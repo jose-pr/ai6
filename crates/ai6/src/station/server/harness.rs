@@ -28,7 +28,10 @@ pub(super) async fn project_settings(
         .map(|operation| operation.harness.clone())
         .unwrap_or_default();
     if policy.project_settings != ProjectSettings::Pinned {
-        return policy.decide(std::path::Path::new(working_directory));
+        return policy.decide(
+            std::path::Path::new(working_directory),
+            &state.station.limits().harness,
+        );
     }
     let (state, operation, mission_id) = (
         state.clone(),
@@ -38,7 +41,7 @@ pub(super) async fn project_settings(
     let root = PathBuf::from(working_directory);
     tokio::task::spawn_blocking(move || {
         let decision = if on_station {
-            policy.decide(&root)
+            policy.decide(&root, &state.station.limits().harness)
         } else {
             refused("the working directory is on another host, where the Station cannot read it")
         };

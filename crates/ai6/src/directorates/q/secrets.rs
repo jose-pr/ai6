@@ -8,10 +8,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 use zeroize::Zeroize;
 
-/// Default lifetime for a secret lease.
-pub const DEFAULT_SECRET_LEASE_TTL: Duration = Duration::from_secs(5 * 60);
-/// Longest secret lease accepted by the broker.
-pub const MAX_SECRET_LEASE_TTL: Duration = Duration::from_secs(60 * 60);
+use crate::bounds::TimeLimit;
 
 /// A short-lived request to a configured secret backend.
 #[derive(Clone)]
@@ -64,15 +61,8 @@ pub struct SecretLeaseRequest {
 }
 
 impl SecretLeaseRequest {
-    /// Creates a request using the default lease lifetime.
-    pub fn try_new(
-        station: impl Into<String>,
-        mission_id: impl Into<String>,
-    ) -> Result<Self, SecretError> {
-        Self::with_ttl(station, mission_id, DEFAULT_SECRET_LEASE_TTL)
-    }
-
-    /// Creates a request with an explicit lifetime.
+    /// Creates a request for a lease of `ttl`: more than zero, and a time this process can
+    /// reach.
     pub fn with_ttl(
         station: impl Into<String>,
         mission_id: impl Into<String>,
@@ -82,7 +72,7 @@ impl SecretLeaseRequest {
         let mission_id = mission_id.into();
         validate_identity(&station)?;
         validate_identity(&mission_id)?;
-        validate_ttl(ttl, MAX_SECRET_LEASE_TTL)?;
+        validate_ttl(ttl, TimeLimit::UNBOUNDED)?;
         Ok(Self {
             station,
             mission_id,
@@ -207,23 +197,23 @@ impl std::error::Error for SecretError {}
 /// Resolves only an Agent's declared references into bounded in-memory leases.
 pub struct SecretBroker {
     backend: Arc<dyn SecretBackend>,
-    max_ttl: Duration,
+    max_ttl: TimeLimit,
 }
 
 impl SecretBroker {
-    /// Creates a broker with the one-hour maximum lease lifetime.
+    /// Creates a broker that leases for as long as a request asks.
     pub fn new(backend: impl SecretBackend + 'static) -> Self {
         Self {
             backend: Arc::new(backend),
-            max_ttl: MAX_SECRET_LEASE_TTL,
+            max_ttl: TimeLimit::UNBOUNDED,
         }
     }
 
-    /// Sets a stricter maximum lease lifetime.
-    pub fn with_max_ttl(mut self, max_ttl: Duration) -> Result<Self, SecretError> {
-        validate_ttl(max_ttl, MAX_SECRET_LEASE_TTL)?;
+    /// Refuses a lease longer than `max_ttl`.
+    #[must_use]
+    pub fn with_max_ttl(mut self, max_ttl: TimeLimit) -> Self {
         self.max_ttl = max_ttl;
-        Ok(self)
+        self
     }
 
     /// Acquires the loadout's named values from the backend.
@@ -487,8 +477,8 @@ fn validate_identity(value: &str) -> Result<(), SecretError> {
     }
 }
 
-fn validate_ttl(value: Duration, maximum: Duration) -> Result<(), SecretError> {
-    if value.is_zero() || value > maximum {
+fn validate_ttl(value: Duration, maximum: TimeLimit) -> Result<(), SecretError> {
+    if value.is_zero() || !maximum.allows(value) || Instant::now().checked_add(value).is_none() {
         Err(SecretError::InvalidTtl)
     } else {
         Ok(())
@@ -498,14 +488,16 @@ fn validate_ttl(value: Duration, maximum: Duration) -> Result<(), SecretError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_SECRET_LEASE_TTL, SecretBackend, SecretBackendFailure, SecretBroker, SecretError,
-        SecretLeaseRequest, SecretRequest, SecretValue,
+        SecretBackend, SecretBackendFailure, SecretBroker, SecretError, SecretLeaseRequest,
+        SecretRequest, SecretValue,
     };
     use crate::directorates::q::LoadoutCatalog;
     use std::collections::BTreeMap;
     use std::str::FromStr;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    const TEST_TTL: Duration = Duration::from_secs(300);
 
     #[derive(Default)]
     struct BackendState {
@@ -530,7 +522,7 @@ mod tests {
             assert!(!request.lease_id().is_empty());
             assert_eq!(request.station(), "station-a");
             assert_eq!(request.mission_id(), "mission-1");
-            assert_eq!(request.ttl(), DEFAULT_SECRET_LEASE_TTL);
+            assert_eq!(request.ttl(), TEST_TTL);
             let invalid = self.0.lock().expect("test backend lock").invalid_response;
             let selected = if invalid { "undeclared" } else { &names[0] };
             Ok(BTreeMap::from([(
@@ -558,7 +550,8 @@ mod tests {
     }
 
     fn request() -> SecretLeaseRequest {
-        SecretLeaseRequest::try_new("station-a", "mission-1").expect("valid lease request")
+        SecretLeaseRequest::with_ttl("station-a", "mission-1", TEST_TTL)
+            .expect("valid lease request")
     }
 
     #[test]
@@ -696,7 +689,7 @@ mod tests {
             lease_id: "l".to_owned(),
             station: "s".to_owned(),
             mission_id: "m".to_owned(),
-            ttl: DEFAULT_SECRET_LEASE_TTL,
+            ttl: TEST_TTL,
         };
         let values = backend.acquire(&request, &["token".to_owned()]).unwrap();
         assert_eq!(values["token"].with_exposed(str::to_owned), "from-a-file");

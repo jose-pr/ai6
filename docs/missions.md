@@ -532,7 +532,8 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Source.repo
 ```
 
 - **Where it runs.** Only the Station holding the Headquarters lease polls, every
-  `interval_secs` (default 60, at least 10) per source. Provider calls block on the
+  `interval_secs` per source (default 60, at least 10: the `station` record's `[sources]
+  poll` and `min_poll`). Provider calls block on the
   network, so they run off the daemon's async runtime. Each Operation and provider keeps a
   cursor in the Registry, so a Station that takes over the lease resumes where the last one
   stopped.

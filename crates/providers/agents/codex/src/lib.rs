@@ -493,7 +493,7 @@ impl CodexSession {
         Self {
             terminal,
             gate: None,
-            output: Mutex::new(JsonLines::new()),
+            output: Mutex::new(JsonLines::new(&Default::default())),
             events: Mutex::new(VecDeque::new()),
             thread_id: None,
             request_id: AtomicU64::new(0),
@@ -2070,7 +2070,7 @@ mod tests {
 
     fn approvals_gate(approved: Arc<Mutex<Vec<ai6::ActionScope>>>) -> Option<Gate> {
         Some(Arc::new(move |command, _cwd| {
-            match ai6::classify(command, &Branches) {
+            match ai6::classify(command, &Branches, 4) {
                 Err(reason) => GateVerdict::Hold(reason),
                 Ok(steps) => {
                     let approved = approved.lock().unwrap();

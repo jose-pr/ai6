@@ -181,7 +181,12 @@ fn remove_caches(
 ) -> Result<Tidied, String> {
     let (mission, report) = over_and_kept(state, target)?;
     let hygiene = &state.station.hygiene;
-    let found = survey(Path::new(&report.path), hygiene, SystemTime::now());
+    let found = survey(
+        Path::new(&report.path),
+        hygiene,
+        SystemTime::now(),
+        state.station.limits().head_of_station.survey_entries,
+    );
     let age = hygiene.cache_age().as_secs();
     let left_alone = found.age_secs.unwrap_or_default();
     if left_alone < age {
@@ -366,6 +371,7 @@ fn discard(
         Path::new(&report.path),
         &state.station.hygiene,
         SystemTime::now(),
+        state.station.limits().head_of_station.survey_entries,
     )
     .size_bytes;
     if let Some((operation, id)) = approval {

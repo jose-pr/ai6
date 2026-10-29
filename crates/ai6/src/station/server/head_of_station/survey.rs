@@ -9,9 +9,6 @@ use serde::Serialize;
 
 use crate::station::safehouse::SafeHouseHygiene;
 
-/// Entries one walk reads before it stops and reports a partial size.
-pub(super) const MAX_ENTRIES: usize = 500_000;
-
 /// A cache directory found in a safe house.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(super) struct CacheDir {
@@ -28,7 +25,7 @@ pub(super) struct CacheDir {
 pub(super) struct Survey {
     /// Total size in bytes, as far as the walk got.
     pub(super) size_bytes: u64,
-    /// Whether the walk read every entry; `false` past [`MAX_ENTRIES`].
+    /// Whether the walk read every entry; `false` past the walk's bound.
     pub(super) size_complete: bool,
     /// Seconds since the safe house or anything at its top level last changed.
     pub(super) age_secs: Option<u64>,
@@ -38,7 +35,14 @@ pub(super) struct Survey {
 
 /// Walks `root`, counting file sizes and finding the directories `hygiene` names as caches.
 /// `.git` is never a cache, and a cache inside a cache is part of the outer one.
-pub(super) fn survey(root: &Path, hygiene: &SafeHouseHygiene, now: SystemTime) -> Survey {
+/// `most` bounds how many directory entries the walk reads before it stops and reports a
+/// partial size.
+pub(super) fn survey(
+    root: &Path,
+    hygiene: &SafeHouseHygiene,
+    now: SystemTime,
+    most: crate::bounds::Limit,
+) -> Survey {
     let mut survey = Survey {
         size_bytes: 0,
         size_complete: true,
@@ -55,7 +59,7 @@ pub(super) fn survey(root: &Path, hygiene: &SafeHouseHygiene, now: SystemTime) -
         };
         for entry in entries.flatten() {
             read += 1;
-            if read > MAX_ENTRIES {
+            if !most.allows(read) {
                 survey.size_complete = false;
                 break 'walk;
             }
@@ -119,6 +123,8 @@ fn relative(root: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
 
+    const ENTRIES: crate::bounds::Limit = crate::bounds::Limit::at(500_000);
+
     #[test]
     fn a_survey_sizes_the_tree_and_finds_outermost_caches() {
         let root = tempfile::tempdir().unwrap();
@@ -133,7 +139,12 @@ mod tests {
         fs::create_dir_all(house.join(".git/refs/heads/target")).unwrap();
         fs::write(house.join(".git/refs/heads/target/x"), [0_u8; 1]).unwrap();
 
-        let found = survey(house, &SafeHouseHygiene::default(), SystemTime::now());
+        let found = survey(
+            house,
+            &SafeHouseHygiene::default(),
+            SystemTime::now(),
+            ENTRIES,
+        );
         assert_eq!(found.size_bytes, 135, ".git is not walked");
         assert!(found.size_complete);
         assert!(found.age_secs.is_some_and(|age| age < 600));
@@ -147,10 +158,14 @@ mod tests {
         let none = SafeHouseHygiene::default()
             .with_caches(Vec::<String>::new())
             .unwrap();
-        assert!(survey(house, &none, SystemTime::now()).caches.is_empty());
+        assert!(
+            survey(house, &none, SystemTime::now(), ENTRIES)
+                .caches
+                .is_empty()
+        );
         let later = SystemTime::now() + std::time::Duration::from_secs(8 * 24 * 3600);
         assert!(
-            survey(house, &SafeHouseHygiene::default(), later)
+            survey(house, &SafeHouseHygiene::default(), later, ENTRIES)
                 .age_secs
                 .is_some_and(|age| age >= 8 * 24 * 3600)
         );

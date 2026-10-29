@@ -14,8 +14,8 @@ use std::time::Duration;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
 use crate::directorates::q::{
-    LoadoutCatalog, MAX_SECRET_LEASE_TTL, SecretBackend, SecretBroker, SecretDefinition,
-    SecretLease, SecretLeaseRequest, StationSecrets,
+    LoadoutCatalog, SecretBackend, SecretBroker, SecretDefinition, SecretLease, SecretLeaseRequest,
+    StationSecrets,
 };
 use crate::directorates::registry::approvals::{Approval, ApprovalStatus};
 use crate::directorates::registry::backend::RegistryBackend;
@@ -25,8 +25,6 @@ use super::DaemonState;
 
 /// The timeline kind of a credential event.
 const TIMELINE_KIND: &str = "credential";
-/// Longest list of secret names a timeline event carries.
-const MAX_NAMES_DETAIL: usize = 240;
 
 /// The Station's loadouts and secret backend, and the leases it has issued, by Mission.
 #[derive(Clone, Default)]
@@ -110,11 +108,6 @@ impl CredentialDesk {
         self
     }
 
-    pub(crate) fn with_account_limit_horizon(mut self, horizon: Duration) -> Self {
-        self.accounts = self.accounts.with_limit_horizon(horizon);
-        self
-    }
-
     /// Resolves relative secret files against the Station's secrets directory, and
     /// logs each weakening of its secrets.
     pub(crate) fn in_secrets_dir(mut self, dir: &std::path::Path) -> Self {
@@ -178,14 +171,15 @@ impl CredentialDesk {
             .collect()
     }
 
-    /// The backend leases come from: the one set in code, else the Station's own.
-    fn broker(&self, catalog: &LoadoutCatalog) -> SecretBroker {
+    /// The backend leases come from: the one set in code, else the Station's own, leasing
+    /// for at most `max_ttl`.
+    fn broker(&self, catalog: &LoadoutCatalog, max_ttl: crate::bounds::TimeLimit) -> SecretBroker {
         let backend: Arc<dyn SecretBackend> = match (&self.backend, &self.secrets_dir) {
             (Some(backend), _) => backend.clone(),
             (None, Some(dir)) => Arc::new(StationSecrets::new(catalog.secrets()).relative_to(dir)),
             (None, None) => Arc::new(StationSecrets::new(catalog.secrets())),
         };
-        SecretBroker::new(Shared(backend))
+        SecretBroker::new(Shared(backend)).with_max_ttl(max_ttl)
     }
 }
 
@@ -231,7 +225,7 @@ pub(super) fn issue(
     let Some(catalog) = &desk.catalog else {
         return Ok(());
     };
-    let broker = desk.broker(catalog);
+    let broker = desk.broker(catalog, state.station.limits().secrets.max_lease_ttl);
     // A pooled Agent's loadout may not set a provider credential variable.
     let reserved = super::accounts::credential_variables(state, catalog, mission, agent);
     let mut leases = Leases::default();
@@ -322,7 +316,7 @@ fn issue_loadout(
         let request = SecretLeaseRequest::with_ttl(
             state.station_id.clone(),
             mission_id.clone(),
-            MAX_SECRET_LEASE_TTL,
+            state.station.limits().secrets.lease_ttl.0,
         )
         .map_err(|error| error.to_string())?;
         let lease = broker
@@ -348,9 +342,11 @@ fn issue_loadout(
             let approval = approved.remove(position);
             let now = state.clock.now() as f64;
             let remaining = approval.expires_at.unwrap_or(now) - now;
-            // Clamped before converting: an approval may expire centuries from now.
+            // Clamped before converting: an approval may expire centuries from now. A lapsed
+            // one gives no time at all, which the lease request refuses.
+            let ceiling = state.station.limits().secrets.max_lease_ttl.as_secs_f64();
             let ttl =
-                Duration::from_secs_f64(remaining.clamp(1.0, MAX_SECRET_LEASE_TTL.as_secs_f64()));
+                Duration::try_from_secs_f64(remaining.clamp(0.0, ceiling)).unwrap_or(Duration::MAX);
             let names = vec![definition.name().to_owned()];
             let lease =
                 SecretLeaseRequest::with_ttl(state.station_id.clone(), mission_id.clone(), ttl)
@@ -611,7 +607,13 @@ fn record(
     };
     let mut listed = String::new();
     for name in names {
-        if listed.len() + name.len() + 1 > MAX_NAMES_DETAIL {
+        if !state
+            .station
+            .limits()
+            .audit
+            .names_detail_chars
+            .allows(listed.len() + name.len() + 1)
+        {
             break;
         }
         if !listed.is_empty() {

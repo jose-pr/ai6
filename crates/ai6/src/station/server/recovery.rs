@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::{
-    DaemonState, INTAKE_MAX_ATTEMPTS, credentials, ensure_leased_mission, queue_event, runner_link,
-    session_hold, unix_now,
+    DaemonState, credentials, ensure_leased_mission, queue_event, runner_link, session_hold,
+    unix_now,
 };
 use crate::directorates::m::mission::{LaunchManifest, MissionState, SessionHold};
 use crate::directorates::m::placement::{OperationPolicy, PlacementRequest, StationFacts};
@@ -37,15 +37,10 @@ use crate::{MissionId, SessionId};
 /// How long a lease this Station gives up is renewed for: it lapses at once, so the
 /// Registry treats the Session or brief like one whose Station stopped renewing it.
 const LAPSE: Duration = Duration::from_nanos(1);
-/// Tries at a Registry step that a concurrent renewal or an equal timestamp can refuse.
-const GIVE_UP_TRIES: u32 = 10;
 
 /// The brief-lease metadata key that hands a Station a Session to adopt; its value is the
 /// Session record's ID.
 pub(super) const ADOPT_KEY: &str = "adopt";
-
-/// How often a Session's recent events are written to its record while they change.
-const NOTES_EVERY: Duration = Duration::from_secs(15);
 
 /// What the Headquarters does with an expired brief lease of another Station.
 pub(super) enum Extraction {
@@ -64,13 +59,14 @@ pub(super) enum Extraction {
 }
 
 impl Extraction {
-    /// The attempt limit to recover the brief lease with, or `None` to leave it alone.
-    pub(super) fn max_attempts(&self) -> Option<u32> {
+    /// The attempt limit to recover the brief lease with, `intake_attempts` when it is queued
+    /// again, or `None` to leave it alone.
+    pub(super) fn max_attempts(&self, intake_attempts: u32) -> Option<u32> {
         match self {
             Self::Requeue
             | Self::Lost {
                 on_lost: OnLost::Retry,
-            } => Some(INTAKE_MAX_ATTEMPTS),
+            } => Some(intake_attempts),
             // Recovering at a limit of zero files the brief as lost.
             Self::Lost { .. } => Some(0),
             Self::HandedOver | Self::Wait => None,
@@ -246,7 +242,7 @@ pub(super) fn give_up(
 /// Lets the Session lease `hold` names lapse and marks the Session lost.
 fn lose_held(state: &DaemonState, hold: &SessionHold, reason: &str) {
     let station = state.station_id.as_str();
-    for _ in 0..GIVE_UP_TRIES {
+    for _ in 0..state.station.limits().recovery.give_up_tries {
         match state
             .intake
             .renew_session(&hold.id, station, hold.fence, LAPSE)
@@ -294,10 +290,11 @@ fn hand_back(state: &DaemonState, mission_id: &str) -> MissionState {
         OnLost::Retry => MissionState::Abandoned,
         OnLost::Fail => MissionState::Failed,
     };
+    let limits = state.station.limits();
     let max_attempts = Extraction::Lost { on_lost }
-        .max_attempts()
-        .unwrap_or(INTAKE_MAX_ATTEMPTS);
-    for _ in 0..GIVE_UP_TRIES {
+        .max_attempts(limits.scheduler.intake_attempts)
+        .unwrap_or(limits.scheduler.intake_attempts);
+    for _ in 0..limits.recovery.give_up_tries {
         let Some(lease) = ours() else {
             // Another Headquarters recovered it once it lapsed.
             return handed;
@@ -385,7 +382,7 @@ pub(super) fn reattach_failed(state: &DaemonState, mission_id: &str) -> Option<I
             }
         }
     }
-    Some(now + reattach_delay(failures))
+    Some(now + reattach_delay(failures, &state.station.limits().recovery))
 }
 
 /// Forgets the failed re-attach tries of a Mission, once one succeeds or it is given up.
@@ -769,7 +766,8 @@ impl Notes {
     /// Writes the notes to the Session record when they changed and the last write is old
     /// enough, so a busy Session costs a Registry write every few seconds at most.
     pub(super) fn write_if_due(&mut self, state: &DaemonState, mission_id: &str) {
-        if self.written.is_some_and(|at| at.elapsed() < NOTES_EVERY) {
+        let every = state.station.limits().recovery.notes_every.0;
+        if self.written.is_some_and(|at| at.elapsed() < every) {
             return;
         }
         self.write_now(state, mission_id);
@@ -1459,13 +1457,13 @@ mod tests {
         let fail = Extraction::Lost {
             on_lost: OnLost::Fail,
         };
-        assert_eq!(fail.max_attempts(), Some(0));
+        assert_eq!(fail.max_attempts(3), Some(0));
         let retry = Extraction::Lost {
             on_lost: OnLost::Retry,
         };
-        assert_eq!(retry.max_attempts(), Some(INTAKE_MAX_ATTEMPTS));
-        assert_eq!(Extraction::Wait.max_attempts(), None);
-        assert_eq!(Extraction::HandedOver.max_attempts(), None);
+        assert_eq!(retry.max_attempts(3), Some(3));
+        assert_eq!(Extraction::Wait.max_attempts(3), None);
+        assert_eq!(Extraction::HandedOver.max_attempts(3), None);
     }
 
     #[test]

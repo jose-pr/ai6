@@ -21,9 +21,6 @@ use super::store::{FileRegistry, invalid_data};
 use crate::directorates::medical::usage::utc_day;
 use crate::directorates::q::{AccountPool, PoolStrategy};
 
-/// The window use an account counts with before its provider has reported any.
-pub const UNKNOWN_USE_PERMILLE: u16 = 500;
-
 /// One account of one pool.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -121,12 +118,13 @@ impl QuotaWindow {
         self
     }
 
-    /// The thousandths used at `now`: none once the window has reset, half when unknown.
-    pub fn use_at(&self, now: f64) -> u16 {
+    /// The thousandths used at `now`: none once the window has reset, `unknown` when its
+    /// provider reported none.
+    pub fn use_at(&self, now: f64, unknown: u16) -> u16 {
         if self.resets_at.is_some_and(|reset| reset <= now) {
             return 0;
         }
-        self.used_permille.unwrap_or(UNKNOWN_USE_PERMILLE)
+        self.used_permille.unwrap_or(unknown)
     }
 }
 
@@ -230,14 +228,14 @@ impl AccountState {
         self.limited_until.is_some_and(|until| until > now)
     }
 
-    /// The use of its most used window at `now` ([`QuotaWindow::use_at`]); half when none
-    /// was reported.
-    pub fn highest_use(&self, now: f64) -> u16 {
+    /// The use of its most used window at `now` ([`QuotaWindow::use_at`]); `unknown` when
+    /// none was reported.
+    pub fn highest_use(&self, now: f64, unknown: u16) -> u16 {
         self.windows
             .iter()
-            .map(|window| window.use_at(now))
+            .map(|window| window.use_at(now, unknown))
             .max()
-            .unwrap_or(UNKNOWN_USE_PERMILLE)
+            .unwrap_or(unknown)
     }
 
     /// Tokens used on the UTC day containing `now`.
@@ -272,6 +270,7 @@ pub struct AccountClaimRequest {
     operation: Option<String>,
     ttl: Duration,
     in_use: bool,
+    unknown_use: u16,
 }
 
 impl AccountClaimRequest {
@@ -300,7 +299,16 @@ impl AccountClaimRequest {
             operation: None,
             ttl,
             in_use: false,
+            unknown_use: crate::station::limits::AccountLimits::default().unknown_use_permille,
         }
+    }
+
+    /// Counts an account whose provider reported no use as `permille` thousandths used
+    /// (default 500, the `station` record's `[accounts] unknown_use_permille`).
+    #[must_use]
+    pub fn unknown_use(mut self, permille: u16) -> Self {
+        self.unknown_use = permille;
+        self
     }
 
     /// Records the Mission's Operation on the claim.
@@ -356,13 +364,15 @@ impl AccountClaimRequest {
 
 /// Which account a pool's strategy picks among `candidates` at `now`, given their states:
 /// [`PoolStrategy`] says how, after `prefer` when it has room. An account has room when it is
-/// not limited and has fewer live claims than its `max_concurrent`.
+/// not limited and has fewer live claims than its `max_concurrent`; one whose provider
+/// reported no use counts as `unknown_use` thousandths used.
 pub fn choose_account<'a>(
     strategy: PoolStrategy,
     candidates: &'a [AccountCandidate],
     states: &BTreeMap<String, AccountState>,
     prefer: Option<&str>,
     now: f64,
+    unknown_use: u16,
 ) -> Option<&'a AccountCandidate> {
     let active = |candidate: &AccountCandidate| {
         states
@@ -389,7 +399,7 @@ pub fn choose_account<'a>(
     let use_of = |candidate: &AccountCandidate| {
         states
             .get(&candidate.account)
-            .map_or(UNKNOWN_USE_PERMILLE, |state| state.highest_use(now))
+            .map_or(unknown_use, |state| state.highest_use(now, unknown_use))
     };
     open.into_iter().min_by(|left, right| {
         let by_name = left.account.cmp(&right.account);
@@ -440,6 +450,7 @@ pub(super) fn claim_in(
             states,
             request.prefer.as_deref(),
             now,
+            request.unknown_use,
         )
     }
     .map(|candidate| candidate.account.clone());
@@ -1213,7 +1224,7 @@ mod tests {
             "declaring keeps the rest"
         );
         assert_eq!(a.windows.len(), 2);
-        assert_eq!(a.highest_use(NOW), 400);
+        assert_eq!(a.highest_use(NOW, 500), 400);
         assert_eq!(a.windows[0].status.as_deref(), Some("allowed_warning"));
         assert_eq!(a.tokens_on_day(day), 1_500);
         assert_eq!(a.tokens_on_day(day + 86_400), 0);

@@ -52,9 +52,6 @@ pub const DEFAULT_APPROVAL_TTL: Duration = Duration::from_secs(60 * 60);
 /// The `blocked_reason` of a Mission waiting for green ink.
 pub const GREEN_INK_REASON: &str = "green-ink";
 
-const MAX_KIND_BYTES: usize = 32;
-const MAX_TARGET_BYTES: usize = 256;
-
 /// What an Agent asks to do: a kind of step and what it acts on.
 ///
 /// `kind` is a built-in ([`BUILTIN_KINDS`]) or one the Operation adds. `target` is free text
@@ -64,9 +61,9 @@ const MAX_TARGET_BYTES: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionScope {
-    /// Lowercase kind name, at most 32 bytes of `a-z`, `0-9`, `-` and `_`.
+    /// Lowercase kind name of `a-z`, `0-9`, `-` and `_`.
     pub kind: String,
-    /// What the step acts on, at most 256 bytes without control characters.
+    /// What the step acts on, without control characters.
     pub target: String,
 }
 
@@ -75,7 +72,8 @@ impl ActionScope {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for a kind or target outside the bounds above.
+    /// `InvalidInput` for an empty kind or target, or one with characters the fields above do
+    /// not allow.
     pub fn try_new(kind: impl Into<String>, target: impl Into<String>) -> io::Result<Self> {
         let scope = Self {
             kind: kind.into(),
@@ -85,24 +83,42 @@ impl ActionScope {
         Ok(scope)
     }
 
-    /// Checks the bounds of a scope read from storage or a request.
+    /// Checks the characters of a scope read from storage or a request.
     ///
     /// # Errors
     ///
-    /// `InvalidInput` naming the field that is out of bounds.
+    /// `InvalidInput` naming the field that is not acceptable.
     pub fn validate(&self) -> io::Result<()> {
         if !valid_kind(&self.kind) {
             return Err(invalid(
-                "the step kind must be 1 to 32 bytes of a-z, 0-9, '-' or '_'",
+                "the step kind must be 1 or more bytes of a-z, 0-9, '-' or '_'",
             ));
         }
-        if self.target.trim().is_empty()
-            || self.target.len() > MAX_TARGET_BYTES
-            || self.target.contains(char::is_control)
-        {
+        if self.target.trim().is_empty() || self.target.contains(char::is_control) {
             return Err(invalid(
-                "the step target must be 1 to 256 bytes without control characters",
+                "the step target must be non-empty, without control characters",
             ));
+        }
+        Ok(())
+    }
+
+    /// Checks a scope an Agent asks about against the Station's `[approvals]` bounds.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` naming the field longer than `limits` allows.
+    pub fn check_size(&self, limits: &crate::station::limits::ApprovalLimits) -> io::Result<()> {
+        if !limits.kind_bytes.allows(self.kind.len()) {
+            return Err(invalid(&format!(
+                "the step kind must be at most {} bytes",
+                limits.kind_bytes
+            )));
+        }
+        if !limits.target_bytes.allows(self.target.len()) {
+            return Err(invalid(&format!(
+                "the step target must be at most {} bytes",
+                limits.target_bytes
+            )));
         }
         Ok(())
     }
@@ -342,7 +358,7 @@ impl GreenInkDefinition {
             for kind in kinds {
                 if !valid_kind(kind) {
                     return Err(format!(
-                        "green_ink kinds has invalid kind {kind:?}; use 1 to 32 bytes of a-z, 0-9, '-' or '_'"
+                        "green_ink kinds has invalid kind {kind:?}; use a-z, 0-9, '-' or '_'"
                     ));
                 }
                 policy.kinds.insert(kind.clone());
@@ -412,7 +428,6 @@ fn compile(patterns: &[String]) -> Result<Vec<GlobMatcher>, String> {
 
 pub(crate) fn valid_kind(kind: &str) -> bool {
     !kind.is_empty()
-        && kind.len() <= MAX_KIND_BYTES
         && kind
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_".contains(&byte))
@@ -588,7 +603,15 @@ mod tests {
                 "{kind:?} {target:?}"
             );
         }
-        assert!(ActionScope::try_new("push", "x".repeat(MAX_TARGET_BYTES + 1)).is_err());
+        let long = ActionScope::try_new("push", "x".repeat(257)).unwrap();
+        let limits = crate::station::limits::ApprovalLimits::default();
+        assert!(long.check_size(&limits).is_err());
+        assert!(
+            ActionScope::try_new("push", "x".repeat(256))
+                .unwrap()
+                .check_size(&limits)
+                .is_ok()
+        );
         assert!(clearance_at_least("00", "field"));
         assert!(clearance_at_least("field", "field"));
         assert!(!clearance_at_least("desk", "field"));

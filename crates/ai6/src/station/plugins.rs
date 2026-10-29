@@ -224,6 +224,8 @@ impl core::error::Error for PluginBuildError {}
 pub struct Plugins {
     registry: ManuallyDrop<Registry>,
     summary: PluginScanSummary,
+    /// The configuration each provider is built with when its caller gives none.
+    defaults: BTreeMap<String, Value>,
 }
 
 impl Plugins {
@@ -288,7 +290,28 @@ impl Plugins {
         Self {
             registry: ManuallyDrop::new(registry),
             summary,
+            defaults: BTreeMap::new(),
         }
+    }
+
+    /// Builds provider `<id>` with `configs[<id>]` when its caller gives no configuration of
+    /// its own, as the `station` record's `[providers.<id>]` tables say.
+    #[must_use]
+    pub fn with_provider_configs(mut self, configs: BTreeMap<String, Value>) -> Self {
+        self.defaults = configs;
+        self
+    }
+
+    fn build<K>(&self, provider: &str, config: Option<&Value>) -> Result<Box<K>, PluginBuildError>
+    where
+        K: ?Sized + Kind,
+        Box<K>: From<Instance<K>>,
+    {
+        build::<K>(
+            &self.registry,
+            provider,
+            config.or_else(|| self.defaults.get(provider)),
+        )
     }
 
     #[cfg(test)]
@@ -296,6 +319,7 @@ impl Plugins {
         Self {
             registry: ManuallyDrop::new(registry),
             summary: PluginScanSummary::default(),
+            defaults: BTreeMap::new(),
         }
     }
 
@@ -330,7 +354,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn TheaterProvider>, PluginBuildError> {
-        build::<dyn TheaterProvider>(&self.registry, provider, config)
+        self.build::<dyn TheaterProvider>(provider, config)
     }
 
     /// Returns the Source providers and their reported availability.
@@ -364,7 +388,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn Accounts>, PluginBuildError> {
-        build::<dyn Accounts>(&self.registry, provider, config)
+        self.build::<dyn Accounts>(provider, config)
     }
 
     /// Constructs an AgentHandler from its provider ID and optional Guatiao config.
@@ -373,7 +397,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn AgentHandler>, PluginBuildError> {
-        build::<dyn AgentHandler>(&self.registry, provider, config)
+        self.build::<dyn AgentHandler>(provider, config)
     }
 
     /// The available terminal providers that build with their defaults, each with whether it
@@ -425,7 +449,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn Terminal>, PluginBuildError> {
-        build::<dyn Terminal>(&self.registry, provider, config)
+        self.build::<dyn Terminal>(provider, config)
     }
 
     /// Constructs a SafeHouseProvider from its provider ID and optional Guatiao config.
@@ -434,7 +458,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn SafeHouseProvider>, PluginBuildError> {
-        build::<dyn SafeHouseProvider>(&self.registry, provider, config)
+        self.build::<dyn SafeHouseProvider>(provider, config)
     }
 
     /// Constructs a Transport from its provider ID and optional Guatiao config.
@@ -443,7 +467,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn Transport>, PluginBuildError> {
-        build::<dyn Transport>(&self.registry, provider, config)
+        self.build::<dyn Transport>(provider, config)
     }
 
     /// Builds the transport a Theater's access settings name. Building never contacts the host.
@@ -474,7 +498,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn Source>, PluginBuildError> {
-        build::<dyn Source>(&self.registry, provider, config)
+        self.build::<dyn Source>(provider, config)
     }
 
     /// Constructs an Authenticator from its provider ID and optional Guatiao config.
@@ -483,7 +507,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn Authenticator>, PluginBuildError> {
-        build::<dyn Authenticator>(&self.registry, provider, config)
+        self.build::<dyn Authenticator>(provider, config)
     }
 
     /// Constructs a Directory from its provider ID and optional Guatiao config.
@@ -492,7 +516,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn Directory>, PluginBuildError> {
-        build::<dyn Directory>(&self.registry, provider, config)
+        self.build::<dyn Directory>(provider, config)
     }
 
     /// Constructs an Authorizer from its provider ID and optional Guatiao config.
@@ -501,7 +525,7 @@ impl Plugins {
         provider: &str,
         config: Option<&Value>,
     ) -> Result<Box<dyn Authorizer>, PluginBuildError> {
-        build::<dyn Authorizer>(&self.registry, provider, config)
+        self.build::<dyn Authorizer>(provider, config)
     }
 
     /// Constructs a Directory, its lookups kept as `cache` says
@@ -770,6 +794,48 @@ fn providers(registry: &Registry, kind: &str) -> Vec<ProviderInfo> {
         .collect()
 }
 
+/// Provider configurations as Guatiao values, from the JSON the `station` record holds.
+///
+/// # Errors
+///
+/// Names the provider whose configuration holds a number Guatiao cannot represent.
+pub fn provider_configs(
+    configs: &BTreeMap<String, serde_json::Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    configs
+        .iter()
+        .map(|(id, config)| {
+            json_value(config)
+                .map(|value| (id.clone(), value))
+                .map_err(|reason| format!("providers.{id}: {reason}"))
+        })
+        .collect()
+}
+
+fn json_value(value: &serde_json::Value) -> Result<Value, String> {
+    use guatiao::ToValue;
+    use std::collections::VecDeque;
+    let encoded = match value {
+        serde_json::Value::Null => ().to_value(),
+        serde_json::Value::Bool(value) => value.to_value(),
+        serde_json::Value::Number(value) => guatiao::value::Number::new(&value.to_string())
+            .map_err(|_| format!("{value} is not a number a provider can read"))?
+            .to_value(),
+        serde_json::Value::String(value) => value.to_value(),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(json_value)
+            .collect::<Result<VecDeque<_>, _>>()?
+            .to_value(),
+        serde_json::Value::Object(values) => values
+            .iter()
+            .map(|(key, value)| json_value(value).map(|value| (key.clone(), value)))
+            .collect::<Result<BTreeMap<_, _>, _>>()?
+            .to_value(),
+    };
+    encoded.map_err(|error| error.to_string())
+}
+
 fn build<K>(
     registry: &Registry,
     provider: &str,
@@ -837,6 +903,76 @@ mod tests {
     use guatiao::ToValue;
 
     use super::*;
+
+    /// A terminal whose `tty` answer comes from its configuration, `true` without one.
+    #[derive(guatiao::Provider)]
+    #[provider(Terminal, id = "mock-x", name = "Configured mock", config = MockXConfig)]
+    struct MockX {
+        tty: bool,
+    }
+
+    #[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema, Debug, Clone)]
+    #[map(crate = ::guatiao)]
+    struct MockXConfig {
+        #[map(default = true)]
+        tty: bool,
+    }
+
+    impl From<MockXConfig> for MockX {
+        fn from(config: MockXConfig) -> Self {
+            Self { tty: config.tty }
+        }
+    }
+
+    impl Terminal for MockX {
+        fn spawn(
+            &self,
+            _spec: &Value,
+        ) -> Result<
+            guatiao::library::Object<dyn crate::directorates::q::terminal::TerminalSession>,
+            guatiao::library::ProviderError,
+        > {
+            Err(guatiao::library::ProviderError::new(
+                Status::GUATIAO_ERR_INTERNAL,
+                "starts nothing",
+            ))
+        }
+
+        fn tty(&self) -> bool {
+            self.tty
+        }
+    }
+
+    mod mock_x {
+        use super::*;
+
+        crate::guatiao::local_providers!(id = "ai6-mock-x", version = "0.0.0", providers = [MockX]);
+    }
+
+    fn mock_x() -> Plugins {
+        let mut registry = Registry::new("ai6-mock-x", env!("CARGO_PKG_VERSION"));
+        registry
+            .register_local("ai6-mock-x", mock_x::library)
+            .expect("the mock registers");
+        Plugins::from_registry(registry)
+    }
+
+    #[test]
+    fn a_station_record_provider_table_configures_a_provider_built_with_none() {
+        assert!(mock_x().terminal("mock-x", None).unwrap().tty());
+        let record: BTreeMap<String, serde_json::Value> =
+            toml::from_str::<crate::station::limits::StationLimits>(
+                "[providers.mock-x]
+tty = false
+",
+            )
+            .unwrap()
+            .providers;
+        let configured = mock_x().with_provider_configs(provider_configs(&record).unwrap());
+        assert!(!configured.terminal("mock-x", None).unwrap().tty());
+        let own = MockXConfig { tty: true }.to_value().unwrap();
+        assert!(configured.terminal("mock-x", Some(&own)).unwrap().tty());
+    }
 
     #[test]
     fn construction_reports_a_missing_provider_by_kind() {

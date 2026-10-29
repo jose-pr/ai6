@@ -20,17 +20,9 @@ use crate::directorates::registry::sources::{
     CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
 
+use crate::station::limits::SourceLimits;
 use crate::station::plugins::Plugins;
 use guatiao::ToValue;
-
-/// Poll interval when an Operation's source table sets none.
-pub(crate) const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
-/// Shortest accepted `interval_secs`; keeps a typo from hammering a tracker.
-pub(crate) const MIN_POLL_INTERVAL: Duration = Duration::from_secs(10);
-/// How often finished Missions are checked for reports that still need posting.
-const REPORT_INTERVAL: Duration = Duration::from_secs(15);
-/// How often sleepers are checked against the clock.
-const SLEEPER_INTERVAL: Duration = Duration::from_secs(20);
 
 /// Constructs the provider for a provider ID and an Operation's settings.
 type SourceBuilder<'a> = dyn Fn(&str, &toml::Table) -> Result<Box<dyn Source>, String> + 'a;
@@ -57,8 +49,13 @@ pub(crate) struct SourceSetup {
 /// Reads an Operation's `sources` table into per-provider settings.
 ///
 /// A table value holds the provider's settings; a bare string is shorthand for
-/// `{ target = "<string>" }`. `interval_secs` belongs to the desk and is not passed on.
-pub(crate) fn source_setups(operation: &Operation) -> Vec<Result<SourceSetup, String>> {
+/// `{ target = "<string>" }`. `interval_secs` belongs to the desk and is not passed on: it
+/// defaults to `limits.poll` and is raised to `limits.min_poll`, so a typo cannot hammer a
+/// tracker.
+pub(crate) fn source_setups(
+    operation: &Operation,
+    limits: &SourceLimits,
+) -> Vec<Result<SourceSetup, String>> {
     operation
         .sources
         .iter()
@@ -78,9 +75,9 @@ pub(crate) fn source_setups(operation: &Operation) -> Vec<Result<SourceSetup, St
                 }
             };
             let interval = match settings.remove("interval_secs") {
-                None => DEFAULT_POLL_INTERVAL,
+                None => limits.poll.0,
                 Some(toml::Value::Integer(seconds)) if seconds > 0 => {
-                    Duration::from_secs(seconds as u64).max(MIN_POLL_INTERVAL)
+                    Duration::from_secs(seconds as u64).max(limits.min_poll.0)
                 }
                 Some(_) => {
                     return Err(format!(
@@ -228,6 +225,7 @@ pub(crate) fn report_finished(
     registry: &dyn RegistryBackend,
     roster: &Roster,
     build: &SourceBuilder<'_>,
+    limits: &SourceLimits,
 ) -> usize {
     let Ok(finished) = registry.unreported_source_briefs() else {
         return 0;
@@ -235,7 +233,7 @@ pub(crate) fn report_finished(
     let mut sources = SourceCache::new();
     let mut reported = 0;
     for entry in finished {
-        let result = report_one(roster, build, &mut sources, &entry);
+        let result = report_one(roster, build, limits, &mut sources, &entry);
         match result {
             Ok(()) => {
                 reported += 1;
@@ -256,6 +254,7 @@ pub(crate) fn report_finished(
 fn report_one(
     roster: &Roster,
     build: &SourceBuilder<'_>,
+    limits: &SourceLimits,
     sources: &mut SourceCache,
     entry: &FinishedSourceBrief,
 ) -> Result<(), String> {
@@ -270,7 +269,7 @@ fn report_one(
         .ok_or("the brief names no Operation")?;
     let operation = roster.operation(operation_key).map_err(|e| e.to_string())?;
     let cover = roster.cover(&operation.cover).map_err(|e| e.to_string())?;
-    let setup = source_setups(operation)
+    let setup = source_setups(operation, limits)
         .into_iter()
         .filter_map(Result::ok)
         .find(|setup| setup.provider == provider)
@@ -436,12 +435,15 @@ pub(crate) struct SourceDesk {
     warned: Mutex<BTreeSet<String>>,
     /// This Station: the provenance of the briefs it queues names it.
     station: String,
+    limits: SourceLimits,
 }
 
 impl SourceDesk {
-    pub(crate) fn new(station: impl Into<String>) -> Self {
+    /// The desk of `station`, polling and reporting as `limits` says.
+    pub(crate) fn new(station: impl Into<String>, limits: SourceLimits) -> Self {
         Self {
             station: station.into(),
+            limits,
             busy: AtomicBool::new(false),
             due: Mutex::new(BTreeMap::new()),
             next_report: Mutex::new(Instant::now()),
@@ -481,7 +483,7 @@ impl SourceDesk {
     ) {
         let now = Instant::now();
         for operation in roster.operations() {
-            for setup in source_setups(operation) {
+            for setup in source_setups(operation, &self.limits) {
                 let setup = match setup {
                     Ok(setup) => setup,
                     Err(error) => {
@@ -530,13 +532,13 @@ impl SourceDesk {
             .map(|mut next| {
                 let due = *next <= now;
                 if due {
-                    *next = now + REPORT_INTERVAL;
+                    *next = now + self.limits.report_every.0;
                 }
                 due
             })
             .unwrap_or(false);
         if report_due {
-            report_finished(registry, roster, build);
+            report_finished(registry, roster, build, &self.limits);
         }
         let sleepers_due = self
             .next_sleepers
@@ -544,7 +546,7 @@ impl SourceDesk {
             .map(|mut next| {
                 let due = *next <= now;
                 if due {
-                    *next = now + SLEEPER_INTERVAL;
+                    *next = now + self.limits.sleeper_every.0;
                 }
                 due
             })
@@ -676,7 +678,7 @@ mod tests {
         );
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
-        let desk = SourceDesk::new("station-a");
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
 
         desk.run(&plugins, &roster, &registry);
         let queued = registry.list_new().unwrap();
@@ -716,23 +718,32 @@ mod tests {
     #[test]
     fn a_string_source_is_shorthand_for_a_target() {
         let (_dir, roster) = roster_with("covert", "{ fake = \"GUA\" }");
-        let setups = source_setups(roster.operation("G").unwrap());
+        let setups = source_setups(roster.operation("G").unwrap(), &SourceLimits::default());
         let setup = setups.into_iter().next().unwrap().unwrap();
         assert_eq!(setup.settings["target"].as_str(), Some("GUA"));
-        assert_eq!(setup.interval, DEFAULT_POLL_INTERVAL);
+        assert_eq!(setup.interval, SourceLimits::default().poll.0);
     }
 
     #[test]
     fn interval_secs_is_clamped_and_validated() {
         let (_dir, roster) = roster_with("covert", "{ fake = { interval_secs = 1 } }");
-        let setup = source_setups(roster.operation("G").unwrap())
+        let limits = SourceLimits::default();
+        let setup = source_setups(roster.operation("G").unwrap(), &limits)
             .remove(0)
             .unwrap();
-        assert_eq!(setup.interval, MIN_POLL_INTERVAL);
+        assert_eq!(setup.interval, limits.min_poll.0);
         assert!(!setup.settings.contains_key("interval_secs"));
+        let looser = SourceLimits {
+            min_poll: crate::Seconds::new(0),
+            ..SourceLimits::default()
+        };
+        let setup = source_setups(roster.operation("G").unwrap(), &looser)
+            .remove(0)
+            .unwrap();
+        assert_eq!(setup.interval, Duration::from_secs(1));
         let (_dir, roster) = roster_with("covert", "{ fake = { interval_secs = \"soon\" } }");
         assert!(
-            source_setups(roster.operation("G").unwrap())
+            source_setups(roster.operation("G").unwrap(), &limits)
                 .remove(0)
                 .is_err()
         );
@@ -744,7 +755,7 @@ mod tests {
         let (_dir, roster) = roster_with("overt", "{ fake = { ids = [\"report-me\"] } }");
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
-        let desk = SourceDesk::new("station-a");
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
         finish_all(
             &registry,

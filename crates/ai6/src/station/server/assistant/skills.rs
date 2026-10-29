@@ -10,13 +10,12 @@
 //! [`SKILLS_PLUGIN`], which Claude Code loads with `--plugin-dir` even under `--restricted`;
 //! she cannot write there (no path with a name starting with `.`).
 
+use crate::station::limits::HarnessLimits;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::directorates::m::assistant::{AssistantSettings, SKILLS_PLUGIN, check_skill};
-use crate::directorates::m::harness::{
-    MAX_MANIFEST_BYTES, MAX_MANIFEST_FILE_BYTES, MAX_MANIFEST_FILES, ProjectManifest,
-};
+use crate::directorates::m::harness::ProjectManifest;
 use crate::directorates::registry::logbook::{
     Severity, StationFinding, StationFindingKind, StationReport,
 };
@@ -68,14 +67,16 @@ pub(super) fn install(
             continue;
         };
         let target = root.join("skills").join(name);
-        let outcome = copy_tree(Path::new(entry.path()), &target).and_then(|()| {
+        let limits = &state.station.limits().harness;
+        let outcome = copy_tree(Path::new(entry.path()), &target, limits).and_then(|()| {
             if let Some(pin) = entry.pin() {
-                let manifest = ProjectManifest::read_tree(&target)?;
+                let manifest = ProjectManifest::read_tree_within(&target, limits)?;
                 if manifest.digest_with(pin.digest()) != pin {
                     return Err(Skipped::Pin);
                 }
             }
-            check_skill(&target, name, settings.skills_allow_tools()).map_err(Skipped::Other)
+            check_skill(&target, name, settings.skills_allow_tools(), limits)
+                .map_err(Skipped::Other)
         });
         match outcome {
             Ok(()) => installed.names.push(name.clone()),
@@ -144,7 +145,7 @@ fn file_finding(state: &DaemonState, name: &str, line: &str) {
 
 /// Copies the directory `from` to `to` (which must not exist), refusing a link, a device or a
 /// pipe anywhere in it, and the limits a [`ProjectManifest`] keeps.
-fn copy_tree(from: &Path, to: &Path) -> Result<(), Skipped> {
+fn copy_tree(from: &Path, to: &Path, limits: &HarnessLimits) -> Result<(), Skipped> {
     let metadata = fs::symlink_metadata(from).map_err(|error| error.to_string())?;
     if is_link(&metadata) || !metadata.is_dir() {
         return Err(Skipped::Other(format!(
@@ -153,10 +154,15 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), Skipped> {
         )));
     }
     let mut copied = (0usize, 0u64);
-    copy_dir(from, to, &mut copied).map_err(Skipped::Other)
+    copy_dir(from, to, &mut copied, limits).map_err(Skipped::Other)
 }
 
-fn copy_dir(from: &Path, to: &Path, copied: &mut (usize, u64)) -> Result<(), String> {
+fn copy_dir(
+    from: &Path,
+    to: &Path,
+    copied: &mut (usize, u64),
+    limits: &HarnessLimits,
+) -> Result<(), String> {
     fs::create_dir_all(to).map_err(|error| format!("{}: {error}", to.display()))?;
     let mut entries: Vec<_> = fs::read_dir(from)
         .map_err(|error| format!("{}: {error}", from.display()))?
@@ -174,7 +180,7 @@ fn copy_dir(from: &Path, to: &Path, copied: &mut (usize, u64)) -> Result<(), Str
             ));
         }
         if metadata.is_dir() {
-            copy_dir(&path, &target, copied)?;
+            copy_dir(&path, &target, copied, limits)?;
             continue;
         }
         if !metadata.file_type().is_file() {
@@ -182,13 +188,13 @@ fn copy_dir(from: &Path, to: &Path, copied: &mut (usize, u64)) -> Result<(), Str
         }
         copied.0 += 1;
         copied.1 += metadata.len();
-        if metadata.len() > MAX_MANIFEST_FILE_BYTES
-            || copied.0 > MAX_MANIFEST_FILES
-            || copied.1 > MAX_MANIFEST_BYTES
+        if !limits.manifest_file_bytes.allows(metadata.len())
+            || !limits.manifest_files.allows(copied.0)
+            || !limits.manifest_bytes.allows(copied.1)
         {
             return Err(format!(
-                "the skill passes {MAX_MANIFEST_FILE_BYTES} bytes a file, {MAX_MANIFEST_FILES} \
-                 files or {MAX_MANIFEST_BYTES} bytes"
+                "the skill passes {} bytes a file, {} files or {} bytes",
+                limits.manifest_file_bytes, limits.manifest_files, limits.manifest_bytes
             ));
         }
         fs::copy(&path, &target).map_err(|error| format!("{}: {error}", path.display()))?;

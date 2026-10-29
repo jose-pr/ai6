@@ -50,8 +50,8 @@ pub trait Repository {
 /// `PR OWNER/REPO#N`), `gh release create` (`release`, `tag TAG`), and a `gh api` call that
 /// merges a pull request. Commands inside `sh -c`, `bash -c`, `pwsh -Command`, `cmd /c`,
 /// `eval`, `env -S` and behind wrappers (`sudo`, `env`, `timeout`, `nice`, `ionice`,
-/// `stdbuf`, `nohup`, `setsid`, `time`, `command`, `exec`) or shell keywords are read too, and
-/// a `cd` before a command moves where its repository is asked.
+/// `stdbuf`, `nohup`, `setsid`, `time`, `command`, `exec`) or shell keywords are read too, up
+/// to `nesting` levels deep, and a `cd` before a command moves where its repository is asked.
 ///
 /// A `git push` without refspecs follows the repository's configuration (`remote.R.push`,
 /// `push.default`, `remote.R.mirror`, `push.followTags`, the push remote of the current
@@ -63,10 +63,15 @@ pub trait Repository {
 /// name, a repository that cannot be read, a merge or release naming no pull request or tag, a
 /// `gh api` call that changes refs or releases, arguments supplied by `xargs`, or a `git` or
 /// `gh` the classifier cannot place in the command.
-pub fn classify(command: &str, repo: &dyn Repository) -> Result<Vec<ActionScope>, String> {
+pub fn classify(
+    command: &str,
+    repo: &dyn Repository,
+    nesting: usize,
+) -> Result<Vec<ActionScope>, String> {
     let mut walk = Walk {
         repo,
         steps: Vec::new(),
+        nesting,
     };
     walk.command(command, &mut Shell::default(), 0)?;
     let mut unique = Vec::new();
@@ -77,9 +82,6 @@ pub fn classify(command: &str, repo: &dyn Repository) -> Result<Vec<ActionScope>
     }
     Ok(unique)
 }
-
-/// How deep `sh -c "sh -c ..."` and git aliases are followed.
-const MAX_NESTING: usize = 4;
 
 /// What a command line has set up for the commands after it.
 #[derive(Debug, Clone, Default)]
@@ -109,6 +111,8 @@ impl Shell {
 struct Walk<'a> {
     repo: &'a dyn Repository,
     steps: Vec<ActionScope>,
+    /// How deep `sh -c "sh -c ..."` and git aliases are followed.
+    nesting: usize,
 }
 
 /// A simple command with its wrappers and keywords taken off.
@@ -131,7 +135,7 @@ impl Walk<'_> {
                 continue;
             }
             if let Some(inner) = simple.nested {
-                if depth < MAX_NESTING {
+                if depth < self.nesting {
                     self.command(&inner, &mut local.clone(), depth + 1)?;
                 }
                 continue;
@@ -162,7 +166,7 @@ impl Walk<'_> {
                 "gh" => self.gh(args, &local, simple.unseen_args)?,
                 _ => {
                     if let Some(inner) = nested(&program, args) {
-                        if depth < MAX_NESTING {
+                        if depth < self.nesting {
                             self.command(&inner, &mut local.clone(), depth + 1)?;
                         }
                     } else if unplaced(&simple.words) {
@@ -252,7 +256,7 @@ impl Walk<'_> {
                     return Ok(());
                 };
                 if let Some(script) = expansion.strip_prefix('!') {
-                    if depth < MAX_NESTING {
+                    if depth < self.nesting {
                         return self.command(
                             &format!("{script} {}", rest.join(" ")),
                             &mut shell.clone(),
@@ -261,7 +265,7 @@ impl Walk<'_> {
                     }
                     return Ok(());
                 }
-                if depth >= MAX_NESTING {
+                if depth >= self.nesting {
                     return Err(format!("the git alias {alias:?} expands too deeply"));
                 }
                 let mut expanded = args[..index].to_vec();
@@ -1102,7 +1106,7 @@ mod tests {
             config: config.to_vec(),
             ..Fake::default()
         };
-        classify(command, &repo)
+        classify(command, &repo, 4)
             .unwrap_or_else(|error| panic!("{command}: {error}"))
             .into_iter()
             .map(|scope| (scope.kind, scope.target))
@@ -1114,7 +1118,7 @@ mod tests {
     }
 
     fn held(command: &str) -> String {
-        classify(command, &Fake::default())
+        classify(command, &Fake::default(), 4)
             .err()
             .unwrap_or_else(|| panic!("{command} should be held"))
     }
@@ -1412,7 +1416,7 @@ mod tests {
             detached: true,
             ..Fake::default()
         };
-        assert!(classify("git push", &detached).is_err());
+        assert!(classify("git push", &detached, 4).is_err());
     }
 
     #[test]
@@ -1421,6 +1425,7 @@ mod tests {
         classify(
             "cd /work/a && GIT_DIR=/srv/repo.git git -C sub push origin main",
             &repo,
+            4,
         )
         .unwrap();
         let asked = repo.asked.borrow();
@@ -1435,6 +1440,7 @@ mod tests {
         classify(
             "export GIT_WORK_TREE=/w; git --git-dir=/g push origin main",
             &repo,
+            4,
         )
         .unwrap();
         for context in repo.asked.borrow().iter() {
@@ -1446,7 +1452,7 @@ mod tests {
             unreadable: true,
             ..Fake::default()
         };
-        let error = classify("cd elsewhere && git push origin main", &unreadable).unwrap_err();
+        let error = classify("cd elsewhere && git push origin main", &unreadable, 4).unwrap_err();
         assert!(error.contains("could not be read"), "{error}");
     }
 
@@ -1569,7 +1575,7 @@ mod tests {
             detached: true,
             ..Fake::default()
         };
-        let error = classify("git push origin HEAD", &detached).unwrap_err();
+        let error = classify("git push origin HEAD", &detached, 4).unwrap_err();
         assert!(error.contains("git push origin BRANCH"), "{error}");
         held("gh pr merge --squash");
         held("gh release create");

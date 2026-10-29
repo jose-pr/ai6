@@ -16,6 +16,7 @@
 //! pin = "sha256:..."     # `ai6 harness pin DIR` prints it
 //! ```
 
+use crate::station::limits::HarnessLimits;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read};
@@ -29,12 +30,6 @@ use serde::{Deserialize, Serialize};
 pub const PROJECT_DIRECTORIES: [&str; 2] = [".claude", ".codex"];
 /// The single files a manifest holds when present.
 pub const PROJECT_FILES: [&str; 1] = [".mcp.json"];
-/// The largest file a manifest reads, in bytes.
-pub const MAX_MANIFEST_FILE_BYTES: u64 = 1_048_576;
-/// The most bytes a manifest reads in all.
-pub const MAX_MANIFEST_BYTES: u64 = 16 * 1_048_576;
-/// The most files a manifest holds.
-pub const MAX_MANIFEST_FILES: usize = 4_096;
 
 /// What a harness may do with the working directory's own configuration.
 #[non_exhaustive]
@@ -149,9 +144,9 @@ impl HarnessPolicy {
         weakened
     }
 
-    /// What a harness working in `root` may load. Under `pinned` it reads the manifest, which
-    /// blocks on the filesystem.
-    pub fn decide(&self, root: &Path) -> ProjectDecision {
+    /// What a harness working in `root` may load. Under `pinned` it reads the manifest within
+    /// `limits`, which blocks on the filesystem.
+    pub fn decide(&self, root: &Path, limits: &HarnessLimits) -> ProjectDecision {
         match self.project_settings {
             ProjectSettings::Ignore => ProjectDecision::ignore(),
             ProjectSettings::Load => ProjectDecision {
@@ -167,7 +162,7 @@ impl HarnessPolicy {
                         ..ProjectDecision::ignore()
                     };
                 };
-                match ProjectManifest::read(root) {
+                match ProjectManifest::read_within(root, limits) {
                     Err(why) => ProjectDecision {
                         refused: Some(why),
                         ..ProjectDecision::ignore()
@@ -203,8 +198,9 @@ impl HarnessPolicy {
 /// working directory that a hook or MCP server command in them names.
 ///
 /// It is read without following a link: a symbolic link, a device, a pipe or a file over
-/// [`MAX_MANIFEST_FILE_BYTES`] makes it unreadable, as does passing [`MAX_MANIFEST_FILES`] or
-/// [`MAX_MANIFEST_BYTES`]. Paths use `/` and are relative to the working directory.
+/// [`HarnessLimits::manifest_file_bytes`] makes it unreadable, as does passing
+/// [`HarnessLimits::manifest_files`] or [`HarnessLimits::manifest_bytes`]. Paths use `/` and
+/// are relative to the working directory.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProjectManifest {
@@ -220,8 +216,19 @@ impl ProjectManifest {
     /// Names the first file that is not a regular file, is too large, or cannot be read, or
     /// the limit that was passed.
     pub fn read(root: &Path) -> Result<Self, String> {
+        Self::read_within(root, &HarnessLimits::default())
+    }
+
+    /// Reads the manifest of `root` within `limits`, as [`read`](Self::read) does within the
+    /// defaults.
+    ///
+    /// # Errors
+    ///
+    /// As [`read`](Self::read).
+    pub fn read_within(root: &Path, limits: &HarnessLimits) -> Result<Self, String> {
         let mut reader = ManifestReader {
             root,
+            limits,
             files: BTreeMap::new(),
             contents: Vec::new(),
             bytes: 0,
@@ -254,12 +261,23 @@ impl ProjectManifest {
     ///
     /// As [`read`](Self::read), or `root` not being a directory reached without a link.
     pub fn read_tree(root: &Path) -> Result<Self, String> {
+        Self::read_tree_within(root, &HarnessLimits::default())
+    }
+
+    /// Reads the manifest of every regular file under `root` within `limits`, as
+    /// [`read_tree`](Self::read_tree) does within the defaults.
+    ///
+    /// # Errors
+    ///
+    /// As [`read_tree`](Self::read_tree).
+    pub fn read_tree_within(root: &Path, limits: &HarnessLimits) -> Result<Self, String> {
         let metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
         if !metadata.is_dir() {
             return Err("not a directory (a link is never followed)".to_owned());
         }
         let mut reader = ManifestReader {
             root,
+            limits,
             files: BTreeMap::new(),
             contents: Vec::new(),
             bytes: 0,
@@ -300,6 +318,7 @@ impl ProjectManifest {
 
 struct ManifestReader<'a> {
     root: &'a Path,
+    limits: &'a HarnessLimits,
     files: BTreeMap<String, PeerId>,
     /// The text of each settings file a command can be named in.
     contents: Vec<(String, String)>,
@@ -328,9 +347,10 @@ impl ManifestReader<'_> {
         if self.files.contains_key(relative) {
             return Ok(());
         }
-        if self.files.len() >= MAX_MANIFEST_FILES {
+        if !self.limits.manifest_files.allows(self.files.len() + 1) {
             return Err(format!(
-                "the project configuration has more than {MAX_MANIFEST_FILES} files"
+                "the project configuration has more than {} files",
+                self.limits.manifest_files
             ));
         }
         let path = self.root.join(relative);
@@ -344,17 +364,19 @@ impl ManifestReader<'_> {
                 "{relative} is not a regular file (a link, a directory, a device or a pipe)"
             ));
         }
-        if metadata.len() > MAX_MANIFEST_FILE_BYTES {
+        if !self.limits.manifest_file_bytes.allows(metadata.len()) {
             return Err(format!(
-                "{relative} is larger than {MAX_MANIFEST_FILE_BYTES} bytes"
+                "{relative} is larger than {} bytes",
+                self.limits.manifest_file_bytes
             ));
         }
         let bytes =
             read_regular(&path, metadata.len()).map_err(|why| format!("{relative}: {why}"))?;
         self.bytes += bytes.len() as u64;
-        if self.bytes > MAX_MANIFEST_BYTES {
+        if !self.limits.manifest_bytes.allows(self.bytes) {
             return Err(format!(
-                "the project configuration is larger than {MAX_MANIFEST_BYTES} bytes"
+                "the project configuration is larger than {} bytes",
+                self.limits.manifest_bytes
             ));
         }
         self.files.insert(relative.to_owned(), PeerId::of(&bytes));
@@ -404,7 +426,8 @@ fn read_regular(path: &Path, expected: u64) -> Result<Vec<u8>, String> {
         return Err("changed while it was read".to_owned());
     }
     let mut bytes = Vec::with_capacity(expected as usize);
-    file.take(MAX_MANIFEST_FILE_BYTES + 1)
+    // One byte past what was expected shows a file that grew while it was read.
+    file.take(expected.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
     if bytes.len() as u64 != expected {
@@ -558,7 +581,7 @@ mod tests {
             ]
         );
         let policy = HarnessPolicy::pinned(manifest.digest());
-        let decision = policy.decide(root.path());
+        let decision = policy.decide(root.path(), &HarnessLimits::default());
         assert!(decision.load && !decision.mcp, "{decision:?}");
         assert_eq!(decision.manifest, Some(manifest.digest()));
 
@@ -570,7 +593,7 @@ mod tests {
         ] {
             let root = checkout();
             write(root.path(), path, text);
-            let decision = policy.decide(root.path());
+            let decision = policy.decide(root.path(), &HarnessLimits::default());
             assert!(!decision.load, "{path}");
             assert!(decision.refused.unwrap().contains("expected"), "{path}");
         }
@@ -587,7 +610,8 @@ mod tests {
         write(root.path(), "tools/server.js", "1");
         let manifest = ProjectManifest::read(root.path()).unwrap();
         assert!(manifest.files.contains_key("tools/server.js"));
-        let decision = HarnessPolicy::pinned(manifest.digest()).decide(root.path());
+        let decision =
+            HarnessPolicy::pinned(manifest.digest()).decide(root.path(), &HarnessLimits::default());
         assert!(decision.load && decision.mcp);
     }
 
@@ -626,7 +650,7 @@ mod tests {
         write(
             root.path(),
             ".claude/huge.json",
-            &" ".repeat(MAX_MANIFEST_FILE_BYTES as usize + 1),
+            &" ".repeat(HarnessLimits::default().manifest_file_bytes.or_max() + 1),
         );
         let why = ProjectManifest::read(root.path()).unwrap_err();
         assert!(why.contains("larger than"), "{why}");
@@ -658,10 +682,14 @@ mod tests {
             HarnessPolicy::default().project_settings,
             ProjectSettings::Ignore
         );
-        assert!(!HarnessPolicy::default().decide(root.path()).load);
+        assert!(
+            !HarnessPolicy::default()
+                .decide(root.path(), &HarnessLimits::default())
+                .load
+        );
         assert!(HarnessPolicy::default().weakenings().is_empty());
         let load = HarnessPolicy::with(ProjectSettings::Load);
-        assert!(load.decide(root.path()).load);
+        assert!(load.decide(root.path(), &HarnessLimits::default()).load);
         assert_eq!(load.weakenings().len(), 1);
         assert!(
             HarnessPolicy::with(ProjectSettings::Pinned)
@@ -671,7 +699,10 @@ mod tests {
 
         let manifest = ProjectManifest::read(root.path()).unwrap();
         let sha1 = HarnessPolicy::pinned(manifest.digest_with(Digest::Sha1));
-        assert!(sha1.decide(root.path()).load, "a SHA-1 pin still pins");
+        assert!(
+            sha1.decide(root.path(), &HarnessLimits::default()).load,
+            "a SHA-1 pin still pins"
+        );
         assert!(sha1.weakenings()[0].contains("SHA-1"));
     }
 

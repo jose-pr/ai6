@@ -1049,7 +1049,7 @@ impl ClaudeSession {
     fn new(terminal: Object<dyn TerminalSession>, expected_session_id: Option<SessionId>) -> Self {
         Self {
             terminal,
-            output: Mutex::new(JsonLines::new()),
+            output: Mutex::new(JsonLines::new(&Default::default())),
             session_id: Mutex::new(None),
             expected_session_id,
             eof: AtomicBool::new(false),

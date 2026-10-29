@@ -24,6 +24,30 @@ pub const GATE_PROGRAM_ENV: &str = "AI6_GREEN_INK_GATE";
 pub const CABLE_URL_ENV: &str = "AI6_CABLE_MCP_URL";
 /// The variable carrying the Session's Cable endpoint bearer token.
 pub const CABLE_TOKEN_ENV: &str = "AI6_CABLE_MCP_TOKEN";
+/// The variable carrying the seconds one exchange with the Station may take, the Station's
+/// `[green_ink] gate_timeout`; unset, the default of 30.
+pub const GATE_TIMEOUT_ENV: &str = "AI6_GREEN_INK_TIMEOUT";
+/// The variable carrying how deep the gate follows nested shells and git aliases, the
+/// Station's `[approvals] classify_nesting`; unset, the default of 4.
+pub const GATE_NESTING_ENV: &str = "AI6_GREEN_INK_NESTING";
+
+/// The variables a Station sets in a Session's environment so its gate runs as the
+/// `station` record says: [`GATE_TIMEOUT_ENV`] and [`GATE_NESTING_ENV`].
+pub fn settings_environment(
+    green_ink: &crate::station::limits::GreenInkLimits,
+    approvals: &crate::station::limits::ApprovalLimits,
+) -> [(String, String); 2] {
+    [
+        (
+            GATE_TIMEOUT_ENV.to_owned(),
+            green_ink.gate_timeout.0.as_secs_f64().to_string(),
+        ),
+        (
+            GATE_NESTING_ENV.to_owned(),
+            approvals.classify_nesting.to_string(),
+        ),
+    ]
+}
 
 /// What the gate decides about a command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,21 +242,34 @@ mod client {
     use serde_json::{Value, json};
 
     use super::{
-        Answers, CABLE_TOKEN_ENV, CABLE_URL_ENV, GateVerdict, GitOutput, GitRepository, decide,
-        deny,
+        Answers, CABLE_TOKEN_ENV, CABLE_URL_ENV, GATE_NESTING_ENV, GATE_TIMEOUT_ENV, GateVerdict,
+        GitOutput, GitRepository, decide, deny,
     };
     use crate::directorates::m::approvals::{ActionScope, classify};
+    use crate::station::limits::{ApprovalLimits, GreenInkLimits};
 
     /// The MCP revision the client speaks.
     const PROTOCOL_VERSION: &str = "2025-06-18";
-    /// How long one exchange with the Station may take.
-    const TIMEOUT: Duration = Duration::from_secs(30);
 
     /// A client of the Station's `check_approval` tool on the Session's Cable endpoint.
     pub struct GateClient {
         url: String,
         token: String,
         agent: ureq::Agent,
+        /// How deep a command's nested shells and git aliases are followed.
+        nesting: usize,
+    }
+
+    /// The exchange timeout and nesting depth `lookup` names, else their defaults.
+    fn settings(lookup: impl Fn(&str) -> Option<String>) -> (Duration, usize) {
+        let timeout = lookup(GATE_TIMEOUT_ENV)
+            .and_then(|seconds| seconds.trim().parse::<f64>().ok())
+            .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
+            .unwrap_or(GreenInkLimits::default().gate_timeout.0);
+        let nesting = lookup(GATE_NESTING_ENV)
+            .and_then(|depth| depth.trim().parse::<usize>().ok())
+            .unwrap_or(ApprovalLimits::default().classify_nesting);
+        (timeout, nesting)
     }
 
     impl std::fmt::Debug for GateClient {
@@ -249,6 +286,7 @@ mod client {
             Some(Self::new(
                 environment.get(CABLE_URL_ENV)?.clone(),
                 environment.get(CABLE_TOKEN_ENV)?.clone(),
+                settings(|name| environment.get(name).cloned()),
             ))
         }
 
@@ -259,17 +297,23 @@ mod client {
             Some(Self::new(
                 url.or_else(|| std::env::var(CABLE_URL_ENV).ok())?,
                 std::env::var(CABLE_TOKEN_ENV).ok()?,
+                settings(|name| std::env::var(name).ok()),
             ))
         }
 
-        fn new(url: String, token: String) -> Self {
+        fn new(url: String, token: String, (timeout, nesting): (Duration, usize)) -> Self {
             let agent = ureq::Agent::config_builder()
-                .timeout_global(Some(TIMEOUT))
+                .timeout_global(Some(timeout))
                 .max_redirects(0)
                 .http_status_as_error(false)
                 .build()
                 .into();
-            Self { url, token, agent }
+            Self {
+                url,
+                token,
+                agent,
+                nesting,
+            }
         }
 
         /// Asks the Station about each step: the statuses it answers, in order (`approved`,
@@ -458,15 +502,22 @@ mod client {
     }
 
     /// Decides whether `command`, run in `cwd`, may go ahead, asking the repository there with
-    /// `git` and the Station through `client`; see [`decide`]. Without a client a governed step
-    /// is held.
+    /// `git` and the Station through `client`; see [`decide`]. Nested shells and git aliases
+    /// are followed as deep as the client's environment says. Without a client a governed
+    /// step is held.
     pub fn gate(command: &str, cwd: Option<&Path>, client: Option<&GateClient>) -> GateVerdict {
         let repository =
             GitRepository::new(cwd.map(|cwd| cwd.to_string_lossy().into_owned()), local_git);
-        decide(classify(command, &repository), |steps| match client {
-            Some(client) => client.check(steps),
-            None => Err("this Session has no Station to check green ink with".to_owned()),
-        })
+        let nesting = client.map_or(ApprovalLimits::default().classify_nesting, |client| {
+            client.nesting
+        });
+        decide(
+            classify(command, &repository, nesting),
+            |steps| match client {
+                Some(client) => client.check(steps),
+                None => Err("this Session has no Station to check green ink with".to_owned()),
+            },
+        )
     }
 
     #[cfg(test)]
@@ -505,7 +556,7 @@ mod client {
         fn steps(command: &str, cwd: &Path) -> Result<Vec<String>, String> {
             let repository =
                 GitRepository::new(Some(cwd.to_string_lossy().into_owned()), local_git);
-            classify(command, &repository).map(|steps| {
+            classify(command, &repository, 4).map(|steps| {
                 steps
                     .into_iter()
                     .map(|step| format!("{} {}", step.kind, step.target))

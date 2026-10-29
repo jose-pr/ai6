@@ -41,8 +41,8 @@ pub use directorates::m::config::{
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::harness::{
-    HarnessPolicy, MAX_MANIFEST_BYTES, MAX_MANIFEST_FILE_BYTES, MAX_MANIFEST_FILES,
-    PROJECT_DIRECTORIES, PROJECT_FILES, ProjectDecision, ProjectManifest, ProjectSettings,
+    HarnessPolicy, PROJECT_DIRECTORIES, PROJECT_FILES, ProjectDecision, ProjectManifest,
+    ProjectSettings,
 };
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
 pub use directorates::m::placement::{
@@ -116,14 +116,14 @@ pub use directorates::q::{
     PoolChoice, PoolStrategy, choose_pools,
 };
 pub use directorates::q::{
-    DEFAULT_SECRET_LEASE_TTL, Loadout, LoadoutCatalog, MAX_SECRET_LEASE_TTL, McpServer, QError,
-    QErrorKind, SandboxError, SandboxProfile, SandboxRequest, SecretBackend, SecretBackendFailure,
-    SecretBroker, SecretDefinition, SecretError, SecretLease, SecretLeaseRequest, SecretRequest,
-    SecretValue, StationSecrets, claude_mcp_config,
+    Loadout, LoadoutCatalog, McpServer, QError, QErrorKind, SandboxError, SandboxProfile,
+    SandboxRequest, SecretBackend, SecretBackendFailure, SecretBroker, SecretDefinition,
+    SecretError, SecretLease, SecretLeaseRequest, SecretRequest, SecretValue, StationSecrets,
+    claude_mcp_config,
 };
 pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,
-    QuotaWindow, UNKNOWN_USE_PERMILLE, choose_account,
+    QuotaWindow, choose_account,
 };
 pub use directorates::registry::agent_records::{
     AgentOutcome, AgentOutcomeReport, AgentRecord, AgentTally, ModelTenure, NO_OPERATION,

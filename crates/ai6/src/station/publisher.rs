@@ -14,6 +14,7 @@ use url::{Host, Url};
 use crate::MissionId;
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::q::terminal::TerminalInputTarget;
+use crate::station::limits::PublisherLimits;
 use ai6_diptel::{
     ControlAction, ControlId, FrameReceiver, IncomingFrame, MAX_CONTROL_MESSAGE_BYTES,
     MissionControl, MissionId as GatewayMissionId, OperationId, SessionId as GatewaySessionId,
@@ -21,20 +22,14 @@ use ai6_diptel::{
     terminal_frames,
 };
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
-const PUBLISH_QUEUE_LIMIT: usize = 64;
-const MAX_TERMINAL_BYTES: usize = 1024 * 1024;
-const MAX_PRE_BIND_TERMINAL_BYTES: usize = MAX_TERMINAL_BYTES;
-const INPUT_RETRY_DELAY: Duration = Duration::from_millis(100);
-/// How long Universal Exports holds a control poll open; kept under the request timeout.
-const CONTROL_WAIT_MS: u64 = 1_000;
-const CONTROL_QUEUE_LIMIT: usize = 16;
-const CONTROL_REPORT_ATTEMPTS: usize = 3;
+/// Room for a frame's header past the terminal bytes it carries.
+const FRAME_MARGIN: u64 = 64 * 1024;
 
 /// Universal Exports gateway credentials and origin for the daemon's event publisher.
 pub struct Config {
     origin: Url,
     token: String,
+    limits: PublisherLimits,
 }
 
 impl Config {
@@ -63,7 +58,17 @@ impl Config {
         if token.is_empty() || token.chars().any(char::is_control) {
             return Err(PublisherError::InvalidToken);
         }
-        Ok(Self { origin, token })
+        Ok(Self {
+            origin,
+            token,
+            limits: PublisherLimits::default(),
+        })
+    }
+
+    /// Publishes within `limits`, the `station` record's `[publisher]` table.
+    pub(crate) fn with_limits(mut self, limits: PublisherLimits) -> Self {
+        self.limits = limits;
+        self
     }
 }
 
@@ -138,6 +143,7 @@ enum Command {
 pub(crate) struct Publisher {
     origin: Url,
     token: String,
+    limits: PublisherLimits,
     sender: SyncSender<Command>,
     running: Arc<AtomicBool>,
     healthy: Arc<AtomicBool>,
@@ -195,12 +201,13 @@ impl Publisher {
         let token = config.token.clone();
         let input_origin = config.origin.clone();
         let input_token = config.token.clone();
+        let limits = config.limits.clone();
         let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(REQUEST_TIMEOUT))
+            .timeout_global(Some(limits.request_timeout.0))
             .max_redirects(0)
             .build()
             .into();
-        let (sender, receiver) = mpsc::sync_channel(PUBLISH_QUEUE_LIMIT);
+        let (sender, receiver) = mpsc::sync_channel(limits.queue);
         let running = Arc::new(AtomicBool::new(true));
         let healthy = Arc::new(AtomicBool::new(true));
         let error = Arc::new(Mutex::new(None));
@@ -221,12 +228,13 @@ impl Publisher {
                 )
             })?;
         let input_agent = ureq::Agent::config_builder()
-            .timeout_global(Some(REQUEST_TIMEOUT))
+            .timeout_global(Some(limits.request_timeout.0))
             .max_redirects(0)
             .build()
             .into();
         let input_running = running.clone();
         let input_targets_for_worker = input_targets.clone();
+        let input_limits = limits.clone();
         let input_worker = match thread::Builder::new()
             .name("ai6-publisher-input".to_owned())
             .spawn(move || {
@@ -234,6 +242,7 @@ impl Publisher {
                     input_origin,
                     input_token,
                     input_agent,
+                    &input_limits,
                     input_running,
                     input_targets_for_worker,
                 )
@@ -249,6 +258,7 @@ impl Publisher {
         Ok(Arc::new(Self {
             origin,
             token,
+            limits,
             sender,
             running,
             healthy,
@@ -278,10 +288,10 @@ impl Publisher {
                 "this Station already takes its controls",
             ));
         }
-        let (deliveries, receiver) = tokio::sync::mpsc::channel(CONTROL_QUEUE_LIMIT);
+        let (deliveries, receiver) = tokio::sync::mpsc::channel(self.limits.control_queue);
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(
-                REQUEST_TIMEOUT + Duration::from_millis(CONTROL_WAIT_MS),
+                self.limits.request_timeout.0 + self.limits.control_wait.0,
             ))
             .max_redirects(0)
             .build()
@@ -291,6 +301,7 @@ impl Publisher {
             token: self.token.clone(),
             station: station_id.to_owned(),
             agent,
+            limits: self.limits.clone(),
         };
         let running = self.running.clone();
         *worker = Some(
@@ -419,6 +430,7 @@ struct ControlLink {
     token: String,
     station: String,
     agent: ureq::Agent,
+    limits: PublisherLimits,
 }
 
 fn take_controls(
@@ -432,7 +444,10 @@ fn take_controls(
     endpoint
         .query_pairs_mut()
         .append_pair("station", &link.station)
-        .append_pair("wait_ms", &CONTROL_WAIT_MS.to_string());
+        .append_pair(
+            "wait_ms",
+            &link.limits.control_wait.0.as_millis().to_string(),
+        );
     let Some(schema) = control_schema() else {
         return;
     };
@@ -443,21 +458,21 @@ fn take_controls(
             .header("Authorization", &format!("Bearer {}", link.token))
             .call();
         let Ok(mut response) = response else {
-            thread::sleep(INPUT_RETRY_DELAY);
+            thread::sleep(link.limits.input_retry_delay.0);
             continue;
         };
         match response.status().as_u16() {
             200 => {}
             204 => continue,
             _ => {
-                thread::sleep(INPUT_RETRY_DELAY);
+                thread::sleep(link.limits.input_retry_delay.0);
                 continue;
             }
         }
         let Ok(frame) = response
             .body_mut()
             .with_config()
-            .limit((MAX_CONTROL_MESSAGE_BYTES + 64 * 1024) as u64)
+            .limit(MAX_CONTROL_MESSAGE_BYTES as u64 + FRAME_MARGIN)
             .read_to_vec()
         else {
             continue;
@@ -525,7 +540,7 @@ fn report_control(link: &ControlLink, control_id: &ControlId, outcome: &ControlO
             .push(control_id.as_str())
             .push("result");
     }
-    for _ in 0..CONTROL_REPORT_ATTEMPTS {
+    for _ in 0..link.limits.control_report_attempts {
         let sent = link
             .agent
             .post(url.as_str())
@@ -538,7 +553,7 @@ fn report_control(link: &ControlLink, control_id: &ControlId, outcome: &ControlO
         // cannot help.
         match sent {
             Ok(_) | Err(ureq::Error::StatusCode(_)) => return,
-            Err(_) => thread::sleep(INPUT_RETRY_DELAY),
+            Err(_) => thread::sleep(link.limits.input_retry_delay.0),
         }
     }
 }
@@ -672,7 +687,8 @@ impl SessionTelemetry {
             self.publisher.fail("Session telemetry lock failed");
             return;
         };
-        for chunk in bytes.chunks(MAX_TERMINAL_BYTES) {
+        let limits = &self.publisher.limits;
+        for chunk in bytes.chunks(limits.terminal_bytes.or_max()) {
             if let Some(session_id) = &state.session_id {
                 if !self.publisher.send(Command::Terminal {
                     session_id: session_id.clone(),
@@ -680,8 +696,9 @@ impl SessionTelemetry {
                 }) {
                     break;
                 }
-            } else if state.pending_terminal_bytes.saturating_add(chunk.len())
-                <= MAX_PRE_BIND_TERMINAL_BYTES
+            } else if limits
+                .pre_bind_terminal_bytes
+                .allows(state.pending_terminal_bytes.saturating_add(chunk.len()))
             {
                 state.pending_terminal.push_back(chunk.to_vec());
                 state.pending_terminal_bytes += chunk.len();
@@ -711,6 +728,7 @@ fn receive_inputs(
     origin: Url,
     token: String,
     agent: ureq::Agent,
+    limits: &PublisherLimits,
     running: Arc<AtomicBool>,
     targets: Arc<Mutex<BTreeMap<SessionId, InputTargetRegistration>>>,
 ) {
@@ -723,11 +741,11 @@ fn receive_inputs(
             .header("Authorization", &format!("Bearer {token}"))
             .call();
         let Ok(mut response) = response else {
-            thread::sleep(INPUT_RETRY_DELAY);
+            thread::sleep(limits.input_retry_delay.0);
             continue;
         };
         if response.status() != 200 {
-            thread::sleep(INPUT_RETRY_DELAY);
+            thread::sleep(limits.input_retry_delay.0);
             continue;
         }
         let operation_id = response
@@ -743,11 +761,16 @@ fn receive_inputs(
         let frame = response
             .body_mut()
             .with_config()
-            .limit((MAX_TERMINAL_BYTES + 64 * 1024) as u64)
+            .limit(
+                limits
+                    .terminal_bytes
+                    .get()
+                    .map_or(u64::MAX, |bytes| bytes.saturating_add(FRAME_MARGIN)),
+            )
             .read_to_vec();
         let (Some(operation_id), Some(mission_id), Ok(frame)) = (operation_id, mission_id, frame)
         else {
-            thread::sleep(INPUT_RETRY_DELAY);
+            thread::sleep(limits.input_retry_delay.0);
             continue;
         };
         if let Some((session_id, _sequence, event)) = decode_input_frame(&frame) {
@@ -1591,7 +1614,8 @@ mod tests {
             "operation-a".to_owned(),
             MissionId::try_new("mission-a").unwrap(),
         );
-        telemetry.publish_terminal(&vec![0; MAX_PRE_BIND_TERMINAL_BYTES + 1]);
+        let limit = PublisherLimits::default().pre_bind_terminal_bytes.or_max();
+        telemetry.publish_terminal(&vec![0; limit + 1]);
 
         let health = publisher.health();
         assert!(!health.healthy);
@@ -1599,5 +1623,40 @@ mod tests {
             health.error,
             Some("pre-registration terminal buffer is full")
         );
+    }
+
+    #[test]
+    fn the_publication_queue_holds_what_its_limits_say() {
+        // A gateway that accepts and never answers keeps the worker on its first request.
+        let gateway = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", gateway.local_addr().unwrap());
+        let held = std::thread::spawn(move || {
+            let accepted: Vec<_> = gateway.incoming().take(1).collect();
+            std::thread::sleep(Duration::from_secs(3));
+            drop(accepted);
+        });
+        let register = |publisher: &Publisher, mission: &str| {
+            publisher.send(Command::Register {
+                operation_id: "operation-a".to_owned(),
+                mission_id: mission.to_owned(),
+                session_id: SessionId::try_new(format!("session-{mission}")).unwrap(),
+                mission: None,
+            })
+        };
+        let limits = PublisherLimits {
+            queue: 1,
+            ..PublisherLimits::default()
+        };
+        let config = Config::try_new(&origin, "test-token")
+            .unwrap()
+            .with_limits(limits);
+        let publisher = Publisher::start(config).unwrap();
+        assert!(register(&publisher, "a"));
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(register(&publisher, "b"));
+        assert!(!register(&publisher, "c"));
+        assert_eq!(publisher.health().error, Some("publication queue is full"));
+        drop(publisher);
+        held.join().unwrap();
     }
 }

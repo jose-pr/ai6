@@ -142,7 +142,7 @@ fn a_child_waiting_for_its_input_answers_without_help() {
         .unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(20);
-    let mut lines = JsonLines::new();
+    let mut lines = JsonLines::new(&Default::default());
     let mut raw = Vec::new();
     let mut values = Vec::new();
     let mut buffer = vec![0; 65536];

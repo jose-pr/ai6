@@ -13,9 +13,6 @@ use crate::station::safehouse::{SafeHouse, SafeHouseHygiene};
 
 use super::super::{DaemonState, is_terminal_state, open_safe_house};
 
-/// The most unexported changes listed per safe house.
-const MAX_LISTED_CHANGES: usize = 20;
-
 /// One kept safe house as the Head of Station sees it.
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct KeptSafeHouse {
@@ -117,7 +114,12 @@ pub(super) fn describe(state: &DaemonState, mission: &Mission, now: SystemTime) 
         operation: mission.operation_id.clone(),
         state: format!("{:?}", mission.state).to_lowercase(),
         live: !is_over(state, mission),
-        survey: survey(Path::new(&path), &state.station.hygiene, now),
+        survey: survey(
+            Path::new(&path),
+            &state.station.hygiene,
+            now,
+            state.station.limits().head_of_station.survey_entries,
+        ),
         path,
         branch,
         exported: None,
@@ -134,12 +136,26 @@ pub(super) fn describe(state: &DaemonState, mission: &Mission, now: SystemTime) 
             described.ignored = exports
                 .ignored
                 .into_iter()
-                .take(MAX_LISTED_CHANGES)
+                .take(
+                    state
+                        .station
+                        .limits()
+                        .head_of_station
+                        .listed_changes
+                        .or_max(),
+                )
                 .collect();
             described.unexported = exports
                 .unexported
                 .into_iter()
-                .take(MAX_LISTED_CHANGES)
+                .take(
+                    state
+                        .station
+                        .limits()
+                        .head_of_station
+                        .listed_changes
+                        .or_max(),
+                )
                 .collect();
         }
         Ok(None) => {

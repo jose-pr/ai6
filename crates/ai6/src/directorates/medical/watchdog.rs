@@ -18,8 +18,6 @@ pub const DEFAULT_BLOCKED_AFTER: Duration = Duration::from_secs(10);
 pub const DEFAULT_LOOP_MIN_LINES: usize = 50;
 /// Default number of distinct terminal lines retained for loop detection.
 pub const DEFAULT_LINE_HISTORY: usize = 4096;
-const MAX_PARTIAL_LINE: usize = 4096;
-
 /// Per-Agent overrides layered over the daemon's WatchdogConfig.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -107,6 +105,8 @@ pub struct WatchdogConfig {
     max_runtime: Option<Duration>,
     history: usize,
     normalize_digits: bool,
+    partial_line_bytes: crate::bounds::Limit,
+    csi_bytes: crate::bounds::Limit,
 }
 
 impl Default for WatchdogConfig {
@@ -119,6 +119,8 @@ impl Default for WatchdogConfig {
             max_runtime: None,
             history: DEFAULT_LINE_HISTORY,
             normalize_digits: false,
+            partial_line_bytes: crate::bounds::Limit::at(4096),
+            csi_bytes: crate::station::limits::TerminalOutputLimits::default().csi_bytes,
         }
     }
 }
@@ -163,6 +165,20 @@ impl WatchdogConfig {
     /// Treats digit runs as `#` while comparing terminal lines for loops.
     pub fn with_normalize_digits(mut self, normalize: bool) -> Self {
         self.normalize_digits = normalize;
+        self
+    }
+
+    /// Sets how many bytes of a terminal line are held before it counts as a line of its own
+    /// (default 4,096); `Limit::UNBOUNDED` waits for its end.
+    pub fn with_partial_line_bytes(mut self, bytes: crate::bounds::Limit) -> Self {
+        self.partial_line_bytes = bytes;
+        self
+    }
+
+    /// Sets how long a terminal control sequence may be before it is read as text
+    /// (default 64 bytes, `[terminal_output] csi_bytes`).
+    pub fn with_csi_bytes(mut self, bytes: crate::bounds::Limit) -> Self {
+        self.csi_bytes = bytes;
         self
     }
 
@@ -331,7 +347,11 @@ impl Watchdog {
                 observe_line(&mut state, now, &self.config);
             } else {
                 state.partial_line.push(*byte);
-                if state.partial_line.len() > MAX_PARTIAL_LINE {
+                if !self
+                    .config
+                    .partial_line_bytes
+                    .allows(state.partial_line.len())
+                {
                     observe_line(&mut state, now, &self.config);
                 }
             }
@@ -396,7 +416,7 @@ impl Watchdog {
     pub(crate) fn is_waiting_at_prompt(&self) -> bool {
         let state = self.lock_state();
         state.paused_since.is_none()
-            && looks_like_prompt(&state.partial_line)
+            && looks_like_prompt(&state.partial_line, self.config.csi_bytes)
             && state.last_activity.elapsed() >= self.config.blocked_after
     }
 
@@ -408,7 +428,8 @@ impl Watchdog {
 }
 
 fn observe_line(state: &mut ActivityState, now: Instant, config: &WatchdogConfig) {
-    let visible = crate::directorates::q::terminal::strip_controls(&state.partial_line);
+    let visible =
+        crate::directorates::q::terminal::strip_controls(&state.partial_line, config.csi_bytes);
     state.partial_line.clear();
     let mut normalized = Vec::with_capacity(visible.len());
     let mut digit_run = false;
@@ -441,8 +462,8 @@ fn observe_line(state: &mut ActivityState, now: Instant, config: &WatchdogConfig
     not(feature = "daemon"),
     allow(dead_code, reason = "used only by the daemon")
 )]
-fn looks_like_prompt(raw: &[u8]) -> bool {
-    let visible = crate::directorates::q::terminal::strip_controls(raw);
+fn looks_like_prompt(raw: &[u8], csi_bytes: crate::bounds::Limit) -> bool {
+    let visible = crate::directorates::q::terminal::strip_controls(raw, csi_bytes);
     let tail = visible
         .get(visible.len().saturating_sub(256)..)
         .unwrap_or(&visible);

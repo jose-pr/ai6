@@ -18,25 +18,30 @@ use crate::directorates::m::placement;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
 use crate::directorates::q::{
     Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin, Loadout,
-    LoadoutCatalog, MAX_SECRET_LEASE_TTL, PoolChoice, SecretBroker, SecretLease,
-    SecretLeaseRequest, choose_pools,
+    LoadoutCatalog, PoolChoice, SecretBroker, SecretLease, SecretLeaseRequest, choose_pools,
 };
 use crate::directorates::registry::accounts::{
     AccountClaimRequest, AccountProfile, AccountRef, AccountState, QuotaWindow, choose_account,
 };
 use crate::directorates::registry::sessions::SessionRecord;
-use crate::directorates::registry::store::DEFAULT_LEASE;
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::section_00::agent::QuotaReport;
 
 use super::DaemonState;
 
-/// How long a claim lasts unless the Station renews it at its check-in: a dark Station's
-/// accounts free up with its Session leases.
-pub(super) const CLAIM_TTL: Duration = DEFAULT_LEASE;
-/// The longest a provider limit keeps an account out unless the Station says otherwise: a
-/// reset reported years ahead is not trusted.
-pub(super) const DEFAULT_LIMIT_HORIZON: Duration = Duration::from_secs(8 * 24 * 3600);
+/// A claim on an account for `state`'s Session of `mission_id`, held for `[accounts]
+/// claim_ttl` unless the Station renews it at its check-in, so a dark Station's accounts free
+/// up with its Session leases.
+fn claim_request(state: &DaemonState, pool: &AccountPool, mission_id: &str) -> AccountClaimRequest {
+    let limits = &state.station.limits().accounts;
+    AccountClaimRequest::new(
+        pool,
+        state.station_id.as_str(),
+        mission_id,
+        limits.claim_ttl.0,
+    )
+    .unknown_use(limits.unknown_use_permille)
+}
 const TIMELINE_KIND: &str = "account";
 const CODEX_CONFIG: &str = "# Written by AI6: this home holds one pool account's login.\n\
                             cli_auth_credentials_store = \"file\"\n";
@@ -49,7 +54,6 @@ const HOME_MARKER: &str = ".ai6-account-homes";
 pub(crate) struct AccountDesk {
     login: Option<Arc<dyn AccountLogin>>,
     homes: Option<PathBuf>,
-    limit_horizon: Option<Duration>,
     held: Arc<Mutex<BTreeMap<String, Held>>>,
     /// Missions whose account is being claimed and handed over: their claims are renewed
     /// like held ones.
@@ -61,16 +65,13 @@ impl std::fmt::Debug for AccountDesk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AccountDesk")
             .field("homes", &self.homes)
-            .field("limit_horizon", &self.limit_horizon)
             .finish_non_exhaustive()
     }
 }
 
 impl PartialEq for AccountDesk {
     fn eq(&self, other: &Self) -> bool {
-        self.homes == other.homes
-            && self.limit_horizon == other.limit_horizon
-            && Arc::ptr_eq(&self.held, &other.held)
+        self.homes == other.homes && Arc::ptr_eq(&self.held, &other.held)
     }
 }
 
@@ -97,15 +98,11 @@ impl AccountDesk {
         self
     }
 
-    pub(crate) fn with_limit_horizon(mut self, horizon: Duration) -> Self {
-        self.limit_horizon = Some(horizon);
-        self
-    }
-
-    fn login(&self) -> Arc<dyn AccountLogin> {
+    /// The login set in code, else the pool's login command, killed after `timeout`.
+    fn login(&self, timeout: Duration) -> Arc<dyn AccountLogin> {
         self.login
             .clone()
-            .unwrap_or_else(|| Arc::new(CommandLogin::default()))
+            .unwrap_or_else(|| Arc::new(CommandLogin::default().with_timeout(timeout)))
     }
 
     fn homes(&self) -> Result<PathBuf, String> {
@@ -116,15 +113,12 @@ impl AccountDesk {
                 .map_err(|error| format!("no state directory for account homes: {error}")),
         }
     }
+}
 
-    fn horizon_secs(&self) -> i64 {
-        i64::try_from(
-            self.limit_horizon
-                .unwrap_or(DEFAULT_LIMIT_HORIZON)
-                .as_secs(),
-        )
-        .unwrap_or(i64::MAX)
-    }
+/// The longest a provider limit keeps an account out, `[accounts] limit_horizon`: a reset
+/// reported years ahead is not trusted.
+fn horizon_secs(state: &DaemonState) -> i64 {
+    i64::try_from(state.station.limits().accounts.limit_horizon.0.as_secs()).unwrap_or(i64::MAX)
 }
 
 /// The account a Mission's Session holds on this Station.
@@ -306,8 +300,7 @@ fn claim<'a>(
 ) -> Result<(&'a AccountPool, AccountState), String> {
     let mission_id = mission.mission_id.as_str();
     let request = |pool: &AccountPool| {
-        AccountClaimRequest::new(pool, state.station_id.as_str(), mission_id, CLAIM_TTL)
-            .operation(mission.operation_id.clone())
+        claim_request(state, pool, mission_id).operation(mission.operation_id.clone())
     };
     let failed = |pool: &AccountPool, error: std::io::Error| {
         format!("pool {:?} could not be claimed from: {error}", pool.id())
@@ -385,15 +378,22 @@ fn hand_over(
     let loadout = Loadout::for_account(pool, account)
         .ok_or_else(|| format!("account {name} reads no secret"))?;
     let secret = loadout.secret_names()[0].clone();
-    let request =
-        SecretLeaseRequest::with_ttl(state.station_id.clone(), mission_id, MAX_SECRET_LEASE_TTL)
-            .map_err(|error| error.to_string())?;
+    let request = SecretLeaseRequest::with_ttl(
+        state.station_id.clone(),
+        mission_id,
+        state.station.limits().secrets.lease_ttl.0,
+    )
+    .map_err(|error| error.to_string())?;
     let lease = broker
         .lease(&loadout, request)
         .map_err(|error| format!("account {name}'s credential could not be leased: {error}"))?;
     let handed = if account.kind().login_flag().is_some() {
         home_for(state, mission_id, pool, account).and_then(|home| {
-            let login = state.station.credentials.accounts.login();
+            let login = state
+                .station
+                .credentials
+                .accounts
+                .login(state.station.limits().accounts.login_timeout.0);
             lease
                 .with_secret(&secret, |value| login.login(pool, account, &home, value))
                 .map_err(|error| error.to_string())?
@@ -505,7 +505,7 @@ pub(super) fn reattach(state: &DaemonState, mission: &Mission, session: &Session
         );
         return;
     };
-    let request = AccountClaimRequest::new(pool, state.station_id.as_str(), mission_id, CLAIM_TTL)
+    let request = claim_request(state, pool, mission_id)
         .operation(mission.operation_id.clone())
         .only(&account.account)
         .in_use();
@@ -557,10 +557,12 @@ pub(super) fn tend(state: &DaemonState) {
     let missions: Vec<String> = missions.into_iter().collect();
     let now = state.clock.now() as f64;
     if has_pools
-        && let Err(error) =
-            state
-                .intake
-                .renew_account_claims(&state.station_id, &missions, CLAIM_TTL, now)
+        && let Err(error) = state.intake.renew_account_claims(
+            &state.station_id,
+            &missions,
+            state.station.limits().accounts.claim_ttl.0,
+            now,
+        )
     {
         eprintln!("ai6: account claims not renewed: {error}");
     }
@@ -762,7 +764,7 @@ pub(super) fn on_limit(
     let until = resets_at
         .filter(|reset| *reset > now)
         .unwrap_or_else(|| now.saturating_add(i64::try_from(fallback_secs).unwrap_or(i64::MAX)))
-        .min(now.saturating_add(desk.horizon_secs()));
+        .min(now.saturating_add(horizon_secs(state)));
     if let Err(error) = state.intake.limit_account(&held.account, until as f64) {
         eprintln!("ai6: account {} not marked limited: {error}", held.account);
     }
@@ -785,9 +787,10 @@ pub(super) fn on_limit(
                 };
                 let states = state.intake.accounts().unwrap_or_default();
                 let now = now as f64;
+                let unknown_use = state.station.limits().accounts.unknown_use_permille;
                 (
-                    has_room(&pools, &states, now, |_| true),
-                    has_room(&pools, &states, now, |account| {
+                    has_room(&pools, &states, (now, unknown_use), |_| true),
+                    has_room(&pools, &states, (now, unknown_use), |account| {
                         account.kind().carries_session()
                     }),
                 )
@@ -815,15 +818,17 @@ pub(super) fn on_limit(
     rotation
 }
 
-/// Whether any of `pools`' accounts that `keep` admits has room at `now`.
+/// Whether any of `pools`' accounts that `keep` admits has room at `now`, an account with no
+/// reported use counting as `unknown_use` thousandths used.
 fn has_room(
     pools: &[&AccountPool],
     states: &[AccountState],
-    now: f64,
+    (now, unknown_use): (f64, u16),
     keep: impl Fn(&Account) -> bool,
 ) -> bool {
     pools.iter().any(|pool| {
-        let mut request = AccountClaimRequest::new(pool, "", "", CLAIM_TTL);
+        // Only its candidates are read: it claims nothing.
+        let mut request = AccountClaimRequest::new(pool, "", "", Duration::ZERO);
         for account in pool.accounts() {
             if !keep(account) {
                 request = request.excluding(account.name());
@@ -835,6 +840,7 @@ fn has_room(
             &pool_states(pool, states),
             None,
             now,
+            unknown_use,
         )
         .is_some()
     })
@@ -879,7 +885,8 @@ pub(super) fn intake_hold(
     };
     let states = state.intake.accounts().ok()?;
     let now = state.clock.now() as f64;
-    if has_room(&pools, &states, now, |_| true) {
+    let unknown_use = state.station.limits().accounts.unknown_use_permille;
+    if has_room(&pools, &states, (now, unknown_use), |_| true) {
         return None;
     }
     let ids: Vec<String> = pools.iter().map(|pool| pool.id().to_owned()).collect();
@@ -1640,7 +1647,12 @@ secret = "race-only"
         state
             .intake
             .claim_account(
-                &AccountClaimRequest::new(&pool, "elsewhere", "other", CLAIM_TTL),
+                &AccountClaimRequest::new(
+                    &pool,
+                    "elsewhere",
+                    "other",
+                    crate::directorates::registry::store::DEFAULT_LEASE,
+                ),
                 START as f64,
             )
             .unwrap()
@@ -1662,7 +1674,7 @@ secret = "race-only"
                     "test",
                 )
                 .with_account(AccountRef::new("solo", "only")),
-                CLAIM_TTL,
+                crate::directorates::registry::store::DEFAULT_LEASE,
             )
             .unwrap();
         reattach(&state, &mission, &record);
@@ -1717,10 +1729,9 @@ env = "MOCK_CONFIG_DIR"
         let loadouts = "[pool.short]\nhandler = \"mock-pooled\"\n[pool.short.account.a]\n\
                         kind = \"claude-oauth-token\"\nsecret = \"short-limited-a\"\n";
         let (mut state, _now, _) = pooled_state(root.path(), "", "", loadouts);
-        state.station = state
-            .station
-            .clone()
-            .with_account_limit_horizon(Duration::from_secs(60));
+        let mut limits = crate::station::limits::StationLimits::default();
+        limits.accounts.limit_horizon = crate::Seconds::new(60);
+        state.station = state.station.clone().with_limits(limits);
         create_mission(&state, "pooled-short");
         start_mission_by_id(&state, "pooled-short").await;
         wait_for_state(&state, "pooled-short", MissionState::Parked).await;

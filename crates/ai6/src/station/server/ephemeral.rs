@@ -22,9 +22,6 @@ use crate::station::transports::Made;
 
 use super::DaemonState;
 
-/// Longest ID given to a Theater made from a template.
-const MAX_NAME_BYTES: usize = 100;
-
 /// The Theater a Mission works in when its Operation is bound to an ephemeral template: the
 /// one made for it, made and fitted out now when there is none. `None` when the Operation
 /// is not bound to a template. Blocks on the Theater provider and the new Theater's transport.
@@ -60,7 +57,11 @@ pub(super) fn prepare(state: &DaemonState, mission: &Mission) -> Result<Option<S
     }
     let made = maker
         .create(&TheaterRequest {
-            name: theater_name(&template.id, &mission_id),
+            name: theater_name(
+                &template.id,
+                &mission_id,
+                state.station.limits().theaters.ephemeral_name_bytes,
+            ),
             template: template.id.clone(),
             mission: mission_id,
         })
@@ -116,7 +117,8 @@ fn adopt(
 fn fit_out(state: &DaemonState, theater: &Theater) -> Result<(), String> {
     let client = state.transports.client(&theater.id)?;
     if theater.requires.is_some() || theater.provision.is_some() || theater.runner.is_some() {
-        let steps = provision::provision(&client, theater, false);
+        let steps =
+            provision::provision(&client, theater, false, &state.station.limits().provision);
         if let Some(step) = steps.iter().find(|step| step.status == StepStatus::Failed) {
             return Err(format!(
                 "Theater {:?} could not be fitted out: {}: {}",
@@ -130,6 +132,7 @@ fn fit_out(state: &DaemonState, theater: &Theater) -> Result<(), String> {
         &capabilities,
         theater.requires.as_ref(),
         theater.workdir.as_deref(),
+        &state.station.limits().provision,
     );
     state.transports.set_report(&theater.id, report);
     Ok(())
@@ -243,8 +246,8 @@ fn destroy(state: &DaemonState, maker: &TheaterMaker, id: &str, why: &str) {
 }
 
 /// `<template>-<mission>` with anything but letters, digits, `.`, `_` and `-` as `-`, cut to
-/// [`MAX_NAME_BYTES`] with a digest of the whole when it is longer.
-fn theater_name(template: &str, mission: &str) -> String {
+/// `bytes` with a digest of the whole when it is longer.
+fn theater_name(template: &str, mission: &str, bytes: crate::bounds::Limit) -> String {
     use sha2::{Digest, Sha256};
     let name: String = format!("{template}-{mission}")
         .chars()
@@ -256,7 +259,7 @@ fn theater_name(template: &str, mission: &str) -> String {
             }
         })
         .collect();
-    if name.len() <= MAX_NAME_BYTES {
+    if bytes.allows(name.len()) {
         return name;
     }
     let digest = Sha256::digest(name.as_bytes());
@@ -264,7 +267,7 @@ fn theater_name(template: &str, mission: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    format!("{}-{suffix}", &name[..MAX_NAME_BYTES - 9])
+    format!("{}-{suffix}", &name[..bytes.or_max().saturating_sub(9)])
 }
 
 /// An in-process Theater provider and transport for tests: a "Theater" is a directory under
@@ -448,13 +451,19 @@ pub(super) mod testing {
 #[cfg(test)]
 mod tests {
     use super::theater_name;
+    use crate::bounds::Limit;
 
     #[test]
     fn a_made_theater_is_named_after_its_template_and_mission_within_bounds() {
-        assert_eq!(theater_name("scratch", "m-1"), "scratch-m-1");
-        assert_eq!(theater_name("scratch", "a b/c:d"), "scratch-a-b-c-d");
-        let long = theater_name("scratch", &"x".repeat(300));
+        let bytes = Limit::at(100);
+        assert_eq!(theater_name("scratch", "m-1", bytes), "scratch-m-1");
+        assert_eq!(theater_name("scratch", "a b/c:d", bytes), "scratch-a-b-c-d");
+        let long = theater_name("scratch", &"x".repeat(300), bytes);
         assert_eq!(long.len(), 100);
-        assert_ne!(long, theater_name("scratch", &"x".repeat(301)));
+        assert_ne!(long, theater_name("scratch", &"x".repeat(301), bytes));
+        assert_eq!(
+            theater_name("scratch", &"x".repeat(300), Limit::UNBOUNDED).len(),
+            308
+        );
     }
 }

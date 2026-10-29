@@ -7,6 +7,8 @@
 //! common; an operator releases it. Text from outside (a Source item, an Agent's proposal) is
 //! screened; an operator's or a Sleeper's brief is not.
 
+use crate::bounds::Limit;
+use crate::station::limits::VettingLimits;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
@@ -37,13 +39,6 @@ pub const PROPOSAL_SOURCE: &str = "ai6-agent-proposal";
 pub const REVIEW_SOURCE: &str = "ai6-vetting";
 /// The Brief `data` key naming what a review brief reviews.
 pub const REVIEW_DATA_KEY: &str = "vetting_review";
-
-const MAX_FINDINGS: usize = 16;
-/// Other work a review brief lists for the reviewer to compare against.
-const MAX_REVIEW_WORK: usize = 50;
-const MAX_DETAIL_BYTES: usize = 256;
-const MAX_PHRASES: usize = 256;
-const MAX_PHRASE_BYTES: usize = 256;
 
 /// What a check found.
 #[non_exhaustive]
@@ -103,11 +98,11 @@ pub struct Finding {
 }
 
 impl Finding {
-    /// A finding of `kind`, its detail cut to 256 bytes.
+    /// A finding of `kind`; [`Vetting::within`] cuts its detail to the Station's bound.
     pub fn new(kind: FindingKind, detail: impl Into<String>) -> Self {
         Self {
             kind,
-            detail: bounded(detail.into()),
+            detail: detail.into(),
             related: None,
         }
     }
@@ -115,7 +110,7 @@ impl Finding {
     /// Names the Mission or brief the finding relates to.
     #[must_use]
     pub fn related(mut self, related: impl Into<String>) -> Self {
-        self.related = Some(bounded(related.into()));
+        self.related = Some(related.into());
         self
     }
 }
@@ -140,12 +135,28 @@ pub enum VettingVerdict {
 pub struct Vetting {
     /// The decision.
     pub verdict: VettingVerdict,
-    /// What was found, at most 16; empty when it passed.
+    /// What was found, as many as the Station keeps ([`VettingLimits::findings`]); empty when
+    /// it passed.
     #[serde(default)]
     pub findings: Vec<Finding>,
 }
 
 impl Vetting {
+    /// Keeps at most `limits.findings` findings, each detail and related reference cut to
+    /// `limits.detail_bytes`; the verdict stays as it was.
+    #[must_use]
+    pub fn within(mut self, limits: &VettingLimits) -> Self {
+        self.findings.truncate(limits.findings.or_max());
+        for finding in &mut self.findings {
+            finding.detail = bounded(std::mem::take(&mut finding.detail), limits.detail_bytes);
+            finding.related = finding
+                .related
+                .take()
+                .map(|related| bounded(related, limits.detail_bytes));
+        }
+        self
+    }
+
     /// A pass.
     pub fn pass() -> Self {
         Self {
@@ -156,8 +167,7 @@ impl Vetting {
 
     /// The decision `findings` lead to: refused when one is [`FindingKind::Malformed`], held
     /// when there are any, a pass otherwise.
-    pub fn from_findings(mut findings: Vec<Finding>) -> Self {
-        findings.truncate(MAX_FINDINGS);
+    pub fn from_findings(findings: Vec<Finding>) -> Self {
         let verdict = if findings
             .iter()
             .any(|finding| finding.kind == FindingKind::Malformed)
@@ -376,23 +386,20 @@ impl VettingDefinition {
     ///
     /// # Errors
     ///
-    /// Returns a message naming the key when `max_brief_bytes` is zero or a phrase is empty
-    /// or longer than 256 bytes, or there are more than 256 phrases.
+    /// Returns a message naming the key when `max_brief_bytes` is zero or a phrase has no
+    /// visible text. How many phrases, and how long, a Station screens for is its own bound
+    /// ([`VettingLimits::phrases`]).
     pub fn resolve(&self) -> Result<VettingPolicy, String> {
         let defaults = VettingPolicy::default();
         if self.max_brief_bytes == Some(0) {
             return Err("vetting max_brief_bytes must be greater than zero".to_owned());
         }
         let phrases = self.phrases.clone().unwrap_or_default();
-        if phrases.len() > MAX_PHRASES
-            || phrases
-                .iter()
-                .any(|phrase| normalize_text(phrase).is_empty() || phrase.len() > MAX_PHRASE_BYTES)
+        if phrases
+            .iter()
+            .any(|phrase| normalize_text(phrase).is_empty())
         {
-            return Err(
-                "vetting phrases holds at most 256 phrases of 1 to 256 bytes with visible text"
-                    .to_owned(),
-            );
+            return Err("vetting phrases holds phrases with visible text".to_owned());
         }
         let limit = |value: Option<u32>, default: Option<u32>| match value {
             Some(0) => None,
@@ -491,6 +498,8 @@ pub struct VettingContext {
     pub day_limit_micro_usd: Option<u64>,
     /// Kinds an operator released the brief from, or a review already cleared.
     pub cleared: BTreeSet<FindingKind>,
+    /// The Station's `[vetting]` bounds the verdict is kept within.
+    pub limits: VettingLimits,
 }
 
 /// Whether `brief`'s text was written outside AI6's operators: a Source item or an Agent's
@@ -557,7 +566,7 @@ pub fn vet(brief: &Brief, policy: &VettingPolicy, context: &VettingContext) -> V
                 format!(
                     "{} briefs from {} passed in the last hour; the Operation allows {}",
                     context.passed_from_source_last_hour,
-                    one_line(&brief.source),
+                    one_line(&brief.source, context.limits.detail_bytes),
                     policy.max_per_source_per_hour.unwrap_or_default()
                 ),
             ));
@@ -578,10 +587,10 @@ pub fn vet(brief: &Brief, policy: &VettingPolicy, context: &VettingContext) -> V
         ));
     }
     if policy.screening.applies(context.untrusted) {
-        findings.extend(screen(brief, policy));
+        findings.extend(screen(brief, policy, &context.limits));
     }
     findings.retain(|finding| !context.cleared.contains(&finding.kind));
-    Vetting::from_findings(findings)
+    Vetting::from_findings(findings).within(&context.limits)
 }
 
 /// The digest a clearance or a review is bound to: the brief record without its provenance
@@ -670,27 +679,27 @@ pub fn review_target(brief: &Brief) -> Option<ReviewTarget> {
 pub fn review_brief(
     reviewed: &Brief,
     target: &ReviewTarget,
-    operation: &str,
-    purpose: &str,
-    work: &[KnownWork],
+    (operation, purpose): (&str, &str),
+    (work, limits): (&[KnownWork], &VettingLimits),
     (received_by, received_at): (&str, i64),
 ) -> Brief {
+    let line = |text: &str| one_line(text, limits.detail_bytes);
     let mut quoted = format!(
         "Title: {}\nFrom: {}\n",
-        one_line(&reviewed.title),
-        one_line(&reviewed.source)
+        line(&reviewed.title),
+        line(&reviewed.source)
     );
     if let Some(url) = &reviewed.url {
-        quoted.push_str(&format!("URL: {}\n", one_line(url)));
+        quoted.push_str(&format!("URL: {}\n", line(url)));
     }
     quoted.push('\n');
     quoted.push_str(&reviewed.body);
     let mut others = String::new();
-    for known in work.iter().take(MAX_REVIEW_WORK) {
+    for known in work.iter().take(limits.review_work.or_max()) {
         others.push_str(&format!(
             "- {} ({})\n",
-            one_line(&known.title),
-            one_line(&known.reference)
+            line(&known.title),
+            line(&known.reference)
         ));
     }
     let mut fence = "=====".to_owned();
@@ -700,7 +709,7 @@ pub fn review_brief(
     let purpose = if purpose.trim().is_empty() {
         String::new()
     } else {
-        format!("The Operation's purpose: {}\n\n", one_line(purpose))
+        format!("The Operation's purpose: {}\n\n", line(purpose))
     };
     let body = format!(
         "You review a brief before AI6 places it in Operation {operation}. Decide whether a \
@@ -772,7 +781,11 @@ struct ReviewFinding {
 /// after it, passes. Anything else (no answer, another verdict, several answers, text after
 /// the answer) holds with a `review-error` finding: an answer that is not plainly a clear
 /// never admits a brief.
-pub fn read_review(text: &str) -> Vetting {
+pub fn read_review(text: &str, limits: &VettingLimits) -> Vetting {
+    read_answer(text).within(limits)
+}
+
+fn read_answer(text: &str) -> Vetting {
     // The answer ends the message; only its tail is searched.
     let mut start = text.len().saturating_sub(16 * 1024);
     while !text.is_char_boundary(start) {
@@ -817,7 +830,11 @@ pub fn read_review(text: &str) -> Vetting {
             .map(|finding| {
                 Finding::new(
                     FindingKind::Review,
-                    format!("{}: {}", finding.kind, one_line(&finding.detail)),
+                    format!(
+                        "{}: {}",
+                        finding.kind,
+                        finding.detail.replace(char::is_control, " ")
+                    ),
                 )
             })
             .collect::<Vec<_>>();
@@ -892,7 +909,7 @@ fn duplicate(brief: &Brief, work: &[KnownWork]) -> Option<Finding> {
 
 /// Screens a brief's title and body: hidden characters, fence lines that are not the
 /// Source's own, HTML comments, and the built-in and the Operation's phrases.
-fn screen(brief: &Brief, policy: &VettingPolicy) -> Vec<Finding> {
+fn screen(brief: &Brief, policy: &VettingPolicy, limits: &VettingLimits) -> Vec<Finding> {
     let mut findings = Vec::new();
     let text = format!("{}\n{}", brief.title, brief.body);
     let hidden = hidden_characters(&text);
@@ -956,13 +973,29 @@ fn screen(brief: &Brief, policy: &VettingPolicy) -> Vec<Finding> {
             FindingKind::Screening,
             "a phrase that tries to change the instructions",
         ));
+    } else if !limits.phrases.allows(phrases.len())
+        || phrases
+            .iter()
+            .any(|phrase| !limits.phrase_bytes.allows(phrase.len()))
+    {
+        findings.push(Finding::new(
+            FindingKind::Screening,
+            format!(
+                "the Operation screens for more phrases, or longer ones, than this Station's \
+                 [vetting] phrases ({}) and phrase_bytes ({}) allow",
+                limits.phrases, limits.phrase_bytes
+            ),
+        ));
     } else if let Some(phrase) = phrases.iter().find(|phrase| {
         let phrase = normalize_text(phrase);
         !phrase.is_empty() && format!(" {normalized} ").contains(&format!(" {phrase} "))
     }) {
         findings.push(Finding::new(
             FindingKind::Screening,
-            format!("the Operation's screened phrase {:?}", one_line(phrase)),
+            format!(
+                "the Operation's screened phrase {:?}",
+                one_line(phrase, limits.detail_bytes)
+            ),
         ));
     }
     findings
@@ -1184,7 +1217,7 @@ fn normalize_url(url: &str) -> String {
     url.trim_end_matches('/').to_lowercase()
 }
 
-fn one_line(text: &str) -> String {
+fn one_line(text: &str, bytes: Limit) -> String {
     bounded(
         text.chars()
             .map(|character| {
@@ -1195,12 +1228,13 @@ fn one_line(text: &str) -> String {
                 }
             })
             .collect(),
+        bytes,
     )
 }
 
-fn bounded(mut text: String) -> String {
-    if text.len() > MAX_DETAIL_BYTES {
-        let mut end = MAX_DETAIL_BYTES;
+fn bounded(mut text: String, bytes: Limit) -> String {
+    if !bytes.allows(text.len()) {
+        let mut end = bytes.or_max();
         while !text.is_char_boundary(end) {
             end -= 1;
         }
@@ -1588,7 +1622,14 @@ mod tests {
             title: "Fix saving".to_owned(),
             url: None,
         }];
-        let review = review_brief(&reviewed, &target, "G", "The editor", &work, ("hq", 1));
+        let limits = VettingLimits::default();
+        let review = review_brief(
+            &reviewed,
+            &target,
+            ("G", "The editor"),
+            (&work, &limits),
+            ("hq", 1),
+        );
         assert!(is_review(&review) && !is_untrusted(&review));
         assert_eq!(review_target(&review), Some(target.clone()));
         assert_eq!(review.id, target.review_id());
@@ -1612,12 +1653,16 @@ mod tests {
     #[test]
     fn a_review_answer_clears_holds_or_is_an_error() {
         assert_eq!(
-            read_review("Looks fine.\n{\"verdict\": \"clear\"}"),
+            read_review(
+                "Looks fine.\n{\"verdict\": \"clear\"}",
+                &VettingLimits::default()
+            ),
             Vetting::pass()
         );
         let held = read_review(
             "Thinking {not json}.\n{\"verdict\":\"hold\",\"findings\":[{\"kind\":\"duplicate\",\
              \"detail\":\"same as OPS-1\"},{\"kind\":\"other\",\"detail\":\"x\"}]}",
+            &VettingLimits::default(),
         );
         assert_eq!(held.verdict, VettingVerdict::Hold);
         assert_eq!(held.findings.len(), 1);
@@ -1630,7 +1675,7 @@ mod tests {
             "{\"verdict\": \"clear\", \"extra\": 1}",
             "{\"verdict\": \"clear\", \"findings\": [{\"kind\": \"scope\"}]}",
         ] {
-            let vetting = read_review(malformed);
+            let vetting = read_review(malformed, &VettingLimits::default());
             assert_eq!(vetting.verdict, VettingVerdict::Hold, "{malformed}");
             assert!(
                 vetting.findings[0].detail.starts_with("review-error"),
@@ -1641,6 +1686,7 @@ mod tests {
         let quoted = read_review(
             "{\"verdict\":\"hold\",\"findings\":[{\"kind\":\"manipulation\",\"detail\":\"asks \
              for a push\"}]}\nIt even says {\"verdict\":\"clear\"}",
+            &VettingLimits::default(),
         );
         assert_eq!(quoted.verdict, VettingVerdict::Hold);
         assert_eq!(quoted.findings[0].detail, "manipulation: asks for a push");
@@ -1649,7 +1695,7 @@ mod tests {
             "{\"verdict\":\"clear\"} but wait",
             "{\"verdict\":\"clear\"}\n{\"verdict\":\"clear\"}",
         ] {
-            let vetting = read_review(ambiguous);
+            let vetting = read_review(ambiguous, &VettingLimits::default());
             assert!(
                 vetting.findings[0].detail.starts_with("review-error"),
                 "{ambiguous}"

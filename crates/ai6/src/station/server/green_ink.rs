@@ -13,8 +13,7 @@ use serde::Serialize;
 use tokio::time::Instant;
 
 use super::{
-    DaemonState, ResumeMission, SCHEDULER_RETRY_DELAY, publish_lifecycle, queue_event,
-    resume_mission, sync_session_record,
+    DaemonState, ResumeMission, publish_lifecycle, queue_event, resume_mission, sync_session_record,
 };
 use crate::directorates::m::approvals::{ActionScope, GREEN_INK_REASON, Requirement};
 use crate::directorates::m::mission::{Mission, MissionState};
@@ -117,7 +116,13 @@ impl Desk {
         let clearance = super::agents::effective(state, Some(&asked.operation), &asked.agent)
             .map_err(|_| "the Agent is not configured for this Operation".to_owned())?
             .clearance;
-        let scope = ActionScope::try_new(&asked.kind, &asked.target).map_err(|e| e.to_string())?;
+        let scope = ActionScope::try_new(&asked.kind, &asked.target)
+            .and_then(|scope| {
+                scope
+                    .check_size(&state.station.limits().approvals)
+                    .map(|()| scope)
+            })
+            .map_err(|e| e.to_string())?;
         let policy = &operation.green_ink;
         match policy.requirement(&clearance, &scope) {
             Requirement::NotRequired if always => {}
@@ -275,7 +280,13 @@ impl Desk {
         let policy = &operation.green_ink;
         let mut answers = Vec::new();
         for (kind, target) in checked.steps {
-            let scope = ActionScope::try_new(&kind, &target).map_err(|e| e.to_string())?;
+            let scope = ActionScope::try_new(&kind, &target)
+                .and_then(|scope| {
+                    scope
+                        .check_size(&state.station.limits().approvals)
+                        .map(|()| scope)
+                })
+                .map_err(|e| e.to_string())?;
             let (status, request_id, message) = match policy.requirement(&clearance, &scope) {
                 Requirement::NotRequired => ("not_required", None, None),
                 Requirement::GreenInk => match state
@@ -530,7 +541,7 @@ async fn resume_with(state: &DaemonState, mission_id: &str, untold: &[Approval],
             if let Ok(mut retries) = state.retry_after.lock() {
                 retries.insert(
                     mission_id.to_owned(),
-                    Instant::now() + SCHEDULER_RETRY_DELAY,
+                    Instant::now() + state.station.limits().scheduler.retry_delay.0,
                 );
             }
         }

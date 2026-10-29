@@ -29,14 +29,10 @@ use crate::directorates::m::theaters::Theater;
 use crate::directorates::q::transport::{
     Capabilities, Output, RunSpec, TransportClient, WriteSpec, describe,
 };
+use crate::station::limits::ProvisionLimits;
 
 /// Seconds an install command may run unless the spec says otherwise.
 pub const DEFAULT_INSTALL_TIMEOUT_SECS: u64 = 600;
-
-const PROBE_TIMEOUT_MS: u64 = 60_000;
-const COMMAND_TIMEOUT_MS: u64 = 120_000;
-const MAX_NAME_BYTES: usize = 64;
-const MAX_VERSION_CHARS: usize = 200;
 
 /// A program a Theater must have, and the oldest version accepted: `claude>=2.1`, or just
 /// `git` for any version.
@@ -51,14 +47,13 @@ impl RequiredProgram {
     pub fn new(name: impl Into<String>) -> Result<Self, String> {
         let name = name.into();
         let valid = !name.is_empty()
-            && name.len() <= MAX_NAME_BYTES
             && !name.starts_with(['-', '.'])
             && name.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'+')
             });
         if !valid {
             return Err(format!(
-                "{name:?} is not a program name: use 1 to {MAX_NAME_BYTES} letters, digits, '.', '_', '-' or '+'"
+                "{name:?} is not a program name: use letters, digits, '.', '_', '-' or '+'"
             ));
         }
         Ok(Self {
@@ -507,22 +502,32 @@ const PLACE: &str = r#"chmod 755 "$1" && mv -f "$1" "$2"
 /// Looks over the Theater `client` reaches: the operating system, each program `requires`
 /// names with its version, free space in `dir`, ambient credentials, and its CPUs, load and
 /// memory as [`probe_resources`] reads them. `capabilities` are
-/// what the transport reported; its `os` wins over `uname`.
+/// what the transport reported; its `os` wins over `uname`. The probe runs within `limits`.
 ///
-/// Never fails: a Theater that cannot be probed answers a report with only
-/// [`ProbeReport::error`] set.
+/// Never fails: a Theater that cannot be probed, or a requirement naming a program longer
+/// than `limits.name_bytes`, answers a report with only [`ProbeReport::error`] set.
 pub fn probe(
     client: &TransportClient,
     capabilities: &Capabilities,
     requires: Option<&Requirements>,
     dir: Option<&str>,
+    limits: &ProvisionLimits,
 ) -> ProbeReport {
     let names: Vec<String> = requires
         .into_iter()
         .flat_map(Requirements::programs)
         .map(|program| program.name().to_owned())
         .collect();
-    let mut report = match probe_programs(client, capabilities, &names, dir) {
+    if let Some(name) = names
+        .iter()
+        .find(|name| !limits.name_bytes.allows(name.len()))
+    {
+        return ProbeReport::failed(format!(
+            "the program name {name:?} is longer than {} bytes ([provision] name_bytes)",
+            limits.name_bytes
+        ));
+    }
+    let mut report = match probe_programs(client, capabilities, &names, dir, limits) {
         Ok(report) => report,
         Err(error) => return ProbeReport::failed(error),
     };
@@ -537,6 +542,7 @@ fn probe_programs(
     capabilities: &Capabilities,
     names: &[String],
     dir: Option<&str>,
+    limits: &ProvisionLimits,
 ) -> Result<ProbeReport, String> {
     if !capabilities.run {
         return Err("its transport cannot run commands, so it cannot be probed".to_owned());
@@ -552,7 +558,7 @@ fn probe_programs(
         dir.unwrap_or(".").to_owned(),
     ];
     argv.extend(names.iter().cloned());
-    let output = run(client, argv, PROBE_TIMEOUT_MS)?;
+    let output = run(client, argv, limits.probe_timeout.0)?;
     if output.code != Some(0) {
         return Err(format!("the probe failed: {}", failure(&output)));
     }
@@ -574,7 +580,7 @@ fn probe_programs(
                     .unwrap_or_default()
                     .trim()
                     .chars()
-                    .take(MAX_VERSION_CHARS)
+                    .take(limits.version_chars.or_max())
                     .collect();
                 report.found.insert(name.to_owned(), version);
             }
@@ -589,7 +595,8 @@ fn probe_programs(
 }
 
 /// Samples the CPUs, load average and memory of the Theater `client` reaches, within its
-/// container's limits when it is one. Cheaper than [`probe`], so a Station runs it more often.
+/// container's limits when it is one, taking at most `limits.probe_timeout`. Cheaper than
+/// [`probe`], so a Station runs it more often.
 ///
 /// # Errors
 ///
@@ -598,6 +605,7 @@ fn probe_programs(
 pub fn probe_resources(
     client: &TransportClient,
     capabilities: &Capabilities,
+    limits: &ProvisionLimits,
 ) -> Result<Resources, String> {
     if !capabilities.run {
         return Err("its transport cannot run commands".to_owned());
@@ -605,7 +613,7 @@ pub fn probe_resources(
     if capabilities.os.as_deref() == Some("windows") {
         return Err("sampling needs a POSIX shell, and the Theater runs windows".to_owned());
     }
-    let output = run(client, script(RESOURCES, []), PROBE_TIMEOUT_MS)?;
+    let output = run(client, script(RESOURCES, []), limits.probe_timeout.0)?;
     if output.code != Some(0) {
         return Err(format!("sampling failed: {}", failure(&output)));
     }
@@ -749,8 +757,14 @@ impl ProvisionStep {
 ///
 /// With `check`, it only looks: a step that would act reports
 /// [`StepStatus::WouldChange`] and nothing on the Theater is written. Never fails: a
-/// Theater that cannot be reached answers one failed step.
-pub fn provision(client: &TransportClient, theater: &Theater, check: bool) -> Vec<ProvisionStep> {
+/// Theater that cannot be reached answers one failed step. Probes and commands run within
+/// `limits`.
+pub fn provision(
+    client: &TransportClient,
+    theater: &Theater,
+    check: bool,
+    limits: &ProvisionLimits,
+) -> Vec<ProvisionStep> {
     let capabilities = match client.probe() {
         Ok(capabilities) => capabilities,
         Err(error) => {
@@ -770,6 +784,7 @@ pub fn provision(client: &TransportClient, theater: &Theater, check: bool) -> Ve
         &capabilities,
         Some(requires),
         theater.workdir.as_deref(),
+        limits,
     );
     if let Some(error) = &report.error {
         return vec![ProvisionStep::new(
@@ -807,11 +822,17 @@ pub fn provision(client: &TransportClient, theater: &Theater, check: bool) -> Ve
             program,
             &report,
             spec,
-            (check, timeout, theater.workdir.as_deref()),
+            (check, timeout, theater.workdir.as_deref(), limits),
         ));
     }
     if let Some(runner) = &theater.runner {
-        steps.extend(runner_steps(client, &capabilities, runner, spec, check));
+        steps.extend(runner_steps(
+            client,
+            &capabilities,
+            runner,
+            spec,
+            (check, limits),
+        ));
     }
     steps
 }
@@ -822,7 +843,7 @@ fn install_step(
     program: &RequiredProgram,
     report: &ProbeReport,
     spec: &ProvisionSpec,
-    (check, timeout, dir): (bool, Duration, Option<&str>),
+    (check, timeout, dir, limits): (bool, Duration, Option<&str>, &ProvisionLimits),
 ) -> ProvisionStep {
     let name = program.name();
     let Some(unmet) = report.unmet.iter().find(|unmet| unmet.name == name) else {
@@ -846,7 +867,7 @@ fn install_step(
     let installed = run(
         client,
         vec!["sh".to_owned(), "-c".to_owned(), command.clone()],
-        u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+        timeout,
     );
     match installed {
         Ok(output) if output.code == Some(0) => {}
@@ -866,7 +887,7 @@ fn install_step(
         }
     }
     let only = Requirements::default().with_tool(program.clone());
-    let after = probe(client, capabilities, Some(&only), dir);
+    let after = probe(client, capabilities, Some(&only), dir, limits);
     match (&after.error, after.unmet.first()) {
         (Some(error), _) => ProvisionStep::new(name, StepStatus::Failed, error.clone()),
         (None, Some(still)) => ProvisionStep::new(
@@ -890,7 +911,7 @@ fn runner_steps(
     capabilities: &Capabilities,
     runner: &crate::directorates::m::theaters::RunnerSettings,
     spec: &ProvisionSpec,
-    check: bool,
+    (check, limits): (bool, &ProvisionLimits),
 ) -> Vec<ProvisionStep> {
     let mut steps = Vec::new();
     let destination = runner.command.as_deref().and_then(theater_path);
@@ -917,9 +938,13 @@ fn runner_steps(
              \"/opt/ai6/bin/ai6\"",
         )),
         (_, Err(error)) => steps.push(ProvisionStep::new("runner", StepStatus::Failed, error)),
-        (Some(destination), Ok(source)) => {
-            steps.push(place_file(client, "runner", &source, &destination, check))
-        }
+        (Some(destination), Ok(source)) => steps.push(place_file(
+            client,
+            "runner",
+            &source,
+            &destination,
+            (check, limits),
+        )),
     }
     if spec.plugins.is_empty() {
         return steps;
@@ -948,7 +973,7 @@ fn runner_steps(
             &format!("plugin {file}"),
             &source,
             &destination,
-            check,
+            (check, limits),
         ));
     }
     steps
@@ -971,7 +996,7 @@ fn place_file(
     name: &str,
     source: &std::path::Path,
     destination: &str,
-    check: bool,
+    (check, limits): (bool, &ProvisionLimits),
 ) -> ProvisionStep {
     let bytes = match std::fs::read(source) {
         Ok(bytes) => bytes,
@@ -985,7 +1010,12 @@ fn place_file(
     };
     let wanted = hex(&Sha256::digest(&bytes));
     let digest = |client: &TransportClient| {
-        run(client, script(DIGEST, [destination]), COMMAND_TIMEOUT_MS).and_then(|output| {
+        run(
+            client,
+            script(DIGEST, [destination]),
+            limits.command_timeout.0,
+        )
+        .and_then(|output| {
             if output.code == Some(0) {
                 Ok(String::from_utf8_lossy(&output.stdout.0).trim().to_owned())
             } else {
@@ -1031,7 +1061,7 @@ fn place_file(
             run(
                 client,
                 script(PLACE, [partial.as_str(), destination]),
-                COMMAND_TIMEOUT_MS,
+                limits.command_timeout.0,
             )
         })
         .and_then(|output| {
@@ -1078,11 +1108,11 @@ fn script<'a>(body: &str, arguments: impl IntoIterator<Item = &'a str>) -> Vec<S
     argv
 }
 
-fn run(client: &TransportClient, argv: Vec<String>, timeout_ms: u64) -> Result<Output, String> {
+fn run(client: &TransportClient, argv: Vec<String>, timeout: Duration) -> Result<Output, String> {
     client
         .run(&RunSpec {
             argv,
-            timeout_ms,
+            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
             ..RunSpec::default()
         })
         .map_err(|error| describe(&error))
@@ -1297,10 +1327,12 @@ mod tests {
             run: true,
             ..Capabilities::default()
         };
-        let report = probe(&client, &runs, None, None);
+        let report = probe(&client, &runs, None, None, &ProvisionLimits::default());
         assert_eq!(report.resources.unwrap().memory_total_mb, Some(256));
         assert_eq!(
-            probe_resources(&client, &runs).unwrap().cpus,
+            probe_resources(&client, &runs, &ProvisionLimits::default())
+                .unwrap()
+                .cpus,
             Some(1.5),
             "the resources-only probe reads the same lines"
         );
@@ -1308,6 +1340,6 @@ mod tests {
             os: Some("windows".to_owned()),
             ..runs
         };
-        assert!(probe_resources(&client, &windows).is_err());
+        assert!(probe_resources(&client, &windows, &ProvisionLimits::default()).is_err());
     }
 }

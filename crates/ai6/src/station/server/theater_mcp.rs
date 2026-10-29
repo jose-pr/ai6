@@ -7,6 +7,7 @@
 //! first, asking the Theater's repository through the same transport: the Agent cannot route
 //! around it, because this is the only way it runs anything.
 
+use crate::station::limits::TheaterToolLimits;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -33,15 +34,6 @@ use crate::directorates::section_00::gate::{
 };
 use guatiao::Bytes;
 
-/// Command output kept per stream.
-const MAX_OUTPUT: u64 = 256 * 1024;
-/// File bytes returned per read unless the caller asks for less.
-const MAX_READ: u64 = 256 * 1024;
-const DEFAULT_TIMEOUT_SECS: u64 = 120;
-const MAX_TIMEOUT_SECS: u64 = 3600;
-/// How long one git question about the Theater's repository may take.
-const GIT_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Asks the Station whether a Mission's Agent may take steps now (`check_approval`).
 pub(super) type StepCheck = Arc<dyn Fn(&[ActionScope]) -> Result<Answers, String> + Send + Sync>;
 
@@ -53,12 +45,14 @@ pub(super) struct Endpoint {
 }
 
 impl Endpoint {
-    /// Starts the listener. `root` is the Mission's working directory on the Theater.
+    /// Starts the listener. `root` is the Mission's working directory on the Theater; the
+    /// tools run within `limits` and read commands `nesting` levels deep for green ink.
     pub(super) async fn start(
         client: Arc<TransportClient>,
         capabilities: Capabilities,
         root: Option<String>,
         check: StepCheck,
+        (limits, nesting): (TheaterToolLimits, usize),
     ) -> std::io::Result<Self> {
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -70,6 +64,7 @@ impl Endpoint {
                     capabilities.clone(),
                     root.clone(),
                     check.clone(),
+                    (limits.clone(), nesting),
                 ))
             },
             Arc::new(LocalSessionManager::default()),
@@ -128,6 +123,8 @@ struct TheaterTools {
     capabilities: Capabilities,
     root: Option<String>,
     check: StepCheck,
+    limits: TheaterToolLimits,
+    nesting: usize,
     tool_router: ToolRouter<Self>,
 }
 
@@ -137,12 +134,15 @@ impl TheaterTools {
         capabilities: Capabilities,
         root: Option<String>,
         check: StepCheck,
+        (limits, nesting): (TheaterToolLimits, usize),
     ) -> Self {
         Self {
             client,
             capabilities,
             root,
             check,
+            limits,
+            nesting,
             tool_router: Self::tool_router(),
         }
     }
@@ -182,14 +182,23 @@ fn resolve(root: Option<&str>, path: &str) -> String {
     }
 }
 
-/// Runs `git` with `args` on the Theater.
-fn theater_git(client: &TransportClient, args: &[String]) -> Result<GitOutput, String> {
+/// A duration as the whole milliseconds a transport request takes.
+fn millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Runs `git` with `args` on the Theater, within `limits`.
+fn theater_git(
+    client: &TransportClient,
+    args: &[String],
+    limits: &TheaterToolLimits,
+) -> Result<GitOutput, String> {
     let mut argv = vec!["git".to_owned()];
     argv.extend(args.iter().cloned());
     let spec = RunSpec {
         argv,
-        timeout_ms: GIT_TIMEOUT.as_millis() as u64,
-        max_output: MAX_OUTPUT,
+        timeout_ms: millis(limits.git_timeout.0),
+        max_output: limits.output_bytes.get().unwrap_or(u64::MAX),
         ..RunSpec::default()
     };
     let output = client.run(&spec).map_err(|error| describe(&error))?;
@@ -285,22 +294,26 @@ impl TheaterTools {
         let spec = RunSpec {
             argv,
             cwd: Some(self.resolve(args.cwd.as_deref().unwrap_or("."))).filter(|cwd| cwd != "."),
-            timeout_ms: Duration::from_secs(
+            timeout_ms: millis(
                 args.timeout_secs
-                    .unwrap_or(DEFAULT_TIMEOUT_SECS)
-                    .clamp(1, MAX_TIMEOUT_SECS),
-            )
-            .as_millis() as u64,
-            max_output: MAX_OUTPUT,
+                    .map_or(self.limits.timeout.0, |secs| {
+                        Duration::from_secs(secs.max(1))
+                    })
+                    .min(self.limits.max_timeout.get().unwrap_or(Duration::MAX)),
+            ),
+            max_output: self.limits.output_bytes.get().unwrap_or(u64::MAX),
             ..RunSpec::default()
         };
         let check = self.check.clone();
         let base = spec.cwd.clone().or_else(|| self.root.clone());
+        let (limits, nesting) = (self.limits.clone(), self.nesting);
         let verdict = self
             .blocking(move |client| {
                 let repository =
-                    GitRepository::new(base, |args: &[String]| theater_git(client, args));
-                Ok(decide(classify(&line, &repository), |steps| check(steps)))
+                    GitRepository::new(base, |args: &[String]| theater_git(client, args, &limits));
+                Ok(decide(classify(&line, &repository, nesting), |steps| {
+                    check(steps)
+                }))
             })
             .await;
         match verdict {
@@ -335,7 +348,10 @@ impl TheaterTools {
         let spec = ReadSpec {
             path: path.clone(),
             offset: args.offset.unwrap_or(0),
-            limit: args.limit.unwrap_or(MAX_READ).min(MAX_READ),
+            limit: {
+                let most = self.limits.read_bytes.get().unwrap_or(u64::MAX);
+                args.limit.unwrap_or(most).min(most)
+            },
         };
         let offset = spec.offset;
         match self
@@ -486,9 +502,15 @@ mod tests {
         let runs = transport.runs();
         let capabilities = transport.capabilities_model();
         let client = Arc::new(TransportClient::new(Box::new(transport)));
-        let endpoint = Endpoint::start(client, capabilities, Some("/work".to_owned()), unchecked())
-            .await
-            .unwrap();
+        let endpoint = Endpoint::start(
+            client,
+            capabilities,
+            Some("/work".to_owned()),
+            unchecked(),
+            (TheaterToolLimits::default(), 4),
+        )
+        .await
+        .unwrap();
         let tools = connect(&endpoint).await;
 
         let mut names = tools
@@ -578,9 +600,15 @@ mod tests {
         let capabilities = transport.capabilities_model();
         assert!(instructions(None, &capabilities).contains("use theater_run for files"));
         let client = Arc::new(TransportClient::new(Box::new(transport)));
-        let endpoint = Endpoint::start(client, capabilities, None, unchecked())
-            .await
-            .unwrap();
+        let endpoint = Endpoint::start(
+            client,
+            capabilities,
+            None,
+            unchecked(),
+            (TheaterToolLimits::default(), 4),
+        )
+        .await
+        .unwrap();
         let tools = connect(&endpoint).await;
         let refused = call(&tools, "theater_read", serde_json::json!({"path": "a"})).await;
         assert!(

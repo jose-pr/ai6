@@ -11,6 +11,8 @@
 
 pub use guatiao;
 
+use crate::bounds::Limit;
+use crate::station::limits::TerminalOutputLimits;
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue, Value};
 use std::sync::Arc;
@@ -59,18 +61,15 @@ pub const READ_TIMED_OUT: i64 = -1;
 /// lines wrap; [`JsonLines`] rejoins the ones that still do.
 pub const STREAM_COLS: u16 = 32767;
 
-/// The longest JSON line [`JsonLines`] holds while it waits for the rest; past it, what was
-/// held is handed over as text.
-pub const MAX_JSON_LINE: usize = 64 * 1024 * 1024;
-
 /// `bytes` without terminal control sequences: CSI (`ESC [ ... final`), OSC (`ESC ] ...`,
 /// ended by BEL, `ESC \` or a line break) and two-byte escapes. Other bytes, line breaks
-/// included, are kept.
-pub fn strip_controls(bytes: &[u8]) -> Vec<u8> {
+/// included, are kept. A CSI with more than `csi_bytes` parameter and intermediate bytes is
+/// not a sequence, and only its `ESC [` is dropped.
+pub fn strip_controls(bytes: &[u8], csi_bytes: Limit) -> Vec<u8> {
     let mut visible = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
-        match control(&bytes[index..]) {
+        match control(&bytes[index..], csi_bytes) {
             Some((len, _)) => index += len,
             None => {
                 visible.push(bytes[index]);
@@ -80,10 +79,6 @@ pub fn strip_controls(bytes: &[u8]) -> Vec<u8> {
     }
     visible
 }
-
-/// The most parameter and intermediate bytes a CSI sequence may have; a longer run is not a
-/// sequence, and only its `ESC [` is dropped.
-const MAX_CSI: usize = 64;
 
 /// What a control sequence does, as far as reading lines goes.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -98,7 +93,7 @@ enum Control {
 /// The length of the control sequence `bytes` starts with, and what it does; `None` when it
 /// starts with none. A CSI ends at its final byte, or before the first byte no CSI can hold;
 /// an OSC ends at BEL, `ESC \` or before a line break; either runs at most to the end.
-fn control(bytes: &[u8]) -> Option<(usize, Control)> {
+fn control(bytes: &[u8], csi_bytes: Limit) -> Option<(usize, Control)> {
     if bytes.first() != Some(&0x1b) {
         return None;
     }
@@ -106,7 +101,7 @@ fn control(bytes: &[u8]) -> Option<(usize, Control)> {
         None => Some((1, Control::Other)),
         Some(b'[') => {
             for (at, byte) in bytes.iter().enumerate().skip(2) {
-                if at - 2 > MAX_CSI {
+                if !csi_bytes.allows(at - 2) {
                     return Some((2, Control::Other));
                 }
                 match byte {
@@ -173,11 +168,12 @@ pub enum StreamLine {
 /// is wide (`\r\n`, then a cursor move). Lines are therefore cut at line breaks and at cursor
 /// moves to another row, stripped of controls, and a line that is the start of a JSON value
 /// but not the whole of it is joined with the lines that follow until it parses, up to
-/// [`MAX_JSON_LINE`] bytes. JSON text cannot hold a raw line break or `ESC`, so neither join
-/// nor strip changes a value the harness wrote; such a line is still marked
-/// [`StreamLine::Json::rebuilt`].
-#[derive(Debug, Default)]
+/// [`TerminalOutputLimits::json_line_bytes`] bytes; past it, what was held is handed over as
+/// text. JSON text cannot hold a raw line break or `ESC`, so neither join nor strip changes a
+/// value the harness wrote; such a line is still marked [`StreamLine::Json::rebuilt`].
+#[derive(Debug)]
 pub struct JsonLines {
+    limits: TerminalOutputLimits,
     /// Output not yet ended by a line break.
     buffer: Vec<u8>,
     /// The start of a JSON value whose rest has not arrived.
@@ -236,9 +232,14 @@ struct Piece<'a> {
 }
 
 impl JsonLines {
-    /// An empty splitter.
-    pub fn new() -> Self {
-        Self::default()
+    /// An empty splitter, holding lines and control sequences within `limits`.
+    pub fn new(limits: &TerminalOutputLimits) -> Self {
+        Self {
+            limits: limits.clone(),
+            buffer: Vec::new(),
+            held: None,
+            ready: std::collections::VecDeque::new(),
+        }
     }
 
     /// Adds output as read from the terminal.
@@ -276,7 +277,7 @@ impl JsonLines {
         let mut removed = Vec::new();
         let mut index = 0;
         while index < bytes.len() {
-            if let Some((len, kind)) = control(&bytes[index..]) {
+            if let Some((len, kind)) = control(&bytes[index..], self.limits.csi_bytes) {
                 match kind {
                     Control::RowMove => self.take_piece(&mut line, &mut removed),
                     Control::Other => removed.push(line.len()),
@@ -330,7 +331,7 @@ impl JsonLines {
                 }
                 // A whole value of its own means the held start was never finished.
                 Parsed::Incomplete
-                    if held.text.len() <= MAX_JSON_LINE
+                    if self.limits.json_line_bytes.allows(held.text.len())
                         && !is_whole_value(piece.bytes.trim_ascii()) =>
                 {
                     self.held = Some(held);
@@ -813,7 +814,7 @@ mod tests {
     }
 
     fn lines_of(chunks: &[&[u8]]) -> Vec<StreamLine> {
-        let mut lines = JsonLines::new();
+        let mut lines = JsonLines::new(&TerminalOutputLimits::default());
         let mut out = Vec::new();
         for chunk in chunks {
             lines.push(chunk);
@@ -907,9 +908,9 @@ mod tests {
         );
         let run = format!("\x1b[{}m", "0;".repeat(40));
         assert_eq!(
-            strip_controls(run.as_bytes()),
+            strip_controls(run.as_bytes(), Limit::at(64)),
             format!("{}m", "0;".repeat(40)).as_bytes(),
-            "past {MAX_CSI} bytes it is not a sequence: only its ESC [ goes"
+            "past 64 bytes it is not a sequence: only its ESC [ goes"
         );
     }
 
@@ -982,7 +983,10 @@ mod tests {
     #[test]
     fn strip_controls_keeps_text_and_line_breaks() {
         assert_eq!(
-            strip_controls(b"\x1b[31mred\x1b[0m\r\n\x1b]0;title\x07ok\x1b]2;t\x1b\\!\x1b="),
+            strip_controls(
+                b"\x1b[31mred\x1b[0m\r\n\x1b]0;title\x07ok\x1b]2;t\x1b\\!\x1b=",
+                Limit::at(64)
+            ),
             b"red\r\nok!"
         );
     }

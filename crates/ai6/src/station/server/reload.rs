@@ -25,7 +25,6 @@ use crate::directorates::registry::store::AuditRecord;
 /// The audit action of a refused configuration.
 const REFUSED_ACTION: &str = "config.refused";
 /// The Registry's bound on an audit target.
-const MAX_TARGET_BYTES: usize = 512;
 /// How often the poll task checks whether the Station is stopping.
 const STOP_CHECK: Duration = Duration::from_millis(250);
 
@@ -294,7 +293,7 @@ fn refuse(state: &DaemonState, reason: &str) {
         action: REFUSED_ACTION.to_owned(),
         operation: String::new(),
         resource: Some(format!("station:{}", state.station_id)),
-        target: bounded(reason),
+        target: bounded(reason, state.station.limits().audit.target_bytes),
         at: state.clock.now() as f64,
     };
     if let Err(error) = state.intake.record_audit(&record) {
@@ -302,8 +301,8 @@ fn refuse(state: &DaemonState, reason: &str) {
     }
 }
 
-/// `text` on one line, cut to the audit target's bound at a character boundary.
-fn bounded(text: &str) -> String {
+/// `text` on one line, cut to `bytes` at a character boundary and marked with `…` when cut.
+fn bounded(text: &str, bytes: crate::bounds::Limit) -> String {
     let mut line = text
         .chars()
         .map(|character| {
@@ -314,8 +313,8 @@ fn bounded(text: &str) -> String {
             }
         })
         .collect::<String>();
-    if line.len() > MAX_TARGET_BYTES {
-        let mut end = MAX_TARGET_BYTES - '…'.len_utf8();
+    if !bytes.allows(line.len()) {
+        let mut end = bytes.or_max().saturating_sub('…'.len_utf8());
         while !line.is_char_boundary(end) {
             end -= 1;
         }

@@ -376,13 +376,28 @@ fn a_detached_runner_answers_calls_until_it_stops() {
     use std::process::Stdio;
 
     let state = tempfile::tempdir().unwrap();
+    // The settings come on standard input, as a Station starting a runner over a transport
+    // sends them.
     let mut starter = ai6()
-        .args(["runner", "serve", "--detach", "--state-dir"])
+        .args([
+            "runner",
+            "serve",
+            "--detach",
+            "--settings",
+            "-",
+            "--state-dir",
+        ])
         .arg(state.path())
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .expect("the AI6 command should start");
+    starter
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"runner": {"page": 5, "max_wait": 2.5}}"#)
+        .unwrap();
     // Only the first line is read: on Windows the runner inherits the starter's output pipe,
     // so the pipe stays open for as long as the runner runs.
     let mut line = String::new();
@@ -426,6 +441,12 @@ fn a_detached_runner_answers_calls_until_it_stops() {
     assert_eq!(code, Some(0));
     assert_eq!(health["status"], 200);
     assert_eq!(health["body"]["pid"], pid);
+    let recorded = ai6::station::runner::RunnerHandoff::in_state_dir(state.path()).unwrap();
+    assert_eq!(recorded.runner.page, 5);
+    assert_eq!(
+        recorded.runner.max_wait,
+        ai6::Seconds(std::time::Duration::from_millis(2500))
+    );
 
     // A request body comes on standard input; the runner's refusal is relayed, not hidden.
     let (code, refused) = call(
@@ -459,6 +480,23 @@ fn a_detached_runner_answers_calls_until_it_stops() {
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
     assert_eq!(code, Some(3), "a call with no runner to answer exits 3");
+}
+
+#[test]
+fn runner_settings_that_cannot_work_stop_the_runner() {
+    let state = tempfile::tempdir().unwrap();
+    let settings = state.path().join("given.json");
+    std::fs::write(&settings, r#"{"runner": {"page": 0}}"#).unwrap();
+    let output = ai6()
+        .args(["runner", "serve", "--settings"])
+        .arg(&settings)
+        .arg("--state-dir")
+        .arg(state.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("runner.page"), "{stderr}");
 }
 
 /// Runs `ai6 green-ink gate` as Claude Code runs a `PreToolUse` hook: the hook's JSON on

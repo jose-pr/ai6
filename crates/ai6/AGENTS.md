@@ -31,7 +31,8 @@ roster, where it comes from (`config`) and cover; `directorates::registry` owns 
 (intake), the traits a Registry store implements (`backend`) and Cables; `directorates::q`
 owns loadouts, secret leases, terminal contracts and the safe-house contract; `directorates::section_00` owns the
 AgentHandler contract; `directorates::medical` owns Session monitoring. `station` holds the
-node that runs them: `station::server` (daemon service and `serve*`), `station::plugins`
+node that runs them: `station::server` (daemon service and `serve*`), `station::limits` (the
+`station` record's tables), `station::plugins`
 (provider host), `station::safehouse` (opens a Mission's safe house through a provider),
 `station::runner` (the field runner), `station::publisher` (`publisher` feature) and
 `station::identity` (`station-tls` feature). The command exposes `ai6 serve`,
@@ -116,6 +117,57 @@ live in memory. `coqui_access_ldap` also takes `cache` (on by default). The host
 beside the test binary; after removing or renaming a plugin, clean `target/`, because the host
 loads every library it finds.
 
+## Station runtime limits (`ai6::station::limits`)
+
+The `station` record's tables, kept by a Station as it starts (they apply at restart). Each
+table is `#[non_exhaustive]`, `#[serde(default, deny_unknown_fields)]`, `Clone, Debug,
+PartialEq, Eq`, with a `Default` of the documented values (`docs/configuration.md`, "Station
+runtime limits"). Counts and sizes are `Limit`, ceilings on durations `TimeLimit`, other
+durations `Seconds`; a queue, page or attempt count is a plain integer. Not re-exported at the
+crate root: several table names repeat the Registry's (`AccountLimits`, `ApprovalLimits`,
+`AuditLimits`, `SourceLimits`, `StationLimits`).
+
+```rust
+pub struct StationLimits {
+    pub scheduler: SchedulerLimits,       // event_queue: Limit, interval, retry_delay, check_in: Seconds,
+                                          // intake_attempts: u32, role_catalog_bytes: Limit, shutdown_wait: Seconds
+    pub publisher: PublisherLimits,       // request_timeout, queue: usize, terminal_bytes, pre_bind_terminal_bytes,
+                                          // input_retry_delay, control_wait, control_queue: usize, control_report_attempts: u32
+    pub sources: SourceLimits,            // poll, min_poll (smaller is looser), report_every, sleeper_every
+    pub transports: TransportLimits,      // reprobe_after, report_every
+    pub recovery: RecoveryLimits,         // first_reattach_delay, max_reattach_delay, give_up_tries: u32, notes_every
+    pub vetting: VettingLimits,           // findings, review_work, detail_bytes, phrases, phrase_bytes: Limit,
+                                          // rate_window, proposals: Limit, proposal_request_ttl, proposal_settle, expiry_sweep
+    pub accounts: AccountLimits,          // reset_grace, unknown_use_permille: u16, claim_ttl, limit_horizon, login_timeout
+    pub approvals: ApprovalLimits,        // kind_bytes, target_bytes: Limit, classify_nesting: usize
+    pub harness: HarnessLimits,           // manifest_file_bytes, manifest_bytes, manifest_files: Limit
+    pub provision: ProvisionLimits,       // probe_timeout, command_timeout, name_bytes, version_chars
+    pub secrets: SecretLimits,            // lease_ttl: Seconds, max_lease_ttl: TimeLimit
+    pub terminal_output: TerminalOutputLimits,   // json_line_bytes, csi_bytes
+    pub green_ink: GreenInkLimits,        // gate_timeout
+    pub detached: DetachedLimits,         // poll, script_timeout, name_chars
+    pub runner: RunnerLimits,             // page: usize, max_wait, keep_ended, refused_body_drain_bytes,
+                                          // cable_request_bytes, cable_connect_timeout, read_wait,
+                                          // call_output_bytes, connect_timeout, call_margin, start_wait
+    pub audit: AuditLimits,               // names_detail_chars, target_bytes
+    pub theaters: TheaterLimits,          // ephemeral_name_bytes
+    pub theater_tools: TheaterToolLimits, // output_bytes, read_bytes, timeout, max_timeout: TimeLimit, git_timeout
+    pub head_of_station: HeadOfStationLimits,    // listed_changes, survey_entries
+    pub providers: BTreeMap<String, serde_json::Value>,   // [providers.<id>]
+}
+impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero queues/pages/attempts, a non-table provider
+```
+
+A Station hands `&StationLimits` (or one table) to whatever does the work; there is no
+global. Free functions that bounded with a constant take the table or the value:
+`reattach_delay(failures, &RecoveryLimits)`, `parked_until(.., grace_secs)`,
+`classify(command, repo, nesting)`, `ActionScope::check_size(&ApprovalLimits)`,
+`HarnessPolicy::decide(root, &HarnessLimits)`, `probe(.., &ProvisionLimits)`,
+`strip_controls(bytes, csi_bytes)`, `JsonLines::new(&TerminalOutputLimits)`,
+`read_review(text, &VettingLimits)`, `Vetting::within(&VettingLimits)`.
+`Plugins::with_provider_configs` takes `[providers.<id>]` as Guatiao values
+(`plugins::provider_configs` converts them).
+
 ## Watchdog (`ai6::directorates::medical::watchdog`)
 
 ```rust
@@ -128,6 +180,8 @@ impl WatchdogConfig {
     pub fn with_max_runtime(self, timeout: Option<Duration>) -> Self;
     pub fn with_history(self, count: usize) -> Self;
     pub fn with_normalize_digits(self, normalize: bool) -> Self;
+    pub fn with_partial_line_bytes(self, bytes: Limit) -> Self;   // default 4,096; station partial_line_bytes
+    pub fn with_csi_bytes(self, bytes: Limit) -> Self;            // default 64; station [terminal_output] csi_bytes
 }
 pub struct WatchdogOverrides {
     pub stall_timeout: Option<Duration>,
@@ -502,7 +556,7 @@ pub struct SkillEntry;  // SkillEntry::new(path).pinned(PeerId); path(), pin() -
 pub const SKILLS_PLUGIN: &str = "ai6";             // Claude Code calls each installed skill `ai6:<name>`
 pub const SKILL_INERT_KEYS: [&str; 12];            // front matter keys that load without skills_allow_tools
 pub fn skill_name(name: &str) -> bool;             // 1-64 of a-z, 0-9, -, starting with a letter or digit
-pub fn check_skill(dir: &Path, name: &str, allow_tools: bool) -> Result<(), String>;
+pub fn check_skill(dir: &Path, name: &str, allow_tools: bool, limits: &HarnessLimits) -> Result<(), String>;
 #[non_exhaustive] pub enum RepoKind { Local, Remote }
 impl RepoKind {
     pub fn of(repo: &str) -> Result<Self, String>;
@@ -536,7 +590,7 @@ absolute (`Roster::load` first makes `agents.toml`'s relative paths absolute und
 configuration directory; a SQL roster or a builder must give absolute ones), a skill without
 a `pin` unless `skills_unpinned`, a skill `check_skill` refuses, and a group or person table
 naming a skill the catalog lacks. `check_skill` reads `<dir>/SKILL.md` (a regular file of at
-most `MAX_MANIFEST_FILE_BYTES`, never through a link): front matter between two `---` lines
+most `limits.manifest_file_bytes`, never through a link; the settings check uses the defaults): front matter between two `---` lines
 must parse as a YAML mapping (`serde-saphyr`; duplicate keys refused, merge keys expanded) with
 `name` equal to the catalog's name and a non-empty `description`; unless `allow_tools`, it
 may hold only `SKILL_INERT_KEYS` and no injected command (any `` !` ``, or a fence of three or
@@ -602,9 +656,6 @@ resumes.
 ```rust
 pub const PROJECT_DIRECTORIES: [&str; 2];      // ".claude", ".codex": every regular file, any depth
 pub const PROJECT_FILES: [&str; 1];            // ".mcp.json"
-pub const MAX_MANIFEST_FILE_BYTES: u64;        // 1 MiB
-pub const MAX_MANIFEST_BYTES: u64;             // 16 MiB
-pub const MAX_MANIFEST_FILES: usize;           // 4096
 #[non_exhaustive] pub enum ProjectSettings { Ignore /* default */, Pinned, Load } // lowercase
 #[non_exhaustive] pub struct HarnessPolicy {
     pub project_settings: ProjectSettings,
@@ -614,14 +665,16 @@ impl HarnessPolicy {
     pub fn pinned(pin: PeerId) -> Self;  pub fn with(project_settings: ProjectSettings) -> Self;
     pub fn validate(&self) -> Result<(), String>;    // pinned needs a pin
     pub fn weakenings(&self) -> Vec<String>;         // load; a SHA-1 pin
-    pub fn decide(&self, root: &Path) -> ProjectDecision; // reads the manifest under pinned (blocking)
+    pub fn decide(&self, root: &Path, limits: &HarnessLimits) -> ProjectDecision; // reads the manifest under pinned (blocking)
 }
 #[non_exhaustive] pub struct ProjectDecision { pub load: bool, pub mcp: bool,
     pub manifest: Option<PeerId>, pub refused: Option<String> }
 #[non_exhaustive] pub struct ProjectManifest { pub files: BTreeMap<String, PeerId> } // path -> sha256
 impl ProjectManifest {
-    pub fn read(root: &Path) -> Result<Self, String>;
+    pub fn read(root: &Path) -> Result<Self, String>;      // within HarnessLimits::default()
+    pub fn read_within(root: &Path, limits: &HarnessLimits) -> Result<Self, String>;
     pub fn read_tree(root: &Path) -> Result<Self, String>; // every regular file under a directory
+    pub fn read_tree_within(root: &Path, limits: &HarnessLimits) -> Result<Self, String>;
     pub fn digest(&self) -> PeerId;  pub fn digest_with(&self, algorithm: coqui_peer::Digest) -> PeerId;
 }
 ```
@@ -761,8 +814,15 @@ impl Settings {
 // Deserialize + Serialize, deny_unknown_fields, every key optional:
 pub struct StationRuntime { max_concurrent_missions, stall_timeout, loop_timeout, loop_min_lines,
     blocked_after, max_runtime, history, normalize_digits, roles, labels, terminal,
-    resources_every, safe_house_caches, safe_house_cache_age }   // seconds as f64
-impl StationRuntime { pub fn validate(&self) -> Result<(), String>;
+    resources_every, safe_house_caches, safe_house_cache_age,   // seconds as f64
+    partial_line_bytes: Option<Limit>, clone_timeout: Option<Seconds>,
+    // the tables, each #[serde(default)]: see "Station runtime limits"
+    scheduler, publisher, sources, transports, recovery, vetting, accounts, approvals, harness,
+    provision, secrets, terminal_output, green_ink, detached, runner, audit, theaters,
+    theater_tools, head_of_station,
+    providers: BTreeMap<String, serde_json::Value> }   // [providers.<id>], each a table
+impl StationRuntime { pub fn validate(&self) -> Result<(), String>;   // includes StationLimits::validate
+    pub fn limits(&self) -> StationLimits;                             // the tables and providers
     pub fn duration(seconds: Option<f64>) -> Option<Duration>; }
 pub struct UnexRecord { authenticator, authenticator_config, directory, directory_config,
     authorizer, authorizer_config, proxy_user_header, proxy_lookup_by /* "name" */,
@@ -1088,7 +1148,7 @@ starting or running is never touched.
 pub const DEFAULT_INSTALL_TIMEOUT_SECS: u64 = 600;
 pub struct RequiredProgram;                  // "claude>=2.1" or "git"; serde as that string; Display, FromStr
 impl RequiredProgram {
-    pub fn new(name: impl Into<String>) -> Result<Self, String>;           // 1-64 of [A-Za-z0-9._+-], not leading - or .
+    pub fn new(name: impl Into<String>) -> Result<Self, String>;           // [A-Za-z0-9._+-], not leading - or .
     pub fn at_least(self, minimum: impl Into<String>) -> Result<Self, String>; // digits and dots
     pub fn name(&self) -> &str; pub fn minimum(&self) -> Option<&str>;
     pub fn refuses(&self, version: &str) -> Option<String>;   // why a `--version` line is too old; None = accepted
@@ -1116,13 +1176,17 @@ impl ProbeReport { pub fn failed(error: impl Into<String>) -> Self; pub fn is_fi
 #[non_exhaustive] pub enum StepStatus { Ok, Changed, WouldChange, Failed }   // as_str(): ok | changed | would-change | failed
 #[non_exhaustive] pub struct ProvisionStep { pub name: String, pub status: StepStatus, pub detail: String }
 /// Never fails: an unprobeable Theater answers a report with only `error` set.
-pub fn probe(client: &TransportClient, capabilities: &Capabilities, requires: Option<&Requirements>, dir: Option<&str>) -> ProbeReport;
+/// A program name longer than `limits.name_bytes` fails the probe.
+pub fn probe(client: &TransportClient, capabilities: &Capabilities, requires: Option<&Requirements>,
+             dir: Option<&str>, limits: &ProvisionLimits) -> ProbeReport;
 /// CPUs (nproc), 1-minute load, MemTotal/MemAvailable; under cgroup v2 the container's
 /// cpu.max quota and memory.max (less memory.current) narrow them; macOS via sysctl (no
 /// available memory). Never cpu_percent. Err: no `run`, a Windows host, nothing recognised.
-pub fn probe_resources(client: &TransportClient, capabilities: &Capabilities) -> Result<Resources, String>;
+pub fn probe_resources(client: &TransportClient, capabilities: &Capabilities, limits: &ProvisionLimits)
+    -> Result<Resources, String>;
 /// Steps in order: os, disk, tools, harnesses, runner, plugins. `check` writes nothing.
-pub fn provision(client: &TransportClient, theater: &Theater, check: bool) -> Vec<ProvisionStep>;
+pub fn provision(client: &TransportClient, theater: &Theater, check: bool, limits: &ProvisionLimits)
+    -> Vec<ProvisionStep>;
 ```
 
 Both block on the transport and need a POSIX `sh` there (`command -v`, `df -Pk`, `sha256sum`
@@ -1356,13 +1420,13 @@ requested Agent, no handler configured, role or tag mismatch) have no `station`.
 
 ```rust
 pub const DEFAULT_LIMIT_FALLBACK_SECS: u64 = 1800;
-pub const RESET_GRACE_SECS: i64 = 15;
 #[non_exhaustive] pub enum OnLimit { Rotate /* default */, Wait, Backup }   // serde: "rotate" | "wait" | "backup"
 impl OnLimit { pub fn as_str(self) -> &'static str }
-pub fn parked_until(now: i64, resets_at: Option<i64>, fallback_secs: u64) -> i64
+pub fn parked_until(now: i64, resets_at: Option<i64>, fallback_secs: u64, grace_secs: i64) -> i64
 ```
 
-`parked_until` honours a reset time in the future plus `RESET_GRACE_SECS`; a missing or
+`parked_until` honours a reset time in the future plus `grace_secs` (a Station passes
+`[accounts] reset_grace`, 15 s by default); a missing or
 already-past one waits `fallback_secs` so a limit that outlives its stated reset cannot
 loop. An Operation sets `on_limit = "rotate" | "wait" | "backup"` and `limit_fallback_secs`
 (above zero) in `operations.toml`; an unknown value or zero fails the roster load. Whatever
@@ -1800,7 +1864,8 @@ rebuildable caches and how long a terminal Mission's safe house is left alone fi
 `with_loadouts(LoadoutCatalog)` replaces `loadouts.toml`,
 `with_assistant_limits(AssistantDeskLimits)` bounds Moneypenny's desk
 (`AssistantDeskLimits::default()` then `with_clone_limits(timeout, max_bytes)`, default 120 s
-and 512 MiB a clone of her repositories, given up and removed past either;
+(the `station` record's `clone_timeout` sets it) and 512 MiB a clone of her repositories,
+given up and removed past either;
 `with_save_limit(max_bytes)`, default 16 MiB of work a save of `personal/` commits, past which
 nothing is saved and a notice says why; `with_memory_requests(n)`, default 4 memory jobs at
 once, past which the next is `rejected` at once; a memory job past its `token_expires_at` is
@@ -1809,8 +1874,7 @@ once, past which the next is `rejected` at once; a memory job past its `token_ex
 `with_account_login(impl AccountLogin + 'static)` replaces `CommandLogin` for Codex pool
 accounts, `with_account_homes(dir)` moves their per-Mission `CODEX_HOME`s from
 `<state>/accounts` (cleanup removes only the directories it made, marked
-`.ai6-account-homes`), `with_account_limit_horizon(Duration)` caps how long a limit keeps an
-account out (default 8 days),
+`.ai6-account-homes`),
 `with_headquarters_lease(Duration)` sets how long the Headquarters lease lasts between
 renewals (default `DEFAULT_LEASE`, 60 s; zero makes startup fail): how long a standby
 control Station waits before taking over, `with_config_poll(Duration)` sets how often it
@@ -1941,9 +2005,9 @@ runner (or the Theater's transport) is probed and the Session given up the same 
 pub fn adopter(policy: &OperationPolicy, request: &PlacementRequest,
                stations: &[StationFacts], session: &SessionRecord) -> Result<PlacementChoice, String>
 pub const DEFAULT_LOST_AFTER_SECS: u64 = 45;              // Operation::lost_after_secs default
-pub const FIRST_REATTACH_DELAY: Duration = 5 s;          // doubles per failed re-attach try
-pub const MAX_REATTACH_DELAY: Duration = 60 s;
-pub fn reattach_delay(failures: u32) -> Duration         // 5, 10, 20, 40, 60, 60, ... s
+/// first_reattach_delay doubled per failed try after the first, up to max_reattach_delay:
+/// 5, 10, 20, 40, 60, 60, ... s by default
+pub fn reattach_delay(failures: u32, limits: &RecoveryLimits) -> Duration
 ```
 
 ## Usage ledger and quarantine records (`ai6::directorates::registry::{usage, quarantine}`)
@@ -2102,7 +2166,6 @@ it is limited and the tokens used per day. One record per account (`accounts/<po
 in a `FileRegistry`, a row of `ai6_accounts` in a `SqlRegistry`), bounded to 256 KiB.
 
 ```rust
-pub const UNKNOWN_USE_PERMILLE: u16 = 500;   // what an unreported account counts as
 pub struct AccountRef { pub pool: String, pub account: String }   // Display "pool/account"; serde
 impl AccountRef { pub fn new(pool, account) -> Self }
 #[non_exhaustive] pub struct AccountClaim { pub station: String, pub mission: String, pub since: f64, pub expires: f64,
@@ -2110,7 +2173,7 @@ impl AccountRef { pub fn new(pool, account) -> Self }
 #[non_exhaustive] pub struct QuotaWindow { pub name: String, pub used_permille: Option<u16>,
     pub resets_at: Option<f64>, pub status: Option<String>, pub observed_at: f64 }
 impl QuotaWindow { pub fn new(name, observed_at: f64) -> Self; .used_permille(u16) .resets_at(f64) .status(s);
-    pub fn use_at(&self, now: f64) -> u16 }   // 0 once reset; UNKNOWN_USE_PERMILLE when no figure
+    pub fn use_at(&self, now: f64, unknown: u16) -> u16 }   // 0 once reset; `unknown` when no figure
 #[non_exhaustive] pub struct AccountProfile { pub handler: String, pub kind: String,
     pub operations: Vec<String>, pub priority: i64, pub max_concurrent: Option<usize>,
     pub labels: BTreeMap<String, String> }   // never a secret name or directory
@@ -2122,13 +2185,15 @@ impl AccountProfile { pub fn of(pool: &AccountPool, account: &str, operations: V
 impl AccountState { pub fn new(AccountRef) -> Self;
     pub fn profile(&self) -> Option<AccountProfile>;   // first Station's settings, operations of every Station
     pub fn live_claims(&self, now) -> impl Iterator<Item = &AccountClaim>;
-    pub fn is_limited(&self, now) -> bool; pub fn highest_use(&self, now) -> u16; pub fn tokens_on_day(&self, now: i64) -> u64 }
+    pub fn is_limited(&self, now) -> bool; pub fn highest_use(&self, now, unknown: u16) -> u16; pub fn tokens_on_day(&self, now: i64) -> u64 }
 pub struct AccountCandidate { pub account: String, pub priority: i64, pub max_concurrent: Option<usize> }
 pub struct AccountClaimRequest;   // ::new(&AccountPool, station, mission, ttl) .prefer(account) .excluding(account) .only(account)
                                   //   .operation(Option<String>) .in_use() (the first candidate, room or not)
+                                  //   .unknown_use(permille) (default 500, [accounts] unknown_use_permille)
 impl AccountClaimRequest { pub fn pool(&self) -> &str; pub fn candidates(&self) -> &[AccountCandidate] }
 pub fn choose_account<'a>(strategy: PoolStrategy, candidates: &'a [AccountCandidate],
-    states: &BTreeMap<String, AccountState>, prefer: Option<&str>, now: f64) -> Option<&'a AccountCandidate>;
+    states: &BTreeMap<String, AccountState>, prefer: Option<&str>, now: f64, unknown_use: u16)
+    -> Option<&'a AccountCandidate>;
 
 pub trait AccountStore {
     fn declare_account(&self, account: &AccountRef, station: &str, profile: &AccountProfile) -> io::Result<()>;  // that Station's profile
@@ -2158,10 +2223,10 @@ Station's claims for the listed Missions to `now + ttl` and drops its others mad
 renews lapses, so a dark Station's accounts free up. Names are 1-64 letters, digits, `.`,
 `_` or `-`, starting with a letter or digit.
 
-The Station claims with a TTL of `DEFAULT_LEASE`, renews at each check-in (its held Missions
+The Station claims with a TTL of `[accounts] claim_ttl` (60 s), renews at each check-in (its held Missions
 and those whose account is being handed over), releases with the Session's leases, records
 quota from `AgentEvent::quota` and adds each usage delta's tokens. A limit is recorded until
-the reset, at most the Station's horizon (8 days, `StationConfig::with_account_limit_horizon`).
+the reset, at most the Station's horizon (`[accounts] limit_horizon`, 8 days).
 A re-attached Session's recorded account is claimed again `in_use`. Each Station declares its
 configured accounts at start with the Operations of its roster that may draw from each pool;
 there is no reload, so a changed roster or loadout is declared at the next start.
@@ -2177,9 +2242,10 @@ pub const DEFAULT_PROTECTED: [&str; 4];    // refs/heads/{main,master,release/*}
 pub const DEFAULT_REQUEST_TTL: Duration;   // 24 h: an undecided request then expires as refused
 pub const DEFAULT_APPROVAL_TTL: Duration;  // 1 h: an approval whose signer chose no lifetime
 pub const GREEN_INK_REASON: &str;          // "green-ink", the blocked_reason of a waiting Mission
-#[non_exhaustive] pub struct ActionScope { pub kind: String /* 1-32 of a-z0-9-_ */, pub target: String /* 1-256, no controls */ }
+#[non_exhaustive] pub struct ActionScope { pub kind: String /* a-z0-9-_ */, pub target: String /* no controls */ }
 impl ActionScope {
-    pub fn try_new(kind, target) -> io::Result<Self>;   // InvalidInput out of bounds
+    pub fn try_new(kind, target) -> io::Result<Self>;   // InvalidInput: empty, or other characters
+    pub fn check_size(&self, limits: &ApprovalLimits) -> io::Result<()>;   // [approvals] kind_bytes, target_bytes
     pub fn pushed_ref(&self) -> String;                 // "[REMOTE:]REF"; bare name -> refs/heads/NAME
     pub fn remote(&self) -> Option<&str>;               // the REMOTE before the last ':'
     pub fn covers(&self, attempted: &ActionScope) -> bool;   // same kind; push/delete: same ref and
@@ -2208,8 +2274,9 @@ pub trait Repository {   // what classify asks about the repository a command ac
     fn full_name(&self, at: &GitContext, name: &str) -> Result<Option<String>, String>;   // rev-parse --symbolic-full-name
     fn config(&self, at: &GitContext, key: &str) -> Result<Vec<String>, String>;         // config --get-all; [] unset
 }
-pub fn classify(command: &str, repo: &dyn Repository)
-    -> Result<Vec<ActionScope>, String>;   // the governed steps a shell command takes
+pub fn classify(command: &str, repo: &dyn Repository, nesting: usize)
+    -> Result<Vec<ActionScope>, String>;   // the governed steps a shell command takes; nested shells
+                                           // and git aliases followed `nesting` deep
 ```
 
 `classify` reads a command line as a shell splits it (quotes, `;` `&&` `||` `|`, newlines,
@@ -2328,6 +2395,10 @@ pub const GATE_PROGRAM_ENV: &str;   // "AI6_GREEN_INK_GATE": the gate program, f
                                     // hosting the handler (Station or field runner)
 pub const CABLE_URL_ENV: &str;      // "AI6_CABLE_MCP_URL"
 pub const CABLE_TOKEN_ENV: &str;    // "AI6_CABLE_MCP_TOKEN"
+pub const GATE_TIMEOUT_ENV: &str;   // "AI6_GREEN_INK_TIMEOUT": seconds per exchange; unset, 30
+pub const GATE_NESTING_ENV: &str;   // "AI6_GREEN_INK_NESTING": classify depth; unset, 4
+/// What a Station puts in a Session's environment from [green_ink] and [approvals].
+pub fn settings_environment(green_ink: &GreenInkLimits, approvals: &ApprovalLimits) -> [(String, String); 2];
 #[derive(Debug, Clone, PartialEq, Eq)] pub enum GateVerdict { Allow, Hold(String /* for the Agent */) }
 pub type Answers = Vec<(String /* status */, Option<String> /* why, for a refusal */)>;
 pub fn decide(classified: Result<Vec<ActionScope>, String>,
@@ -2379,7 +2450,8 @@ leading `~`, or `-` cannot be followed, so the command is held. A name that is n
 `GitRepository` with `local_git` from `cwd` and `client`; without a client a governed step is
 held. `GateClient::check` speaks MCP 2025-06-18 over HTTP (initialize,
 initialized, `tools/call check_approval`, then `DELETE` of the MCP session), reading JSON or
-server-sent events, 30 s per request. `pre_tool_use` takes the `PreToolUse` hook input
+server-sent events, within `AI6_GREEN_INK_TIMEOUT` (30 s unset) per request; `gate` follows
+nested shells as deep as the client's `AI6_GREEN_INK_NESTING` says. `pre_tool_use` takes the `PreToolUse` hook input
 (`tool_input.command`, `cwd`) and returns
 `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":…}}`
 for a held command and for input it cannot read or that names no command, `None` otherwise
@@ -2562,13 +2634,14 @@ pub const PROPOSAL_SOURCE: &str = "ai6-agent-proposal";
 
 #[non_exhaustive] pub enum FindingKind { Malformed, Duplicate, Rate, Budget, Screening, Review }
                   // serde snake_case; ::ALL; .as_str()
-#[non_exhaustive] pub struct Finding { pub kind: FindingKind, pub detail: String /* ≤256 B, never brief text */, pub related: Option<String> }
+#[non_exhaustive] pub struct Finding { pub kind: FindingKind, pub detail: String /* never brief text */, pub related: Option<String> }
 impl Finding { pub fn new(kind, detail) -> Self; pub fn related(self, mission_or_key) -> Self; }
 #[non_exhaustive] pub enum VettingVerdict { Pass, Hold, Refuse }   // serde snake_case
-#[non_exhaustive] pub struct Vetting { pub verdict: VettingVerdict, pub findings: Vec<Finding> /* ≤16 */ }
+#[non_exhaustive] pub struct Vetting { pub verdict: VettingVerdict, pub findings: Vec<Finding> }
 impl Vetting {
     pub fn pass() -> Self;
     pub fn from_findings(findings: Vec<Finding>) -> Self;  // any Malformed → Refuse; any → Hold; none → Pass
+    pub fn within(self, limits: &VettingLimits) -> Self;   // findings ≤ limits.findings, each detail ≤ detail_bytes
     pub fn kinds(&self) -> BTreeSet<FindingKind>;
     pub fn summary(&self) -> String;                       // "duplicate,screening"
 }
@@ -2603,6 +2676,8 @@ pub struct VettingContext {
     pub day_spend_micro_usd: Option<u64>,      // None: unread, never holds
     pub day_limit_micro_usd: Option<u64>,
     pub cleared: BTreeSet<FindingKind>,        // not reported again
+    pub limits: VettingLimits,                 // the verdict is kept within; more phrases than
+                                               // `phrases` (or longer than phrase_bytes) hold screened briefs
 }
 /// `source:` prefix or PROPOSAL_SOURCE, or a provenance other than Operator, Sleeper or
 /// Review: a registry drop, or none (missing, or the record changed since it was sealed).
@@ -2642,14 +2717,15 @@ pub fn is_review(brief: &Brief) -> bool;             // REVIEW_SOURCE and an Ori
 pub fn review_target(brief: &Brief) -> Option<ReviewTarget>;  // None unless is_review
 /// role chief-of-staff, priority of the reviewed brief, data: target + exposure ["brief:source"],
 /// provenance Origin::Review (received_by, received_at; reference = review_id);
-/// the brief and up to 50 other work titles quoted between markers neither contains.
-pub fn review_brief(reviewed: &Brief, target: &ReviewTarget, operation: &str, purpose: &str,
-                    work: &[KnownWork], received: (&str, i64)) -> Brief;
+/// the brief and up to `limits.review_work` other work titles quoted between markers neither
+/// contains, each line cut to `limits.detail_bytes`.
+pub fn review_brief(reviewed: &Brief, target: &ReviewTarget, (operation, purpose): (&str, &str),
+                    (work, limits): (&[KnownWork], &VettingLimits), received: (&str, i64)) -> Brief;
 /// The JSON objects shaped {"verdict", "findings"?} in the final message's last 16 KiB: any
 /// "hold" → Review findings "KIND: detail" (duplicate|scope|manipulation); exactly one
 /// "clear" with no findings and only whitespace after it → pass; anything else (none, several,
 /// another verdict, text after) → hold with "review-error: ...". Never admits on a bad answer.
-pub fn read_review(text: &str) -> Vetting;
+pub fn read_review(text: &str, limits: &VettingLimits) -> Vetting;
 ```
 
 The review Mission's ID is its brief key `ai6-vetting--review-…`. Its Station starts it only
@@ -2868,12 +2944,9 @@ and applies only the secrets: see "Credentials" under the Station daemon.
 Secret references can be leased through `SecretBroker`:
 
 ```rust
-pub const DEFAULT_SECRET_LEASE_TTL: Duration;
-pub const MAX_SECRET_LEASE_TTL: Duration;
 pub struct SecretLeaseRequest;
 impl SecretLeaseRequest {
-    pub fn try_new(station: impl Into<String>, mission_id: impl Into<String>)
-        -> Result<Self, SecretError>;
+    /// InvalidTtl for zero, or a lifetime past what this process's clock can reach.
     pub fn with_ttl(station: impl Into<String>, mission_id: impl Into<String>, ttl: Duration)
         -> Result<Self, SecretError>;
     pub fn station(&self) -> &str;
@@ -2897,8 +2970,8 @@ pub trait SecretBackend: Send + Sync {
 }
 pub struct SecretBroker;
 impl SecretBroker {
-    pub fn new(backend: impl SecretBackend + 'static) -> Self;
-    pub fn with_max_ttl(self, max_ttl: Duration) -> Result<Self, SecretError>;
+    pub fn new(backend: impl SecretBackend + 'static) -> Self;    // no ceiling on a lease
+    pub fn with_max_ttl(self, max_ttl: TimeLimit) -> Self;        // a longer request is InvalidTtl
     pub fn lease(&self, loadout: &Loadout, request: SecretLeaseRequest)
         -> Result<SecretLease, SecretError>;
     /// Some of the loadout's names; an undeclared one is AccessDenied and nothing is acquired.
@@ -3459,16 +3532,19 @@ line longer than the terminal is wide (CRLF, then a cursor move).
 
 ```rust
 pub const STREAM_COLS: u16 = 32767;          // widest terminal every provider accepts (ConPTY: i16)
-pub const MAX_JSON_LINE: usize = 64 << 20;   // a held, unfinished value past this is handed over as text
-pub fn strip_controls(bytes: &[u8]) -> Vec<u8>; // drops CSI, OSC and two-byte escapes; keeps line breaks
+/// Drops CSI (one with more than `csi_bytes` parameter bytes is no sequence), OSC and two-byte
+/// escapes; keeps line breaks.
+pub fn strip_controls(bytes: &[u8], csi_bytes: Limit) -> Vec<u8>;
 pub enum StreamLine {
     Json { value: serde_json::Value, text: Vec<u8>,
            rebuilt: bool /* joined from a broken line, or a non-SGR control removed inside */ },
     Text(String),
 }
-pub struct JsonLines; // Default
+pub struct JsonLines;
 impl JsonLines {
-    pub fn new() -> Self;
+    /// A held, unfinished value past `limits.json_line_bytes` is handed over as text; a CSI past
+    /// `limits.csi_bytes` is no sequence.
+    pub fn new(limits: &TerminalOutputLimits) -> Self;
     pub fn push(&mut self, bytes: &[u8]);               // output as read
     pub fn next_line(&mut self) -> Option<StreamLine>;   // a whole line, if one has arrived
     pub fn finish(&mut self) -> Option<StreamLine>;      // after end of output: what is held; call until None
@@ -3477,8 +3553,8 @@ impl JsonLines {
 
 Lines are cut at line breaks and at cursor moves to another row (CUP, HVP, CNL, CPL, VPA,
 IND, NEL, RI), controls and CR removed. A CSI ends at its final byte, or before the first byte
-no CSI holds (a line break included); past 64 parameter bytes it is no sequence and only its
-`ESC [` goes. An OSC ends at BEL, `ESC \` or before a line break. A line starting with `{`
+no CSI holds (a line break included); past `csi_bytes` parameter bytes (64 by default) it is
+no sequence and only its `ESC [` goes. An OSC ends at BEL, `ESC \` or before a line break. A line starting with `{`
 or `[` that does not parse yet is held, untrimmed, and joined with the lines after it; it is
 parsed again only when a piece closes its outermost bracket (strings and escapes tracked).
 A line that is a whole value of its own ends the held one as text. Anything else is `Text`,
@@ -3821,25 +3897,37 @@ pub const CALL_NOT_RUNNING: u8 = 3;            // exit status of `ai6 runner cal
 pub struct RunnerInfo { pub url: String, pub pid: u32, pub version: String }   // runner.json
 impl RunnerInfo { pub fn read(state_dir: &Path) -> io::Result<Self>; }       // absent while none serves
 #[non_exhaustive]
-pub struct RunnerConfig { /* state_dir, listen (default 127.0.0.1:0), plugin_paths, terminal */ }
+pub struct RunnerConfig { /* state_dir, listen (default 127.0.0.1:0), plugin_paths, terminal, settings */ }
 impl RunnerConfig {
     pub fn new(state_dir: impl Into<PathBuf>) -> Self;
     pub fn with_listen(self, address: SocketAddr) -> Self;   // loopback only: serve refuses any other
     pub fn with_plugin_paths(self, paths: impl IntoIterator<Item = PathBuf>) -> Self;
     pub fn with_terminal(self, terminal: impl Into<String>) -> Self;
+    pub fn with_limits(self, limits: RunnerLimits) -> Self;
+    pub fn with_provider_configs(self, configs: BTreeMap<String, serde_json::Value>) -> Self;
+}
+pub const SETTINGS_FILE: &str = "settings.json";             // what serve runs by, in the state directory
+/// {"runner": RunnerLimits, "providers": {...}}; serde default, deny_unknown_fields
+#[non_exhaustive] pub struct RunnerHandoff { pub runner: RunnerLimits, pub providers: BTreeMap<String, serde_json::Value> }
+impl RunnerHandoff {
+    pub fn new(runner: RunnerLimits, providers: BTreeMap<String, serde_json::Value>) -> Self;
+    pub fn read(path: &Path) -> io::Result<Self>;            // InvalidData: not settings, page 0, a provider value Guatiao cannot hold
+    pub fn parse(bytes: &[u8]) -> io::Result<Self>;
+    pub fn in_state_dir(state_dir: &Path) -> io::Result<Self>;   // SETTINGS_FILE, defaults when absent
 }
 pub fn default_state_dir() -> io::Result<PathBuf>;           // `<AI6 state>/runner`
 pub async fn serve<F>(config: RunnerConfig, shutdown: F) -> io::Result<()>;  // F: Future<Output = ()> + Send + 'static
-pub fn call(state_dir: &Path, method: &str, path: &str, body: Option<&serde_json::Value>)
-    -> Result<(u16, serde_json::Value), String>;             // Err: no runner answers
-pub fn spawn_detached(program: &Path, arguments: &[OsString], state_dir: &Path) -> io::Result<RunnerInfo>;
+pub fn call(state_dir: &Path, method: &str, path: &str, body: Option<&serde_json::Value>,
+            limits: &RunnerLimits) -> Result<(u16, serde_json::Value), String>;   // Err: no runner answers
+pub fn spawn_detached(program: &Path, arguments: &[OsString], state_dir: &Path, start_wait: Duration)
+    -> io::Result<RunnerInfo>;
 ```
 
 `serve` takes `runner.lock` (a second runner on the same directory gets `AddrInUse`), creates
 `token` once (mode `0600` on Unix), writes `runner.json` once it listens and removes it on a
 clean stop. Its API needs `Authorization: Bearer <token>` and speaks JSON: `GET /v1/health`,
 `GET|POST /v1/sessions`, `GET /v1/sessions/{key}` (handler, terminal, `session_id`, `ended`,
-`last`, `cursor`), `GET .../events?after=N&timeout_ms=T` (waits up to 30 s; answers
+`last`, `cursor`), `GET .../events?after=N&timeout_ms=T` (waits up to `max_wait`, 30 s; answers
 `{events: [{seq, event}], session_id, complete}`), `POST .../messages`, `POST .../interrupt`,
 `POST .../close?after=N` and `PUT .../cable` (`{url, token}`). A start names a key (letters,
 digits, `.`, `_`, `-`), the handler, an optional terminal and `{"start": AgentStart}` or
@@ -3851,15 +3939,18 @@ before any Station can read it. `after` acknowledges everything up to `N` and is
 it missed (at least once: the last event it took may come again). A `completed`, `failed`
 or `limit` event ends the Session and stops the harness. A runner that restarts ends every
 Session it had running with a `lost` event saying so (a Station gives such a Session up as
-lost); ended Sessions older than seven days
-are removed when a runner starts. When the start environment carries `AI6_CABLE_MCP_URL` and
+lost); ended Sessions older than `keep_ended` (seven days)
+are removed when a runner starts. `serve` builds providers with `[providers.<id>]` when a
+request gives no configuration, and records its settings in `SETTINGS_FILE`; `ai6 runner serve
+--settings PATH` (`-`: standard input, which `--detach` writes to `SETTINGS_FILE` and passes
+on) reads them. When the start environment carries `AI6_CABLE_MCP_URL` and
 `_TOKEN`, the runner starts a loopback relay with its own URL and token, gives the harness
 those, and relays to the Station's endpoint, which `PUT .../cable` replaces; with none set it
 answers 503. Stopping the runner stops its harnesses.
 
 `call` reads `runner.json` and `token` and sends one request (`ai6 runner call METHOD PATH`
-prints `{"status": N, "body": …}`, takes a body on standard input and exits
-`CALL_NOT_RUNNING` when no runner answers). `spawn_detached` starts
+prints `{"status": N, "body": …}`, takes a body on standard input, runs by the state
+directory's `SETTINGS_FILE` and exits `CALL_NOT_RUNNING` when no runner answers). `spawn_detached` starts
 `program runner serve <arguments>` in its own process group (Unix) or detached (Windows),
 with output in `runner.log`, and answers once that process serves; on Windows it inherits
 the caller's inheritable handles, such as an output pipe.
@@ -3867,10 +3958,11 @@ the caller's inheritable handles, such as an output pipe.
 A Station uses the runner of the Theater a Session runs on when the Theater declares one
 (`Theater::runner`). On its own host it reads `runner.json` and the token and calls the API
 directly, starting the runner with `spawn_detached` (its own binary unless `command` is set)
-when none answers. On another host it runs `<command> runner call [--state-dir D] METHOD
-PATH` through the Theater's transport for every request (`command` defaults to `ai6`), and
-`<command> runner serve --detach` with the settings' plugin paths and terminal when none
-answers. A read that cannot reach the runner answers "no event yet", so a dropped link costs
+when none answers, its `[runner]` and `[providers.<id>]` written to the runner's
+`SETTINGS_FILE` and passed with `--settings`. On another host it runs `<command> runner call
+[--state-dir D] METHOD PATH` through the Theater's transport for every request (`command`
+defaults to `ai6`), and `<command> runner serve --detach --settings -` with the settings'
+plugin paths and terminal, and the settings JSON on standard input, when none answers. A read that cannot reach the runner answers "no event yet", so a dropped link costs
 only time; the Station re-opens its Cable forward and repoints the relay once a read gets
 through again. Past the Operation's `lost_after_secs` out of reach it probes once more and,
 if the runner is gone (or answers 404 for the Session), gives the Session up as lost (see
@@ -3895,9 +3987,10 @@ and resize frames from `/v1/station/inputs/next`; AI6 dispatches them only to th
 bound to the matching Station, Mission and provider Session. The gateway's user-scoped
 write grant and lease checks remain the authorization boundary. Requests time out after
 two seconds; outbound writes are not retried, while input polling retries after errors.
-A queue overflow or outbound gateway error disables publication and is reported by
-`GET /internal/publisher`; it does not block Mission execution. Terminal chunks and the
-pre-registration output buffer are each bounded to 1 MiB. Output read before the provider
+A queue overflow (64 events) or outbound gateway error disables publication and is reported
+by `GET /internal/publisher`; it does not block Mission execution. Terminal chunks and the
+pre-registration output buffer are each bounded to 1 MiB. The `station` record's
+`[publisher]` table sets each of these. Output read before the provider
 Session ID is observed is queued until registration; overflowing that buffer disables
 publication.
 
@@ -4227,6 +4320,12 @@ Station and a runner choose a harness's terminal with it.
 
 ```rust
 impl Plugins { pub fn scan_with(paths: &[PathBuf], policy: &PluginPolicy) -> Plugins; } // scan() = default policy
+impl Plugins {
+    /// Provider <id> built with configs[<id>] when its caller gives None (every kind).
+    pub fn with_provider_configs(self, configs: BTreeMap<String, Value>) -> Self;
+}
+/// The station record's [providers.<id>] as Guatiao values; Err names a number Guatiao cannot hold.
+pub fn provider_configs(configs: &BTreeMap<String, serde_json::Value>) -> Result<BTreeMap<String, Value>, String>;
 impl Plugins {
     pub fn terminal_offers(&self) -> Vec<TerminalOffer>;
     pub fn choose_terminal(&self, stdio: HarnessStdio, pinned: Option<&str>)

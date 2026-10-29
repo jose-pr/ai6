@@ -36,6 +36,21 @@ labels = { gpu = "yes" }
 The default roles are `control` and `execution`. Every Station is also labeled with its
 Station ID, host and operating system; the record's `labels` adds more.
 
+The record's tables bound and pace the Station's own work: how often it checks in
+(`[scheduler] check_in`), how much it holds for Universal Exports (`[publisher]`), how it
+probes Theaters and re-attaches to Sessions, how long its secret leases last, and so on, each
+key with a default ([Station runtime limits](configuration.md#station-runtime-limits)). Its
+`[providers.<id>]` tables configure the handlers, terminals and safe houses it builds:
+
+```toml
+# stations/hq-1/station.toml
+[scheduler]
+check_in = 5
+
+[providers.pty]
+scrollback = 2000
+```
+
 ## Serving Operations
 
 Operations are global: they live in `operations.toml`, and no Station owns one. A Station
@@ -348,7 +363,8 @@ records, `unex.cfg`'s `[plugins] profile` or `--plugin-profile`), and the field 
 (`ai6 runner serve --pins PATH --plugin-profile P`, whose verified copies go under its own
 state directory; a Station starting one on its own host writes the pins it resolved into the
 runner's state directory and passes them). Each prints what it refused and every weakening
-when it starts.
+when it starts. A Station hands every runner it starts its record's `[runner]` and
+`[providers.<id>]` tables (`--settings`, [The field runner](theaters.md#the-field-runner)).
 
 What a pin covers is the library file. A library that imports another non-system library
 gets it from wherever the operating system's loader finds it; on Windows that includes

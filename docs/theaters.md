@@ -298,6 +298,13 @@ directory (`token`, readable only by its user). On the Station's own host the St
 to it directly. On another host it runs `ai6 runner call` there through the Theater's
 transport for each request, and `ai6 runner serve --detach` when no runner answers; a link
 that drops costs only time, since the runner keeps every event until a read gets through.
+
+A Station starting a runner hands it its `station` record's `[runner]` table and
+`[providers.<id>]` tables ([Station runtime limits](configuration.md#station-runtime-limits))
+as JSON, `{"runner": {...}, "providers": {...}}`: in `settings.json` in the runner's state
+directory on its own host, over standard input on another (`--settings -`). `ai6 runner serve
+--settings PATH` reads such a file, a key left out keeping its default, and records what it
+runs by as `settings.json` in its state directory, where `ai6 runner call` reads it.
 A runner out of reach for longer than the Operation's `lost_after_secs` is probed once more
 and, if it is gone, its Session is lost and the Mission tried again
 ([Runner loss](missions.md#runner-loss-the-station-lives)).

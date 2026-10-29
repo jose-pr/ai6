@@ -12,17 +12,15 @@ use guatiao::Status;
 use guatiao::library::ProviderError;
 use serde::Deserialize;
 
-use super::{EventsPage, Launch, SessionReport, Spooled, StartRequest, Upstream};
+use super::{
+    EventsPage, Launch, RunnerHandoff, SETTINGS_FILE, SessionReport, Spooled, StartRequest,
+    Upstream,
+};
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::m::theaters::{RunnerSettings, Theater, TheaterAccess};
 use crate::directorates::q::transport::{RunSpec, TransportClient, describe};
 use crate::directorates::section_00::agent::{AgentEvent, AgentMessage, AgentSession};
 use crate::station::reach::ReachWatch;
-
-/// How long one read of a runner's events may wait for a new one.
-const READ_WAIT_MS: u64 = 1_000;
-/// Output a relayed answer may have; a page of events is well under it.
-const MAX_CALL_OUTPUT: u64 = 32 * 1024 * 1024;
 
 /// How the Station reaches the runner.
 enum Reach {
@@ -47,6 +45,9 @@ pub(crate) struct RunnerLink {
     /// The pins and profile the Station resolved, which a runner it starts on its own host
     /// checks its libraries against.
     pins: Option<(crate::PinSet, crate::PluginProfile)>,
+    /// The `[runner]` and `[providers.<id>]` tables, which the link runs by and hands a runner
+    /// it starts.
+    settings: RunnerHandoff,
 }
 
 /// Why a request got no answer from the runner: the link is down, or no runner serves.
@@ -113,7 +114,15 @@ impl RunnerLink {
             plugin_paths: settings.plugin_paths.clone(),
             terminal: settings.terminal.clone(),
             pins: None,
+            settings: RunnerHandoff::default(),
         }
+    }
+
+    /// Runs by `settings`, and hands them to a runner it starts.
+    #[must_use]
+    pub(crate) fn with_settings(mut self, settings: RunnerHandoff) -> Self {
+        self.settings = settings;
+        self
     }
 
     /// Starts a runner on the Station's own host checking its libraries against `pins` under
@@ -138,7 +147,8 @@ impl RunnerLink {
     ) -> Result<(u16, serde_json::Value), Unreachable> {
         match &self.reach {
             Reach::Local { state_dir, .. } => {
-                super::call(state_dir, method, path, body).map_err(Unreachable)
+                super::call(state_dir, method, path, body, &self.settings.runner)
+                    .map_err(Unreachable)
             }
             Reach::Transport {
                 client,
@@ -158,8 +168,15 @@ impl RunnerLink {
                     .run(&RunSpec {
                         argv,
                         stdin: stdin.map(Bytes),
-                        timeout_ms: super::MAX_WAIT.as_millis() as u64 + 30_000,
-                        max_output: MAX_CALL_OUTPUT,
+                        timeout_ms: millis(
+                            self.settings.runner.max_wait.0 + self.settings.runner.call_margin.0,
+                        ),
+                        max_output: self
+                            .settings
+                            .runner
+                            .call_output_bytes
+                            .get()
+                            .unwrap_or(u64::MAX),
                         ..RunSpec::default()
                     })
                     .map_err(|error| Unreachable(describe(&error)))?;
@@ -205,6 +222,13 @@ impl RunnerLink {
                 let mut arguments: Vec<std::ffi::OsString> =
                     arguments.into_iter().map(Into::into).collect();
                 arguments.extend(["--state-dir".into(), state_dir.as_os_str().to_owned()]);
+                let settings = state_dir.join(SETTINGS_FILE);
+                let text =
+                    serde_json::to_vec_pretty(&self.settings).map_err(|error| error.to_string())?;
+                std::fs::create_dir_all(state_dir)
+                    .and_then(|()| std::fs::write(&settings, text))
+                    .map_err(|error| format!("{}: {error}", settings.display()))?;
+                arguments.extend(["--settings".into(), settings.into_os_string()]);
                 if let Some((pins, profile)) = &self.pins {
                     let path = state_dir.join("plugins.toml");
                     let text = toml::to_string(pins).map_err(|error| error.to_string())?;
@@ -218,9 +242,13 @@ impl RunnerLink {
                         profile.as_str().into(),
                     ]);
                 }
-                super::spawn_detached(command, &arguments, state_dir).map_err(|error| {
-                    format!("the runner could not start ({not_running}): {error}")
-                })?;
+                super::spawn_detached(
+                    command,
+                    &arguments,
+                    state_dir,
+                    self.settings.runner.start_wait.0,
+                )
+                .map_err(|error| format!("the runner could not start ({not_running}): {error}"))?;
             }
             Reach::Transport {
                 client,
@@ -237,10 +265,18 @@ impl RunnerLink {
                     argv.extend(["--state-dir".to_owned(), dir.clone()]);
                 }
                 argv.extend(arguments);
+                // The settings go over standard input, so nothing is written on the Theater
+                // before the runner itself records them in its state directory.
+                argv.extend(["--settings".to_owned(), "-".to_owned()]);
+                let settings =
+                    serde_json::to_vec(&self.settings).map_err(|error| error.to_string())?;
                 let output = client
                     .run(&RunSpec {
                         argv,
-                        timeout_ms: 60_000,
+                        stdin: Some(Bytes(settings)),
+                        timeout_ms: millis(
+                            self.settings.runner.start_wait.0 + self.settings.runner.call_margin.0,
+                        ),
                         ..RunSpec::default()
                     })
                     .map_err(|error| describe(&error))?;
@@ -308,6 +344,11 @@ impl RunnerLink {
             Err(Unreachable(why)) => Err(why),
         }
     }
+}
+
+/// A duration as the whole milliseconds a request takes.
+fn millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn api_error(status: u16, body: &serde_json::Value) -> String {
@@ -434,7 +475,9 @@ impl AgentSession for RunnerSession {
     }
 
     fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
-        let wait = u64::try_from(timeout_ms).unwrap_or(0).min(READ_WAIT_MS);
+        let wait = u64::try_from(timeout_ms)
+            .unwrap_or(0)
+            .min(millis(self.link.settings.runner.read_wait.0));
         let after = {
             let mut reading = self.reading();
             if !reading.buffered.is_empty() {

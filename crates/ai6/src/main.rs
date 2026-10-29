@@ -274,6 +274,12 @@ struct RunnerServeArgs {
     terminal: Option<String>,
     #[command(flatten)]
     pins: PinArgs,
+    /// The settings a Station hands its runners, as JSON: the `[runner]` table and the
+    /// `[providers.<id>]` tables of its `station` record; `-` reads them from standard input
+    /// (default: every key at its default). They are recorded in the state directory, where
+    /// `runner call` reads them.
+    #[arg(long, value_name = "PATH")]
+    settings: Option<PathBuf>,
     /// Start in the background, detached from this terminal, and print where it listens.
     #[arg(long)]
     detach: bool,
@@ -878,9 +884,43 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
+            let settings = match args.settings.as_deref() {
+                None => ai6::station::runner::RunnerHandoff::default(),
+                Some(path) => {
+                    let read = if path == std::path::Path::new("-") {
+                        let mut bytes = Vec::new();
+                        std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes)
+                            .and_then(|_| ai6::station::runner::RunnerHandoff::parse(&bytes))
+                    } else {
+                        ai6::station::runner::RunnerHandoff::read(path)
+                    };
+                    match read {
+                        Ok(settings) => settings,
+                        Err(error) => {
+                            eprintln!("ai6: runner settings {}: {error}", path.display());
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                }
+            };
             if args.detach {
                 let mut arguments: Vec<std::ffi::OsString> =
                     vec!["--state-dir".into(), state_dir.clone().into()];
+                if args.settings.is_some() {
+                    // Settings read from standard input reach the detached runner as a file.
+                    let path = state_dir.join(ai6::station::runner::SETTINGS_FILE);
+                    let written = serde_json::to_vec_pretty(&settings)
+                        .map_err(std::io::Error::other)
+                        .and_then(|bytes| {
+                            std::fs::create_dir_all(&state_dir)?;
+                            std::fs::write(&path, bytes)
+                        });
+                    if let Err(error) = written {
+                        eprintln!("ai6: runner settings {}: {error}", path.display());
+                        return ExitCode::FAILURE;
+                    }
+                    arguments.extend(["--settings".into(), path.into()]);
+                }
                 if let Some(listen) = args.listen {
                     arguments.extend(["--listen".into(), listen.to_string().into()]);
                 }
@@ -897,7 +937,12 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                     arguments.extend(["--plugin-profile".into(), profile.as_str().into()]);
                 }
                 let started = std::env::current_exe().and_then(|program| {
-                    ai6::station::runner::spawn_detached(&program, &arguments, &state_dir)
+                    ai6::station::runner::spawn_detached(
+                        &program,
+                        &arguments,
+                        &state_dir,
+                        settings.runner.start_wait.0,
+                    )
                 });
                 return match started {
                     Ok(info) => {
@@ -930,7 +975,9 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
             };
             let mut config = ai6::station::runner::RunnerConfig::new(&state_dir)
                 .with_plugin_paths(args.plugin_paths)
-                .with_plugin_policy(policy);
+                .with_plugin_policy(policy)
+                .with_limits(settings.runner)
+                .with_provider_configs(settings.providers);
             if let Some(listen) = args.listen {
                 config = config.with_listen(listen);
             }
@@ -964,8 +1011,21 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
+            let settings = match ai6::station::runner::RunnerHandoff::in_state_dir(&state_dir) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    eprintln!("ai6: runner settings: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
             let answered = tokio::task::spawn_blocking(move || {
-                ai6::station::runner::call(&state_dir, &method, &path, body.as_ref())
+                ai6::station::runner::call(
+                    &state_dir,
+                    &method,
+                    &path,
+                    body.as_ref(),
+                    &settings.runner,
+                )
             })
             .await;
             match answered {
@@ -1037,7 +1097,12 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let steps = ai6::directorates::q::provision::provision(&client, &declared, check);
+    let steps = ai6::directorates::q::provision::provision(
+        &client,
+        &declared,
+        check,
+        &snapshot.settings.station.limits().provision,
+    );
     let mut unfit = false;
     for step in &steps {
         println!(

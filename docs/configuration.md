@@ -449,8 +449,12 @@ audited as `config.refused`, and reported at check-in.
 
 The `station` record takes `max_concurrent_missions`, `stall_timeout`, `loop_timeout`,
 `loop_min_lines`, `blocked_after`, `max_runtime`, `history`, `normalize_digits`, `roles`
-(`control`, `execution`), `labels`, `terminal`, `resources_every`, `safe_house_caches` and
-`safe_house_cache_age`; seconds may be fractional. The `tls` record is a coqui-peer-tls policy
+(`control`, `execution`), `labels`, `terminal`, `resources_every`, `safe_house_caches`,
+`safe_house_cache_age`, `partial_line_bytes` (bytes of a terminal line the watchdog holds
+before it counts as a line, default 4,096) and `clone_timeout` (seconds a clone of one of
+Moneypenny's repositories may take, default 120); seconds may be fractional. Its tables bound
+and pace the Station's work ([Station runtime limits](#station-runtime-limits)), and its
+`[providers.<id>]` tables configure providers. The `tls` record is a coqui-peer-tls policy
 document (`profile = "modern" | "intermediate" | "legacy"`, `cipher_profiles`, `tls_versions`
 and the rest), read over the library's default; whatever it gives up against that default is
 logged and sent at check-in as `tls_weakened`. The `unex` record takes `authenticator`,
@@ -461,6 +465,210 @@ logged and sent at check-in as `tls_weakened`. The `unex` record takes `authenti
 `moneypenny`) and `route_text_bytes` (default 128, the longest `text` filter of an Outer
 Office page link Moneypenny's views and page context may carry). A credential written inline in one of those configurations is reported as a
 weakening: name a file there instead.
+
+### Station runtime limits
+
+The `station` record's tables bound and pace one Station's work, and apply at restart like
+the rest of the record. They follow the [Limits](#limits) rules: a count or size is a whole
+number or `"none"` (no bound); seconds may be fractional; a key left out keeps its default.
+Only what cannot work is refused: a queue, page or attempt count of 0. Looser values are not
+reported as weakenings.
+
+```toml
+# stations/hq-1/station.toml
+[scheduler]
+check_in = 5                          # check in every 5 seconds instead of 15
+
+[publisher]
+queue = 256                           # more lifecycle events held while Universal Exports is slow
+
+[secrets]
+max_lease_ttl = 900                   # no lease, green ink or not, outlives 15 minutes
+
+[providers.pty]                       # the pty terminal's configuration when nothing else gives one
+scrollback = 2000
+```
+
+`[providers.<id>]` is the Guatiao configuration a Station hands provider `<id>` when it builds
+it with none of its own: handlers, terminals and safe houses. Transports, Sources and Theater
+providers take theirs from the `theater` and `operation` records. A Station hands its field
+runners the `[runner]` table and the `[providers.<id>]` tables
+([The field runner](theaters.md#the-field-runner)).
+
+`[scheduler]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `event_queue` | 256 | Events of one Session queued for its event pump; past it the oldest is dropped |
+| `interval` | 0.5 | Seconds between scheduler rounds |
+| `retry_delay` | 5 | Seconds before a Mission whose start failed is tried again |
+| `check_in` | 15 | Seconds between the Station's check-ins with the Registry |
+| `intake_attempts` | 3 | Times a brief is placed before it is filed as failed |
+| `role_catalog_bytes` | 512 KiB | Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out |
+| `shutdown_wait` | 2 | Seconds a stopping Station waits for each of its loops |
+
+`[publisher]`: publication to Universal Exports.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `request_timeout` | 2 | Seconds one request may take |
+| `queue` | 64 | Lifecycle and terminal events held for publication; when full, publication stops and is reported unhealthy |
+| `terminal_bytes` | 1 MiB | Bytes of terminal output in one published frame |
+| `pre_bind_terminal_bytes` | 1 MiB | Bytes of terminal output held for a Session not yet bound to its Mission |
+| `input_retry_delay` | 0.1 | Seconds before a failed input or control poll is tried again |
+| `control_wait` | 1 | Seconds Universal Exports holds a control poll open |
+| `control_queue` | 16 | Mission controls queued for the scheduler |
+| `control_report_attempts` | 3 | Times the outcome of a control is reported |
+
+`[sources]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `poll` | 60 | Seconds between polls of a Source whose `interval_secs` is not set |
+| `min_poll` | 10 | The shortest interval a Source is polled at, in seconds; a smaller `interval_secs` is raised to it, and 0 takes the floor away |
+| `report_every` | 15 | Seconds between rounds reporting finished briefs to their Sources |
+| `sleeper_every` | 20 | Seconds between rounds firing Sleepers |
+
+`[transports]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `reprobe_after` | 60 | Seconds before a Theater the Station could not reach is probed again |
+| `report_every` | 300 | Seconds between looks over a Theater for its requirements and ambient credentials |
+
+`[recovery]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `first_reattach_delay` | 5 | Seconds before the first try to re-attach to a Session; each failed try doubles it |
+| `max_reattach_delay` | 60 | The longest wait between tries, in seconds |
+| `give_up_tries` | 10 | Tries at a Registry step a concurrent renewal can refuse, when the Station gives a lease up |
+| `notes_every` | 15 | Seconds between writes of a Session's recent events to its record |
+
+`[vetting]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `findings` | 16 | Findings a verdict keeps |
+| `review_work` | 50 | Other work a review brief lists for the reviewer |
+| `detail_bytes` | 256 | Bytes of a finding's detail, of the lines a review brief quotes, and of a vetting timeline detail |
+| `phrases` | 256 | Manipulation phrases an Operation may screen for; past it, or past `phrase_bytes`, screened briefs are held |
+| `phrase_bytes` | 256 | Bytes of one such phrase |
+| `rate_window` | 3,600 | Seconds of the rolling window hourly rates are counted over |
+| `proposals` | 500 | Pending Mission proposals looked at per Operation each round, within the Registry's `[registry.limits.proposals] results` |
+| `proposal_request_ttl` | 3,600 | Seconds the green ink request a class authorisation approves for a proposal lasts |
+| `proposal_settle` | 30 | Seconds a proposal waits before M promotes it on its own |
+| `expiry_sweep` | 60 | Seconds between looks at rate holds for expiry |
+
+`[accounts]`: pool accounts.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `reset_grace` | 15 | Seconds past a reported reset before a Session parked on a limit resumes |
+| `unknown_use_permille` | 500 | Thousandths used an account whose provider reported nothing counts as, 0 to 1,000 |
+| `claim_ttl` | 60 | Seconds a claim on an account lasts unless the Station renews it at check-in |
+| `limit_horizon` | 691,200 (8 days) | The longest a limited account is kept out, in seconds, whatever reset time its provider reports |
+| `login_timeout` | 60 | Seconds a pool account's login command may take |
+
+`[approvals]`: green ink steps.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `kind_bytes` | 32 | Bytes of the kind of a step an Agent asks about |
+| `target_bytes` | 256 | Bytes of its target |
+| `classify_nesting` | 4 | How deep nested shells (`sh -c "sh -c ..."`) and git aliases are followed when a command is read; the harness gate gets it in `AI6_GREEN_INK_NESTING` |
+
+`[harness]`: a working directory's harness configuration under `harness.project_settings =
+"pinned"`, and a skill Moneypenny's desk installs.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `manifest_file_bytes` | 1 MiB | Bytes of one file |
+| `manifest_bytes` | 16 MiB | Bytes of all of them |
+| `manifest_files` | 4,096 | Files |
+
+`[provision]`: probing and provisioning Theaters.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `probe_timeout` | 60 | Seconds the requirements probe, and a resources sample, may take |
+| `command_timeout` | 120 | Seconds one provisioning command may take |
+| `name_bytes` | 64 | Bytes of a required program's name; a longer one fails the probe |
+| `version_chars` | 200 | Characters of a program's version kept from the probe |
+
+`[secrets]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `lease_ttl` | 3,600 | Seconds the leases of a Session's loadout and pool account secrets last |
+| `max_lease_ttl` | 3,600 | The longest lease, in seconds; a green ink secret's lease lasts as long as its approval, up to it |
+
+`[terminal_output]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `json_line_bytes` | 64 MiB | Bytes of one line of a JSON harness's output held while the rest arrives |
+| `csi_bytes` | 64 | Bytes of one terminal control sequence before it is read as text |
+
+`[green_ink]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `gate_timeout` | 30 | Seconds the harness gate's exchange with the Station may take; the gate gets it in `AI6_GREEN_INK_TIMEOUT` |
+
+`[detached]`: harnesses run detached on another host, over its transport.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `poll` | 0.2 | Seconds between reads of the harness's output |
+| `script_timeout` | 30 | Seconds one of the wrapper's scripts may take |
+| `name_chars` | 64 | Characters of the Mission's name in the wrapper's file names |
+
+`[runner]`: field runners, and the Station's side of them.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `page` | 256 | Events one read of a runner returns |
+| `max_wait` | 30 | The longest a read of a runner waits for a new event, in seconds |
+| `keep_ended` | 604,800 (a week) | Seconds an ended Session is kept by its runner |
+| `refused_body_drain_bytes` | 64 KiB | Bytes of a refused request's body a runner, or the Station's own API, reads before it answers |
+| `cable_request_bytes` | 4 MiB | Bytes of one request through a runner's Cable relay |
+| `cable_connect_timeout` | 10 | Seconds a runner's Cable relay may take to reach the Station |
+| `read_wait` | 1 | Seconds the Station's read of a runner waits for an event |
+| `call_output_bytes` | 32 MiB | Bytes of output an `ai6 runner call` over a transport may return |
+| `connect_timeout` | 5 | Seconds connecting to a runner may take |
+| `call_margin` | 30 | Seconds a request to a runner may take past `max_wait`, and starting one over a transport past `start_wait` |
+| `start_wait` | 30 | Seconds a started runner has to answer |
+
+`[audit]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `names_detail_chars` | 240 | Characters of the secret names a credential timeline event lists |
+| `target_bytes` | 512 | Bytes of a refused configuration's audit target |
+
+`[theaters]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `ephemeral_name_bytes` | 100 | Bytes of an ephemeral Theater's name; a longer one is cut and given a digest |
+
+`[theater_tools]`: the `theater_*` tools of a remote-hands Session.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `output_bytes` | 256 KiB | Bytes of each stream of a command's output `theater_run` returns |
+| `read_bytes` | 256 KiB | Bytes `theater_read` returns |
+| `timeout` | 120 | Seconds a `theater_run` command may take unless it asks for another |
+| `max_timeout` | 3,600 | The longest a command may ask for, in seconds |
+| `git_timeout` | 30 | Seconds each git command the tools run for green ink may take |
+
+`[head_of_station]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `listed_changes` | 20 | Changes of a kept safe house listed in one report |
+| `survey_entries` | 500,000 | Directory entries one survey of a safe house walks before it reports a partial size |
 
 ### The directory provider
 

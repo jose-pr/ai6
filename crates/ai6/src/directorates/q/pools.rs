@@ -611,10 +611,12 @@ pub struct CommandLogin {
 }
 
 impl Default for CommandLogin {
-    /// Gives a login a minute.
+    /// Gives a login a Station's default `[accounts] login_timeout`.
     fn default() -> Self {
         Self {
-            timeout: std::time::Duration::from_secs(60),
+            timeout: crate::station::limits::AccountLimits::default()
+                .login_timeout
+                .0,
         }
     }
 }

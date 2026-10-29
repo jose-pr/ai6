@@ -11,13 +11,8 @@ use crate::directorates::m::theaters::{Theater, TheaterAccess, TheaterSummary, T
 use crate::directorates::q::ephemeral::{TheaterMaker, TheaterProviderConfig};
 use crate::directorates::q::provision::{self, ProbeReport};
 use crate::directorates::q::transport::{Capabilities, TransportClient, describe};
+use crate::station::limits::StationLimits;
 use crate::station::plugins::Plugins;
-
-/// How long after a failed contact the Station tries a Theater again.
-const REPROBE_AFTER: Duration = Duration::from_secs(60);
-/// How often the Station looks over a Theater again for its requirements and for ambient
-/// credentials.
-const REPORT_EVERY: Duration = Duration::from_secs(300);
 
 /// The transport for each Theater a Station reaches.
 ///
@@ -30,6 +25,8 @@ pub(crate) struct Transports {
     /// How often a Theater other than the Station's own host is sampled for its resources;
     /// zero leaves only the full probe's sample.
     resources_every: Duration,
+    /// The `[transports]` and `[provision]` tables pace and bound the probes.
+    limits: Arc<StationLimits>,
 }
 
 struct Entry {
@@ -74,7 +71,15 @@ impl Transports {
         Self {
             entries: RwLock::new(BTreeMap::new()),
             resources_every: crate::station::server::DEFAULT_RESOURCES_EVERY,
+            limits: Arc::default(),
         }
+    }
+
+    /// Probes Theaters as the `station` record's tables say.
+    #[must_use]
+    pub(crate) fn with_limits(mut self, limits: Arc<StationLimits>) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// Samples each Theater other than the Station's own host every `every`; zero leaves
@@ -220,14 +225,14 @@ impl Transports {
             .unwrap_or_default();
         entries
             .iter()
-            .map(|entry| entry.summary(terminal_available, self.resources_every))
+            .map(|entry| entry.summary(terminal_available, self.resources_every, &self.limits))
             .collect()
     }
 
     /// One Theater as published at check-in.
     pub(crate) fn summary(&self, id: &str, terminal_available: bool) -> Option<TheaterSummary> {
         self.entry(id)
-            .map(|entry| entry.summary(terminal_available, self.resources_every))
+            .map(|entry| entry.summary(terminal_available, self.resources_every, &self.limits))
     }
 }
 
@@ -267,7 +272,12 @@ impl Entry {
         summary
     }
 
-    fn summary(&self, terminal_available: bool, resources_every: Duration) -> TheaterSummary {
+    fn summary(
+        &self,
+        terminal_available: bool,
+        resources_every: Duration,
+        limits: &StationLimits,
+    ) -> TheaterSummary {
         if let Some(maker) = &self.maker {
             return self.template_summary(maker);
         }
@@ -276,7 +286,7 @@ impl Entry {
         let own_host = self.theater.access == TheaterAccess::Local;
         let mut capabilities = None;
         match &self.client {
-            Ok(client) => match self.known_capabilities(client) {
+            Ok(client) => match self.known_capabilities(client, limits) {
                 Ok(known) => capabilities = Some(known),
                 Err(reason) => summary.unavailable = Some(reason),
             },
@@ -304,7 +314,7 @@ impl Entry {
         }
         summary.report = match (&self.client, &capabilities) {
             (Ok(client), Some(capabilities)) if summary.unavailable.is_none() => {
-                self.known_report(client, capabilities)
+                self.known_report(client, capabilities, limits)
             }
             (Err(reason), _) if self.theater.requires.is_some() => Some(ProbeReport::failed(
                 format!("this Station cannot reach it to probe it: {reason}"),
@@ -332,7 +342,7 @@ impl Entry {
         } else {
             let sampled = match (&self.client, &capabilities) {
                 (Ok(client), Some(capabilities)) if summary.unavailable.is_none() => {
-                    self.known_resources(client, capabilities, resources_every)
+                    self.known_resources(client, capabilities, resources_every, limits)
                 }
                 _ => None,
             };
@@ -355,6 +365,7 @@ impl Entry {
         client: &Arc<TransportClient>,
         capabilities: &Capabilities,
         every: Duration,
+        limits: &StationLimits,
     ) -> Option<Resources> {
         if every.is_zero() || capabilities.os.as_deref() == Some("windows") {
             return None;
@@ -367,10 +378,12 @@ impl Entry {
             probe.sampling = true;
             let (client, state, capabilities) =
                 (client.clone(), self.probe.clone(), capabilities.clone());
+            let provision_limits = limits.provision.clone();
             let spawned = std::thread::Builder::new()
                 .name("ai6-theater-resources".to_owned())
                 .spawn(move || {
-                    let sampled = provision::probe_resources(&client, &capabilities);
+                    let sampled =
+                        provision::probe_resources(&client, &capabilities, &provision_limits);
                     if let Ok(mut probe) = state.lock() {
                         probe.sampling = false;
                         probe.sampled = Some(Instant::now());
@@ -394,6 +407,7 @@ impl Entry {
         &self,
         client: &Arc<TransportClient>,
         capabilities: &Capabilities,
+        limits: &StationLimits,
     ) -> Option<ProbeReport> {
         let requires = self.theater.requires.clone();
         if requires.is_none() && capabilities.os.as_deref() == Some("windows") {
@@ -402,12 +416,13 @@ impl Entry {
         let mut probe = self.probe.lock().ok()?;
         let due = probe
             .reported
-            .is_none_or(|reported| reported.elapsed() >= REPORT_EVERY);
+            .is_none_or(|reported| reported.elapsed() >= limits.transports.report_every.0);
         if due && !probe.reporting {
             probe.reporting = true;
             let (client, state, capabilities) =
                 (client.clone(), self.probe.clone(), capabilities.clone());
             let workdir = self.theater.workdir.clone();
+            let provision_limits = limits.provision.clone();
             let spawned = std::thread::Builder::new()
                 .name("ai6-theater-report".to_owned())
                 .spawn(move || {
@@ -416,6 +431,7 @@ impl Entry {
                         &capabilities,
                         requires.as_ref(),
                         workdir.as_deref(),
+                        &provision_limits,
                     );
                     if let Ok(mut probe) = state.lock() {
                         probe.reporting = false;
@@ -432,7 +448,11 @@ impl Entry {
 
     /// What the transport reported, contacting a remote host in the background until it
     /// answers.
-    fn known_capabilities(&self, client: &Arc<TransportClient>) -> Result<Capabilities, String> {
+    fn known_capabilities(
+        &self,
+        client: &Arc<TransportClient>,
+        limits: &StationLimits,
+    ) -> Result<Capabilities, String> {
         let static_capabilities = client.capabilities().map_err(|error| describe(&error))?;
         if self.theater.access == TheaterAccess::Local {
             return Ok(static_capabilities);
@@ -445,7 +465,7 @@ impl Entry {
         }
         let due = probe
             .last
-            .is_none_or(|last| last.elapsed() >= REPROBE_AFTER);
+            .is_none_or(|last| last.elapsed() >= limits.transports.reprobe_after.0);
         if due && !probe.running {
             probe.running = true;
             probe.last = Some(Instant::now());

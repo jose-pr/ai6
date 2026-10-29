@@ -45,6 +45,7 @@ use crate::directorates::m::theaters::Theaters;
 use crate::directorates::q::LoadoutCatalog;
 use crate::directorates::registry::bona_fides::PinSet;
 use crate::directorates::registry::cables::CableConfig;
+use crate::station::limits;
 
 /// The families of record a configuration provider holds.
 #[non_exhaustive]
@@ -474,11 +475,78 @@ pub struct StationRuntime {
     pub safe_house_caches: Option<Vec<String>>,
     /// Seconds a finished Mission's safe house is left alone before its caches may go.
     pub safe_house_cache_age: Option<f64>,
+    /// `[scheduler]`.
+    #[serde(default)]
+    pub scheduler: limits::SchedulerLimits,
+    /// `[publisher]`.
+    #[serde(default)]
+    pub publisher: limits::PublisherLimits,
+    /// `[sources]`.
+    #[serde(default)]
+    pub sources: limits::SourceLimits,
+    /// `[transports]`.
+    #[serde(default)]
+    pub transports: limits::TransportLimits,
+    /// `[recovery]`.
+    #[serde(default)]
+    pub recovery: limits::RecoveryLimits,
+    /// `[vetting]`.
+    #[serde(default)]
+    pub vetting: limits::VettingLimits,
+    /// `[accounts]`.
+    #[serde(default)]
+    pub accounts: limits::AccountLimits,
+    /// `[approvals]`.
+    #[serde(default)]
+    pub approvals: limits::ApprovalLimits,
+    /// `[harness]`.
+    #[serde(default)]
+    pub harness: limits::HarnessLimits,
+    /// `[provision]`.
+    #[serde(default)]
+    pub provision: limits::ProvisionLimits,
+    /// `[secrets]`.
+    #[serde(default)]
+    pub secrets: limits::SecretLimits,
+    /// `[terminal_output]`.
+    #[serde(default)]
+    pub terminal_output: limits::TerminalOutputLimits,
+    /// `[green_ink]`.
+    #[serde(default)]
+    pub green_ink: limits::GreenInkLimits,
+    /// `[detached]`.
+    #[serde(default)]
+    pub detached: limits::DetachedLimits,
+    /// `[runner]`.
+    #[serde(default)]
+    pub runner: limits::RunnerLimits,
+    /// `[audit]`.
+    #[serde(default)]
+    pub audit: limits::AuditLimits,
+    /// `[theaters]`.
+    #[serde(default)]
+    pub theaters: limits::TheaterLimits,
+    /// `[theater_tools]`.
+    #[serde(default)]
+    pub theater_tools: limits::TheaterToolLimits,
+    /// `[head_of_station]`.
+    #[serde(default)]
+    pub head_of_station: limits::HeadOfStationLimits,
+    /// Bytes of a terminal line the watchdog holds before it ends.
+    pub partial_line_bytes: Option<Limit>,
+    /// Seconds a clone of one of Moneypenny's repositories may take.
+    pub clone_timeout: Option<crate::bounds::Seconds>,
+    /// `[providers.<id>]`: provider `<id>`'s Guatiao configuration when the Station builds
+    /// it with none of its own.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub providers: BTreeMap<String, serde_json::Value>,
 }
 
 impl StationRuntime {
-    /// Checks every value: seconds finite and not negative, a capacity of 1 to 1,024, known
-    /// roles, non-empty labels.
+    /// Checks every value: seconds finite and not negative, a capacity of at least 1, known
+    /// roles, non-empty labels, and the tables as [`StationLimits::validate`] does.
+    ///
+    /// [`StationLimits::validate`]: crate::station::limits::StationLimits::validate
     ///
     /// # Errors
     ///
@@ -518,7 +586,33 @@ impl StationRuntime {
         {
             return Err("station.labels: keys and values must be non-empty".to_owned());
         }
-        Ok(())
+        self.limits().validate()
+    }
+
+    /// The tables, each over its defaults, and the provider configurations.
+    pub fn limits(&self) -> limits::StationLimits {
+        limits::StationLimits {
+            scheduler: self.scheduler.clone(),
+            publisher: self.publisher.clone(),
+            sources: self.sources.clone(),
+            transports: self.transports.clone(),
+            recovery: self.recovery.clone(),
+            vetting: self.vetting.clone(),
+            accounts: self.accounts.clone(),
+            approvals: self.approvals.clone(),
+            harness: self.harness.clone(),
+            provision: self.provision.clone(),
+            secrets: self.secrets.clone(),
+            terminal_output: self.terminal_output.clone(),
+            green_ink: self.green_ink.clone(),
+            detached: self.detached.clone(),
+            runner: self.runner.clone(),
+            audit: self.audit.clone(),
+            theaters: self.theaters.clone(),
+            theater_tools: self.theater_tools.clone(),
+            head_of_station: self.head_of_station.clone(),
+            providers: self.providers.clone(),
+        }
     }
 
     /// A number of seconds as a duration; values were checked by [`validate`](Self::validate).

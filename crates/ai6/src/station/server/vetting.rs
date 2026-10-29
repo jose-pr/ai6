@@ -11,6 +11,7 @@
 //! When the Operation configures the `chief-of-staff` role, an untrusted brief that passes
 //! waits for a review; with no reviewer available it is held rather than placed unreviewed.
 
+use crate::station::limits::VettingLimits;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Mutex;
@@ -31,19 +32,8 @@ use crate::directorates::registry::store::{
 };
 use crate::directorates::registry::timeline::TimelineEvent;
 
-/// The window the hourly rate limits count passes in.
-const RATE_WINDOW_SECS: f64 = 3_600.0;
-/// Pending proposals looked at per Operation each round.
-const MAX_PROPOSALS: usize = 500;
 /// The class authorisation kind that lets M promote a clean proposal.
 const PROPOSAL_KIND: &str = "proposal";
-/// How long the green ink request a class authorisation approves for a proposal lasts.
-const PROPOSAL_REQUEST_TTL: std::time::Duration = std::time::Duration::from_secs(3_600);
-/// How old a proposal must be before M promotes it on its own: the proposing Session's
-/// events, a tool result that exposed it among them, reach the Registry within this.
-const PROPOSAL_SETTLE_SECS: f64 = 30.0;
-/// How often rate holds are looked at for expiry.
-const EXPIRY_SWEEP_SECS: f64 = 60.0;
 /// The prefix of a review's own working directory.
 const REVIEW_DIR_PREFIX: &str = "ai6-review-";
 /// What a review's harness keeps of its Agent's environment: where to find its own files and
@@ -76,7 +66,6 @@ const REVIEW_ENVIRONMENT: [&str; 22] = [
 ];
 /// The timeline kind of vetting events.
 pub(super) const INTAKE_EVENT: &str = "intake";
-const MAX_DETAIL_BYTES: usize = 256;
 
 /// What Headquarters remembers about vetted briefs between intake rounds.
 #[derive(Default)]
@@ -212,7 +201,10 @@ impl<'a> Round<'a> {
             return Admission::Wait;
         }
         if !reviewer_available(state, operation) {
-            let held = review_hold("review-unavailable: no chief-of-staff Agent can review it now");
+            let held = review_hold(
+                &state.station.limits().vetting,
+                "review-unavailable: no chief-of-staff Agent can review it now",
+            );
             return self.hold(operation, brief, mission_id, &held);
         }
         if self.read_facts(operation).is_none() {
@@ -228,9 +220,8 @@ impl<'a> Round<'a> {
         let review = review_brief(
             brief,
             &target,
-            &operation.id,
-            &operation.description,
-            &work,
+            (&operation.id, &operation.description),
+            (&work, &state.station.limits().vetting),
             (&state.station_id, state.clock.now()),
         );
         match self.queue_review(&review) {
@@ -242,7 +233,10 @@ impl<'a> Round<'a> {
             // it was applied since this round looked.
             Some(ReviewState::Ended) if reviewed(state, brief) == Some(true) => Admission::Place,
             Some(ReviewState::Ended) => {
-                let held = review_hold("review-error: the review ended without an answer");
+                let held = review_hold(
+                    &state.station.limits().vetting,
+                    "review-error: the review ended without an answer",
+                );
                 self.hold(operation, brief, mission_id, &held)
             }
             None => Admission::Wait,
@@ -338,7 +332,9 @@ impl<'a> Round<'a> {
         let in_window = read
             .passed
             .iter()
-            .filter(|(at, _)| *at >= now - RATE_WINDOW_SECS)
+            .filter(|(at, _)| {
+                *at >= now - state.station.limits().vetting.rate_window.0.as_secs_f64()
+            })
             .collect::<Vec<_>>();
         let mut context = VettingContext {
             untrusted,
@@ -351,6 +347,7 @@ impl<'a> Round<'a> {
             day_spend_micro_usd: read.day_spend,
             day_limit_micro_usd: operation.budget.operation_cost_micro_usd_per_day,
             cleared,
+            limits: state.station.limits().vetting.clone(),
         };
         let vetting = vet(brief, &operation.vetting, &context);
         facts.work = std::mem::take(&mut context.work);
@@ -446,7 +443,7 @@ impl<'a> Round<'a> {
             proposal_reviews: Vec::new(),
             day_spend: None,
         };
-        let window = self.now - RATE_WINDOW_SECS;
+        let window = self.now - state.station.limits().vetting.rate_window.0.as_secs_f64();
         for event in events.iter().filter(|event| event.kind == INTAKE_EVENT) {
             match event.action.as_str() {
                 "passed" => {
@@ -486,7 +483,8 @@ impl<'a> Round<'a> {
     pub(super) fn requeue_expired(&mut self) {
         let state = self.state;
         let due = state.vetting.swept_at.lock().is_ok_and(|mut swept_at| {
-            let due = *swept_at + EXPIRY_SWEEP_SECS <= self.now || *swept_at > self.now;
+            let every = state.station.limits().vetting.expiry_sweep.0.as_secs_f64();
+            let due = *swept_at + every <= self.now || *swept_at > self.now;
             if due {
                 *swept_at = self.now;
             }
@@ -540,7 +538,7 @@ impl<'a> Round<'a> {
             }
             let pending = match state
                 .intake
-                .list_mission_proposals(&operation.id, MAX_PROPOSALS)
+                .list_mission_proposals(&operation.id, proposal_results(state))
             {
                 Ok(pending) => pending,
                 Err(error) => {
@@ -598,6 +596,7 @@ impl<'a> Round<'a> {
             day_spend_micro_usd: read.day_spend,
             day_limit_micro_usd: operation.budget.operation_cost_micro_usd_per_day,
             cleared: BTreeSet::from([FindingKind::Rate]),
+            limits: state.station.limits().vetting.clone(),
             ..VettingContext::default()
         };
         let reviews_here = read.proposal_reviews.len() as u32;
@@ -625,7 +624,10 @@ impl<'a> Round<'a> {
             }
             let over = |limit: Option<u32>, count: u32| limit.is_some_and(|limit| count >= limit);
             vetting = if !reviewer_available(state, operation) {
-                review_hold("review-unavailable: no chief-of-staff Agent can review it now")
+                review_hold(
+                    &state.station.limits().vetting,
+                    "review-unavailable: no chief-of-staff Agent can review it now",
+                )
             } else if over(
                 operation.vetting.max_proposal_reviews_per_hour,
                 reviews_here,
@@ -634,6 +636,7 @@ impl<'a> Round<'a> {
                     FindingKind::Rate,
                     format!("{reviews_here} proposal reviews were queued in the last hour"),
                 )])
+                .within(&state.station.limits().vetting)
             } else if over(
                 operation.vetting.max_proposal_reviews_per_session_per_hour,
                 reviews_by_session,
@@ -645,13 +648,13 @@ impl<'a> Round<'a> {
                          the last hour"
                     ),
                 )])
+                .within(&state.station.limits().vetting)
             } else {
                 let review = review_brief(
                     &proposal.brief,
                     &target,
-                    &operation.id,
-                    &operation.description,
-                    &work,
+                    (&operation.id, &operation.description),
+                    (&work, &state.station.limits().vetting),
                     (&state.station_id, state.clock.now()),
                 );
                 match self.queue_review(&review) {
@@ -665,7 +668,10 @@ impl<'a> Round<'a> {
                     // Its answer may have been applied since this round listed the proposal.
                     Some(ReviewState::Ended) => match stored_vetting(state, proposal) {
                         Some(vetting) => return Some(vetting),
-                        None => review_hold("review-error: the review ended without an answer"),
+                        None => review_hold(
+                            &state.station.limits().vetting,
+                            "review-error: the review ended without an answer",
+                        ),
                     },
                     None => return None,
                 }
@@ -687,6 +693,13 @@ impl<'a> Round<'a> {
     }
 }
 
+/// How many pending proposals one listing asks the Registry for: `[vetting] proposals`, within
+/// what the Registry gives one listing.
+fn proposal_results(state: &DaemonState) -> usize {
+    let wanted = state.station.limits().vetting.proposals.or_max();
+    wanted.min(state.intake.limits().proposals.results.or_max())
+}
+
 /// The vetting stored for a pending proposal, read again from the Registry.
 /// The most held briefs one listing may ask `registry` for.
 fn held_results(limits: &crate::directorates::registry::limits::RegistryLimits) -> usize {
@@ -696,16 +709,16 @@ fn held_results(limits: &crate::directorates::registry::limits::RegistryLimits) 
 fn stored_vetting(state: &DaemonState, proposal: &MissionProposal) -> Option<Vetting> {
     state
         .intake
-        .list_mission_proposals(&proposal.operation_id, MAX_PROPOSALS)
+        .list_mission_proposals(&proposal.operation_id, proposal_results(state))
         .ok()?
         .into_iter()
         .find(|pending| pending.id == proposal.id)?
         .vetting
 }
 
-/// A hold with one [`FindingKind::Review`] finding.
-fn review_hold(detail: &str) -> Vetting {
-    Vetting::from_findings(vec![Finding::new(FindingKind::Review, detail)])
+/// A hold with one [`FindingKind::Review`] finding, within `limits`.
+fn review_hold(limits: &VettingLimits, detail: &str) -> Vetting {
+    Vetting::from_findings(vec![Finding::new(FindingKind::Review, detail)]).within(limits)
 }
 
 /// Whether the brief's review cleared it as it reads now: `None` when the Registry could
@@ -730,7 +743,7 @@ fn reviewed(state: &DaemonState, brief: &Brief) -> Option<bool> {
 /// its title against the target pattern. Never for a proposal whose proposing Session read
 /// untrusted input, by the proposal's own mark or by the parent Mission's Session records
 /// under an Operation that restricts proposals, nor before it is
-/// [`PROPOSAL_SETTLE_SECS`] old, so the Session's last events have reached the Registry.
+/// `[vetting] proposal_settle` old, so the Session's last events have reached the Registry.
 /// The approval counts one use and is audited as `mission.proposal.approved` with actor
 /// `class:ID`.
 fn promote_by_class(
@@ -740,7 +753,15 @@ fn promote_by_class(
     now: f64,
 ) {
     if !medical::brief_exposure(&proposal.brief).is_empty()
-        || proposal.created_at + PROPOSAL_SETTLE_SECS > now
+        || proposal.created_at
+            + state
+                .station
+                .limits()
+                .vetting
+                .proposal_settle
+                .0
+                .as_secs_f64()
+            > now
     {
         return;
     }
@@ -765,7 +786,8 @@ fn promote_by_class(
     else {
         return;
     };
-    let Ok(scope) = ActionScope::try_new(PROPOSAL_KIND, detail_text(&proposal.brief.title)) else {
+    let Ok(scope) = ActionScope::try_new(PROPOSAL_KIND, detail_text(state, &proposal.brief.title))
+    else {
         return;
     };
     let Ok(request) = ApprovalRequest::try_new(
@@ -781,7 +803,10 @@ fn promote_by_class(
         return;
     };
     let request = request
-        .expiring(now.max(1.0), PROPOSAL_REQUEST_TTL)
+        .expiring(
+            now.max(1.0),
+            state.station.limits().vetting.proposal_request_ttl.0,
+        )
         .proposing_role(proposal.brief.role.clone());
     let role = proposal.parent_role.as_deref();
     let approval = match state
@@ -1011,7 +1036,7 @@ pub(super) fn review_completed(state: &DaemonState, mission_id: &str, text: Opti
     let Some(review) = genuine_review(state, &mission, mission_id) else {
         return;
     };
-    let verdict = read_review(text.unwrap_or_default());
+    let verdict = read_review(text.unwrap_or_default(), &state.station.limits().vetting);
     let reviewer = format!(
         "review:{}",
         mission.agent_id.as_deref().unwrap_or("unknown")
@@ -1052,7 +1077,7 @@ pub(super) fn review_ended(state: &DaemonState, lease: &Lease, mission: &Mission
             .and_then(|operation| {
                 state
                     .intake
-                    .list_mission_proposals(operation, MAX_PROPOSALS)
+                    .list_mission_proposals(operation, proposal_results(state))
                     .ok()
             })
             .is_none_or(|pending| {
@@ -1066,9 +1091,10 @@ pub(super) fn review_ended(state: &DaemonState, lease: &Lease, mission: &Mission
         return;
     }
     let state_name = format!("{:?}", mission.state).to_lowercase();
-    let verdict = review_hold(&format!(
-        "review-error: the review ended {state_name} without an answer"
-    ));
+    let verdict = review_hold(
+        &state.station.limits().vetting,
+        &format!("review-error: the review ended {state_name} without an answer"),
+    );
     settle(state, &review, &verdict, "review:ended");
 }
 
@@ -1161,8 +1187,8 @@ fn record_target(
         state.clock.now().max(1) as f64,
     )
     .station(state.station_id.clone())
-    .mission(detail_text(reviewed))
-    .actor(detail_text(reviewer));
+    .mission(detail_text(state, reviewed))
+    .actor(detail_text(state, reviewer));
     if !vetting.findings.is_empty() {
         event = event.detail("findings", vetting.summary());
     }
@@ -1181,11 +1207,11 @@ fn record_proposal_review(state: &DaemonState, operation: &Operation, proposal: 
         state.clock.now().max(1) as f64,
     )
     .station(state.station_id.clone())
-    .mission(detail_text(&proposal.id))
-    .actor(detail_text(&proposal.proposer_agent_id))
+    .mission(detail_text(state, &proposal.id))
+    .actor(detail_text(state, &proposal.proposer_agent_id))
     .detail(
         "proposer_session",
-        detail_text(proposal.proposer_session_id.as_str()),
+        detail_text(state, proposal.proposer_session_id.as_str()),
     );
     if let Err(error) = state.intake.record_event(&event) {
         eprintln!("ai6: vetting timeline event was not recorded: {error}");
@@ -1240,7 +1266,7 @@ pub(super) fn record(
     )
     .station(state.station_id.clone())
     .mission(mission_id)
-    .detail("source", detail_text(&brief.source))
+    .detail("source", detail_text(state, &brief.source))
     .detail("trust", trust);
     if let Some(vetting) = vetting.filter(|vetting| !vetting.findings.is_empty()) {
         event = event.detail("findings", vetting.summary());
@@ -1250,8 +1276,10 @@ pub(super) fn record(
     }
 }
 
-/// Text safe for a timeline detail: no control characters, at most 256 bytes, never empty.
-fn detail_text(text: &str) -> String {
+/// Text safe for a timeline detail: no control characters, at most `[vetting] detail_bytes`,
+/// never empty.
+fn detail_text(state: &DaemonState, text: &str) -> String {
+    let bytes = state.station.limits().vetting.detail_bytes;
     let mut text = text
         .chars()
         .map(|character| {
@@ -1262,8 +1290,8 @@ fn detail_text(text: &str) -> String {
             }
         })
         .collect::<String>();
-    if text.len() > MAX_DETAIL_BYTES {
-        let mut end = MAX_DETAIL_BYTES;
+    if !bytes.allows(text.len()) {
+        let mut end = bytes.or_max();
         while !text.is_char_boundary(end) {
             end -= 1;
         }

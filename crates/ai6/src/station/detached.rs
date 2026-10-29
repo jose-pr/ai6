@@ -19,6 +19,7 @@ use guatiao::{Bytes, FromValue, Status, ToValue, Value};
 use crate::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
 use crate::directorates::q::transport::kit::{is_variable_name, quote};
 use crate::directorates::q::transport::{ReadSpec, RunSpec, TransportClient, describe};
+use crate::station::limits::DetachedLimits;
 use crate::station::reach::ReachWatch;
 
 /// Where wrapped harnesses keep their files: relative to the transport's default directory,
@@ -26,8 +27,6 @@ use crate::station::reach::ReachWatch;
 pub(crate) const ROOT: &str = ".ai6/detached";
 /// The name a launch record gives the wrapper in place of a terminal provider.
 pub(crate) const TERMINAL: &str = "detached";
-const POLL: Duration = Duration::from_millis(200);
-const SCRIPT_TIMEOUT_MS: u64 = 30_000;
 
 /// Makes the harness's directory: ends a harness an earlier start of the same Mission left,
 /// then makes the environment and input FIFOs, the output file and the wrapper script, and
@@ -97,13 +96,19 @@ fn refuse(message: impl std::fmt::Display) -> ProviderError {
 /// Starts harnesses on one Theater for one Mission.
 pub(crate) struct DetachedTerminal {
     client: Arc<TransportClient>,
+    limits: DetachedLimits,
     prefix: String,
     relink: Option<Arc<dyn Fn() + Send + Sync>>,
     reach: ReachWatch,
 }
 
 impl DetachedTerminal {
-    pub(crate) fn new(client: Arc<TransportClient>, mission_id: &str) -> Self {
+    /// The wrapper for `mission_id`'s harnesses over `client`, within `limits`.
+    pub(crate) fn new(
+        client: Arc<TransportClient>,
+        mission_id: &str,
+        limits: DetachedLimits,
+    ) -> Self {
         let mut prefix: String = mission_id
             .chars()
             .map(|c| {
@@ -113,13 +118,14 @@ impl DetachedTerminal {
                     '_'
                 }
             })
-            .take(64)
+            .take(limits.name_chars.or_max())
             .collect();
         if prefix.starts_with('.') || prefix.starts_with('-') {
             prefix.insert(0, 'm');
         }
         Self {
             client,
+            limits,
             prefix,
             relink: None,
             reach: ReachWatch::default(),
@@ -156,7 +162,7 @@ impl DetachedTerminal {
             "sh".to_owned(),
         ];
         argv.extend(arguments);
-        run_script(&self.client, argv, stdin)
+        run_script(&self.client, argv, stdin, &self.limits)
     }
 }
 
@@ -164,11 +170,12 @@ fn run_script(
     client: &TransportClient,
     argv: Vec<String>,
     stdin: Option<Vec<u8>>,
+    limits: &DetachedLimits,
 ) -> Result<String, ProviderError> {
     let output = client.run(&RunSpec {
         argv,
         stdin: stdin.map(Bytes),
-        timeout_ms: SCRIPT_TIMEOUT_MS,
+        timeout_ms: millis(limits.script_timeout.0),
         ..RunSpec::default()
     })?;
     if output.code != Some(0) {
@@ -227,6 +234,7 @@ impl Terminal for DetachedTerminal {
             .map_err(|_| refuse("the detached wrapper did not report the harness's process"))?;
         Ok(DetachedSession {
             client: self.client.clone(),
+            limits: self.limits.clone(),
             dir,
             pid,
             offset: Mutex::new(0),
@@ -247,6 +255,7 @@ impl Terminal for DetachedTerminal {
 /// One harness under the wrapper, read and written through the transport.
 struct DetachedSession {
     client: Arc<TransportClient>,
+    limits: DetachedLimits,
     dir: String,
     pid: i64,
     offset: Mutex<u64>,
@@ -274,7 +283,7 @@ impl DetachedSession {
                     self.dir.clone(),
                     self.pid.to_string(),
                 ],
-                timeout_ms: SCRIPT_TIMEOUT_MS,
+                timeout_ms: millis(self.limits.script_timeout.0),
                 ..RunSpec::default()
             })
             .map_err(|error| describe(&error))?;
@@ -378,7 +387,7 @@ impl TerminalSession for DetachedSession {
             if remaining.is_zero() {
                 return Ok(READ_TIMED_OUT);
             }
-            std::thread::sleep(remaining.min(POLL));
+            std::thread::sleep(remaining.min(self.limits.poll.0));
         }
     }
 
@@ -393,6 +402,7 @@ impl TerminalSession for DetachedSession {
                 self.path("in"),
             ],
             Some(data.to_vec()),
+            &self.limits,
         )
         .map(drop)
     }
@@ -414,6 +424,7 @@ impl TerminalSession for DetachedSession {
                 self.dir.clone(),
             ],
             None,
+            &self.limits,
         )
         .map(drop)
     }
@@ -444,10 +455,15 @@ impl TerminalSession for DetachedSession {
                     signal: None,
                 };
             }
-            std::thread::sleep(remaining.min(POLL));
+            std::thread::sleep(remaining.min(self.limits.poll.0));
         };
         status.to_value().map_err(|error| refuse(error.to_string()))
     }
+}
+
+/// A duration as the whole milliseconds a transport request takes.
+fn millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]
@@ -482,13 +498,16 @@ mod tests {
             crate::station::transports::testing::DirTransport::new(std::path::Path::new(".")),
         )));
         assert_eq!(
-            DetachedTerminal::new(client.clone(), "mission-1").prefix,
+            DetachedTerminal::new(client.clone(), "mission-1", DetachedLimits::default()).prefix,
             "mission-1"
         );
         assert_eq!(
-            DetachedTerminal::new(client.clone(), "a b/c*").prefix,
+            DetachedTerminal::new(client.clone(), "a b/c*", DetachedLimits::default()).prefix,
             "a_b_c_"
         );
-        assert_eq!(DetachedTerminal::new(client, "-x").prefix, "m-x");
+        assert_eq!(
+            DetachedTerminal::new(client, "-x", DetachedLimits::default()).prefix,
+            "m-x"
+        );
     }
 }

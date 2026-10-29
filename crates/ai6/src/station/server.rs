@@ -74,6 +74,7 @@ use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
+use crate::station::limits::StationLimits;
 use crate::station::plugins;
 #[cfg(feature = "publisher")]
 use crate::station::publisher::MissionPublication;
@@ -101,12 +102,6 @@ pub const DEFAULT_RESOURCES_EVERY: Duration = Duration::from_secs(60);
 /// How often a Station asks its configuration source whether the roster or `loadouts.toml`
 /// changed, unless [`StationConfig::with_config_poll`] says otherwise.
 pub const DEFAULT_CONFIG_POLL: Duration = Duration::from_secs(5);
-const EVENT_QUEUE_LIMIT: usize = 256;
-const SCHEDULER_INTERVAL: Duration = Duration::from_millis(500);
-const SCHEDULER_RETRY_DELAY: Duration = Duration::from_secs(5);
-const STATION_CHECK_IN_INTERVAL: Duration = Duration::from_secs(15);
-const INTAKE_MAX_ATTEMPTS: u32 = 3;
-const MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES: usize = 512 * 1024;
 
 /// A capability advertised by an AI6 execution Station.
 #[non_exhaustive]
@@ -155,6 +150,8 @@ pub struct StationConfig {
     tls_weakened: Vec<String>,
     /// The pins and profile a runner the Station starts on its own host checks against.
     runner_pins: Option<(crate::PinSet, crate::PluginProfile)>,
+    /// The `station` record's tables: what bounds and paces the Station's work.
+    limits: Arc<StationLimits>,
 }
 
 /// What Moneypenny's desk on a Station allows: how long cloning one of her repositories may
@@ -181,11 +178,11 @@ impl Default for AssistantDeskLimits {
 }
 
 impl AssistantDeskLimits {
-    /// Gives up on a clone of one of her repositories after `timeout` (at least one second),
-    /// or once it holds more than `max_bytes` on disk, and removes what it made.
+    /// Gives up on a clone of one of her repositories after `timeout`, or once it holds more
+    /// than `max_bytes` on disk, and removes what it made.
     #[must_use]
     pub fn with_clone_limits(mut self, timeout: Duration, max_bytes: u64) -> Self {
-        self.clone_timeout = timeout.max(Duration::from_secs(1));
+        self.clone_timeout = timeout;
         self.clone_bytes = max_bytes;
         self
     }
@@ -237,6 +234,18 @@ impl StationConfig {
 
     pub(crate) fn protected_paths(&self) -> &[PathBuf] {
         &self.protected_paths
+    }
+
+    /// The `station` record's tables the Station runs by.
+    pub(crate) fn limits(&self) -> &StationLimits {
+        &self.limits
+    }
+
+    /// Runs by `limits` in place of the `station` record's tables.
+    #[cfg(test)]
+    pub(crate) fn with_limits(mut self, limits: StationLimits) -> Self {
+        self.limits = Arc::new(limits);
+        self
     }
 
     /// The state directory: the one set with [`StationConfig::with_state_dir`], else the
@@ -340,14 +349,6 @@ impl StationConfig {
         self
     }
 
-    /// Keeps a limited pool account out for at most `horizon` (default 8 days), whatever
-    /// reset time its provider reports.
-    #[must_use]
-    pub fn with_account_limit_horizon(mut self, horizon: Duration) -> Self {
-        self.credentials = self.credentials.with_account_limit_horizon(horizon);
-        self
-    }
-
     /// Makes the per-Mission `CODEX_HOME` of Codex pool accounts under `dir` instead of
     /// `accounts` in the Station's state directory. Cleanup removes only the directories the
     /// Station made there.
@@ -400,6 +401,7 @@ impl Default for StationConfig {
             protected_paths: Vec::new(),
             tls_weakened: Vec::new(),
             runner_pins: None,
+            limits: Arc::default(),
         }
     }
 }
@@ -683,6 +685,17 @@ fn apply_runtime(
     if let Some(every) = seconds(runtime.resources_every) {
         config.station.resources_every = every;
     }
+    if let Some(bytes) = runtime.partial_line_bytes {
+        config.watchdog = config.watchdog.clone().with_partial_line_bytes(bytes);
+    }
+    config.watchdog = config
+        .watchdog
+        .clone()
+        .with_csi_bytes(runtime.terminal_output.csi_bytes);
+    if let Some(timeout) = runtime.clone_timeout {
+        config.station.assistant.clone_timeout = timeout.0;
+    }
+    config.station.limits = Arc::new(runtime.limits());
     if let Some(caches) = &runtime.safe_house_caches {
         config.station.hygiene = std::mem::take(&mut config.station.hygiene)
             .with_caches(caches.clone())
@@ -846,7 +859,13 @@ where
     let startup_recovery = recover_startup_missions(&mut missions)?;
     let listener = TcpListener::bind(config.address).await?;
     #[cfg(feature = "publisher")]
-    let publisher = config.publisher.take().map(Publisher::start).transpose()?;
+    let publisher = config
+        .publisher
+        .take()
+        .map(|publisher| {
+            Publisher::start(publisher.with_limits(config.station.limits().publisher.clone()))
+        })
+        .transpose()?;
     let roster = Arc::new(roster);
     let live_config = Arc::new(reload::LiveConfig::new(
         config_source,
@@ -901,14 +920,17 @@ where
         scope_burst,
     )
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
-    let plugins = Arc::new(plugins::Plugins::scan_with(
-        &config.plugin_paths,
-        &plugin_policy,
-    ));
+    let provider_configs = plugins::provider_configs(&config.station.limits().providers)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("station.{error}")))?;
+    let plugins = Arc::new(
+        plugins::Plugins::scan_with(&config.plugin_paths, &plugin_policy)
+            .with_provider_configs(provider_configs),
+    );
     plugins::log_scan(plugins.scan_summary());
     let transports = Arc::new(
         Transports::build(&config.station.theaters, &plugins)
-            .with_resources_every(config.station.resources_every),
+            .with_resources_every(config.station.resources_every)
+            .with_limits(config.station.limits.clone()),
     );
     for theater in config.station.theaters.reachable() {
         for weakened in theater.weakenings() {
@@ -968,17 +990,18 @@ where
         })
         .await;
     state.stopping.store(true, Ordering::Release);
-    let _ = tokio::time::timeout(Duration::from_secs(2), scheduler).await;
+    let shutdown_wait = state.station.limits().scheduler.shutdown_wait.0;
+    let _ = tokio::time::timeout(shutdown_wait, scheduler).await;
     if let Some(reloading) = reloading {
-        let _ = tokio::time::timeout(Duration::from_secs(2), reloading).await;
+        let _ = tokio::time::timeout(shutdown_wait, reloading).await;
     }
     #[cfg(feature = "publisher")]
     if let Some(controls) = controls {
-        let _ = tokio::time::timeout(Duration::from_secs(2), controls).await;
+        let _ = tokio::time::timeout(shutdown_wait, controls).await;
     }
     #[cfg(feature = "publisher")]
     if let Some(assistant) = assistant {
-        let _ = tokio::time::timeout(Duration::from_secs(2), assistant).await;
+        let _ = tokio::time::timeout(shutdown_wait, assistant).await;
     }
     let event_pumps = std::mem::take(
         &mut *state
@@ -991,7 +1014,7 @@ where
             let _ = event_pump.await;
         }
     };
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), drain).await;
+    let _ = tokio::time::timeout(shutdown_wait, drain).await;
     served.map_err(io::Error::other)
 }
 
@@ -1068,8 +1091,9 @@ fn api(state: DaemonState, token: String) -> Router {
         );
     #[cfg(feature = "publisher")]
     let app = app.route("/internal/publisher", get(publisher_health));
+    let bearer = crate::station::runner::Bearer::new(token, &state.station.limits().runner);
     app.route_layer(axum::middleware::from_fn_with_state(
-        token,
+        bearer,
         crate::station::runner::authorize,
     ))
     .route("/healthz", get(|| async { "ok" }))
@@ -1571,7 +1595,10 @@ fn reserve_existing_session_resume(
 }
 
 async fn scheduler_loop(base: DaemonState) {
-    let desk = Arc::new(SourceDesk::new(base.station_id.clone()));
+    let desk = Arc::new(SourceDesk::new(
+        base.station_id.clone(),
+        base.station.limits().sources.clone(),
+    ));
     let mut next_station_check_in = Instant::now();
     while !base.stopping.load(Ordering::Acquire) {
         let state = base.current();
@@ -1579,7 +1606,7 @@ async fn scheduler_loop(base: DaemonState) {
         // slow Registry never stalls the async workers that serve Sessions.
         let check_in = Instant::now() >= next_station_check_in;
         if check_in {
-            next_station_check_in = Instant::now() + STATION_CHECK_IN_INTERVAL;
+            next_station_check_in = Instant::now() + state.station.limits().scheduler.check_in.0;
         }
         let tick = state.clone();
         let _ = tokio::task::spawn_blocking(move || {
@@ -1621,7 +1648,7 @@ async fn scheduler_loop(base: DaemonState) {
                 desk.end();
             });
         }
-        tokio::time::sleep(SCHEDULER_INTERVAL).await;
+        tokio::time::sleep(state.station.limits().scheduler.interval.0).await;
     }
 }
 
@@ -1636,7 +1663,8 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
     if is_headquarters && let Ok(expired) = state.intake.expired() {
         for lease in expired {
             if lease.station() != station
-                && let Some(max_attempts) = recovery::extract(state, &lease).max_attempts()
+                && let Some(max_attempts) = recovery::extract(state, &lease)
+                    .max_attempts(state.station.limits().scheduler.intake_attempts)
             {
                 let _ = state.intake.recover(&lease, max_attempts, station);
             }
@@ -1811,7 +1839,12 @@ async fn schedule_recovered_once(state: &DaemonState) {
                 let (worker, id) = (state.clone(), mission_id.clone());
                 tokio::task::spawn_blocking(move || recovery::reattach_failed(&worker, &id))
                     .await
-                    .unwrap_or_else(|_| Some(std::time::Instant::now() + SCHEDULER_RETRY_DELAY))
+                    .unwrap_or_else(|_| {
+                        Some(
+                            std::time::Instant::now()
+                                + state.station.limits().scheduler.retry_delay.0,
+                        )
+                    })
                     .map(Instant::from_std)
             }
         };
@@ -2096,13 +2129,15 @@ fn publish_station_check_in(state: &DaemonState) {
         serde_json::json!(std::process::id()),
     );
     info.insert("roles".to_owned(), serde_json::json!(roles));
+    let catalog_bytes = state.station.limits().scheduler.role_catalog_bytes;
     match serde_json::to_vec(&agent_roles) {
-        Ok(encoded) if encoded.len() <= MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES => {
+        Ok(encoded) if catalog_bytes.allows(encoded.len()) => {
             info.insert("agent_roles".to_owned(), serde_json::json!(agent_roles));
         }
         Ok(_) => eprintln!(
-            "ai6: Station role catalog exceeds the {} KiB check-in budget; Universal Exports role listing will omit the global catalog",
-            MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES / 1024
+            "ai6: Station role catalog exceeds the {catalog_bytes}-byte check-in budget \
+             ([scheduler] role_catalog_bytes); Universal Exports role listing will omit the \
+             global catalog"
         ),
         Err(error) => eprintln!("ai6: could not encode Station role catalog: {error}"),
     }
@@ -2162,12 +2197,12 @@ fn publish_station_check_in(state: &DaemonState) {
         })
         .collect();
     match serde_json::to_vec(&policies) {
-        Ok(encoded) if encoded.len() <= MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES => {
+        Ok(encoded) if catalog_bytes.allows(encoded.len()) => {
             info.insert("operation_policies".to_owned(), serde_json::json!(policies));
         }
         Ok(_) => eprintln!(
-            "ai6: Station placement policies exceed the {} KiB check-in budget; placement previews will be unavailable",
-            MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES / 1024
+            "ai6: Station placement policies exceed the {catalog_bytes}-byte check-in budget \
+             ([scheduler] role_catalog_bytes); placement previews will be unavailable"
         ),
         Err(error) => eprintln!("ai6: could not encode Station placement policies: {error}"),
     }
@@ -2339,7 +2374,11 @@ fn runner_link(state: &DaemonState, theater_id: &str) -> Result<Option<Arc<Runne
         .state_dir()
         .map_err(|error| error.to_string())?;
     let link = RunnerLink::for_theater(&theater, transport, &station_state)?;
+    let limits = state.station.limits();
+    let settings =
+        crate::station::runner::RunnerHandoff::new(limits.runner.clone(), limits.providers.clone());
     Ok(link
+        .map(|link| link.with_settings(settings))
         .map(|link| match &state.station.runner_pins {
             Some((pins, profile)) => link.with_pins(pins.clone(), *profile),
             None => link,
@@ -2562,12 +2601,24 @@ fn runner_session(
     session.into_object()
 }
 
+/// Tells the harness gate of a Session with a Cable endpoint how long to wait for this
+/// Station and how deep to read commands, as the `station` record says.
+#[cfg(feature = "cables-mcp")]
+fn gate_environment(state: &DaemonState, environment: &mut BTreeMap<String, String>) {
+    let limits = state.station.limits();
+    environment.extend(crate::directorates::section_00::gate::settings_environment(
+        &limits.green_ink,
+        &limits.approvals,
+    ));
+}
+
 /// The terminal a harness the Station supervises itself starts in.
 enum HarnessTerminal {
     /// The Station's Terminal provider, on its own host.
     Provider(Box<dyn Terminal>),
-    /// The detached wrapper on another POSIX host, over its transport.
-    Detached(Arc<TransportClient>),
+    /// The detached wrapper on another POSIX host, over its transport, within the
+    /// `[detached]` table.
+    Detached(Arc<TransportClient>, crate::station::limits::DetachedLimits),
 }
 
 fn harness_terminal(
@@ -2580,7 +2631,9 @@ fn harness_terminal(
         return state
             .transports
             .client(theater_id)
-            .map(HarnessTerminal::Detached)
+            .map(|client| {
+                HarnessTerminal::Detached(client, state.station.limits().detached.clone())
+            })
             .map_err(configuration_error);
     }
     state
@@ -2600,11 +2653,11 @@ impl HarnessTerminal {
         reach: &ReachWatch,
         #[cfg(feature = "cables-mcp")] route: Option<&CableRoute>,
     ) -> Box<dyn Terminal> {
-        let client = match self {
+        let (client, limits) = match self {
             Self::Provider(terminal) => return terminal,
-            Self::Detached(client) => client,
+            Self::Detached(client, limits) => (client, limits),
         };
-        let wrapper = crate::station::detached::DetachedTerminal::new(client, mission_id)
+        let wrapper = crate::station::detached::DetachedTerminal::new(client, mission_id, limits)
             .watched_by(reach.clone());
         #[cfg(feature = "cables-mcp")]
         if let Some(CableRoute {
@@ -2712,10 +2765,19 @@ async fn start_theater_tools(
         .capabilities()
         .map_err(|error| crate::directorates::q::transport::describe(&error))?;
     let check = green_ink::step_check(state, mission, agent);
-    let endpoint =
-        theater_mcp::Endpoint::start(client, capabilities.clone(), root.map(str::to_owned), check)
-            .await
-            .map_err(|error| format!("Theater MCP listener failed: {error}"))?;
+    let limits = state.station.limits();
+    let endpoint = theater_mcp::Endpoint::start(
+        client,
+        capabilities.clone(),
+        root.map(str::to_owned),
+        check,
+        (
+            limits.theater_tools.clone(),
+            limits.approvals.classify_nesting,
+        ),
+    )
+    .await
+    .map_err(|error| format!("Theater MCP listener failed: {error}"))?;
     endpoint.add_environment(environment);
     Ok((endpoint, theater_mcp::instructions(root, &capabilities)))
 }
@@ -3323,7 +3385,10 @@ async fn schedule_queued_once(state: &DaemonState) {
             Err(ApiErrorResponse(StatusCode::TOO_MANY_REQUESTS, _)) => break,
             Err(_) => {
                 if let Ok(mut retries) = state.retry_after.lock() {
-                    retries.insert(mission_id, Instant::now() + SCHEDULER_RETRY_DELAY);
+                    retries.insert(
+                        mission_id,
+                        Instant::now() + state.station.limits().scheduler.retry_delay.0,
+                    );
                 }
             }
         }
@@ -4106,6 +4171,7 @@ async fn start_mission(
                 ));
             }
             endpoint.add_environment(&mut environment);
+            gate_environment(&state, &mut environment);
             initial_context.push(cables_mcp::INSTRUCTIONS.to_owned());
             Some(endpoint)
         } else {
@@ -4835,6 +4901,7 @@ async fn resume_mission(
             ));
         }
         endpoint.add_environment(&mut environment);
+        gate_environment(&state, &mut environment);
         endpoint
             .bind_session(Some(&session_id))
             .map_err(|_| runtime_error("Cable Session binding failed"))?;
@@ -5601,7 +5668,13 @@ fn attach_observed_session(
 fn queue_event(state: &DaemonState, mission_id: &str, event: AgentEvent) {
     if let Ok(mut events) = state.events.lock() {
         let queue = events.entry(mission_id.to_owned()).or_default();
-        if queue.len() == EVENT_QUEUE_LIMIT {
+        if !state
+            .station
+            .limits()
+            .scheduler
+            .event_queue
+            .allows(queue.len() + 1)
+        {
             queue.pop_front();
         }
         queue.push_back(event);
@@ -5792,7 +5865,15 @@ fn handle_limit(
         return;
     }
 
-    let until = parked_until(state.clock.now(), resets_at, policy.1);
+    let grace = state
+        .station
+        .limits()
+        .accounts
+        .reset_grace
+        .0
+        .as_secs_f64()
+        .ceil() as i64;
+    let until = parked_until(state.clock.now(), resets_at, policy.1, grace);
     if park_mission(state, mission_id, until) {
         queue_event(state, mission_id, event);
     }
@@ -5896,7 +5977,10 @@ async fn schedule_parked_once(state: &DaemonState) {
             Err(ApiErrorResponse(StatusCode::TOO_MANY_REQUESTS, _)) => break,
             Err(_) => {
                 if let Ok(mut retries) = state.retry_after.lock() {
-                    retries.insert(mission_id, Instant::now() + SCHEDULER_RETRY_DELAY);
+                    retries.insert(
+                        mission_id,
+                        Instant::now() + state.station.limits().scheduler.retry_delay.0,
+                    );
                 }
             }
         }
@@ -6336,6 +6420,60 @@ mod tests {
     use super::*;
     use crate::directorates::registry::store::FileRegistry;
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_station_record_paces_check_ins_and_sizes_the_publication_queue() {
+        let root = tempfile::tempdir().unwrap();
+        let config_dir = root.path().join("config");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("station.toml"),
+            "[scheduler]
+check_in = 0.2
+
+[publisher]
+queue = 1
+",
+        )
+        .unwrap();
+        let snapshot = FileProvider::new(&config_dir).load("limits").unwrap();
+        let mut config = ServeConfig::new(SocketAddr::from(([127, 0, 0, 1], 0)));
+        apply_runtime(&mut config, &snapshot.settings.station).unwrap();
+        let limits = config.station.limits();
+        assert_eq!(limits.publisher.queue, 1);
+        assert_eq!(limits.scheduler.check_in.0, Duration::from_millis(200));
+        assert_eq!(
+            limits.scheduler.interval,
+            crate::station::limits::SchedulerLimits::default().interval
+        );
+
+        // A Station serving the record checks in five times a second; by default, once in 15.
+        let registry = Arc::new(FileRegistry::open(root.path().join("registry")));
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let serving = tokio::spawn(serve_with_options(
+            ServeConfig::new(SocketAddr::from(([127, 0, 0, 1], 0)))
+                .with_config_dir(&config_dir)
+                .with_registry(registry.clone())
+                .with_station_id("limits")
+                .with_station_config(
+                    StationConfig::default().with_state_dir(root.path().join("state")),
+                ),
+            async move {
+                let _ = stopped.await;
+            },
+        ));
+        let mut seen = BTreeSet::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while seen.len() < 4 && Instant::now() < deadline {
+            for station in registry.stations(DEFAULT_LEASE).unwrap_or_default() {
+                seen.insert(station.seen().to_bits());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let _ = stop.send(());
+        serving.await.unwrap().unwrap();
+        assert!(seen.len() >= 4, "{} check-ins in 10 seconds", seen.len());
+    }
+
     #[test]
     fn a_runner_reported_provider_cannot_forge_a_log_line() {
         assert_eq!(
@@ -6404,7 +6542,6 @@ mod tests {
         assert_eq!(event.kind, "completed");
     }
     use crate::directorates::m::config::MemoryProvider;
-    use crate::directorates::m::limits::RESET_GRACE_SECS;
     use crate::directorates::q::safehouse::{
         ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseSession,
     };
@@ -7599,7 +7736,7 @@ mod tests {
         start_mission_one(&state).await;
         wait_for_state(&state, "mission-1", MissionState::Parked).await;
 
-        let resume_at = MOCK_RESET + RESET_GRACE_SECS;
+        let resume_at = MOCK_RESET + 15;
         let parked = state
             .missions
             .lock()

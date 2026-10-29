@@ -19,25 +19,23 @@ use crate::directorates::m::placement::{
 };
 use crate::directorates::m::theaters::LOCAL_THEATER;
 use crate::directorates::registry::sessions::SessionRecord;
+use crate::station::limits::RecoveryLimits;
 
 /// Seconds a Session's runner, or its wrapped harness, may stay out of reach before its
 /// Station probes it and gives the Session up when it is still gone: three Station check-in
 /// intervals.
 pub const DEFAULT_LOST_AFTER_SECS: u64 = 45;
 
-/// The first wait between a Station's tries at re-attaching to a Session; each failed try
-/// doubles it, up to [`MAX_REATTACH_DELAY`].
-pub const FIRST_REATTACH_DELAY: Duration = Duration::from_secs(5);
-/// The longest wait between tries at re-attaching to a Session.
-pub const MAX_REATTACH_DELAY: Duration = Duration::from_secs(60);
-
 /// How long to wait before the next try at re-attaching to a Session after `failures` tries
-/// in a row failed.
-pub fn reattach_delay(failures: u32) -> Duration {
+/// in a row failed: `limits.first_reattach_delay`, doubled for each failure after the first,
+/// up to `limits.max_reattach_delay`.
+pub fn reattach_delay(failures: u32, limits: &RecoveryLimits) -> Duration {
     let doublings = failures.saturating_sub(1).min(16);
-    FIRST_REATTACH_DELAY
+    limits
+        .first_reattach_delay
+        .0
         .saturating_mul(1 << doublings)
-        .min(MAX_REATTACH_DELAY)
+        .min(limits.max_reattach_delay.0)
 }
 
 /// The live Station that should re-attach to `session`'s harness, or why none may.
@@ -225,10 +223,16 @@ mod tests {
 
     #[test]
     fn reattach_tries_back_off_up_to_a_ceiling() {
-        let delays: Vec<u64> = (1..=6).map(|n| reattach_delay(n).as_secs()).collect();
+        let limits = RecoveryLimits::default();
+        let delays: Vec<u64> = (1..=6)
+            .map(|n| reattach_delay(n, &limits).as_secs())
+            .collect();
         assert_eq!(delays, [5, 10, 20, 40, 60, 60]);
-        assert_eq!(reattach_delay(0), FIRST_REATTACH_DELAY);
-        assert_eq!(reattach_delay(u32::MAX), MAX_REATTACH_DELAY);
+        assert_eq!(reattach_delay(0, &limits), limits.first_reattach_delay.0);
+        assert_eq!(
+            reattach_delay(u32::MAX, &limits),
+            limits.max_reattach_delay.0
+        );
     }
 
     #[test]

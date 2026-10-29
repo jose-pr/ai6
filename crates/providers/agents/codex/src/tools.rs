@@ -25,6 +25,10 @@ use serde_json::Value;
 use crate::sandbox::SCRIPT_FEATURES;
 use crate::{internal, refuse};
 
+/// The longest terminal control sequence stripped from Codex's output, as a Station's
+/// `[terminal_output] csi_bytes` defaults to.
+const CSI_BYTES: ai6::Limit = ai6::Limit::at(64);
+
 /// The environment variable that chooses what a failed tool check does: `strict` (the
 /// default) refuses to start, `warn` starts and reports a weakening.
 pub const TOOL_CHECK_ENV: &str = "AI6_CODEX_TOOL_CHECK";
@@ -92,7 +96,7 @@ pub(crate) struct FeatureList {
 
 /// Reads `codex features list` output; `None` when no line reads as a feature.
 pub(crate) fn feature_list(output: &[u8]) -> Option<FeatureList> {
-    let text = String::from_utf8_lossy(&strip_controls(output)).replace('\r', "");
+    let text = String::from_utf8_lossy(&strip_controls(output, CSI_BYTES)).replace('\r', "");
     let mut read = 0;
     let mut list = FeatureList::default();
     for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
@@ -120,7 +124,7 @@ pub(crate) fn feature_list(output: &[u8]) -> Option<FeatureList> {
 /// server's environment values, so nothing else of it is kept.
 pub(crate) fn mcp_server_names(output: &[u8]) -> Option<Vec<String>> {
     // Pretty-printed JSON, as `offered_tools` reads it: every line break can go.
-    let mut text = strip_controls(output);
+    let mut text = strip_controls(output, CSI_BYTES);
     text.retain(|byte| !matches!(byte, b'\r' | b'\n'));
     let start = (0..text.len()).find(|&at| opens_server_list(&text[at..]))?;
     let servers: Value = serde_json::from_slice(&text[start..]).ok()?;
@@ -190,7 +194,7 @@ pub(crate) fn offered_tools(output: &[u8]) -> Option<Vec<String>> {
 fn prompt_items(output: &[u8]) -> Option<Vec<Value>> {
     // The output is pretty-printed JSON, and a terminal may break a long line: JSON text holds
     // no raw line break, so every one can go.
-    let mut text = strip_controls(output);
+    let mut text = strip_controls(output, CSI_BYTES);
     text.retain(|byte| !matches!(byte, b'\r' | b'\n'));
     let start = (0..text.len()).find(|&at| opens_item_list(&text[at..]))?;
     // One value, then only whitespace: `from_slice` refuses anything after it.
@@ -489,6 +493,7 @@ impl Probe<'_> {
         let check = ToolCheck::from_environment(self.environment)?;
         let version = String::from_utf8_lossy(&strip_controls(
             &self.capture(&[self.executable.to_owned(), "--version".to_owned()])?,
+            CSI_BYTES,
         ))
         .trim()
         .to_owned();

@@ -71,9 +71,9 @@ fn a_container_theater_is_made_fitted_out_used_and_gone_afterwards() {
             "printf '#!/bin/sh\\necho ai6-stand-in 1.0\\n' > /usr/local/bin/ai6-stand-in \
              && chmod 755 /usr/local/bin/ai6-stand-in",
         ));
-    let steps = provision::provision(&client, &theater, false);
+    let steps = provision::provision(&client, &theater, false, &Default::default());
     assert_eq!(steps[0].status, StepStatus::Changed, "{steps:#?}");
-    let again = provision::provision(&client, &theater, false);
+    let again = provision::provision(&client, &theater, false, &Default::default());
     assert_eq!(again[0].status, StepStatus::Ok, "{again:#?}");
     let ran = client
         .run(&RunSpec {

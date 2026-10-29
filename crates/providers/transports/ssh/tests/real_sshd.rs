@@ -307,7 +307,8 @@ fn the_ssh_transport_works_against_a_real_openssh_server() {
     assert!(probed.files && probed.run && probed.terminal && probed.forward);
 
     // Its CPUs, load and memory, as a Station samples a Theater for placement.
-    let resources = ai6::probe_resources(&pinned, &probed).expect("the host can be sampled");
+    let resources = ai6::probe_resources(&pinned, &probed, &Default::default())
+        .expect("the host can be sampled");
     assert!(
         resources.cpus.is_some_and(|cpus| cpus >= 1.0) && resources.load_1m.is_some(),
         "{resources:?}"

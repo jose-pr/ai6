@@ -49,12 +49,12 @@ use coqui_peer::{Digest as PinDigest, PeerId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::directorates::m::harness::MAX_MANIFEST_FILE_BYTES;
 use crate::directorates::section_00::agent::AssistantNetwork;
 use crate::directorates::section_00::assistant::{
     AssistantReach, host_pattern, interpreter_name, valid_identity,
 };
 use crate::directorates::section_00::denied::DenyList;
+use crate::station::limits::HarnessLimits;
 
 /// The name a person's identifier takes in `personal_repo`.
 pub const PERSON_PLACEHOLDER: &str = "{person}";
@@ -483,7 +483,7 @@ pub fn skill_name(name: &str) -> bool {
 }
 
 /// Checks the skill in `dir` as the catalog's `name`: a `SKILL.md` that is a regular file of at
-/// most [`MAX_MANIFEST_FILE_BYTES`], UTF-8, opening with `---` front matter that parses as YAML
+/// most `limits.manifest_file_bytes`, UTF-8, opening with `---` front matter that parses as YAML
 /// with `name` equal to `name` and a non-empty `description`. Unless `allow_tools`, its front
 /// matter has only [`SKILL_INERT_KEYS`] and it has no injected command (`` !`command` ``, or a
 /// fenced block opened with `` ```! ``), since those grant tools or run commands in her
@@ -492,7 +492,12 @@ pub fn skill_name(name: &str) -> bool {
 /// # Errors
 ///
 /// A message saying what is wrong with it.
-pub fn check_skill(dir: &Path, name: &str, allow_tools: bool) -> Result<(), String> {
+pub fn check_skill(
+    dir: &Path,
+    name: &str,
+    allow_tools: bool,
+    limits: &HarnessLimits,
+) -> Result<(), String> {
     let path = dir.join("SKILL.md");
     let metadata = std::fs::symlink_metadata(dir)
         .and_then(|metadata| {
@@ -505,10 +510,11 @@ pub fn check_skill(dir: &Path, name: &str, allow_tools: bool) -> Result<(), Stri
             }
         })
         .map_err(|error| format!("{}: {error}", path.display()))?;
-    if !metadata.file_type().is_file() || metadata.len() > MAX_MANIFEST_FILE_BYTES {
+    if !metadata.file_type().is_file() || !limits.manifest_file_bytes.allows(metadata.len()) {
         return Err(format!(
-            "{} is not a regular file of at most {MAX_MANIFEST_FILE_BYTES} bytes",
-            path.display()
+            "{} is not a regular file of at most {} bytes",
+            path.display(),
+            limits.manifest_file_bytes
         ));
     }
     let text =
@@ -1091,8 +1097,13 @@ impl AssistantSettings {
                      assistant.skills_unpinned = true loads it without one)"
                 ));
             }
-            check_skill(Path::new(&skill.path), name, self.skills_allow_tools)
-                .map_err(|reason| format!("{key}: {reason}"))?;
+            check_skill(
+                Path::new(&skill.path),
+                name,
+                self.skills_allow_tools,
+                &HarnessLimits::default(),
+            )
+            .map_err(|reason| format!("{key}: {reason}"))?;
         }
         for (group, narrowing) in &self.group {
             if !valid_identity(group) {

@@ -33,7 +33,8 @@ fn the_container_transport_works_on_a_real_engine() {
 
     // A container reports its own limits, not the host's, when it has them:
     // `AI6_TEST_CONTAINER_MEMORY_MB` names the container's `--memory` limit in MiB.
-    let resources = ai6::probe_resources(&client, &probed).expect("the container is sampled");
+    let resources = ai6::probe_resources(&client, &probed, &Default::default())
+        .expect("the container is sampled");
     assert!(
         resources.cpus.is_some_and(|cpus| cpus > 0.0),
         "{resources:?}"

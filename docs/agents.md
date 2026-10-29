@@ -359,7 +359,10 @@ what Codex asked; each is logged and recorded as a `declined` event. In remote-h
 `theater_run` command itself. The hook is the `ai6` program hosting the handler unless the
 Agent's roster environment names another in `AI6_GREEN_INK_GATE` (reported as a weakening; a
 start or resume request cannot set it), and it is given the Session's Cable URL in its own
-arguments. It needs Claude Code 2.1.295 or later, which blocks the call when the hook cannot
+arguments. The Station sets `AI6_GREEN_INK_TIMEOUT` and `AI6_GREEN_INK_NESTING` in the
+Session's environment from its `station` record (`[green_ink] gate_timeout`, `[approvals]
+classify_nesting`): how long the gate waits for the Station and how deep it reads nested
+shells and git aliases. It needs Claude Code 2.1.295 or later, which blocks the call when the hook cannot
 run.
 
 ## Credentials
@@ -400,9 +403,10 @@ targets = ["tag v*", "origin:refs/tags/*"]   # globs on the approval's target; d
   environment. The environment is the weaker choice, logged as a weakening at start: every
   process the Station starts on its own host inherits it, a harness among them, green ink
   or not. `StationConfig::with_secret_backend` puts another backend in its place, such as a
-  vault client whose leases expire on their own. Leases last at most an hour and are
-  revoked when the Mission ends or its Session stops on that Station; a value already in a
-  harness's environment stays there until the harness ends.
+  vault client whose leases expire on their own. Leases last an hour (the `station` record's
+  `[secrets] lease_ttl`, at most `max_lease_ttl`) and are revoked when the Mission ends or
+  its Session stops on that Station; a value already in a harness's environment stays there
+  until the harness ends.
 - A harness on the Station's own host runs as the Station's user, so it can read what that
   user can, the secret files among them. Keep green ink credentials out of reach of local
   harnesses: give them to Missions on other Theaters, or use a backend the harness cannot
@@ -490,7 +494,8 @@ a person approved.
   from a `config-dir` or Codex account (those are tried again as a new attempt instead).
 - **Balancing**: `headroom` skips accounts that are limited or at `max_concurrent`, then
   takes the one whose most used quota window is lowest (an account whose provider has
-  reported nothing counts as half used; a window past its reset counts as unused), then the
+  reported nothing counts as half used, the `station` record's `[accounts]
+  unknown_use_permille`; a window past its reset counts as unused), then the
   one with fewest Sessions, then the least recently used, then the highest priority.
   `round_robin` takes the least recently used and `priority` the highest priority with room.
 - **Claims and usage**: a claim is released when the Session ends, fails or is fenced out,
@@ -501,7 +506,7 @@ a person approved.
   `reclaimed` on the timeline). The tokens each Session uses count toward its account's day,
   and the quota windows Claude Code and Codex report are kept per account.
 - **Limits**: a limited account is skipped until its reset, but never longer than eight days
-  (`StationConfig::with_account_limit_horizon`), whatever the provider reports. An operator
+  (the `station` record's `[accounts] limit_horizon`), whatever the provider reports. An operator
   with `pool.manage` lifts a limit early with `ai6ctl pools clear-limit POOL ACCOUNT
   --operation <id>` (audited as `pool.limit.clear`).
 - **Weakenings**, logged at start: a `config-dir` account hands the harness a login kept on

@@ -66,7 +66,8 @@ pub(super) fn provision_theater(
         }
     }
     let client = state.transports.client(id)?;
-    let mut steps = provision::provision(&client, &theater, !apply);
+    let mut steps =
+        provision::provision(&client, &theater, !apply, &state.station.limits().provision);
     for step in &mut steps {
         if step.status == StepStatus::Failed {
             step.detail = format!(
@@ -83,6 +84,7 @@ pub(super) fn provision_theater(
                 &capabilities,
                 theater.requires.as_ref(),
                 theater.workdir.as_deref(),
+                &state.station.limits().provision,
             );
             state.transports.set_report(id, report);
         }

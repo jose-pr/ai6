@@ -232,7 +232,8 @@ The **manifest** of a working directory is every regular file under `.claude/` a
 line of a skill's or subagent's front matter; `$CLAUDE_PROJECT_DIR` stands for the working
 directory. `pin` is the digest of the manifest's lines, `PATH NUL sha256:HEX LF` in path
 order. A symbolic link, a device, a pipe, a file over 1 MiB, more than 16 MiB or more than
-4096 files in all make the manifest unreadable, and the harness starts as `ignore`. Under
+4096 files in all (the Station's `[harness]` limits) make the manifest unreadable, and the
+harness starts as `ignore`. Under
 `pinned`, Claude Code keeps `--strict-mcp-config` unless the manifest holds `.mcp.json`.
 
 Each `pinned` start and resume reads the manifest on the Station and records its digest on

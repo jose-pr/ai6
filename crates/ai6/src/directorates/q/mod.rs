@@ -18,9 +18,8 @@ pub use pools::{
 };
 pub use sandbox::{SandboxError, SandboxRequest};
 pub use secrets::{
-    DEFAULT_SECRET_LEASE_TTL, MAX_SECRET_LEASE_TTL, SecretBackend, SecretBackendFailure,
-    SecretBroker, SecretError, SecretLease, SecretLeaseRequest, SecretRequest, SecretValue,
-    StationSecrets,
+    SecretBackend, SecretBackendFailure, SecretBroker, SecretError, SecretLease,
+    SecretLeaseRequest, SecretRequest, SecretValue, StationSecrets,
 };
 
 use std::collections::BTreeMap;

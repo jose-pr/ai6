@@ -21,9 +21,6 @@ pub(crate) const URL_KEY: &str = "AI6_CABLE_MCP_URL";
 /// The environment variable that carries the Cable MCP endpoint's bearer token to a harness.
 pub(crate) const TOKEN_KEY: &str = "AI6_CABLE_MCP_TOKEN";
 
-/// The largest request body relayed; MCP requests are small JSON documents.
-const MAX_REQUEST: usize = 4 * 1024 * 1024;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Request headers MCP's streamable HTTP transport depends on; nothing else is relayed.
 const REQUEST_HEADERS: [&str; 5] = [
     "content-type",
@@ -55,6 +52,9 @@ impl Upstream {
 struct Shared {
     token: Arc<str>,
     upstream: Arc<RwLock<Option<Upstream>>>,
+    /// The largest request body relayed; MCP requests are small JSON documents.
+    request_bytes: usize,
+    connect_timeout: Duration,
 }
 
 /// A running relay, stopped when dropped.
@@ -66,8 +66,12 @@ pub(super) struct CableProxy {
 }
 
 impl CableProxy {
-    /// Listens on a loopback port and relays to `upstream` until another is set.
-    pub(super) async fn start(upstream: Option<Upstream>) -> std::io::Result<Self> {
+    /// Listens on a loopback port and relays to `upstream` until another is set, within the
+    /// `cable_*` keys of `limits`.
+    pub(super) async fn start(
+        upstream: Option<Upstream>,
+        limits: &crate::station::limits::RunnerLimits,
+    ) -> std::io::Result<Self> {
         let token = uuid::Uuid::new_v4().to_string();
         let upstream = Arc::new(RwLock::new(upstream));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -77,6 +81,8 @@ impl CableProxy {
             .with_state(Shared {
                 token: token.clone().into(),
                 upstream: upstream.clone(),
+                request_bytes: limits.cable_request_bytes.or_max(),
+                connect_timeout: limits.cable_connect_timeout.0,
             });
         let server = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
@@ -117,7 +123,7 @@ async fn relay(State(shared): State<Shared>, request: Request) -> Response {
     // The body is read before any refusal: answering an unread request and closing makes
     // Windows abort the client's send instead of delivering the status.
     let (parts, body) = request.into_parts();
-    let Ok(body) = axum::body::to_bytes(body, MAX_REQUEST).await else {
+    let Ok(body) = axum::body::to_bytes(body, shared.request_bytes).await else {
         return refuse(StatusCode::PAYLOAD_TOO_LARGE, "the request is too large");
     };
     let presented = parts
@@ -148,13 +154,14 @@ async fn relay(State(shared): State<Shared>, request: Request) -> Response {
     let (chunk_sender, chunks) = tokio::sync::mpsc::channel::<Bytes>(16);
     // The upstream answer may be a stream that lasts as long as the MCP session, so it is
     // read on a thread of its own and handed over chunk by chunk.
+    let connect_timeout = shared.connect_timeout;
     let spawned = std::thread::Builder::new()
         .name("ai6-runner-cable".to_owned())
         .spawn(move || {
             let agent: ureq::Agent = ureq::Agent::config_builder()
                 .http_status_as_error(false)
                 .max_redirects(0)
-                .timeout_connect(Some(CONNECT_TIMEOUT))
+                .timeout_connect(Some(connect_timeout))
                 .build()
                 .into();
             let response = if body.is_empty() {
@@ -308,7 +315,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn the_harness_keeps_its_endpoint_while_the_station_behind_it_changes() {
         let first = echo_station("first-token", "first").await;
-        let proxy = CableProxy::start(None).await.unwrap();
+        let proxy = CableProxy::start(None, &Default::default()).await.unwrap();
         let mut environment = BTreeMap::new();
         proxy.add_environment(&mut environment);
         let (url, token) = (environment[URL_KEY].clone(), environment[TOKEN_KEY].clone());

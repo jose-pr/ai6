@@ -14,8 +14,8 @@
 //! Sessions with a `lost` event, which a Station takes as the Session lost.
 //!
 //! The state directory holds `runner.json` (where the runner listens, while it runs),
-//! `token`, `runner.lock` and `sessions/<key>/` with `events.jsonl`, `cursor` and
-//! `session.json`.
+//! `token`, `runner.lock`, `settings.json` (the [`RunnerHandoff`] it runs by) and
+//! `sessions/<key>/` with `events.jsonl`, `cursor` and `session.json`.
 
 mod cable;
 pub(crate) mod client;
@@ -47,6 +47,7 @@ use crate::directorates::q::terminal::{HarnessStdio, TerminalBridge};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
+use crate::station::limits::RunnerLimits;
 use crate::station::plugins::Plugins;
 
 #[cfg(feature = "cables-mcp")]
@@ -59,14 +60,11 @@ const TOKEN_FILE: &str = "token";
 const LOCK_FILE: &str = "runner.lock";
 const SESSIONS_DIR: &str = "sessions";
 const SESSION_FILE: &str = "session.json";
-/// Most events one read returns.
-const PAGE: usize = 256;
-/// The longest a read waits for a new event.
-const MAX_WAIT: Duration = Duration::from_secs(30);
+/// The file in the state directory holding the [`RunnerHandoff`] the runner serves by, which
+/// `ai6 runner call` reads too.
+pub const SETTINGS_FILE: &str = "settings.json";
 /// How long the pump waits for one event before it checks whether to stop.
 const POLL_MS: i64 = 250;
-/// Ended Sessions older than this are removed when a runner starts.
-const KEEP_ENDED: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// The exit status of `ai6 runner call` when no runner answers it.
 pub const CALL_NOT_RUNNING: u8 = 3;
@@ -95,6 +93,67 @@ impl RunnerInfo {
     }
 }
 
+/// What a Station hands a runner it starts: the `[runner]` table and the `[providers.<id>]`
+/// tables of its `station` record. `ai6 runner serve --settings PATH` reads it as JSON; a key
+/// it does not name keeps its default.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RunnerHandoff {
+    /// How the runner serves.
+    pub runner: RunnerLimits,
+    /// The Guatiao configuration each provider is built with when a request gives none.
+    pub providers: BTreeMap<String, serde_json::Value>,
+}
+
+impl RunnerHandoff {
+    /// The settings `runner` and `providers`.
+    pub fn new(runner: RunnerLimits, providers: BTreeMap<String, serde_json::Value>) -> Self {
+        Self { runner, providers }
+    }
+
+    /// Reads the settings in `path`.
+    ///
+    /// # Errors
+    ///
+    /// The file cannot be read, or is not settings JSON.
+    pub fn read(path: &Path) -> io::Result<Self> {
+        Self::parse(&fs::read(path)?)
+    }
+
+    /// Reads settings JSON from `bytes`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidData` for anything but settings JSON with acceptable values.
+    pub fn parse(bytes: &[u8]) -> io::Result<Self> {
+        let settings: Self = serde_json::from_slice(bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        if settings.runner.page == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "runner.page: at least 1",
+            ));
+        }
+        crate::station::plugins::provider_configs(&settings.providers)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Ok(settings)
+    }
+
+    /// The settings recorded in the state directory `state_dir`, or the defaults when there
+    /// are none.
+    ///
+    /// # Errors
+    ///
+    /// The file exists but cannot be read or parsed.
+    pub fn in_state_dir(state_dir: &Path) -> io::Result<Self> {
+        match Self::read(&state_dir.join(SETTINGS_FILE)) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
+            read => read,
+        }
+    }
+}
+
 /// How `ai6 runner serve` runs.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -104,6 +163,7 @@ pub struct RunnerConfig {
     plugin_paths: Vec<PathBuf>,
     plugin_policy: crate::station::plugins::PluginPolicy,
     terminal: Option<String>,
+    settings: RunnerHandoff,
 }
 
 impl RunnerConfig {
@@ -115,7 +175,23 @@ impl RunnerConfig {
             plugin_paths: Vec::new(),
             plugin_policy: crate::station::plugins::PluginPolicy::default(),
             terminal: None,
+            settings: RunnerHandoff::default(),
         }
+    }
+
+    /// Serves within `limits` (default [`RunnerLimits::default`]).
+    #[must_use]
+    pub fn with_limits(mut self, limits: RunnerLimits) -> Self {
+        self.settings.runner = limits;
+        self
+    }
+
+    /// Builds provider `<id>` with `configs[<id>]` when a request gives no configuration of
+    /// its own.
+    #[must_use]
+    pub fn with_provider_configs(mut self, configs: BTreeMap<String, serde_json::Value>) -> Self {
+        self.settings.providers = configs;
+        self
     }
 
     /// Listens on `address`, which must be a loopback address.
@@ -160,10 +236,12 @@ pub async fn serve<F>(config: RunnerConfig, shutdown: F) -> io::Result<()>
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    let plugins = Arc::new(Plugins::scan_with(
-        &config.plugin_paths,
-        &config.plugin_policy,
-    ));
+    let configs = crate::station::plugins::provider_configs(&config.settings.providers)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let plugins = Arc::new(
+        Plugins::scan_with(&config.plugin_paths, &config.plugin_policy)
+            .with_provider_configs(configs),
+    );
     crate::station::plugins::log_scan(plugins.scan_summary());
     serve_with_plugins(config, plugins, shutdown).await
 }
@@ -195,12 +273,19 @@ where
         )
     })?;
     let token = ensure_token(&config.state_dir)?;
+    write_atomically(
+        &config.state_dir.join(SETTINGS_FILE),
+        &serde_json::to_vec_pretty(&config.settings).map_err(io::Error::other)?,
+    )?;
+    let limits = config.settings.runner;
+    let bearer = Bearer::new(token, &limits);
     let runner = Runner {
         inner: Arc::new(Inner {
             state_dir: config.state_dir.clone(),
             plugins,
             terminal: config.terminal,
-            sessions: Mutex::new(load_sessions(&config.state_dir)?),
+            sessions: Mutex::new(load_sessions(&config.state_dir, &limits)?),
+            limits,
             stopping: AtomicBool::new(false),
             _lock: lock,
         }),
@@ -224,7 +309,7 @@ where
         .route("/v1/sessions/{key}/interrupt", post(interrupt))
         .route("/v1/sessions/{key}/close", post(close))
         .route("/v1/sessions/{key}/cable", put(set_cable))
-        .layer(middleware::from_fn_with_state(token, authorize))
+        .layer(middleware::from_fn_with_state(bearer, authorize))
         .with_state(runner.clone());
     let served = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
@@ -240,7 +325,9 @@ where
     served
 }
 
-/// Sends one request to the runner serving `state_dir` and answers its status and JSON body.
+/// Sends one request to the runner serving `state_dir` and answers its status and JSON body,
+/// connecting within `limits.connect_timeout` and waiting at most `limits.max_wait` and
+/// `limits.call_margin` for the answer.
 ///
 /// This is what `ai6 runner call` does for a Station that reaches the Theater through a
 /// transport, and what a Station on the same host does itself.
@@ -249,6 +336,7 @@ pub fn call(
     method: &str,
     path: &str,
     body: Option<&serde_json::Value>,
+    limits: &RunnerLimits,
 ) -> Result<(u16, serde_json::Value), String> {
     let not_running = |why: String| format!("no runner serves {} ({why})", state_dir.display());
     let info = RunnerInfo::read(state_dir).map_err(|error| not_running(error.to_string()))?;
@@ -257,8 +345,8 @@ pub fn call(
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
-        .timeout_connect(Some(Duration::from_secs(5)))
-        .timeout_global(Some(MAX_WAIT + Duration::from_secs(30)))
+        .timeout_connect(Some(limits.connect_timeout.0))
+        .timeout_global(Some(limits.max_wait.0 + limits.call_margin.0))
         .build()
         .into();
     let request = ureq::http::Request::builder()
@@ -293,7 +381,8 @@ pub fn call(
 }
 
 /// Starts `program runner serve <arguments>` in the background, detached from the caller's
-/// terminal and session, and answers once it serves `state_dir`.
+/// terminal and session, and answers once it serves `state_dir`, giving up after
+/// `start_wait`.
 ///
 /// Its output goes to `runner.log` in the state directory. On Windows it also inherits the
 /// caller's inheritable handles, such as an output pipe, and holds them while it runs.
@@ -301,6 +390,7 @@ pub fn spawn_detached(
     program: &Path,
     arguments: &[std::ffi::OsString],
     state_dir: &Path,
+    start_wait: Duration,
 ) -> io::Result<RunnerInfo> {
     fs::create_dir_all(state_dir)?;
     let log = OpenOptions::new()
@@ -329,7 +419,7 @@ pub fn spawn_detached(
         command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
     let mut child = command.spawn()?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let deadline = std::time::Instant::now() + start_wait;
     loop {
         if let Ok(info) = RunnerInfo::read(state_dir)
             && info.pid == child.id()
@@ -346,7 +436,10 @@ pub fn spawn_detached(
             let _ = child.kill();
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "the runner did not start within 30 seconds",
+                format!(
+                    "the runner did not start within {} seconds",
+                    start_wait.as_secs_f64()
+                ),
             ));
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -430,6 +523,7 @@ struct Inner {
     plugins: Arc<Plugins>,
     terminal: Option<String>,
     sessions: Mutex<BTreeMap<String, Arc<Hosted>>>,
+    limits: RunnerLimits,
     stopping: AtomicBool,
     _lock: File,
 }
@@ -515,8 +609,11 @@ fn valid_key(key: &str) -> bool {
 }
 
 /// The Sessions in the state directory. One that was live when its runner stopped ends now,
-/// with an event saying why; ended ones past [`KEEP_ENDED`] are removed.
-fn load_sessions(state_dir: &Path) -> io::Result<BTreeMap<String, Arc<Hosted>>> {
+/// with an event saying why; ended ones older than `limits.keep_ended` are removed.
+fn load_sessions(
+    state_dir: &Path,
+    limits: &RunnerLimits,
+) -> io::Result<BTreeMap<String, Arc<Hosted>>> {
     let mut sessions = BTreeMap::new();
     let now = unix_seconds();
     for entry in fs::read_dir(state_dir.join(SESSIONS_DIR))? {
@@ -534,7 +631,9 @@ fn load_sessions(state_dir: &Path) -> io::Result<BTreeMap<String, Arc<Hosted>>> 
         else {
             continue;
         };
-        if file.ended && now.saturating_sub(file.created_at) > KEEP_ENDED.as_secs() {
+        if file.ended
+            && now.saturating_sub(file.created_at) as f64 > limits.keep_ended.0.as_secs_f64()
+        {
             let _ = fs::remove_dir_all(&dir);
             continue;
         }
@@ -734,12 +833,27 @@ fn failure(status: StatusCode, message: impl Into<String>) -> Failure {
     Failure(status, message.into())
 }
 
-/// The most of a refused request's body read before the 401, in bytes.
-const REFUSED_BODY_DRAIN: usize = 64 * 1024;
+/// The bearer token an API takes, and how much of a refused request's body it reads before
+/// answering.
+#[derive(Clone)]
+pub(crate) struct Bearer {
+    token: String,
+    drain: usize,
+}
+
+impl Bearer {
+    /// `token`, draining refused bodies up to `limits.refused_body_drain_bytes`.
+    pub(crate) fn new(token: String, limits: &RunnerLimits) -> Self {
+        Self {
+            token,
+            drain: limits.refused_body_drain_bytes.or_max(),
+        }
+    }
+}
 
 /// Lets a request through only with `Authorization: Bearer TOKEN`, compared in constant time.
 pub(crate) async fn authorize(
-    State(token): State<String>,
+    State(Bearer { token, drain }): State<Bearer>,
     request: Request,
     next: Next,
 ) -> Response {
@@ -752,7 +866,7 @@ pub(crate) async fn authorize(
     if supplied.len() != token.len() || !bool::from(supplied.as_bytes().ct_eq(token.as_bytes())) {
         // Read a small body before answering: a socket closed with unread data is reset, and
         // a Windows client then sees an aborted connection instead of the 401.
-        let _ = axum::body::to_bytes(request.into_body(), REFUSED_BODY_DRAIN).await;
+        let _ = axum::body::to_bytes(request.into_body(), drain).await;
         return failure(StatusCode::UNAUTHORIZED, "a valid bearer token is required")
             .into_response();
     }
@@ -873,7 +987,7 @@ async fn start_session(
     };
     // The harness talks to the runner's relay, which a re-attaching Station repoints.
     if let Some(upstream) = Upstream::from_environment(environment) {
-        match cable::CableProxy::start(Some(upstream)).await {
+        match cable::CableProxy::start(Some(upstream), &runner.inner.limits).await {
             Ok(proxy) => {
                 proxy.add_environment(environment);
                 *lock_of(&hosted.cable) = Some(proxy);
@@ -940,13 +1054,13 @@ async fn read_events(
         if let Err(error) = spool.acknowledge(after) {
             eprintln!("ai6 runner: Session {key:?} cursor not written: {error}");
         }
-        let events = spool.after(after, PAGE);
+        let events = spool.after(after, runner.inner.limits.page);
         let through = events.last().map_or(after, |spooled| spooled.seq);
         let complete = hosted.ended.load(Ordering::Acquire) && through >= spool.last();
         (after, events, complete)
     };
     let (after, mut events, mut complete) = page(query.after);
-    let wait = Duration::from_millis(query.timeout_ms).min(MAX_WAIT);
+    let wait = Duration::from_millis(query.timeout_ms).min(runner.inner.limits.max_wait.0);
     if events.is_empty() && !complete && !wait.is_zero() {
         let _ = tokio::time::timeout(wait, async {
             loop {
@@ -1075,7 +1189,7 @@ mod tests {
         session_on_disk(state_dir.path(), "done", true, unix_seconds());
         let old = session_on_disk(state_dir.path(), "old", true, 1);
 
-        let sessions = load_sessions(state_dir.path()).unwrap();
+        let sessions = load_sessions(state_dir.path(), &RunnerLimits::default()).unwrap();
         assert_eq!(
             sessions.keys().map(String::as_str).collect::<Vec<_>>(),
             ["done", "live"]
@@ -1096,7 +1210,7 @@ mod tests {
         );
         // Ended once is enough: loading again adds nothing.
         drop(sessions);
-        let again = load_sessions(state_dir.path()).unwrap();
+        let again = load_sessions(state_dir.path(), &RunnerLimits::default()).unwrap();
         assert_eq!(again["live"].report().last, 2);
         assert_eq!(again["done"].report().last, 1);
     }
@@ -1108,6 +1222,7 @@ mod tests {
                 plugins: Arc::new(crate::station::plugins::testing::terminal_choice(with_pipe)),
                 terminal: pinned.map(str::to_owned),
                 sessions: Mutex::new(BTreeMap::new()),
+                limits: RunnerLimits::default(),
                 stopping: AtomicBool::new(false),
                 _lock: File::create(state_dir.join(LOCK_FILE)).unwrap(),
             }),
@@ -1201,7 +1316,8 @@ mod tests {
         let dir = state_dir.path().to_path_buf();
         let health = tokio::task::spawn_blocking(move || {
             for _ in 0..500 {
-                if let Ok(answer) = call(&dir, "GET", "/v1/health", None) {
+                if let Ok(answer) = call(&dir, "GET", "/v1/health", None, &RunnerLimits::default())
+                {
                     return answer;
                 }
                 std::thread::sleep(Duration::from_millis(10));
@@ -1248,9 +1364,11 @@ mod tests {
             "a runner that stops says so by removing runner.json"
         );
         let dir = state_dir.path().to_path_buf();
-        let gone = tokio::task::spawn_blocking(move || call(&dir, "GET", "/v1/health", None))
-            .await
-            .unwrap();
+        let gone = tokio::task::spawn_blocking(move || {
+            call(&dir, "GET", "/v1/health", None, &RunnerLimits::default())
+        })
+        .await
+        .unwrap();
         assert!(gone.unwrap_err().contains("no runner serves"));
     }
 }
