@@ -127,6 +127,7 @@ impl ai6::directorates::m::assistant::AssistantNarrowing
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::new() -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::skills(&self) -> core::option::Option<&[alloc::string::String]>
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_allowed_hosts(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_denied_networks(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_network(self, ai6::directorates::m::assistant::NetworkPolicy) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_skills(self, alloc::vec::Vec<alloc::string::String>) -> Self
@@ -136,6 +137,7 @@ impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::changes_from(&self, &ai6::directorates::m::assistant::AssistantSettings) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::denied_networks(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::deployment_reach(&self) -> ai6::directorates::section_00::assistant::AssistantReach
 pub fn ai6::directorates::m::assistant::AssistantSettings::has_group_narrowing(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::interpreters(&self) -> &[alloc::string::String]
@@ -156,6 +158,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_elevated(self, bool) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_denied_networks(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_group(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_network(self, ai6::directorates::m::assistant::NetworkPolicy, alloc::vec::Vec<alloc::string::String>) -> Self
@@ -3856,6 +3859,7 @@ pub fn ai6::directorates::section_00::agent::AssistantMode::validate(&self) -> c
 pub fn ai6::directorates::section_00::agent::AssistantMode::with_cables(self) -> Self
 pub struct ai6::directorates::section_00::agent::AssistantNetwork
 pub ai6::directorates::section_00::agent::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::agent::AssistantNetwork::denied: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::agent::AssistantNetwork::policy: alloc::string::String
 impl ai6::directorates::section_00::agent::AssistantNetwork
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::open(&self) -> bool
@@ -4093,6 +4097,24 @@ pub fn ai6::directorates::section_00::assistant::memory_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::outside_tool(&str, bool) -> bool
 pub fn ai6::directorates::section_00::assistant::repository_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::valid_identity(&str) -> bool
+pub mod ai6::directorates::section_00::denied
+pub enum ai6::directorates::section_00::denied::DenyEntry
+pub ai6::directorates::section_00::denied::DenyEntry::Category(&'static str)
+pub ai6::directorates::section_00::denied::DenyEntry::Host(alloc::string::String)
+pub ai6::directorates::section_00::denied::DenyEntry::Net(core::net::ip_addr::IpAddr, u8)
+impl ai6::directorates::section_00::denied::DenyEntry
+pub fn ai6::directorates::section_00::denied::DenyEntry::is_range(&self) -> bool
+pub fn ai6::directorates::section_00::denied::DenyEntry::parse(&str) -> core::result::Result<Self, alloc::string::String>
+pub struct ai6::directorates::section_00::denied::DenyList
+impl ai6::directorates::section_00::denied::DenyList
+pub fn ai6::directorates::section_00::denied::DenyList::denies_address(&self, core::net::ip_addr::IpAddr) -> bool
+pub fn ai6::directorates::section_00::denied::DenyList::denies_name(&self, &str) -> bool
+pub fn ai6::directorates::section_00::denied::DenyList::entries(&self) -> &[ai6::directorates::section_00::denied::DenyEntry]
+pub fn ai6::directorates::section_00::denied::DenyList::is_empty(&self) -> bool
+pub fn ai6::directorates::section_00::denied::DenyList::names_and_addresses(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::section_00::denied::DenyList::parse<S: core::convert::AsRef<str>>(&[S]) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::directorates::section_00::denied::DenyList::ranges(&self) -> alloc::vec::Vec<&ai6::directorates::section_00::denied::DenyEntry>
+pub const ai6::directorates::section_00::denied::DENY_CATEGORIES: [&str; 4]
 pub mod ai6::directorates::section_00::gate
 pub enum ai6::directorates::section_00::gate::GateVerdict
 pub ai6::directorates::section_00::gate::GateVerdict::Allow
@@ -4121,8 +4143,21 @@ pub fn ai6::directorates::section_00::gate::host_in(&str, &[alloc::string::Strin
 pub fn ai6::directorates::section_00::gate::local_git(&[alloc::string::String]) -> core::result::Result<ai6::directorates::section_00::gate::GitOutput, alloc::string::String>
 pub fn ai6::directorates::section_00::gate::pre_tool_use(&str, core::option::Option<&ai6::directorates::section_00::gate::GateClient>) -> core::option::Option<alloc::string::String>
 pub fn ai6::directorates::section_00::gate::web_fetch_gate(&str, &[alloc::string::String], &[alloc::string::String]) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::section_00::gate::web_fetch_gate_with(&str, &[alloc::string::String], &[alloc::string::String], &ai6::directorates::section_00::gate::Resolver<'_>) -> core::option::Option<alloc::string::String>
 pub type ai6::directorates::section_00::gate::Answers = alloc::vec::Vec<(alloc::string::String, core::option::Option<alloc::string::String>)>
 pub type ai6::directorates::section_00::gate::GitOutput = (bool, alloc::string::String)
+pub type ai6::directorates::section_00::gate::Resolver<'a> = (dyn core::ops::function::Fn(&str) -> core::io::error::Result<alloc::vec::Vec<core::net::ip_addr::IpAddr>> + 'a)
+pub mod ai6::directorates::section_00::programs
+pub const ai6::directorates::section_00::programs::STATION_CONFIG_ROOTS: [&str; 3]
+pub fn ai6::directorates::section_00::programs::canonical(&std::path::Path) -> std::path::PathBuf
+pub fn ai6::directorates::section_00::programs::denied_station_paths(&std::path::Path, &[std::path::PathBuf], core::option::Option<std::path::PathBuf>, core::option::Option<std::path::PathBuf>, core::option::Option<std::path::PathBuf>) -> alloc::vec::Vec<std::path::PathBuf>
+pub fn ai6::directorates::section_00::programs::find_program(&str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::option::Option<std::path::PathBuf>
+pub fn ai6::directorates::section_00::programs::install_dir(&std::path::Path) -> std::path::PathBuf
+pub fn ai6::directorates::section_00::programs::path_text(&std::path::Path) -> alloc::string::String
+pub fn ai6::directorates::section_00::programs::program_dirs(&[&str], &std::path::Path, &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> alloc::vec::Vec<std::path::PathBuf>
+pub fn ai6::directorates::section_00::programs::starts_with(&std::path::Path, &std::path::Path) -> bool
+pub fn ai6::directorates::section_00::programs::station_paths(&std::path::Path, &[std::path::PathBuf]) -> alloc::vec::Vec<std::path::PathBuf>
+pub fn ai6::directorates::section_00::programs::variable(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, &str) -> core::option::Option<alloc::string::String>
 pub mod ai6::station
 pub mod ai6::station::elevation
 pub fn ai6::station::elevation::is_elevated() -> core::io::error::Result<bool>
@@ -4345,6 +4380,7 @@ pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::conve
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
 impl core::default::Default for ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::default() -> Self
+pub const ai6::station::server::API_TOKEN_FILE: &str
 pub const ai6::station::server::DEFAULT_CONFIG_POLL: core::time::Duration
 pub const ai6::station::server::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::station::server::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
@@ -5121,12 +5157,14 @@ impl ai6::directorates::m::assistant::AssistantNarrowing
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::new() -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::skills(&self) -> core::option::Option<&[alloc::string::String]>
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_allowed_hosts(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_denied_networks(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_network(self, ai6::directorates::m::assistant::NetworkPolicy) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_skills(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_unsandboxed_scripts(self, bool) -> Self
 pub struct ai6::AssistantNetwork
 pub ai6::AssistantNetwork::allowed_hosts: alloc::vec::Vec<alloc::string::String>
+pub ai6::AssistantNetwork::denied: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantNetwork::policy: alloc::string::String
 impl ai6::directorates::section_00::agent::AssistantNetwork
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::open(&self) -> bool
@@ -5152,6 +5190,7 @@ impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::changes_from(&self, &ai6::directorates::m::assistant::AssistantSettings) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::denied_networks(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::deployment_reach(&self) -> ai6::directorates::section_00::assistant::AssistantReach
 pub fn ai6::directorates::m::assistant::AssistantSettings::has_group_narrowing(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::interpreters(&self) -> &[alloc::string::String]
@@ -5172,6 +5211,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_elevated(self, bool) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_denied_networks(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_group(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_interpreters(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_network(self, ai6::directorates::m::assistant::NetworkPolicy, alloc::vec::Vec<alloc::string::String>) -> Self
