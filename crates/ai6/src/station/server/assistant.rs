@@ -4127,8 +4127,15 @@ mod tests {
         assert!(unlocked.exists(), "too young to judge without a lock");
         assert!(other.exists(), "not a desk's");
         drop(held);
-        assert_eq!(sweep_stale_roots(temp.path()), 1, "once its desk lets go");
-        assert!(!live.exists());
+        // A process another test forks holds a copy of the lock's descriptor until it execs,
+        // so the lock can stay taken for a moment after the desk lets go.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while live.exists() && std::time::Instant::now() < deadline {
+            if sweep_stale_roots(temp.path()) == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+        assert!(!live.exists(), "once its desk lets go");
     }
 
     #[test]
