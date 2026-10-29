@@ -32,13 +32,17 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Account pools: the pool accounts each Operation may draw from, with the Sessions using
   each against its limit (other Operations' counted, not named), quota used per window, tokens today and until when a limited
   account waits, refreshed every fifteen seconds; it needs `pool.read`.
-- Agents (Administration, `agent.read`): each Agent of an Operation with its record there
+- Agents (`agent.read`): each Agent of an Operation with its record there
   (Missions done, failed, stalled and the incidents charged to it), the model occupying the
   codename, the clearance it works at, a coming retirement and a promotion waiting for green
   ink; with `agent.configure`, lower its clearance there or restore the configured one.
-- Administration: Operation-scoped Agent roles (purpose and policy), and each Station's
-  Mission capacity and resource limits (the free memory and CPU past which it takes no new
-  Missions; 0 MiB and 100% turn them off).
+  Its Roles tab holds the Operation-scoped Agent roles (purpose and policy).
+- Stations, with tabs for every Station's Theaters, each Station's settings (its Mission
+  capacity and resource limits: the free memory and CPU past which it takes no new
+  Missions; 0 MiB and 100% turn them off) and a placement preview.
+- Overview: counts of Operations, Stations online and dark, active Missions and waiting
+  Sessions, and what needs attention; Operations: each Operation's Missions by state;
+  Sessions: every Session in a table sorted by any column.
 - Roster: the Operations, Agents, Agent roles, cover policies and Moneypenny's settings every
   Station reads, with the revision each Station runs and what any Station refused or waits to
   restart for (`roster.read`); with `roster.manage` and a roster that takes edits (SQL), add,
@@ -59,7 +63,12 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   (after a confirmation), each a commit by the operator. See the
   [assistant guide](https://jose-pr.github.io/ai6/assistant/).
 - Audit log for operators with `audit.read`; operator menu with identity, effective
-  permissions per Operation, theme and sign-out.
+  permissions per Operation, theme and wallpaper, and sign-out.
+- Six themes from the Outer Office design kit (Night Ops, the default, Black Ops, Dusk,
+  Classic, Light and Red File) or the system's light or dark setting, stored per device as
+  `oo.theme`. Every text colour reaches WCAG AA (4.5:1) on its surface, the system's high
+  contrast and reduced motion settings apply, and a theme's wallpaper (`oo.backdrop`) shows
+  only behind sign-in, the Overview header and empty pages.
 
 ## Toolchain
 
@@ -116,6 +125,11 @@ is generated and ignored: run `dart run tool/build_guatiao_wasm.dart` after `pub
 before a non-demo web build. It builds `guatiao-intake` at the revision in `pubspec.lock`.
 
 ## Layout
+
+A top bar, a rail of pages (Overview, Operations, Missions, Sessions, Agents, Stations,
+Green Ink, Briefings, Roster, Account Pools, Timeline, Audit; each shown only with its
+permission) and the page. From 1200 px wide the rail has labels beside its icons, from 900
+px labels below them, and narrower it opens from a menu button, one view at a time.
 
 Web is one Flutter app view: wide windows keep the board beside the selected Session,
 narrow windows navigate to it in-page with browser back. It opens no browser popups and

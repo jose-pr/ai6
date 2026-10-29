@@ -103,8 +103,8 @@ While a request is pending the Mission's [Watchdog](watchdog.md) is paused: wait
 person is not a stall, and terminal output or an operator message does not end the wait.
 If the Agent's turn ends meanwhile, the Session closes and the Mission stays blocked.
 
-An operator with `approval.decide` on the Operation sees the waiting steps in Outer Office's
-Administration → Green ink, or from `GET /v1/user/operations/{operation_id}/green-ink`,
+An operator with `approval.decide` on the Operation sees the waiting steps on Outer Office's
+Green Ink page, or from `GET /v1/user/operations/{operation_id}/green-ink`,
 and approves one for a chosen time (one hour unless chosen) or rejects it with a reason.
 The signer is always the signed-in person. The Station holding the Mission tells the Agent
 the outcome, the step and the expiry (in a message to its live Session, or by resuming the
@@ -493,7 +493,7 @@ hold. The Operation's timeline records each decision as an `intake` event (`pass
 brief's text.
 
 An operator with `mission.create` on the Operation reviews held briefs in Outer Office
-(Administration → Held briefs), with `ai6ctl held-briefs`, or through the API:
+(Briefings → Held briefs), with `ai6ctl held-briefs`, or through the API:
 
 ```bash
 ai6ctl held-briefs list --operation G

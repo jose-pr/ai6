@@ -34,8 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `cached_authorizer` load a provider that way.
 - Outer Office (short name OO) is the Flutter desktop and web operator app, in
   `clients/outer-office` (Dart package `outer_office`); Moneypenny is the AI assistant
-  inside it. Its build defines are `OO_API` and `OO_DEMO`, and it keeps the theme choice
-  as the `oo.lightTheme` preference.
+  inside it. Its build defines are `OO_API` and `OO_DEMO`.
+- Outer Office takes the design kit's look: six themes (Night Ops, the default, Black Ops,
+  Dusk, Classic, Light, Red File) or the system setting, chosen in the operator menu and
+  stored as `oo.theme`, with every text colour at WCAG AA on its surface and the system's
+  high contrast and reduced motion honoured; the kit's icons; and a rail of twelve pages
+  (new Overview, Operations and Sessions pages; Agents, Green Ink, Briefings and Roster take
+  Administration's tabs; Theaters, settings and placement are tabs of Stations) that has
+  labels from 1200 px, is compact from 900 px and sits behind a menu button below that.
 - Moneypenny runs on Codex with scripts and her workspace. With interpreters, the Codex
   handler admits Codex's code-mode tools (`functions.exec`, `functions.wait`) inside Codex's
   own sandbox, a permission profile (`ai6_assistant`) that denies the filesystem but the

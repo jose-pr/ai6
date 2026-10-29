@@ -150,7 +150,7 @@ embedding the Station can pass another store with `ServeConfig::with_registry`.
 ## Capacity and visibility
 
 Operators granted `station.configure` can change a Station's maximum concurrent Missions
-(1–1,024) in Outer Office's Administration view; the change applies to new Missions and is
+(1–1,024) in Outer Office under Stations → Settings; the change applies to new Missions and is
 audited. The same settings hold the Station's resource limits, `min_free_memory_mb` (default
 512; 0 never rules it out) and `max_cpu_percent` (default 95; 100 never does), set in the
 same view or through `PUT /v1/user/stations/{id}/settings`; the Station publishes them at check-in and placement

@@ -357,7 +357,7 @@ capacity and watchdog defaults.
 Universal Exports edits the roster for operators when it is started with the same
 location (`--roster`, `AI6_EXPORTS_ROSTER`): `roster.read` and `roster.manage` on the
 scope `config:roster` (for example `scope = "config:roster"` in `access.toml`) let a person
-list and change Operations, Agents, roles and covers from Outer Office's Administration.
+list and change Operations, Agents, roles and covers from Outer Office's Roster page.
 The source checks the whole roster before it keeps an edit; an accepted edit is audited as
 `roster.update` or `roster.remove`, a refused one answers with the reason and is audited as
 `roster.refused`. A configuration directory is listed read-only: its files are edited by
