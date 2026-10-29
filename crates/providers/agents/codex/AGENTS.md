@@ -151,7 +151,12 @@ developer-instructions line tells her (when the policy names hosts) and standard
 Unsandboxed, `sandbox = "danger-full-access"` and no profile. Without interpreters the thread
 stays read-only and, with `files`, is told it has no file tools (nothing offers one outside
 `exec`). Every command execution item a scripts thread starts is reported as tool
-`exec_command`. `assistant_scripts` runs `<executable> [-c windows.sandbox="mxc"] -c
+`exec_command`; a command code mode's `exec` runs through its nested `exec_command` is announced
+as such an item (`source: "unifiedExecStartup"`), and one whose sandbox fails to start is not
+announced and does not run (0.164.0, measured through a loopback stand-in on Linux and Windows).
+A link a script plants in a writable directory pointing outside does not let a script or
+`apply_patch` write there: Codex runs `apply_patch` inside the same sandbox (0.164.0, measured:
+bubblewrap and MXC; MXC refused to create a junction), so no mode is refused for it. `assistant_scripts` runs `<executable> [-c windows.sandbox="mxc"] -c
 permissions.ai6_assistant_probe={…} sandbox -P ai6_assistant_probe -- cmd.exe /d /c echo …`
 (`/bin/sh -c 'echo …'` elsewhere) from a fresh temporary directory (`tempfile`, removed after)
 with exactly the given environment (`std::process`, 60 s), and answers `None` only when it exits

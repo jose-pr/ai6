@@ -521,7 +521,12 @@ What differs from Claude Code:
   she writes nothing, and is told so.
 - **Every command counts as reading her files.** The Station sees each command Codex starts
   (`exec_command`) and treats it as Claude Code's `Bash`: it reads the outside-text record's
-  files, and reaches the network while the policy names hosts.
+  files, and reaches the network while the policy names hosts. A command her code-mode script
+  runs is announced like any other (Codex 0.164).
+- **Links do not lead out.** A script may create a link in `personal/` pointing outside her
+  working directory (a symbolic link on Linux and Windows; MXC refused a junction), but neither
+  a script nor Codex's patch tool reached its target with Codex 0.164: the patch tool runs
+  inside the same sandbox, so a write through the link failed and the target was unchanged.
 
 Whether Codex's sandbox runs is asked once in 15 minutes per executable and configuration:
 the handler runs `codex sandbox -P` with the same kind of profile, no model involved. Where it
