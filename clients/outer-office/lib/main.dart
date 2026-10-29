@@ -15,7 +15,9 @@ import 'package:guatiao/guatiao.dart' as guatiao;
 
 import 'agents/agents_page.dart';
 import 'assistant/assistant_controller.dart';
-import 'assistant/assistant_panel.dart';
+import 'assistant/chat_layout.dart';
+import 'assistant/chat_region.dart';
+import 'assistant/chat_window.dart';
 import 'assistant/memory_page.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
@@ -27,6 +29,7 @@ import 'roster/roster_page.dart';
 import 'settings/connection_settings.dart';
 import 'settings/oo_config.dart';
 import 'settings/oo_config_file.dart';
+import 'shell/app_window.dart';
 import 'shell/oo_shell.dart';
 import 'shell/operations_page.dart';
 import 'shell/overview_page.dart';
@@ -99,7 +102,13 @@ Future<void> _startWeb() async {
     // Browser storage unavailable: the defaults stand.
   }
 
-  runApp(OuterOfficeApp(board: board, desktopWindows: false));
+  runApp(
+    OuterOfficeApp(
+      board: board,
+      desktopWindows: false,
+      chatSettings: config.chat,
+    ),
+  );
 }
 
 void _startDesktop() {
@@ -112,7 +121,7 @@ void _startDesktop() {
     onThemeChanged: appearance.saveTheme,
     onBackdropChanged: appearance.saveBackdrop,
   );
-  runWidget(_DesktopWindowHost(board: board));
+  runWidget(_DesktopWindowHost(board: board, chatSettings: config.chat));
   unawaited(appearance.restore(board).catchError((Object _) {}));
 }
 
@@ -2378,9 +2387,10 @@ class AgentRoleSummary {
 }
 
 class _DesktopWindowHost extends StatefulWidget {
-  const _DesktopWindowHost({required this.board});
+  const _DesktopWindowHost({required this.board, required this.chatSettings});
 
   final MissionBoard board;
+  final ChatSettings chatSettings;
 
   @override
   State<_DesktopWindowHost> createState() => _DesktopWindowHostState();
@@ -2410,8 +2420,11 @@ class _DesktopWindowHostState extends State<_DesktopWindowHost> {
     initialWindows: [
       WindowEntry(
         controller: _mainWindow,
-        builder: (_) =>
-            OuterOfficeApp(board: widget.board, desktopWindows: true),
+        builder: (_) => OuterOfficeApp(
+          board: widget.board,
+          desktopWindows: true,
+          chatSettings: widget.chatSettings,
+        ),
       ),
     ],
   );
@@ -2650,11 +2663,15 @@ class OuterOfficeApp extends StatelessWidget {
   const OuterOfficeApp({
     required this.board,
     required this.desktopWindows,
+    this.chatSettings = const ChatSettings(),
     super.key,
   });
 
   final MissionBoard board;
   final bool desktopWindows;
+
+  /// Moneypenny's chat sizes and timing, `OO.cfg`'s `[chat]`.
+  final ChatSettings chatSettings;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -2663,28 +2680,110 @@ class OuterOfficeApp extends StatelessWidget {
       themeId: board.themeId,
       backdrop: board.backdrop,
       title: 'Outer Office | AI6',
-      home: _AccessGate(board: board, desktopWindows: desktopWindows),
+      home: _AccessGate(
+        board: board,
+        desktopWindows: desktopWindows,
+        chatSettings: chatSettings,
+      ),
     ),
   );
 }
 
-class _AccessGate extends StatelessWidget {
-  const _AccessGate({required this.board, required this.desktopWindows});
+class _AccessGate extends StatefulWidget {
+  const _AccessGate({
+    required this.board,
+    required this.desktopWindows,
+    required this.chatSettings,
+  });
 
   final MissionBoard board;
   final bool desktopWindows;
+  final ChatSettings chatSettings;
+
+  @override
+  State<_AccessGate> createState() => _AccessGateState();
+}
+
+class _AccessGateState extends State<_AccessGate> {
+  MoneypennyChat? _chat;
+
+  @override
+  void dispose() {
+    _drop();
+    super.dispose();
+  }
+
+  /// The conversation with Moneypenny for the signed-in token: made at sign-in, replaced
+  /// when the token changes, gone at sign-out. None in the preview.
+  MoneypennyChat? _chatFor(MissionBoard board) {
+    final token = board.accessToken;
+    if (board.demo || token == null) {
+      _drop();
+      return null;
+    }
+    if (_chat case final chat? when chat.controller.token == token) return chat;
+    _drop();
+    return _chat = MoneypennyChat(
+      controller: AssistantController(
+        token: token,
+        connect:
+            board.assistantChannel ?? () => connectAssistant(board.apiOrigin),
+      ),
+      preferences: ChatPreferences(SharedPreferences.getInstance()),
+      settings: widget.chatSettings,
+      openWindow: widget.desktopWindows
+          ? (context, chat, onClosed) =>
+                _openChatWindow(context, chat, onClosed, board)
+          : null,
+    );
+  }
+
+  /// Disposes the old conversation after this frame, once nothing shows it.
+  void _drop() {
+    final chat = _chat;
+    if (chat == null) return;
+    _chat = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) => chat.dispose());
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: board,
+    animation: widget.board,
     builder: (context, _) {
+      final board = widget.board;
+      final chat = _chatFor(board);
       if (!board.demo && board.accessToken == null) {
         return _LoginPage(board: board);
       }
-      return MissionBoardPage(board: board, desktopWindows: desktopWindows);
+      return MissionBoardPage(
+        board: board,
+        desktopWindows: widget.desktopWindows,
+        chat: chat,
+      );
     },
   );
 }
+
+/// Moneypenny's own window, themed like the app.
+AppWindow _openChatWindow(
+  BuildContext context,
+  MoneypennyChat chat,
+  VoidCallback onClosed,
+  MissionBoard board,
+) => openChatWindow(
+  context,
+  chat: chat,
+  onClosed: onClosed,
+  app: (home) => AnimatedBuilder(
+    animation: board,
+    builder: (context, _) => OoMaterialApp(
+      themeId: board.themeId,
+      backdrop: board.backdrop,
+      title: chatWindowTitle,
+      home: home,
+    ),
+  ),
+);
 
 class _LoginPage extends StatefulWidget {
   const _LoginPage({required this.board});
@@ -2801,11 +2900,15 @@ class MissionBoardPage extends StatefulWidget {
   const MissionBoardPage({
     required this.board,
     required this.desktopWindows,
+    this.chat,
     super.key,
   });
 
   final MissionBoard board;
   final bool desktopWindows;
+
+  /// The conversation with Moneypenny; none in the preview or before sign-in.
+  final MoneypennyChat? chat;
 
   @override
   State<MissionBoardPage> createState() => _MissionBoardPageState();
@@ -2815,41 +2918,25 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   String? _selectedState;
   SessionSummary? _selectedWebSession;
   OoPage _page = OoPage.overview;
-  AssistantController? _assistantController;
-  final _scaffold = GlobalKey<ScaffoldState>();
-
-  /// The conversation with Moneypenny, kept while this page lives; none in the demo or
-  /// before sign-in.
-  AssistantController? get _assistant {
-    final token = widget.board.accessToken;
-    if (widget.board.demo || token == null) return null;
-    final current = _assistantController;
-    if (current != null && current.token == token) return current;
-    current?.dispose();
-    return _assistantController = AssistantController(
-      token: token,
-      connect:
-          widget.board.assistantChannel ??
-          () => connectAssistant(widget.board.apiOrigin),
-    );
-  }
-
-  @override
-  void dispose() {
-    _assistantController?.dispose();
-    super.dispose();
-  }
 
   /// Opens the app page a view links to: a Mission on Missions, a Station or Theater on
-  /// Stations. Anything else is ignored.
-  void _openLink(BuildContext context, String link) {
+  /// Stations. Anything else is ignored. A chat covering the page makes way for it.
+  void _openLink(String link) {
     final page = link.startsWith('app:/missions/')
         ? OoPage.missions
         : link.startsWith('app:/stations/') || link.startsWith('app:/theaters/')
         ? OoPage.stations
         : null;
-    if (page == null) return;
-    Navigator.of(context).maybePop();
+    if (page == null || !mounted) return;
+    if (widget.chat case final chat?) {
+      switch (chatPlacement(chat.layout, MediaQuery.sizeOf(context).width)) {
+        case ChatPlacement.centre:
+          chat.dock();
+        case ChatPlacement.sheet || ChatPlacement.fullScreen:
+          chat.collapse();
+        case _:
+      }
+    }
     setState(() => _page = page);
   }
 
@@ -2896,10 +2983,13 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               board: board,
               pages: pages,
               onOpen: (page) => setState(() => _page = page),
-              assistant: _assistant,
+              assistant: widget.chat?.controller,
               onAsk: (text) {
-                _scaffold.currentState?.openEndDrawer();
-                _assistant?.ask(text, page: {'view': OoPage.overview.id});
+                widget.chat?.open();
+                widget.chat?.controller.ask(
+                  text,
+                  page: {'view': OoPage.overview.id},
+                );
               },
             ),
             OoPage.operations => OperationsPage(board: board),
@@ -3065,86 +3155,82 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   Widget build(BuildContext context) {
     final pages = _pages(widget.board);
     final page = pages.contains(_page) ? _page : OoPage.overview;
-    final assistant = _assistant;
+    final chat = widget.chat;
     final selectedSession = _selectedWebSession;
     final width = MediaQuery.sizeOf(context).width;
     final phone = width < OoBreakpoints.phone;
-    void open(OoPage page) => setState(() => _page = page);
-    return OoShell(
-      scaffoldKey: _scaffold,
-      pages: pages,
-      page: page,
-      onSelect: open,
-      search: (expanded) => AnimatedBuilder(
-        animation: widget.board,
-        builder: (context, _) => OoSearch(
-          board: widget.board,
-          pages: pages,
-          onOpen: open,
-          expanded: expanded,
+    void open(OoPage page) {
+      // An expanded chat hides the page; going to a page shows it.
+      if (chat?.layout == ChatLayout.expanded) chat!.dock();
+      setState(() => _page = page);
+    }
+
+    return ChatShell(
+      chat: chat,
+      personId: widget.board.userSession?.personId,
+      page: {
+        'view': page.id,
+        if (selectedSession != null) ...{
+          'operation_id': selectedSession.operationId,
+          'mission_id': selectedSession.missionId,
+          'session_id': selectedSession.sessionId,
+        },
+      },
+      onLink: _openLink,
+      onMemory: (context) => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MemoryPage(board: widget.board),
         ),
       ),
-      endDrawer: assistant == null
-          ? null
-          : Drawer(
-              // On a phone her chat takes the whole screen.
-              width: phone ? width : 460,
-              shape: phone ? const RoundedRectangleBorder() : null,
-              child: SafeArea(
-                child: Builder(
-                  builder: (context) => AssistantPanel(
-                    controller: assistant,
-                    page: {
-                      'view': page.id,
-                      if (selectedSession != null) ...{
-                        'operation_id': selectedSession.operationId,
-                        'mission_id': selectedSession.missionId,
-                        'session_id': selectedSession.sessionId,
-                      },
-                    },
-                    onOpen: (link) => _openLink(context, link),
-                    onClose: phone ? () => Navigator.of(context).pop() : null,
-                    onMemory: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => MemoryPage(board: widget.board),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+      child: OoShell(
+        pages: pages,
+        page: page,
+        onSelect: open,
+        search: (expanded) => AnimatedBuilder(
+          animation: widget.board,
+          builder: (context, _) => OoSearch(
+            board: widget.board,
+            pages: pages,
+            onOpen: open,
+            expanded: expanded,
+          ),
+        ),
+        actions: [
+          if (chat != null)
+            MoneypennyButton(chat: chat)
+          else
+            const IconButton(
+              tooltip: 'Moneypenny answers once you are signed in',
+              onPressed: null,
+              icon: OoIcon(OoIconName.moneypenny),
             ),
-      actions: [
-        IconButton(
-          tooltip: assistant == null
-              ? 'Moneypenny answers once you are signed in'
-              : 'Ask Moneypenny',
-          onPressed: assistant == null
-              ? null
-              : () => _scaffold.currentState?.openEndDrawer(),
-          icon: const OoIcon(OoIconName.moneypenny),
-        ),
-        AnimatedBuilder(
-          animation: widget.board,
-          builder: (context, _) =>
-              AttentionBell(board: widget.board, pages: pages, onOpen: open),
-        ),
-        if (!phone)
-          IconButton(
-            tooltip: 'Appearance settings',
-            onPressed: () => _showAppearance(context, widget.board),
-            icon: const OoIcon(OoIconName.settings),
+          AnimatedBuilder(
+            animation: widget.board,
+            builder: (context, _) =>
+                AttentionBell(board: widget.board, pages: pages, onOpen: open),
           ),
-        const SizedBox(width: 4),
-        AnimatedBuilder(
-          animation: widget.board,
-          builder: (context, _) => UserChip(
-            session: widget.board.userSession,
-            compact: width < OoBreakpoints.wide,
-            onPressed: () => _showOperatorMenu(context, widget.board),
+          if (!phone)
+            IconButton(
+              tooltip: 'Appearance settings',
+              onPressed: () => _showAppearance(context, widget.board),
+              icon: const OoIcon(OoIconName.settings),
+            ),
+          const SizedBox(width: 4),
+          AnimatedBuilder(
+            animation: widget.board,
+            builder: (context, _) => UserChip(
+              session: widget.board.userSession,
+              compact: width < OoBreakpoints.wide,
+              onPressed: () => _showOperatorMenu(context, widget.board),
+            ),
           ),
+        ],
+        body: ChatRegion(
+          chat: chat,
+          pageLabel: page.label,
+          child: _pageBody(context, page, pages),
         ),
-      ],
-      body: _pageBody(context, page, pages),
+      ),
     );
   }
 }
@@ -5186,40 +5272,20 @@ void _openSessionWindow(
   BuildContext context,
   SessionSummary session,
   MissionBoard board,
-) {
-  final registry = WindowRegistry.of(context);
-  late final WindowEntry entry;
-  final controller = WindowController(
-    size: const Size(900, 680),
-    title: 'Session ${session.sessionId} | Outer Office',
-    delegate: _WindowDelegate(onDestroyed: () => registry.unregister(entry)),
-  );
-  entry = WindowEntry(
-    controller: controller,
-    builder: (_) => AnimatedBuilder(
-      animation: board,
-      builder: (context, _) => OoMaterialApp(
-        themeId: board.themeId,
-        backdrop: board.backdrop,
-        title: 'Session ${session.sessionId}',
-        home: SessionWindow(session: session, board: board),
-      ),
+) => openAppWindow(
+  context,
+  size: const Size(900, 680),
+  title: 'Session ${session.sessionId} | Outer Office',
+  builder: (_) => AnimatedBuilder(
+    animation: board,
+    builder: (context, _) => OoMaterialApp(
+      themeId: board.themeId,
+      backdrop: board.backdrop,
+      title: 'Session ${session.sessionId}',
+      home: SessionWindow(session: session, board: board),
     ),
-  );
-  registry.register(entry);
-}
-
-class _WindowDelegate with WindowControllerDelegate {
-  _WindowDelegate({required this.onDestroyed});
-
-  final VoidCallback onDestroyed;
-
-  @override
-  void onWindowDestroyed() {
-    onDestroyed();
-    super.onWindowDestroyed();
-  }
-}
+  ),
+);
 
 class SessionWindow extends StatelessWidget {
   const SessionWindow({required this.session, required this.board, super.key});

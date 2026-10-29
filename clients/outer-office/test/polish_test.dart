@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
+import 'package:outer_office/assistant/chat_region.dart';
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/shell/top_bar.dart';
@@ -183,30 +184,31 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Ask Moneypenny'));
+    await tester.tap(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'));
     await tester.pumpAndSettle();
-    expect(tester.getSize(find.byType(Drawer)).width, 390);
+    expect(tester.getSize(find.byType(ChatPanel)).width, 390);
+    expect(find.byType(AppBar), findsNothing, reason: 'one view at a time');
     expect(channel.sent.single['type'], 'hello');
     channel.answer({'type': 'ready', 'conversation': 'c-1', 'entries': []});
     await tester.pumpAndSettle();
     // An empty chat offers the quick questions as chips.
     expect(
       find.descendant(
-        of: find.byType(Drawer),
+        of: find.byType(ChatPanel),
         matching: find.widgetWithText(ActionChip, 'Summarise the board'),
       ),
       findsOneWidget,
     );
-    await tester.tap(find.byTooltip('Close Moneypenny'));
+    await tester.tap(find.byTooltip('Close Moneypenny (Ctrl+Alt+I)'));
     await tester.pumpAndSettle();
-    expect(find.byType(Drawer), findsNothing);
+    expect(find.byType(ChatPanel), findsNothing);
 
     final chip = find.widgetWithText(ActionChip, 'What needs my attention?');
     await tester.ensureVisible(chip);
     await tester.pumpAndSettle();
     await tester.tap(chip);
     await tester.pumpAndSettle();
-    expect(find.byType(Drawer), findsOneWidget);
+    expect(find.byType(ChatPanel), findsOneWidget);
     expect(channel.sent.last, {
       'type': 'message',
       'text': 'What needs my attention?',
@@ -217,7 +219,7 @@ void main() {
   testWidgets('without a conversation the Overview card is disabled and says '
       'why', (tester) async {
     await demoAt(tester, const Size(1400, 900));
-    expect(find.byTooltip('Ask Moneypenny'), findsNothing);
+    expect(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'), findsNothing);
     final chip = tester.widget<ActionChip>(
       find.widgetWithText(ActionChip, 'Summarise the board'),
     );

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -33,6 +35,72 @@ MissionBoard _board(OoConfig config) => MissionBoard(
 );
 
 void main() {
+  test('[chat] sets Moneypenny\'s chat sizes; each defaults on its own', () {
+    final config = OoConfig.parse(
+      '[chat]\nmin_width = 280\nmax_width = 900\nwidth = 500\nwidth_step = 8\n'
+      'min_page_width = 300\ntext_width = 1100\nwindow_width = 600\n'
+      'window_height = 800\ntransition_ms = 0\n',
+    );
+    final chat = config.chat;
+    expect(
+      [
+        chat.minWidth,
+        chat.maxWidth,
+        chat.width,
+        chat.widthStep,
+        chat.minPageWidth,
+        chat.textWidth,
+        chat.windowWidth,
+        chat.windowHeight,
+      ],
+      [280, 900, 500, 8, 300, 1100, 600, 800],
+    );
+    expect(chat.transitionMs, 0);
+    final partial = OoConfig.parse('#!json\n{"chat": {"width": 640}}').chat;
+    expect(partial.width, 640);
+    expect(partial.maxWidth, const ChatSettings().maxWidth);
+    expect(OoConfig.none.chat.width, 400);
+    // The example file shows the defaults.
+    final example = OoConfig.parse(
+      File('../../examples/config/OO.cfg').readAsStringSync(),
+    ).chat;
+    const defaults = ChatSettings();
+    expect(
+      [
+        example.minWidth,
+        example.maxWidth,
+        example.width,
+        example.widthStep,
+        example.minPageWidth,
+        example.textWidth,
+        example.windowWidth,
+        example.windowHeight,
+        example.transitionMs,
+      ],
+      [
+        defaults.minWidth,
+        defaults.maxWidth,
+        defaults.width,
+        defaults.widthStep,
+        defaults.minPageWidth,
+        defaults.textWidth,
+        defaults.windowWidth,
+        defaults.windowHeight,
+        defaults.transitionMs,
+      ],
+    );
+    for (final bad in [
+      '[chat]\nwidth = 900\n',
+      '[chat]\nmin_width = 800\nmax_width = 700\nwidth = 750\n',
+      '[chat]\nwidth = -1\n',
+      '[chat]\nwidth = "wide"\n',
+      '[chat]\ntransition_ms = 1.5\n',
+      '[chat]\nheight = 3\n',
+    ]) {
+      expect(() => OoConfig.parse(bad), throwsFormatException, reason: bad);
+    }
+  });
+
   test('each format names the same settings and [assets] is left alone', () {
     for (final MapEntry(key: name, value: text) in _documents.entries) {
       final config = OoConfig.parse(text);

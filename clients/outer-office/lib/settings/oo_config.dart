@@ -9,8 +9,9 @@ import '../theme/oo_tokens.dart';
 /// The formats an `OO.cfg` can be written in.
 enum OoConfigFormat { toml, json, yaml }
 
-/// Outer Office's own configuration, `OO.cfg`: where Universal Exports is and the deployment's
-/// default theme. The person's own choices (`oo.theme`) win over it.
+/// Outer Office's own configuration, `OO.cfg`: where Universal Exports is, the deployment's
+/// default theme and Moneypenny's chat sizes. The person's own choices (`oo.theme`, the chat
+/// width they drag to) win over it.
 ///
 /// A document names its format on its first line, `#!json`, `#!yaml` (`#!yml`) or `#!toml`
 /// (the last word of the line, after any `/`, read without case or leading dots); a document
@@ -18,7 +19,7 @@ enum OoConfigFormat { toml, json, yaml }
 /// Unknown tables and keys are refused; `[assets]` belongs to the web page's bootstrap and is
 /// left alone.
 class OoConfig {
-  const OoConfig({this.unexUrl, this.theme});
+  const OoConfig({this.unexUrl, this.theme, this.chat = const ChatSettings()});
 
   /// `[unex] url`: Universal Exports' origin.
   final Uri? unexUrl;
@@ -26,7 +27,10 @@ class OoConfig {
   /// `[appearance] theme`: a theme id or `system`, the default under the person's choice.
   final String? theme;
 
-  /// The defaults: no origin and no theme.
+  /// `[chat]`: Moneypenny's chat sizes and timing.
+  final ChatSettings chat;
+
+  /// The defaults: no origin, no theme and the default chat.
   static const none = OoConfig();
 
   /// Reads an `OO.cfg`'s text.
@@ -34,7 +38,7 @@ class OoConfig {
   /// Throws a [FormatException] naming the format, the table or the key that is wrong.
   factory OoConfig.parse(String text) {
     final document = decodeOoConfig(text);
-    const known = {'unex', 'appearance', 'assets'};
+    const known = {'unex', 'appearance', 'chat', 'assets'};
     for (final key in document.keys) {
       if (!known.contains(key)) {
         throw FormatException('OO.cfg: unknown table [$key]');
@@ -64,7 +68,45 @@ class OoConfig {
       return value;
     }
 
+    double? number(Map<String, Object?> table, String key) {
+      final value = table[key];
+      if (value == null) return null;
+      if (value is! num || value <= 0 || !value.isFinite) {
+        throw FormatException('OO.cfg: chat.$key is not a positive number');
+      }
+      return value.toDouble();
+    }
+
     final unex = table('unex', {'url'});
+    final chatTable = table('chat', ChatSettings.keys);
+    const defaults = ChatSettings();
+    final chat = ChatSettings(
+      minWidth: number(chatTable, 'min_width') ?? defaults.minWidth,
+      maxWidth: number(chatTable, 'max_width') ?? defaults.maxWidth,
+      width: number(chatTable, 'width') ?? defaults.width,
+      widthStep: number(chatTable, 'width_step') ?? defaults.widthStep,
+      minPageWidth:
+          number(chatTable, 'min_page_width') ?? defaults.minPageWidth,
+      textWidth: number(chatTable, 'text_width') ?? defaults.textWidth,
+      windowWidth: number(chatTable, 'window_width') ?? defaults.windowWidth,
+      windowHeight: number(chatTable, 'window_height') ?? defaults.windowHeight,
+      transitionMs: chatTable['transition_ms'] == null
+          ? defaults.transitionMs
+          : switch (chatTable['transition_ms']) {
+              final int ms when ms >= 0 => ms,
+              _ => throw const FormatException(
+                'OO.cfg: chat.transition_ms is not a whole number of 0 or more',
+              ),
+            },
+    );
+    if (chat.minWidth > chat.maxWidth ||
+        chat.width < chat.minWidth ||
+        chat.width > chat.maxWidth) {
+      throw FormatException(
+        'OO.cfg: chat.width ${chat.width} is not between chat.min_width '
+        '${chat.minWidth} and chat.max_width ${chat.maxWidth}',
+      );
+    }
     final appearance = table('appearance', {'theme'});
     final url = string(unex, 'unex', 'url');
     final origin = url == null ? null : Uri.tryParse(url);
@@ -75,6 +117,7 @@ class OoConfig {
     return OoConfig(
       unexUrl: origin,
       theme: string(appearance, 'appearance', 'theme'),
+      chat: chat,
     );
   }
 
@@ -91,6 +134,62 @@ class OoConfig {
     }
     return valid;
   }
+}
+
+/// Moneypenny's chat sizes and timing, `OO.cfg`'s `[chat]` table; every value defaults to
+/// the one here. Widths are logical pixels.
+class ChatSettings {
+  const ChatSettings({
+    this.minWidth = 320,
+    this.maxWidth = 720,
+    this.width = 400,
+    this.widthStep = 16,
+    this.minPageWidth = 360,
+    this.textWidth = 960,
+    this.windowWidth = 520,
+    this.windowHeight = 760,
+    this.transitionMs = 200,
+  });
+
+  /// The table's keys, in the order above.
+  static const keys = {
+    'min_width',
+    'max_width',
+    'width',
+    'width_step',
+    'min_page_width',
+    'text_width',
+    'window_width',
+    'window_height',
+    'transition_ms',
+  };
+
+  /// `min_width`, `max_width`: how narrow and wide the docked chat may be dragged.
+  final double minWidth;
+  final double maxWidth;
+
+  /// `width`: the docked chat's width until the person drags it.
+  final double width;
+
+  /// `width_step`: how far an arrow key moves the drag handle.
+  final double widthStep;
+
+  /// `min_page_width`: the page keeps at least this much beside the docked chat.
+  final double minPageWidth;
+
+  /// `text_width`: the widest column her text keeps to when expanded.
+  final double textWidth;
+
+  /// `window_width`, `window_height`: the size her own window opens at (desktop).
+  final double windowWidth;
+  final double windowHeight;
+
+  /// `transition_ms`: how long the chat takes to move; none when the system asks for no
+  /// animations.
+  final int transitionMs;
+
+  /// [width] kept between [minWidth] and [maxWidth].
+  double clamp(double width) => width.clamp(minWidth, maxWidth);
 }
 
 /// The format `text` declares by its first line ([OoConfig]).

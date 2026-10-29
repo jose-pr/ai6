@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../held/held_briefs_page.dart' show revealInvisible;
@@ -10,7 +11,7 @@ import 'assistant_view.dart';
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
 /// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries [page],
 /// the app page the person is on, so "this Mission" means something to her. Its menu opens
-/// her memory of the person ([onMemory]).
+/// her memory of the person ([onMemory]). Enter sends; Shift+Enter starts a new line.
 class AssistantPanel extends StatefulWidget {
   const AssistantPanel({
     required this.controller,
@@ -18,6 +19,11 @@ class AssistantPanel extends StatefulWidget {
     this.onOpen,
     this.onMemory,
     this.onClose,
+    this.closeTooltip = 'Close Moneypenny',
+    this.actions = const [],
+    this.message,
+    this.composerFocus,
+    this.textWidth,
     super.key,
   });
 
@@ -32,13 +38,28 @@ class AssistantPanel extends StatefulWidget {
 
   /// Closes the chat where it fills the screen (a phone); without it there is no button.
   final VoidCallback? onClose;
+  final String closeTooltip;
+
+  /// Header buttons after New conversation, such as Expand and Pop out.
+  final List<Widget> actions;
+
+  /// The composer's text and focus when they outlive the panel; else the panel's own.
+  final TextEditingController? message;
+  final FocusNode? composerFocus;
+
+  /// Where set, messages and the composer keep to a centred column this wide, and views
+  /// (tables, charts) take the full width.
+  final double? textWidth;
 
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
 }
 
 class _AssistantPanelState extends State<AssistantPanel> {
-  final _message = TextEditingController();
+  TextEditingController? _ownMessage;
+
+  TextEditingController get _message =>
+      widget.message ?? (_ownMessage ??= TextEditingController());
 
   @override
   void initState() {
@@ -48,16 +69,43 @@ class _AssistantPanelState extends State<AssistantPanel> {
 
   @override
   void dispose() {
-    _message.dispose();
+    _ownMessage?.dispose();
     super.dispose();
   }
 
   void _send() {
     final text = _message.text;
-    if (text.trim().isEmpty || widget.controller.busy) return;
+    if (text.trim().isEmpty ||
+        widget.controller.busy ||
+        !widget.controller.connected) {
+      return;
+    }
     widget.controller.say(text, page: widget.page);
     _message.clear();
   }
+
+  /// Enter sends; with Shift it is left to the field, which starts a new line.
+  KeyEventResult _composerKey(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        (event.logicalKey != LogicalKeyboardKey.enter &&
+            event.logicalKey != LogicalKeyboardKey.numpadEnter) ||
+        HardwareKeyboard.instance.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    _send();
+    return KeyEventResult.handled;
+  }
+
+  /// [child] kept to [AssistantPanel.textWidth], centred, where one is set.
+  Widget _column(Widget child) => switch (widget.textWidth) {
+    null => child,
+    final width => Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: width),
+        child: child,
+      ),
+    ),
+  };
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -68,55 +116,79 @@ class _AssistantPanelState extends State<AssistantPanel> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ListTile(
-            leading: widget.onClose == null
-                // The title names her; the portrait beside it is decoration.
-                ? const ExcludeSemantics(child: MoneypennyAvatar(size: 40))
-                : IconButton(
-                    tooltip: 'Close Moneypenny',
-                    onPressed: widget.onClose,
-                    icon: const Icon(Icons.arrow_back),
-                  ),
-            title: Text(
-              'Moneypenny',
-              style: TextStyle(
-                fontFamily: ooDisplayFamily,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.4,
-                color: OoTokens.of(context).accent,
-              ),
-            ),
-            subtitle: Text(
-              !controller.connected
-                  ? 'Connecting…'
-                  : controller.stopping
-                  ? 'Stopping…'
-                  : controller.busy
-                  ? 'Answering…'
-                  : 'Ask about AI6, or ask her to propose a change.',
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  tooltip: 'New conversation',
-                  onPressed: controller.connected ? controller.startOver : null,
-                  icon: const Icon(Icons.add_comment_outlined),
-                ),
-                if (widget.onMemory case final onMemory?)
-                  PopupMenuButton<void>(
-                    tooltip: 'Moneypenny menu',
-                    itemBuilder: (context) => [
-                      PopupMenuItem(
-                        onTap: onMemory,
-                        child: const ListTile(
-                          leading: Icon(Icons.psychology_outlined),
-                          title: Text('Her memory of you'),
+          LayoutBuilder(
+            // A narrow panel gives the portrait's room to the title and the buttons.
+            builder: (context, constraints) => Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+              child: Row(
+                children: [
+                  if (widget.onClose != null)
+                    IconButton(
+                      tooltip: widget.closeTooltip,
+                      onPressed: widget.onClose,
+                      icon: const Icon(Icons.arrow_back),
+                    )
+                  else if (constraints.maxWidth >= 360)
+                    // The title names her; the portrait beside it is decoration.
+                    const ExcludeSemantics(child: MoneypennyAvatar(size: 40)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Moneypenny',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontFamily: ooDisplayFamily,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.4,
+                            color: OoTokens.of(context).accent,
+                          ),
                         ),
-                      ),
-                    ],
+                        Text(
+                          !controller.connected
+                              ? 'Connecting…'
+                              : controller.stopping
+                              ? 'Stopping…'
+                              : controller.busy
+                              ? 'Answering…'
+                              : 'Ask about AI6, or ask her to propose a change.',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
                   ),
-              ],
+                  IconButton(
+                    tooltip: 'New conversation',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: controller.connected
+                        ? controller.startOver
+                        : null,
+                    icon: const Icon(Icons.add_comment_outlined),
+                  ),
+                  if (widget.onMemory case final onMemory?)
+                    PopupMenuButton<void>(
+                      tooltip: 'Moneypenny menu',
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          onTap: onMemory,
+                          child: const ListTile(
+                            leading: Icon(Icons.psychology_outlined),
+                            title: Text('Her memory of you'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ...widget.actions,
+                ],
+              ),
             ),
           ),
           const Divider(height: 1),
@@ -129,11 +201,15 @@ class _AssistantPanelState extends State<AssistantPanel> {
                 for (final entry in controller.entries.reversed)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: _EntryView(
+                    child: switch (_EntryView(
                       entry: entry,
                       controller: controller,
                       onOpen: widget.onOpen,
-                    ),
+                    )) {
+                      // Views are tables and charts: they take the whole width.
+                      final view when entry.role == 'view' => view,
+                      final other => _column(other),
+                    },
                   ),
                 if (controller.earlier > 0)
                   Text(
@@ -147,19 +223,21 @@ class _AssistantPanelState extends State<AssistantPanel> {
           if (controller.connected &&
               !controller.busy &&
               controller.entries.isEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final prompt in moneypennyPrompts)
-                    ActionChip(
-                      label: Text(prompt),
-                      onPressed: () =>
-                          widget.controller.say(prompt, page: widget.page),
-                    ),
-                ],
+            _column(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final prompt in moneypennyPrompts)
+                      ActionChip(
+                        label: Text(prompt),
+                        onPressed: () =>
+                            widget.controller.say(prompt, page: widget.page),
+                      ),
+                  ],
+                ),
               ),
             ),
           if (controller.busy) const LinearProgressIndicator(),
@@ -171,38 +249,46 @@ class _AssistantPanelState extends State<AssistantPanel> {
                 style: TextStyle(color: theme.colorScheme.error),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _message,
-                    minLines: 1,
-                    maxLines: 4,
-                    enabled: controller.connected,
-                    decoration: const InputDecoration(
-                      hintText: 'Ask Moneypenny…',
+          _column(
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Focus(
+                      canRequestFocus: false,
+                      skipTraversal: true,
+                      onKeyEvent: _composerKey,
+                      child: TextField(
+                        controller: _message,
+                        focusNode: widget.composerFocus,
+                        minLines: 1,
+                        maxLines: 4,
+                        enabled: controller.connected,
+                        decoration: const InputDecoration(
+                          hintText: 'Ask Moneypenny…',
+                        ),
+                        onSubmitted: (_) => _send(),
+                      ),
                     ),
-                    onSubmitted: (_) => _send(),
                   ),
-                ),
-                const SizedBox(width: 8),
-                if (controller.busy)
-                  IconButton.filled(
-                    tooltip: controller.stopping ? 'Stopping…' : 'Stop',
-                    onPressed: controller.connected && !controller.stopping
-                        ? controller.interrupt
-                        : null,
-                    icon: const Icon(Icons.stop),
-                  )
-                else
-                  IconButton.filled(
-                    tooltip: 'Send',
-                    onPressed: controller.connected ? _send : null,
-                    icon: const Icon(Icons.send),
-                  ),
-              ],
+                  const SizedBox(width: 8),
+                  if (controller.busy)
+                    IconButton.filled(
+                      tooltip: controller.stopping ? 'Stopping…' : 'Stop',
+                      onPressed: controller.connected && !controller.stopping
+                          ? controller.interrupt
+                          : null,
+                      icon: const Icon(Icons.stop),
+                    )
+                  else
+                    IconButton.filled(
+                      tooltip: 'Send',
+                      onPressed: controller.connected ? _send : null,
+                      icon: const Icon(Icons.send),
+                    ),
+                ],
+              ),
             ),
           ),
         ],

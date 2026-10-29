@@ -43,8 +43,7 @@ abstract final class OoBreakpoints {
   static const double phone = 600;
 }
 
-/// The application frame: a top bar, the rail of [pages], the current page's [body], and
-/// the right-hand [endDrawer].
+/// The application frame: a top bar, the rail of [pages] and the current page's [body].
 ///
 /// The top bar holds the wordmark, the [search] field (an icon below
 /// [OoBreakpoints.wide]) and [actions]. At [OoBreakpoints.wide] and wider the rail is
@@ -59,7 +58,6 @@ class OoShell extends StatelessWidget {
     required this.body,
     this.actions = const [],
     this.search,
-    this.endDrawer,
     this.scaffoldKey,
     super.key,
   });
@@ -75,7 +73,6 @@ class OoShell extends StatelessWidget {
 
   /// The search: a field when given `true` (wide windows), else a button that opens it.
   final Widget Function(bool expanded)? search;
-  final Widget? endDrawer;
   final GlobalKey<ScaffoldState>? scaffoldKey;
 
   @override
@@ -106,7 +103,6 @@ class OoShell extends StatelessWidget {
               ),
             )
           : null,
-      endDrawer: endDrawer,
       appBar: AppBar(
         toolbarHeight: phone ? 60 : 68,
         titleSpacing: phone ? 4 : 20,
