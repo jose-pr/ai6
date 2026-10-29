@@ -17,9 +17,9 @@ use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_
 /// The directory of a Station's own family files under the provider's root.
 const STATIONS_DIR: &str = "stations";
 
-/// Configuration in a directory, one file per family: `operations`, `agents` (Agents, roles
-/// and `[assistant]`), `covers` and `theaters`, each with the extension `cfg`, `toml`,
-/// `json`, `yaml` or `yml` ([`format`](crate::bootstrap::format)). A Station's own records
+/// Configuration in a directory, one file per family ([`ConfigRecord::file`]), each with the
+/// extension `cfg`, `toml`, `json`, `yaml` or `yml` ([`format`](crate::bootstrap::format)),
+/// except `unex.cfg`, which is Universal Exports' bootstrap file. A Station's own records
 /// are in `stations/<id>/` beside them, for the families that take them. A missing file
 /// holds no records; two files for one family make the configuration invalid.
 ///
@@ -68,7 +68,12 @@ impl FileProvider {
         for stem in stems {
             let mut present = Vec::new();
             for extension in EXTENSIONS {
-                let path = dir.join(format!("{stem}.{extension}"));
+                let name = format!("{stem}.{extension}");
+                // A bootstrap file beside the family files is not one of them.
+                if name == crate::bootstrap::FILE_NAME || name == crate::bootstrap::UNEX_FILE_NAME {
+                    continue;
+                }
+                let path = dir.join(name);
                 match fs::metadata(&path) {
                     Ok(metadata) if metadata.is_file() => present.push(path),
                     Ok(_) => {}

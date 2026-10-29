@@ -10,8 +10,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 const DEFAULT_SERVER: &str = "http://127.0.0.1:7082";
-const SERVER_ENV: &str = "AI6_EXPORTS_URL";
-const ACCESS_TOKEN_ENV: &str = "AI6_ACCESS_TOKEN";
+const SERVER_ENV: &str = "UNEX_URL";
+const ACCESS_TOKEN_ENV: &str = "UNEX_ACCESS_TOKEN";
 const DEFAULT_CONTROL_WAIT_SECS: u64 = 10;
 const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -19,12 +19,17 @@ const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(500);
 #[command(
     name = "ai6ctl",
     about = "Inspect and control AI6 Stations, Agent roles, Missions and Sessions, and sign green ink, through the Universal Exports API",
-    after_help = "Commands other than health require a user bearer token in AI6_ACCESS_TOKEN. Never use M or terminal-attachment credentials."
+    after_help = "The Universal Exports origin is --server, else UNEX_URL, else [unex] url of the ai6.cfg found as the ai6 command finds it (--config, AI6_CONFIG, the user's then the system's configuration directory), else http://127.0.0.1:7082. Commands other than health require a user bearer token in UNEX_ACCESS_TOKEN. Never use M or terminal-attachment credentials."
 )]
 struct Cli {
-    /// Universal Exports API origin.
-    #[arg(long, env = SERVER_ENV, default_value = DEFAULT_SERVER, global = true)]
-    server: String,
+    /// Universal Exports API origin (default: UNEX_URL, else `[unex] url` of ai6.cfg, else
+    /// http://127.0.0.1:7082).
+    #[arg(long, env = SERVER_ENV, global = true)]
+    server: Option<String>,
+    /// The ai6.cfg to read `[unex] url` from, which must exist (default: AI6_CONFIG, else
+    /// ai6.cfg in the user's, then the system's configuration directory).
+    #[arg(long, value_name = "PATH", global = true)]
+    config: Option<std::path::PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -473,9 +478,23 @@ async fn main() -> ExitCode {
     }
 }
 
+/// The origin to use: `server` (the flag or `UNEX_URL`), else `[unex] url` of the bootstrap
+/// file the `ai6` command would read, else the loopback default. Nothing else of that file
+/// is read, its Station token least of all.
+fn origin(server: Option<&str>, config: Option<&std::path::Path>) -> Result<String, String> {
+    if let Some(server) = server {
+        return Ok(server.to_owned());
+    }
+    let located = ai6::bootstrap::Bootstrap::find(config).map_err(|error| error.to_string())?;
+    Ok(located
+        .value
+        .unex
+        .map_or_else(|| DEFAULT_SERVER.to_owned(), |unex| unex.url))
+}
+
 async fn run() -> Result<(), String> {
     let cli = Cli::parse();
-    let server = server_url(&cli.server)?;
+    let server = server_url(&origin(cli.server.as_deref(), cli.config.as_deref())?)?;
     let client = Client::builder()
         .timeout(Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::none())

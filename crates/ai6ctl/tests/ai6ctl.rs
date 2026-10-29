@@ -164,9 +164,9 @@ async fn ai6ctl(server: String, token: Option<String>, args: &[&str]) -> std::pr
             .arg("--server")
             .arg(server)
             .args(args)
-            .env_remove("AI6_ACCESS_TOKEN");
+            .env_remove("UNEX_ACCESS_TOKEN");
         if let Some(token) = token {
-            command.env("AI6_ACCESS_TOKEN", token);
+            command.env("UNEX_ACCESS_TOKEN", token);
         }
         command.output().unwrap()
     })
@@ -312,7 +312,7 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
     assert!(
         String::from_utf8(no_token.stderr)
             .unwrap()
-            .contains("AI6_ACCESS_TOKEN")
+            .contains("UNEX_ACCESS_TOKEN")
     );
 
     let no_mission_token = ai6ctl(server.clone(), None, &["missions"]).await;
@@ -320,7 +320,7 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
     assert!(
         String::from_utf8(no_mission_token.stderr)
             .unwrap()
-            .contains("AI6_ACCESS_TOKEN")
+            .contains("UNEX_ACCESS_TOKEN")
     );
 
     let _ = shutdown.send(());
@@ -881,4 +881,66 @@ async fn green_ink_is_listed_signed_refused_and_revoked_and_class_authorisations
         "the Agent's reason is never audited"
     );
     let _ = shutdown.send(());
+}
+
+/// A loopback stand-in that answers `GET /health` with `{}`, and the URL it is reached at.
+async fn health_stand_in() -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let app = axum::Router::new().route(
+        "/health",
+        axum::routing::get(|| async { axum::Json(serde_json::json!({"status": "ok"})) }),
+    );
+    let (stop, stopped) = oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = stopped.await;
+            })
+            .await;
+    });
+    (url, stop)
+}
+
+#[tokio::test]
+async fn the_origin_comes_from_the_flag_then_unex_url_then_ai6_cfg() {
+    let (url, stop) = health_stand_in().await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("ai6.cfg");
+    std::fs::write(
+        &config,
+        format!("[unex]\nurl = \"{url}\"\ntoken = \"never-read\"\n"),
+    )
+    .unwrap();
+    let health = |extra: Vec<String>, unex_url: Option<String>| {
+        let config = config.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_ai6ctl"));
+            command
+                .arg("health")
+                .args(extra)
+                .env("AI6_CONFIG", &config)
+                .env_remove("UNEX_URL")
+                .env_remove("UNEX_ACCESS_TOKEN");
+            if let Some(unex_url) = unex_url {
+                command.env("UNEX_URL", unex_url);
+            }
+            command.output().unwrap()
+        })
+    };
+    let reached = health(Vec::new(), None).await.unwrap();
+    assert!(
+        reached.status.success(),
+        "ai6.cfg's [unex] url: {reached:?}"
+    );
+
+    // Nothing listens on port 9 of loopback: a flag or UNEX_URL that names it wins and fails.
+    let closed = "http://127.0.0.1:9".to_owned();
+    let flag = health(vec!["--server".to_owned(), closed.clone()], None)
+        .await
+        .unwrap();
+    assert!(!flag.status.success(), "--server beats ai6.cfg");
+    let variable = health(Vec::new(), Some(closed)).await.unwrap();
+    assert!(!variable.status.success(), "UNEX_URL beats ai6.cfg");
+    let _ = stop.send(());
 }
