@@ -107,8 +107,17 @@ impl AccessProviders {
         header: axum::http::HeaderName,
         lookup_by: impl Into<String>,
     ) -> Self;
+    // Err below MIN_PROXY_SECRET_LEN (32) or without a proxy identity. Without a secret no
+    // asserted identity is accepted: login with the identity header also needs
+    // PROXY_SECRET_HEADER ("x-ai6-proxy-secret") equal to it, else 401.
+    pub fn with_proxy_secret(self, secret: impl Into<String>) -> Result<Self, String>;
 }
+pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
+pub const MIN_PROXY_SECRET_LEN: usize = 32;
 ```
+
+`universal-exports` reads the secret from `AI6_EXPORTS_PROXY_SECRET` (environment only) and
+refuses to start with `AI6_EXPORTS_PROXY_USER_HEADER` but no secret.
 
 All fields are public; `AttachMode` is non-exhaustive. M is the authority that
 chooses the Operation, Mission ID, Session ID and mode. The gateway refuses a

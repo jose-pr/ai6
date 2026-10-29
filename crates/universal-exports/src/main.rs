@@ -355,6 +355,7 @@ fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {
             })?;
             AccessProviders::new(authenticator, directory, authorizer)
                 .with_proxy_identity(header, cli.proxy_lookup_by.clone())
+                .with_proxy_secret(proxy_secret()?)?
         }
         (Some(authenticator), None) => AccessProviders::new(authenticator, directory, authorizer),
         (None, Some(header)) => {
@@ -367,6 +368,7 @@ fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {
                 header,
                 cli.proxy_lookup_by.clone(),
             )
+            .with_proxy_secret(proxy_secret()?)?
         }
         (None, None) => {
             return Err(
@@ -375,6 +377,17 @@ fn configured_access(cli: &Cli) -> Result<Option<AccessProviders>, String> {
         }
     };
     Ok(Some(access))
+}
+
+/// `AI6_EXPORTS_PROXY_SECRET`, which the reverse proxy sends in `X-AI6-Proxy-Secret`; read from
+/// the environment only, so it never appears in a command line.
+fn proxy_secret() -> Result<String, String> {
+    std::env::var("AI6_EXPORTS_PROXY_SECRET").map_err(|_| {
+        "AI6_EXPORTS_PROXY_USER_HEADER needs AI6_EXPORTS_PROXY_SECRET, the secret the reverse \
+         proxy sends in X-AI6-Proxy-Secret, so a client reaching the gateway's port directly \
+         cannot assert an identity"
+            .to_owned()
+    })
 }
 
 fn load_provider_config(path: &Path) -> Result<Value, String> {

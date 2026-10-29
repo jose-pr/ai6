@@ -93,11 +93,15 @@ $env:AI6_EXPORTS_DIRECTORY = 'coqui_access_password'
 $env:AI6_EXPORTS_DIRECTORY_CONFIG = 'C:\secure\accounts.json'
 $env:AI6_EXPORTS_PROXY_USER_HEADER = 'X-Forwarded-User'
 $env:AI6_EXPORTS_PROXY_LOOKUP_BY = 'name'
+$env:AI6_EXPORTS_PROXY_SECRET = '<at least 32 random characters>'
 universal-exports --public-origin https://exports.example
 ```
 
 The reverse proxy must overwrite `X-Forwarded-User` after authenticating the
-browser and remove any client-supplied value. The Directory maps that asserted
+browser and remove any client-supplied value, and set `X-AI6-Proxy-Secret` to
+`AI6_EXPORTS_PROXY_SECRET` on every request it forwards: an asserted identity without
+that secret is refused, since anything reaching the loopback port directly (another
+local process) can set the identity header too. The Directory maps that asserted
 name to the authoritative person record; authorization still comes from the
 configured access policy.
 
@@ -247,6 +251,7 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 | `AI6_EXPORTS_AUTHENTICATOR_CONFIG` | Path to the Authenticator's JSON config object. | None |
 | `AI6_EXPORTS_PROXY_USER_HEADER` | Sanitized authenticated-user header supplied by the trusted reverse proxy. | None |
 | `AI6_EXPORTS_PROXY_LOOKUP_BY` | Directory attribute for the reverse-proxy identity, commonly `name` or `email`. | `name` |
+| `AI6_EXPORTS_PROXY_SECRET` | Required with `AI6_EXPORTS_PROXY_USER_HEADER`: what the proxy sends in `X-AI6-Proxy-Secret`, at least 32 characters; environment only. | None |
 | `AI6_EXPORTS_DIRECTORY` | Guatiao Directory provider ID. | None |
 | `AI6_EXPORTS_DIRECTORY_CONFIG` | Path to the Directory's JSON config object. | None |
 | `AI6_EXPORTS_ACCESS_POLICY` | TOML policy for the built-in RoleAuthorizer; alternative to `AI6_EXPORTS_AUTHORIZER`. | Deny all |

@@ -109,7 +109,16 @@ pub struct AccessProviders {
 struct ProxyIdentity {
     header: HeaderName,
     lookup_by: String,
+    /// What the proxy sends in [`PROXY_SECRET_HEADER`]; without it no asserted identity counts.
+    secret: Option<String>,
 }
+
+/// The header in which the trusted reverse proxy proves it sent a request that asserts an
+/// identity: anything that reaches the gateway's port directly can set the identity header too.
+pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
+
+/// The shortest proxy secret accepted.
+pub const MIN_PROXY_SECRET_LEN: usize = 32;
 
 impl AccessProviders {
     /// Combines the configured authentication, identity and authorization providers.
@@ -145,6 +154,7 @@ impl AccessProviders {
             proxy_identity: Some(ProxyIdentity {
                 header,
                 lookup_by: lookup_by.into(),
+                secret: None,
             }),
         }
     }
@@ -154,8 +164,33 @@ impl AccessProviders {
         self.proxy_identity = Some(ProxyIdentity {
             header,
             lookup_by: lookup_by.into(),
+            secret: None,
         });
         self
+    }
+
+    /// The secret the reverse proxy sends in [`PROXY_SECRET_HEADER`] with every request; an
+    /// asserted identity is accepted only beside it, so a client that reaches the gateway's port
+    /// without the proxy (a local process among them) cannot assert one. Without a secret no
+    /// asserted identity is accepted.
+    ///
+    /// # Errors
+    ///
+    /// A message when `secret` is shorter than [`MIN_PROXY_SECRET_LEN`] or there is no proxy
+    /// identity to guard.
+    pub fn with_proxy_secret(mut self, secret: impl Into<String>) -> Result<Self, String> {
+        let secret = secret.into();
+        if secret.len() < MIN_PROXY_SECRET_LEN {
+            return Err(format!(
+                "the proxy secret must be at least {MIN_PROXY_SECRET_LEN} characters"
+            ));
+        }
+        let proxy = self
+            .proxy_identity
+            .as_mut()
+            .ok_or("a proxy secret needs a proxy identity header")?;
+        proxy.secret = Some(secret);
+        Ok(self)
     }
 }
 
@@ -2074,6 +2109,17 @@ async fn login(
     let person = if let Some(proxy) = &providers.proxy_identity {
         if let Some(value) = headers.get(&proxy.header) {
             require_origin(&gateway, &headers)?;
+            let sent = headers
+                .get(PROXY_SECRET_HEADER)
+                .map(|value| value.as_bytes())
+                .unwrap_or_default();
+            let proven = proxy
+                .secret
+                .as_ref()
+                .is_some_and(|secret| constant_time_eq(secret.as_bytes(), sent));
+            if !proven {
+                return Err(ApiError::unauthorized());
+            }
             let value = value.to_str().map_err(|_| ApiError::unauthorized())?;
             let value = value.trim();
             if value.is_empty() || value.len() > 512 || value.contains(',') {
@@ -3966,6 +4012,8 @@ fn read_sequence(map: &Map) -> Result<u64, GatewayError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PROXY_TEST_SECRET: &str = "proxy-secret-that-is-long-enough-for-tests";
     use ai6::{FileRegistry, RoleAuthorizer};
     use ai6_diptel::{
         LifecycleEvent, SessionState, TerminalData, TerminalDirection, TerminalResize,
@@ -4989,7 +5037,9 @@ mod tests {
                 Arc::new(TestDirectory),
                 Arc::new(authorizer),
             )
-            .with_proxy_identity(HeaderName::from_static("x-forwarded-user"), "name"),
+            .with_proxy_identity(HeaderName::from_static("x-forwarded-user"), "name")
+            .with_proxy_secret(PROXY_TEST_SECRET)
+            .unwrap(),
         );
         for (station, mission, session) in [
             ("G", "mission-g", "session-g"),
@@ -5050,11 +5100,25 @@ mod tests {
                 .json(&serde_json::json!({"name": name, "secret": "secret"}))
         };
 
+        // A client that reaches the port without the proxy sets every header but the secret.
+        for secret in [None, Some("wrong"), Some(&PROXY_TEST_SECRET[1..])] {
+            let mut forged = client
+                .post(format!("{base}/v1/auth/login"))
+                .header("origin", "https://localhost")
+                .header("x-forwarded-proto", "https")
+                .header("x-forwarded-user", "viewer");
+            if let Some(secret) = secret {
+                forged = forged.header(PROXY_SECRET_HEADER, secret);
+            }
+            let forged = forged.json(&serde_json::json!({})).send().await.unwrap();
+            assert_eq!(forged.status(), StatusCode::UNAUTHORIZED, "{secret:?}");
+        }
         let proxy_login = client
             .post(format!("{base}/v1/auth/login"))
             .header("origin", "https://localhost")
             .header("x-forwarded-proto", "https")
             .header("x-forwarded-user", "viewer")
+            .header(PROXY_SECRET_HEADER, PROXY_TEST_SECRET)
             .json(&serde_json::json!({}))
             .send()
             .await
@@ -5079,6 +5143,7 @@ mod tests {
             .header("origin", "https://localhost")
             .header("x-forwarded-proto", "https")
             .header("x-forwarded-user", "unknown-account")
+            .header(PROXY_SECRET_HEADER, PROXY_TEST_SECRET)
             .json(&serde_json::json!({}))
             .send()
             .await
