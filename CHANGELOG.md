@@ -77,7 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a URL that is not a route opens Overview and says so. Universal Exports and the app parse
   routes alike, tested on one fixture. The old `app:/missions/OP/ID`, `app:/stations/ID` and
   `app:/theaters/ID` links are refused, and a Moneypenny message carries `route` (the
-  route's JSON form) instead of `page`; Sessions sort by state or update time.
+  route's JSON form) instead of `page`; Sessions sort by state or update time. A route's
+  `text` filter is at most 128 bytes by default: the `unex` record's `route_text_bytes` and
+  `OO.cfg`'s `[routes] text_bytes` set it.
 - Outer Office makes no request outside its own origin by default: it bundles Roboto and
   its icons, and the web build loads CanvasKit from `canvaskit/` and fallback fonts from
   `assets/fonts/fallback/`. `[assets] cdn = "fonts"` or `"all"` in the `OO.cfg` beside

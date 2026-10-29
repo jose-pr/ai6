@@ -158,6 +158,9 @@ window_width = 520                    # desktop: her own window's size when popp
 window_height = 760
 transition_ms = 200                   # how long the chat takes to move; 0 for none
 
+[routes]
+text_bytes = 128                      # the longest text filter a page link may carry, in bytes
+
 [assets]
 cdn = "none"                          # web only: none, fonts or all (read by the page's bootstrap)
 ```
@@ -168,7 +171,11 @@ which beats Night Ops; an unknown theme id is logged and read as the default. In
 each value is a positive number (`transition_ms` a whole one, 0 allowed) and `width` lies
 between `min_width` and `max_width`, or the file is refused; a width the person drags to
 (`oo.chat.<person ID>`) beats `width` and is kept within the limits. The system's reduced
-motion setting turns transitions off whatever `transition_ms` says. The operator
+motion setting turns transitions off whatever `transition_ms` says.
+`[routes] text_bytes` (1 or more, default 128) bounds the `text` filter of a page link: a web
+URL or one of Moneypenny's links with a longer one is refused like any other bad link. Keep it
+equal to the `unex` record's `route_text_bytes`, or her links that one accepts and this one
+does not show as a refused view. The operator
 menu on desktop writes `[unex] url` back in the format the file declares, keeping its `#!`
 line; a YAML file keeps its comments, a TOML or JSON one does not. The address applies at the
 next start.
@@ -214,8 +221,9 @@ logged and sent at check-in as `tls_weakened`. The `unex` record takes `authenti
 `directory`, `authorizer` and their `*_config` objects (handed to the provider as they are),
 `proxy_user_header`, `proxy_lookup_by`, `login_tries_per_address`, `login_tries_per_name`,
 `client_address_header`, `access_cache_ttl`, `access_cache_negative_ttl`,
-`access_cache_entries`, `assistant` (default `true`) and `assistant_agent` (default
-`moneypenny`). A credential written inline in one of those configurations is reported as a
+`access_cache_entries`, `assistant` (default `true`), `assistant_agent` (default
+`moneypenny`) and `route_text_bytes` (default 128, the longest `text` filter of an Outer
+Office page link Moneypenny's views and page context may carry). A credential written inline in one of those configurations is reported as a
 weakening: name a file there instead.
 
 ### The directory provider
