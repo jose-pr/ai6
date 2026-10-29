@@ -147,7 +147,7 @@ pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,
     CableError, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy,
     CablePrincipal, CableRecipient, CableRelay, CableRelayError, CableRelease, CableScope,
-    CableSendRequest, CableState, CableTarget, DEFAULT_CABLE_TTL, MAX_CABLE_FANOUT,
+    CableSendRequest, CableState, CableTarget, MAX_CABLE_FANOUT,
 };
 pub use directorates::registry::clearance::ClearanceGrant;
 pub use directorates::registry::limits::{

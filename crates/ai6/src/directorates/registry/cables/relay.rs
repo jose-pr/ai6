@@ -10,13 +10,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::bounds::{Limit, Seconds, TimeLimit};
+
 use crate::directorates::registry::backend::*;
 
 use super::{Cable, CableDraft, CableError, CableRecipient, CableScope, CableState, CableTarget};
 
-/// Default Cable lifetime in seconds.
-pub const DEFAULT_CABLE_TTL: f64 = 15.0 * 60.0;
-/// Maximum number of Agent Sessions one broadcast may reach.
+/// Maximum number of Agent Sessions one broadcast may reach unless the `cables` record says
+/// otherwise.
 pub const MAX_CABLE_FANOUT: usize = 100;
 const DEFAULT_SENDER_RATE: f64 = 2.0;
 const DEFAULT_SENDER_BURST: u32 = 20;
@@ -41,6 +42,18 @@ fn default_scope_rate() -> f64 {
 
 fn default_scope_burst() -> u32 {
     DEFAULT_SCOPE_BURST
+}
+
+fn default_body_bytes() -> Limit {
+    Limit::at(16 * 1024)
+}
+
+fn default_max_ttl() -> TimeLimit {
+    TimeLimit::secs(24 * 60 * 60)
+}
+
+fn default_default_ttl() -> Seconds {
+    Seconds::new(15 * 60)
 }
 
 /// Why the relay denied a Cable request; protected recipient details are omitted.
@@ -327,6 +340,12 @@ pub struct CableConfig {
     scope_rate: f64,
     #[serde(default = "default_scope_burst")]
     scope_burst: u32,
+    #[serde(default = "default_body_bytes")]
+    body_bytes: Limit,
+    #[serde(default = "default_max_ttl")]
+    max_ttl: TimeLimit,
+    #[serde(default = "default_default_ttl")]
+    default_ttl: Seconds,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -350,6 +369,9 @@ impl Default for CableConfig {
             sender_burst: DEFAULT_SENDER_BURST,
             scope_rate: DEFAULT_SCOPE_RATE,
             scope_burst: DEFAULT_SCOPE_BURST,
+            body_bytes: default_body_bytes(),
+            max_ttl: default_max_ttl(),
+            default_ttl: default_default_ttl(),
         }
     }
 }
@@ -360,16 +382,18 @@ impl CableConfig {
         let config: Self = toml::from_str(source)
             .map_err(|error| CableError::new(format!("invalid Cable config: {error}")))?;
         config.policy()?;
-        if !(1..=1_000).contains(&config.max_fanout)
+        if config.max_fanout == 0
             || !config.sender_rate.is_finite()
             || config.sender_rate <= 0.0
             || config.sender_burst == 0
             || !config.scope_rate.is_finite()
             || config.scope_rate <= 0.0
             || config.scope_burst == 0
+            || config.default_ttl.0.is_zero()
+            || !config.max_ttl.allows(config.default_ttl.0)
         {
             return Err(CableError::new(
-                "Cable config limits must be positive and bounded",
+                "Cable config limits must be positive, with default_ttl within max_ttl",
             ));
         }
         for (channel, members) in &config.channels {
@@ -415,6 +439,13 @@ impl CableConfig {
             self.scope_rate,
             self.scope_burst,
         )
+    }
+
+    /// Returns the UTF-8 bytes a Cable's body may have (`body_bytes`, default 16 KiB), the
+    /// longest lifetime a sender may ask for (`max_ttl`, default a day) and the lifetime of a
+    /// Cable that asks for none (`default_ttl`, default 15 minutes).
+    pub fn message_limits(&self) -> (Limit, TimeLimit, Seconds) {
+        (self.body_bytes, self.max_ttl, self.default_ttl)
     }
 }
 
@@ -534,7 +565,8 @@ pub struct CableSendRequest {
     target: CableTarget,
     body: String,
     idempotency_key: String,
-    ttl: f64,
+    /// Seconds; `None` takes the relay's default lifetime.
+    ttl: Option<f64>,
     conversation_id: Option<String>,
     reply_to: Option<String>,
     /// For a reply to a Cable sent for a person: only the Session that sent it.
@@ -620,13 +652,13 @@ impl fmt::Debug for CableDelivery {
 }
 
 impl CableSendRequest {
-    /// Creates a request with the default 15-minute lifetime.
+    /// Creates a request with the relay's default lifetime.
     pub fn new(target: CableTarget, body: String, idempotency_key: String) -> Self {
         Self {
             target,
             body,
             idempotency_key,
-            ttl: DEFAULT_CABLE_TTL,
+            ttl: None,
             conversation_id: None,
             reply_to: None,
             to_session: None,
@@ -635,7 +667,7 @@ impl CableSendRequest {
 
     /// Sets a requested lifetime in seconds, validated when the relay accepts the request.
     pub fn with_ttl(mut self, ttl: f64) -> Self {
-        self.ttl = ttl;
+        self.ttl = Some(ttl);
         self
     }
 
@@ -670,6 +702,9 @@ pub struct CableRelay {
     sender_burst: u32,
     scope_rate: f64,
     scope_burst: u32,
+    body_bytes: Limit,
+    max_ttl: TimeLimit,
+    default_ttl: Seconds,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     audit: Option<Arc<AuditSink>>,
     person_audit: Option<Arc<PersonAudit>>,
@@ -700,6 +735,9 @@ impl CableRelay {
             sender_burst: DEFAULT_SENDER_BURST,
             scope_rate: DEFAULT_SCOPE_RATE,
             scope_burst: DEFAULT_SCOPE_BURST,
+            body_bytes: default_body_bytes(),
+            max_ttl: default_max_ttl(),
+            default_ttl: default_default_ttl(),
             now: Arc::new(system_time),
             audit: None,
             person_audit: None,
@@ -716,7 +754,7 @@ impl CableRelay {
         scope_rate: f64,
         scope_burst: u32,
     ) -> Result<Self, CableError> {
-        if !(1..=1_000).contains(&max_fanout)
+        if max_fanout == 0
             || !sender_rate.is_finite()
             || sender_rate <= 0.0
             || sender_burst == 0
@@ -724,9 +762,7 @@ impl CableRelay {
             || scope_rate <= 0.0
             || scope_burst == 0
         {
-            return Err(CableError::new(
-                "Cable relay limits must be positive and bounded",
-            ));
+            return Err(CableError::new("Cable relay limits must be positive"));
         }
         self.max_fanout = max_fanout;
         self.sender_rate = sender_rate;
@@ -762,6 +798,32 @@ impl CableRelay {
             _ => Vec::new(),
         };
         policy.allows(agent, action, target, &ancestors)
+    }
+
+    /// Sets the UTF-8 bytes a Cable's body may have, the longest lifetime a sender may ask
+    /// for, and the lifetime of a Cable that asks for none ([`CableConfig::message_limits`]).
+    ///
+    /// # Errors
+    ///
+    /// A zero `default_ttl`, or one longer than `max_ttl`.
+    pub fn with_message_limits(
+        mut self,
+        (body_bytes, max_ttl, default_ttl): (Limit, TimeLimit, Seconds),
+    ) -> Result<Self, CableError> {
+        if default_ttl.0.is_zero() || !max_ttl.allows(default_ttl.0) {
+            return Err(CableError::new(
+                "a Cable's default lifetime must be positive and within its maximum",
+            ));
+        }
+        self.body_bytes = body_bytes;
+        self.max_ttl = max_ttl;
+        self.default_ttl = default_ttl;
+        Ok(self)
+    }
+
+    /// The UTF-8 bytes a Cable's body may have, as the `cables` record says.
+    pub fn body_bytes(&self) -> Limit {
+        self.body_bytes
     }
 
     /// Sets the relay clock, primarily for deterministic operation and tests.
@@ -1209,21 +1271,23 @@ impl CableRelay {
             .map_err(|_| CableRelayError::Unavailable)
     }
 
+    /// The lifetime `request` asks for, else the relay's default, in seconds.
+    fn ttl_of(&self, request: &CableSendRequest) -> f64 {
+        request.ttl.unwrap_or(self.default_ttl.0.as_secs_f64())
+    }
+
     /// Authorizes, expands and persists one Cable without accepting caller-selected identity.
     pub fn send(
         &self,
         principal: &CablePrincipal,
         request: CableSendRequest,
     ) -> Result<Cable, CableRelayError> {
-        let limits = &self.registry.limits().cables;
-        if !request.ttl.is_finite()
-            || request.ttl <= 0.0
-            || !limits.max_ttl.allows_secs(request.ttl)
-        {
+        let ttl = self.ttl_of(&request);
+        if !ttl.is_finite() || ttl <= 0.0 || !self.max_ttl.allows_secs(ttl) {
             return Err(CableRelayError::InvalidRequest);
         }
         if request.body.trim().is_empty()
-            || !limits.body_bytes.allows(request.body.len())
+            || !self.body_bytes.allows(request.body.len())
             || super::validate_text(
                 "Cable idempotency_key",
                 Some(&request.idempotency_key),
@@ -1241,7 +1305,7 @@ impl CableRelay {
             return Err(CableRelayError::InvalidRequest);
         }
         let now = (self.now)();
-        if !now.is_finite() || now <= 0.0 || !(now + request.ttl).is_finite() {
+        if !now.is_finite() || now <= 0.0 || !(now + ttl).is_finite() {
             return Err(CableRelayError::RegistryUnavailable);
         }
 
@@ -1351,13 +1415,7 @@ impl CableRelay {
         recipients: Vec<CableRecipient>,
         now: f64,
     ) -> Result<CableDraft, CableRelayError> {
-        if !self
-            .registry
-            .limits()
-            .cables
-            .body_bytes
-            .allows(request.body.len())
-        {
+        if !self.body_bytes.allows(request.body.len()) {
             return Err(CableRelayError::InvalidRequest);
         }
         let id = new_cable_id();
@@ -1371,7 +1429,7 @@ impl CableRelay {
             request.idempotency_key.clone(),
             id,
             now,
-            now + request.ttl,
+            now + self.ttl_of(request),
         );
         if let Some(theater) = principal.theater.as_deref() {
             draft = draft.with_sender_theater(theater);
@@ -2756,5 +2814,70 @@ ops = ["007", "008"]
         assert!(config.policy().is_ok());
         assert!(CableConfig::parse_toml("unexpected = true").is_err());
         assert!(CableConfig::parse_toml("max_fanout = 0").is_err());
+    }
+
+    #[test]
+    fn the_cables_record_bounds_a_cables_body_and_lifetime() {
+        let config = CableConfig::parse_toml(
+            "body_bytes = 8
+max_ttl = 120
+default_ttl = 60
+
+[[grants]]
+agent = \"007\"
+             action = \"send\"
+scope = \"station\"
+name = \"station-a\"
+
+[[grants]]
+             agent = \"008\"
+action = \"receive\"
+scope = \"station\"
+name = \"station-a\"
+",
+        )
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let service = relay(
+            Arc::new(FileRegistry::open(root.path())),
+            config.policy().unwrap(),
+            vec![endpoint("008", "operation-a", Some("session-008"))],
+        )
+        .with_message_limits(config.message_limits())
+        .unwrap();
+        assert_eq!(service.body_bytes(), Limit::at(8));
+        let sender = principal("007", "operation-a");
+        let to = target(CableScope::Agent, Some("008"));
+        // The Registry would store this body; the record's relay refuses it.
+        assert_eq!(
+            service
+                .send(&sender, request(to.clone(), "long"))
+                .unwrap_err(),
+            CableRelayError::InvalidRequest
+        );
+        let short = |key: &str| CableSendRequest::new(to.clone(), "Look.".into(), key.into());
+        let sent = service.send(&sender, short("default")).unwrap();
+        assert_eq!(sent.expires_at() - sent.created_at(), 60.0);
+        assert_eq!(
+            service
+                .send(&sender, short("too-long").with_ttl(121.0))
+                .unwrap_err(),
+            CableRelayError::InvalidRequest
+        );
+        assert!(CableConfig::parse_toml("default_ttl = 0").is_err());
+        assert!(
+            CableConfig::parse_toml(
+                "max_ttl = 60
+default_ttl = 61"
+            )
+            .is_err()
+        );
+        let unbounded = CableConfig::parse_toml(
+            "body_bytes = \"none\"
+max_ttl = \"none\"",
+        )
+        .unwrap();
+        assert_eq!(unbounded.message_limits().0, Limit::UNBOUNDED);
+        assert!(CableConfig::parse_toml("max_fanout = 5000").is_ok());
     }
 }

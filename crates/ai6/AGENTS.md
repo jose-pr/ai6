@@ -3075,8 +3075,11 @@ names an Agent (or `*`), a `CableAction` (`Send`, `Receive`, `Discover`, `Releas
 `CableTarget`. `CableRelay::new(Arc<dyn RegistryBackend>, policy, endpoint_source, channels)`
 (`limits()` gives that Registry's `RegistryLimits`)
 uses the shared Registry, an authoritative Agent/Session directory and named channel
-members. `with_limits` configures bounded fan-out (1–1,000) and persistent sender/scope
-token buckets. `send(principal, CableSendRequest)` checks sender and every receiver,
+members. `with_limits` configures bounded fan-out (at least 1) and persistent sender/scope
+token buckets; `with_message_limits(CableConfig::message_limits())` the body size, longest and
+default lifetime a sender gets (16 KiB, a day and 15 minutes by default), which
+`body_bytes()` reports; the Registry's `[registry.limits.cables]` bound what it stores.
+`CableSendRequest::new` asks for the relay's default lifetime, `with_ttl` for another. `send(principal, CableSendRequest)` checks sender and every receiver,
 deduplicates the audience, snapshots recipient Sessions, applies deliver/hold/refuse and
 stores an idempotent Cable. Same-Station unicast uses Station grants; cross-Station
 unicast uses explicit Agent grants. Theater, global and channel broadcasts require exact

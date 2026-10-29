@@ -5,8 +5,7 @@ mod relay;
 pub use relay::{
     CableAction, CableAuditRecord, CableConfig, CableDelivery, CableEndpoint, CableGrant,
     CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy, CablePrincipal,
-    CableRelay, CableRelayError, CableRelease, CableSendRequest, DEFAULT_CABLE_TTL,
-    MAX_CABLE_FANOUT,
+    CableRelay, CableRelayError, CableRelease, CableSendRequest, MAX_CABLE_FANOUT,
 };
 
 use std::error::Error;

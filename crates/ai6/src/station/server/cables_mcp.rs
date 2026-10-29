@@ -1727,7 +1727,7 @@ impl CableTools {
                 finding.text.trim()
             ));
         }
-        let limit = self.relay.limits().cables.body_bytes;
+        let limit = self.relay.body_bytes();
         if !limit.allows(body.len()) {
             let mut end = limit.or_max();
             while !body.is_char_boundary(end) {
@@ -2336,7 +2336,7 @@ impl AssistantCableDesk {
 
     /// Keeps the request for the person to confirm and tells Universal Exports; sends nothing.
     fn hold(&self, operation: &str, action: Held, body: String, idempotency_key: String) -> String {
-        let limit = self.relay.limits().cables.body_bytes;
+        let limit = self.relay.body_bytes();
         if body.trim().is_empty() || !limit.allows(body.len()) {
             return format!("Cable body is empty or longer than {limit} bytes; nothing was held");
         }

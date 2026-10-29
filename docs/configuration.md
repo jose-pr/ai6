@@ -245,8 +245,12 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | --- | --- | --- |
 | `record_bytes` | 2 MiB | Bytes of one Cable record |
 | `records` | 10,000 | Cable records the Registry holds |
-| `body_bytes` | 16 KiB | UTF-8 bytes of a Cable's body |
-| `max_ttl` | 86,400 (a day) | Seconds a Cable may live |
+| `body_bytes` | 16 KiB | UTF-8 bytes of a Cable's body the Registry stores |
+| `max_ttl` | 86,400 (a day) | Seconds a Cable the Registry stores may live |
+
+What a Station's relay accepts from a sender is the `cables` record's
+([Families](#families)); the Registry's bounds above apply to what is stored, whoever wrote
+it.
 
 `[registry.limits.clearance]`
 
@@ -669,6 +673,14 @@ runners the `[runner]` table and the `[providers.<id>]` tables
 | --- | --- | --- |
 | `listed_changes` | 20 | Changes of a kept safe house listed in one report |
 | `survey_entries` | 500,000 | Directory entries one survey of a safe house walks before it reports a partial size |
+
+The `cables` record takes `grants`, `inbound` and `channels`, and the relay's limits:
+`max_fanout` (Agent Sessions one broadcast may reach, default 100), `sender_rate` and
+`sender_burst` (sends a second and burst per sending Agent, 2 and 20), `scope_rate` and
+`scope_burst` (per target scope, 10 and 50), `body_bytes` (UTF-8 bytes of a Cable's body,
+16 KiB; `"none"` takes the bound away), `max_ttl` (the longest lifetime a sender may ask for,
+in seconds, 86,400; `"none"` for no bound) and `default_ttl` (the lifetime of a Cable that
+asks for none, 900, within `max_ttl`). Each must be positive.
 
 ### The directory provider
 

@@ -919,6 +919,7 @@ where
         scope_rate,
         scope_burst,
     )
+    .and_then(|relay| relay.with_message_limits(cable_config.message_limits()))
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
     let provider_configs = plugins::provider_configs(&config.station.limits().providers)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("station.{error}")))?;

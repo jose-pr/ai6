@@ -137,7 +137,8 @@ recipients are not disclosed by denial errors.
 
 The lifecycle is `queued`, `delivered`, `held`, `refused`, `acked`, `expired` or
 `failed`. Retries preserve the Cable ID and are idempotent. The default TTL is 15 minutes
-and the maximum is 24 hours; broadcast membership is snapshotted when accepted. A live
+and the maximum is 24 hours (the `cables` record's `default_ttl` and `max_ttl`); broadcast
+membership is snapshotted when accepted. A live
 recipient is bound to its current Session; a known offline Agent gets an Agent-level
 queued delivery that any of its Sessions may read before expiry. The relay uses shared
 Registry token buckets by sender Agent and target scope: defaults are 2 sends/second with a
