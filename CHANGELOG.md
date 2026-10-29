@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (new Overview, Operations and Sessions pages; Agents, Green Ink, Briefings and Roster take
   Administration's tabs; Theaters, settings and placement are tabs of Stations) that has
   labels from 1200 px, is compact from 900 px and sits behind a menu button below that.
+- Outer Office makes no request outside its own origin by default: it bundles Roboto and
+  its icons, and the web build loads CanvasKit from `canvaskit/` and fallback fonts from
+  `assets/fonts/fallback/`. `[assets] cdn = "fonts"` or `"all"` in the `OO.cfg` beside
+  `index.html` opts in to Google Fonts, or to it and Flutter's CDN for the engine.
 - Moneypenny runs on Codex with scripts and her workspace. With interpreters, the Codex
   handler admits Codex's code-mode tools (`functions.exec`, `functions.wait`) inside Codex's
   own sandbox, a permission profile (`ai6_assistant`) that denies the filesystem but the

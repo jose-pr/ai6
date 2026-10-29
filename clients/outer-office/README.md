@@ -124,6 +124,34 @@ The web build loads Guatiao's WebAssembly wire runtime from `web/ai6_guatiao.was
 is generated and ignored: run `dart run tool/build_guatiao_wasm.dart` after `pub get` and
 before a non-demo web build. It builds `guatiao-intake` at the revision in `pubspec.lock`.
 
+## No outside requests by default
+
+Outer Office ships everything it shows: the Roboto font (Apache-2.0, in `assets/fonts/`,
+listed on the app's licence page), Material icons, the design kit's icons and wallpapers.
+The web build loads its engine (CanvasKit or skwasm) from its own `canvaskit/` directory,
+so by default the browser fetches nothing from any origin but the one serving the app.
+Desktop builds never use a CDN.
+
+A web deployment may opt in with `[assets] cdn` in an `OO.cfg` beside `index.html`, read
+by `web/flutter_bootstrap.js` before the engine starts:
+
+| `cdn` | Fetched from outside |
+| --- | --- |
+| `"none"` (default; also a missing, unreadable or unknown value) | nothing |
+| `"fonts"` | fonts for characters Roboto lacks (other scripts, emoji), from Google Fonts (`fonts.gstatic.com`) |
+| `"all"` | those fonts, and the engine from Flutter's CDN (`www.gstatic.com`) |
+
+```toml
+[assets]
+cdn = "fonts"
+```
+
+Under `"none"` a character no bundled font has shows as a box; to cover more scripts
+without a CDN, serve Google's Noto fonts under `assets/fonts/fallback/` with the paths
+`fonts.gstatic.com/s/` uses. `test/no_cdn_test.dart` fails if the page or the bootstrap
+names a CDN host, or if the default stops loading the engine and fonts locally.
+Moneypenny's linked pages are separate pages and may load what they need.
+
 ## Layout
 
 A top bar, a rail of pages (Overview, Operations, Missions, Sessions, Agents, Stations,
