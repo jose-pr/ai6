@@ -83,6 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   person's layout and width are kept on each device as `oo.chat.<person>`. `OO.cfg`'s
   `[chat]` sets its sizes (the docked width and its limits, the arrow-key step, the page's
   minimum beside it, the expanded text column, her window's size) and transition time.
+  Overview, Sessions and Missions lay out by the width the page has, so a docked chat never
+  squeezes them. In the demo (`OO_DEMO=true`) she answers from a scripted sample
+  conversation, labelled as such, with no network and no effect.
 - The Outer Office web build serves the Noto fallback fonts itself (727 files, 34.4 MiB,
   OFL-1.1), so text in other scripts and emoji render with no outside request;
   `tool/cdn_files.dart fill` puts them in after `flutter build web`, from the `deps`

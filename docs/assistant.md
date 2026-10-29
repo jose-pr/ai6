@@ -697,7 +697,9 @@ person still confirms.
 beside the page in a wide window, over it in a narrower one, full screen on a phone. It can
 be expanded into the centre (Ctrl+Alt+Shift+I) and, on desktop, popped out into its own
 window (Ctrl+Alt+O); every layout shows the same conversation, and the app remembers the
-layout per person on each device (the app's README has the details).
+layout per person on each device (the app's README has the details). The app's demo build
+(`OO_DEMO=true`) shows a scripted sample conversation instead, labelled as one; it reaches no
+network and its proposals change nothing.
 
 The app opens a WebSocket to `/v1/user/moneypenny` and sends its access token in the first
 frame. With each message it says which page the person is on (for example the Stations page,

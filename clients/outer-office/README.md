@@ -111,7 +111,10 @@ across Windows GPUs.
 
 ## Quick start
 
-A demo board with sample data and no network connection:
+A demo board with sample data and no network connection. Moneypenny answers there from a
+short scripted sample, labelled "Sample conversation — demo": canned replies to her quick
+questions (one with a table and a chart, one with a proposal whose Confirm and Cancel change
+nothing) and one reply to anything else. A signed-in app never uses the script.
 
 ```powershell
 & $flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release --dart-define=OO_DEMO=true
