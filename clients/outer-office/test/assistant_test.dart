@@ -172,8 +172,14 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.text('Earlier question'), findsOneWidget);
+    // Her portrait heads the panel; in the conversation only her messages carry it.
+    final inConversation = find.descendant(
+      of: find.byType(ListView),
+      matching: find.byType(MoneypennyAvatar),
+    );
+    expect(find.byType(MoneypennyAvatar), findsOneWidget);
     expect(
-      find.byType(MoneypennyAvatar),
+      inConversation,
       findsNothing,
       reason: 'only her messages carry her avatar',
     );
@@ -206,17 +212,23 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(find.text('board'), findsOneWidget);
     expect(find.textContaining('is busy: 4 of 4.'), findsOneWidget);
-    expect(find.byType(MoneypennyAvatar), findsOneWidget);
+    expect(inConversation, findsOneWidget);
     expect(
-      find.image(const AssetImage(MoneypennyAvatar.asset)),
+      find.descendant(
+        of: find.byType(ListView),
+        matching: find.image(const AssetImage(MoneypennyAvatar.asset)),
+      ),
       findsOneWidget,
     );
     expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is Semantics &&
-            widget.properties.label == 'Moneypenny' &&
-            widget.properties.image == true,
+      find.descendant(
+        of: find.byType(ListView),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics &&
+              widget.properties.label == 'Moneypenny' &&
+              widget.properties.image == true,
+        ),
       ),
       findsOneWidget,
     );

@@ -128,6 +128,14 @@ void main() {
       (family) => family['family'] == 'Roboto',
     );
     expect(roboto['fonts'], hasLength(3));
+    final cinzel = manifest.cast<Map<String, dynamic>>().singleWhere(
+      (family) => family['family'] == 'Cinzel',
+    );
+    expect(cinzel['fonts'], hasLength(2));
+    expect(
+      await rootBundle.loadString('assets/fonts/LICENSE-Cinzel.txt'),
+      contains('SIL Open Font License, Version 1.1'),
+    );
     expect(
       await rootBundle.loadString('assets/fonts/LICENSE-Roboto.txt'),
       contains('Apache License'),
@@ -139,10 +147,13 @@ void main() {
     final web = await fontLicenses(web: true).toList();
     expect(
       [for (final entry in web) ...entry.packages],
-      ['Roboto', 'Noto fonts'],
+      ['Roboto', 'Cinzel', 'Noto fonts'],
     );
     final desktop = await fontLicenses(web: false).toList();
-    expect([for (final entry in desktop) ...entry.packages], ['Roboto']);
+    expect(
+      [for (final entry in desktop) ...entry.packages],
+      ['Roboto', 'Cinzel'],
+    );
     expect(
       File('pubspec.lock').readAsStringSync(),
       isNot(contains('google_fonts')),

@@ -1,11 +1,12 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../theme/oo_decor.dart';
 import '../theme/oo_icon.dart';
-import '../theme/oo_tokens.dart';
+import '../theme/oo_theme.dart';
 
 /// The pages of the rail, in its order.
 enum OoPage {
-  overview('overview', 'Overview', null),
+  overview('overview', 'Overview', OoIconName.overview),
   operations('operations', 'Operations', OoIconName.operations),
   missions('missions', 'Missions', OoIconName.missions),
   sessions('sessions', 'Sessions', OoIconName.sessions),
@@ -18,18 +19,15 @@ enum OoPage {
   timeline('timeline', 'Timeline', OoIconName.timeline),
   audit('audit', 'Audit', OoIconName.audit);
 
-  const OoPage(this.id, this.label, this._icon);
+  const OoPage(this.id, this.label, this.iconName);
 
   /// The page's name in Moneypenny's page context, such as `green_ink`.
   final String id;
   final String label;
-  final OoIconName? _icon;
+  final OoIconName iconName;
 
-  /// The kit's icon, or a Material one where the kit has none.
-  Widget get icon => switch (_icon) {
-    final name? => OoIcon(name),
-    null => const Icon(Icons.dashboard_outlined),
-  };
+  /// The page's line icon, for small sizes.
+  Widget get icon => OoIcon(iconName);
 }
 
 /// Window widths at which the layout changes, in logical pixels.
@@ -39,14 +37,20 @@ abstract final class OoBreakpoints {
 
   /// From here: the compact rail. Below it one view at a time, the rail in a drawer.
   static const double compact = 900;
+
+  /// Below this: a phone. The top bar keeps only what fits, Overview is one column, tables
+  /// become lists and Moneypenny opens full screen.
+  static const double phone = 600;
 }
 
 /// The application frame: a top bar, the rail of [pages], the current page's [body], and
 /// the right-hand [endDrawer].
 ///
-/// At [OoBreakpoints.wide] and wider the rail is 226 px with labels beside the icons; down
-/// to [OoBreakpoints.compact] it is compact, labels below the icons; narrower, the rail is a
-/// modal drawer behind a menu button, since twelve entries do not fit a bottom bar.
+/// The top bar holds the wordmark, the [search] field (an icon below
+/// [OoBreakpoints.wide]) and [actions]. At [OoBreakpoints.wide] and wider the rail is
+/// 226 px with labels beside the icons; down to [OoBreakpoints.compact] it is compact,
+/// labels below the icons; narrower, the rail is a modal drawer behind a menu button, since
+/// twelve entries do not fit a bottom bar.
 class OoShell extends StatelessWidget {
   const OoShell({
     required this.pages,
@@ -54,7 +58,9 @@ class OoShell extends StatelessWidget {
     required this.onSelect,
     required this.body,
     this.actions = const [],
+    this.search,
     this.endDrawer,
+    this.scaffoldKey,
     super.key,
   });
 
@@ -64,15 +70,23 @@ class OoShell extends StatelessWidget {
   final ValueChanged<OoPage> onSelect;
   final Widget body;
 
-  /// Top-bar buttons, after the page title.
+  /// Top-bar buttons, after the search.
   final List<Widget> actions;
+
+  /// The search: a field when given `true` (wide windows), else a button that opens it.
+  final Widget Function(bool expanded)? search;
   final Widget? endDrawer;
+  final GlobalKey<ScaffoldState>? scaffoldKey;
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final selected = pages.indexOf(page);
+    final wide = width >= OoBreakpoints.wide;
+    final phone = width < OoBreakpoints.phone;
+    final tokens = OoTokens.of(context);
     return Scaffold(
+      key: scaffoldKey,
       drawer: width < OoBreakpoints.compact
           ? Builder(
               builder: (context) => NavigationDrawer(
@@ -82,10 +96,10 @@ class OoShell extends StatelessWidget {
                   onSelect(pages[index]);
                 },
                 children: [
-                  const _RailHeading(),
+                  const _DrawerHeading(),
                   for (final page in pages)
                     NavigationDrawerDestination(
-                      icon: page.icon,
+                      icon: OoTile(page.iconName, size: 38),
                       label: Text(page.label),
                     ),
                 ],
@@ -94,15 +108,46 @@ class OoShell extends StatelessWidget {
           : null,
       endDrawer: endDrawer,
       appBar: AppBar(
+        toolbarHeight: phone ? 60 : 68,
+        titleSpacing: phone ? 4 : 20,
         title: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            const _Mark(),
-            const SizedBox(width: 14),
-            Flexible(child: Text(page.label, overflow: TextOverflow.ellipsis)),
+            if (wide)
+              const FittedBox(fit: BoxFit.scaleDown, child: OoWordmark())
+            else if (!phone) ...[
+              const OoWordmark(compact: true, size: 26),
+              const SizedBox(width: 14),
+            ],
+            if (!wide)
+              Flexible(
+                child: Text(
+                  page.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: ooDisplayFamily,
+                    fontWeight: FontWeight.w700,
+                    fontSize: phone ? 18 : 20,
+                    letterSpacing: 1.2,
+                    color: tokens.text,
+                  ),
+                ),
+              ),
+            if (wide && search != null)
+              Expanded(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: search!(true),
+                  ),
+                ),
+              ),
           ],
         ),
-        actions: [...actions, const SizedBox(width: 12)],
+        actions: [
+          if (!wide && search != null) search!(false),
+          ...actions,
+          SizedBox(width: phone ? 4 : 12),
+        ],
       ),
       body: Row(
         children: [
@@ -110,7 +155,7 @@ class OoShell extends StatelessWidget {
             OoRail(
               pages: pages,
               selected: selected,
-              extended: width >= OoBreakpoints.wide,
+              extended: wide,
               onSelect: (index) => onSelect(pages[index]),
             ),
             const VerticalDivider(width: 1),
@@ -162,7 +207,7 @@ class OoRail extends StatelessWidget {
       child: SizedBox(
         width: width,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 16),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
           children: [
             const _RailHeading(),
             for (final (index, page) in pages.indexed)
@@ -178,8 +223,9 @@ class OoRail extends StatelessWidget {
   }
 }
 
-/// One labelled rail entry. Selected: a raised fill, an accent icon and a 3 px accent bar
-/// on the left, with the label in `text` (accent on `raised` is below 4.5:1 in Red File).
+/// One labelled rail entry. Selected: the gilt highlight of the design reference, a fill
+/// washed with the accent, an accent edge and glow, the icon in accent and the label in
+/// `text` (accent on the fill is below 4.5:1 in some themes).
 class _RailEntry extends StatelessWidget {
   const _RailEntry({
     required this.page,
@@ -196,44 +242,56 @@ class _RailEntry extends StatelessWidget {
     final tokens = OoTokens.of(context);
     final iconColor = selected ? tokens.accent : tokens.muted;
     final labelColor = selected ? tokens.text : tokens.muted;
-    final radius = BorderRadius.circular(9);
+    final radius = BorderRadius.circular(10);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.only(bottom: 4),
       child: Semantics(
         selected: selected,
         button: true,
-        child: Material(
-          color: selected ? tokens.raised : const Color(0x00000000),
-          borderRadius: radius,
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Container(
-              decoration: selected
-                  ? BoxDecoration(
-                      border: Border(
-                        left: BorderSide(color: tokens.accent, width: 3),
-                      ),
-                    )
-                  : null,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-              child: Row(
-                children: [
-                  IconTheme.merge(
-                    data: IconThemeData(color: iconColor, size: 20),
-                    child: page.icon,
+        child: DecoratedBox(
+          decoration: selected
+              ? BoxDecoration(
+                  borderRadius: radius,
+                  gradient: LinearGradient(
+                    colors: [tokens.selectedFill, tokens.raised],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      page.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge
-                          ?.copyWith(color: labelColor),
+                  border: Border.all(
+                    color: tokens.accent.withValues(alpha: 0.7),
+                  ),
+                  boxShadow: tokens.glow(tokens.accent, radius: 10),
+                )
+              : const BoxDecoration(),
+          child: Material(
+            type: MaterialType.transparency,
+            borderRadius: radius,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    IconTheme.merge(
+                      data: IconThemeData(color: iconColor, size: 20),
+                      child: page.icon,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        page.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: labelColor,
+                          fontWeight: selected ? FontWeight.w600 : null,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -248,37 +306,44 @@ class _RailHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
     child: Text(
       'COMMAND CENTER',
-      style: Theme.of(context).textTheme.labelSmall
-          ?.copyWith(letterSpacing: 2, color: OoTokens.of(context).accent),
+      style: ooSectionLabel(context).copyWith(fontSize: 11.5),
     ),
   );
 }
 
-/// The OO mark of the top bar.
-class _Mark extends StatelessWidget {
-  const _Mark();
+/// The menu drawer's heading: the app's mark and the wordmark.
+class _DrawerHeading extends StatelessWidget {
+  const _DrawerHeading();
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: 'Outer Office',
-    child: ExcludeSemantics(
-      child: Text(
-        'OO',
-        style: TextStyle(
-          fontFamily: 'Georgia',
-          fontFamilyFallback: const ['serif'],
-          fontWeight: FontWeight.w700,
-          fontSize: 24,
-          letterSpacing: 1.8,
-          color: OoTokens.of(context).accent,
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 20, 16, 16),
+    child: Row(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.asset(
+            ooAppMark,
+            width: 52,
+            height: 52,
+            filterQuality: FilterQuality.medium,
+            excludeFromSemantics: true,
+          ),
         ),
-      ),
+        const SizedBox(width: 14),
+        const Flexible(
+          child: FittedBox(fit: BoxFit.scaleDown, child: OoWordmark(size: 22)),
+        ),
+      ],
     ),
   );
 }
+
+/// The Outer Office app icon from the brand pack, 256 px.
+const ooAppMark = 'assets/brand/outer-office-256.png';
 
 /// A page made of [tabs], each a label and its body: one tab is shown without a tab bar,
 /// none says [empty].

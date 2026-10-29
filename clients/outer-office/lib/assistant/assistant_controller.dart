@@ -95,6 +95,9 @@ class AssistantController extends ChangeNotifier {
   bool connected = false;
   String? problem;
 
+  /// A message asked before the conversation was ready, sent when it is.
+  ({String text, Map<String, String> page})? _pending;
+
   /// Opens the socket and says hello, resuming the last conversation when there is one.
   void open() {
     if (_channel != null) return;
@@ -144,6 +147,16 @@ class AssistantController extends ChangeNotifier {
           for (final entry in message['entries'] as List? ?? const [])
             AssistantEntry.fromJson((entry as Map).cast<String, Object?>()),
         ];
+        if (_pending case final pending?) {
+          _pending = null;
+          _channel?.send(
+            jsonEncode({
+              'type': 'message',
+              'text': pending.text,
+              if (pending.page.isNotEmpty) 'page': pending.page,
+            }),
+          );
+        }
       case 'entry':
         entries = [
           ...entries,
@@ -189,6 +202,18 @@ class AssistantController extends ChangeNotifier {
   void say(String text, {Map<String, String> page = const {}}) {
     if (text.trim().isEmpty) return;
     _send({'type': 'message', 'text': text, if (page.isNotEmpty) 'page': page});
+  }
+
+  /// Sends a message now when the conversation is ready, else opens it and sends the
+  /// message once Universal Exports says it is ready.
+  void ask(String text, {Map<String, String> page = const {}}) {
+    if (text.trim().isEmpty) return;
+    if (connected) {
+      say(text, page: page);
+      return;
+    }
+    _pending = (text: text, page: page);
+    open();
   }
 
   void confirm(String proposalId) =>

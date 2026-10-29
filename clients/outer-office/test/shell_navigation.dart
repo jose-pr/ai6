@@ -20,6 +20,8 @@ Future<void> openPage(WidgetTester tester, String label) async {
     await tester.tap(_menu);
     await tester.pumpAndSettle();
   }
+  await tester.ensureVisible(navLabel(label));
+  await tester.pumpAndSettle();
   await tester.tap(navLabel(label));
   await tester.pumpAndSettle();
 }

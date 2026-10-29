@@ -2,9 +2,13 @@ import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
 import '../theme/oo_backdrop.dart';
+import '../theme/oo_decor.dart';
 import '../theme/oo_icon.dart';
+import '../theme/oo_tokens.dart';
+import 'oo_shell.dart';
 
-/// Every Session on the board in a table sorted by any column; a row opens the Session.
+/// Every Session on the board in a table sorted by any column; a row opens the Session. On
+/// a phone the table is a list of rows, in the same order.
 class SessionsPage extends StatefulWidget {
   const SessionsPage({required this.board, required this.onOpen, super.key});
 
@@ -53,6 +57,9 @@ class _SessionsPageState extends State<SessionsPage> {
       (left, right) =>
           _ascending ? _compare(left, right) : _compare(right, left),
     );
+    if (MediaQuery.sizeOf(context).width < OoBreakpoints.phone) {
+      return _SessionList(sessions: sessions, onOpen: widget.onOpen);
+    }
     DataColumn column(String label, {bool numeric = false}) =>
         DataColumn(label: Text(label), numeric: numeric, onSort: _sort);
     return SingleChildScrollView(
@@ -111,6 +118,72 @@ class _SessionsPageState extends State<SessionsPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The Sessions as rows, like the design reference's phone lists: an icon tile, the
+/// Session, its Operation and Mission, and its state beside a dot of its colour.
+class _SessionList extends StatelessWidget {
+  const _SessionList({required this.sessions, required this.onOpen});
+
+  final List<SessionSummary> sessions;
+  final ValueChanged<SessionSummary> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = OoTokens.of(context);
+    final text = Theme.of(context).textTheme;
+    return ListView.separated(
+      padding: const EdgeInsets.all(12),
+      itemCount: sessions.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        final session = sessions[index];
+        final state = session.state ?? 'working';
+        return Card(
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => onOpen(session),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  const OoTile(OoIconName.sessions, size: 44),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          session.sessionId,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.titleSmall,
+                        ),
+                        Text(
+                          'Operation ${session.operationId} · '
+                          'Mission ${session.missionId}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.bodySmall?.copyWith(color: tokens.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OoStatusDot(tokens.stateColor(state)),
+                  const SizedBox(width: 6),
+                  Text(
+                    [state, ?session.reason?.replaceAll('-', ' ')].join(' · '),
+                    style: text.labelMedium,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

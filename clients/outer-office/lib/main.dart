@@ -28,6 +28,7 @@ import 'shell/oo_shell.dart';
 import 'shell/operations_page.dart';
 import 'shell/overview_page.dart';
 import 'shell/sessions_page.dart';
+import 'shell/top_bar.dart';
 import 'theme/oo_backdrop.dart';
 import 'theme/oo_icon.dart';
 import 'theme/oo_theme.dart';
@@ -52,12 +53,15 @@ void main() {
   _startDesktop();
 }
 
-/// The licences of the fonts the app ships, for its licence page: Roboto everywhere, and on
-/// the [web] the Noto fallback fonts its build serves.
+/// The licences of the fonts the app ships, for its licence page: Roboto and Cinzel
+/// everywhere, and on the [web] the Noto fallback fonts its build serves.
 Stream<LicenseEntry> fontLicenses({required bool web}) async* {
   yield LicenseEntryWithLineBreaks(const [
     'Roboto',
   ], await rootBundle.loadString('assets/fonts/LICENSE-Roboto.txt'));
+  yield LicenseEntryWithLineBreaks(const [
+    'Cinzel',
+  ], await rootBundle.loadString('assets/fonts/LICENSE-Cinzel.txt'));
   if (web) {
     yield LicenseEntryWithLineBreaks(const [
       'Noto fonts',
@@ -139,6 +143,7 @@ class MissionBoard extends ChangeNotifier {
     this.backdrop = true,
     this.onThemeChanged,
     this.onBackdropChanged,
+    this.assistantChannel,
     http.Client? client,
     Duration? pollInterval = const Duration(seconds: 3),
   }) : themeId = ooThemePreference(themeId),
@@ -302,6 +307,10 @@ class MissionBoard extends ChangeNotifier {
   final String? terminalRuntimeError;
   final Future<void> Function(String themeId)? onThemeChanged;
   final Future<void> Function(bool backdrop)? onBackdropChanged;
+
+  /// Opens the channel to Moneypenny; without one, her socket on [apiOrigin]. Tests give a
+  /// fake one.
+  final AssistantChannel Function()? assistantChannel;
   final http.Client _client;
   Timer? _poll;
   List<SessionSummary> sessions = const [];
@@ -2797,6 +2806,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   SessionSummary? _selectedWebSession;
   OoPage _page = OoPage.overview;
   AssistantController? _assistantController;
+  final _scaffold = GlobalKey<ScaffoldState>();
 
   /// The conversation with Moneypenny, kept while this page lives; none in the demo or
   /// before sign-in.
@@ -2808,7 +2818,9 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     current?.dispose();
     return _assistantController = AssistantController(
       token: token,
-      connect: () => connectAssistant(widget.board.apiOrigin),
+      connect:
+          widget.board.assistantChannel ??
+          () => connectAssistant(widget.board.apiOrigin),
     );
   }
 
@@ -2874,6 +2886,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               board: board,
               pages: pages,
               onOpen: (page) => setState(() => _page = page),
+              assistant: _assistant,
+              onAsk: (text) {
+                _scaffold.currentState?.openEndDrawer();
+                _assistant?.ask(text, page: {'view': OoPage.overview.id});
+              },
             ),
             OoPage.operations => OperationsPage(board: board),
             OoPage.missions => _missionsBody(context),
@@ -3038,17 +3055,31 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   Widget build(BuildContext context) {
     final pages = _pages(widget.board);
     final page = pages.contains(_page) ? _page : OoPage.overview;
-    final operatorInitial = _operatorInitial(widget.board.userSession);
     final assistant = _assistant;
     final selectedSession = _selectedWebSession;
+    final width = MediaQuery.sizeOf(context).width;
+    final phone = width < OoBreakpoints.phone;
+    void open(OoPage page) => setState(() => _page = page);
     return OoShell(
+      scaffoldKey: _scaffold,
       pages: pages,
       page: page,
-      onSelect: (page) => setState(() => _page = page),
+      onSelect: open,
+      search: (expanded) => AnimatedBuilder(
+        animation: widget.board,
+        builder: (context, _) => OoSearch(
+          board: widget.board,
+          pages: pages,
+          onOpen: open,
+          expanded: expanded,
+        ),
+      ),
       endDrawer: assistant == null
           ? null
           : Drawer(
-              width: 460,
+              // On a phone her chat takes the whole screen.
+              width: phone ? width : 460,
+              shape: phone ? const RoundedRectangleBorder() : null,
               child: SafeArea(
                 child: Builder(
                   builder: (context) => AssistantPanel(
@@ -3062,6 +3093,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                       },
                     },
                     onOpen: (link) => _openLink(context, link),
+                    onClose: phone ? () => Navigator.of(context).pop() : null,
                     onMemory: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => MemoryPage(board: widget.board),
@@ -3072,28 +3104,34 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               ),
             ),
       actions: [
-        if (assistant != null)
-          Builder(
-            builder: (context) => IconButton(
-              tooltip: 'Ask Moneypenny',
-              onPressed: () => Scaffold.of(context).openEndDrawer(),
-              icon: const OoIcon(OoIconName.moneypenny),
-            ),
-          ),
         IconButton(
-          tooltip: 'Operator account and preferences',
-          onPressed: () => _showOperatorMenu(context, widget.board),
-          icon: CircleAvatar(
-            radius: 16,
-            child: operatorInitial == null
-                ? const Icon(Icons.person_outline, size: 19)
-                : Text(operatorInitial),
-          ),
+          tooltip: assistant == null
+              ? 'Moneypenny answers once you are signed in'
+              : 'Ask Moneypenny',
+          onPressed: assistant == null
+              ? null
+              : () => _scaffold.currentState?.openEndDrawer(),
+          icon: const OoIcon(OoIconName.moneypenny),
         ),
-        IconButton(
-          tooltip: 'Refresh AI6',
-          onPressed: widget.board.refresh,
-          icon: const Icon(Icons.refresh),
+        AnimatedBuilder(
+          animation: widget.board,
+          builder: (context, _) =>
+              AttentionBell(board: widget.board, pages: pages, onOpen: open),
+        ),
+        if (!phone)
+          IconButton(
+            tooltip: 'Appearance settings',
+            onPressed: () => _showAppearance(context, widget.board),
+            icon: const OoIcon(OoIconName.settings),
+          ),
+        const SizedBox(width: 4),
+        AnimatedBuilder(
+          animation: widget.board,
+          builder: (context, _) => UserChip(
+            session: widget.board.userSession,
+            compact: width < OoBreakpoints.wide,
+            onPressed: () => _showOperatorMenu(context, widget.board),
+          ),
         ),
       ],
       body: _pageBody(context, page, pages),
@@ -4034,15 +4072,6 @@ class _AuditLogPageState extends State<AuditLogPage> {
   );
 }
 
-String? _operatorInitial(UserSessionSummary? session) {
-  final displayName = session?.displayName?.trim();
-  final name = displayName?.isNotEmpty == true
-      ? displayName
-      : session?.name.trim();
-  if (name == null || name.isEmpty) return null;
-  return String.fromCharCode(name.runes.first).toUpperCase();
-}
-
 Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
   final identity = board.demo ? null : board.loadUserSession();
   await showDialog<void>(
@@ -4125,7 +4154,8 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
       ),
       actions: [
         if (!board.demo)
-          TextButton.icon(
+          FilledButton.icon(
+            style: ooDangerButton(OoTokens.of(dialogContext)),
             onPressed: () {
               Navigator.pop(dialogContext);
               unawaited(board.logout());
@@ -4141,6 +4171,30 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
     ),
   );
 }
+
+/// The top bar's settings: the operator menu's appearance settings on their own.
+Future<void> _showAppearance(BuildContext context, MissionBoard board) =>
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Appearance'),
+        content: SizedBox(
+          width: 440,
+          child: SingleChildScrollView(
+            child: AnimatedBuilder(
+              animation: board,
+              builder: (context, _) => _ThemeChooser(board: board),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
 
 /// The operator menu's appearance settings: the theme, each with its swatch, and the
 /// wallpaper switch.

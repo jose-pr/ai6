@@ -123,6 +123,16 @@ void main() {
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
+    await tester.pumpAndSettle();
+    // Overview, the first page, read each Operation's newest activity.
+    expect(
+      [for (final uri in timeline.asked) uri.path],
+      unorderedEquals([
+        '/v1/user/operations/G/timeline',
+        '/v1/user/operations/L/timeline',
+      ]),
+    );
+    timeline.asked.clear();
     await openPage(tester, 'Timeline');
     await tester.pumpAndSettle();
 

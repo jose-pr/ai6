@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
 
 import '../held/held_briefs_page.dart' show revealInvisible;
+import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_view.dart';
 
@@ -16,6 +17,7 @@ class AssistantPanel extends StatefulWidget {
     this.page = const {},
     this.onOpen,
     this.onMemory,
+    this.onClose,
     super.key,
   });
 
@@ -27,6 +29,9 @@ class AssistantPanel extends StatefulWidget {
 
   /// Opens the Memory page; without it the menu does not offer it.
   final VoidCallback? onMemory;
+
+  /// Closes the chat where it fills the screen (a phone); without it there is no button.
+  final VoidCallback? onClose;
 
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
@@ -64,8 +69,23 @@ class _AssistantPanelState extends State<AssistantPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           ListTile(
-            leading: const Icon(Icons.support_agent),
-            title: const Text('Moneypenny'),
+            leading: widget.onClose == null
+                // The title names her; the portrait beside it is decoration.
+                ? const ExcludeSemantics(child: MoneypennyAvatar(size: 40))
+                : IconButton(
+                    tooltip: 'Close Moneypenny',
+                    onPressed: widget.onClose,
+                    icon: const Icon(Icons.arrow_back),
+                  ),
+            title: Text(
+              'Moneypenny',
+              style: TextStyle(
+                fontFamily: ooDisplayFamily,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.4,
+                color: OoTokens.of(context).accent,
+              ),
+            ),
             subtitle: Text(
               !controller.connected
                   ? 'Connecting…'
@@ -124,6 +144,24 @@ class _AssistantPanelState extends State<AssistantPanel> {
               ],
             ),
           ),
+          if (controller.connected &&
+              !controller.busy &&
+              controller.entries.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final prompt in moneypennyPrompts)
+                    ActionChip(
+                      label: Text(prompt),
+                      onPressed: () =>
+                          widget.controller.say(prompt, page: widget.page),
+                    ),
+                ],
+              ),
+            ),
           if (controller.busy) const LinearProgressIndicator(),
           if (controller.problem != null)
             Padding(
@@ -144,7 +182,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
                     maxLines: 4,
                     enabled: controller.connected,
                     decoration: const InputDecoration(
-                      hintText: 'Message Moneypenny',
+                      hintText: 'Ask Moneypenny…',
                     ),
                     onSubmitted: (_) => _send(),
                   ),
@@ -187,14 +225,22 @@ class _EntryView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final tokens = OoTokens.of(context);
     return switch (entry.role) {
       'person' => Align(
         alignment: Alignment.centerRight,
         child: Container(
-          padding: const EdgeInsets.all(10),
+          margin: const EdgeInsets.only(left: 40),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: colors.primaryContainer,
-            borderRadius: BorderRadius.circular(12),
+            color: tokens.selectedFill,
+            border: Border.all(color: tokens.accent.withValues(alpha: 0.5)),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(14),
+              topRight: Radius.circular(4),
+              bottomLeft: Radius.circular(14),
+              bottomRight: Radius.circular(14),
+            ),
           ),
           child: Text(revealInvisible(entry.text)),
         ),
@@ -204,7 +250,22 @@ class _EntryView extends StatelessWidget {
         spacing: 8,
         children: [
           const MoneypennyAvatar(),
-          Expanded(child: MarkdownText(entry.text, onOpen: onOpen)),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: tokens.raised,
+                border: Border.all(color: tokens.border),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
+              ),
+              child: MarkdownText(entry.text, onOpen: onOpen),
+            ),
+          ),
         ],
       ),
       'tools' => Wrap(
@@ -252,6 +313,13 @@ class _EntryView extends StatelessWidget {
     };
   }
 }
+
+/// The quick questions offered under her greeting on Overview and in an empty chat.
+const moneypennyPrompts = [
+  'What needs my attention?',
+  'Summarise the board',
+  'Which Stations are dark?',
+];
 
 /// Moneypenny's icon beside her messages, labelled "Moneypenny" for screen readers.
 class MoneypennyAvatar extends StatelessWidget {

@@ -11,6 +11,7 @@ import 'package:material_ui/material_ui.dart'
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/theme/oo_backdrop.dart';
+import 'package:outer_office/theme/oo_decor.dart';
 
 import 'shell_navigation.dart';
 
@@ -58,6 +59,7 @@ void main() {
       ),
       findsOneWidget,
     );
+    await tester.ensureVisible(find.text('Open Briefings'));
     await tester.tap(find.text('Open Briefings'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Held briefs'));
@@ -118,7 +120,9 @@ void main() {
     await demoAt(tester, const Size(1400, 900));
     await openPage(tester, 'Overview');
     expect(find.text('Command overview'), findsOneWidget);
-    expect(find.byType(OoBackdrop), findsOneWidget);
+    // The theme's hero art heads Overview; the wallpaper is only for empty pages.
+    expect(find.byType(OoHero), findsOneWidget);
+    expect(find.byType(OoBackdrop), findsNothing);
     expect(find.text('2 online · 0 dark'), findsNothing);
     expect(find.text('1 online · 1 dark'), findsOneWidget);
     expect(find.text('of 3 Sessions'), findsOneWidget);
@@ -126,6 +130,7 @@ void main() {
       find.text('Station station-remote-02 has gone dark'),
       findsOneWidget,
     );
+    await tester.ensureVisible(find.text('Open Stations'));
     await tester.tap(find.text('Open Stations'));
     await tester.pumpAndSettle();
     expect(find.text('station-control-01'), findsOneWidget);
