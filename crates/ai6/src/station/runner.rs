@@ -734,6 +734,9 @@ fn failure(status: StatusCode, message: impl Into<String>) -> Failure {
     Failure(status, message.into())
 }
 
+/// The most of a refused request's body read before the 401, in bytes.
+const REFUSED_BODY_DRAIN: usize = 64 * 1024;
+
 /// Lets a request through only with `Authorization: Bearer TOKEN`, compared in constant time.
 pub(crate) async fn authorize(
     State(token): State<String>,
@@ -747,6 +750,9 @@ pub(crate) async fn authorize(
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or_default();
     if supplied.len() != token.len() || !bool::from(supplied.as_bytes().ct_eq(token.as_bytes())) {
+        // Read a small body before answering: a socket closed with unread data is reset, and
+        // a Windows client then sees an aborted connection instead of the 401.
+        let _ = axum::body::to_bytes(request.into_body(), REFUSED_BODY_DRAIN).await;
         return failure(StatusCode::UNAUTHORIZED, "a valid bearer token is required")
             .into_response();
     }
