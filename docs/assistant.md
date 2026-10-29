@@ -508,7 +508,11 @@ What differs from Claude Code:
   `functions.wait`, and keeps no list of allowed programs: inside the sandbox she may run any
   command. Each harness started with scripts reports that as a weakening (`ai6: weakening:
   Codex gives Moneypenny's thread functions.exec and functions.wait …`, and a `weakened`
-  event first).
+  event first). The tool check reads the tools `exec` declares and admits only the command
+  tools, Codex's patch tool when she has files to write, her servers' tools and resource
+  tools, and a clock; anything else stops her start (`AI6_CODEX_TOOL_CHECK=warn` starts it as a
+  weakening). Codex 0.164 always declares the patch tool, so there she needs `files` to start
+  with interpreters.
 - **No network for scripts.** Codex's app server enforced no host list for a profile's
   network in Codex 0.164 (with network on, a script reached unlisted hosts and the Station's
   own loopback services), so her scripts get none under every policy; she is told so when the

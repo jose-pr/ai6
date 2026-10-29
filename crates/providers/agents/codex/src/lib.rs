@@ -1293,6 +1293,8 @@ fn spawn(
             model: mode.model,
             servers: &servers,
             scripts: scripts != Scripts::None,
+            files: restriction(mode.answer_only, mode.assistant)
+                .is_some_and(|allowed| allowed.file_changes),
         }
         .check()?;
         argv.extend(checked.overrides);
@@ -3263,6 +3265,7 @@ mod tests {
         for unsandboxed in [false, true] {
             let mut mode = AssistantMode::moneypenny();
             mode.interpreters.push("python3".to_owned());
+            mode.files = vec!["personal".to_owned()];
             mode.unsandboxed = unsandboxed;
             let terminal = ProcessTerminal::new();
             let session = handler

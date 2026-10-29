@@ -173,16 +173,10 @@ pub(crate) fn switch_off_servers(
 /// one `message` and otherwise only `additional_tools`, with nothing after it, so an unknown
 /// shape is never read as "no tools".
 pub(crate) fn offered_tools(output: &[u8]) -> Option<Vec<String>> {
-    // The output is pretty-printed JSON, and a terminal may break a long line: JSON text holds
-    // no raw line break, so every one can go.
-    let mut text = strip_controls(output);
-    text.retain(|byte| !matches!(byte, b'\r' | b'\n'));
-    let start = (0..text.len()).find(|&at| opens_item_list(&text[at..]))?;
-    // One value, then only whitespace: `from_slice` refuses anything after it.
-    let items: Value = serde_json::from_slice(&text[start..]).ok()?;
+    let items = prompt_items(output)?;
     let mut tools = Vec::new();
     let mut messages = 0;
-    for item in items.as_array()? {
+    for item in &items {
         match item.get("type").and_then(Value::as_str)? {
             "message" => messages += 1,
             "additional_tools" => collect(item.get("tools")?.as_array()?, "", &mut tools)?,
@@ -190,6 +184,55 @@ pub(crate) fn offered_tools(output: &[u8]) -> Option<Vec<String>> {
         }
     }
     (messages > 0).then_some(tools)
+}
+
+/// The one JSON array of input items in `codex debug prompt-input` output.
+fn prompt_items(output: &[u8]) -> Option<Vec<Value>> {
+    // The output is pretty-printed JSON, and a terminal may break a long line: JSON text holds
+    // no raw line break, so every one can go.
+    let mut text = strip_controls(output);
+    text.retain(|byte| !matches!(byte, b'\r' | b'\n'));
+    let start = (0..text.len()).find(|&at| opens_item_list(&text[at..]))?;
+    // One value, then only whitespace: `from_slice` refuses anything after it.
+    match serde_json::from_slice(&text[start..]).ok()? {
+        Value::Array(items) => Some(items),
+        _ => None,
+    }
+}
+
+/// The tools `functions.exec` nests, as its description in `codex debug prompt-input` output
+/// declares them, one `declare const tools: { NAME(` per tool under an `exec tool
+/// declaration:` heading: `Some` empty when `exec` is not offered, `None` when its declarations
+/// cannot be read. Codex leaves deferred tools (an MCP server's, in 0.164.0) out of the
+/// description, so those are not seen here.
+pub(crate) fn exec_nested(output: &[u8]) -> Option<Vec<String>> {
+    let exec = prompt_items(output)?
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+        .filter_map(|item| item.get("tools")?.as_array())
+        .flatten()
+        .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("functions"))
+        .filter_map(|namespace| namespace.get("tools")?.as_array())
+        .flatten()
+        .find(|tool| tool.get("name").and_then(Value::as_str) == Some("exec"))
+        .cloned();
+    let Some(exec) = exec else {
+        return Some(Vec::new());
+    };
+    let description = exec.get("description")?.as_str()?;
+    const DECLARATION: &str = "declare const tools: { ";
+    let names: Vec<String> = description
+        .match_indices(DECLARATION)
+        .map(|(at, _)| {
+            description[at + DECLARATION.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '$'))
+                .collect()
+        })
+        .collect();
+    let headings = description.matches("exec tool declaration:").count();
+    (!names.is_empty() && names.len() == headings && names.iter().all(|name| !name.is_empty()))
+        .then_some(names)
 }
 
 /// Whether `text` starts `[`, `{`, `"type"`, with only whitespace between.
@@ -233,23 +276,72 @@ fn collect(list: &[Value], prefix: &str, tools: &mut Vec<String>) -> Option<()> 
 /// these alone.
 pub(crate) const CODE_MODE_TOOLS: [&str; 2] = ["functions.exec", "functions.wait"];
 
-/// Judges the offered tools against the MCP servers a thread may use: each tool must belong
-/// to one of them (`mcp__<server>.<tool>`) and each must offer at least one. With `scripts`,
-/// [`CODE_MODE_TOOLS`] are allowed too, and a server need not offer a tool directly, since
-/// code mode nests every tool in `exec`. `Ok(None)` passes; `Ok(Some(found))` is a failure a
-/// `warn` check starts with; `Err` refuses.
+/// The tools nested in `exec` that run a script's commands: `exec_command` starts one and
+/// `write_stdin` writes to one it started.
+const COMMAND_TOOLS: [&str; 2] = ["exec_command", "write_stdin"];
+/// The nested tools that list and read the resources of the configured MCP servers, which the
+/// tool check leaves only the thread's.
+const MCP_RESOURCE_TOOLS: [&str; 3] = [
+    "list_mcp_resources",
+    "list_mcp_resource_templates",
+    "read_mcp_resource",
+];
+/// Nested tools that read and reach nothing: the current time. Codex 0.164.0 offers it with
+/// every feature but the kept ones off, and no setting removes it.
+const INERT_TOOLS: [&str; 1] = ["clock__curr_time"];
+
+/// What a thread may use, for [`judge`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Allowed<'a> {
+    /// The MCP servers the thread may use.
+    pub(crate) servers: &'a [String],
+    /// Whether it runs scripts: [`CODE_MODE_TOOLS`] are allowed, with [`COMMAND_TOOLS`] nested.
+    pub(crate) scripts: bool,
+    /// Whether it may change files through Codex's patch tool (`apply_patch`, nested).
+    pub(crate) files: bool,
+}
+
+impl Allowed<'_> {
+    /// Whether `exec` may nest `tool`: the command tools, `apply_patch` with files, the
+    /// resource tools and `mcp__<server>__<tool>` of the thread's servers, and the inert ones.
+    fn nests(&self, tool: &str) -> bool {
+        COMMAND_TOOLS.contains(&tool)
+            || INERT_TOOLS.contains(&tool)
+            || (self.files && tool == "apply_patch")
+            || (!self.servers.is_empty() && MCP_RESOURCE_TOOLS.contains(&tool))
+            || self.servers.iter().any(|server| {
+                // Codex names a nested tool as a JavaScript identifier.
+                let server: String = server
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                    .collect();
+                tool.strip_prefix(&format!("mcp__{server}__"))
+                    .is_some_and(|rest| !rest.is_empty())
+            })
+    }
+}
+
+/// Judges the offered tools against what a thread may use: each tool must belong to one of its
+/// MCP servers (`mcp__<server>.<tool>`) and each server must offer at least one. With
+/// `scripts`, [`CODE_MODE_TOOLS`] are allowed too, a server need not offer a tool directly
+/// (code mode nests them in `exec`), and every tool `exec` declares (`nested`, from
+/// [`exec_nested`]) must be one it may nest ([`Allowed::nests`]). `Ok(None)` passes;
+/// `Ok(Some(found))` is a failure a `warn` check starts with; `Err` refuses.
 pub(crate) fn judge(
     offered: Option<&[String]>,
-    servers: &[String],
-    scripts: bool,
+    nested: Option<&[String]>,
+    allowed: Allowed<'_>,
     check: ToolCheck,
 ) -> Result<Option<String>, String> {
+    let Allowed {
+        servers, scripts, ..
+    } = allowed;
     let found = match offered {
         None => {
             "the tools Codex offers could not be read from `codex debug prompt-input`".to_owned()
         }
         Some(offered) => {
-            let allowed = |tool: &str| {
+            let offers = |tool: &str| {
                 (scripts && CODE_MODE_TOOLS.contains(&tool))
                     || servers.iter().any(|server| {
                         tool.strip_prefix(&format!("mcp__{server}."))
@@ -258,7 +350,7 @@ pub(crate) fn judge(
             };
             let extra = offered
                 .iter()
-                .filter(|tool| !allowed(tool))
+                .filter(|tool| !offers(tool))
                 .cloned()
                 .collect::<BTreeSet<_>>();
             let missing = servers
@@ -283,6 +375,28 @@ pub(crate) fn judge(
                     "Codex offers no tool of MCP server {} directly",
                     missing.join(", ")
                 ));
+            }
+            if scripts && offered.iter().any(|tool| tool == CODE_MODE_TOOLS[0]) {
+                match nested {
+                    None => found.push(
+                        "the tools nested in functions.exec could not be read from its \
+                         description"
+                            .to_owned(),
+                    ),
+                    Some(nested) => {
+                        let extra = nested
+                            .iter()
+                            .filter(|tool| !allowed.nests(tool))
+                            .cloned()
+                            .collect::<BTreeSet<_>>();
+                        if !extra.is_empty() {
+                            found.push(format!(
+                                "Codex nests tools in functions.exec beyond the thread's: {}",
+                                extra.into_iter().collect::<Vec<_>>().join(", ")
+                            ));
+                        }
+                    }
+                }
             }
             if found.is_empty() {
                 return Ok(None);
@@ -361,6 +475,8 @@ pub(crate) struct Probe<'a> {
     /// [`SCRIPT_FEATURES`](crate::sandbox::SCRIPT_FEATURES) and may be offered
     /// [`CODE_MODE_TOOLS`].
     pub(crate) scripts: bool,
+    /// Whether it may change files through Codex's patch tool.
+    pub(crate) files: bool,
 }
 
 impl Probe<'_> {
@@ -417,8 +533,15 @@ impl Probe<'_> {
             let model = serde_json::to_string(model).map_err(internal)?;
             argv.extend(["-c".to_owned(), format!("model={model}")]);
         }
-        let offered = offered_tools(&self.capture(&argv)?);
-        if let Some(found) = judge(offered.as_deref(), self.servers, self.scripts, check)
+        let output = self.capture(&argv)?;
+        let allowed = Allowed {
+            servers: self.servers,
+            scripts: self.scripts,
+            files: self.files,
+        };
+        let offered = offered_tools(&output);
+        let nested = exec_nested(&output);
+        if let Some(found) = judge(offered.as_deref(), nested.as_deref(), allowed, check)
             .map_err(|reason| refuse(Status::GUATIAO_ERR_UNSUPPORTED, reason))?
         {
             weakenings.push(found);
@@ -559,6 +682,15 @@ mod tests {
         vec!["moneypenny".to_owned()]
     }
 
+    /// A thread on `servers`, with scripts and files or without either.
+    fn allow(servers: &[String], scripts: bool) -> Allowed<'_> {
+        Allowed {
+            servers,
+            scripts,
+            files: scripts,
+        }
+    }
+
     #[test]
     fn the_settings_before_the_check_left_code_mode_agents_and_computer_use_on() {
         let offered = offered_tools(BEFORE.as_bytes()).unwrap();
@@ -571,7 +703,8 @@ mod tests {
         ] {
             assert!(offered.iter().any(|t| t == tool), "{tool}: {offered:?}");
         }
-        let refused = judge(Some(&offered), &[], false, ToolCheck::Strict).unwrap_err();
+        let refused =
+            judge(Some(&offered), None, allow(&[], false), ToolCheck::Strict).unwrap_err();
         assert!(refused.contains("functions.exec") && refused.contains("mcp__cua_repl.js"));
     }
 
@@ -583,17 +716,18 @@ mod tests {
             ["functions.exec", "functions.wait"],
             "request_user_input is switched off; exec and wait come with the model"
         );
-        let refused = judge(Some(&offered), &[], false, ToolCheck::Strict).unwrap_err();
+        let refused =
+            judge(Some(&offered), None, allow(&[], false), ToolCheck::Strict).unwrap_err();
         assert!(
             refused.contains("functions.exec, functions.wait"),
             "{refused}"
         );
-        let weakening = judge(Some(&offered), &[], false, ToolCheck::Warn)
+        let weakening = judge(Some(&offered), None, allow(&[], false), ToolCheck::Warn)
             .unwrap()
             .unwrap();
         assert!(weakening.contains("functions.exec"), "{weakening}");
         assert_eq!(
-            judge(Some(&[]), &[], false, ToolCheck::Strict),
+            judge(Some(&[]), None, allow(&[], false), ToolCheck::Strict),
             Ok(None),
             "an answer-only thread passes with no tool at all"
         );
@@ -602,7 +736,13 @@ mod tests {
     #[test]
     fn an_assistant_whose_server_codex_does_not_offer_is_refused() {
         let offered = offered_tools(ASSISTANT.as_bytes()).unwrap();
-        let refused = judge(Some(&offered), &moneypenny(), false, ToolCheck::Strict).unwrap_err();
+        let refused = judge(
+            Some(&offered),
+            None,
+            allow(&moneypenny(), false),
+            ToolCheck::Strict,
+        )
+        .unwrap_err();
         assert!(
             refused.contains("functions.exec, functions.wait")
                 && refused.contains("no tool of MCP server moneypenny"),
@@ -686,7 +826,13 @@ mod tests {
     fn extra_tools_are_refused_and_named_or_started_as_a_weakening() {
         let offered = offered_tools(CODE_MODE.as_bytes()).unwrap();
         assert!(offered.iter().any(|tool| tool == "mcp__moneypenny.board"));
-        let refused = judge(Some(&offered), &moneypenny(), false, ToolCheck::Strict).unwrap_err();
+        let refused = judge(
+            Some(&offered),
+            None,
+            allow(&moneypenny(), false),
+            ToolCheck::Strict,
+        )
+        .unwrap_err();
         assert!(
             refused.contains("functions.exec, functions.request_user_input"),
             "{refused}"
@@ -695,28 +841,49 @@ mod tests {
             !refused.contains("board"),
             "the server's own tool is allowed"
         );
-        let weakening = judge(Some(&offered), &moneypenny(), false, ToolCheck::Warn)
-            .unwrap()
-            .unwrap();
+        let weakening = judge(
+            Some(&offered),
+            None,
+            allow(&moneypenny(), false),
+            ToolCheck::Warn,
+        )
+        .unwrap()
+        .unwrap();
         assert!(weakening.contains("functions.exec"), "{weakening}");
     }
 
-    /// `codex debug prompt-input` of Codex 0.164.0 for an assistant with scripts: the kept
-    /// script features, the sandbox profile and one MCP server, `moneypenny`.
+    /// `codex debug prompt-input` of Codex 0.164.0 on Windows for an assistant with scripts: the
+    /// kept script features, the sandbox profile with `personal/` and `scratch/` writable and
+    /// one MCP server, `moneypenny`; `exec`'s description whole.
     const SCRIPTS: &str = include_str!("../tests/fixtures/codex-0.164.0/prompt-input-scripts.json");
 
     #[test]
     fn a_scripts_thread_is_offered_code_mode_alone_and_passes_only_with_scripts() {
+        let servers = moneypenny();
         let offered = offered_tools(SCRIPTS.as_bytes()).unwrap();
+        let nested = exec_nested(SCRIPTS.as_bytes()).unwrap();
         assert_eq!(
             offered, CODE_MODE_TOOLS,
             "the server's tools are nested in exec"
         );
         assert_eq!(
-            judge(Some(&offered), &moneypenny(), true, ToolCheck::Strict),
-            Ok(None)
+            nested,
+            [
+                "apply_patch",
+                "exec_command",
+                "list_mcp_resource_templates",
+                "list_mcp_resources",
+                "read_mcp_resource",
+                "write_stdin",
+                "clock__curr_time"
+            ],
+            "the server's own tools are deferred, out of the description"
         );
-        let refused = judge(Some(&offered), &moneypenny(), false, ToolCheck::Strict).unwrap_err();
+        let judged = |offered: &[String], nested: &[String], allowed| {
+            judge(Some(offered), Some(nested), allowed, ToolCheck::Strict)
+        };
+        assert_eq!(judged(&offered, &nested, allow(&servers, true)), Ok(None));
+        let refused = judged(&offered, &nested, allow(&servers, false)).unwrap_err();
         assert!(
             refused.contains("functions.exec, functions.wait"),
             "{refused}"
@@ -726,11 +893,82 @@ mod tests {
             vec!["functions.request_user_input".to_owned()],
         ]
         .concat();
-        let refused = judge(Some(&more), &moneypenny(), true, ToolCheck::Strict).unwrap_err();
+        let refused = judged(&more, &nested, allow(&servers, true)).unwrap_err();
         assert!(
             refused.contains("functions.request_user_input") && !refused.contains("exec"),
             "only code mode is admitted: {refused}"
         );
+    }
+
+    #[test]
+    fn exec_nests_only_the_command_tools_the_patch_tool_with_files_and_the_servers() {
+        let servers = moneypenny();
+        let offered = offered_tools(SCRIPTS.as_bytes()).unwrap();
+        let nested = exec_nested(SCRIPTS.as_bytes()).unwrap();
+        let no_files = Allowed {
+            servers: &servers,
+            scripts: true,
+            files: false,
+        };
+        let refused =
+            judge(Some(&offered), Some(&nested), no_files, ToolCheck::Strict).unwrap_err();
+        assert!(
+            refused.contains("functions.exec beyond the thread's: apply_patch"),
+            "{refused}"
+        );
+
+        // A new nested tool, declared as Codex 0.164.0 declares its own.
+        let browser = "\\n\\n### `browser__open`\\nOpens a page.\\n\\nexec tool declaration:\\n\
+                       ```ts\\ndeclare const tools: { browser__open(args: {}): Promise<unknown>; \
+                       };\\n```";
+        let at = SCRIPTS.find("\\n\\n## clock").unwrap();
+        let widened = format!("{}{browser}{}", &SCRIPTS[..at], &SCRIPTS[at..]);
+        let nested = exec_nested(widened.as_bytes()).unwrap();
+        assert!(
+            nested.iter().any(|tool| tool == "browser__open"),
+            "{nested:?}"
+        );
+        let refused = judge(
+            Some(&offered),
+            Some(&nested),
+            allow(&servers, true),
+            ToolCheck::Strict,
+        )
+        .unwrap_err();
+        assert!(
+            refused.contains("beyond the thread's: browser__open"),
+            "{refused}"
+        );
+
+        let allowed = allow(&servers, true);
+        assert!(
+            allowed.nests("mcp__moneypenny__board")
+                && !allowed.nests("mcp__moneypenny_evil__board")
+        );
+        assert!(!allow(&[], true).nests("read_mcp_resource"));
+
+        let cut = SCRIPTS.replacen("exec tool declaration:", "", 1);
+        assert_eq!(
+            exec_nested(cut.as_bytes()),
+            None,
+            "a declaration without its heading"
+        );
+        assert!(
+            judge(
+                Some(&offered),
+                None,
+                allow(&servers, true),
+                ToolCheck::Strict
+            )
+            .unwrap_err()
+            .contains("could not be read")
+        );
+        assert_eq!(
+            exec_nested(ANSWER_ONLY.as_bytes()),
+            None,
+            "the older fixtures cut exec's description"
+        );
+        assert_eq!(exec_nested(b"[{\"type\":\"message\"}]"), Some(Vec::new()));
     }
 
     #[test]
@@ -740,11 +978,24 @@ mod tests {
             "mcp__moneypenny.missions".to_owned(),
         ];
         assert_eq!(
-            judge(Some(&offered), &moneypenny(), false, ToolCheck::Strict),
+            judge(
+                Some(&offered),
+                None,
+                allow(&moneypenny(), false),
+                ToolCheck::Strict
+            ),
             Ok(None)
         );
         let lookalike = vec!["mcp__moneypenny_evil.board".to_owned()];
-        assert!(judge(Some(&lookalike), &moneypenny(), false, ToolCheck::Strict).is_err());
+        assert!(
+            judge(
+                Some(&lookalike),
+                None,
+                allow(&moneypenny(), false),
+                ToolCheck::Strict
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -764,8 +1015,12 @@ mod tests {
         ] {
             let offered = offered_tools(output.as_bytes());
             assert_eq!(offered, None, "{output}");
-            assert!(judge(None, &[], false, ToolCheck::Strict).is_err());
-            assert!(judge(None, &[], false, ToolCheck::Warn).unwrap().is_some());
+            assert!(judge(None, None, allow(&[], false), ToolCheck::Strict).is_err());
+            assert!(
+                judge(None, None, allow(&[], false), ToolCheck::Warn)
+                    .unwrap()
+                    .is_some()
+            );
         }
     }
 

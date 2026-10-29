@@ -204,7 +204,18 @@ output with no such array, anything but whitespace after it, no `message` item, 
 of another type is unreadable. The thread passes when every offered tool is
 `mcp__<server>.<tool>` for one of its servers and each server offers at least one
 (answer-only: no tool); with scripts `functions.exec` and `functions.wait` are allowed too and
-a server need not offer a tool directly (code mode nests them in `exec`), and the start is
+a server need not offer a tool directly (code mode nests them in `exec`), and every tool
+`exec`'s description declares (`declare const tools: { NAME(`, one per `exec tool declaration:`
+heading; a count that differs, or none, is unreadable and fails the check) must be
+`exec_command` or `write_stdin`, `apply_patch` when the thread may change files (`files`, or
+unsandboxed), `list_mcp_resources`, `list_mcp_resource_templates` or `read_mcp_resource` when it
+has servers, `mcp__<server>__<tool>` of one of its servers (the server's name with every
+character but letters and digits as `_`), or `clock__curr_time`, which only reads the time and
+which Codex 0.164.0 offers with no setting to remove it. That release declares exactly
+`apply_patch`, `exec_command`, `list_mcp_resource_templates`, `list_mcp_resources`,
+`read_mcp_resource`, `write_stdin` and `clock__curr_time`, with or without `files`: in `strict`
+a sandboxed scripts thread without `files` is refused (`apply_patch`). Deferred tools, an MCP
+server's among them, are left out of the description and not seen. The start is
 reported as a weakening in either mode (`Codex gives Moneypenny's thread functions.exec and
 functions.wait (code mode): her scripts may run any command inside Codex's sandbox, not only
 <interpreters>`, before any weakening the check found). On a failure `strict` refuses with `GUATIAO_ERR_UNSUPPORTED` naming
@@ -223,7 +234,8 @@ so in `strict` answer-only threads and assistants without scripts are refused on
 release; `warn` starts them as a weakening (fixtures in `tests/fixtures/codex-0.164.0/`). An
 MCP server's tools are offered only inside `functions.exec` there, so an assistant without
 scripts also finds its server missing; one with scripts is offered exactly
-`functions.exec` and `functions.wait` (`prompt-input-scripts.json`) and passes. A server whose name collides with one of the user's is merged with it: with a stdio
+`functions.exec` and `functions.wait` (`prompt-input-scripts.json`, `exec`'s description whole)
+and passes when it has `files`. A server whose name collides with one of the user's is merged with it: with a stdio
 server of that name Codex refuses its configuration and the check fails.
 
 `stdio()` answers `HarnessStdio::Json`, so the Station starts the app server in a terminal

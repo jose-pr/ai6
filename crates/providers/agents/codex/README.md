@@ -30,7 +30,8 @@ initialization, thread start/resume, turn submission and event decoding.
   read-only sandbox, never asking, with web search off and no MCP servers.
 - Before an answer-only or assistant thread starts, switches off every Codex feature but
   four, renders what the model would be offered (`codex debug prompt-input`) and refuses to
-  start unless that is exactly the thread's MCP tools; `AI6_CODEX_TOOL_CHECK=warn` starts it
+  start unless that is exactly the thread's MCP tools (with scripts, code mode's `exec` and
+  `wait`, and only the expected tools nested in `exec`); `AI6_CODEX_TOOL_CHECK=warn` starts it
   anyway and reports a weakening.
 
 ## Installation
