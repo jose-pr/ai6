@@ -113,8 +113,10 @@ class DemoAssistantChannel implements AssistantChannel {
               'attempt at station-control-01; one of its Sessions is working and one '
               'is blocked. Operation L\'s mission-021 is done.',
         ),
+        // Her missions tool read briefs, text from outside AI6, so her views are stamped.
         _entry('view', '', {
           'id': 'demo-view',
+          'exposed': true,
           'view': {
             'version': 1,
             'title': 'The board by Station',
@@ -146,6 +148,11 @@ class DemoAssistantChannel implements AssistantChannel {
             ],
           },
         }),
+        _entry('view', '', {
+          'id': 'demo-view-g',
+          'exposed': true,
+          'view': _operationG,
+        }),
       ];
     }
     if (text == dark) {
@@ -167,6 +174,120 @@ class DemoAssistantChannel implements AssistantChannel {
       ),
     ];
   }
+
+  /// Operation G as the sample's second view: its attempts as a schedule, where it runs as a
+  /// graph, Missions by state and Sessions by Station as charts, and a drawing.
+  static const Map<String, Object?> _operationG = {
+    'version': 1,
+    'title': 'Operation G',
+    'blocks': [
+      {
+        'kind': 'schedule',
+        'title': 'Attempts of mission-007',
+        'rows': [
+          {
+            'label': 'attempt 1',
+            'start': '2026-10-29T08:00:00Z',
+            'end': '2026-10-29T08:40:00Z',
+            'state': 'failed',
+            'link': 'app:/missions?operation_id=G&mission_id=mission-007',
+          },
+          {
+            'label': 'attempt 2',
+            'start': '2026-10-29T08:45:00Z',
+            'end': '2026-10-29T09:30:00Z',
+            'state': 'working',
+          },
+        ],
+      },
+      {
+        'kind': 'graph',
+        'title': 'Where G runs',
+        'nodes': [
+          {'id': 'G', 'label': 'Operation G', 'kind': 'operation'},
+          {
+            'id': 'control',
+            'label': 'station-control-01',
+            'kind': 'station',
+            'state': 'working',
+            'link': 'app:/stations?station_id=station-control-01',
+          },
+          {'id': 'build', 'label': 'build-box', 'kind': 'theater'},
+          {
+            'id': 'mission',
+            'label': 'mission-007',
+            'kind': 'mission',
+            'state': 'blocked',
+          },
+        ],
+        'edges': [
+          {'from': 'G', 'to': 'control'},
+          {'from': 'control', 'to': 'build', 'label': 'ssh'},
+          {'from': 'build', 'to': 'mission'},
+        ],
+      },
+      {
+        'kind': 'chart',
+        'chart': 'bar',
+        'stacked': true,
+        'title': 'Missions by state',
+        'x_label': 'Operation',
+        'series': [
+          {
+            'name': 'done',
+            'points': [
+              {'x': 'G', 'y': 4},
+              {'x': 'L', 'y': 1},
+            ],
+          },
+          {
+            'name': 'working',
+            'points': [
+              {'x': 'G', 'y': 1},
+            ],
+          },
+          {
+            'name': 'blocked',
+            'points': [
+              {'x': 'G', 'y': 1},
+            ],
+          },
+        ],
+      },
+      {
+        'kind': 'chart',
+        'chart': 'pie',
+        'title': 'Sessions by Station',
+        'series': [
+          {
+            'name': 'Sessions',
+            'points': [
+              {'x': 'station-control-01', 'y': 2},
+              {'x': 'station-remote-02', 'y': 1},
+            ],
+          },
+        ],
+      },
+      {
+        'kind': 'svg',
+        'title': 'station-control-01 hands mission-007 to build-box',
+        'svg':
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80">'
+            '<title>station-control-01 hands mission-007 to build-box</title>'
+            '<rect x="10" y="20" width="80" height="40" rx="6" fill="none" '
+            'stroke="currentColor"/>'
+            '<text x="50" y="45" text-anchor="middle" fill="currentColor" '
+            'font-size="12">control-01</text>'
+            '<line x1="90" y1="40" x2="150" y2="40" stroke="currentColor" '
+            'stroke-width="2"/>'
+            '<rect x="150" y="20" width="80" height="40" rx="6" fill="none" '
+            'stroke="currentColor"/>'
+            '<text x="190" y="45" text-anchor="middle" fill="currentColor" '
+            'font-size="12">build-box</text>'
+            '</svg>',
+      },
+    ],
+  };
 
   @override
   Future<void> close() async {

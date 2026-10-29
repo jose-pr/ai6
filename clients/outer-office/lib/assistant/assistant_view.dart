@@ -6,21 +6,89 @@ import 'package:material_ui/material_ui.dart';
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_route.dart';
 import '../shell/oo_shell.dart' show OoPage;
+import '../theme/oo_tokens.dart';
+import 'charts.dart';
 
 /// The view schema version this app renders. Universal Exports refuses any other view
 /// before it reaches the app; the app checks again and shows a refusal, never a guess.
 const assistantViewVersion = 1;
 
-const _maxBlocks = 24;
-const _maxText = 8 * 1024;
-const _maxShort = 512;
-const _maxColumns = 12;
-const _maxRows = 200;
-const _maxItems = 100;
-const _maxSeries = 8;
-const _maxPoints = 200;
-const _maxDiff = 16 * 1024;
-const _maxFields = 20;
+/// The bounds Universal Exports holds views to. It sends its own with each conversation
+/// (`view_limits` in the `ready` frame); the defaults are its defaults.
+@immutable
+class ViewLimits {
+  const ViewLimits({
+    this.blocks = 24,
+    this.viewBytes = 65536,
+    this.textBytes = 8192,
+    this.shortBytes = 512,
+    this.columns = 12,
+    this.rows = 200,
+    this.items = 100,
+    this.series = 8,
+    this.points = 200,
+    this.pieSlices = 12,
+    this.diffBytes = 16384,
+    this.fields = 20,
+    this.scheduleRows = 50,
+    this.graphNodes = 60,
+    this.graphEdges = 120,
+    this.svgBytes = 32768,
+    this.svgElements = 2000,
+    this.svgDepth = 16,
+  });
+
+  /// The `view_limits` Universal Exports sent; a missing or unusable one keeps its default.
+  factory ViewLimits.fromJson(Object? json) {
+    final limits = json is Map ? json : const {};
+    int read(String key, int fallback) => switch (limits[key]) {
+      final int value when value >= 1 => value,
+      _ => fallback,
+    };
+    return ViewLimits(
+      blocks: read('blocks', 24),
+      viewBytes: read('view_bytes', 65536),
+      textBytes: read('text_bytes', 8192),
+      shortBytes: read('short_bytes', 512),
+      columns: read('columns', 12),
+      rows: read('rows', 200),
+      items: read('items', 100),
+      series: read('series', 8),
+      points: read('points', 200),
+      pieSlices: read('pie_slices', 12),
+      diffBytes: read('diff_bytes', 16384),
+      fields: read('fields', 20),
+      scheduleRows: read('schedule_rows', 50),
+      graphNodes: read('graph_nodes', 60),
+      graphEdges: read('graph_edges', 120),
+      svgBytes: read('svg_bytes', 32768),
+      svgElements: read('svg_elements', 2000),
+      svgDepth: read('svg_depth', 16),
+    );
+  }
+
+  final int blocks;
+  final int viewBytes;
+  final int textBytes;
+  final int shortBytes;
+  final int columns;
+  final int rows;
+  final int items;
+  final int series;
+  final int points;
+  final int pieSlices;
+  final int diffBytes;
+  final int fields;
+  final int scheduleRows;
+  final int graphNodes;
+  final int graphEdges;
+  final int svgBytes;
+  final int svgElements;
+  final int svgDepth;
+}
+
+/// The limits of the view being parsed; [AssistantView.parse] sets them for its call.
+ViewLimits _limits = const ViewLimits();
 
 /// A view Moneypenny showed, checked against the schema.
 @immutable
@@ -31,7 +99,20 @@ class AssistantView {
   final List<ViewBlock> blocks;
 
   /// Parses a view; a [FormatException] names the first thing that is not the schema.
-  factory AssistantView.parse(Object? json) {
+  factory AssistantView.parse(
+    Object? json, {
+    ViewLimits limits = const ViewLimits(),
+  }) {
+    final outer = _limits;
+    _limits = limits;
+    try {
+      return AssistantView._parse(json);
+    } finally {
+      _limits = outer;
+    }
+  }
+
+  factory AssistantView._parse(Object? json) {
     final view = _object(json, 'the view', const {
       'version',
       'title',
@@ -42,8 +123,8 @@ class AssistantView {
     }
     final title = _optionalShort(view, 'title');
     final blocks = view['blocks'];
-    if (blocks is! List || blocks.isEmpty || blocks.length > _maxBlocks) {
-      throw const FormatException('a view has 1 to $_maxBlocks blocks');
+    if (blocks is! List || blocks.isEmpty || blocks.length > _limits.blocks) {
+      throw FormatException('a view has 1 to ${_limits.blocks} blocks');
     }
     final parsed = <ViewBlock>[];
     for (var index = 0; index < blocks.length; index++) {
@@ -72,10 +153,10 @@ Map<String, Object?> _object(Object? json, String what, Set<String> allowed) {
 
 String _short(Object? value, String what) {
   if (value is! String ||
-      utf8.encode(value).length > _maxShort ||
+      utf8.encode(value).length > _limits.shortBytes ||
       value.runes.any((rune) => rune < 0x20 && rune != 0x0A)) {
     throw FormatException(
-      '$what is text of at most $_maxShort bytes without control characters',
+      '$what is text of at most ${_limits.shortBytes} bytes without control characters',
     );
   }
   return value;
@@ -130,6 +211,9 @@ sealed class ViewBlock {
       'timeline' => TimelineBlock._parse(json),
       'diff' => DiffBlock._parse(json),
       'form' => FormBlock._parse(json),
+      'schedule' => ScheduleBlock._parse(json),
+      'graph' => GraphBlock._parse(json),
+      'svg' => SvgBlock._parse(json),
       final kind => throw FormatException('unknown variant `$kind`'),
     };
   }
@@ -145,8 +229,8 @@ class TextBlock extends ViewBlock {
     final markdown = block['markdown'];
     if (markdown is! String ||
         markdown.trim().isEmpty ||
-        utf8.encode(markdown).length > _maxText) {
-      throw const FormatException('text is 1 to $_maxText bytes');
+        utf8.encode(markdown).length > _limits.textBytes) {
+      throw FormatException('text is 1 to ${_limits.textBytes} bytes');
     }
     for (final match in RegExp(r'\]\(').allMatches(markdown)) {
       if (!markdown.startsWith('app:/', match.end)) {
@@ -178,12 +262,14 @@ class TableBlock extends ViewBlock {
   factory TableBlock._parse(Map json) {
     final block = _object(json, 'a table', const {'kind', 'columns', 'rows'});
     final columns = block['columns'];
-    if (columns is! List || columns.isEmpty || columns.length > _maxColumns) {
-      throw const FormatException('a table has 1 to $_maxColumns columns');
+    if (columns is! List ||
+        columns.isEmpty ||
+        columns.length > _limits.columns) {
+      throw FormatException('a table has 1 to ${_limits.columns} columns');
     }
     final rows = block['rows'];
-    if (rows is! List || rows.length > _maxRows) {
-      throw const FormatException('a table has at most $_maxRows rows');
+    if (rows is! List || rows.length > _limits.rows) {
+      throw FormatException('a table has at most ${_limits.rows} rows');
     }
     return TableBlock(
       [for (final column in columns) _short(column, 'a column')],
@@ -205,9 +291,9 @@ class KeyValuesBlock extends ViewBlock {
 
   factory KeyValuesBlock._parse(Map json) {
     final block = _object(json, 'a key-value list', const {'kind', 'items'});
-    final items = _pairs(block['items'], 'a key-value list', _maxItems);
+    final items = _pairs(block['items'], 'a key-value list', _limits.items);
     if (items.isEmpty) {
-      throw const FormatException('a key-value list has 1 to $_maxItems items');
+      throw FormatException('a key-value list has 1 to ${_limits.items} items');
     }
     return KeyValuesBlock(items);
   }
@@ -223,14 +309,19 @@ class ChartSeries {
 
 class ChartBlock extends ViewBlock {
   const ChartBlock({
-    required this.line,
+    required this.chart,
+    required this.stacked,
     required this.title,
     required this.xLabel,
     required this.yLabel,
     required this.series,
   });
 
-  final bool line;
+  /// `bar`, `line` or `pie`.
+  final String chart;
+
+  /// Whether a bar chart's series are stacked in one bar per x.
+  final bool stacked;
   final String? title;
   final String? xLabel;
   final String? yLabel;
@@ -240,50 +331,453 @@ class ChartBlock extends ViewBlock {
     final block = _object(json, 'a chart', const {
       'kind',
       'chart',
+      'stacked',
       'title',
       'x_label',
       'y_label',
       'series',
     });
     final chart = block['chart'];
-    if (chart != 'bar' && chart != 'line') {
-      throw const FormatException('chart is bar or line');
+    if (chart != 'bar' && chart != 'line' && chart != 'pie') {
+      throw const FormatException('chart is bar, line or pie');
+    }
+    final stacked = block['stacked'] ?? false;
+    if (stacked is! bool) {
+      throw const FormatException('stacked is true or false');
+    }
+    if (stacked && chart != 'bar') {
+      throw const FormatException('only a bar chart is stacked');
     }
     final series = block['series'];
-    if (series is! List || series.isEmpty || series.length > _maxSeries) {
-      throw const FormatException('a chart has 1 to $_maxSeries series');
+    if (series is! List || series.isEmpty || series.length > _limits.series) {
+      throw FormatException('a chart has 1 to ${_limits.series} series');
+    }
+    final parsed = [
+      for (final item in series)
+        () {
+          final line = _object(item, 'a series', const {'name', 'points'});
+          final points = line['points'];
+          if (points is! List ||
+              points.isEmpty ||
+              points.length > _limits.points) {
+            throw FormatException('a series has 1 to ${_limits.points} points');
+          }
+          final seen = <String>{};
+          return ChartSeries(_short(line['name'], 'a series name'), [
+            for (final point in points)
+              () {
+                final xy = _object(point, 'a point', const {'x', 'y'});
+                final y = xy['y'];
+                if (y is! num || !y.isFinite) {
+                  throw const FormatException('y must be a finite number');
+                }
+                final x = _scalar(xy['x'], 'x');
+                // Bars and slices are placed by their x, so a series names each x once.
+                if (chart != 'line' && !seen.add(jsonEncode(x))) {
+                  throw FormatException(
+                    'a series names each x once, not ${jsonEncode(x)} twice',
+                  );
+                }
+                return (x, y.toDouble());
+              }(),
+          ]);
+        }(),
+    ];
+    final values = [
+      for (final line in parsed)
+        for (final (_, y) in line.points) y,
+    ];
+    if (chart == 'pie') {
+      if (parsed.length != 1) {
+        throw const FormatException('a pie has one series');
+      }
+      if (parsed.single.points.length > _limits.pieSlices) {
+        throw FormatException('a pie has at most ${_limits.pieSlices} slices');
+      }
+      if (values.any((y) => y < 0)) {
+        throw const FormatException("a pie's values are 0 or more");
+      }
+      if (values.every((y) => y == 0)) {
+        throw const FormatException('a pie has a value above 0');
+      }
+    }
+    if (stacked && values.any((y) => y < 0)) {
+      throw const FormatException("a stacked bar's values are 0 or more");
     }
     return ChartBlock(
-      line: chart == 'line',
+      chart: chart as String,
+      stacked: stacked,
       title: _optionalShort(block, 'title'),
       xLabel: _optionalShort(block, 'x_label'),
       yLabel: _optionalShort(block, 'y_label'),
-      series: [
-        for (final item in series)
+      series: parsed,
+    );
+  }
+}
+
+/// A link to a page of the app: an app route in its link form (`app:/<page>?...`), read as
+/// Universal Exports reads it.
+String _appLink(Object? value, String what) {
+  final link = _short(value, what);
+  if (!link.startsWith('app:/')) {
+    throw FormatException(
+      '$what must point into the app (app:/...); outside links are not shown',
+    );
+  }
+  try {
+    OoRoute.parseUri(link);
+  } on FormatException catch (error) {
+    throw FormatException('$what is not an app route: ${error.message}');
+  }
+  return link;
+}
+
+String? _optionalLink(Map<String, Object?> json, String key) =>
+    json[key] == null ? null : _appLink(json[key], 'a link');
+
+final _rfc3339 = RegExp(
+  r'^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|([+-])(\d{2}):(\d{2}))$',
+);
+
+/// The UTC time of an RFC 3339 text (`2026-10-29T08:00:00Z`, `...T08:00:00.5+07:00`), or
+/// null when [text] is not one; read as Universal Exports reads it.
+DateTime? parseRfc3339(String text) {
+  final match = _rfc3339.firstMatch(text);
+  if (match == null) return null;
+  int part(int group) => int.parse(match.group(group)!);
+  final (year, month, day) = (part(1), part(2), part(3));
+  final (hour, minute, second) = (part(4), part(5), part(6));
+  final leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+  final days = switch (month) {
+    1 || 3 || 5 || 7 || 8 || 10 || 12 => 31,
+    4 || 6 || 9 || 11 => 30,
+    2 => leap ? 29 : 28,
+    _ => 0,
+  };
+  if (day < 1 || day > days || hour > 23 || minute > 59 || second > 60) {
+    return null;
+  }
+  var offset = Duration.zero;
+  if (match.group(9) != null) {
+    final (hours, minutes) = (part(10), part(11));
+    if (hours > 23 || minutes > 59) return null;
+    offset = Duration(hours: hours, minutes: minutes);
+    if (match.group(9) == '-') offset = -offset;
+  }
+  final fraction = match.group(7) == null
+      ? 0
+      : (double.parse('0${match.group(7)}') * 1000000).round();
+  return DateTime.utc(
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    0,
+    fraction,
+  ).subtract(offset);
+}
+
+/// A schedule's time: an RFC 3339 text or a finite number of the person's choosing.
+sealed class ScheduleTime {
+  const ScheduleTime();
+
+  /// The position on the time axis: Unix seconds for a date, else the number.
+  double get value;
+}
+
+class ScheduleDate extends ScheduleTime {
+  const ScheduleDate(this.at);
+
+  final DateTime at;
+
+  @override
+  double get value => at.microsecondsSinceEpoch / 1e6;
+}
+
+class ScheduleNumber extends ScheduleTime {
+  const ScheduleNumber(this.number);
+
+  final double number;
+
+  @override
+  double get value => number;
+}
+
+ScheduleTime _scheduleTime(Object? value) => switch (value) {
+  final String text => switch (parseRfc3339(text)) {
+    final DateTime at => ScheduleDate(at),
+    null => throw FormatException(
+      '${jsonEncode(text)} is not an RFC 3339 time',
+    ),
+  },
+  final num number when number.isFinite => ScheduleNumber(number.toDouble()),
+  num() => throw const FormatException('a time is a finite number'),
+  _ => throw const FormatException(
+    'start and end are RFC 3339 times or numbers',
+  ),
+};
+
+@immutable
+class ScheduleRow {
+  const ScheduleRow({
+    required this.label,
+    required this.start,
+    required this.end,
+    required this.state,
+    required this.link,
+  });
+
+  final String label;
+  final ScheduleTime start;
+  final ScheduleTime end;
+  final String? state;
+  final String? link;
+}
+
+/// Bars over time, one row each.
+class ScheduleBlock extends ViewBlock {
+  const ScheduleBlock({required this.title, required this.rows});
+
+  final String? title;
+  final List<ScheduleRow> rows;
+
+  /// Whether the times are RFC 3339 dates rather than numbers.
+  bool get dates => rows.first.start is ScheduleDate;
+
+  factory ScheduleBlock._parse(Map json) {
+    final block = _object(json, 'a schedule', const {'kind', 'title', 'rows'});
+    final rows = block['rows'];
+    if (rows is! List || rows.isEmpty || rows.length > _limits.scheduleRows) {
+      throw FormatException('a schedule has 1 to ${_limits.scheduleRows} rows');
+    }
+    bool? dates;
+    return ScheduleBlock(
+      title: _optionalShort(block, 'title'),
+      rows: [
+        for (final item in rows)
           () {
-            final line = _object(item, 'a series', const {'name', 'points'});
-            final points = line['points'];
-            if (points is! List ||
-                points.isEmpty ||
-                points.length > _maxPoints) {
+            final row = _object(item, 'a row', const {
+              'label',
+              'start',
+              'end',
+              'state',
+              'link',
+            });
+            final label = _short(row['label'], 'a label');
+            final state = _optionalShort(row, 'state');
+            final link = _optionalLink(row, 'link');
+            final start = _scheduleTime(row['start']);
+            final end = _scheduleTime(row['end']);
+            final isDate = start is ScheduleDate;
+            if ((end is ScheduleDate) != isDate ||
+                (dates ??= isDate) != isDate) {
               throw const FormatException(
-                'a series has 1 to $_maxPoints points',
+                "a schedule's times are all RFC 3339 times or all numbers",
               );
             }
-            return ChartSeries(_short(line['name'], 'a series name'), [
-              for (final point in points)
-                () {
-                  final xy = _object(point, 'a point', const {'x', 'y'});
-                  final y = xy['y'];
-                  if (y is! num || !y.isFinite) {
-                    throw const FormatException('y must be a finite number');
-                  }
-                  return (_scalar(xy['x'], 'x'), y.toDouble());
-                }(),
-            ]);
+            if (start.value >= end.value) {
+              throw FormatException(
+                'every row starts before it ends (${jsonEncode(label)})',
+              );
+            }
+            return ScheduleRow(
+              label: label,
+              start: start,
+              end: end,
+              state: state,
+              link: link,
+            );
           }(),
       ],
     );
+  }
+}
+
+/// The kinds a graph node may be.
+const graphNodeKinds = {
+  'operation',
+  'station',
+  'theater',
+  'mission',
+  'session',
+  'agent',
+  'other',
+};
+
+@immutable
+class GraphNode {
+  const GraphNode({
+    required this.id,
+    required this.label,
+    required this.kind,
+    required this.state,
+    required this.link,
+  });
+
+  final String id;
+  final String label;
+  final String? kind;
+  final String? state;
+  final String? link;
+}
+
+@immutable
+class GraphEdge {
+  const GraphEdge(this.from, this.to, this.label);
+
+  final String from;
+  final String to;
+  final String? label;
+}
+
+/// Nodes and the edges between them.
+class GraphBlock extends ViewBlock {
+  const GraphBlock({
+    required this.title,
+    required this.nodes,
+    required this.edges,
+    required this.tree,
+  });
+
+  final String? title;
+  final List<GraphNode> nodes;
+  final List<GraphEdge> edges;
+
+  /// Whether it is laid out as a tree rather than in layers.
+  final bool tree;
+
+  factory GraphBlock._parse(Map json) {
+    final block = _object(json, 'a graph', const {
+      'kind',
+      'title',
+      'nodes',
+      'edges',
+      'layout',
+    });
+    final layout = block['layout'] ?? 'layered';
+    if (layout != 'layered' && layout != 'tree') {
+      throw const FormatException('layout is layered or tree');
+    }
+    final nodes = block['nodes'];
+    if (nodes is! List || nodes.isEmpty || nodes.length > _limits.graphNodes) {
+      throw FormatException('a graph has 1 to ${_limits.graphNodes} nodes');
+    }
+    final edges = block['edges'] ?? const [];
+    if (edges is! List || edges.length > _limits.graphEdges) {
+      throw FormatException('a graph has at most ${_limits.graphEdges} edges');
+    }
+    final parsedNodes = <GraphNode>[];
+    final ids = <String>{};
+    for (final item in nodes) {
+      final node = _object(item, 'a node', const {
+        'id',
+        'label',
+        'kind',
+        'state',
+        'link',
+      });
+      final id = _identifier(node['id'], 'a node id');
+      if (!ids.add(id)) {
+        throw FormatException('the node id ${jsonEncode(id)} is used twice');
+      }
+      final label = _short(node['label'], 'a node label');
+      final kind = node['kind'];
+      if (kind != null && !graphNodeKinds.contains(kind)) {
+        throw const FormatException(
+          "a node's kind is operation, station, theater, mission, session, agent or other",
+        );
+      }
+      parsedNodes.add(
+        GraphNode(
+          id: id,
+          label: label,
+          kind: kind as String?,
+          state: _optionalShort(node, 'state'),
+          link: _optionalLink(node, 'link'),
+        ),
+      );
+    }
+    final parents = <String, String>{};
+    final parsedEdges = <GraphEdge>[];
+    for (final item in edges) {
+      final edge = _object(item, 'an edge', const {'from', 'to', 'label'});
+      final from = edge['from'];
+      final to = edge['to'];
+      for (final end in [from, to]) {
+        if (end is! String || !ids.contains(end)) {
+          throw FormatException(
+            'an edge names an unknown node ${jsonEncode(end)}',
+          );
+        }
+      }
+      if (from == to) {
+        throw FormatException(
+          'an edge joins two nodes, not ${jsonEncode(from)} to itself',
+        );
+      }
+      final label = _optionalShort(edge, 'label');
+      if (layout == 'tree' && parents.containsKey(to)) {
+        throw FormatException(
+          'in a tree each node has at most one parent; ${jsonEncode(to)} has two',
+        );
+      }
+      parents[to as String] = from as String;
+      parsedEdges.add(GraphEdge(from, to, label));
+    }
+    if (layout == 'tree') {
+      for (final start in ids) {
+        var at = start;
+        for (
+          var step = 0;
+          step < ids.length && parents.containsKey(at);
+          step++
+        ) {
+          at = parents[at]!;
+        }
+        if (parents.containsKey(at)) {
+          throw const FormatException('a tree has no cycle');
+        }
+      }
+      final roots = ids.where((id) => !parents.containsKey(id)).length;
+      if (roots != 1) {
+        throw FormatException('a tree has one root, not $roots');
+      }
+    }
+    return GraphBlock(
+      title: _optionalShort(block, 'title'),
+      nodes: parsedNodes,
+      edges: parsedEdges,
+      tree: layout == 'tree',
+    );
+  }
+}
+
+/// A drawing in SVG. Universal Exports admits only its allow-list and sends the canonical
+/// form; the app checks the size and the root element and draws the rest as sent.
+class SvgBlock extends ViewBlock {
+  const SvgBlock({required this.title, required this.svg});
+
+  final String title;
+  final String svg;
+
+  factory SvgBlock._parse(Map json) {
+    final block = _object(json, 'an SVG', const {'kind', 'title', 'svg'});
+    final title = _short(block['title'], 'title');
+    if (title.trim().isEmpty) throw const FormatException('an SVG has a title');
+    final svg = block['svg'];
+    if (svg is! String || utf8.encode(svg).length > _limits.svgBytes) {
+      throw FormatException('an SVG is at most ${_limits.svgBytes} bytes');
+    }
+    final body = svg
+        .trimLeft()
+        .replaceFirst(RegExp(r'^<\?xml[^>]*\?>'), '')
+        .trimLeft();
+    if (!RegExp(r'^<svg[\s/>]').hasMatch(body)) {
+      throw const FormatException('the root element of an SVG is <svg>');
+    }
+    return SvgBlock(title: title, svg: svg);
   }
 }
 
@@ -334,7 +828,7 @@ class CardBlock extends ViewBlock {
       state: _optionalShort(block, 'state'),
       fields: block['fields'] == null
           ? const []
-          : _pairs(block['fields'], 'a card', _maxFields),
+          : _pairs(block['fields'], 'a card', _limits.fields),
     );
   }
 }
@@ -358,8 +852,8 @@ class TimelineBlock extends ViewBlock {
   factory TimelineBlock._parse(Map json) {
     final block = _object(json, 'a timeline', const {'kind', 'items'});
     final items = block['items'];
-    if (items is! List || items.isEmpty || items.length > _maxItems) {
-      throw const FormatException('a timeline has 1 to $_maxItems items');
+    if (items is! List || items.isEmpty || items.length > _limits.items) {
+      throw FormatException('a timeline has 1 to ${_limits.items} items');
     }
     return TimelineBlock([
       for (final item in items)
@@ -405,10 +899,10 @@ class DiffBlock extends ViewBlock {
     final after = block['after'];
     if (before is! String ||
         after is! String ||
-        utf8.encode(before).length > _maxDiff ||
-        utf8.encode(after).length > _maxDiff) {
-      throw const FormatException(
-        'each side of a diff is text of at most $_maxDiff bytes',
+        utf8.encode(before).length > _limits.diffBytes ||
+        utf8.encode(after).length > _limits.diffBytes) {
+      throw FormatException(
+        'each side of a diff is text of at most ${_limits.diffBytes} bytes',
       );
     }
     return DiffBlock(
@@ -469,8 +963,8 @@ class FormBlock extends ViewBlock {
     final fixed = block['fixed'] ?? const <String, Object?>{};
     if (fixed is! Map) throw const FormatException('fixed must be an object');
     final fields = block['fields'];
-    if (fields is! List || fields.isEmpty || fields.length > _maxFields) {
-      throw const FormatException('a form has 1 to $_maxFields fields');
+    if (fields is! List || fields.isEmpty || fields.length > _limits.fields) {
+      throw FormatException('a form has 1 to ${_limits.fields} fields');
     }
     return FormBlock(
       tool: tool,
@@ -536,12 +1030,20 @@ String showValue(Object? value) => switch (value) {
 class AssistantViewCard extends StatelessWidget {
   const AssistantViewCard({
     required this.json,
+    this.exposed = false,
+    this.limits = const ViewLimits(),
     this.onOpen,
     this.onSubmit,
     super.key,
   });
 
   final Object? json;
+
+  /// Whether she built it after reading text from outside AI6; the card says so above it.
+  final bool exposed;
+
+  /// The bounds Universal Exports sent with the conversation.
+  final ViewLimits limits;
 
   /// Opens an app page (`app:/<page>?...`).
   final void Function(String link)? onOpen;
@@ -553,7 +1055,7 @@ class AssistantViewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final AssistantView view;
     try {
-      view = AssistantView.parse(json);
+      view = AssistantView.parse(json, limits: limits);
     } on FormatException catch (error) {
       return RefusedView(reason: error.message);
     }
@@ -565,6 +1067,7 @@ class AssistantViewCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (exposed) const OutsideTextStrip(),
             if (view.title != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -578,17 +1081,55 @@ class AssistantViewCard extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: switch (block) {
                   TextBlock() => MarkdownText(block.markdown, onOpen: onOpen),
-                  TableBlock() => _TableView(block),
+                  TableBlock() => AssistantTable(block.columns, block.rows),
                   KeyValuesBlock() => _PairsView(block.items),
-                  ChartBlock() => _ChartView(block),
+                  ChartBlock() => ChartView(block),
                   CardBlock() => _CardView(block, onOpen: onOpen),
                   TimelineBlock() => _TimelineView(block),
                   DiffBlock() => _DiffView(block),
                   FormBlock() => _FormView(block, onSubmit: onSubmit),
+                  ScheduleBlock() => ScheduleView(block, onOpen: onOpen),
+                  GraphBlock() => GraphBlockView(block, onOpen: onOpen),
+                  SvgBlock() => SvgView(block),
                 },
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The strip over a view she built after reading text from outside AI6.
+class OutsideTextStrip extends StatelessWidget {
+  const OutsideTextStrip({super.key});
+
+  /// What the strip says.
+  static const message =
+      'Made after reading text from outside AI6. Check it before acting on it.';
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = OoTokens.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(
+          tokens.warning.withValues(alpha: 0.14),
+          tokens.raised,
+        ),
+        border: Border(left: BorderSide(color: tokens.warning, width: 3)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        spacing: 8,
+        children: [
+          Icon(Icons.warning_amber_rounded, color: tokens.warning, size: 18),
+          Expanded(
+            child: Text(message, style: TextStyle(color: tokens.text)),
+          ),
+        ],
       ),
     );
   }
@@ -724,21 +1265,23 @@ class MarkdownText extends StatelessWidget {
   }
 }
 
-class _TableView extends StatelessWidget {
-  const _TableView(this.block);
+/// A table of plain values: a table block, or a chart, schedule or graph shown as one.
+class AssistantTable extends StatelessWidget {
+  const AssistantTable(this.columns, this.rows, {super.key});
 
-  final TableBlock block;
+  final List<String> columns;
+  final List<List<Object?>> rows;
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
     scrollDirection: Axis.horizontal,
     child: DataTable(
       columns: [
-        for (final column in block.columns)
+        for (final column in columns)
           DataColumn(label: Text(revealInvisible(column))),
       ],
       rows: [
-        for (final row in block.rows)
+        for (final row in rows)
           DataRow(
             cells: [for (final cell in row) DataCell(Text(showValue(cell)))],
           ),
@@ -775,132 +1318,6 @@ class _PairsView extends StatelessWidget {
         ),
     ],
   );
-}
-
-class _ChartView extends StatelessWidget {
-  const _ChartView(this.block);
-
-  final ChartBlock block;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final palette = [
-      theme.colorScheme.primary,
-      theme.colorScheme.tertiary,
-      theme.colorScheme.secondary,
-      theme.colorScheme.error,
-    ];
-    final kind = block.line ? 'line chart' : 'bar chart';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (block.title != null)
-          Text(
-            revealInvisible(block.title!),
-            style: theme.textTheme.titleSmall,
-          ),
-        Semantics(
-          label: '$kind${block.title == null ? '' : ': ${block.title}'}',
-          child: SizedBox(
-            height: 180,
-            child: CustomPaint(
-              size: Size.infinite,
-              painter: _ChartPainter(block, palette, theme.dividerColor),
-            ),
-          ),
-        ),
-        Wrap(
-          spacing: 12,
-          children: [
-            for (var index = 0; index < block.series.length; index++)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 10,
-                    height: 10,
-                    color: palette[index % palette.length],
-                  ),
-                  const SizedBox(width: 4),
-                  Text(revealInvisible(block.series[index].name)),
-                ],
-              ),
-            if (block.xLabel != null)
-              Text('x: ${revealInvisible(block.xLabel!)}'),
-            if (block.yLabel != null)
-              Text('y: ${revealInvisible(block.yLabel!)}'),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _ChartPainter extends CustomPainter {
-  _ChartPainter(this.block, this.palette, this.axis);
-
-  final ChartBlock block;
-  final List<Color> palette;
-  final Color axis;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final values = [
-      for (final series in block.series)
-        for (final (_, y) in series.points) y,
-    ];
-    final top = values.fold<double>(0, math.max);
-    final bottom = values.fold<double>(0, math.min);
-    final span = (top - bottom) == 0 ? 1.0 : top - bottom;
-    double place(double y) => size.height - (y - bottom) / span * size.height;
-    canvas.drawLine(
-      Offset(0, place(0)),
-      Offset(size.width, place(0)),
-      Paint()..color = axis,
-    );
-    final count = block.series
-        .map((series) => series.points.length)
-        .fold(0, math.max);
-    if (count == 0) return;
-    final slot = size.width / count;
-    for (var index = 0; index < block.series.length; index++) {
-      final series = block.series[index];
-      final paint = Paint()
-        ..color = palette[index % palette.length]
-        ..strokeWidth = 2
-        ..style = block.line ? PaintingStyle.stroke : PaintingStyle.fill;
-      if (block.line) {
-        final path = Path();
-        for (var at = 0; at < series.points.length; at++) {
-          final point = Offset(slot * (at + 0.5), place(series.points[at].$2));
-          at == 0
-              ? path.moveTo(point.dx, point.dy)
-              : path.lineTo(point.dx, point.dy);
-        }
-        canvas.drawPath(path, paint);
-      } else {
-        final width = slot / (block.series.length + 1);
-        for (var at = 0; at < series.points.length; at++) {
-          final left = slot * at + width * (index + 0.5);
-          final y = place(series.points[at].$2);
-          final zero = place(0);
-          canvas.drawRect(
-            Rect.fromLTRB(
-              left,
-              math.min(y, zero),
-              left + width,
-              math.max(y, zero),
-            ),
-            paint,
-          );
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_ChartPainter old) => old.block != block;
 }
 
 class _CardView extends StatelessWidget {

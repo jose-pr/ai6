@@ -399,6 +399,8 @@ class _EntryView extends StatelessWidget {
       ),
       'view' => AssistantViewCard(
         json: entry.data?['view'],
+        exposed: entry.data?['exposed'] == true,
+        limits: controller.viewLimits,
         onOpen: onOpen,
         onSubmit: entry.id == null
             ? null

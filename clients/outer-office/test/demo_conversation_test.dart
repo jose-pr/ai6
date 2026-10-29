@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_panel.dart';
+import 'package:outer_office/assistant/assistant_view.dart'
+    show OutsideTextStrip;
 import 'package:outer_office/assistant/chat_region.dart';
 import 'package:outer_office/assistant/demo_conversation.dart';
 import 'package:outer_office/main.dart';
@@ -56,7 +58,34 @@ void main() {
       find.descendant(of: chat, matching: find.text(demoConversationLabel)),
       findsOneWidget,
     );
-    expect(find.text('The board by Station'), findsOneWidget, reason: 'a view');
+    // The newest entry is at the bottom; older ones are built as the chat scrolls up to them.
+    final entries = find
+        .descendant(of: chat, matching: find.byType(Scrollable))
+        .first;
+    for (final title in [
+      'station-control-01 hands mission-007 to build-box',
+      'Where G runs',
+      'Attempts of mission-007',
+    ]) {
+      await tester.scrollUntilVisible(
+        find.text(title),
+        120,
+        scrollable: entries,
+      );
+    }
+    expect(
+      find.text(OutsideTextStrip.message),
+      findsOneWidget,
+      reason: 'a view made after reading briefs is marked',
+    );
+    await tester.scrollUntilVisible(
+      find.text('The board by Station'),
+      120,
+      scrollable: entries,
+    );
+    // Back to the newest entry, where the next answer appears.
+    await tester.drag(entries, const Offset(0, -10000));
+    await tester.pumpAndSettle();
 
     await askFromOverview(tester, 'What needs my attention?');
     expect(find.text('Raise station-control-01 to 6 Missions'), findsOneWidget);

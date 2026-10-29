@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
@@ -23,6 +25,7 @@ Future<void> showView(
   Object? view, {
   void Function(String link)? onOpen,
   void Function(Map<String, Object?> values)? onSubmit,
+  bool exposed = false,
 }) async {
   tester.view.physicalSize = const Size(900, 1600);
   tester.view.devicePixelRatio = 1;
@@ -34,6 +37,7 @@ Future<void> showView(
         body: SingleChildScrollView(
           child: AssistantViewCard(
             json: view,
+            exposed: exposed,
             onOpen: onOpen,
             onSubmit: onSubmit,
           ),
@@ -44,9 +48,10 @@ Future<void> showView(
   await tester.pumpAndSettle();
 }
 
-/// The chart whose accessible label is [label].
+/// The chart, schedule or graph whose accessible summary begins with [label].
 Finder chartLabelled(String label) => find.byWidgetPredicate(
-  (widget) => widget is Semantics && widget.properties.label == label,
+  (widget) =>
+      widget is Semantics && (widget.properties.label ?? '').startsWith(label),
 );
 
 /// A socket that keeps what the app sends and lets the test answer.
@@ -127,6 +132,8 @@ void main() {
     (tester) async {
       for (final item in invalid) {
         final testCase = (item as Map).cast<String, Object?>();
+        // What an SVG may hold is checked once, by Universal Exports.
+        if (testCase['gateway_only'] == true) continue;
         await showView(tester, testCase['view']);
         expect(find.text('View refused'), findsOneWidget, reason: '$testCase');
         expect(
@@ -139,6 +146,266 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'charts, schedules, graphs and drawings render from the fixture',
+    (tester) async {
+      await showView(tester, valid['bar_chart']);
+      expect(find.byType(BarChart), findsOneWidget);
+      expect(
+        chartLabelled('bar chart: Tokens today. 1 series'),
+        findsOneWidget,
+      );
+
+      await showView(tester, valid['stacked_bar_chart']);
+      final stacked = tester.widget<BarChart>(find.byType(BarChart)).data;
+      expect(stacked.barGroups, hasLength(2), reason: 'one bar per Operation');
+      expect(
+        stacked.barGroups.first.barRods.single.rodStackItems,
+        hasLength(3),
+      );
+      expect(stacked.barGroups.first.barRods.single.toY, 17);
+      expect(
+        chartLabelled('stacked bar chart: Missions by state'),
+        findsOneWidget,
+      );
+
+      await showView(tester, valid['line_chart']);
+      expect(find.byType(LineChart), findsOneWidget);
+
+      await showView(tester, valid['pie_chart']);
+      final pie = tester.widget<PieChart>(find.byType(PieChart)).data;
+      expect([for (final slice in pie.sections) slice.value], [2, 5, 0]);
+      expect(find.text('worker: 5'), findsOneWidget, reason: 'the legend');
+
+      final opened = <String>[];
+      await showView(tester, valid['schedule'], onOpen: opened.add);
+      final schedule = tester.widget<BarChart>(find.byType(BarChart)).data;
+      expect(schedule.rotationQuarterTurns, 1, reason: 'horizontal bars');
+      expect(schedule.barGroups, hasLength(2));
+      final first = schedule.barGroups.first.barRods.single;
+      expect(first.fromY, 0);
+      expect(first.toY, 40 * 60, reason: 'forty minutes from the first start');
+      expect(
+        chartLabelled('schedule: Attempts of mission-7. 2 rows'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('attempt 1'));
+      expect(opened, ['app:/missions?operation_id=G&mission_id=mission-7']);
+
+      opened.clear();
+      await showView(tester, valid['graph'], onOpen: opened.add);
+      for (final node in [
+        'Operation G',
+        'hq',
+        'worker',
+        'build-box',
+        'mission-7',
+      ]) {
+        expect(find.text(node), findsOneWidget, reason: node);
+      }
+      expect(find.text('stalled'), findsOneWidget, reason: "a node's state");
+      expect(
+        chartLabelled('graph: Where G runs. 5 nodes and 4 edges'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('hq'));
+      expect(opened, ['app:/stations?station_id=hq']);
+
+      await showView(tester, valid['tree_graph']);
+      for (final node in [
+        'Operation G',
+        'mission-1',
+        'mission-2',
+        'session-1',
+      ]) {
+        expect(find.text(node), findsOneWidget, reason: node);
+      }
+
+      await showView(tester, valid['svg']);
+      final drawing = tester.widget<SvgPicture>(find.byType(SvgPicture));
+      expect(drawing.semanticsLabel, 'hq hands mission-7 to worker');
+    },
+  );
+
+  testWidgets('a chart, schedule or graph shows the same values as a table', (
+    tester,
+  ) async {
+    await showView(tester, valid['stacked_bar_chart']);
+    expect(find.byType(DataTable), findsNothing);
+    await tester.tap(find.text('Show as table'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BarChart), findsNothing);
+    final table = tester.widget<DataTable>(find.byType(DataTable));
+    expect(
+      [for (final column in table.columns) (column.label as Text).data],
+      ['Operation', 'done', 'failed', 'working'],
+    );
+    List<String?> cells(DataRow row) => [
+      for (final cell in row.cells) (cell.child as Text).data,
+    ];
+    expect(cells(table.rows[0]), ['G', '12', '2', '3']);
+    expect(cells(table.rows[1]), [
+      'Q',
+      '4',
+      '1',
+      '—',
+    ], reason: 'no point is not 0');
+    await tester.tap(find.text('Show as stacked bar chart'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BarChart), findsOneWidget);
+
+    await showView(tester, valid['pie_chart']);
+    await tester.tap(find.text('Show as table'));
+    await tester.pumpAndSettle();
+    expect(find.text('71.4%'), findsOneWidget);
+
+    await showView(tester, valid['schedule']);
+    await tester.tap(find.text('Show as table'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10-29 08:00:00Z'), findsOneWidget);
+    expect(find.text('2026-10-29 08:10:00Z'), findsOneWidget, reason: 'in UTC');
+    expect(find.text('2026-10-29 08:55:30.500Z'), findsOneWidget);
+
+    await showView(tester, valid['graph']);
+    await tester.tap(find.text('Show as table'));
+    await tester.pumpAndSettle();
+    expect(find.text('worker, hq'), findsNothing);
+    expect(find.text('hq, worker'), findsOneWidget, reason: 'where G leads');
+    expect(
+      find.text('build-box (ssh)'),
+      findsOneWidget,
+      reason: 'an edge label',
+    );
+  });
+
+  testWidgets(
+    'a graph keeps its nodes through a layout that is not a rebuild',
+    (tester) async {
+      await showView(tester, valid['graph']);
+      expect(find.text('worker'), findsOneWidget);
+      // A web font arriving relays out text without rebuilding the view.
+      for (final element in find.text('worker').evaluate()) {
+        element.renderObject!.markNeedsLayout();
+      }
+      tester.renderObject(find.byType(Stack).first).markNeedsLayout();
+      await tester.pump();
+      expect(find.text('worker'), findsOneWidget);
+      expect(find.text('build-box'), findsOneWidget);
+      expect(
+        find.text('ssh'),
+        findsNothing,
+        reason: 'an edge label is painted, not a widget',
+      );
+    },
+  );
+
+  testWidgets('views are held to the limits Universal Exports sent', (
+    tester,
+  ) async {
+    const tight = ViewLimits(graphNodes: 2, svgBytes: 64);
+    expect(
+      () => AssistantView.parse(valid['graph'], limits: tight),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('a graph has 1 to 2 nodes'),
+        ),
+      ),
+    );
+    expect(
+      () => AssistantView.parse(valid['svg'], limits: tight),
+      throwsA(isA<FormatException>()),
+    );
+    AssistantView.parse(valid['graph']);
+    final wide = ViewLimits.fromJson({
+      'graph_nodes': 600,
+      'rows': 0,
+      'svg_bytes': 'x',
+    });
+    expect(wide.graphNodes, 600);
+    expect(
+      wide.rows,
+      const ViewLimits().rows,
+      reason: 'below 1 keeps the default',
+    );
+    expect(wide.svgBytes, const ViewLimits().svgBytes);
+
+    final channel = FakeChannel();
+    final controller = AssistantController(
+      token: 'user-token',
+      connect: () => channel,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AssistantPanel(controller: controller)),
+      ),
+    );
+    channel.answer({
+      'type': 'ready',
+      'conversation': 'c-1',
+      'busy': false,
+      'view_limits': {'graph_nodes': 2},
+      'entries': [
+        {
+          'role': 'view',
+          'text': '',
+          'at': 1.0,
+          'data': {'id': 'view-1', 'view': valid['graph']},
+        },
+      ],
+    });
+    await tester.pumpAndSettle();
+    expect(controller.viewLimits.graphNodes, 2);
+    expect(find.text('View refused'), findsOneWidget);
+  });
+
+  testWidgets('a view built after reading outside text carries the strip', (
+    tester,
+  ) async {
+    await showView(tester, valid['table']);
+    expect(find.text(OutsideTextStrip.message), findsNothing);
+    await showView(tester, valid['table'], exposed: true);
+    expect(find.text(OutsideTextStrip.message), findsOneWidget);
+    expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
+
+    // The panel reads the stamp Universal Exports put on the entry.
+    final channel = FakeChannel();
+    final controller = AssistantController(
+      token: 'user-token',
+      connect: () => channel,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AssistantPanel(controller: controller)),
+      ),
+    );
+    channel.answer({
+      'type': 'ready',
+      'conversation': 'c-1',
+      'busy': false,
+      'entries': [
+        {
+          'role': 'view',
+          'text': '',
+          'at': 1.0,
+          'data': {'id': 'view-1', 'view': valid['key_values']},
+        },
+        {
+          'role': 'view',
+          'text': '',
+          'at': 2.0,
+          'data': {'id': 'view-2', 'view': valid['table'], 'exposed': true},
+        },
+      ],
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Headquarters'), findsOneWidget);
+    expect(find.text(OutsideTextStrip.message), findsOneWidget);
+  });
 
   testWidgets('the panel streams the conversation and confirms a proposal', (
     tester,

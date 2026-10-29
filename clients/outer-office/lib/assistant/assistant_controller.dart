@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../routes/oo_route.dart';
+import 'assistant_view.dart' show ViewLimits;
 
 /// A text channel to Universal Exports' Moneypenny socket; tests give a fake one.
 abstract interface class AssistantChannel {
@@ -90,6 +91,9 @@ class AssistantController extends ChangeNotifier {
 
   /// How many older entries Universal Exports kept but did not send.
   int earlier = 0;
+
+  /// The bounds Universal Exports holds her views to, as it sent them.
+  ViewLimits viewLimits = const ViewLimits();
   bool busy = false;
 
   /// The person asked to stop the answer, and it has not stopped yet.
@@ -145,6 +149,7 @@ class AssistantController extends ChangeNotifier {
         busy = message['busy'] == true;
         stopping = false;
         earlier = (message['earlier'] as num?)?.toInt() ?? 0;
+        viewLimits = ViewLimits.fromJson(message['view_limits']);
         entries = [
           for (final entry in message['entries'] as List? ?? const [])
             AssistantEntry.fromJson((entry as Map).cast<String, Object?>()),

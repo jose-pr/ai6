@@ -120,6 +120,50 @@ void main() {
     expect(pages, OoPage.values.toSet(), reason: 'every page has a case');
   });
 
+  test(
+    'a Missions route shows the fixture Missions her missions tool shows',
+    () {
+      final shared = (_fixture()['missions']! as Map).cast<String, Object?>();
+      final missions = (shared['board']! as List).cast<Map<String, dynamic>>();
+      final board =
+          MissionBoard(
+              apiOrigin: Uri.parse('https://oo.example'),
+              pollInterval: null,
+            )
+            ..sessions = [
+              for (final mission in missions)
+                for (final session in mission['sessions'] as List)
+                  SessionSummary.fromJson(
+                    (session as Map).cast<String, dynamic>(),
+                  ),
+            ]
+            ..missionBriefs = [
+              for (final mission in missions)
+                ?MissionBriefSummary.fromMissionJson(mission),
+            ];
+      addTearDown(board.dispose);
+      final order = [for (final mission in missions) mission['mission_id']];
+      for (final raw in shared['cases']! as List) {
+        final testCase = (raw as Map).cast<String, Object?>();
+        final shown = {
+          for (final mission in routeMissions(
+            board,
+            OoRoute.fromJson(testCase['route']),
+          ))
+            mission.missionId,
+        };
+        expect(
+          [
+            for (final id in order)
+              if (shown.contains(id)) id,
+          ],
+          testCase['shows'],
+          reason: '${testCase['route']}',
+        );
+      }
+    },
+  );
+
   test('every invalid route of the fixture is refused with its reason', () {
     final invalid = _fixture()['invalid']! as List;
     expect(invalid, isNotEmpty);

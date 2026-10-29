@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  fl_chart: ^1.3.0
   flutter_svg: ^2.3.0
   guatiao:
     git:
