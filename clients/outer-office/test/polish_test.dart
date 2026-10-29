@@ -218,14 +218,20 @@ void main() {
 
   testWidgets('without a conversation the Overview card is disabled and says '
       'why', (tester) async {
-    await demoAt(tester, const Size(1400, 900));
+    await atSize(tester, const Size(1400, 900));
+    final board = signedIn(FakeChannel());
+    addTearDown(board.dispose);
+    await tester.pumpWidget(
+      MaterialApp(home: MissionBoardPage(board: board, desktopWindows: false)),
+    );
+    await tester.pumpAndSettle();
     expect(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'), findsNothing);
     final chip = tester.widget<ActionChip>(
       find.widgetWithText(ActionChip, 'Summarise the board'),
     );
     expect(chip.onPressed, isNull);
     expect(
-      find.text('Moneypenny does not answer in the preview.'),
+      find.text('Moneypenny answers once you are signed in.'),
       findsOneWidget,
     );
   });

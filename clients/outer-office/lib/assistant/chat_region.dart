@@ -334,6 +334,7 @@ class ChatPanel extends StatelessWidget {
             actions: _actions(),
             message: chat.message,
             composerFocus: chat.composer,
+            label: chat.label,
             textWidth: placement == ChatPlacement.centre
                 ? chat.settings.textWidth
                 : null,

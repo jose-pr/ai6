@@ -18,6 +18,7 @@ import 'assistant/assistant_controller.dart';
 import 'assistant/chat_layout.dart';
 import 'assistant/chat_region.dart';
 import 'assistant/chat_window.dart';
+import 'assistant/demo_conversation.dart';
 import 'assistant/memory_page.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
@@ -2714,10 +2715,11 @@ class _AccessGateState extends State<_AccessGate> {
   }
 
   /// The conversation with Moneypenny for the signed-in token: made at sign-in, replaced
-  /// when the token changes, gone at sign-out. None in the preview.
+  /// when the token changes, gone at sign-out. The preview gets the scripted sample
+  /// conversation, which reaches no network, and nothing else does.
   MoneypennyChat? _chatFor(MissionBoard board) {
-    final token = board.accessToken;
-    if (board.demo || token == null) {
+    final token = board.demo ? 'demo' : board.accessToken;
+    if (token == null) {
       _drop();
       return null;
     }
@@ -2726,9 +2728,11 @@ class _AccessGateState extends State<_AccessGate> {
     return _chat = MoneypennyChat(
       controller: AssistantController(
         token: token,
-        connect:
-            board.assistantChannel ?? () => connectAssistant(board.apiOrigin),
+        connect: board.demo
+            ? DemoAssistantChannel.new
+            : board.assistantChannel ?? () => connectAssistant(board.apiOrigin),
       ),
+      label: board.demo ? demoConversationLabel : null,
       preferences: ChatPreferences(SharedPreferences.getInstance()),
       settings: widget.chatSettings,
       openWindow: widget.desktopWindows

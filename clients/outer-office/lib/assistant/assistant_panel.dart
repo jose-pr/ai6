@@ -24,6 +24,7 @@ class AssistantPanel extends StatefulWidget {
     this.message,
     this.composerFocus,
     this.textWidth,
+    this.label,
     super.key,
   });
 
@@ -50,6 +51,9 @@ class AssistantPanel extends StatefulWidget {
   /// Where set, messages and the composer keep to a centred column this wide, and views
   /// (tables, charts) take the full width.
   final double? textWidth;
+
+  /// A line under the header saying what this conversation is, such as a sample.
+  final String? label;
 
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
@@ -192,6 +196,29 @@ class _AssistantPanelState extends State<AssistantPanel> {
             ),
           ),
           const Divider(height: 1),
+          if (widget.label case final label?)
+            Material(
+              color: OoTokens.of(context).selectedFill,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                child: Row(
+                  spacing: 8,
+                  children: [
+                    Icon(
+                      Icons.science_outlined,
+                      size: 16,
+                      color: OoTokens.of(context).accent,
+                    ),
+                    Expanded(
+                      child: Text(label, style: theme.textTheme.labelMedium),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(12),

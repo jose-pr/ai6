@@ -148,12 +148,16 @@ class MoneypennyChat extends ChangeNotifier {
     this.preferences,
     this.openWindow,
     this.settings = const ChatSettings(),
+    this.label,
   }) : _width = settings.width {
     controller.addListener(_heard);
   }
 
   /// Sizes and timing, from `OO.cfg`'s `[chat]`.
   final ChatSettings settings;
+
+  /// What this conversation is, shown in the chat, such as the preview's sample.
+  final String? label;
 
   final AssistantController controller;
   final ChatPreferences? preferences;
