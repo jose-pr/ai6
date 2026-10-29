@@ -25,7 +25,7 @@ class OoTile extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [tokens.raised, tokens.surface],
+          colors: tokens.gradient(tokens.raised, tokens.surface),
         ),
         border: Border.all(color: tokens.accent.withValues(alpha: 0.4)),
         boxShadow: [
@@ -159,8 +159,8 @@ class OoPanel extends StatelessWidget {
 }
 
 /// The theme's hero art ([OoTokens.hero]) at [height], decorative only: [child] sits on a
-/// `surface` panel at 0.92 opacity over its lower left corner. Without art (wallpaper off,
-/// high contrast) only the panel is shown.
+/// `surface` panel at [ooArtPanelOpacity] over its lower left corner. Without art
+/// (wallpaper off, high contrast) only the panel is shown.
 ///
 /// Nothing is plotted on the art: AI6 knows no Station geography.
 class OoHero extends StatelessWidget {
@@ -176,13 +176,13 @@ class OoHero extends StatelessWidget {
     final tokens = OoTokens.of(context);
     final panel = DecoratedBox(
       decoration: BoxDecoration(
-        color: tokens.surface.withValues(alpha: 0.92),
+        color: tokens.surface.withValues(alpha: ooArtPanelOpacity),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: tokens.border),
       ),
       child: child,
     );
-    final art = tokens.hero;
+    final art = tokens.decorated ? tokens.hero : null;
     if (art == null) return Card(child: panel);
     Widget image = Image(
       image: art,

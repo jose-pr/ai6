@@ -2,8 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'oo_tokens.dart';
 
-/// The theme's wallpaper behind [child], which sits on a `surface` panel at 0.92 opacity so
-/// text over it keeps its contrast.
+/// The theme's wallpaper behind [child], which sits on a `surface` panel at
+/// [ooArtPanelOpacity] so text over it keeps its contrast.
 ///
 /// Only for the sign-in page, the Overview header and empty states: never behind tables,
 /// terminals, Session pages, dialogs, green ink, briefings or the chat. Paints only the panel
@@ -29,7 +29,7 @@ class OoBackdrop extends StatelessWidget {
     final tokens = OoTokens.of(context);
     final panel = DecoratedBox(
       decoration: BoxDecoration(
-        color: tokens.surface.withValues(alpha: 0.92),
+        color: tokens.surface.withValues(alpha: ooArtPanelOpacity),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: tokens.border),
       ),
@@ -41,7 +41,7 @@ class OoBackdrop extends StatelessWidget {
           ? panel
           : Align(alignment: alignment!, child: panel),
     );
-    final image = tokens.backdrop;
+    final image = tokens.decorated ? tokens.backdrop : null;
     if (image == null) return framed;
     final width =
         (MediaQuery.sizeOf(context).width *

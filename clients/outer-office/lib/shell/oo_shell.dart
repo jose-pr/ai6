@@ -252,7 +252,7 @@ class _RailEntry extends StatelessWidget {
               ? BoxDecoration(
                   borderRadius: radius,
                   gradient: LinearGradient(
-                    colors: [tokens.selectedFill, tokens.raised],
+                    colors: tokens.gradient(tokens.selectedFill, tokens.raised),
                   ),
                   border: Border.all(
                     color: tokens.accent.withValues(alpha: 0.7),

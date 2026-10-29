@@ -42,10 +42,14 @@ String ooThemePreference(String? stored) =>
     ? stored!
     : OoThemeId.nightOps.id;
 
+/// The opacity of the `surface` panel that holds text over art (`OoHero`, `OoBackdrop`).
+const ooArtPanelOpacity = 0.92;
+
 /// The colours of one Outer Office theme, read with [OoTokens.of].
 ///
 /// `border` separates surfaces and carries no meaning; everything a person must read uses
-/// `text`, `muted`, `accent` or a status colour, each at least 4.5:1 on `surface`.
+/// `text`, `muted`, `accent` or a status colour, each at least 4.5:1 on `bg`, `surface`
+/// and `raised` (status colours on `surface`).
 @immutable
 class OoTokens extends ThemeExtension<OoTokens> {
   const OoTokens({
@@ -63,6 +67,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
     this.backdrop,
     this.hero,
     this.heroDuotone = false,
+    this.decorated = true,
   });
 
   final Color bg;
@@ -80,7 +85,9 @@ class OoTokens extends ThemeExtension<OoTokens> {
   /// turned off.
   final ImageProvider? backdrop;
 
-  /// Eight categorical colours for charts, each at least 3:1 on `surface`.
+  /// Eight categorical colours for charts, in a fixed order, each at least 3:1 on
+  /// `surface`. Neighbours, and the first colour beside any other (a pie's last slice
+  /// touches its first), stay apart for people with red-green colour blindness too.
   final List<Color> series;
 
   /// The art of the Overview hero, painted only by `OoHero`; null when it is turned off.
@@ -89,15 +96,26 @@ class OoTokens extends ThemeExtension<OoTokens> {
   /// Whether [hero] is drawn in this theme's colours ([heroMatrix]) rather than as drawn.
   final bool heroDuotone;
 
+  /// Whether ornament is drawn: glows, decorative gradients, the wallpaper and the hero
+  /// art. False under high contrast ([highContrast]), where every one of them is flat.
+  final bool decorated;
+
   /// Whether this is a dark theme: light text on a dark background.
   bool get dark => bg.computeLuminance() < text.computeLuminance();
 
   /// The two stops of the accent gradient (primary buttons, the wordmark), top first: a
   /// step lighter than `accent` on a dark theme and a step darker on a light one, so `bg`
-  /// reads on both stops at least as well as on `accent`.
-  List<Color> get accentGradient => dark
+  /// reads on both stops at least as well as on `accent`. Solid `accent` when not
+  /// [decorated].
+  List<Color> get accentGradient => !decorated
+      ? [accent, accent]
+      : dark
       ? [_lightness(accent, 0.1), accent]
       : [accent, _lightness(accent, -0.06)];
+
+  /// A decorative gradient from [from] to [to], or solid [from] when not [decorated].
+  List<Color> gradient(Color from, Color to) =>
+      decorated ? [from, to] : [from, from];
 
   /// The duotone icon colours: the gradient's light and dark stops and the ink of details.
   ({Color hi, Color lo, Color ink}) get duotone => dark
@@ -116,8 +134,9 @@ class OoTokens extends ThemeExtension<OoTokens> {
   Color get selectedFill =>
       Color.alphaBlend(accent.withValues(alpha: 0.16), raised);
 
-  /// A soft glow of [color] around a dot, tile or selected entry; none under high contrast.
-  List<BoxShadow> glow(Color color, {double radius = 8}) => border == muted
+  /// A soft glow of [color] around a selected entry or the primary action; none when not
+  /// [decorated].
+  List<BoxShadow> glow(Color color, {double radius = 8}) => !decorated
       ? const []
       : [
           BoxShadow(
@@ -152,8 +171,8 @@ class OoTokens extends ThemeExtension<OoTokens> {
   static OoTokens of(BuildContext context) =>
       Theme.of(context).extension<OoTokens>() ?? _nightOps;
 
-  /// These tokens for a person who asked for more contrast: muted text becomes text and
-  /// separators become as visible as muted text; no wallpaper.
+  /// These tokens for a person who asked for more contrast: muted text becomes text,
+  /// separators become as visible as muted text, and nothing is [decorated].
   OoTokens highContrast() => OoTokens(
     bg: bg,
     surface: surface,
@@ -166,6 +185,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
     warning: warning,
     danger: danger,
     series: series,
+    decorated: false,
   );
 
   /// The colour of a Mission or Session state; the state's name is always shown beside it.
@@ -191,6 +211,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
     Color? danger,
     List<Color>? series,
     ImageProvider? backdrop,
+    bool? decorated,
     bool clearBackdrop = false,
   }) => OoTokens(
     bg: bg ?? this.bg,
@@ -207,6 +228,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
     backdrop: clearBackdrop ? null : backdrop ?? this.backdrop,
     hero: clearBackdrop ? null : hero,
     heroDuotone: heroDuotone,
+    decorated: decorated ?? this.decorated,
   );
 
   @override
@@ -231,12 +253,16 @@ class OoTokens extends ThemeExtension<OoTokens> {
       backdrop: t < 0.5 ? backdrop : other.backdrop,
       hero: t < 0.5 ? hero : other.hero,
       heroDuotone: t < 0.5 ? heroDuotone : other.heroDuotone,
+      // A change into or out of high contrast draws no ornament on the way.
+      decorated: decorated && other.decorated,
     );
   }
 }
 
-// The design kit's tokens. Where a kit colour fell below WCAG AA on `surface` (or `bg` on
-// `accent`), only its HSL lightness moved, by the smallest 1% step that passes.
+// The design kit's tokens. Where a kit colour fell below WCAG AA where text is drawn with
+// it (`test/theme_test.dart`), only its HSL lightness moved, by the smallest 1% step that
+// passes. The series take the accent first where it has enough chroma to name a series,
+// then hues ordered so that neighbours differ in colour-blind simulations too.
 const _nightOps = OoTokens(
   bg: Color(0xFF07111B),
   surface: Color(0xFF0D1C28),
@@ -251,14 +277,14 @@ const _nightOps = OoTokens(
   backdrop: AssetImage('assets/backdrops/night-ops.jpg'),
   hero: AssetImage('assets/heroes/map.jpg'),
   series: [
-    Color(0xFFD6A958),
-    Color(0xFFE69F00),
-    Color(0xFF56B4E9),
-    Color(0xFF009E73),
-    Color(0xFFF0E442),
-    Color(0xFF0072B2),
-    Color(0xFFD55E00),
-    Color(0xFFCC79A7),
+    Color(0xFFD6A958), // accent
+    Color(0xFF3987E5), // blue
+    Color(0xFFC44608), // orange
+    Color(0xFFA298FE), // violet
+    Color(0xFF069468), // aqua
+    Color(0xFFA468C2), // purple
+    Color(0xFF5BC5FA), // sky
+    Color(0xFFD55181), // magenta
   ],
 );
 
@@ -277,14 +303,14 @@ const _blackOps = OoTokens(
   hero: AssetImage('assets/heroes/map.jpg'),
   heroDuotone: true,
   series: [
-    Color(0xFFCBD1D0),
-    Color(0xFFE69F00),
-    Color(0xFF56B4E9),
-    Color(0xFF009E73),
-    Color(0xFFF0E442),
-    Color(0xFF0072B2),
-    Color(0xFFD55E00),
-    Color(0xFFCC79A7),
+    Color(0xFF3987E5), // blue
+    Color(0xFFD95926), // orange
+    Color(0xFF4EC494), // aqua
+    Color(0xFF9A6502), // yellow
+    Color(0xFFF56E9C), // magenta
+    Color(0xFF008300), // green
+    Color(0xFFA5CF45), // lime
+    Color(0xFFDE9FFE), // purple
   ],
 );
 
@@ -302,14 +328,14 @@ const _dusk = OoTokens(
   backdrop: AssetImage('assets/backdrops/dusk.jpg'),
   hero: AssetImage('assets/heroes/skyline.jpg'),
   series: [
-    Color(0xFFECAC70),
-    Color(0xFFE69F00),
-    Color(0xFF56B4E9),
-    Color(0xFF009E73),
-    Color(0xFFF0E442),
-    Color(0xFF0072B2),
-    Color(0xFFD55E00),
-    Color(0xFFCC79A7),
+    Color(0xFFECAC70), // accent
+    Color(0xFF3987E5), // blue
+    Color(0xFF018059), // aqua
+    Color(0xFFA298FE), // violet
+    Color(0xFFD55181), // magenta
+    Color(0xFF46B2E6), // sky
+    Color(0xFF729405), // lime
+    Color(0xFFA468C2), // purple
   ],
 );
 
@@ -318,7 +344,7 @@ const _classic = OoTokens(
   surface: Color(0xFFF5E8D2),
   raised: Color(0xFFFFF4DF),
   text: Color(0xFF30291F),
-  muted: Color(0xFF71685A),
+  muted: Color(0xFF635B4F),
   accent: Color(0xFF76582C),
   border: Color(0xFFC4AB85),
   success: Color(0xFF367253),
@@ -328,14 +354,14 @@ const _classic = OoTokens(
   hero: AssetImage('assets/heroes/map.jpg'),
   heroDuotone: true,
   series: [
-    Color(0xFF76582C),
-    Color(0xFFAE7800),
-    Color(0xFF1B8DCE),
-    Color(0xFF00946C),
-    Color(0xFF8E850B),
-    Color(0xFF0072B2),
-    Color(0xFFD55E00),
-    Color(0xFFC46398),
+    Color(0xFF7A6DF5), // violet
+    Color(0xFFD6551C), // orange
+    Color(0xFF0B8C8C), // teal
+    Color(0xFF9F0117), // red
+    Color(0xFF02587C), // sky
+    Color(0xFF689001), // lime
+    Color(0xFFAB446E), // magenta
+    Color(0xFF026502), // green
   ],
 );
 
@@ -354,14 +380,14 @@ const _light = OoTokens(
   hero: AssetImage('assets/heroes/map.jpg'),
   heroDuotone: true,
   series: [
-    Color(0xFF2A6D84),
-    Color(0xFFC28600),
-    Color(0xFF209CE2),
-    Color(0xFF009E73),
-    Color(0xFFA1960D),
-    Color(0xFF0072B2),
-    Color(0xFFD55E00),
-    Color(0xFFCC79A7),
+    Color(0xFF3481E0), // blue
+    Color(0xFFEB6834), // orange
+    Color(0xFF026502), // green
+    Color(0xFFD36992), // magenta
+    Color(0xFF9F0117), // red
+    Color(0xFF06A572), // aqua
+    Color(0xFF7B289D), // purple
+    Color(0xFFA56F00), // yellow
   ],
 );
 
@@ -372,7 +398,7 @@ const _redFile = OoTokens(
   raised: Color(0xFF351725),
   text: Color(0xFFFCEDEF),
   muted: Color(0xFFC9A4AF),
-  accent: Color(0xFFE5555C),
+  accent: Color(0xFFE65960),
   border: Color(0xFF622A3C),
   success: Color(0xFF5ECEA0),
   warning: Color(0xFFE6B04C),
@@ -380,14 +406,14 @@ const _redFile = OoTokens(
   hero: AssetImage('assets/heroes/map.jpg'),
   heroDuotone: true,
   series: [
-    Color(0xFFE5555C),
-    Color(0xFFE69F00),
-    Color(0xFF56B4E9),
-    Color(0xFF009E73),
-    Color(0xFFF0E442),
-    Color(0xFF0072B2),
-    Color(0xFFD55E00),
-    Color(0xFFCC79A7),
+    Color(0xFFE65960), // accent
+    Color(0xFF3987E5), // blue
+    Color(0xFF59CE9D), // aqua
+    Color(0xFF6557B7), // violet
+    Color(0xFF50BBF0), // sky
+    Color(0xFFE3B738), // gold
+    Color(0xFF199E9E), // teal
+    Color(0xFFDE9FFE), // purple
   ],
 );
 

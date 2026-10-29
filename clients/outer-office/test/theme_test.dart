@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' show Brightness, Color, Size;
 
 import 'package:flutter_svg/flutter_svg.dart';
@@ -24,51 +23,7 @@ import 'package:outer_office/theme/oo_icon.dart';
 import 'package:outer_office/theme/oo_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// WCAG 2.2 relative luminance of an sRGB colour.
-double luminance(Color color) {
-  double channel(double c) =>
-      c <= 0.04045 ? c / 12.92 : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
-  return 0.2126 * channel(color.r) +
-      0.7152 * channel(color.g) +
-      0.0722 * channel(color.b);
-}
-
-/// WCAG 2.2 contrast ratio of two colours.
-double contrast(Color a, Color b) {
-  final la = luminance(a);
-  final lb = luminance(b);
-  return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05);
-}
-
-/// Every pair the tokens promise, as (name, foreground, background, minimum).
-List<(String, Color, Color, double)> promisedPairs(OoTokens t) => [
-  ('text on bg', t.text, t.bg, 4.5),
-  ('text on surface', t.text, t.surface, 4.5),
-  ('text on raised', t.text, t.raised, 4.5),
-  ('muted on surface', t.muted, t.surface, 4.5),
-  ('muted on raised', t.muted, t.raised, 4.5),
-  ('accent on surface', t.accent, t.surface, 4.5),
-  ('accent on raised (the selected rail icon and bar)', t.accent, t.raised, 3),
-  ('bg on accent', t.bg, t.accent, 4.5),
-  ('success on surface', t.success, t.surface, 4.5),
-  ('warning on surface', t.warning, t.surface, 4.5),
-  ('danger on surface', t.danger, t.surface, 4.5),
-  ('outline (muted) on surface', t.muted, t.surface, 3),
-  // The polish pass: primary button labels on both gradient stops, the wordmark's stops as
-  // large text, the selected rail entry and her person bubble, the bell's count badge.
-  for (final (index, stop) in t.accentGradient.indexed) ...[
-    ('bg on accent gradient stop $index', t.bg, stop, 4.5),
-    ('accent gradient stop $index on surface (large text)', stop, t.surface, 3),
-  ],
-  ('text on the selected fill', t.text, t.selectedFill, 4.5),
-  ('badge label on danger', _readable(t.danger, t), t.danger, 4.5),
-  ('accent on raised (labels in tiles and chips)', t.accent, t.raised, 3),
-  for (final (index, color) in t.series.indexed)
-    ('series $index on surface', color, t.surface, 3),
-];
-
-/// The label colour the theme puts on [color].
-Color _readable(Color color, OoTokens t) => ooReadableOn(color, t);
+import 'contrast.dart';
 
 void main() {
   test('the ratio check fails the kit colours it was written to catch', () {
@@ -82,24 +37,81 @@ void main() {
       lessThan(4.5),
     );
     expect(contrast(const Color(0xFF000000), const Color(0xFFFFFFFF)), 21);
+    // Classic's muted and Red File's accent before this check covered `bg` and `raised`.
+    expect(
+      contrast(const Color(0xFF71685A), const Color(0xFFE6D6BB)),
+      lessThan(4.5),
+    );
+    expect(
+      contrast(const Color(0xFFE5555C), const Color(0xFF351725)),
+      lessThan(4.5),
+    );
   });
 
   for (final theme in OoThemeId.values) {
-    test('${theme.label} meets every promised contrast ratio', () {
+    test('${theme.label} meets the ratio of every pair it draws', () {
       for (final tokens in [theme.tokens, theme.tokens.highContrast()]) {
         expect(tokens.series, hasLength(8));
-        for (final (name, foreground, background, minimum) in promisedPairs(
+        for (final (name, foreground, background, minimum) in actualUsePairs(
           tokens,
         )) {
           expect(
             contrast(foreground, background),
             greaterThanOrEqualTo(minimum),
-            reason: '${theme.label}: $name',
+            reason:
+                '${theme.label}${tokens.decorated ? '' : ' (high contrast)'}: '
+                '$name',
           );
         }
       }
     });
+
+    test('${theme.label} chart series stay apart', () {
+      expect(
+        seriesProblems(theme.tokens.series, theme.tokens.surface),
+        isEmpty,
+        reason: theme.label,
+      );
+    });
   }
+
+  test('the series check fails the palette it was written to catch', () {
+    // Night Ops' first two series before: its gold accent and an orange.
+    final before = [
+      const Color(0xFFD6A958),
+      const Color(0xFFE69F00),
+      ...OoThemeId.nightOps.tokens.series.skip(2),
+    ];
+    expect(
+      seriesProblems(before, OoThemeId.nightOps.tokens.surface),
+      contains(startsWith('slots 0 and 1 look alike')),
+    );
+  });
+
+  test('high contrast draws no ornament in any theme', () {
+    const white = Color(0xFFFFFFFF);
+    for (final theme in OoThemeId.values) {
+      final plain = theme.tokens.highContrast();
+      expect(theme.tokens.decorated, isTrue, reason: theme.label);
+      expect(plain.decorated, isFalse, reason: theme.label);
+      expect(plain.glow(white), isEmpty, reason: theme.label);
+      expect(theme.tokens.glow(white), isNotEmpty, reason: theme.label);
+      expect(plain.accentGradient, [plain.accent, plain.accent]);
+      expect(plain.gradient(plain.raised, plain.surface), [
+        plain.raised,
+        plain.raised,
+      ]);
+      expect(plain.hero, isNull, reason: theme.label);
+      expect(plain.backdrop, isNull, reason: theme.label);
+      // Carried by copyWith; lerp keeps it off from either side.
+      expect(plain.copyWith(accent: white).decorated, isFalse);
+      for (final t in [0.0, 0.5, 1.0]) {
+        expect(theme.tokens.lerp(plain, t).decorated, isFalse);
+        expect(plain.lerp(theme.tokens, t).decorated, isFalse);
+      }
+      expect(theme.tokens.lerp(theme.tokens, 0.5).decorated, isTrue);
+    }
+  });
 
   test('only Red File has no wallpaper', () {
     for (final theme in OoThemeId.values) {
@@ -157,7 +169,8 @@ void main() {
     expect(boardStates, hasLength(9));
   });
 
-  test('high contrast and turning the wallpaper off drop the wallpaper', () {
+  test('high contrast and turning the wallpaper off drop the wallpaper and '
+      'the hero art', () {
     final contrasted = ooTheme(
       OoThemeId.dusk,
       highContrast: true,
@@ -165,10 +178,14 @@ void main() {
     expect(contrasted.muted, OoThemeId.dusk.tokens.text);
     expect(contrasted.border, OoThemeId.dusk.tokens.muted);
     expect(contrasted.backdrop, isNull);
-    expect(
-      ooTheme(OoThemeId.dusk, backdrop: false).extension<OoTokens>()!.backdrop,
-      isNull,
-    );
+    expect(contrasted.hero, isNull);
+    for (final theme in OoThemeId.values) {
+      final off = ooTheme(theme, backdrop: false).extension<OoTokens>()!;
+      expect(off.backdrop, isNull, reason: theme.label);
+      expect(off.hero, isNull, reason: theme.label);
+      expect(off.decorated, isTrue, reason: theme.label);
+      expect(ooTheme(theme).extension<OoTokens>()!.hero, isNotNull);
+    }
     expect(ooTheme(OoThemeId.dusk).extension<OoTokens>()!.backdrop, isNotNull);
   });
 
@@ -262,6 +279,21 @@ void main() {
             .builders[TargetPlatform.android]!
             .transitionDuration,
         Duration.zero,
+      );
+      // Changing the theme does not animate either.
+      expect(
+        tester
+            .widget<MaterialApp>(find.byType(MaterialApp))
+            .themeAnimationDuration,
+        Duration.zero,
+      );
+      tester.platformDispatcher.clearAccessibilityFeaturesTestValue();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<MaterialApp>(find.byType(MaterialApp))
+            .themeAnimationDuration,
+        greaterThan(Duration.zero),
       );
     });
   });
