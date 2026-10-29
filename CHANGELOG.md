@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The Station API asks every `/internal` request for `Authorization: Bearer TOKEN`, the token
+  in `api-token` under the Station's state directory, made on first start; `/healthz` stays
+  open. Universal Exports accepts an identity its reverse proxy asserts only with
+  `X-AI6-Proxy-Secret` equal to `AI6_EXPORTS_PROXY_SECRET` (required with
+  `AI6_EXPORTS_PROXY_USER_HEADER`, at least 32 characters).
+- `assistant.denied_networks` (and in group and person tables, which only add to it): the
+  categories `loopback`, `private`, `link-local` and `metadata`, networks, addresses and host
+  names Moneypenny's web tools and scripts may not reach. Empty by default: `open` reaches
+  everything the Station reaches, the Station itself included. Her WebFetch gate checks a name
+  by every address it resolves to.
+- Her scripts read only what an interpreter needs (not `/etc`, `/opt` or `/dev` whole), each
+  interpreter's install directory, and never AI6's state directory or the Station's own program,
+  under Claude Code and Codex alike.
+- The `pipe` terminal keeps a program's standard error on its own pipe by default
+  (`stderr = "tail"`) and adds only its last lines after the output ends; it starts the program
+  alone (its own session, no inherited descriptor or handle) and kills processes that left its
+  process group.
+
 - Universal Exports keeps its Directory's lookups and a plugin Authorizer's decisions for a
   few seconds (coqui-access-kit's `Cached`; `AI6_EXPORTS_ACCESS_CACHE_TTL` 5 s,
   `AI6_EXPORTS_ACCESS_CACHE_NEGATIVE_TTL` 1 s, `AI6_EXPORTS_ACCESS_CACHE_ENTRIES` 10 000, `0`
