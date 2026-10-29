@@ -57,9 +57,16 @@ class _SessionsPageState extends State<SessionsPage> {
       (left, right) =>
           _ascending ? _compare(left, right) : _compare(right, left),
     );
-    if (MediaQuery.sizeOf(context).width < OoBreakpoints.phone) {
-      return _SessionList(sessions: sessions, onOpen: widget.onOpen);
-    }
+    // The width the page has, not the window's: a docked chat takes part of it.
+    return LayoutBuilder(
+      builder: (context, constraints) =>
+          constraints.maxWidth < OoBreakpoints.phone
+          ? _SessionList(sessions: sessions, onOpen: widget.onOpen)
+          : _table(sessions),
+    );
+  }
+
+  Widget _table(List<SessionSummary> sessions) {
     DataColumn column(String label, {bool numeric = false}) =>
         DataColumn(label: Text(label), numeric: numeric, onSort: _sort);
     return SingleChildScrollView(

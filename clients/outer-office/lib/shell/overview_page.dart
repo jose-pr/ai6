@@ -45,11 +45,19 @@ class OverviewPage extends StatelessWidget {
   /// How often Recent Activity is fetched again while shown; `null` only once.
   final Duration? activityEvery;
 
+  /// The narrowest a stat tile reads well: its icon, count and a short label on one row.
+  static const double statTileWidth = 230;
+
+  // Sized by the width the page has, not the window's: a docked chat takes part of it.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => _page(context, constraints.maxWidth),
+  );
+
+  Widget _page(BuildContext context, double width) {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
-    final phone = MediaQuery.sizeOf(context).width < OoBreakpoints.phone;
+    final phone = width < OoBreakpoints.phone;
     final missions = groupMissions(board.sessions);
     final active = missions.where((mission) => !mission.finished).toList();
     final working = active.where((mission) => mission.state == 'working');
@@ -99,6 +107,7 @@ class OverviewPage extends StatelessWidget {
     );
     final stats = [
       _Stat(
+        compact: phone,
         icon: OoIconName.operations,
         label: 'Operations',
         count: operations.length,
@@ -109,6 +118,7 @@ class OverviewPage extends StatelessWidget {
         ),
       ),
       _Stat(
+        compact: phone,
         icon: OoIconName.stations,
         label: 'Stations',
         count: stations.length,
@@ -129,6 +139,7 @@ class OverviewPage extends StatelessWidget {
         ),
       ),
       _Stat(
+        compact: phone,
         icon: OoIconName.missions,
         label: 'Missions',
         count: active.length,
@@ -143,6 +154,7 @@ class OverviewPage extends StatelessWidget {
         ),
       ),
       _Stat(
+        compact: phone,
         icon: OoIconName.sessions,
         label: 'Sessions waiting',
         count: waiting.length,
@@ -172,136 +184,131 @@ class OverviewPage extends StatelessWidget {
       onAsk: onAsk,
       waiting: attention.length,
     );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final gap = phone ? 12.0 : 16.0;
-        final side = width >= 1000;
-        final threeColumns = width >= 1080;
-        final statColumns = phone
-            ? 1
-            : width >= 760
-            ? 4
-            : 2;
-        final statWidth =
-            (width - 2 * gap - gap * (statColumns - 1)) / statColumns;
-        // A column, not a lazy list: Overview is a few panels, and every one of them is
-        // built so search and screen readers see the whole page.
-        return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(gap, gap, gap, 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (side)
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(minHeight: 270),
-                          child: OoHero(height: null, child: heroText),
-                        ),
-                      ),
-                      SizedBox(width: gap),
-                      SizedBox(width: 340, child: operationsPanel),
-                    ],
-                  ),
-                )
-              else ...[
-                OoHero(height: phone ? 170 : 220, child: heroText),
-                SizedBox(height: gap),
-                operationsPanel,
-              ],
-              SizedBox(height: gap),
-              Wrap(
-                spacing: gap,
-                runSpacing: gap,
+    final gap = phone ? 12.0 : 16.0;
+    final side = width >= 1000;
+    final threeColumns = width >= 1080;
+    // Four tiles in a row, two, or one: never three and an orphan.
+    final fit = ((width - gap) / (statTileWidth + gap)).floor();
+    final statColumns = phone || fit < 2
+        ? 1
+        : fit >= 4
+        ? 4
+        : 2;
+    final statWidth = (width - 2 * gap - gap * (statColumns - 1)) / statColumns;
+    // A column, not a lazy list: Overview is a few panels, and every one of them is
+    // built so search and screen readers see the whole page.
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(gap, gap, gap, 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (side)
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final stat in stats)
-                    SizedBox(width: statWidth, child: stat),
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 270),
+                      child: OoHero(height: null, child: heroText),
+                    ),
+                  ),
+                  SizedBox(width: gap),
+                  SizedBox(width: 340, child: operationsPanel),
                 ],
               ),
-              SizedBox(height: gap),
-              if (threeColumns)
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(child: activity),
-                      SizedBox(width: gap),
-                      Expanded(child: upcoming),
-                      SizedBox(width: gap),
-                      Expanded(child: moneypenny),
-                    ],
-                  ),
-                )
-              else ...[
-                moneypenny,
-                SizedBox(height: gap),
-                activity,
-                SizedBox(height: gap),
-                upcoming,
-              ],
-              SizedBox(height: gap),
-              if (attention.isEmpty)
-                const OoBackdrop(
-                  padding: EdgeInsets.zero,
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text('Nothing needs your attention.'),
-                  ),
-                )
-              else
-                OoPanel(
-                  title: 'NEEDS ATTENTION',
-                  trailing: Text(
-                    '${attention.length}',
-                    style: text.titleMedium,
-                  ),
-                  child: Column(
-                    children: [
-                      for (final item in attention)
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: IconTheme.merge(
-                            data: IconThemeData(color: item.color),
-                            child: OoIcon(item.icon),
-                          ),
-                          title: Text(
-                            item.text,
-                            maxLines: phone ? 3 : 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: pages.contains(item.page) && !phone
-                              ? TextButton(
-                                  onPressed: () => onOpen(item.page),
-                                  child: Text('Open ${item.page.label}'),
-                                )
-                              : null,
-                          onTap: pages.contains(item.page) && phone
-                              ? () => onOpen(item.page)
-                              : null,
-                        ),
-                    ],
-                  ),
-                ),
+            )
+          else ...[
+            OoHero(height: phone ? 170 : 220, child: heroText),
+            SizedBox(height: gap),
+            operationsPanel,
+          ],
+          SizedBox(height: gap),
+          Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: [
+              for (final stat in stats) SizedBox(width: statWidth, child: stat),
             ],
           ),
-        );
-      },
+          SizedBox(height: gap),
+          if (threeColumns)
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: activity),
+                  SizedBox(width: gap),
+                  Expanded(child: upcoming),
+                  SizedBox(width: gap),
+                  Expanded(child: moneypenny),
+                ],
+              ),
+            )
+          else ...[
+            moneypenny,
+            SizedBox(height: gap),
+            activity,
+            SizedBox(height: gap),
+            upcoming,
+          ],
+          SizedBox(height: gap),
+          if (attention.isEmpty)
+            const OoBackdrop(
+              padding: EdgeInsets.zero,
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Text('Nothing needs your attention.'),
+              ),
+            )
+          else
+            OoPanel(
+              title: 'NEEDS ATTENTION',
+              trailing: Text('${attention.length}', style: text.titleMedium),
+              child: Column(
+                children: [
+                  for (final item in attention)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: IconTheme.merge(
+                        data: IconThemeData(color: item.color),
+                        child: OoIcon(item.icon),
+                      ),
+                      title: Text(
+                        item.text,
+                        maxLines: phone ? 3 : 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: pages.contains(item.page) && !phone
+                          ? TextButton(
+                              onPressed: () => onOpen(item.page),
+                              child: Text('Open ${item.page.label}'),
+                            )
+                          : null,
+                      onTap: pages.contains(item.page) && phone
+                          ? () => onOpen(item.page)
+                          : null,
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
 
 class _Stat extends StatelessWidget {
   const _Stat({
+    required this.compact,
     required this.icon,
     required this.label,
     required this.count,
     required this.detail,
   });
 
+  /// A phone-sized page: a smaller tile.
+  final bool compact;
   final OoIconName icon;
   final String label;
   final int count;
@@ -311,13 +318,12 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
-    final phone = MediaQuery.sizeOf(context).width < OoBreakpoints.phone;
     return Card(
       child: Padding(
-        padding: EdgeInsets.all(phone ? 12 : 16),
+        padding: EdgeInsets.all(compact ? 12 : 16),
         child: Row(
           children: [
-            OoTile(icon, size: phone ? 48 : 60),
+            OoTile(icon, size: compact ? 48 : 60),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -971,9 +977,7 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
           if (!enabled) ...[
             const SizedBox(height: 8),
             Text(
-              widget.board.demo
-                  ? 'Moneypenny does not answer in the preview.'
-                  : 'Moneypenny answers once you are signed in.',
+              'Moneypenny answers once you are signed in.',
               style: text.bodySmall?.copyWith(color: tokens.muted),
             ),
           ],

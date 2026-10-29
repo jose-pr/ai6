@@ -148,6 +148,67 @@ void main() {
     }
   });
 
+  testWidgets('a docked chat never squeezes the Overview\'s stat tiles', (
+    tester,
+  ) async {
+    final channel = FakeChannel();
+    final board = signedIn(channel);
+    addTearDown(board.dispose);
+    Finder tile(String label) => find.ancestor(
+      of: find.descendant(
+        of: find.byType(OverviewPage),
+        matching: find.text(label),
+      ),
+      matching: find.byType(Card),
+    );
+    double labelHeight(String label) => tester
+        .getSize(
+          find.descendant(of: tile(label).first, matching: find.text(label)),
+        )
+        .height;
+    for (final (width, docked, columns) in [
+      (1200.0, true, 1),
+      (1536.0, true, 2),
+      (1536.0, false, 4),
+    ]) {
+      await atSize(tester, Size(width, 900));
+      final chat = await signIn(tester, board, channel);
+      if (docked) {
+        chat.open(focus: false);
+      } else {
+        chat.collapse();
+      }
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final reason = '$width px, docked: $docked';
+      final labels = ['Operations', 'Stations', 'Missions', 'Sessions waiting'];
+      final rects = [
+        for (final label in labels) tester.getRect(tile(label).first),
+      ];
+      for (final rect in rects) {
+        expect(
+          rect.width,
+          greaterThanOrEqualTo(OverviewPage.statTileWidth),
+          reason: reason,
+        );
+      }
+      expect(
+        rects.map((rect) => rect.top).toSet(),
+        hasLength(4 ~/ columns),
+        reason: '$reason: $columns per row',
+      );
+      // The test font's square glyphs are far wider than Roboto's, so only the docked
+      // tiles, which are wider, are held to one line here.
+      for (final label in docked ? labels : const <String>[]) {
+        expect(
+          labelHeight(label),
+          labelHeight('Stations'),
+          reason: '$reason: "$label" on one line',
+        );
+      }
+    }
+  });
+
   testWidgets('expanded hides the board and keeps its filter for docked', (
     tester,
   ) async {

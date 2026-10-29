@@ -3064,7 +3064,13 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     ],
   );
 
-  Widget _missionsBody(BuildContext context) {
+  // Sized by the width the page has, not the window's: a docked chat takes part of it.
+  Widget _missionsBody(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) =>
+        _missionsBoard(context, constraints.maxWidth),
+  );
+
+  Widget _missionsBoard(BuildContext context, double width) {
     final sessions = widget.board.sessions
         .where(
           (session) =>
@@ -3073,9 +3079,10 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         )
         .toList();
     final missions = groupMissions(sessions);
+    // The page's width beside the labelled rail at the wide breakpoint.
     final showSessionPane =
         !widget.desktopWindows &&
-        MediaQuery.sizeOf(context).width >= OoBreakpoints.wide;
+        width >= OoBreakpoints.wide - OoRail.width - 1;
     final boardView = CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
