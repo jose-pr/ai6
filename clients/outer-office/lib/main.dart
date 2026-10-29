@@ -181,6 +181,8 @@ class MissionBoard extends ChangeNotifier {
           sessionId: 'preview-session-007',
           state: 'working',
           sequence: 18,
+          stationId: 'station-control-01',
+          agent: 'technical-officer',
         ),
         SessionSummary(
           operationId: 'G',
@@ -189,6 +191,8 @@ class MissionBoard extends ChangeNotifier {
           state: 'blocked',
           sequence: 7,
           exposure: ['tool:WebFetch'],
+          stationId: 'station-control-01',
+          agent: 'technical-officer',
         ),
         SessionSummary(
           operationId: 'L',
@@ -196,6 +200,7 @@ class MissionBoard extends ChangeNotifier {
           sessionId: 'preview-session-021',
           state: 'done',
           sequence: 32,
+          stationId: 'station-remote-02',
         ),
       ];
       missionBriefs = const [
@@ -2455,6 +2460,8 @@ class SessionSummary {
     this.reason,
     this.updatedAt,
     this.exposure = const [],
+    this.stationId,
+    this.agent,
   });
 
   final String operationId;
@@ -2474,6 +2481,13 @@ class SessionSummary {
   /// The untrusted input the Session has read (`brief:source`, `tool:WebFetch`, ...).
   final List<String> exposure;
 
+  /// The Station that holds, or last held, the Session; `null` when the gateway has no
+  /// record of it.
+  final String? stationId;
+
+  /// The Agent its Mission's brief names; `null` before the brief arrives.
+  final String? agent;
+
   /// A new state replaces the reason with [reason]; without one the reason stays.
   SessionSummary copyWith({String? state, int? sequence, String? reason}) =>
       SessionSummary(
@@ -2487,6 +2501,8 @@ class SessionSummary {
             ? updatedAt
             : DateTime.now().millisecondsSinceEpoch / 1000,
         exposure: exposure,
+        stationId: stationId,
+        agent: agent,
       );
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
@@ -2501,6 +2517,8 @@ class SessionSummary {
       for (final source in (json['exposure'] as List<dynamic>? ?? const []))
         source as String,
     ],
+    stationId: json['station_id'] as String?,
+    agent: json['agent'] as String?,
   );
 }
 
@@ -3453,8 +3471,8 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
 }
 
 /// The Missions a Missions [route] selects from the board, in its order. A state filter keeps
-/// the Sessions in those states (a Mission shows when one of its Sessions does); Station and
-/// Agent come from the Mission's brief and attempts.
+/// the Sessions in those states (a Mission shows when one of its Sessions does); a Station or
+/// Agent filter keeps the Missions with a Session on that Station or for that Agent.
 List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
   final states = route.states;
   final sessions = [
@@ -3471,22 +3489,16 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
     if (route['mission_id'] case final id? when mission.missionId != id) {
       return false;
     }
-    final brief = board.missionBrief(mission.operationId, mission.missionId);
-    if (route['station_id'] case final station?) {
-      final stations = {
-        ?brief?.stationId,
-        for (final attempt in board.attempts(
-          mission.operationId,
-          mission.missionId,
-        ))
-          attempt.station,
-      };
-      if (!stations.contains(station)) return false;
+    if (route['station_id'] case final station?
+        when !mission.sessions.any((session) => session.stationId == station)) {
+      return false;
     }
-    if (route['agent'] case final agent? when brief?.agentId != agent) {
+    if (route['agent'] case final agent?
+        when !mission.sessions.any((session) => session.agent == agent)) {
       return false;
     }
     if (text != null) {
+      final brief = board.missionBrief(mission.operationId, mission.missionId);
       final haystack = [
         mission.operationId,
         mission.missionId,
@@ -3507,14 +3519,15 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
   double created(MissionGroup mission) => mission.sessions
       .map((session) => session.updatedAt ?? 0)
       .reduce((a, b) => a < b ? a : b);
-  final key = switch (route['sort']) {
-    'updated' => updated,
-    'created' => created,
-    'state' => (
-      MissionGroup mission,
-    ) => boardStates.indexOf(mission.state).toDouble(),
-    _ => null,
-  };
+  final Comparable<Object> Function(MissionGroup)? key =
+      switch (route['sort']) {
+        'updated' => updated,
+        'created' => created,
+        'state' => (mission) => boardStates.indexOf(mission.state),
+        'operation' => (mission) => mission.operationId,
+        'mission' => (mission) => mission.missionId,
+        _ => null,
+      };
   // Ties keep the board's order (Operation, then Mission ID); `List.sort` is not stable.
   final missions = groupMissions(sessions).where(matches).indexed.toList();
   if (key != null) {

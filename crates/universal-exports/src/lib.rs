@@ -616,7 +616,8 @@ impl Gateway {
             .ok_or(GatewayError::Conflict)
     }
 
-    /// Returns the current provider Sessions and their latest lifecycle states.
+    /// Returns the current provider Sessions, their latest lifecycle states and the Agent of
+    /// each one's Mission brief.
     pub async fn board_sessions(&self) -> Vec<BoardSession> {
         let inner = self.inner.lock().await;
         let mut sessions = inner
@@ -631,6 +632,11 @@ impl Gateway {
                 sequence: session.lifecycle_sequence,
                 updated_at: session.lifecycle_at,
                 exposure: Vec::new(),
+                station_id: None,
+                agent: inner
+                    .missions
+                    .get(&(session.operation_id.clone(), session.mission_id.clone()))
+                    .and_then(|brief| brief.agent_id.clone()),
             })
             .collect::<Vec<_>>();
         sessions.sort_by(|left, right| {
@@ -1923,20 +1929,21 @@ async fn authorized_board_sessions(
     let sessions = gateway.board_sessions().await;
     let registry = gateway.registry.clone();
     let visible = tokio::task::spawn_blocking(move || {
-        // Exposure lives in the shared Session records, keyed by the provider's Session ID.
-        let exposure: BTreeMap<String, Vec<String>> = registry
+        // Exposure and the holding Station live in the shared Session records, keyed by the
+        // provider's Session ID.
+        let records: BTreeMap<String, (String, Vec<String>)> = registry
             .and_then(|registry| registry.sessions().ok())
             .into_iter()
             .flatten()
-            .filter(|record| !record.exposure.is_empty())
             .filter_map(|record| {
                 let sources = record.exposure.into_iter().map(|e| e.source).collect();
-                Some((record.provider_session_id?, sources))
+                Some((record.provider_session_id?, (record.station, sources)))
             })
             .collect();
         let mut visible = Vec::new();
         for mut session in sessions {
-            if let Some(sources) = exposure.get(&session.session_id) {
+            if let Some((station, sources)) = records.get(&session.session_id) {
+                session.station_id = Some(station.clone());
                 session.exposure.clone_from(sources);
             }
             let decision = authorizer
@@ -3202,6 +3209,12 @@ pub struct BoardSession {
     /// The untrusted input the Session has read (`brief:source`, `cable:SENDER`,
     /// `tool:NAME`, `review`), from its Registry record; empty when it has read none.
     pub exposure: Vec<String>,
+    /// The Station that holds, or last held, the Session, from its Registry record; absent
+    /// without a Registry or before the Station records the Session.
+    pub station_id: Option<String>,
+    /// The Agent the Mission's published brief names; absent before the brief arrives or
+    /// when it names none. Every Session of a Mission carries the same one.
+    pub agent: Option<String>,
 }
 
 /// One registered Mission with the provider Sessions known to Universal Exports.
@@ -5997,6 +6010,14 @@ mod tests {
         assert_eq!(
             viewer_board[0]["exposure"],
             serde_json::json!(["tool:WebFetch"])
+        );
+        assert_eq!(
+            viewer_board[0]["station_id"], "worker",
+            "from its Registry record"
+        );
+        assert_eq!(
+            viewer_board[0]["agent"], "technical-officer",
+            "from its Mission's brief"
         );
 
         let viewer_missions = client

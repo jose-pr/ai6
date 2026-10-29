@@ -44,7 +44,15 @@ pub(crate) const STATES: [&str; 9] = [
     "abandoned",
 ];
 
-const SORTS: &[&str] = &["updated", "created", "state"];
+const MISSION_SORTS: &[&str] = &["updated", "created", "state", "operation", "mission"];
+const SESSION_SORTS: &[&str] = &[
+    "updated",
+    "created",
+    "state",
+    "operation",
+    "mission",
+    "session",
+];
 const ORDERS: &[&str] = &["asc", "desc"];
 const STATION_TABS: &[&str] = &["overview", "theaters", "settings", "placement"];
 const AGENT_TABS: &[&str] = &["agents", "roles"];
@@ -138,7 +146,7 @@ impl Page {
                 ("station_id", Identifier),
                 ("agent", Identifier),
                 ("text", Text),
-                ("sort", OneOf(SORTS)),
+                ("sort", OneOf(MISSION_SORTS)),
                 ("order", OneOf(ORDERS)),
                 ("mission_id", Identifier),
             ],
@@ -147,7 +155,7 @@ impl Page {
                 ("state", OneOf(&STATES)),
                 ("station_id", Identifier),
                 ("agent", Identifier),
-                ("sort", OneOf(SORTS)),
+                ("sort", OneOf(SESSION_SORTS)),
                 ("order", OneOf(ORDERS)),
                 ("session_id", Identifier),
             ],

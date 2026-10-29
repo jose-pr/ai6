@@ -47,6 +47,8 @@ Future<List<MethodCall>> openAt(WidgetTester tester, String location) async {
       sessionId: 's-g-failed',
       state: 'failed',
       sequence: 3,
+      stationId: 'hq',
+      agent: '007',
     ),
     SessionSummary(
       operationId: 'G',
@@ -54,6 +56,8 @@ Future<List<MethodCall>> openAt(WidgetTester tester, String location) async {
       sessionId: 's-g-working',
       state: 'working',
       sequence: 2,
+      stationId: 'worker',
+      agent: '008',
     ),
     SessionSummary(
       operationId: 'L',
@@ -61,6 +65,7 @@ Future<List<MethodCall>> openAt(WidgetTester tester, String location) async {
       sessionId: 's-l-failed',
       state: 'failed',
       sequence: 4,
+      stationId: 'hq',
     ),
   ];
   await tester.pumpWidget(OuterOfficeApp(board: board, desktopWindows: false));
@@ -244,6 +249,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(locations(reported).last, ('/missions', true));
     expect(find.text('Mission g-working'), findsOneWidget);
+  });
+
+  testWidgets('the Station and Agent filters read each Session\'s own', (
+    tester,
+  ) async {
+    await openAt(tester, '/sessions?station_id=hq');
+    expect(find.text('s-g-failed'), findsOneWidget);
+    expect(find.text('s-l-failed'), findsOneWidget);
+    expect(find.text('s-g-working'), findsNothing);
+    await browserBackTo(tester, '/missions?agent=008');
+    expect(find.text('Mission g-working'), findsOneWidget);
+    expect(find.text('Mission g-failed'), findsNothing);
+    expect(find.text('Mission l-failed'), findsNothing);
   });
 
   testWidgets('a selected Mission the board does not hold says so', (

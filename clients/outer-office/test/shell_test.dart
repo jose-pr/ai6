@@ -162,6 +162,8 @@ void main() {
           state: session.state,
           sequence: session.sequence,
           updatedAt: at,
+          stationId: session.stationId,
+          agent: session.agent,
         ),
     ];
     await openPage(tester, 'Sessions');
@@ -204,6 +206,20 @@ void main() {
       'preview-session-008',
       'preview-session-021',
     ]);
+    // Every column sorts through the route.
+    await tester.tap(find.text('Session'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Session'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sorted by: session'), findsOneWidget);
+    expect(order(), [
+      'preview-session-021',
+      'preview-session-008',
+      'preview-session-007',
+    ]);
+    await tester.tap(find.text('Operation'));
+    await tester.pumpAndSettle();
+    expect(order().last, 'preview-session-021', reason: 'Operation L after G');
 
     await tester.tap(find.text('preview-session-008'));
     await tester.pumpAndSettle();

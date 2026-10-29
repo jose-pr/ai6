@@ -137,6 +137,8 @@ pub struct BoardSession {
     pub sequence: u64,
     pub updated_at: Option<f64>, // Unix seconds of the latest lifecycle event
     pub exposure: Vec<String>,   // untrusted input the Session read, from its Registry record
+    pub station_id: Option<String>, // the Station holding it, from its Registry record
+    pub agent: Option<String>,   // the Agent its Mission's published brief names
 }
 
 #[non_exhaustive]
@@ -745,7 +747,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | Method and path | Contract |
 | --- | --- |
 | `GET /health` | Returns `204 No Content` while the gateway is serving. |
-| `GET /v1/board` | Requires a user bearer and returns Sessions for Operations allowed by `mission.read`. |
+| `GET /v1/board` | Requires a user bearer and returns Sessions for Operations allowed by `mission.read`, each with the `station_id` of its Registry record and the `agent` of its Mission's brief (`null` when unknown). |
 | `GET /v1/stations` | Requires a user bearer; returns visible Station health, hosted Operations and current Headquarters Station. |
 | `GET /v1/user/operations/{operation_id}/placement-preview` | Requires `mission.read` at the Operation; returns the eligible (Station, Theater, Agent) choices, best first, and a reason for each rejection. Optional `agent`, `role`, `stations`, `tags` query parameters narrow it. |
 | `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. |

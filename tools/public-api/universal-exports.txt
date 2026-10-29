@@ -96,6 +96,7 @@ pub universal_exports::BoardMission::operation_id: alloc::string::String
 pub universal_exports::BoardMission::sessions: alloc::vec::Vec<universal_exports::BoardSession>
 pub universal_exports::BoardMission::usage: core::option::Option<ai6::directorates::medical::usage::MissionUsage>
 #[non_exhaustive] pub struct universal_exports::BoardSession
+pub universal_exports::BoardSession::agent: core::option::Option<alloc::string::String>
 pub universal_exports::BoardSession::exposure: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardSession::mission_id: alloc::string::String
 pub universal_exports::BoardSession::operation_id: alloc::string::String
@@ -103,6 +104,7 @@ pub universal_exports::BoardSession::reason: core::option::Option<alloc::string:
 pub universal_exports::BoardSession::sequence: u64
 pub universal_exports::BoardSession::session_id: alloc::string::String
 pub universal_exports::BoardSession::state: core::option::Option<alloc::string::String>
+pub universal_exports::BoardSession::station_id: core::option::Option<alloc::string::String>
 pub universal_exports::BoardSession::updated_at: core::option::Option<f64>
 #[non_exhaustive] pub struct universal_exports::BoardStation
 pub universal_exports::BoardStation::capacity: usize

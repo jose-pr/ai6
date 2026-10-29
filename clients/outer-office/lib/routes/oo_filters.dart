@@ -73,10 +73,13 @@ class OoSortMenu extends StatelessWidget {
   final OoRoute route;
   final ValueChanged<OoRoute> onRoute;
 
-  static const _sorts = {
+  static const _labels = {
     'updated': 'Last updated',
     'created': 'First seen',
     'state': 'State',
+    'operation': 'Operation',
+    'mission': 'Mission',
+    'session': 'Session',
   };
 
   @override
@@ -88,9 +91,15 @@ class OoSortMenu extends StatelessWidget {
     ),
     itemBuilder: (context) => [
       const PopupMenuItem(value: (null, null), child: Text('Board order')),
-      for (final MapEntry(:key, :value) in _sorts.entries) ...[
-        PopupMenuItem(value: (key, 'asc'), child: Text('$value, ascending')),
-        PopupMenuItem(value: (key, 'desc'), child: Text('$value, descending')),
+      for (final sort in routeWords(route.page, 'sort')) ...[
+        PopupMenuItem(
+          value: (sort, 'asc'),
+          child: Text('${_labels[sort] ?? sort}, ascending'),
+        ),
+        PopupMenuItem(
+          value: (sort, 'desc'),
+          child: Text('${_labels[sort] ?? sort}, descending'),
+        ),
       ],
     ],
   );

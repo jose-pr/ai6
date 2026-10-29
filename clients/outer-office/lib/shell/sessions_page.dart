@@ -10,35 +10,16 @@ import '../theme/oo_tokens.dart';
 import 'oo_shell.dart';
 
 /// The Sessions a Sessions [route] selects from the board, in its order: by Operation,
-/// Mission and Session unless it sorts. Station and Agent come from the Mission's brief and
-/// attempts.
+/// Mission and Session unless it sorts, ties kept in that order.
 List<SessionSummary> routeSessions(MissionBoard board, OoRoute route) {
-  bool matches(SessionSummary session) {
-    if (route['operation_id'] case final operation?
-        when session.operationId != operation) {
-      return false;
-    }
-    if (route['state'] case final state?
-        when (session.state ?? 'working') != state) {
-      return false;
-    }
-    final brief = board.missionBrief(session.operationId, session.missionId);
-    if (route['station_id'] case final station?) {
-      final stations = {
-        ?brief?.stationId,
-        for (final attempt in board.attempts(
-          session.operationId,
-          session.missionId,
-        ))
-          attempt.station,
-      };
-      if (!stations.contains(station)) return false;
-    }
-    if (route['agent'] case final agent? when brief?.agentId != agent) {
-      return false;
-    }
-    return true;
-  }
+  bool matches(SessionSummary session) =>
+      (route['operation_id'] == null ||
+          session.operationId == route['operation_id']) &&
+      (route['state'] == null ||
+          (session.state ?? 'working') == route['state']) &&
+      (route['station_id'] == null ||
+          session.stationId == route['station_id']) &&
+      (route['agent'] == null || session.agent == route['agent']);
 
   int byBoard(SessionSummary left, SessionSummary right) {
     for (final (a, b) in [
@@ -52,16 +33,19 @@ List<SessionSummary> routeSessions(MissionBoard board, OoRoute route) {
     return 0;
   }
 
-  // A Session's one update time stands in for when it was created: the board holds no
-  // creation time.
-  double? key(SessionSummary session) => switch (route['sort']) {
-    'updated' || 'created' => session.updatedAt ?? 0,
-    'state' => boardStates.indexOf(session.state ?? 'working').toDouble(),
-    _ => null,
-  };
+  // The board holds no creation time: a Session's one update time stands in for it.
+  final Comparable<Object>? Function(SessionSummary)? key =
+      switch (route['sort']) {
+        'updated' || 'created' => (session) => session.updatedAt ?? 0,
+        'state' => (session) => boardStates.indexOf(session.state ?? 'working'),
+        'operation' => (session) => session.operationId,
+        'mission' => (session) => session.missionId,
+        'session' => (session) => session.sessionId,
+        _ => null,
+      };
   final sessions = board.sessions.where(matches).toList()
     ..sort((left, right) {
-      final order = (key(left) ?? 0).compareTo(key(right) ?? 0);
+      final order = key == null ? 0 : key(left)!.compareTo(key(right)!);
       return order != 0 ? order : byBoard(left, right);
     });
   return route['order'] == 'desc' ? sessions.reversed.toList() : sessions;
@@ -163,6 +147,9 @@ class SessionsPage extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             child: DataTable(
               sortColumnIndex: switch (sort) {
+                'operation' => 0,
+                'mission' => 1,
+                'session' => 2,
                 'state' => 3,
                 'updated' || 'created' => 4,
                 _ => null,
@@ -170,17 +157,17 @@ class SessionsPage extends StatelessWidget {
               sortAscending: route['order'] != 'desc',
               showCheckboxColumn: false,
               columns: [
-                const DataColumn(label: Text('Operation')),
-                const DataColumn(label: Text('Mission')),
-                const DataColumn(label: Text('Session')),
-                DataColumn(
-                  label: const Text('State'),
-                  onSort: (_, ascending) => _sort('state', ascending),
-                ),
-                DataColumn(
-                  label: const Text('Updated (UTC)'),
-                  onSort: (_, ascending) => _sort('updated', ascending),
-                ),
+                for (final (label, sort) in const [
+                  ('Operation', 'operation'),
+                  ('Mission', 'mission'),
+                  ('Session', 'session'),
+                  ('State', 'state'),
+                  ('Updated (UTC)', 'updated'),
+                ])
+                  DataColumn(
+                    label: Text(label),
+                    onSort: (_, ascending) => _sort(sort, ascending),
+                  ),
               ],
               rows: [
                 for (final session in sessions)

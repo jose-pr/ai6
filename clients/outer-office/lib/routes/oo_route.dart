@@ -33,7 +33,8 @@ class OoRouteLimits {
   static OoRouteLimits current = const OoRouteLimits();
 }
 
-const _sorts = ['updated', 'created', 'state'];
+const _missionSorts = ['updated', 'created', 'state', 'operation', 'mission'];
+const _sessionSorts = [..._missionSorts, 'session'];
 const _orders = ['asc', 'desc'];
 
 enum _Kind { identifier, text, states, oneOf }
@@ -58,7 +59,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('station_id', _Kind.identifier),
     _Field('agent', _Kind.identifier),
     _Field('text', _Kind.text),
-    _Field('sort', _Kind.oneOf, _sorts),
+    _Field('sort', _Kind.oneOf, _missionSorts),
     _Field('order', _Kind.oneOf, _orders),
     _Field('mission_id', _Kind.identifier),
   ],
@@ -67,7 +68,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('state', _Kind.oneOf, boardStates),
     _Field('station_id', _Kind.identifier),
     _Field('agent', _Kind.identifier),
-    _Field('sort', _Kind.oneOf, _sorts),
+    _Field('sort', _Kind.oneOf, _sessionSorts),
     _Field('order', _Kind.oneOf, _orders),
     _Field('session_id', _Kind.identifier),
   ],
@@ -316,6 +317,12 @@ class OoRoute {
   @override
   String toString() => toUri();
 }
+
+/// The words [page]'s field [key] takes, in their order; empty when it is not one of a set.
+List<String> routeWords(OoPage page, String key) => [
+  for (final field in _fields[page]!)
+    if (field.name == key) ...field.words,
+];
 
 OoPage _named(String name) {
   for (final page in OoPage.values) {

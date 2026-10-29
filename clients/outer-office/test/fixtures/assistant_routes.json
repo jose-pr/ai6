@@ -25,6 +25,8 @@
       "json": {"page": "sessions", "state": "working", "sort": "state", "order": "asc", "session_id": "s-1"},
       "uri": "app:/sessions?state=working&sort=state&order=asc&session_id=s-1"
     },
+    {"json": {"page": "sessions", "sort": "session", "order": "desc"}, "uri": "app:/sessions?sort=session&order=desc"},
+    {"json": {"page": "missions", "sort": "operation"}, "uri": "app:/missions?sort=operation"},
     {
       "json": {"page": "stations", "station_id": "worker", "tab": "theaters", "theater_id": "local"},
       "uri": "app:/stations?station_id=worker&tab=theaters&theater_id=local"
@@ -65,7 +67,9 @@
     {"json": {"page": "missions", "state": ["lost"]}, "reason": "lost is not a board state"},
     {"json": {"page": "sessions", "state": ["working"]}, "reason": "state is a string"},
     {"json": {"page": "sessions", "state": "lost"}, "reason": "state is one of queued, working, blocked, stalled, parked, quarantined, done, failed, abandoned"},
-    {"json": {"page": "missions", "sort": "priority"}, "reason": "sort is one of updated, created, state"},
+    {"json": {"page": "missions", "sort": "priority"}, "reason": "sort is one of updated, created, state, operation, mission"},
+    {"json": {"page": "missions", "sort": "session"}, "reason": "sort is one of updated, created, state, operation, mission"},
+    {"json": {"page": "sessions", "sort": "agent"}, "reason": "sort is one of updated, created, state, operation, mission, session"},
     {"json": {"page": "missions", "text": "a\u200bb"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
     {"json": {"page": "missions", "text": "line\nbreak"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
     {"json": {"page": "missions", "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
