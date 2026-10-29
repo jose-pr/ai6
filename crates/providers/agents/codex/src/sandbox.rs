@@ -891,9 +891,15 @@ mod tests {
         assert_eq!(argv[at..at + 4], ["sandbox", "-P", PROBE_PROFILE, "--"]);
         let filesystem = parsed(&argv, "permissions.ai6_assistant_probe")["filesystem"].clone();
         assert_eq!(filesystem[":root"].as_str(), Some("deny"));
-        assert_eq!(
-            filesystem[&path_text(&canonical(&cwd))].as_str(),
-            Some("read"),
+        // The directory is gone by now, so its canonical path (`/private/var/…` for macOS's
+        // `/var/…`) cannot be asked for again: its name identifies it.
+        let name = cwd.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            filesystem
+                .as_table()
+                .unwrap()
+                .iter()
+                .any(|(path, access)| { path.ends_with(&name) && access.as_str() == Some("read") }),
             "the probe runs from a directory it may read: {filesystem:?}"
         );
         assert!(!cwd.exists(), "and removes it");
