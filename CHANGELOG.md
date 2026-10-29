@@ -69,6 +69,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   labels from 1200 px, is compact from 900 px and sits behind a menu button below that.
   It opens on Overview, whose attention list includes the briefs vetting holds, read with
   the board from each Operation where the person has `mission.create`.
+- Outer Office pages are routes: a closed set of pages, each with typed optional filters
+  (`app:/missions?operation_id=G&state=failed`), the same in Moneypenny's links, the page
+  context sent with each message and web URLs (`#/missions?operation_id=G&state=failed`).
+  Every filter shows as a removable chip with **Clear filters**; a page change is a browser
+  history entry and a filter change replaces it; **Copy link** copies the page's web link;
+  a URL that is not a route opens Overview and says so. Universal Exports and the app parse
+  routes alike, tested on one fixture. The old `app:/missions/OP/ID`, `app:/stations/ID` and
+  `app:/theaters/ID` links are refused, and a Moneypenny message carries `route` (the
+  route's JSON form) instead of `page`; Sessions sort by state or update time.
 - Outer Office makes no request outside its own origin by default: it bundles Roboto and
   its icons, and the web build loads CanvasKit from `canvaskit/` and fallback fonts from
   `assets/fonts/fallback/`. `[assets] cdn = "fonts"` or `"all"` in the `OO.cfg` beside

@@ -676,7 +676,7 @@ A view is data in a strict, versioned schema that the app renders with its own w
 
 | Block | Shows |
 | --- | --- |
-| `text` | Markdown: headings, lists, bold, italic, code, and links into the app only |
+| `text` | Markdown: headings, lists, bold, italic, code, and links to app pages only |
 | `table` | Columns and rows of plain values |
 | `key_values` | A list of names and values |
 | `chart` | A bar or line chart of up to eight series |
@@ -702,10 +702,10 @@ layout per person on each device (the app's README has the details). The app's d
 network and its proposals change nothing.
 
 The app opens a WebSocket to `/v1/user/moneypenny` and sends its access token in the first
-frame. With each message it says which page the person is on (for example the Stations page,
-or the Session open beside the board), so "why is this one stuck?" means something. Her
-answers, the tools she used, her views and her proposals (with **Confirm** and **Cancel**)
-appear in the chat.
+frame. With each message it sends the page the person is on and its filters, as the page's
+route (for example `app:/missions?operation_id=G&state=failed`), so "why is this one stuck?"
+means something. Her links open app pages the same way. Her answers, the tools she used, her
+views and her proposals (with **Confirm** and **Cancel**) appear in the chat.
 Conversations are kept per person (20 each, for a week) in Universal Exports' memory;
 reopening one shows what was said. One message is answered at a time.
 
