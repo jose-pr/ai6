@@ -80,6 +80,8 @@ pub struct AssistantConfig {
     live_per_person: usize,
     conversation_bytes: usize,
     person_bytes: usize,
+    memory_per_person: usize,
+    memory_total: usize,
 }
 
 impl Default for AssistantConfig {
@@ -97,6 +99,8 @@ impl Default for AssistantConfig {
             live_per_person: 2,
             conversation_bytes: 1024 * 1024,
             person_bytes: 4 * 1024 * 1024,
+            memory_per_person: 2,
+            memory_total: 16,
         }
     }
 }
@@ -190,6 +194,16 @@ impl AssistantConfig {
         }
     }
 
+    /// How many of the app's memory requests (`/v1/user/assistant/memory`) wait for a Station
+    /// at once: `per_person` for one signed-in person (default 2) and `total` in all (default
+    /// 16), each at least one. Past either the request is refused `429`.
+    #[must_use]
+    pub fn with_memory_requests(mut self, per_person: usize, total: usize) -> Self {
+        self.memory_per_person = per_person.max(1);
+        self.memory_total = total.max(1);
+        self
+    }
+
     /// How many tool calls one conversation may make in a minute (default 120).
     #[must_use]
     pub fn with_tool_calls_per_minute(mut self, calls: u32) -> Self {
@@ -224,6 +238,8 @@ struct Desk {
     /// Memory requests waiting for their Station's answer, by job ID: the Station given the
     /// job, and where its answer goes.
     memory: HashMap<String, (String, tokio::sync::oneshot::Sender<AssistantReport>)>,
+    /// Memory requests waiting for a Station, by the signed-in person who made them.
+    memory_waiting: HashMap<String, usize>,
 }
 
 /// What a control job asks of a Station.

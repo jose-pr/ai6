@@ -53,7 +53,11 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   checked by `git check-ref-format --branch` rules in the provider itself (and `@` alone is
   refused), not by a Git command. A repository with no branch at all leaves `<base>` unborn (the base is empty); one with
   branches but not `<base>` is refused and the clone removed. Remote repositories are reached
-  with the Station user's Git credentials.
+  with the Station user's Git credentials. With `depth`, the clone is shallow (`--depth=N
+  --no-single-branch`, and `--no-local` for a local repository so the depth holds). The clone
+  and its `checkout` run within `timeout_secs` (else the 120-second deadline) and, with
+  `max_bytes`, are killed once the working tree and git directory hold more (measured every
+  250 ms and when the command ends); either way what the clone made is removed.
 
 ## Session behaviour
 
@@ -81,7 +85,8 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   fallback, the first refusal is the error. Nothing to commit and `HEAD` already on
   `<remote>/<b>` pushes nothing; an unborn `HEAD` with nothing written answers an empty
   `commit`. Each `exclude` path (a `repository_path`) is left out too, with everything
-  under it (`:(exclude,literal)<path>`). With `record` (a `repository_path` directory), the same commit gets one entry in
+  under it (`:(exclude,literal)<path>`). With `max_bytes`, a save whose staged files hold more
+  in the working tree is refused and unstaged: nothing is committed or pushed. With `record` (a `repository_path` directory), the same commit gets one entry in
   it for each file the index adds or changes against `HEAD` (`diff-index --cached
   --name-only --no-renames --diff-filter=d -z HEAD`; every staged file when `HEAD` is unborn;
   none for the directory's own files): a blob holding the path and a newline, named by its

@@ -66,6 +66,15 @@ pub struct SafeHouseClone {
     /// of `.git` inside `path`: the working directory then holds no `.git` at all, so whoever
     /// writes there cannot reach the repository's configuration or hooks.
     pub git_dir: Option<String>,
+    /// Fetch only the last this many commits of `base` (a shallow clone); `None` fetches its
+    /// whole history.
+    pub depth: Option<u32>,
+    /// Give up on the clone, and remove what it made, after this many seconds; `None` keeps
+    /// the provider's own limit.
+    pub timeout_secs: Option<u64>,
+    /// Give up on the clone, and remove what it made, once its working directory and git
+    /// directory hold more than this many bytes; `None` sets no limit.
+    pub max_bytes: Option<u64>,
 }
 
 /// Work in progress saved where another Station can fetch it: a commit pushed to a branch.
@@ -118,6 +127,9 @@ pub struct CheckpointSpec {
     /// leaves out with everything under them, as it leaves out paths with a name starting
     /// with `.`.
     pub exclude: Option<Vec<String>>,
+    /// With `branch` and no `files`: refuse the save, committing and pushing nothing, when the
+    /// files it would add or change hold more than this many bytes together.
+    pub max_bytes: Option<u64>,
 }
 
 /// One file a save commits with exactly its text. Crosses as a value, inside a

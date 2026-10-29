@@ -374,6 +374,9 @@ impl AssistantConfig {
     pub fn with_answer_deadline(self, deadline: Duration) -> Self;
     pub fn with_live_conversations_per_person(self, conversations: usize) -> Self; // at least 1
     pub fn with_memory_limits(self, per_conversation: usize, per_person: usize) -> Self;
+    /// Memory requests waiting for a Station at once: per signed-in person (default 2) and in
+    /// all (default 16), each at least 1; past either the route answers 429
+    pub fn with_memory_requests(self, per_person: usize, total: usize) -> Self;
 }
 impl Gateway { pub fn with_assistant(self, config: AssistantConfig) -> Self; }
 ```

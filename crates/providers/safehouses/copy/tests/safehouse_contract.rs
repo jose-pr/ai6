@@ -151,6 +151,9 @@ fn a_clone_is_refused() {
             path: root.path().join("clone").to_string_lossy().into_owned(),
             create_source: false,
             git_dir: None,
+            depth: None,
+            timeout_secs: None,
+            max_bytes: None,
         }),
         ..spec(&source, &root.path().join("state"))
     };

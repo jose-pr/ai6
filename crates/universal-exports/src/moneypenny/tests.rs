@@ -2941,6 +2941,55 @@ async fn answer_memory(
 }
 
 #[tokio::test]
+async fn memory_requests_past_their_limits_are_refused_and_free_their_place_when_done() {
+    let served = served_with(
+        AssistantConfig::default().with_memory_requests(1, 2),
+        Some(personal_roster()),
+    )
+    .await;
+    let first = memory_request(&served, reqwest::Method::GET, "", &served.operator, None);
+    let job = take(&served, "hq").await;
+    // A second of the same person's waits for no Station.
+    let (status, refused) =
+        memory_request(&served, reqwest::Method::GET, "", &served.operator, None)
+            .await
+            .unwrap();
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{refused}");
+    // Another person's has a place, until everyone's are taken.
+    let other = memory_request(&served, reqwest::Method::GET, "", &served.viewer, None);
+    let other_job = take(&served, "hq").await;
+    assert_eq!(other_job.person_id.as_deref(), Some("viewer-007"));
+    // The first one done, its person may ask again.
+    assert_eq!(
+        answer_memory(
+            &served,
+            "hq",
+            &job,
+            EVENT_ACCEPTED,
+            "",
+            ai6::MemoryAnswer::default()
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(first.await.unwrap().0, StatusCode::OK);
+    let again = memory_request(&served, reqwest::Method::GET, "", &served.operator, None);
+    let again_job = take(&served, "hq").await;
+    for (job, waiting) in [(other_job, other), (again_job, again)] {
+        answer_memory(
+            &served,
+            "hq",
+            &job,
+            EVENT_ACCEPTED,
+            "",
+            ai6::MemoryAnswer::default(),
+        )
+        .await;
+        assert_eq!(waiting.await.unwrap().0, StatusCode::OK);
+    }
+}
+
+#[tokio::test]
 async fn a_persons_memory_is_read_by_them_and_by_an_audited_admin_only() {
     let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
 

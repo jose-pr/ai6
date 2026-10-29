@@ -541,6 +541,28 @@ impl RepoKind {
         }
         Ok(Self::Local)
     }
+
+    /// The directory of a [`RepoKind::Local`] repository: the path, or a `file://` URL's path
+    /// (`file:///C:/x` is `C:/x`); `None` for another kind, or a `file://` URL naming a host.
+    pub fn local_path(repo: &str) -> Option<std::path::PathBuf> {
+        if Self::of(repo).ok()? != Self::Local {
+            return None;
+        }
+        let Some((_, rest)) = repo
+            .split_once("://")
+            .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("file"))
+        else {
+            return Some(std::path::PathBuf::from(repo));
+        };
+        let path = rest.strip_prefix("localhost").unwrap_or(rest);
+        let bytes = path.as_bytes();
+        if bytes.len() > 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':'
+        {
+            return Some(std::path::PathBuf::from(&path[1..]));
+        }
+        path.starts_with('/')
+            .then(|| std::path::PathBuf::from(path))
+    }
 }
 
 /// `user@host:path`, the form Git reads as SSH: a colon before any slash, and not a drive
@@ -1338,6 +1360,26 @@ mod tests {
         );
         assert_eq!(person_digest("../root").len(), 16);
         assert_ne!(person_digest("a"), person_digest("b"));
+    }
+
+    #[test]
+    fn a_local_repository_names_its_directory() {
+        use std::path::PathBuf;
+        for (repo, path) in [
+            ("/srv/a.git", Some("/srv/a.git")),
+            ("file:///srv/a.git", Some("/srv/a.git")),
+            ("FILE://localhost/srv/a.git", Some("/srv/a.git")),
+            ("file:///C:/srv/a.git", Some("C:/srv/a.git")),
+            ("file://host/a.git", None),
+            ("ssh://git@host/a.git", None),
+            ("ext::sh", None),
+        ] {
+            assert_eq!(
+                RepoKind::local_path(repo),
+                path.map(PathBuf::from),
+                "{repo}"
+            );
+        }
     }
 
     #[test]

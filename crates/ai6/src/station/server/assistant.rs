@@ -93,8 +93,6 @@ const STOP_CHECK: Duration = Duration::from_millis(250);
 const MAX_KNOWN: usize = 1_024;
 /// How long removing a closed harness's working directory is tried again.
 const REMOVE_RETRY: Duration = Duration::from_secs(2);
-/// Memory jobs a Station makes at once, each in a clone of its own; more wait their turn.
-const MAX_MEMORY_JOBS: usize = 4;
 
 /// A harness, shared by the desk (to send it messages) and its pump (to read it).
 type SharedSession = Arc<Mutex<Object<dyn AgentSession>>>;
@@ -588,7 +586,7 @@ pub(super) struct Desk {
     log: Logger,
     /// Universal Exports' record of exposure.
     exposure: Arc<dyn Exposure>,
-    /// Turns for memory jobs ([`MAX_MEMORY_JOBS`]).
+    /// Turns for memory jobs, as many as `AssistantDeskLimits` allows at once.
     memory_jobs: Arc<tokio::sync::Semaphore>,
 }
 
@@ -600,6 +598,7 @@ impl Desk {
         mcp_url: String,
     ) -> Self {
         let plugins = state.plugins.clone();
+        let memory_requests = state.station.assistant.memory_requests;
         Self {
             state,
             harness,
@@ -619,7 +618,7 @@ impl Desk {
             elevation: OnceLock::new(),
             log: Arc::new(|line| eprintln!("ai6: {line}")),
             exposure: Arc::new(Unreachable),
-            memory_jobs: Arc::new(tokio::sync::Semaphore::new(MAX_MEMORY_JOBS)),
+            memory_jobs: Arc::new(tokio::sync::Semaphore::new(memory_requests)),
         }
     }
 
@@ -778,28 +777,55 @@ impl Desk {
         }
     }
 
-    /// Takes a memory job on a task of its own, so a slow clone holds up no conversation, and
-    /// at most [`MAX_MEMORY_JOBS`] at once: answers `accepted` with what it did and found, or
-    /// `rejected` with why nothing was done, each with its [`MemoryAnswer`].
+    /// Takes a memory job on a task of its own, so a slow clone holds up no conversation:
+    /// answers `accepted` with what it did and found, or `rejected` with why nothing was done,
+    /// each with its [`MemoryAnswer`]. Universal Exports gives the request up at the job's
+    /// `token_expires_at`, so a job past it is refused, and so is one past the Station's
+    /// [`AssistantDeskLimits`] of memory requests at once; none waits for a turn. Its clone
+    /// is given up at that deadline too.
+    ///
+    /// [`AssistantDeskLimits`]: super::AssistantDeskLimits
     fn handle_memory(&self, job: AssistantJob) {
-        let checked = job
+        let left = job.token_expires_at - unix_now();
+        let taken = job
             .validate()
             .and_then(|()| self.check_elevation())
             .and_then(|()| self.check_repositories(&job))
-            .and_then(|()| job.memory.clone().ok_or_else(|| "no memory job".to_owned()));
+            .and_then(|()| job.memory.clone().ok_or_else(|| "no memory job".to_owned()))
+            .and_then(|op| {
+                if left <= 0.0 {
+                    return Err(
+                        "the request's deadline passed before this Station took it, \
+                                so nothing was done"
+                            .to_owned(),
+                    );
+                }
+                let turn = self.memory_jobs.clone().try_acquire_owned().map_err(|_| {
+                    "this Station is making as many memory requests as it may; nothing was \
+                     done, so ask again shortly"
+                        .to_owned()
+                })?;
+                Ok((op, turn))
+            });
+        let limits = workspace::CloneLimits::of(&self.state.station.assistant);
+        let limits = workspace::CloneLimits {
+            timeout: limits.timeout.min(Duration::from_secs_f64(left.max(0.0))),
+            ..limits
+        };
         let houses = self.houses.clone();
         let outbox = self.outbox.clone();
         let station_id = self.state.station_id.clone();
-        let permits = self.memory_jobs.clone();
         tokio::spawn(async move {
-            let outcome = match checked {
+            let outcome = match taken {
                 Err(reason) => Err(memory::Refusal::of(reason)),
-                Ok(op) => {
-                    let _turn = permits.acquire_owned().await;
+                Ok((op, turn)) => {
                     let digest = conversation_digest(&job.conversation_id);
-                    tokio::task::spawn_blocking(move || memory::run(&houses, &op, &digest))
-                        .await
-                        .unwrap_or_else(|error| Err(memory::Refusal::of(error.to_string())))
+                    tokio::task::spawn_blocking(move || {
+                        let _turn = turn;
+                        memory::run(&houses, &op, &digest, limits)
+                    })
+                    .await
+                    .unwrap_or_else(|error| Err(memory::Refusal::of(error.to_string())))
                 }
             };
             let (kind, (text, answer)) = match outcome {
@@ -935,6 +961,7 @@ impl Desk {
             .and_then(|live| live.workspace.clone());
         let houses = self.houses.clone();
         let digest = conversation_digest(&job.conversation_id);
+        let limits = workspace::CloneLimits::of(&self.state.station.assistant);
         tokio::task::spawn_blocking(move || {
             if commit.kind == COMMIT_MEMORY
                 && let Some(workspace) = workspace
@@ -946,7 +973,7 @@ impl Desk {
                     return workspace.apply(&commit);
                 }
             }
-            workspace::commit_once(&houses, &commit, &digest)
+            workspace::commit_once(&houses, &commit, &digest, limits)
         })
         .await
         .map_err(|error| error.to_string())?
@@ -1497,6 +1524,7 @@ impl Desk {
         let file = context.clone();
         let exposed = job.exposed;
         let skills = skills.to_vec();
+        let limits = self.state.station.assistant;
         let (mut workspace, notices) = tokio::task::spawn_blocking(move || {
             Workspace::prepare(
                 &houses,
@@ -1507,6 +1535,7 @@ impl Desk {
                 &wanted,
                 exposed,
                 &skills,
+                &limits,
             )
         })
         .await
@@ -4534,6 +4563,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_memory_job_past_its_deadline_or_past_the_stations_limit_is_refused() {
+        let people = tempfile::tempdir().unwrap();
+        let mut fixture = git_fixture(people.path(), Script::Answers);
+        let bare = people.path().join("eve.git");
+        let mut late = remembering("late", &bare, MemoryAction::List {});
+        late.token_expires_at = unix_now() - 1.0;
+        fixture.desk.handle(late).await;
+        let (kind, text, _) = memory_answer(&fixture, "late").await;
+        assert_eq!(kind, EVENT_REJECTED);
+        assert!(text.contains("deadline"), "{text}");
+
+        // A Station making as many as it may refuses the next at once rather than queue it.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let held = Arc::new(Mutex::new(held));
+        let houses = fixture.desk.houses.clone();
+        fixture.desk.houses = Arc::new(move || {
+            let _ = held.lock().unwrap().recv_timeout(Duration::from_secs(30));
+            houses()
+        });
+        fixture.desk.memory_jobs = Arc::new(tokio::sync::Semaphore::new(1));
+        let write = |id: &str| {
+            remembering(
+                id,
+                &bare,
+                MemoryAction::Write {
+                    path: "memory/prefs.md".to_owned(),
+                    text: "Tables.\n".to_owned(),
+                    base: None,
+                    commit: by_the_person("Edit memory/prefs.md"),
+                },
+            )
+        };
+        fixture.desk.handle(write("slow")).await;
+        until(|| fixture.desk.memory_jobs.available_permits() == 0).await;
+        fixture.desk.handle(write("next")).await;
+        let (kind, text, _) = memory_answer(&fixture, "next").await;
+        assert_eq!(kind, EVENT_REJECTED);
+        assert!(text.contains("as many memory requests"), "{text}");
+        release.send(()).unwrap();
+        let (kind, text, _) = memory_answer(&fixture, "slow").await;
+        assert_eq!(kind, EVENT_ACCEPTED, "{text}");
+    }
+
+    #[tokio::test]
     async fn the_person_reads_writes_and_forgets_memory_in_commits_of_their_own() {
         let people = tempfile::tempdir().unwrap();
         let fixture = git_fixture(people.path(), Script::Answers);
@@ -4545,7 +4618,7 @@ mod tests {
             commit: by_the_person("Edit memory/prefs.md"),
         };
 
-        // Her first use creates the repository, empty.
+        // A look at a repository not made yet finds nothing, and makes nothing.
         fixture
             .desk
             .handle(remembering("1", &bare, MemoryAction::List {}))
@@ -4553,8 +4626,21 @@ mod tests {
         let (kind, _, listed) = memory_answer(&fixture, "1").await;
         assert_eq!(kind, EVENT_ACCEPTED);
         assert_eq!(listed, MemoryAnswer::default(), "nothing yet, no commit");
-        assert!(bare.join("HEAD").exists(), "created bare");
+        fixture
+            .desk
+            .handle(remembering(
+                "1r",
+                &bare,
+                MemoryAction::Read {
+                    path: "memory/prefs.md".to_owned(),
+                },
+            ))
+            .await;
+        let (kind, _, read) = memory_answer(&fixture, "1r").await;
+        assert_eq!((kind.as_str(), read.missing), (EVENT_REJECTED, true));
+        assert!(!bare.exists(), "a look creates no repository");
 
+        // Her first change creates it.
         fixture
             .desk
             .handle(remembering("2", &bare, write("Tables, please.\n", None)))

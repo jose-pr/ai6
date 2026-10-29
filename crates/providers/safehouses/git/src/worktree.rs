@@ -623,12 +623,65 @@ pub(crate) fn git_with(
     git_input(cwd, args, env, None)
 }
 
+/// How long a Git command may run, and how large the directories it fills may grow.
+pub(crate) struct Limits {
+    /// Past it the command is killed.
+    pub(crate) timeout: Duration,
+    /// The command is killed once these directories hold more than `max_bytes` together.
+    pub(crate) watch: Vec<PathBuf>,
+    pub(crate) max_bytes: Option<u64>,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            timeout: GIT_TIMEOUT,
+            watch: Vec::new(),
+            max_bytes: None,
+        }
+    }
+}
+
+/// How often a command's watched directories are measured.
+const MEASURE_EVERY: Duration = Duration::from_millis(250);
+
+/// The bytes of the files under `paths`, never following a link.
+pub(crate) fn tree_bytes(paths: &[PathBuf]) -> u64 {
+    fn walk(path: &Path) -> u64 {
+        let Ok(metadata) = fs::symlink_metadata(path) else {
+            return 0;
+        };
+        if metadata.is_dir() {
+            fs::read_dir(path)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| walk(&entry.path()))
+                .sum()
+        } else {
+            metadata.len()
+        }
+    }
+    paths.iter().map(|path| walk(path)).sum()
+}
+
 /// [`git_with`], with `input` written to the command's standard input.
 pub(crate) fn git_input(
     cwd: &Path,
     args: &[&str],
     env: &[(&str, String)],
     input: Option<&[u8]>,
+) -> Result<String, Failure> {
+    git_limited(cwd, args, env, input, &Limits::default())
+}
+
+/// [`git_input`] within `limits`.
+pub(crate) fn git_limited(
+    cwd: &Path,
+    args: &[&str],
+    env: &[(&str, String)],
+    input: Option<&[u8]>,
+    limits: &Limits,
 ) -> Result<String, Failure> {
     // The subcommand, past the global options (`-c key=value`, `--git-dir=...`).
     let name = args
@@ -668,30 +721,47 @@ pub(crate) fn git_input(
         .ok_or("git stderr pipe was unavailable")?;
     let stdout_reader = thread::spawn(move || read_pipe(stdout_pipe));
     let stderr_reader = thread::spawn(move || read_pipe(stderr_pipe));
-    let deadline = Instant::now() + GIT_TIMEOUT;
+    let deadline = Instant::now() + limits.timeout;
+    let mut measured = Instant::now();
     let status = loop {
-        match child.try_wait() {
+        let over = limits
+            .max_bytes
+            .filter(|_| measured.elapsed() >= MEASURE_EVERY)
+            .and_then(|max| {
+                measured = Instant::now();
+                let bytes = tree_bytes(&limits.watch);
+                (bytes > max).then_some(max)
+            });
+        let stopped = match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
-                return Err(format!(
+            Ok(None) if over.is_none() && Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Ok(None) => match over {
+                Some(max) => format!("git {name} was stopped: it wrote more than {max} bytes"),
+                None => format!(
                     "git {name} timed out after {} seconds",
-                    GIT_TIMEOUT.as_secs()
-                ));
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
-                return Err(format!("git {name}: {error}"));
-            }
-        }
+                    limits.timeout.as_secs()
+                ),
+            },
+            Err(error) => format!("git {name}: {error}"),
+        };
+        let _ = child.kill();
+        let _ = child.wait();
+        // Not joined: a process Git started may still hold the pipes open, and its readers end
+        // when it does.
+        drop((stdout_reader, stderr_reader));
+        return Err(stopped);
     };
+    // One that finished between two measurements is measured once more.
+    if let Some(max) = limits.max_bytes
+        && tree_bytes(&limits.watch) > max
+    {
+        return Err(format!(
+            "git {name} was stopped: it wrote more than {max} bytes"
+        ));
+    }
     let stdout = stdout_reader
         .join()
         .map_err(|_| "git stdout reader panicked".to_owned())?
@@ -1048,6 +1118,7 @@ mod tests {
             files: None,
             record: None,
             exclude: None,
+            max_bytes: None,
         }
     }
 

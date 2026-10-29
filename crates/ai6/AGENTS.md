@@ -440,7 +440,10 @@ pub const SKILL_INERT_KEYS: [&str; 12];            // front matter keys that loa
 pub fn skill_name(name: &str) -> bool;             // 1-64 of a-z, 0-9, -, starting with a letter or digit
 pub fn check_skill(dir: &Path, name: &str, allow_tools: bool) -> Result<(), String>;
 #[non_exhaustive] pub enum RepoKind { Local, Remote }
-impl RepoKind { pub fn of(repo: &str) -> Result<Self, String>; }
+impl RepoKind {
+    pub fn of(repo: &str) -> Result<Self, String>;
+    pub fn local_path(repo: &str) -> Option<PathBuf>; // a Local repository's directory (file:// stripped)
+}
 pub const PERSON_PLACEHOLDER: &str = "{person}";
 pub const PERSON_DIGEST_PLACEHOLDER: &str = "{person_digest}";
 pub const ORG_SHARED: &str = "org";
@@ -1504,6 +1507,13 @@ adds a placement label, `with_theater` declares a Theater in code,
 `with_safe_house_hygiene(SafeHouseHygiene)` sets which directories of a kept safe house are
 rebuildable caches and how long a terminal Mission's safe house is left alone first,
 `with_loadouts(LoadoutCatalog)` replaces `loadouts.toml`,
+`with_assistant_limits(AssistantDeskLimits)` bounds Moneypenny's desk
+(`AssistantDeskLimits::default()` then `with_clone_limits(timeout, max_bytes)`, default 120 s
+and 512 MiB a clone of her repositories, given up and removed past either;
+`with_save_limit(max_bytes)`, default 16 MiB of work a save of `personal/` commits, past which
+nothing is saved and a notice says why; `with_memory_requests(n)`, default 4 memory jobs at
+once, past which the next is `rejected` at once; a memory job past its `token_expires_at` is
+`rejected` too, and its shallow clone (`depth` 1) is given up at that deadline),
 `with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets`,
 `with_account_login(impl AccountLogin + 'static)` replaces `CommandLogin` for Codex pool
 accounts, `with_account_homes(dir)` moves their per-Mission `CODEX_HOME`s from
@@ -3804,6 +3814,9 @@ pub struct SafeHouseClone {
     pub path: String,          // the working directory; must not exist
     pub create_source: bool,   // first make a missing local/file:// `source` an empty bare repository
     pub git_dir: Option<String>, // the git directory here instead of `.git` in `path`; none left there
+    pub depth: Option<u32>,        // a shallow clone of the last N commits of `base`
+    pub timeout_secs: Option<u64>, // give up (removing what it made) after this; None: the provider's own
+    pub max_bytes: Option<u64>,    // give up (removing what it made) past this on disk; None: no limit
 }
 pub struct CheckpointSpec {
     pub remote: String,    // Git remote name or URL
@@ -3814,6 +3827,7 @@ pub struct CheckpointSpec {
     pub files: Option<Vec<CheckpointFile>>, // with `branch`: commit exactly these, nothing of the working directory
     pub record: Option<String>, // with `branch`, no `files`: a directory in which the same commit records each file it adds or changes
     pub exclude: Option<Vec<String>>, // with `branch`, no `files`: paths left out with everything under them
+    pub max_bytes: Option<u64>, // with `branch`, no `files`: refused, nothing committed, past this many bytes added or changed
 }
 pub struct CheckpointFile { pub path: String /* repository_path */, pub text: Option<String> /* None removes */,
     pub base: Option<String> /* hex SHA-256 it must hold on the remote branch, "" absent; None unchecked */ }

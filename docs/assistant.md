@@ -190,8 +190,8 @@ to 64 lowercase letters, digits, `.`, `_`, `@` and `-` not starting with `.`: an
 identifier is refused, so two people whose identifiers differ only in case never share a
 repository on a case-insensitive filesystem. The template holds exactly one of the two,
 inside the repository's path (not its host or user), and is refused when some identifier
-would fill it in as a shared or the organisation's repository. A local path or `file://` repository is
-created, empty and bare, the first time it is used, readable by the Station's user only on
+would fill it in as a shared or the organisation's repository. A local path or `file://`
+repository is created, empty and bare, the first time a conversation or a change uses it, readable by the Station's user only on
 Unix (`0700` directories, `0600` files; on Windows it takes its parent directory's access);
 `ssh://`, `https://` and `user@host:` repositories are reached with the Station user's Git
 credentials and must exist. Universal Exports reads the
@@ -296,8 +296,12 @@ What she remembers about you is yours to read and correct. In the app, **Ask Mon
 menu opens **Her memory of you**: the files of `memory/` in your personal repository, each to
 open, edit and save, and to forget (after you confirm). A new file is made there too. The page
 talks to Universal Exports, which has no checkout of any repository: it asks the Headquarters
-Station (else the first healthy one) to do it in a clone of your repository of its own, and
-answers within 30 seconds or says that the Station did not.
+Station (else the first healthy one) to do it in a shallow clone of your repository of its
+own, and answers within 30 seconds or says that the Station did not. A Station gives the clone
+up at that deadline, refuses a request that reaches it later, and refuses one more than it
+makes at once (4 by default) rather than queue it. Universal Exports keeps at most 2 of your
+requests and 16 of everyone's waiting, and answers `429` past that. Reading or listing makes
+no repository: a local one is created only by your first change.
 
 | Route | Does |
 | --- | --- |
@@ -637,6 +641,10 @@ answered does nothing.
 | Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `AssistantConfig::with_live_conversations_per_person` |
 | How long an answer may go without word from its Station | 10 minutes, then it is given up | `AssistantConfig::with_answer_deadline` |
 | Memory kept | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `AssistantConfig::with_memory_limits` |
+| Memory requests waiting for a Station | 2 a person, 16 in all; `429` past either | `AssistantConfig::with_memory_requests` |
+| Memory requests a Station makes at once | 4; the next is refused | `AssistantDeskLimits::with_memory_requests` (`StationConfig::with_assistant_limits`) |
+| A clone of one of her repositories | 120 seconds and 512 MiB, then given up and removed | `AssistantDeskLimits::with_clone_limits` |
+| What one save of her work commits | 16 MiB; past it nothing is saved and she is told | `AssistantDeskLimits::with_save_limit` |
 | Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml`, or the `assistant` record of a SQL roster |
 | Shared repositories | none | `[assistant.shared.<group>]`, `[assistant.org]` (`write = false`) |
 | Run on an elevated Station | no | `[assistant] allow_elevated` |

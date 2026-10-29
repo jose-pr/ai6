@@ -14,8 +14,9 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -25,7 +26,7 @@ use ai6::directorates::q::safehouse::{
     SafeHouseSpec,
 };
 
-use crate::worktree::{Failure, Worktree, fail, git, git_input, git_path, git_with};
+use crate::worktree::{Failure, Limits, Worktree, fail, git, git_limited, git_path};
 
 /// The settings every command of a clone runs with. `core.hooksPath` names a directory that
 /// is never made, so no hook runs; `core.symlinks=false` checks a link out as a plain file
@@ -146,15 +147,8 @@ fn stage_exactly(repo: &Repo<'_>, files: &[CheckpointFile]) -> Result<(), Failur
     Ok(())
 }
 
-/// Stages an entry in `record` for each file the index adds or changes against `HEAD` (every
-/// staged file when `HEAD` is unborn), outside `record` itself: the entry holds the path and a
-/// newline and is named by its own object ID. Answers whether it staged any.
-fn record_changes(repo: &Repo<'_>, record: &str) -> Result<bool, Failure> {
-    if !exact_path(record) {
-        return Err(format!(
-            "{record:?} is not a directory a save may record in"
-        ));
-    }
+/// The files the index adds or changes against `HEAD`, every staged file when `HEAD` is unborn.
+fn staged_paths(repo: &Repo<'_>) -> Result<Vec<String>, Failure> {
     let listed = if repo.resolve("HEAD").is_ok() {
         repo.run(
             &[
@@ -171,10 +165,48 @@ fn record_changes(repo: &Repo<'_>, record: &str) -> Result<bool, Failure> {
     } else {
         repo.run(&["ls-files", "--cached", "-z"], &[])?
     };
+    Ok(listed
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Refuses a save whose staged files hold more than `max` bytes in the working tree, and
+/// unstages them, so nothing of it is committed.
+fn within(repo: &Repo<'_>, work_tree: &Path, max: u64) -> Result<(), Failure> {
+    let bytes: u64 = staged_paths(repo)?
+        .iter()
+        .filter_map(|path| fs::symlink_metadata(work_tree.join(path)).ok())
+        .map(|metadata| metadata.len())
+        .sum();
+    if bytes <= max {
+        return Ok(());
+    }
+    if repo.resolve("HEAD").is_ok() {
+        repo.run(&["read-tree", "HEAD"], &[])?;
+    } else {
+        repo.run(&["read-tree", "--empty"], &[])?;
+    }
+    Err(format!(
+        "the work to save holds {bytes} bytes, more than the {max} a save may commit, so \
+         nothing was saved"
+    ))
+}
+
+/// Stages an entry in `record` for each file the index adds or changes against `HEAD` (every
+/// staged file when `HEAD` is unborn), outside `record` itself: the entry holds the path and a
+/// newline and is named by its own object ID. Answers whether it staged any.
+fn record_changes(repo: &Repo<'_>, record: &str) -> Result<bool, Failure> {
+    if !exact_path(record) {
+        return Err(format!(
+            "{record:?} is not a directory a save may record in"
+        ));
+    }
     let inside = format!("{record}/");
     let mut any = false;
-    for path in listed.split('\0') {
-        if path.is_empty() || path.starts_with(&inside) {
+    for path in staged_paths(repo)? {
+        if path.starts_with(&inside) {
             continue;
         }
         any = true;
@@ -334,6 +366,26 @@ impl<'a> Repo<'a> {
 
     /// Runs `git args` with `env`, hardened, against this git directory and working tree.
     pub(crate) fn run(&self, args: &[&str], env: &[(&str, String)]) -> Result<String, Failure> {
+        self.git(args, env, None, &Limits::default())
+    }
+
+    /// Runs `git args`, hardened, within `limits`.
+    fn run_within(&self, args: &[&str], limits: &Limits) -> Result<String, Failure> {
+        self.git(args, &[], None, limits)
+    }
+
+    /// Runs `git args`, hardened, with `input` on its standard input.
+    fn input(&self, args: &[&str], input: &[u8]) -> Result<String, Failure> {
+        self.git(args, &[], Some(input), &Limits::default())
+    }
+
+    fn git(
+        &self,
+        args: &[&str],
+        env: &[(&str, String)],
+        input: Option<&[u8]>,
+        limits: &Limits,
+    ) -> Result<String, Failure> {
         let mut all = vec![
             format!("--git-dir={}", self.git_dir.to_string_lossy()),
             format!("--work-tree={}", self.work_tree.to_string_lossy()),
@@ -343,20 +395,7 @@ impl<'a> Repo<'a> {
         let all: Vec<&str> = all.iter().map(String::as_str).collect();
         let mut env = env.to_vec();
         env.push((HARDENED_ENV.0, HARDENED_ENV.1.to_owned()));
-        git_with(self.work_tree, &all, &env)
-    }
-
-    /// Runs `git args`, hardened, with `input` on its standard input.
-    fn input(&self, args: &[&str], input: &[u8]) -> Result<String, Failure> {
-        let mut all = vec![
-            format!("--git-dir={}", self.git_dir.to_string_lossy()),
-            format!("--work-tree={}", self.work_tree.to_string_lossy()),
-        ];
-        all.extend(hardened(self.git_dir));
-        all.extend(args.iter().map(|arg| (*arg).to_owned()));
-        let all: Vec<&str> = all.iter().map(String::as_str).collect();
-        let env = [(HARDENED_ENV.0, HARDENED_ENV.1.to_owned())];
-        git_input(self.work_tree, &all, &env, Some(input))
+        git_limited(self.work_tree, &all, &env, input, limits)
     }
 
     /// The commit `revision` names.
@@ -403,7 +442,7 @@ impl Worktree {
         }
         if clone.create_source
             && kind == RepoKind::Local
-            && let Some(local) = local_repository(&spec.source)
+            && let Some(local) = RepoKind::local_path(&spec.source)
             && !local.exists()
         {
             create_bare(&local, &spec.base)?;
@@ -440,13 +479,40 @@ impl Worktree {
         if clone.git_dir.is_some() {
             args.push(format!("--separate-git-dir={}", git_dir.to_string_lossy()));
         }
+        if let Some(depth) = clone.depth {
+            // Every branch's tip, so `base` is found whatever the remote's default branch is;
+            // a local repository is read through Git's transport, which honours the depth.
+            args.extend([
+                format!("--depth={}", depth.max(1)),
+                "--no-single-branch".to_owned(),
+            ]);
+            if kind == RepoKind::Local {
+                args.push("--no-local".to_owned());
+            }
+        }
         args.extend(["--".to_owned(), spec.source.clone(), name]);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        git_with(
+        let limits = Limits {
+            timeout: clone
+                .timeout_secs
+                .map_or(Limits::default().timeout, Duration::from_secs),
+            watch: vec![path.clone(), git_dir.clone()],
+            max_bytes: clone.max_bytes,
+        };
+        let made = |failure: Failure| {
+            // A clone stopped part way leaves what it wrote; none of it is kept.
+            let _ = remove_tree(&path);
+            let _ = remove_tree(&git_dir);
+            failure
+        };
+        git_limited(
             &parent,
             &args,
             &[(HARDENED_ENV.0, HARDENED_ENV.1.to_owned())],
-        )?;
+            None,
+            &limits,
+        )
+        .map_err(made)?;
         if clone.git_dir.is_some() {
             // The pointer Git leaves in the working tree is not needed: every command names the
             // git directory itself.
@@ -464,17 +530,19 @@ impl Worktree {
         let repo = house.repo();
         let tracking = format!("refs/remotes/origin/{}", spec.base);
         if repo.resolve(&tracking).is_ok() {
-            repo.run(
-                &[
-                    "checkout",
-                    "--quiet",
-                    "-B",
-                    &spec.base,
-                    "--track",
-                    &format!("origin/{}", spec.base),
-                ],
-                &[],
-            )?;
+            let checkout = [
+                "checkout",
+                "--quiet",
+                "-B",
+                &spec.base,
+                "--track",
+                &format!("origin/{}", spec.base),
+            ];
+            // It writes `base`'s tree, within the clone's limits.
+            if let Err(failure) = repo.run_within(&checkout, &limits) {
+                let _ = house.remove_clone();
+                return Err(failure);
+            }
         } else if repo
             .run(&["for-each-ref", "--count=1", "refs/remotes"], &[])?
             .trim()
@@ -549,6 +617,9 @@ impl Worktree {
                     add.push(format!(":(exclude,literal){path}"));
                 }
                 run(&add.iter().map(String::as_str).collect::<Vec<_>>())?;
+                if let Some(max) = spec.max_bytes {
+                    within(&repo, &self.path, max)?;
+                }
                 let recorded = match &spec.record {
                     Some(record) => record_changes(&repo, record)?,
                     None => false,
@@ -696,20 +767,6 @@ fn make_writable(path: &Path) {
     }
 }
 
-/// The directory of a local repository: a path, or a `file://` URL's path.
-fn local_repository(source: &str) -> Option<PathBuf> {
-    let Some(rest) = source.strip_prefix("file://") else {
-        return Some(PathBuf::from(source));
-    };
-    let path = rest.strip_prefix("localhost").unwrap_or(rest);
-    // `file:///C:/x` names `C:/x` on Windows.
-    let bytes = path.as_bytes();
-    if bytes.len() > 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
-        return Some(PathBuf::from(&path[1..]));
-    }
-    path.starts_with('/').then(|| PathBuf::from(path))
-}
-
 /// Makes `path` an empty bare repository whose `HEAD` names `branch`, private to the Station
 /// user: on Unix the directory is made `0700` and Git keeps everything it writes there `0600`
 /// (`core.sharedRepository=0600`), whatever the umask.
@@ -781,6 +838,9 @@ mod tests {
                 path: target.to_string_lossy().into_owned(),
                 create_source: create,
                 git_dir: None,
+                depth: None,
+                timeout_secs: None,
+                max_bytes: None,
             }),
         }
     }
@@ -796,6 +856,7 @@ mod tests {
             files: None,
             record: None,
             exclude: None,
+            max_bytes: None,
         }
     }
 
@@ -1400,6 +1461,110 @@ mod tests {
     }
 
     #[test]
+    fn a_save_past_its_size_commits_and_pushes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("eve.git");
+        let house = Worktree::open(&spec(
+            &bare.to_string_lossy(),
+            &root.path().join("personal"),
+            true,
+        ))
+        .unwrap();
+        fs::write(house.path.join("big.md"), "x".repeat(2048)).unwrap();
+        let mut capped = save_spec("moneypenny: big");
+        capped.max_bytes = Some(1024);
+        let refused = house.save(&capped, "main").unwrap_err();
+        assert!(refused.contains("2048 bytes"), "{refused}");
+        assert!(
+            run(&bare, &["for-each-ref", "refs/heads"])
+                .trim()
+                .is_empty(),
+            "nothing pushed"
+        );
+        fs::remove_file(house.path.join("big.md")).unwrap();
+        fs::write(house.path.join("small.md"), "small\n").unwrap();
+        house.save(&capped, "main").unwrap();
+        assert_eq!(
+            run(&bare, &["ls-tree", "-r", "--name-only", "main"]).trim(),
+            "small.md"
+        );
+        house.discard().unwrap();
+    }
+
+    #[test]
+    fn a_clone_is_shallow_when_asked_and_stopped_past_its_size_or_time() {
+        let root = tempfile::tempdir().unwrap();
+        let seed = root.path().join("seed");
+        fs::create_dir_all(&seed).unwrap();
+        run(&seed, &["init", "--quiet", "--initial-branch=main"]);
+        fs::write(seed.join("a.md"), "a\n").unwrap();
+        run(&seed, &["add", "a.md"]);
+        run(&seed, &["commit", "--quiet", "-m", "a"]);
+        // 256 KiB in the working tree, whatever the pack compresses it to.
+        fs::write(seed.join("big.bin"), vec![b'x'; 256 * 1024]).unwrap();
+        run(&seed, &["add", "big.bin"]);
+        run(&seed, &["commit", "--quiet", "-m", "big"]);
+        run(
+            root.path(),
+            &["clone", "--quiet", "--bare", "seed", "eve.git"],
+        );
+        let bare = root.path().join("eve.git").to_string_lossy().into_owned();
+        let with = |target: &str, change: &dyn Fn(&mut SafeHouseClone)| {
+            let mut spec = spec(&bare, &root.path().join(target), false);
+            if let Some(clone) = spec.clone.as_mut() {
+                change(clone);
+            }
+            spec
+        };
+
+        let shallow = Worktree::open(&with("one", &|clone| clone.depth = Some(1))).unwrap();
+        assert_eq!(
+            run(&shallow.path, &["rev-list", "--count", "HEAD"]).trim(),
+            "1"
+        );
+        shallow.discard().unwrap();
+        let whole = Worktree::open(&with("two", &|_| {})).unwrap();
+        assert_eq!(
+            run(&whole.path, &["rev-list", "--count", "HEAD"]).trim(),
+            "2"
+        );
+        whole.discard().unwrap();
+
+        let refused = Worktree::open(&with("three", &|clone| {
+            clone.max_bytes = Some(64 * 1024);
+        }))
+        .unwrap_err();
+        assert!(refused.contains("more than 65536 bytes"), "{refused}");
+        assert!(!root.path().join("three").exists(), "nothing is left");
+
+        // A remote that takes the connection and never answers.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let stalled = std::thread::spawn(move || {
+            let held = listener.accept();
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            drop(held);
+        });
+        let mut silent = spec(
+            &format!("http://{address}/eve.git"),
+            &root.path().join("four"),
+            false,
+        );
+        if let Some(clone) = silent.clone.as_mut() {
+            clone.timeout_secs = Some(1);
+        }
+        let started = std::time::Instant::now();
+        let timed_out = Worktree::open(&silent).unwrap_err();
+        assert!(
+            timed_out.contains("timed out after 1 seconds"),
+            "{timed_out}"
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(!root.path().join("four").exists(), "nothing is left");
+        stalled.join().unwrap();
+    }
+
+    #[test]
     fn branch_names_are_checked_as_git_checks_them_without_running_it() {
         let names = [
             "main",
@@ -1442,22 +1607,5 @@ mod tests {
                 "{name:?}"
             );
         }
-    }
-
-    #[test]
-    fn file_urls_name_local_paths() {
-        assert_eq!(
-            local_repository("/srv/a.git"),
-            Some(PathBuf::from("/srv/a.git"))
-        );
-        assert_eq!(
-            local_repository("file:///srv/a.git"),
-            Some(PathBuf::from("/srv/a.git"))
-        );
-        assert_eq!(
-            local_repository("file:///C:/srv/a.git"),
-            Some(PathBuf::from("C:/srv/a.git"))
-        );
-        assert_eq!(local_repository("file://host/a.git"), None);
     }
 }

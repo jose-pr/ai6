@@ -18,7 +18,9 @@ use crate::directorates::section_00::assistant::{
 };
 use crate::station::safehouse::SafeHouse;
 
-use super::workspace::{Houses, MAIN, MEMORY, in_tree, no_links, open_clone, sha256_hex, walk};
+use super::workspace::{
+    CloneLimits, Houses, MAIN, MEMORY, in_tree, no_links, open_clone, sha256_hex, walk,
+};
 
 /// Why an operation was refused, with what its answer says of it.
 #[derive(Debug, Default)]
@@ -40,27 +42,56 @@ impl Refusal {
     }
 }
 
-/// Makes `op` in a fresh clone of its repository; `digest` names the clone's safe house.
-/// Answers what was done and found, or why nothing was.
+/// Makes `op` in a fresh shallow clone of its repository, made within `limits`; `digest` names
+/// the clone's safe house. Answers what was done and found, or why nothing was.
 pub(super) fn run(
     houses: &Houses,
     op: &MemoryOp,
     digest: &str,
+    limits: CloneLimits,
 ) -> Result<(String, MemoryAnswer), Refusal> {
+    let kind = RepoKind::of(&op.repo).map_err(plain)?;
+    let changes = matches!(
+        op.action,
+        MemoryAction::Write { .. } | MemoryAction::Forget { .. }
+    );
+    // A local repository is created on the first change, as a conversation's would be; a look
+    // at one not made yet finds an empty memory and makes nothing.
+    if !changes && RepoKind::local_path(&op.repo).is_some_and(|path| !path.exists()) {
+        return match &op.action {
+            MemoryAction::Read { path } => Err(Refusal {
+                reason: format!("{path} is not in the person's memory"),
+                missing: true,
+                ..Refusal::default()
+            }),
+            _ => Ok(("memory/ holds 0 files".to_owned(), MemoryAnswer::default())),
+        };
+    }
     let provider = houses().map_err(plain)?;
     let scratch = tempfile::Builder::new()
         .prefix("ai6-assistant-memory-")
         .tempdir()
         .map_err(|error| plain(error.to_string()))?;
-    // A local repository is created on first use, as a conversation's would be.
-    let create = RepoKind::of(&op.repo).map_err(plain)? == RepoKind::Local;
     let root = scratch.path().join("repository");
-    let house =
-        open_clone(provider.as_ref(), &op.repo, &root, None, create, digest).map_err(|reason| {
-            plain(format!(
-                "the personal repository could not be opened: {reason}"
-            ))
-        })?;
+    let shallow = CloneLimits {
+        depth: Some(1),
+        ..limits
+    };
+    let create = changes && kind == RepoKind::Local;
+    let house = open_clone(
+        provider.as_ref(),
+        &op.repo,
+        &root,
+        None,
+        create,
+        digest,
+        shallow,
+    )
+    .map_err(|reason| {
+        plain(format!(
+            "the personal repository could not be opened: {reason}"
+        ))
+    })?;
     let answer = MemoryAnswer {
         commit: house
             .base()
@@ -217,6 +248,7 @@ fn save(
             files: Some(vec![file]),
             record: None,
             exclude: None,
+            max_bytes: None,
         })
         .map_err(|error| plain(format!("nothing was saved: {error}")))?;
     Ok((!saved.commit.is_empty()).then_some(saved.commit))

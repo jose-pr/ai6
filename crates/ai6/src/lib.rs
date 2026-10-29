@@ -194,8 +194,8 @@ pub use directorates::section_00::assistant::{
 pub use guatiao;
 #[cfg(feature = "daemon")]
 pub use station::server::{
-    DEFAULT_CONFIG_POLL, DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_RESOURCES_EVERY,
-    ServeConfig, StationConfig, StationRole, serve, serve_with_capacity, serve_with_config_dir,
-    serve_with_config_dir_and_capacity, serve_with_options, serve_with_plugins,
-    serve_with_plugins_and_capacity,
+    AssistantDeskLimits, DEFAULT_CONFIG_POLL, DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS,
+    DEFAULT_RESOURCES_EVERY, ServeConfig, StationConfig, StationRole, serve, serve_with_capacity,
+    serve_with_config_dir, serve_with_config_dir_and_capacity, serve_with_options,
+    serve_with_plugins, serve_with_plugins_and_capacity,
 };

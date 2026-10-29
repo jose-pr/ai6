@@ -208,7 +208,10 @@ impl Memory {
             repo: self.repo.clone(),
             action,
         };
-        let event = self.assistant.memory(gateway, &self.owner, op).await?;
+        let event = self
+            .assistant
+            .memory(gateway, &self.person.id, &self.owner, op)
+            .await?;
         let answer = event.memory.unwrap_or_default();
         if event.kind == EVENT_ACCEPTED {
             return Ok(answer);
@@ -391,6 +394,44 @@ pub(crate) async fn forget(
     Ok(Json(json!({"path": shown(&path), "commit": answer.commit})))
 }
 
+/// One memory request waiting for a Station, counted against its requester and everyone's
+/// until it is dropped, however the request ends.
+struct Waiting<'a> {
+    assistant: &'a Assistant,
+    requester: String,
+}
+
+impl<'a> Waiting<'a> {
+    fn take(assistant: &'a Assistant, requester: &str) -> Result<Self, Refused> {
+        let mut desk = assistant.desk();
+        let total: usize = desk.memory_waiting.values().sum();
+        let mine = desk.memory_waiting.get(requester).copied().unwrap_or(0);
+        if mine >= assistant.config.memory_per_person || total >= assistant.config.memory_total {
+            return Err(refused(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many memory requests are waiting; nothing was done. Try again shortly.",
+            ));
+        }
+        *desk.memory_waiting.entry(requester.to_owned()).or_insert(0) += 1;
+        Ok(Self {
+            assistant,
+            requester: requester.to_owned(),
+        })
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        let mut desk = self.assistant.desk();
+        if let Some(count) = desk.memory_waiting.get_mut(&self.requester) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                desk.memory_waiting.remove(&self.requester);
+            }
+        }
+    }
+}
+
 impl Assistant {
     /// The memory job of `op` for `person`, checked as a Station will check it.
     fn memory_job(&self, person: &str, op: MemoryOp) -> Result<AssistantJob, Refused> {
@@ -435,15 +476,19 @@ impl Assistant {
         self.memory_job(person, op).map(|_| ())
     }
 
-    /// Queues `op` on `person`'s memory for the Headquarters Station, else the first healthy
-    /// one, and waits for its answer: the event that settles the job.
+    /// Queues `op` on `person`'s memory, asked by `requester`, for the Headquarters Station,
+    /// else the first healthy one, and waits for its answer: the event that settles the job.
+    /// `429` when `requester`'s requests, or everyone's, already fill the configured limits
+    /// ([`super::AssistantConfig::with_memory_requests`]).
     async fn memory(
         &self,
         gateway: &Gateway,
+        requester: &str,
         person: &str,
         op: MemoryOp,
     ) -> Result<AssistantEvent, Refused> {
         let job = self.memory_job(person, op)?;
+        let _waiting = Waiting::take(self, requester)?;
         let job_id = job.job_id.clone();
         let station = healthy_stations(gateway)
             .await

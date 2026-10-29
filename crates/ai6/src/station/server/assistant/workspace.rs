@@ -28,8 +28,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
+use super::super::AssistantDeskLimits;
 use crate::directorates::m::assistant::{RepoKind, SKILLS_PLUGIN};
 use crate::directorates::q::safehouse::{
     CheckpointFile, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseProvider,
@@ -107,6 +108,8 @@ pub(super) struct Workspace {
     found: Option<String>,
     /// The shared repositories checked out under `shared/`, by name.
     shared: BTreeSet<String>,
+    /// The most a save of her work commits, in bytes.
+    save_bytes: u64,
 }
 
 /// What the end of a turn found besides the work it saved.
@@ -121,7 +124,8 @@ pub(super) struct TurnEnd {
 impl Workspace {
     /// Makes the workspace in `area`, the conversation's empty directory, with the
     /// repositories' git directories in `repos` and the standing text in `context`, both
-    /// outside `area`; answers it with notices for the conversation.
+    /// outside `area`, each repository cloned and each save made within `limits`; answers it
+    /// with notices for the conversation.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn prepare(
         houses: &Houses,
@@ -132,6 +136,7 @@ impl Workspace {
         job: &AssistantWorkspace,
         exposed: bool,
         skills: &[String],
+        limits: &AssistantDeskLimits,
     ) -> Result<(Self, Vec<String>), String> {
         let provider = houses()?;
         let digest = &super::conversation_digest(conversation_id);
@@ -144,6 +149,7 @@ impl Workspace {
             Some(&repos.join(PERSONAL)),
             create,
             digest,
+            CloneLimits::of(limits),
         )
         .map_err(|reason| format!("the personal repository could not be opened: {reason}"))?;
         let mut workspace = Self {
@@ -161,6 +167,7 @@ impl Workspace {
             outside: BTreeSet::new(),
             found: None,
             shared: BTreeSet::new(),
+            save_bytes: limits.save_bytes,
         };
         workspace.outside = workspace.read_record().into_values().collect();
         if !workspace.exposed
@@ -205,6 +212,11 @@ impl Workspace {
                 Some(&git_dir),
                 false,
                 digest,
+                // Read only, so its history is not needed.
+                CloneLimits {
+                    depth: Some(1),
+                    ..CloneLimits::of(limits)
+                },
             ) {
                 Ok(_) => shared.push(name.clone()),
                 Err(reason) => notices.push(format!(
@@ -574,6 +586,7 @@ impl Workspace {
         spec.record = self.exposed.then(|| OUTSIDE_TEXT.to_owned());
         // Her memory reaches the repository only as a change the person let through.
         spec.exclude = Some(vec![MEMORY.to_owned()]);
+        spec.max_bytes = Some(self.save_bytes);
         let saved = self
             .personal
             .checkpoint(&spec)
@@ -599,16 +612,18 @@ impl Workspace {
             files,
             record: None,
             exclude: None,
+            max_bytes: None,
         }
     }
 }
 
-/// Makes `commit` in a clone of its repository of its own, which goes afterwards; answers
-/// where it landed.
+/// Makes `commit` in a clone of its repository of its own, made within `limits`, which goes
+/// afterwards; answers where it landed.
 pub(super) fn commit_once(
     houses: &Houses,
     commit: &AssistantCommit,
     digest: &str,
+    limits: CloneLimits,
 ) -> Result<String, String> {
     let provider = houses()?;
     let scratch = tempfile::Builder::new()
@@ -624,6 +639,7 @@ pub(super) fn commit_once(
         None,
         create,
         digest,
+        limits,
     )?;
     // The save takes the files' text from the commit, never from this working tree, which
     // nothing here writes.
@@ -638,6 +654,7 @@ pub(super) fn commit_once(
             files: Some(exactly(&commit.change)),
             record: None,
             exclude: None,
+            max_bytes: None,
         })
         .map_err(|error| error.to_string());
     let _ = house.discard();
@@ -698,7 +715,28 @@ fn landed(saved: &SafeHouseCheckpoint, repo: &str) -> String {
     }
 }
 
-/// Clones `repo` into `path` on `main`, its git directory in `git_dir` when given.
+/// How a repository is cloned: shallow to `depth` commits when set, and given up after
+/// `timeout` or past `max_bytes` on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CloneLimits {
+    pub(super) depth: Option<u32>,
+    pub(super) timeout: Duration,
+    pub(super) max_bytes: u64,
+}
+
+impl CloneLimits {
+    /// A whole clone within the Station's limits.
+    pub(super) fn of(limits: &AssistantDeskLimits) -> Self {
+        Self {
+            depth: None,
+            timeout: limits.clone_timeout,
+            max_bytes: limits.clone_bytes,
+        }
+    }
+}
+
+/// Clones `repo` into `path` on `main`, its git directory in `git_dir` when given, within
+/// `limits`.
 pub(super) fn open_clone(
     provider: &dyn SafeHouseProvider,
     repo: &str,
@@ -706,6 +744,7 @@ pub(super) fn open_clone(
     git_dir: Option<&Path>,
     create: bool,
     digest: &str,
+    limits: CloneLimits,
 ) -> Result<SafeHouse, String> {
     let parent = path.parent().unwrap_or(path);
     let spec = SafeHouseSpec {
@@ -723,6 +762,10 @@ pub(super) fn open_clone(
             path: path.to_string_lossy().into_owned(),
             create_source: create,
             git_dir: git_dir.map(|dir| dir.to_string_lossy().into_owned()),
+            depth: limits.depth,
+            // Rounded up, so a deadline under a second still allows one.
+            timeout_secs: Some(limits.timeout.as_secs_f64().ceil() as u64),
+            max_bytes: Some(limits.max_bytes),
         }),
     };
     SafeHouse::open(provider, &spec).map_err(|error| error.to_string())
