@@ -2898,6 +2898,14 @@ pub fn canonical(path: &Path) -> PathBuf;     // links followed, no `\\?\`; as g
 pub fn path_text(path: &Path) -> String;
 pub fn starts_with(path: &Path, base: &Path) -> bool;   // case ignored on Windows
 pub fn variable(environment: &BTreeMap<String, String>, name: &str) -> Option<String>;
+pub const STATION_CONFIG_ROOTS: [&str; 3];   // /etc/ai6, /usr/local/etc, /usr/etc
+/// What a scripts sandbox denies again: STATION_CONFIG_ROOTS (not on Windows), the state
+/// directory, AI6_HOME and the running program's directory (the program alone when an `open`
+/// directory holds or lies in it); a path that is or holds `cwd` or an `open` directory is
+/// left out.
+pub fn station_paths(cwd: &Path, open: &[PathBuf]) -> Vec<PathBuf>;
+pub fn denied_station_paths(cwd: &Path, open: &[PathBuf], state: Option<PathBuf>,
+    home: Option<PathBuf>, program: Option<PathBuf>) -> Vec<PathBuf>;   // station_paths, given
 impl AssistantMode { pub fn moneypenny() -> Self; pub fn validate(&self) -> Result<(), String>;
                      pub fn with_cables(self) -> Self; } // adds server `cables`,
                                                          // prefix AI6_ASSISTANT_CABLE_MCP

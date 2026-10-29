@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use ai6::directorates::section_00::agent::AssistantMode;
 use ai6::directorates::section_00::assistant::SCRIPT_ENVIRONMENT;
 use ai6::directorates::section_00::programs::{
-    canonical, find_program, path_text, program_dirs, starts_with, variable,
+    canonical, find_program, path_text, program_dirs, station_paths, variable,
 };
 use serde_json::Value;
 
@@ -265,64 +265,6 @@ fn rules(
     let mut seen = std::collections::HashSet::new();
     rules.retain(|(key, _)| seen.insert(key.clone()));
     rules
-}
-
-/// Where a Station on Unix may keep its configuration and secrets inside what `:minimal` or an
-/// interpreter's install directory (`/usr`) re-opens.
-const STATION_CONFIG_ROOTS: [&str; 3] = ["/etc/ai6", "/usr/local/etc", "/usr/etc"];
-
-/// The Station's own paths a profile denies again: [`STATION_CONFIG_ROOTS`] (not on Windows),
-/// AI6's state directory, `AI6_HOME`, and the directory of the program hosting this handler.
-fn station_paths(cwd: &Path, open: &[PathBuf]) -> Vec<PathBuf> {
-    denied_station_paths(
-        cwd,
-        open,
-        ai6::station::safehouse::state_dir().ok(),
-        std::env::var_os("AI6_HOME").map(PathBuf::from),
-        std::env::current_exe().ok(),
-    )
-}
-
-/// [`station_paths`] from the given state directory, `AI6_HOME` and program. The program's
-/// directory is denied unless it holds or lies in an `open` directory, which keeps it readable,
-/// and then only the program itself is. A path that is or holds `cwd` or an `open` directory is
-/// left out: its deny would take those with it.
-fn denied_station_paths(
-    cwd: &Path,
-    open: &[PathBuf],
-    state: Option<PathBuf>,
-    home: Option<PathBuf>,
-    program: Option<PathBuf>,
-) -> Vec<PathBuf> {
-    let mut candidates: Vec<PathBuf> = if cfg!(windows) {
-        Vec::new()
-    } else {
-        STATION_CONFIG_ROOTS.iter().map(PathBuf::from).collect()
-    };
-    candidates.extend(state);
-    candidates.extend(home.filter(|home| !home.as_os_str().is_empty()));
-    if let Some(program) = program.map(|program| canonical(&program)) {
-        let overlaps = |dir: &Path| {
-            open.iter()
-                .any(|open| starts_with(dir, open) || starts_with(open, dir))
-        };
-        match program.parent() {
-            Some(dir) if !overlaps(dir) => candidates.push(dir.to_path_buf()),
-            _ => candidates.push(program),
-        }
-    }
-    let cwd = canonical(cwd);
-    let mut paths: Vec<PathBuf> = Vec::new();
-    for path in candidates.iter().map(|path| canonical(path)) {
-        if starts_with(&cwd, &path)
-            || open.iter().any(|dir| starts_with(dir, &path))
-            || paths.contains(&path)
-        {
-            continue;
-        }
-        paths.push(path);
-    }
-    paths
 }
 
 /// The install directories scripts also read ([`program_dirs`]): the codex executable's
@@ -612,6 +554,7 @@ mod tree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ai6::directorates::section_00::programs::{STATION_CONFIG_ROOTS, denied_station_paths};
 
     fn parsed(argv: &[String], key: &str) -> toml::Value {
         let pair = argv

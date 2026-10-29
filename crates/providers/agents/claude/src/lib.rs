@@ -603,42 +603,6 @@ fn script_read_roots(os: &str) -> &'static [&'static str] {
     }
 }
 
-/// Paths under the re-opened roots that a Station may keep its configuration in, denied
-/// again: a `denyRead` entry inside an `allowRead` one wins (measured with Claude Code
-/// 2.1.310: `/usr/local/x` denied under an allowed `/usr` was unreadable).
-const STATION_CONFIG_ROOTS: [&str; 2] = ["/usr/local/etc", "/usr/etc"];
-
-/// What scripts may not read although a re-opened root holds it: the configuration roots
-/// above, AI6's state directory and `AI6_HOME`, and the program hosting this handler (its
-/// directory, unless an interpreter is installed there, which `program_dirs` re-opens).
-fn station_paths(program_dirs: &[std::path::PathBuf]) -> Vec<String> {
-    let mut paths: Vec<String> = STATION_CONFIG_ROOTS.map(str::to_owned).to_vec();
-    if let Ok(state) = ai6::station::safehouse::state_dir() {
-        paths.push(state.to_string_lossy().into_owned());
-    }
-    if let Some(home) = std::env::var_os("AI6_HOME") {
-        paths.push(
-            std::path::PathBuf::from(home)
-                .to_string_lossy()
-                .into_owned(),
-        );
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        let exe = programs::canonical(&exe);
-        match exe.parent() {
-            Some(dir)
-                if !program_dirs
-                    .iter()
-                    .any(|open| programs::starts_with(dir, open)) =>
-            {
-                paths.push(dir.to_string_lossy().into_owned());
-            }
-            _ => paths.push(exe.to_string_lossy().into_owned()),
-        }
-    }
-    paths
-}
-
 /// The Claude Code settings that confine an assistant's scripts (code.claude.com/docs/en/
 /// sandboxing and /settings-reference): the sandbox on, Claude Code exiting at start when it
 /// cannot run it (`failIfUnavailable`), every command still checked against the allow rules
@@ -646,7 +610,7 @@ fn station_paths(program_dirs: &[std::path::PathBuf]) -> Vec<String> {
 /// (`allowUnsandboxedCommands: false`). Reads are denied everywhere (`denyRead: ["/"]`) but the
 /// working directory, the system paths an interpreter needs ([`script_read_roots`]) and the
 /// interpreters' own install directories, with the Station's own paths denied again
-/// ([`station_paths`]). Scripts write only the mode's directories, never `read_only`, `.claude`
+/// ([`programs::station_paths`]). Scripts write only the mode's directories, never `read_only`, `.claude`
 /// or a `.git` under the working directory (which an unsandboxed git could act on); reach only
 /// the mode's hosts (every host under `open`) less the deny list's names and addresses
 /// (`deniedDomains`); see no environment variable but [`SCRIPT_ENVIRONMENT`]
@@ -729,10 +693,12 @@ fn script_settings(
             allow_read.push(temp.join(socket).to_string_lossy().into_owned());
         }
     }
-    // An `allowRead` entry inside a denied one wins (as the working directory inside `/`), so
-    // a working directory under the state directory stays readable.
     let mut deny_read = vec!["/".to_owned()];
-    deny_read.extend(station_paths(&program_dirs));
+    deny_read.extend(
+        programs::station_paths(root, &program_dirs)
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned()),
+    );
     // Claude Code 2.1.310 does not open the sandbox to `WebFetch(domain:*)` given in
     // `--allowedTools`, so an open network names every host here itself.
     let hosts: Vec<&str> = match mode.network.policy.as_str() {
@@ -3718,14 +3684,13 @@ mod tests {
                 );
                 let deny_read = strings(&fs["denyRead"]);
                 assert_eq!(deny_read[0], "/", "reads denied everywhere: {case}");
-                for path in STATION_CONFIG_ROOTS {
-                    assert!(deny_read.contains(&path.to_owned()), "{case}: {path}");
+                let station =
+                    programs::station_paths(std::path::Path::new(&working_directory), &[]);
+                assert!(!station.is_empty(), "{case}");
+                for path in station {
+                    let path = path.to_string_lossy().into_owned();
+                    assert!(deny_read.contains(&path), "{case}: {path} denied again");
                 }
-                let state = ai6::station::safehouse::state_dir().unwrap();
-                assert!(
-                    deny_read.contains(&state.to_string_lossy().into_owned()),
-                    "{case}: the state directory denied again: {deny_read:?}"
-                );
                 let allow_read = strings(&fs["allowRead"]);
                 assert!(
                     allow_read.contains(&working_directory),
