@@ -40,11 +40,19 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Stations, with tabs for every Station's Theaters, each Station's settings (its Mission
   capacity and resource limits: the free memory and CPU past which it takes no new
   Missions; 0 MiB and 100% turn them off) and a placement preview.
-- Overview, the page Outer Office opens on: counts of Operations, Stations online and
-  dark, active Missions and waiting Sessions, and what needs attention (blocked Sessions,
-  briefs vetting holds in the Operations where the person has `mission.create`, dark
-  Stations), each with a link to its page; Operations: each Operation's Missions by state;
-  Sessions: every Session in a table sorted by any column.
+- Overview, the page Outer Office opens on: the theme's hero art beside the person's
+  Operations (each with the share of its Missions done) and the Stations; counts of
+  Operations, Stations online and dark, active Missions and waiting Sessions; recent
+  activity from the Operations' timelines (with `audit.read`); Upcoming, the Missions
+  waiting to run (queued Missions oldest first, then held briefs); a Moneypenny card whose
+  quick questions and field open her chat and ask her; and what needs attention (blocked
+  Sessions, briefs vetting holds in the Operations where the person has `mission.create`,
+  dark Stations), each with a link to its page. Operations: each Operation's Missions by
+  state; Sessions: every Session in a table sorted by any column (a list on a phone).
+- The top bar: the OO wordmark, search across the Operations, Missions, Sessions and
+  Stations on the board, **Ask Moneypenny**, a bell counting what needs attention (its
+  menu opens each item's page), appearance settings, and the person's chip (initials, name
+  and first directory group) opening the operator menu.
 - Roster: the Operations, Agents, Agent roles, cover policies and Moneypenny's settings every
   Station reads, with the revision each Station runs and what any Station refused or waits to
   restart for (`roster.read`); with `roster.manage` and a roster that takes edits (SQL), add,
@@ -70,7 +78,11 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   Classic, Light and Red File) or the system's light or dark setting, stored per device as
   `oo.theme`. Every text colour reaches WCAG AA (4.5:1) on its surface, the system's high
   contrast and reduced motion settings apply, and a theme's wallpaper (`oo.backdrop`) shows
-  only behind sign-in, the Overview header and empty pages.
+  only behind sign-in, the Overview hero and empty pages. The hero is decorative: a world
+  map with glowing routes (in Night Ops as drawn, in Black Ops, Classic, Light and Red File
+  recoloured from the theme's own colours) or, in Dusk, a Westminster skyline; nothing is
+  plotted on it, and its text sits on a solid panel. Large icons (stat tiles, recent
+  activity, the phone menu) are duotone drawings of the kit's icons in the theme's accent.
 
 ## Toolchain
 
@@ -132,8 +144,10 @@ before a non-demo web build. It builds `guatiao-intake` at the revision in `pubs
 
 ## No outside requests by default
 
-Outer Office ships everything it shows: the Roboto font (Apache-2.0, in `assets/fonts/`,
-listed on the app's licence page), Material icons, the design kit's icons and wallpapers.
+Outer Office ships everything it shows: the Roboto font (Apache-2.0) for text and the
+Cinzel font (SIL Open Font License 1.1, version 2.000) for the wordmark and section labels,
+both in `assets/fonts/` and listed on the app's licence page, Material icons, the design
+kit's icons and their duotone drawings, the wallpapers and the hero art.
 The web build loads its engine (CanvasKit or skwasm) from its own `canvaskit/` directory
 and the fonts for characters Roboto lacks from its own `assets/fonts/fallback/`, so by
 default the browser fetches nothing from any origin but the one serving the app. Desktop
@@ -185,8 +199,11 @@ pages and may load what they need.
 
 A top bar, a rail of pages (Overview, Operations, Missions, Sessions, Agents, Stations,
 Green Ink, Briefings, Roster, Account Pools, Timeline, Audit; each shown only with its
-permission) and the page, Overview after sign-in. From 1200 px wide the rail has labels beside its icons, from 900
-px labels below them, and narrower it opens from a menu button, one view at a time.
+permission) and the page, Overview after sign-in. From 1200 px wide the rail has labels
+beside its icons, from 900 px labels below them, and narrower it opens from a menu button,
+one view at a time, its pages as rows with icon tiles. Below 600 px (a phone) the top bar
+keeps the page title, search, Moneypenny, the bell and the person's initials; Overview is
+one column, tables are lists, and Moneypenny's chat fills the screen.
 
 Web is one Flutter app view: wide windows keep the board beside the selected Session,
 narrow windows navigate to it in-page with browser back. It opens no browser popups and

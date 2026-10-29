@@ -16,4 +16,8 @@ Outer Office's icons are made from the Outer Office icon:
 (192 and 512, plus maskable versions with the art at 80% on its edge colour) and
 `clients/outer-office/windows/runner/resources/app_icon.ico` (16 to 256). Moneypenny,
 the assistant inside it, keeps her own icon as her chat avatar:
-`clients/outer-office/assets/brand/moneypenny-128.png` (128 × 128).
+`clients/outer-office/assets/brand/moneypenny-128.png` (128 × 128). The app's menu
+heading uses the Outer Office icon at 256 px (`assets/brand/outer-office-256.png`). Its
+Overview hero art is cut from the two banners: the world map from the left of
+`ai6-header.png` (`assets/heroes/map.jpg`, 940 × 278) and the skyline from the right of
+`outer-office-header.png` (`assets/heroes/skyline.jpg`, 774 × 278).

@@ -4,9 +4,13 @@ Outer Office (short name OO) is the AI6 operator app (Flutter desktop and web); 
 is the AI assistant inside it. It talks only to Universal Exports, AI6's authenticated
 public API. Build defines and stored preference keys use the short name (`OO_API`,
 `OO_DEMO`, `oo.theme`, `oo.backdrop`); the directory and Dart package keep the long one.
-Colours come only from `OoTokens` (`lib/theme/`), icons from the design kit's SVGs through
-`OoIcon`, and the wallpaper (`OoBackdrop`) never sits behind tables, terminals, Session
-pages, dialogs, green ink, briefings or the chat.
+Colours come only from `OoTokens` (`lib/theme/`); icons from the design kit's SVGs through
+`OoIcon` (line, small sizes) and `OoDuotone`/`OoTile` (`assets/icons/duotone/`, drawn in the
+sentinel colours `#F6D58E`, `#B9832F`, `#2A1C08` that `OoDuotone` swaps for the theme's);
+Cinzel (`ooDisplayFamily`) only for the wordmark and section labels. The wallpaper
+(`OoBackdrop`) and the hero art (`OoHero`, Overview only) never sit behind tables,
+terminals, Session pages, dialogs, green ink, briefings or the chat, and nothing is plotted
+on the hero.
 
 ## Boundaries
 
