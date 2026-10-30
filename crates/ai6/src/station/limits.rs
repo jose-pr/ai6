@@ -209,6 +209,14 @@ pub struct SourceLimits {
     pub report_every: Seconds,
     /// Seconds between rounds firing Sleepers. Default 20.
     pub sleeper_every: Seconds,
+    /// Seconds between rounds sending the outbox of tracker writes. Default 5.
+    pub outbox_every: Seconds,
+    /// Outbox entries sent in one round. Default 20.
+    pub outbox_batch: Limit,
+    /// Sends tried before an outbox entry fails. Default 5.
+    pub send_attempts: Limit,
+    /// Seconds before a failed send is tried again; each attempt doubles it. Default 30.
+    pub retry_backoff: Seconds,
 }
 
 impl Default for SourceLimits {
@@ -218,6 +226,10 @@ impl Default for SourceLimits {
             min_poll: Seconds::new(10),
             report_every: Seconds::new(15),
             sleeper_every: Seconds::new(20),
+            outbox_every: Seconds::new(5),
+            outbox_batch: Limit::at(20),
+            send_attempts: Limit::at(5),
+            retry_backoff: Seconds::new(30),
         }
     }
 }

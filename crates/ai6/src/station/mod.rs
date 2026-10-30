@@ -8,6 +8,8 @@ pub(crate) mod detached;
 pub mod elevation;
 #[cfg(feature = "station-tls")]
 pub mod identity;
+#[cfg(feature = "daemon")]
+pub(crate) mod issues;
 pub mod limits;
 #[cfg(feature = "daemon")]
 pub mod plugins;
