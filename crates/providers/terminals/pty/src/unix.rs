@@ -17,8 +17,8 @@ pub(crate) use crate::process_tree::ProcessTree;
 
 /// The child's process tree: `portable-pty` starts the child with `setsid`, so its process
 /// group and session ids are its pid.
-pub(crate) fn adopt(pid: Option<u32>) -> io::Result<ProcessTree> {
-    ProcessTree::of(pid)
+pub(crate) fn adopt(pid: Option<u32>, scans: usize) -> io::Result<ProcessTree> {
+    ProcessTree::of(pid, scans)
 }
 
 /// Turns off line editing and echo on the terminal before the program starts, so input of any

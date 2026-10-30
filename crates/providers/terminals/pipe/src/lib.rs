@@ -44,23 +44,15 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue, Value};
 use os::Process;
 use process_tree::ProcessTree;
 
-const READ_CHUNK: usize = 65536;
 const EXIT_POLL: Duration = Duration::from_millis(10);
 /// How often a waiting `read` asks whether the child has exited.
 const EXIT_CHECK: Duration = Duration::from_millis(50);
-/// How long the output must stay quiet after the child has exited before `read` reports its
-/// end while a process the child left behind still holds the output pipe.
-const DRAIN_QUIET: Duration = Duration::from_millis(200);
-/// The longest `kill` waits for the child and its process tree to have exited.
-const KILL_WAIT: Duration = Duration::from_secs(2);
-/// How much of the end of standard error [`StderrMode::Tail`] keeps.
-pub const STDERR_TAIL_BYTES: usize = 8192;
 
 /// What becomes of the program's standard error.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[map(crate = ::ai6::guatiao, rename_all = "lowercase")]
 pub enum StderrMode {
-    /// Read through a pipe of its own, and only its last [`STDERR_TAIL_BYTES`] (from the first
+    /// Read through a pipe of its own, and only its last [`PipeConfig::stderr_tail_bytes`] (from the first
     /// whole line in them) added to the output after the program's own output has ended, as
     /// lines of their own. A JSON stream on standard output is never broken up by it, and what
     /// the program said last on standard error, such as why it failed, is still read.
@@ -73,12 +65,50 @@ pub enum StderrMode {
 }
 
 /// `pipe` provider configuration; every field has a default.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
 #[map(crate = ::ai6::guatiao)]
 pub struct PipeConfig {
     /// What becomes of standard error: `tail` (the default), `merge` or `drop`.
     #[map(default = StderrMode::Tail)]
     pub stderr: StderrMode,
+    /// Bytes of one read of the program's output. At least 1. Default 65536.
+    #[map(default = 65536)]
+    pub read_chunk_bytes: u64,
+    /// Milliseconds the output must stay quiet after the program has exited before `read`
+    /// reports its end, while a process the program left behind holds the output pipe. Default
+    /// 200.
+    #[map(default = 200)]
+    pub drain_quiet_ms: u64,
+    /// Milliseconds `kill` waits for the program and its process tree to have exited. Default
+    /// 2000.
+    #[map(default = 2_000)]
+    pub kill_wait_ms: u64,
+    /// Bytes of the end of standard error [`StderrMode::Tail`] keeps. Default 8192.
+    #[map(default = 8192)]
+    pub stderr_tail_bytes: u64,
+    /// On Unix, the highest descriptor the child marks close-on-exec where `close_range` is
+    /// not there to do it at once (before Linux 5.11, and on other systems): a soft
+    /// `RLIMIT_NOFILE` of a million would take as many calls. Default 65536. Windows ignores it.
+    #[map(default = 65536)]
+    pub swept_fds: u64,
+    /// On Unix, how many times the process table is read again for processes started
+    /// meanwhile when a tree is killed. Default 32. Windows ignores it.
+    #[map(default = 32)]
+    pub tree_scans: u64,
+}
+
+impl Default for PipeConfig {
+    fn default() -> Self {
+        Self {
+            stderr: StderrMode::Tail,
+            read_chunk_bytes: 65536,
+            drain_quiet_ms: 200,
+            kill_wait_ms: 2_000,
+            stderr_tail_bytes: 8192,
+            swept_fds: 65536,
+            tree_scans: 32,
+        }
+    }
 }
 
 /// Starts programs on plain pipes, with no terminal.
@@ -105,6 +135,12 @@ impl TryFrom<PipeConfig> for Pipe {
     type Error = ProviderError;
 
     fn try_from(config: PipeConfig) -> Result<Self, Self::Error> {
+        if config.read_chunk_bytes == 0 {
+            return Err(refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "read_chunk_bytes is 0: a read of no bytes never sees any output",
+            ));
+        }
         Ok(Self::new(config))
     }
 }
@@ -112,7 +148,7 @@ impl TryFrom<PipeConfig> for Pipe {
 impl Terminal for Pipe {
     fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
         let spec = Spec::from_value(spec).map_err(|e| refuse(Status::GUATIAO_ERR_BAD_VALUE, e))?;
-        Ok(PipeSession::start(&spec, self.config.stderr)?.into_object())
+        Ok(PipeSession::start(&spec, self.config)?.into_object())
     }
 
     fn tty(&self) -> bool {
@@ -139,12 +175,17 @@ struct PipeSession {
     errors: Option<Arc<Mutex<ErrorTail>>>,
     /// The last byte `read` handed out, `\n` before any.
     last_byte: AtomicU8,
+    /// How long the output must stay quiet after the child has exited, and how long `kill`
+    /// waits for it to have gone.
+    drain_quiet: Duration,
+    kill_wait: Duration,
 }
 
 /// The end of a program's standard error, as its own pipe delivers it.
-#[derive(Default)]
 struct ErrorTail {
     bytes: VecDeque<u8>,
+    /// How many of the last bytes are kept.
+    keep: usize,
     /// Whether bytes were dropped from the front.
     cut: bool,
     /// Whether the pipe has closed.
@@ -154,9 +195,19 @@ struct ErrorTail {
 }
 
 impl ErrorTail {
+    fn new(keep: usize) -> Self {
+        Self {
+            bytes: VecDeque::new(),
+            keep,
+            cut: false,
+            closed: false,
+            taken: false,
+        }
+    }
+
     fn push(&mut self, chunk: &[u8]) {
         self.bytes.extend(chunk);
-        let over = self.bytes.len().saturating_sub(STDERR_TAIL_BYTES);
+        let over = self.bytes.len().saturating_sub(self.keep);
         if over > 0 {
             self.bytes.drain(..over);
             self.cut = true;
@@ -202,6 +253,12 @@ pub(crate) struct Launch<'a> {
     pub(crate) stdin: PipeReader,
     pub(crate) stdout: PipeWriter,
     pub(crate) stderr: ErrorOutput,
+    /// The highest descriptor swept close-on-exec where `close_range` is not there (Unix).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub(crate) swept_fds: u64,
+    /// How many times the process table is read again when a tree is killed (Unix).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub(crate) tree_scans: usize,
 }
 
 /// Where the child's standard error goes.
@@ -215,7 +272,9 @@ pub(crate) enum ErrorOutput {
 }
 
 impl PipeSession {
-    fn start(spec: &Spec, stderr: StderrMode) -> Result<Self, ProviderError> {
+    fn start(spec: &Spec, config: PipeConfig) -> Result<Self, ProviderError> {
+        let read_chunk = usize::try_from(config.read_chunk_bytes).unwrap_or(usize::MAX);
+        let stderr = config.stderr;
         let (program, args) = spec
             .argv
             .split_first()
@@ -238,6 +297,8 @@ impl PipeSession {
             stdin,
             stdout: writer,
             stderr: error_output,
+            swept_fds: config.swept_fds,
+            tree_scans: usize::try_from(config.tree_scans).unwrap_or(usize::MAX),
         };
         let (child, tree) = os::spawn(launch)
             .map_err(|error| internal(format!("cannot start {program:?}: {error}")))?;
@@ -246,12 +307,14 @@ impl PipeSession {
 
         let errors = match error_reader {
             Some(mut reader) => {
-                let errors = Arc::new(Mutex::new(ErrorTail::default()));
+                let errors = Arc::new(Mutex::new(ErrorTail::new(
+                    usize::try_from(config.stderr_tail_bytes).unwrap_or(usize::MAX),
+                )));
                 let tail = errors.clone();
                 std::thread::Builder::new()
                     .name(format!("pipe-{pid}-stderr"))
                     .spawn(move || {
-                        let mut buf = vec![0u8; READ_CHUNK];
+                        let mut buf = vec![0u8; read_chunk];
                         loop {
                             let read = reader.read(&mut buf);
                             let Ok(mut tail) = tail.lock() else { break };
@@ -274,7 +337,7 @@ impl PipeSession {
         std::thread::Builder::new()
             .name(format!("pipe-{pid}"))
             .spawn(move || {
-                let mut buf = vec![0u8; READ_CHUNK];
+                let mut buf = vec![0u8; read_chunk];
                 loop {
                     match output.read(&mut buf) {
                         Ok(0) | Err(_) => break,
@@ -301,17 +364,19 @@ impl PipeSession {
             exit: Mutex::new(None),
             errors,
             last_byte: AtomicU8::new(b'\n'),
+            drain_quiet: Duration::from_millis(config.drain_quiet_ms),
+            kill_wait: Duration::from_millis(config.kill_wait_ms),
         })
     }
 
     /// The tail of standard error, once the output has ended, if it holds anything and has not
-    /// been taken: waits up to [`DRAIN_QUIET`] for its pipe to close, which a process the
+    /// been taken: waits up to `drain_quiet_ms` for its pipe to close, which a process the
     /// program left running may hold open.
     fn error_tail(&self) -> Result<Option<Vec<u8>>, ProviderError> {
         let Some(errors) = &self.errors else {
             return Ok(None);
         };
-        let deadline = Instant::now() + DRAIN_QUIET;
+        let deadline = Instant::now() + self.drain_quiet;
         loop {
             let mut tail = lock(errors)?;
             if tail.taken {
@@ -375,7 +440,7 @@ impl TerminalSession for PipeSession {
                     continue;
                 }
                 let drained_at = match exited {
-                    true => Some(*lock(&self.quiet_since)?.get_or_insert(now) + DRAIN_QUIET),
+                    true => Some(*lock(&self.quiet_since)?.get_or_insert(now) + self.drain_quiet),
                     false => None,
                 };
                 let until = drained_at.unwrap_or(now + EXIT_CHECK).min(deadline);
@@ -432,7 +497,7 @@ impl TerminalSession for PipeSession {
         // An error here means it already exited, which is what was asked.
         let _ = lock(&self.child)?.kill();
         // Killing is asynchronous; a caller may remove the working directory next.
-        let deadline = Instant::now() + KILL_WAIT;
+        let deadline = Instant::now() + self.kill_wait;
         while (self.poll_exit()?.is_none() || self.tree.running()) && Instant::now() < deadline {
             std::thread::sleep(EXIT_POLL);
         }

@@ -7,10 +7,21 @@ self-contained. Development documentation lives with the source at
 
 No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) and
 `portable-pty`; `libc` and `nix` (`term`) on Unix and `windows-sys` on Windows. The crate root exports
-`Pty`, which implements `ai6::directorates::q::terminal::Terminal`; the library is both an
+`Pty` (and its `PtyConfig`), which implements `ai6::directorates::q::terminal::Terminal`; the library is both an
 `rlib` and the Guatiao `cdylib` a Station loads. Provider ID: `pty`. Unsafe code is
 limited to the platform calls that own the process tree (`../process_tree/`, shared with
 `pipe`, and `windows.rs`), each with a safety comment.
+
+`PtyConfig` (`ToValue`, `FromValue`, `Schema`, `Default`; `Pty::new(PtyConfig)`) holds the
+provider's limits; every key is optional and each default is the value the provider used before
+it was a key. A Station sets them in `[providers.pty]`.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `read_chunk_bytes` | 65536 | Bytes of one read of the output; 0 is refused |
+| `drain_quiet_ms` | 200 | How long the output stays quiet, once the program has exited, before it ends |
+| `kill_wait_ms` | 2000 | How long `kill` waits for the program and its tree to have exited |
+| `tree_scans` | 32 (8 on Windows) | Times the process table is read again when a tree is killed (Unix) or adopted (Windows) |
 
 `tty()` answers `true`. A Station prefers `pty` for a harness whose handler does not declare
 JSON over standard input and output (`HarnessStdio::Json`), when several terminal providers
@@ -49,7 +60,7 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   names it, else `-1`. A Windows exit code is reported as a signed 32-bit value
   (`0xC000013A` is `-1073741510`), as the `pipe` provider and the transports do.
 - **End of output**: `read` returns `0` when the terminal closes, and also once the child
-  has exited and no output has arrived for 200 ms, on every platform. ConPTY keeps the
+  has exited and no output has arrived for `drain_quiet_ms` (200 ms), on every platform. ConPTY keeps the
   output open until the pseudo-console is closed, and on Unix a process the child left
   running keeps the terminal open; either way the caller sees the end after the child's
   last output. A waiting `read` asks for the exit every 50 ms. After the first `0`, every
@@ -64,7 +75,7 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   (`portable-pty` starts it and takes no Job Object), and every process it started before then,
   found by parent and created after it, is assigned too; one whose parent already exited in
   that instant is not found. `kill` returns once the child has exited and, on Windows,
-  the Job Object has no process left, or after 2 s. Windows may still refuse to remove the
+  the Job Object has no process left, or after `kill_wait_ms` (2 s). Windows may still refuse to remove the
   child's working directory for a few tens of milliseconds after that (os error 32): retry.
 - **Input** is passed through on Unix. On Windows, ConPTY reads Enter as CR, so a bare LF
   or a CRLF pair is sent as one CR.

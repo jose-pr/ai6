@@ -367,7 +367,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   standard input and output and no terminal, so its output arrives byte for byte and a
   harness that checks for a terminal reads its input. Standard error goes through a pipe of
   its own and only its last 8 KiB of whole lines follow the output once it has ended
-  (`stderr = "tail"`, the default, `ai6_terminal_pipe::STDERR_TAIL_BYTES`), so a JSON stream
+  (`stderr = "tail"`, the default, `stderr_tail_bytes`), so a JSON stream
   is never broken up by it; it can be merged into the output (`"merge"`) or dropped
   (`"drop"`). Kill takes the whole tree:
   a process group on Unix, a Job Object on Windows.

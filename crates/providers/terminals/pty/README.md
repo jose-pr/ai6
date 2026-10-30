@@ -19,6 +19,7 @@ child's process tree, translating input) live in `unix.rs` and `windows.rs`. See
 - Kills the whole process tree: the process group and the processes found by parent from it on
   Unix, a Job Object on Windows.
 - Builds as both a Rust library and the Guatiao provider library a Station loads.
+- Its read size, waits and process-tree scans are config keys (`[providers.pty]`), listed in the API header.
 
 ## Installation
 

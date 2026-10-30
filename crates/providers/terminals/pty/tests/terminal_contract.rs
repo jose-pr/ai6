@@ -6,7 +6,7 @@ use ai6::directorates::q::terminal::{
     ExitInfo, JsonLines, STREAM_COLS, Spec, StreamLine, Terminal, TerminalSession,
 };
 use ai6::guatiao::{FromValue, ToValue, library::Object};
-use ai6_terminal_pty::Pty;
+use ai6_terminal_pty::{Pty, PtyConfig};
 
 fn spec(argv: Vec<String>) -> Spec {
     Spec {
@@ -19,7 +19,9 @@ fn spec(argv: Vec<String>) -> Spec {
 }
 
 fn start(argv: Vec<String>) -> Object<dyn TerminalSession> {
-    Pty.spawn(&spec(argv).to_value().unwrap()).unwrap()
+    Pty::default()
+        .spawn(&spec(argv).to_value().unwrap())
+        .unwrap()
 }
 
 fn read_until(session: &Object<dyn TerminalSession>, marker: &[u8]) -> Vec<u8> {
@@ -124,7 +126,7 @@ fn a_child_waiting_for_its_input_answers_without_help() {
         "pty_child".to_owned(),
         "--nocapture".to_owned(),
     ];
-    let session = Pty
+    let session = Pty::default()
         .spawn(
             &Spec {
                 argv: argv.to_vec(),
@@ -261,7 +263,7 @@ fn a_child_that_exits_early_ends_its_output() {
         "pty_exit_child".to_owned(),
         "--nocapture".to_owned(),
     ];
-    let session = Pty
+    let session = Pty::default()
         .spawn(
             &Spec {
                 env: Some(env),
@@ -425,7 +427,7 @@ fn kill_ends_a_grandchild_that_left_the_process_group() {
         "pty_detacher".to_owned(),
         "--nocapture".to_owned(),
     ];
-    let session = Pty
+    let session = Pty::default()
         .spawn(
             &Spec {
                 env: Some(env),
@@ -448,4 +450,56 @@ fn kill_ends_a_grandchild_that_left_the_process_group() {
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(size(), after_kill, "the grandchild still runs");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The configured read chunk and waits are the ones used: a one-byte chunk still delivers the
+/// whole output, and a read of no bytes is refused.
+#[test]
+fn the_configured_chunk_and_waits_are_observed() {
+    let mut env: BTreeMap<String, String> = std::env::vars().collect();
+    env.insert("AI6_PTY_EXIT".to_owned(), "1".to_owned());
+    let argv = vec![
+        std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        "--exact".to_owned(),
+        "pty_exit_child".to_owned(),
+        "--nocapture".to_owned(),
+    ];
+    let pty = Pty::try_from(PtyConfig {
+        read_chunk_bytes: 1,
+        drain_quiet_ms: 50,
+        kill_wait_ms: 500,
+        ..PtyConfig::default()
+    })
+    .unwrap();
+    let session = pty
+        .spawn(
+            &Spec {
+                env: Some(env),
+                cols: STREAM_COLS,
+                ..spec(argv)
+            }
+            .to_value()
+            .unwrap(),
+        )
+        .unwrap();
+    let output = read_to_end(&session);
+    assert!(
+        output.windows(13).any(|window| window == b"AI6_PTY_FATAL"),
+        "{}",
+        String::from_utf8_lossy(&output)
+    );
+    assert!(
+        Pty::try_from(PtyConfig {
+            read_chunk_bytes: 0,
+            ..PtyConfig::default()
+        })
+        .is_err()
+    );
+    assert_eq!(
+        PtyConfig::from_value(&BTreeMap::<String, String>::new().to_value().unwrap()).unwrap(),
+        PtyConfig::default()
+    );
 }

@@ -188,7 +188,7 @@ fn pipe_noisy_child() {
 }
 
 /// By default standard error never breaks into the program's output; only its last lines, up to
-/// `STDERR_TAIL_BYTES`, follow the output once it has ended. Merged, it lands in between.
+/// `stderr_tail_bytes`, follow the output once it has ended. Merged, it lands in between.
 #[test]
 fn stderr_keeps_out_of_the_stream_and_only_its_tail_follows() {
     let noisy = [("AI6_PIPE_NOISY", "1".to_owned())];
@@ -203,7 +203,7 @@ fn stderr_keeps_out_of_the_stream_and_only_its_tail_follows() {
     let errors = &text[text.find("AI6_ERR_").unwrap()..];
     assert!(text.find("test result").unwrap() < text.find("AI6_ERR_").unwrap());
     assert!(
-        errors.len() <= ai6_terminal_pipe::STDERR_TAIL_BYTES,
+        errors.len() <= PipeConfig::default().stderr_tail_bytes as usize,
         "{}",
         errors.len()
     );
@@ -218,6 +218,7 @@ fn stderr_keeps_out_of_the_stream_and_only_its_tail_follows() {
 
     let merged = Pipe::new(PipeConfig {
         stderr: StderrMode::Merge,
+        ..PipeConfig::default()
     });
     let output = read_to_end(&start_child(merged, "pipe_noisy_child", &noisy));
     let text = String::from_utf8_lossy(&output);
@@ -233,6 +234,7 @@ fn stderr_keeps_out_of_the_stream_and_only_its_tail_follows() {
 fn dropped_stderr_is_not_in_the_output() {
     let pipe = Pipe::new(PipeConfig {
         stderr: StderrMode::Drop,
+        ..PipeConfig::default()
     });
     let session = start_child(pipe, "pipe_child", &[("AI6_PIPE_CHILD", "1".to_owned())]);
     session.write(b"short\n").unwrap();
@@ -247,6 +249,7 @@ fn an_empty_configuration_keeps_only_the_stderr_tail() {
     let empty = BTreeMap::<String, String>::new().to_value().unwrap();
     let config = PipeConfig::from_value(&empty).unwrap();
     assert_eq!(config.stderr, StderrMode::Tail);
+    assert_eq!(config, PipeConfig::default());
     assert_eq!(PipeConfig::default().stderr, StderrMode::Tail);
     for (name, mode) in [
         ("tail", StderrMode::Tail),
@@ -652,4 +655,28 @@ fn tempfile_dir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// A smaller `stderr_tail_bytes` keeps less of standard error; a read of no bytes is refused.
+#[test]
+fn the_configured_tail_and_chunk_are_observed() {
+    let noisy = [("AI6_PIPE_NOISY", "1".to_owned())];
+    let small = Pipe::new(PipeConfig {
+        stderr_tail_bytes: 128,
+        read_chunk_bytes: 7,
+        ..PipeConfig::default()
+    });
+    let output = read_to_end(&start_child(small, "pipe_noisy_child", &noisy));
+    let text = String::from_utf8_lossy(&output);
+    let errors = &text[text.find("AI6_ERR_").unwrap()..];
+    assert!(errors.len() <= 128, "{}", errors.len());
+    assert!(errors.ends_with("AI6_ERR_1999\n"), "the last line is kept");
+
+    assert!(
+        Pipe::try_from(PipeConfig {
+            read_chunk_bytes: 0,
+            ..PipeConfig::default()
+        })
+        .is_err()
+    );
 }

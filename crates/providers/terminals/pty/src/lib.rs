@@ -45,21 +45,14 @@ use std::time::{Duration, Instant};
 
 use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
 use ai6::guatiao::library::{Object, ProviderError};
-use ai6::guatiao::{FromValue, Status, ToValue, Value};
+use ai6::guatiao::{FromValue, Schema, Status, ToValue, Value};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use os::ProcessTree;
 
-const READ_CHUNK: usize = 65536;
 const EXIT_POLL: Duration = Duration::from_millis(10);
 /// How often a waiting `read` asks whether the child has exited.
 const EXIT_CHECK: Duration = Duration::from_millis(50);
-/// How long the output must stay quiet after the child has exited before `read` reports its
-/// end: ConPTY can deliver the last of a program's output after the program has exited, and
-/// keeps the output open until the pseudo-console is closed.
-const DRAIN_QUIET: Duration = Duration::from_millis(200);
-/// The longest `kill` waits for the child and its process tree to have exited.
-const KILL_WAIT: Duration = Duration::from_secs(2);
 /// ConPTY takes rows and columns as signed 16-bit numbers.
 const MAX_DIMENSION: u16 = i16::MAX as u16;
 /// A cursor position query (DSR 6).
@@ -69,19 +62,80 @@ const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 #[cfg(windows)]
 const CURSOR_REPORT: &[u8] = b"\x1b[1;1R";
 
-#[derive(Default, ai6::guatiao::Provider)]
+/// `pty` provider configuration; every field has a default.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::ai6::guatiao)]
+pub struct PtyConfig {
+    /// Bytes of one read of the program's output. At least 1. Default 65536.
+    #[map(default = 65536)]
+    pub read_chunk_bytes: u64,
+    /// Milliseconds the output must stay quiet after the program has exited before `read`
+    /// reports its end: ConPTY can deliver the last of a program's output after the program has
+    /// exited, and keeps the output open until the pseudo-console is closed. Default 200.
+    #[map(default = 200)]
+    pub drain_quiet_ms: u64,
+    /// Milliseconds `kill` waits for the program and its process tree to have exited. Default
+    /// 2000.
+    #[map(default = 2_000)]
+    pub kill_wait_ms: u64,
+    /// How many times the process table is read again for processes started meanwhile when a
+    /// tree is adopted (Windows) or killed (Unix). Default 8 on Windows and 32 elsewhere.
+    #[map(default = DEFAULT_TREE_SCANS)]
+    pub tree_scans: u64,
+}
+
+/// The default of [`PtyConfig::tree_scans`].
+const DEFAULT_TREE_SCANS: u64 = if cfg!(windows) { 8 } else { 32 };
+
+impl Default for PtyConfig {
+    fn default() -> Self {
+        Self {
+            read_chunk_bytes: 65536,
+            drain_quiet_ms: 200,
+            kill_wait_ms: 2_000,
+            tree_scans: DEFAULT_TREE_SCANS,
+        }
+    }
+}
+
+/// Starts programs on a pseudo-terminal.
+#[derive(Debug, Clone, Copy, Default, ai6::guatiao::Provider)]
 #[provider(
     Terminal,
     id = "pty",
     name = "pty",
-    crate = ::ai6::guatiao
+    crate = ::ai6::guatiao,
+    config = PtyConfig
 )]
-pub struct Pty;
+pub struct Pty {
+    config: PtyConfig,
+}
+
+impl Pty {
+    /// A provider with `config`.
+    pub fn new(config: PtyConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl TryFrom<PtyConfig> for Pty {
+    type Error = ProviderError;
+
+    fn try_from(config: PtyConfig) -> Result<Self, Self::Error> {
+        if config.read_chunk_bytes == 0 {
+            return Err(refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "read_chunk_bytes is 0: a read of no bytes never sees any output",
+            ));
+        }
+        Ok(Self::new(config))
+    }
+}
 
 impl Terminal for Pty {
     fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
         let spec = Spec::from_value(spec).map_err(|e| refuse(Status::GUATIAO_ERR_BAD_VALUE, e))?;
-        Ok(PtySession::start(&spec)?.into_object())
+        Ok(PtySession::start(&spec, self.config)?.into_object())
     }
 }
 
@@ -98,10 +152,15 @@ struct PtySession {
     child: Mutex<Box<dyn Child + Send + Sync>>,
     tree: ProcessTree,
     exit: Mutex<Option<ExitInfo>>,
+    /// How long the output must stay quiet after the child has exited, and how long `kill`
+    /// waits for it to have gone.
+    drain_quiet: Duration,
+    kill_wait: Duration,
 }
 
 impl PtySession {
-    fn start(spec: &Spec) -> Result<Self, ProviderError> {
+    fn start(spec: &Spec, config: PtyConfig) -> Result<Self, ProviderError> {
+        let read_chunk = usize::try_from(config.read_chunk_bytes).unwrap_or(usize::MAX);
         let (program, args) = spec
             .argv
             .split_first()
@@ -125,7 +184,10 @@ impl PtySession {
             cmd.cwd(dir);
         }
         let child = pair.slave.spawn_command(cmd).map_err(internal)?;
-        let tree = match os::adopt(child.process_id()) {
+        let tree = match os::adopt(
+            child.process_id(),
+            usize::try_from(config.tree_scans).unwrap_or(usize::MAX),
+        ) {
             Ok(tree) => tree,
             Err(error) => {
                 let mut child = child;
@@ -160,7 +222,7 @@ impl PtySession {
         std::thread::Builder::new()
             .name(format!("pty-{pid}"))
             .spawn(move || {
-                let mut buf = vec![0u8; READ_CHUNK];
+                let mut buf = vec![0u8; read_chunk];
                 #[cfg(windows)]
                 let mut queries = CursorQueries::default();
                 loop {
@@ -206,6 +268,8 @@ impl PtySession {
             child: Mutex::new(child),
             tree,
             exit: Mutex::new(None),
+            drain_quiet: Duration::from_millis(config.drain_quiet_ms),
+            kill_wait: Duration::from_millis(config.kill_wait_ms),
         })
     }
 
@@ -236,7 +300,9 @@ impl TerminalSession for PtySession {
             loop {
                 let now = Instant::now();
                 let drained_at = match self.poll_exit()? {
-                    Some(_) => Some(*lock(&self.quiet_since)?.get_or_insert(now) + DRAIN_QUIET),
+                    Some(_) => {
+                        Some(*lock(&self.quiet_since)?.get_or_insert(now) + self.drain_quiet)
+                    }
                     None => None,
                 };
                 let until = drained_at.unwrap_or(now + EXIT_CHECK).min(deadline);
@@ -249,7 +315,7 @@ impl TerminalSession for PtySession {
                     Err(RecvTimeoutError::Disconnected) => {
                         // The terminal can close before the child is reaped; the end of output
                         // promises its exit status, so wait for it as kill does.
-                        let settle = Instant::now() + KILL_WAIT;
+                        let settle = Instant::now() + self.kill_wait;
                         while self.poll_exit()?.is_none() && Instant::now() < settle {
                             std::thread::sleep(EXIT_POLL);
                         }
@@ -297,7 +363,7 @@ impl TerminalSession for PtySession {
         // An error here means it already exited, which is what was asked.
         let _ = lock(&self.child)?.kill();
         // Killing is asynchronous; a caller may remove the working directory next.
-        let deadline = Instant::now() + KILL_WAIT;
+        let deadline = Instant::now() + self.kill_wait;
         while (self.poll_exit()?.is_none() || self.tree.running()) && Instant::now() < deadline {
             std::thread::sleep(EXIT_POLL);
         }

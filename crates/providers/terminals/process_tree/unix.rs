@@ -18,12 +18,10 @@
 use std::collections::BTreeSet;
 use std::io;
 
-/// How many times the process table is read again for processes started meanwhile; each scan
-/// stops what it finds, so a tree stops growing after a few.
-const MAX_SCANS: usize = 32;
-
-/// A program's process tree: its process ID, which is also its process group and session ID.
-pub(crate) struct ProcessTree(libc::pid_t);
+/// A program's process tree: its process ID, which is also its process group and session ID,
+/// and how many times the process table is read again for processes started meanwhile (each
+/// scan stops what it finds, so a tree stops growing after a few).
+pub(crate) struct ProcessTree(libc::pid_t, usize);
 
 /// One process of the table: its ID, its parent's, its process group's and, where the platform
 /// says, its session's.
@@ -36,10 +34,10 @@ struct Entry {
 
 impl ProcessTree {
     /// The tree of the program with process ID `pid`, which leads its own process group.
-    pub(crate) fn of(pid: Option<u32>) -> io::Result<Self> {
+    pub(crate) fn of(pid: Option<u32>, scans: usize) -> io::Result<Self> {
         pid.and_then(|pid| libc::pid_t::try_from(pid).ok())
             .filter(|&pid| pid > 1)
-            .map(Self)
+            .map(|pid| Self(pid, scans))
             .ok_or_else(|| io::Error::other("the child's process ID is unknown or out of range"))
     }
 
@@ -69,7 +67,7 @@ impl ProcessTree {
         let leader = self.0;
         let me = std::process::id() as libc::pid_t;
         let mut found = BTreeSet::new();
-        for _ in 0..MAX_SCANS {
+        for _ in 0..self.1 {
             let table = processes();
             let before = found.len();
             loop {

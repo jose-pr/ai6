@@ -16,11 +16,6 @@ use ai6::directorates::q::terminal::ExitInfo;
 use crate::process_tree::ProcessTree;
 use crate::{ErrorOutput, Launch};
 
-/// The highest descriptor the child marks close-on-exec where it cannot mark them all at once
-/// (`close_range` is Linux 5.11 or later): a soft `RLIMIT_NOFILE` of a million would take as many
-/// calls.
-const MAX_SWEPT_FD: libc::rlim_t = 65536;
-
 /// A started child.
 pub(crate) struct Process(Child);
 
@@ -63,13 +58,14 @@ pub(crate) fn spawn(launch: Launch<'_>) -> io::Result<(Process, ProcessTree)> {
         ErrorOutput::Pipe(writer) => Stdio::from(writer),
     };
     cmd.stdin(launch.stdin).stdout(launch.stdout).stderr(stderr);
+    let swept_fds = launch.swept_fds;
     // SAFETY: the hook runs in the child between fork and exec, and calls only setsid, fcntl,
     // getrlimit and close_range, which are async-signal-safe and allocate nothing.
-    unsafe { cmd.pre_exec(start_alone) };
+    unsafe { cmd.pre_exec(move || start_alone(swept_fds)) };
     let mut child = cmd.spawn()?;
     // The command holds the child's ends of the pipes.
     drop(cmd);
-    match ProcessTree::of(Some(child.id())) {
+    match ProcessTree::of(Some(child.id()), launch.tree_scans) {
         Ok(tree) => Ok((Process(child), tree)),
         Err(error) => {
             let _ = child.kill();
@@ -79,19 +75,20 @@ pub(crate) fn spawn(launch: Launch<'_>) -> io::Result<(Process, ProcessTree)> {
     }
 }
 
-fn start_alone() -> io::Result<()> {
+fn start_alone(swept_fds: u64) -> io::Result<()> {
     // SAFETY: setsid takes no argument and touches no memory.
     if unsafe { libc::setsid() } == -1 {
         return Err(io::Error::last_os_error());
     }
     // Marked close-on-exec rather than closed: the standard library reports a failed exec over
     // a close-on-exec pipe of its own, which must stay open until the exec.
-    close_on_exec_from(3);
+    close_on_exec_from(3, swept_fds);
     Ok(())
 }
 
-/// Marks every descriptor from `first` up close-on-exec.
-fn close_on_exec_from(first: libc::c_int) {
+/// Marks every descriptor from `first` up close-on-exec, up to descriptor `swept_fds` where
+/// `close_range` is not there to do it at once.
+fn close_on_exec_from(first: libc::c_int, swept_fds: u64) {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         const CLOSE_RANGE_CLOEXEC: libc::c_uint = 1 << 2;
@@ -114,10 +111,10 @@ fn close_on_exec_from(first: libc::c_int) {
     };
     // SAFETY: getrlimit writes only the `rlimit` it is given.
     let top = match unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } {
-        0 if limit.rlim_cur != libc::RLIM_INFINITY => limit.rlim_cur.min(MAX_SWEPT_FD),
-        _ => MAX_SWEPT_FD,
+        0 if limit.rlim_cur != libc::RLIM_INFINITY => limit.rlim_cur.min(swept_fds as libc::rlim_t),
+        _ => swept_fds as libc::rlim_t,
     };
-    for fd in first..top as libc::c_int {
+    for fd in first..top.min(libc::c_int::MAX as libc::rlim_t) as libc::c_int {
         // SAFETY: fcntl on a descriptor number touches no memory; one that is not open fails.
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
         if flags >= 0 && flags & libc::FD_CLOEXEC == 0 {

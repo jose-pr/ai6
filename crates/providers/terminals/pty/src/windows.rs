@@ -25,12 +25,9 @@ use windows_sys::Win32::System::Threading::{
 
 pub(crate) use crate::process_tree::ProcessTree;
 
-/// How many times the process table is read again for processes started meanwhile.
-const MAX_SCANS: usize = 8;
-
 /// Puts the child in a new kill-on-close Job Object, with every process it started before it
 /// joined, so killing the job kills every process the child started.
-pub(crate) fn adopt(pid: Option<u32>) -> io::Result<ProcessTree> {
+pub(crate) fn adopt(pid: Option<u32>, scans: usize) -> io::Result<ProcessTree> {
     let pid =
         pid.ok_or_else(|| io::Error::other("portable-pty did not return the Windows process ID"))?;
     let tree = ProcessTree::new()?;
@@ -39,7 +36,7 @@ pub(crate) fn adopt(pid: Option<u32>) -> io::Result<ProcessTree> {
     if unsafe { AssignProcessToJobObject(tree.handle(), child.as_raw_handle()) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    adopt_descendants(&tree, pid, created(&child)?);
+    adopt_descendants(&tree, pid, created(&child)?, scans);
     Ok(tree)
 }
 
@@ -47,9 +44,9 @@ pub(crate) fn adopt(pid: Option<u32>) -> io::Result<ProcessTree> {
 /// none. A process counts as a child only when it was created after its parent `root` (the
 /// tree's first process, created at `since`): a parent ID is never updated, so a process whose
 /// parent exited long ago may name a reused one.
-fn adopt_descendants(tree: &ProcessTree, root: u32, since: u64) {
+fn adopt_descendants(tree: &ProcessTree, root: u32, since: u64, scans: usize) {
     let mut found = BTreeSet::from([root]);
-    for _ in 0..MAX_SCANS {
+    for _ in 0..scans {
         let mut grew = false;
         for (pid, parent) in processes() {
             if found.contains(&pid) || !found.contains(&parent) {
@@ -197,7 +194,7 @@ mod tests {
             assert!(Instant::now() < deadline, "cmd.exe started {started:?}");
             std::thread::sleep(Duration::from_millis(20));
         };
-        let tree = adopt(Some(child.id())).unwrap();
+        let tree = adopt(Some(child.id()), 8).unwrap();
         for pid in started {
             let process = open(pid).unwrap();
             let mut inside = 0;
