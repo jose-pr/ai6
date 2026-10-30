@@ -1,9 +1,25 @@
 pub mod ai6_agent_codex
 pub struct ai6_agent_codex::CodexConfig
+pub ai6_agent_codex::CodexConfig::close_wait_ms: u64
+pub ai6_agent_codex::CodexConfig::context_file_bytes: u64
+pub ai6_agent_codex::CodexConfig::csi_bytes: u64
 pub ai6_agent_codex::CodexConfig::executable: alloc::string::String
+pub ai6_agent_codex::CodexConfig::exit_wait_ms: u64
+pub ai6_agent_codex::CodexConfig::json_line_bytes: u64
+pub ai6_agent_codex::CodexConfig::request_timeout_ms: u64
+pub ai6_agent_codex::CodexConfig::sandbox_error_chars: u64
+pub ai6_agent_codex::CodexConfig::sandbox_probe_lifetime_secs: u64
+pub ai6_agent_codex::CodexConfig::sandbox_probe_timeout_ms: u64
+pub ai6_agent_codex::CodexConfig::start_timeout_ms: u64
+pub ai6_agent_codex::CodexConfig::tail_line_bytes: u64
+pub ai6_agent_codex::CodexConfig::tail_lines: u64
+pub ai6_agent_codex::CodexConfig::tool_check_lifetime_secs: u64
+pub ai6_agent_codex::CodexConfig::tool_command_timeout_ms: u64
 impl core::convert::TryFrom<ai6_agent_codex::CodexConfig> for ai6_agent_codex::CodexHandler
 pub type ai6_agent_codex::CodexHandler::Error = guatiao::library::kind::ProviderError
 pub fn ai6_agent_codex::CodexHandler::try_from(ai6_agent_codex::CodexConfig) -> core::result::Result<Self, Self::Error>
+impl core::default::Default for ai6_agent_codex::CodexConfig
+pub fn ai6_agent_codex::CodexConfig::default() -> Self
 pub struct ai6_agent_codex::CodexHandler
 impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_codex::CodexHandler
 pub fn ai6_agent_codex::CodexHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>

@@ -1,9 +1,22 @@
 pub mod ai6_safehouse_git
 pub struct ai6_safehouse_git::Git
+impl ai6_safehouse_git::Git
+pub fn ai6_safehouse_git::Git::new(ai6_safehouse_git::GitConfig) -> Self
 impl ai6::directorates::q::safehouse::SafeHouseProvider for ai6_safehouse_git::Git
 pub fn ai6_safehouse_git::Git::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6_safehouse_git::GitConfig> for ai6_safehouse_git::Git
+pub type ai6_safehouse_git::Git::Error = guatiao::library::kind::ProviderError
+pub fn ai6_safehouse_git::Git::try_from(ai6_safehouse_git::GitConfig) -> core::result::Result<Self, Self::Error>
 impl guatiao::library::kind::parts::ProviderDecl for ai6_safehouse_git::Git
 pub const ai6_safehouse_git::Git::KINDS: &'static [&'static str]
 pub fn ai6_safehouse_git::Git::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub struct ai6_safehouse_git::GitConfig
+pub ai6_safehouse_git::GitConfig::git_timeout_ms: u64
+pub ai6_safehouse_git::GitConfig::measure_every_ms: u64
+impl core::convert::TryFrom<ai6_safehouse_git::GitConfig> for ai6_safehouse_git::Git
+pub type ai6_safehouse_git::Git::Error = guatiao::library::kind::ProviderError
+pub fn ai6_safehouse_git::Git::try_from(ai6_safehouse_git::GitConfig) -> core::result::Result<Self, Self::Error>
+impl core::default::Default for ai6_safehouse_git::GitConfig
+pub fn ai6_safehouse_git::GitConfig::default() -> Self
 #[no_mangle] pub static ai6_safehouse_git::guatiao_declares: [u8; 20]
 #[no_mangle] pub unsafe c fn ai6_safehouse_git::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

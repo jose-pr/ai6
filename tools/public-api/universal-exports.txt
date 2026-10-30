@@ -20,7 +20,7 @@ impl universal_exports::AccessProviders
 pub fn universal_exports::AccessProviders::from_reverse_proxy(alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn universal_exports::AccessProviders::new(alloc::sync::Arc<dyn coqui_access::kind::Authenticator>, alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>) -> Self
 pub fn universal_exports::AccessProviders::with_proxy_identity(self, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn universal_exports::AccessProviders::with_proxy_secret(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, alloc::string::String>
+pub fn universal_exports::AccessProviders::with_proxy_secret(self, impl core::convert::Into<alloc::string::String>, usize) -> core::result::Result<Self, alloc::string::String>
 impl core::fmt::Debug for universal_exports::AccessProviders
 pub fn universal_exports::AccessProviders::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::AgentInput
@@ -194,16 +194,23 @@ impl universal_exports::GatewayConfig
 pub fn universal_exports::GatewayConfig::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, universal_exports::GatewayLimits, core::time::Duration, core::time::Duration) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::GatewayConfig::public_origin(&self) -> &str
 pub fn universal_exports::GatewayConfig::with_login_limits(self, universal_exports::LoginLimits) -> Self
+pub fn universal_exports::GatewayConfig::with_unex_limits(self, ai6::directorates::m::unex_limits::UnexLimits) -> Self
 impl core::fmt::Debug for universal_exports::GatewayConfig
 pub fn universal_exports::GatewayConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::GatewayLimits
+pub universal_exports::GatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
+pub universal_exports::GatewayLimits::client_slots: ai6::bounds::Limit
 pub universal_exports::GatewayLimits::fanout_capacity: usize
 pub universal_exports::GatewayLimits::input_queue_capacity: usize
 pub universal_exports::GatewayLimits::max_clients_per_session: usize
 pub universal_exports::GatewayLimits::max_frame_bytes: usize
 pub universal_exports::GatewayLimits::max_input_frames_per_second: u32
 pub universal_exports::GatewayLimits::max_sessions: usize
+pub universal_exports::GatewayLimits::origin_bytes: ai6::bounds::Limit
 pub universal_exports::GatewayLimits::scrollback_events: usize
+pub universal_exports::GatewayLimits::station_token_min_bytes: usize
+impl core::convert::From<&ai6::directorates::m::unex_limits::UnexGatewayLimits> for universal_exports::GatewayLimits
+pub fn universal_exports::GatewayLimits::from(&ai6::directorates::m::unex_limits::UnexGatewayLimits) -> Self
 impl core::default::Default for universal_exports::GatewayLimits
 pub fn universal_exports::GatewayLimits::default() -> Self
 #[non_exhaustive] pub struct universal_exports::HeldBriefDecision
@@ -229,6 +236,10 @@ pub universal_exports::LaunchManifest::theater_id: core::option::Option<alloc::s
 pub universal_exports::LaunchManifest::working_directory: alloc::string::String
 pub struct universal_exports::LoginLimits
 pub universal_exports::LoginLimits::address_header: core::option::Option<http::header::name::HeaderName>
+pub universal_exports::LoginLimits::address_window: core::time::Duration
+pub universal_exports::LoginLimits::forget_every: u32
+pub universal_exports::LoginLimits::name_bytes: usize
+pub universal_exports::LoginLimits::name_window: core::time::Duration
 pub universal_exports::LoginLimits::per_address: core::num::nonzero::NonZeroU32
 pub universal_exports::LoginLimits::per_name: core::num::nonzero::NonZeroU32
 impl core::default::Default for universal_exports::LoginLimits
@@ -309,7 +320,4 @@ pub universal_exports::ViewLimits::text_bytes: usize
 pub universal_exports::ViewLimits::view_bytes: usize
 impl core::default::Default for universal_exports::ViewLimits
 pub fn universal_exports::ViewLimits::default() -> Self
-pub const universal_exports::DEFAULT_TIMELINE_PAGE: usize
-pub const universal_exports::MAX_TIMELINE_PAGE: usize
-pub const universal_exports::MIN_PROXY_SECRET_LEN: usize
 pub const universal_exports::PROXY_SECRET_HEADER: &str

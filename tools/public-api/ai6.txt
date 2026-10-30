@@ -93,6 +93,7 @@ pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::weakenings(&self) -> 
 impl ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::listen(&self) -> core::net::socket_addr::SocketAddr
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::provider_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::proxy_secret_min_bytes(&self) -> u64
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::registry_password(&self) -> core::option::Option<&ai6::bootstrap::SecretRef>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
@@ -137,6 +138,7 @@ pub ai6::bootstrap::UnexBootstrap::listen: core::option::Option<core::net::socke
 pub ai6::bootstrap::UnexBootstrap::plugins: ai6::bootstrap::PluginSettings
 pub ai6::bootstrap::UnexBootstrap::provider: ai6::bootstrap::ProviderSettings
 pub ai6::bootstrap::UnexBootstrap::proxy_secret: core::option::Option<ai6::bootstrap::SecretRef>
+pub ai6::bootstrap::UnexBootstrap::proxy_secret_min_bytes: core::option::Option<u64>
 pub ai6::bootstrap::UnexBootstrap::public_origin: core::option::Option<alloc::string::String>
 pub ai6::bootstrap::UnexBootstrap::registry: ai6::bootstrap::RegistrySettings
 pub ai6::bootstrap::UnexBootstrap::state_dir: core::option::Option<std::path::PathBuf>
@@ -150,6 +152,7 @@ pub ai6::bootstrap::UnexSettings::url: alloc::string::String
 pub const ai6::bootstrap::CONFIG_ENV: &str
 pub const ai6::bootstrap::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::bootstrap::DEFAULT_POLL: core::time::Duration
+pub const ai6::bootstrap::DEFAULT_PROXY_SECRET_MIN_BYTES: u64
 pub const ai6::bootstrap::DEFAULT_UNEX_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::bootstrap::FILE_NAME: &str
 pub const ai6::bootstrap::UNEX_CONFIG_ENV: &str
@@ -551,14 +554,21 @@ pub ai6::directorates::m::config::UnexRecord::authenticator_config: core::option
 pub ai6::directorates::m::config::UnexRecord::authorizer: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::config::UnexRecord::authorizer_config: core::option::Option<serde_json::map::Map<alloc::string::String, serde_json::value::Value>>
 pub ai6::directorates::m::config::UnexRecord::client_address_header: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::config::UnexRecord::controls: ai6::directorates::m::unex_limits::ControlLimits
 pub ai6::directorates::m::config::UnexRecord::directory: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::config::UnexRecord::directory_config: core::option::Option<serde_json::map::Map<alloc::string::String, serde_json::value::Value>>
+pub ai6::directorates::m::config::UnexRecord::gateway: ai6::directorates::m::unex_limits::UnexGatewayLimits
+pub ai6::directorates::m::config::UnexRecord::login: ai6::directorates::m::unex_limits::LoginTable
 pub ai6::directorates::m::config::UnexRecord::login_tries_per_address: core::option::Option<u32>
 pub ai6::directorates::m::config::UnexRecord::login_tries_per_name: core::option::Option<u32>
+pub ai6::directorates::m::config::UnexRecord::provider_config_depth: ai6::bounds::Limit
 pub ai6::directorates::m::config::UnexRecord::proxy_lookup_by: alloc::string::String
 pub ai6::directorates::m::config::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::config::UnexRecord::route_text_bytes: core::option::Option<u64>
+pub ai6::directorates::m::config::UnexRecord::text: ai6::directorates::m::unex_limits::TextLimits
+pub ai6::directorates::m::config::UnexRecord::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
 impl ai6::directorates::m::config::UnexRecord
+pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directorates::m::unex_limits::UnexLimits
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
@@ -1177,9 +1187,12 @@ pub fn ai6::directorates::m::theaters::RunnerSettings::with_state_dir(self, impl
 pub fn ai6::directorates::m::theaters::RunnerSettings::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::SshAccess
 pub ai6::directorates::m::theaters::SshAccess::connect_timeout_secs: core::option::Option<u64>
+pub ai6::directorates::m::theaters::SshAccess::exit_grace_ms: core::option::Option<u64>
 pub ai6::directorates::m::theaters::SshAccess::host: alloc::string::String
 pub ai6::directorates::m::theaters::SshAccess::host_key: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::theaters::SshAccess::identity: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::SshAccess::keepalive_max: core::option::Option<usize>
+pub ai6::directorates::m::theaters::SshAccess::keepalive_secs: core::option::Option<u64>
 pub ai6::directorates::m::theaters::SshAccess::port: core::option::Option<u16>
 pub ai6::directorates::m::theaters::SshAccess::trust_on_first_use: bool
 pub ai6::directorates::m::theaters::SshAccess::user: core::option::Option<alloc::string::String>
@@ -1258,6 +1271,64 @@ pub const ai6::directorates::m::theaters::DEFAULT_KEEP_FAILED: usize
 pub const ai6::directorates::m::theaters::DEFAULT_KEEP_FAILED_HOURS: u64
 pub const ai6::directorates::m::theaters::LOCAL_THEATER: &str
 pub fn ai6::directorates::m::theaters::is_sha256_pin(&str) -> bool
+pub mod ai6::directorates::m::unex_limits
+#[non_exhaustive] pub struct ai6::directorates::m::unex_limits::ControlLimits
+pub ai6::directorates::m::unex_limits::ControlLimits::controls: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::ControlLimits::idempotency_key_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::ControlLimits::max_poll_wait: ai6::bounds::TimeLimit
+pub ai6::directorates::m::unex_limits::ControlLimits::pending_per_station: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::ControlLimits::poll_wait: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::ControlLimits::reason_chars: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::ControlLimits::ttl: ai6::bounds::Seconds
+impl core::default::Default for ai6::directorates::m::unex_limits::ControlLimits
+pub fn ai6::directorates::m::unex_limits::ControlLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::unex_limits::LoginTable
+pub ai6::directorates::m::unex_limits::LoginTable::address_window: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::LoginTable::forget_every: u64
+pub ai6::directorates::m::unex_limits::LoginTable::name_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::LoginTable::name_window: ai6::bounds::Seconds
+impl core::default::Default for ai6::directorates::m::unex_limits::LoginTable
+pub fn ai6::directorates::m::unex_limits::LoginTable::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::unex_limits::TextLimits
+pub ai6::directorates::m::unex_limits::TextLimits::agent_reason_chars: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::TextLimits::green_ink_max_grant: ai6::bounds::TimeLimit
+pub ai6::directorates::m::unex_limits::TextLimits::green_ink_note_chars: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::TextLimits::held_reason_chars: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::TextLimits::roster_key_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::TextLimits::roster_target_bytes: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::m::unex_limits::TextLimits
+pub fn ai6::directorates::m::unex_limits::TextLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::unex_limits::UnexGatewayLimits
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::attach_token_ttl: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::client_slots: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::clients_per_session: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::fanout: u64
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::frame_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::input_frames_per_second: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::input_queue: u64
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::origin_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::scrollback_events: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::sessions: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::station_token_min_bytes: u64
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::write_lease_ttl: ai6::bounds::Seconds
+impl core::default::Default for ai6::directorates::m::unex_limits::UnexGatewayLimits
+pub fn ai6::directorates::m::unex_limits::UnexGatewayLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::unex_limits::UnexLimits
+pub ai6::directorates::m::unex_limits::UnexLimits::controls: ai6::directorates::m::unex_limits::ControlLimits
+pub ai6::directorates::m::unex_limits::UnexLimits::gateway: ai6::directorates::m::unex_limits::UnexGatewayLimits
+pub ai6::directorates::m::unex_limits::UnexLimits::login: ai6::directorates::m::unex_limits::LoginTable
+pub ai6::directorates::m::unex_limits::UnexLimits::text: ai6::directorates::m::unex_limits::TextLimits
+pub ai6::directorates::m::unex_limits::UnexLimits::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
+impl ai6::directorates::m::unex_limits::UnexLimits
+pub fn ai6::directorates::m::unex_limits::UnexLimits::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::unex_limits::UnexLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::unex_limits::UnexTimelineLimits
+pub ai6::directorates::m::unex_limits::UnexTimelineLimits::max_page: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexTimelineLimits::page: u64
+pub ai6::directorates::m::unex_limits::UnexTimelineLimits::text_chars: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::m::unex_limits::UnexTimelineLimits
+pub fn ai6::directorates::m::unex_limits::UnexTimelineLimits::default() -> Self
 pub mod ai6::directorates::m::vetting
 #[non_exhaustive] pub enum ai6::directorates::m::vetting::FindingKind
 pub ai6::directorates::m::vetting::FindingKind::Budget
@@ -1854,6 +1925,7 @@ pub struct ai6::directorates::q::transport::kit::ProcessInput<'a>
 pub ai6::directorates::q::transport::kit::ProcessInput::max_output: u64
 pub ai6::directorates::q::transport::kit::ProcessInput::stdin: core::option::Option<&'a [u8]>
 pub ai6::directorates::q::transport::kit::ProcessInput::timeout_ms: u64
+pub const ai6::directorates::q::transport::kit::DEFAULT_READER_GRACE_MS: u64
 pub const ai6::directorates::q::transport::kit::EXIT_NOT_FOUND: i64
 pub trait ai6::directorates::q::transport::kit::Shell
 pub fn ai6::directorates::q::transport::kit::Shell::sh(&self, &str, core::option::Option<&[u8]>, u64) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
@@ -1863,7 +1935,7 @@ pub fn ai6::directorates::q::transport::kit::is_variable_name(&str) -> bool
 pub fn ai6::directorates::q::transport::kit::list_dir(&dyn ai6::directorates::q::transport::kit::Shell, &str) -> core::result::Result<ai6::directorates::q::transport::DirListing, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::transport::kit::quote(&str) -> alloc::string::String
 pub fn ai6::directorates::q::transport::kit::read_file(&dyn ai6::directorates::q::transport::kit::Shell, &ai6::directorates::q::transport::ReadSpec) -> core::result::Result<ai6::directorates::q::transport::FileData, guatiao::library::kind::ProviderError>
-pub fn ai6::directorates::q::transport::kit::run_process(&mut std::process::Command, &ai6::directorates::q::transport::kit::ProcessInput<'_>) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::transport::kit::run_process(&mut std::process::Command, &ai6::directorates::q::transport::kit::ProcessInput<'_>, core::time::Duration) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::transport::kit::write_file(&dyn ai6::directorates::q::transport::kit::Shell, &ai6::directorates::q::transport::WriteSpec) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub struct ai6::directorates::q::transport::Capabilities
 pub ai6::directorates::q::transport::Capabilities::arch: core::option::Option<alloc::string::String>
@@ -6197,6 +6269,16 @@ pub fn ai6::directorates::m::config::ConfigSnapshot::new(ai6::directorates::m::c
 pub ai6::ConfigStatus::needs_restart: alloc::vec::Vec<alloc::string::String>
 pub ai6::ConfigStatus::refused: alloc::vec::Vec<alloc::string::String>
 pub ai6::ConfigStatus::revision: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::ControlLimits
+pub ai6::ControlLimits::controls: ai6::bounds::Limit
+pub ai6::ControlLimits::idempotency_key_bytes: ai6::bounds::Limit
+pub ai6::ControlLimits::max_poll_wait: ai6::bounds::TimeLimit
+pub ai6::ControlLimits::pending_per_station: ai6::bounds::Limit
+pub ai6::ControlLimits::poll_wait: ai6::bounds::Seconds
+pub ai6::ControlLimits::reason_chars: ai6::bounds::Limit
+pub ai6::ControlLimits::ttl: ai6::bounds::Seconds
+impl core::default::Default for ai6::directorates::m::unex_limits::ControlLimits
+pub fn ai6::directorates::m::unex_limits::ControlLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::Cover
 impl ai6::directorates::m::cover::Cover
 pub fn ai6::directorates::m::cover::Cover::briefing(&self, core::option::Option<&ai6::directorates::m::roster::CoverIdentity>, &str, &str) -> alloc::string::String
@@ -6594,6 +6676,13 @@ impl ai6::directorates::registry::limits::LogbookLimits
 pub fn ai6::directorates::registry::limits::LogbookLimits::record_bytes(&self) -> ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::LogbookLimits
 pub fn ai6::directorates::registry::limits::LogbookLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::LoginTable
+pub ai6::LoginTable::address_window: ai6::bounds::Seconds
+pub ai6::LoginTable::forget_every: u64
+pub ai6::LoginTable::name_bytes: ai6::bounds::Limit
+pub ai6::LoginTable::name_window: ai6::bounds::Seconds
+impl core::default::Default for ai6::directorates::m::unex_limits::LoginTable
+pub fn ai6::directorates::m::unex_limits::LoginTable::default() -> Self
 pub struct ai6::MadeTheater
 pub ai6::MadeTheater::created_at: u64
 pub ai6::MadeTheater::mission: alloc::string::String
@@ -7569,9 +7658,12 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::release_held(&self, &str, 
 pub fn ai6::directorates::registry::sql::SqlRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 #[non_exhaustive] pub struct ai6::SshAccess
 pub ai6::SshAccess::connect_timeout_secs: core::option::Option<u64>
+pub ai6::SshAccess::exit_grace_ms: core::option::Option<u64>
 pub ai6::SshAccess::host: alloc::string::String
 pub ai6::SshAccess::host_key: core::option::Option<alloc::string::String>
 pub ai6::SshAccess::identity: core::option::Option<alloc::string::String>
+pub ai6::SshAccess::keepalive_max: core::option::Option<usize>
+pub ai6::SshAccess::keepalive_secs: core::option::Option<u64>
 pub ai6::SshAccess::port: core::option::Option<u16>
 pub ai6::SshAccess::trust_on_first_use: bool
 pub ai6::SshAccess::user: core::option::Option<alloc::string::String>
@@ -7694,6 +7786,15 @@ pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::va
 pub struct ai6::TerminalOffer
 pub ai6::TerminalOffer::id: alloc::string::String
 pub ai6::TerminalOffer::tty: bool
+#[non_exhaustive] pub struct ai6::TextLimits
+pub ai6::TextLimits::agent_reason_chars: ai6::bounds::Limit
+pub ai6::TextLimits::green_ink_max_grant: ai6::bounds::TimeLimit
+pub ai6::TextLimits::green_ink_note_chars: ai6::bounds::Limit
+pub ai6::TextLimits::held_reason_chars: ai6::bounds::Limit
+pub ai6::TextLimits::roster_key_bytes: ai6::bounds::Limit
+pub ai6::TextLimits::roster_target_bytes: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::m::unex_limits::TextLimits
+pub fn ai6::directorates::m::unex_limits::TextLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::Theater
 pub ai6::Theater::access: ai6::directorates::m::theaters::TheaterAccess
 pub ai6::Theater::agents: ai6::directorates::m::theaters::AgentMode
@@ -7836,6 +7937,31 @@ pub fn ai6::directorates::q::transport::TransportClient::run(&self, &ai6::direct
 pub fn ai6::directorates::q::transport::TransportClient::write_file(&self, &ai6::directorates::q::transport::WriteSpec) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub struct ai6::TransportConfig
 pub ai6::TransportConfig::settings_toml: alloc::string::String
+#[non_exhaustive] pub struct ai6::UnexGatewayLimits
+pub ai6::UnexGatewayLimits::attach_token_ttl: ai6::bounds::Seconds
+pub ai6::UnexGatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::client_slots: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::clients_per_session: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::fanout: u64
+pub ai6::UnexGatewayLimits::frame_bytes: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::input_frames_per_second: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::input_queue: u64
+pub ai6::UnexGatewayLimits::origin_bytes: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::scrollback_events: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::sessions: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::station_token_min_bytes: u64
+pub ai6::UnexGatewayLimits::write_lease_ttl: ai6::bounds::Seconds
+impl core::default::Default for ai6::directorates::m::unex_limits::UnexGatewayLimits
+pub fn ai6::directorates::m::unex_limits::UnexGatewayLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::UnexLimits
+pub ai6::UnexLimits::controls: ai6::directorates::m::unex_limits::ControlLimits
+pub ai6::UnexLimits::gateway: ai6::directorates::m::unex_limits::UnexGatewayLimits
+pub ai6::UnexLimits::login: ai6::directorates::m::unex_limits::LoginTable
+pub ai6::UnexLimits::text: ai6::directorates::m::unex_limits::TextLimits
+pub ai6::UnexLimits::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
+impl ai6::directorates::m::unex_limits::UnexLimits
+pub fn ai6::directorates::m::unex_limits::UnexLimits::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::unex_limits::UnexLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct ai6::UnexRecord
 pub ai6::UnexRecord::access_cache_entries: core::option::Option<u64>
 pub ai6::UnexRecord::access_cache_negative_ttl: core::option::Option<f64>
@@ -7847,17 +7973,30 @@ pub ai6::UnexRecord::authenticator_config: core::option::Option<serde_json::map:
 pub ai6::UnexRecord::authorizer: core::option::Option<alloc::string::String>
 pub ai6::UnexRecord::authorizer_config: core::option::Option<serde_json::map::Map<alloc::string::String, serde_json::value::Value>>
 pub ai6::UnexRecord::client_address_header: core::option::Option<alloc::string::String>
+pub ai6::UnexRecord::controls: ai6::directorates::m::unex_limits::ControlLimits
 pub ai6::UnexRecord::directory: core::option::Option<alloc::string::String>
 pub ai6::UnexRecord::directory_config: core::option::Option<serde_json::map::Map<alloc::string::String, serde_json::value::Value>>
+pub ai6::UnexRecord::gateway: ai6::directorates::m::unex_limits::UnexGatewayLimits
+pub ai6::UnexRecord::login: ai6::directorates::m::unex_limits::LoginTable
 pub ai6::UnexRecord::login_tries_per_address: core::option::Option<u32>
 pub ai6::UnexRecord::login_tries_per_name: core::option::Option<u32>
+pub ai6::UnexRecord::provider_config_depth: ai6::bounds::Limit
 pub ai6::UnexRecord::proxy_lookup_by: alloc::string::String
 pub ai6::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
 pub ai6::UnexRecord::route_text_bytes: core::option::Option<u64>
+pub ai6::UnexRecord::text: ai6::directorates::m::unex_limits::TextLimits
+pub ai6::UnexRecord::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
 impl ai6::directorates::m::config::UnexRecord
+pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directorates::m::unex_limits::UnexLimits
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
+#[non_exhaustive] pub struct ai6::UnexTimelineLimits
+pub ai6::UnexTimelineLimits::max_page: ai6::bounds::Limit
+pub ai6::UnexTimelineLimits::page: u64
+pub ai6::UnexTimelineLimits::text_chars: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::m::unex_limits::UnexTimelineLimits
+pub fn ai6::directorates::m::unex_limits::UnexTimelineLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::Unmet
 pub ai6::Unmet::name: alloc::string::String
 pub ai6::Unmet::reason: alloc::string::String

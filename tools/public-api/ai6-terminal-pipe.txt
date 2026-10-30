@@ -16,10 +16,17 @@ impl guatiao::library::kind::parts::ProviderDecl for ai6_terminal_pipe::Pipe
 pub const ai6_terminal_pipe::Pipe::KINDS: &'static [&'static str]
 pub fn ai6_terminal_pipe::Pipe::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
 pub struct ai6_terminal_pipe::PipeConfig
+pub ai6_terminal_pipe::PipeConfig::drain_quiet_ms: u64
+pub ai6_terminal_pipe::PipeConfig::kill_wait_ms: u64
+pub ai6_terminal_pipe::PipeConfig::read_chunk_bytes: u64
 pub ai6_terminal_pipe::PipeConfig::stderr: ai6_terminal_pipe::StderrMode
+pub ai6_terminal_pipe::PipeConfig::stderr_tail_bytes: u64
+pub ai6_terminal_pipe::PipeConfig::swept_fds: u64
+pub ai6_terminal_pipe::PipeConfig::tree_scans: u64
 impl core::convert::TryFrom<ai6_terminal_pipe::PipeConfig> for ai6_terminal_pipe::Pipe
 pub type ai6_terminal_pipe::Pipe::Error = guatiao::library::kind::ProviderError
 pub fn ai6_terminal_pipe::Pipe::try_from(ai6_terminal_pipe::PipeConfig) -> core::result::Result<Self, Self::Error>
-pub const ai6_terminal_pipe::STDERR_TAIL_BYTES: usize
+impl core::default::Default for ai6_terminal_pipe::PipeConfig
+pub fn ai6_terminal_pipe::PipeConfig::default() -> Self
 #[no_mangle] pub static ai6_terminal_pipe::guatiao_declares: [u8; 19]
 #[no_mangle] pub unsafe c fn ai6_terminal_pipe::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

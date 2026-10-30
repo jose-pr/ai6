@@ -1,9 +1,17 @@
 pub mod ai6_agent_claude
 pub struct ai6_agent_claude::ClaudeConfig
+pub ai6_agent_claude::ClaudeConfig::close_wait_ms: u64
+pub ai6_agent_claude::ClaudeConfig::csi_bytes: u64
 pub ai6_agent_claude::ClaudeConfig::executable: alloc::string::String
+pub ai6_agent_claude::ClaudeConfig::exit_wait_ms: u64
+pub ai6_agent_claude::ClaudeConfig::json_line_bytes: u64
+pub ai6_agent_claude::ClaudeConfig::tail_line_bytes: u64
+pub ai6_agent_claude::ClaudeConfig::tail_lines: u64
 impl core::convert::TryFrom<ai6_agent_claude::ClaudeConfig> for ai6_agent_claude::ClaudeHandler
 pub type ai6_agent_claude::ClaudeHandler::Error = guatiao::library::kind::ProviderError
 pub fn ai6_agent_claude::ClaudeHandler::try_from(ai6_agent_claude::ClaudeConfig) -> core::result::Result<Self, Self::Error>
+impl core::default::Default for ai6_agent_claude::ClaudeConfig
+pub fn ai6_agent_claude::ClaudeConfig::default() -> Self
 pub struct ai6_agent_claude::ClaudeHandler
 impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_claude::ClaudeHandler
 pub fn ai6_agent_claude::ClaudeHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
