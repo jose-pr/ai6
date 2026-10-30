@@ -123,7 +123,7 @@ and a user bearer from `UNEX_ACCESS_TOKEN`. A Station publishes to Universal Exp
 | `ai6::station` | The Station: server, provider host, safe houses, publisher, mTLS identity |
 | `universal-exports` | The public API gateway: authentication, authorization, attachment, audit |
 | `ai6-diptel` | The wire contract for Session lifecycle and terminal frames |
-| `ai6-agent-claude`, `ai6-agent-codex` | AgentHandler providers |
+| `ai6-agent-claude`, `ai6-agent-codex`, `ai6-agent-acp` | AgentHandler providers (`acp` runs any Agent Client Protocol agent) |
 | `ai6-terminal-pty` | The `pty` terminal provider |
 | `ai6-terminal-pipe` | The `pipe` terminal provider, for harnesses that speak JSON |
 | `coqui-access`, `coqui-roles` (shared) | Access kinds, the role authorizer and the access providers AI6 loads |

@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Online or Dark, its last check-in, resources as sampled (or **Not reported**) and the
   Sessions running there; an Operation shows its access, Missions by state and recent
   activity ([Outer Office](https://github.com/jose-pr/ai6/blob/main/clients/outer-office/README.md)).
+- The `acp` handler (`ai6-agent-acp`): any Agent Client Protocol agent (the Claude and Codex
+  adapters, `gemini --acp`) is an Agent's handler, started with the Session's full
+  environment and judged by the green-ink gate. Configured by the Agent's `handler_settings`
+  (`command`, `args`, `env`, `meta`, option ids and timeouts).
 - An Agent's `handler_settings` table configures its handler provider (the provider validates
   it). Operator terminal input to a Claude or Codex Session, which speak JSON on plain pipes,
   is no longer written to the harness's input: typed lines become messages and Ctrl-C

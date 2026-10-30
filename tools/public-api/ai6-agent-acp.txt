@@ -1,0 +1,33 @@
+pub mod ai6_agent_acp
+pub struct ai6_agent_acp::AcpConfig
+pub ai6_agent_acp::AcpConfig::settings_toml: alloc::string::String
+impl core::convert::TryFrom<ai6_agent_acp::AcpConfig> for ai6_agent_acp::AcpHandler
+pub type ai6_agent_acp::AcpHandler::Error = guatiao::library::kind::ProviderError
+pub fn ai6_agent_acp::AcpHandler::try_from(ai6_agent_acp::AcpConfig) -> core::result::Result<Self, Self::Error>
+pub struct ai6_agent_acp::AcpHandler
+impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_acp::AcpHandler
+pub fn ai6_agent_acp::AcpHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_acp::AcpHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_acp::AcpHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6_agent_acp::AcpConfig> for ai6_agent_acp::AcpHandler
+pub type ai6_agent_acp::AcpHandler::Error = guatiao::library::kind::ProviderError
+pub fn ai6_agent_acp::AcpHandler::try_from(ai6_agent_acp::AcpConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_agent_acp::AcpHandler
+pub const ai6_agent_acp::AcpHandler::KINDS: &'static [&'static str]
+pub fn ai6_agent_acp::AcpHandler::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub struct ai6_agent_acp::AcpSettings
+pub ai6_agent_acp::AcpSettings::args: alloc::vec::Vec<alloc::string::String>
+pub ai6_agent_acp::AcpSettings::close_grace_ms: u64
+pub ai6_agent_acp::AcpSettings::command: alloc::string::String
+pub ai6_agent_acp::AcpSettings::diagnostic_lines: usize
+pub ai6_agent_acp::AcpSettings::effort_option: core::option::Option<alloc::string::String>
+pub ai6_agent_acp::AcpSettings::env: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6_agent_acp::AcpSettings::initialize_timeout_ms: u64
+pub ai6_agent_acp::AcpSettings::meta: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub ai6_agent_acp::AcpSettings::model_option: core::option::Option<alloc::string::String>
+pub ai6_agent_acp::AcpSettings::poll_ms: i64
+pub ai6_agent_acp::AcpSettings::protocol: alloc::string::String
+pub ai6_agent_acp::AcpSettings::request_timeout_ms: u64
+pub ai6_agent_acp::AcpSettings::start_timeout_ms: u64
+#[no_mangle] pub static ai6_agent_acp::guatiao_declares: [u8; 24]
+#[no_mangle] pub unsafe c fn ai6_agent_acp::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>
