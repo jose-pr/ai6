@@ -454,6 +454,87 @@ mod tests {
         assert!(changed.roster.cover("house").is_err());
     }
 
+    fn a_tree_of_operations_loads_the_same_through_sql_files_and_code(location: &str) {
+        let provider = SqlProvider::open(location).unwrap();
+        let checkout = json!({"path": "/srv/fortitude-south"});
+        assert!(
+            provider
+                .put(
+                    ConfigRecord::Operation,
+                    &GLOBAL,
+                    "SOUTH",
+                    &json!({"parent": "FORTITUDE"})
+                )
+                .is_err(),
+            "its parent is not stored yet"
+        );
+        for (key, definition) in [
+            ("BODYGUARD", json!({})),
+            ("FORTITUDE", json!({"parent": "BODYGUARD"})),
+            ("SOUTH", {
+                let mut south = checkout.clone();
+                south["parent"] = json!("FORTITUDE");
+                south
+            }),
+        ] {
+            provider
+                .put(ConfigRecord::Operation, &GLOBAL, key, &definition)
+                .unwrap();
+        }
+        let from_sql = provider.load("").unwrap().roster;
+        assert_eq!(from_sql.lineage("SOUTH"), ["FORTITUDE", "BODYGUARD"]);
+
+        let refused = provider
+            .remove(ConfigRecord::Operation, &GLOBAL, "FORTITUDE")
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("not a registered Operation"),
+            "{refused}"
+        );
+        let shallow = json!({"max_operation_depth": 2});
+        let key = ConfigRecord::SINGLETON_KEY;
+        assert!(
+            provider
+                .put(ConfigRecord::Roster, &GLOBAL, key, &shallow)
+                .is_err()
+        );
+        provider
+            .put(
+                ConfigRecord::Roster,
+                &GLOBAL,
+                key,
+                &json!({"max_operation_depth": "none"}),
+            )
+            .unwrap();
+        let unbounded = provider.load("").unwrap().roster;
+        assert_eq!(unbounded.settings().max_operation_depth, None);
+
+        let dir = tempfile::tempdir().unwrap();
+        crate::directorates::m::config::export(&provider, dir.path()).unwrap();
+        let from_files = super::super::FileProvider::new(dir.path())
+            .load("")
+            .unwrap()
+            .roster;
+        let from_code = crate::Roster::builder()
+            .operation(crate::Operation::new("BODYGUARD"))
+            .operation(crate::Operation::new("FORTITUDE").with_parent("BODYGUARD"))
+            .operation({
+                let mut south = crate::Operation::new("SOUTH").with_parent("FORTITUDE");
+                south.path = Some("/srv/fortitude-south".into());
+                south
+            })
+            .max_operation_depth(None)
+            .build()
+            .unwrap();
+        for roster in [&from_files, &from_code] {
+            assert_eq!(roster.settings(), unbounded.settings());
+            for id in ["BODYGUARD", "FORTITUDE", "SOUTH"] {
+                assert_eq!(roster.operation(id), unbounded.operation(id), "{id}");
+            }
+            assert_eq!(roster.subtree("BODYGUARD"), unbounded.subtree("BODYGUARD"));
+        }
+    }
+
     fn an_unacceptable_change_is_refused_and_changes_nothing(location: &str) {
         let provider = SqlProvider::open(location).unwrap();
         seed(&provider);
@@ -668,6 +749,11 @@ mod tests {
     #[test]
     fn a_sql_roster_is_built_from_typed_rows_and_shared_by_revision() {
         run(a_roster_is_built_from_typed_rows_and_shared_by_revision);
+    }
+
+    #[test]
+    fn a_tree_of_operations_loads_the_same_through_every_provider() {
+        run(a_tree_of_operations_loads_the_same_through_sql_files_and_code);
     }
 
     #[test]

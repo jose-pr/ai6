@@ -282,6 +282,8 @@ impl AgentRole {
 pub struct Operation {
     /// Operation codename.
     pub id: String,
+    /// The codename of the Operation it is subordinate to; `None` for a root.
+    pub parent: Option<String>,
     /// Project name, also accepted as a lookup key.
     pub name: Option<String>,
     /// Human-readable project purpose.
@@ -404,6 +406,19 @@ pub enum OnLost {
 }
 
 impl Operation {
+    /// This Operation, subordinate to the Operation `parent`.
+    #[must_use]
+    pub fn with_parent(mut self, parent: impl Into<String>) -> Self {
+        self.parent = Some(parent.into());
+        self
+    }
+
+    /// Whether a Mission of this Operation has no place to work: no `path`, `theater` or
+    /// `workspace.source`. Such an Operation only groups others; intake refuses its briefs.
+    pub fn has_nowhere_to_work(&self) -> bool {
+        self.path.is_none() && self.theater.is_none() && self.workspace.source.is_none()
+    }
+
     /// The provider that makes this Operation's safe houses, or `None` when Missions work
     /// in the Operation's directory without one.
     pub fn safe_house_provider(&self) -> Option<String> {
@@ -437,6 +452,108 @@ pub struct Roster {
     )]
     covers: Covers,
     assistant: AssistantSettings,
+    settings: RosterSettings,
+}
+
+/// How deep an Operation may sit in the tree of Operations by default: 64 levels, a root
+/// being the first.
+pub const DEFAULT_MAX_OPERATION_DEPTH: usize = 64;
+
+/// Settings that apply to the whole roster: the `roster` record (a `[roster]` table in the
+/// global `operations` file).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RosterSettings {
+    /// How many levels the tree of Operations may have, a root being the first; `None`
+    /// (`"none"` in a file) is no bound. A missing parent or a cycle is refused whatever
+    /// this says.
+    #[serde(with = "optional_bound")]
+    pub max_operation_depth: Option<usize>,
+}
+
+impl Default for RosterSettings {
+    /// [`DEFAULT_MAX_OPERATION_DEPTH`] levels.
+    fn default() -> Self {
+        Self {
+            max_operation_depth: Some(DEFAULT_MAX_OPERATION_DEPTH),
+        }
+    }
+}
+
+impl RosterSettings {
+    /// Settings with every value at its default.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// These settings with `max_operation_depth` set; `None` is no bound.
+    #[must_use]
+    pub fn with_max_operation_depth(mut self, depth: Option<usize>) -> Self {
+        self.max_operation_depth = depth;
+        self
+    }
+
+    /// Checks every value: a depth bound of at least 1.
+    ///
+    /// # Errors
+    ///
+    /// Names the first key that is not acceptable.
+    pub fn validate(&self) -> Result<(), RosterError> {
+        if self.max_operation_depth == Some(0) {
+            return Err(error(
+                "roster.max_operation_depth must be at least 1, or \"none\"",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Each value looser than its default, worded for a log line.
+    pub fn weakenings(&self) -> Vec<String> {
+        match self.max_operation_depth {
+            Some(depth) if depth <= DEFAULT_MAX_OPERATION_DEPTH => Vec::new(),
+            depth => vec![format!(
+                "roster.max_operation_depth {} is looser than the default \
+                 {DEFAULT_MAX_OPERATION_DEPTH}",
+                depth.map_or_else(|| "none".to_owned(), |depth| depth.to_string())
+            )],
+        }
+    }
+}
+
+/// A bound that may be lifted: a number, or `"none"` (JSON `null` too) for no bound.
+mod optional_bound {
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        value: &Option<usize>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(bound) => serializer.serialize_u64(*bound as u64),
+            None => serializer.serialize_str("none"),
+        }
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<usize>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Bound {
+            Number(usize),
+            Text(String),
+        }
+        match Option::<Bound>::deserialize(deserializer)? {
+            None => Ok(None),
+            Some(Bound::Number(bound)) => Ok(Some(bound)),
+            Some(Bound::Text(text)) if text == "none" => Ok(None),
+            Some(Bound::Text(text)) => Err(D::Error::custom(format!(
+                "expected a whole number or \"none\", found {text:?}"
+            ))),
+        }
+    }
 }
 
 /// Configuration could not be read or resolved.
@@ -499,6 +616,7 @@ pub struct RosterBuilder {
     roles: Vec<AgentRole>,
     covers: Covers,
     assistant: AssistantSettings,
+    settings: RosterSettings,
 }
 
 impl RosterBuilder {
@@ -532,15 +650,35 @@ impl RosterBuilder {
         self
     }
 
+    /// Sets the roster-wide settings (the `roster` record).
+    pub fn settings(mut self, settings: RosterSettings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    /// Sets how many levels the tree of Operations may have; `None` is no bound. The default
+    /// is [`DEFAULT_MAX_OPERATION_DEPTH`].
+    pub fn max_operation_depth(mut self, depth: Option<usize>) -> Self {
+        self.settings.max_operation_depth = depth;
+        self
+    }
+
     /// The roster of these records, checked as [`Roster::from_parts`] checks them, with the
-    /// assistant settings checked by [`AssistantSettings::validate`].
+    /// assistant settings checked by [`AssistantSettings::validate`] and the tree of
+    /// Operations by these roster settings.
     ///
     /// # Errors
     ///
-    /// As [`Roster::from_parts`], or assistant settings that are not acceptable.
+    /// As [`Roster::from_parts`], or assistant or roster settings that are not acceptable.
     pub fn build(self) -> Result<Roster, RosterError> {
         self.assistant.validate().map_err(error)?;
-        let mut roster = Roster::from_parts(self.operations, self.agents, self.roles, self.covers)?;
+        let mut roster = Roster::from_parts_with(
+            self.settings,
+            self.operations,
+            self.agents,
+            self.roles,
+            self.covers,
+        )?;
         roster.assistant = self.assistant;
         Ok(roster)
     }
@@ -622,12 +760,14 @@ impl Roster {
         let operation_file = root.join(OPERATIONS_FILE);
         if operation_file.exists() {
             let document: OperationsDocument = parse_file(&operation_file)?;
-            for (id, definition) in document.operation {
-                let operation = definition.resolve(id, &operation_file.display())?;
-                roster
-                    .register(operation)
-                    .map_err(|reason| error(format!("{}: {reason}", operation_file.display())))?;
+            let source = operation_file.display();
+            let in_file = |reason: RosterError| error(format!("{source}: {reason}"));
+            document.roster.validate().map_err(in_file)?;
+            for operation in resolve_operations(document.operation, &document.roster, &source)? {
+                roster.register(operation).map_err(in_file)?;
             }
+            roster.settings = document.roster;
+            roster.check_tree().map_err(in_file)?;
         }
         let agents_file = root.join(AGENTS_FILE);
         if agents_file.exists() {
@@ -677,21 +817,36 @@ impl Roster {
     /// # Errors
     ///
     /// Returns an error naming the first record that is not acceptable, or an Operation key,
-    /// Agent codename or role ID given twice.
+    /// Agent codename or role ID given twice; a `parent` that is not registered, a cycle of
+    /// parents, or a tree of Operations deeper than [`DEFAULT_MAX_OPERATION_DEPTH`] levels.
     pub fn from_parts(
         operations: impl IntoIterator<Item = Operation>,
         agents: impl IntoIterator<Item = Agent>,
         roles: impl IntoIterator<Item = AgentRole>,
         covers: Covers,
     ) -> Result<Self, RosterError> {
+        Self::from_parts_with(RosterSettings::default(), operations, agents, roles, covers)
+    }
+
+    /// As [`Roster::from_parts`], with the tree of Operations checked against `settings`.
+    fn from_parts_with(
+        settings: RosterSettings,
+        operations: impl IntoIterator<Item = Operation>,
+        agents: impl IntoIterator<Item = Agent>,
+        roles: impl IntoIterator<Item = AgentRole>,
+        covers: Covers,
+    ) -> Result<Self, RosterError> {
+        settings.validate()?;
         let mut roster = Self {
             covers,
+            settings,
             ..Self::default()
         };
         for operation in operations {
             operation.validate()?;
             roster.register(operation)?;
         }
+        roster.check_tree()?;
         for agent in agents {
             validate_codename(&agent.id)?;
             validate_clearance(&agent.clearance)
@@ -943,6 +1098,81 @@ impl Roster {
         self.operations.values()
     }
 
+    /// The roster-wide settings (the `roster` record).
+    pub fn settings(&self) -> &RosterSettings {
+        &self.settings
+    }
+
+    /// The codename of the Operation `key` (codename or project name) is subordinate to;
+    /// `None` for a root or an Operation that is not registered.
+    pub fn parent(&self, key: &str) -> Option<&str> {
+        self.operation(key).ok()?.parent.as_deref()
+    }
+
+    /// The codenames of the Operations directly subordinate to `key`, in codename order.
+    pub fn children(&self, key: &str) -> Vec<&str> {
+        let Ok(operation) = self.operation(key) else {
+            return Vec::new();
+        };
+        self.operations
+            .values()
+            .filter(|child| child.parent.as_deref() == Some(operation.id.as_str()))
+            .map(|child| child.id.as_str())
+            .collect()
+    }
+
+    /// The codenames of the Operations `key` is subordinate to, nearest first: its parent,
+    /// that one's parent, and so on to its root. Empty for a root or an Operation that is not
+    /// registered.
+    pub fn lineage(&self, key: &str) -> Vec<&str> {
+        let mut lineage = Vec::new();
+        let Ok(mut operation) = self.operation(key) else {
+            return lineage;
+        };
+        // The tree was checked when the roster was built; the bound only guards the loop.
+        while lineage.len() < self.operations.len()
+            && let Some(parent) = operation
+                .parent
+                .as_deref()
+                .and_then(|parent| self.operations.get(parent))
+        {
+            lineage.push(parent.id.as_str());
+            operation = parent;
+        }
+        lineage
+    }
+
+    /// The codename of `key` and of every Operation under it, depth first, children in
+    /// codename order. Empty for an Operation that is not registered.
+    pub fn subtree(&self, key: &str) -> Vec<&str> {
+        let Ok(operation) = self.operation(key) else {
+            return Vec::new();
+        };
+        let mut subtree = Vec::new();
+        let mut pending = vec![operation.id.as_str()];
+        while let Some(id) = pending.pop() {
+            if subtree.len() >= self.operations.len() {
+                break;
+            }
+            subtree.push(id);
+            let mut children = self.children(id);
+            children.reverse();
+            pending.extend(children);
+        }
+        subtree
+    }
+
+    /// Refuses a parent that is not registered, a cycle of parents, or a tree deeper than
+    /// the roster settings allow.
+    fn check_tree(&self) -> Result<(), RosterError> {
+        let parents = self
+            .operations
+            .values()
+            .map(|operation| (operation.id.as_str(), operation.parent.as_deref()))
+            .collect();
+        check_tree(&parents, self.settings.max_operation_depth)
+    }
+
     /// The Operation's own agents file in its trusted `.ai6` directory: `agents.cfg`,
     /// `.toml`, `.json`, `.yaml` or `.yml`; `None` when there is none.
     fn operation_agent_file(&self, operation: &Operation) -> Result<Option<PathBuf>, RosterError> {
@@ -979,7 +1209,64 @@ impl Roster {
 #[serde(deny_unknown_fields)]
 struct OperationsDocument {
     #[serde(default)]
-    operation: BTreeMap<String, OperationDefinition>,
+    operation: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    roster: RosterSettings,
+}
+
+/// Checks the tree that `parents` (each Operation's codename and its parent's) make: every
+/// parent registered, no cycle, and no Operation more than `max_depth` levels deep.
+fn check_tree(
+    parents: &BTreeMap<&str, Option<&str>>,
+    max_depth: Option<usize>,
+) -> Result<(), RosterError> {
+    for (&id, &parent) in parents {
+        let mut chain = vec![id];
+        let mut next = parent;
+        while let Some(parent) = next {
+            let Some(&grandparent) = parents.get(parent) else {
+                let child = chain.last().copied().unwrap_or(id);
+                return Err(error(format!(
+                    "Operation {child:?}: parent {parent:?} is not a registered Operation"
+                )));
+            };
+            let cycle = chain.contains(&parent);
+            chain.push(parent);
+            if cycle {
+                return Err(error(format!(
+                    "Operation parents form a cycle: {}",
+                    chain.join(" -> ")
+                )));
+            }
+            if let Some(max_depth) = max_depth
+                && chain.len() > max_depth
+            {
+                return Err(error(format!(
+                    "Operation {id:?} is more than {max_depth} levels deep \
+                     (roster.max_operation_depth)"
+                )));
+            }
+            next = grandparent;
+        }
+    }
+    Ok(())
+}
+
+/// The Operations of `definitions`, each the keys of its `[operation.<id>]` table, resolved
+/// and checked; `source` names where they came from in error messages.
+fn resolve_operations(
+    definitions: impl IntoIterator<Item = (String, serde_json::Value)>,
+    settings: &RosterSettings,
+    source: &dyn fmt::Display,
+) -> Result<Vec<Operation>, RosterError> {
+    let _ = settings;
+    let mut operations = Vec::new();
+    for (id, definition) in definitions {
+        let definition = OperationDefinition::deserialize(definition)
+            .map_err(|reason| error(format!("{source}: Operation {id:?}: {reason}")))?;
+        operations.push(definition.resolve(id, source)?);
+    }
+    Ok(operations)
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -996,6 +1283,7 @@ struct AgentsDocument {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct OperationDefinition {
+    parent: Option<String>,
     name: Option<String>,
     description: String,
     path: Option<String>,
@@ -1093,6 +1381,7 @@ impl OperationDefinition {
         let workspace = Workspace::default();
         Ok(Operation {
             id,
+            parent: self.parent,
             name: self.name,
             description: self.description,
             path,
@@ -1171,15 +1460,23 @@ impl Operation {
             .expect("the default Operation settings resolve")
     }
 
-    /// Checks the settings a configuration file is checked for: Sleeper names and
-    /// schedules, Station IDs, clearance, workspace, `on_blown`, the checkpoint, limit and
-    /// `lost_after_secs` intervals and the cover identity.
+    /// Checks the settings a configuration file is checked for: the parent's codename,
+    /// Sleeper names and schedules, Station IDs, clearance, workspace, `on_blown`, the
+    /// checkpoint, limit and `lost_after_secs` intervals and the cover identity. Whether the
+    /// parent is registered is checked with the roster.
     ///
     /// # Errors
     ///
     /// Names the Operation and the first setting that is not acceptable.
     pub fn validate(&self) -> Result<(), RosterError> {
         let id = &self.id;
+        if let Some(parent) = &self.parent
+            && (parent.trim().is_empty() || parent.trim() != parent)
+        {
+            return Err(error(format!(
+                "Operation {id:?}: parent must be an Operation's codename"
+            )));
+        }
         for (name, sleeper) in &self.sleepers {
             let valid_name = !name.is_empty()
                 && name
@@ -1296,36 +1593,56 @@ impl AgentRoleDefinition {
     }
 }
 
-/// The roster of records kept somewhere other than configuration files: each record's
-/// definition as the keys of its table in `operations.toml` or `agents.toml`, in any serde
-/// format, keyed by its ID, built into typed records and checked by [`Roster::from_parts`].
-/// `assistant` holds the keys of `[assistant]`, checked by [`AssistantSettings::validate`];
-/// `None` is the default settings. `source` names where they came from in error messages.
+/// The definitions of one roster kept somewhere other than configuration files, each record's
+/// as the keys of its table in `operations.toml` or `agents.toml`, keyed by its ID.
+pub(crate) struct RosterDefinitions {
+    /// `[operation.<id>]` tables.
+    pub(crate) operations: Vec<(String, serde_json::Value)>,
+    /// `[agent.<codename>]` tables.
+    pub(crate) agents: Vec<(String, serde_json::Value)>,
+    /// `[role.<id>]` tables.
+    pub(crate) roles: Vec<(String, serde_json::Value)>,
+    /// The `[assistant]` table; `None` is the default settings.
+    pub(crate) assistant: Option<serde_json::Value>,
+    /// The `[roster]` table; `None` is the default settings.
+    pub(crate) settings: Option<serde_json::Value>,
+}
+
+/// The roster of `definitions`, built into typed records and checked by
+/// [`Roster::from_parts`]; the assistant settings are checked by
+/// [`AssistantSettings::validate`] and the roster settings by [`RosterSettings::validate`].
+/// `source` names where they came from in error messages.
 ///
 /// Agents are resolved here, `extends` included, so the roster holds them complete. A
 /// relative skill path in the assistant settings is resolved against `base` when given.
-pub(crate) fn roster_from_definitions<'de, D>(
-    operations: impl IntoIterator<Item = (String, D)>,
-    agents: impl IntoIterator<Item = (String, D)>,
-    roles: impl IntoIterator<Item = (String, D)>,
+pub(crate) fn roster_from_definitions(
+    definitions: RosterDefinitions,
     covers: Covers,
-    assistant: Option<D>,
     base: Option<&Path>,
     source: &dyn fmt::Display,
-) -> Result<Roster, RosterError>
-where
-    D: serde::Deserializer<'de>,
-    D::Error: fmt::Display,
-{
+) -> Result<Roster, RosterError> {
+    let RosterDefinitions {
+        operations,
+        agents,
+        roles,
+        assistant,
+        settings,
+    } = definitions;
     let invalid = |what: &str, id: &str, reason: &dyn fmt::Display| {
         error(format!("{source}: {what} {id:?}: {reason}"))
     };
-    let mut parsed = Vec::new();
-    for (id, definition) in operations {
-        let definition = OperationDefinition::deserialize(definition)
-            .map_err(|reason| invalid("Operation", &id, &reason))?;
-        parsed.push(definition.resolve(id, source)?);
-    }
+    let settings = match settings {
+        Some(definition) => {
+            let settings = RosterSettings::deserialize(definition)
+                .map_err(|reason| error(format!("{source}: roster: {reason}")))?;
+            settings
+                .validate()
+                .map_err(|reason| error(format!("{source}: {reason}")))?;
+            settings
+        }
+        None => RosterSettings::default(),
+    };
+    let parsed = resolve_operations(operations, &settings, source)?;
     let mut definitions = BTreeMap::new();
     for (id, definition) in agents {
         let definition = AgentDefinition::deserialize(definition)
@@ -1363,7 +1680,8 @@ where
         }
         None => AssistantSettings::default(),
     };
-    let mut roster = Roster::from_parts(parsed, resolved, typed_roles, covers)?;
+    let mut roster = Roster::from_parts_with(settings, parsed, resolved, typed_roles, covers)
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
     roster.assistant = assistant;
     Ok(roster)
 }
@@ -2403,6 +2721,113 @@ sources = {{ jira = \"GUA\" }}\n",
             Path::new(path),
             directory.0.join("skills").join("charts").as_path()
         );
+    }
+
+    /// A chain of `levels` Operations, `L1` the root and each next one its child.
+    fn chain(levels: usize) -> Vec<Operation> {
+        (1..=levels)
+            .map(|level| {
+                let operation = Operation::new(format!("L{level}"));
+                if level == 1 {
+                    operation
+                } else {
+                    operation.with_parent(format!("L{}", level - 1))
+                }
+            })
+            .collect()
+    }
+
+    fn built(operations: Vec<Operation>, depth: Option<usize>) -> Result<Roster, RosterError> {
+        operations
+            .into_iter()
+            .fold(Roster::builder(), RosterBuilder::operation)
+            .max_operation_depth(depth)
+            .build()
+    }
+
+    #[test]
+    fn the_tree_refuses_a_cycle_a_missing_parent_and_more_levels_than_allowed() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "operations.toml",
+            "[operation.A]\nparent = \"C\"\n[operation.B]\nparent = \"A\"\n\
+             [operation.C]\nparent = \"B\"\n",
+        );
+        let cycle = Roster::load(&directory.0).unwrap_err().to_string();
+        assert!(cycle.contains("cycle: A -> C -> B -> A"), "{cycle}");
+        let alone = built(vec![Operation::new("G").with_parent("G")], None).unwrap_err();
+        assert!(alone.to_string().contains("cycle: G -> G"), "{alone}");
+
+        directory.write("operations.toml", "[operation.G]\nparent = \"P\"\n");
+        let missing = Roster::load(&directory.0).unwrap_err().to_string();
+        assert!(
+            missing.contains("Operation \"G\": parent \"P\" is not a registered Operation"),
+            "{missing}"
+        );
+        assert!(Roster::from_parts(chain(3).split_off(1), [], [], Covers::default()).is_err());
+
+        assert_eq!(DEFAULT_MAX_OPERATION_DEPTH, 64);
+        assert!(built(chain(64), Some(64)).is_ok());
+        let deep = Roster::from_parts(chain(65), [], [], Covers::default()).unwrap_err();
+        assert!(
+            deep.to_string()
+                .contains("\"L65\" is more than 64 levels deep"),
+            "{deep}"
+        );
+        assert!(built(chain(65), Some(DEFAULT_MAX_OPERATION_DEPTH)).is_err());
+        let unbounded = built(chain(65), None).unwrap();
+        assert_eq!(unbounded.lineage("L65").len(), 64);
+        assert_eq!(
+            unbounded.settings().weakenings(),
+            ["roster.max_operation_depth none is looser than the default 64"]
+        );
+        assert!(built(chain(1), Some(0)).is_err(), "zero levels is nonsense");
+
+        let file = |depth: &str| {
+            let mut text = format!("[roster]\nmax_operation_depth = {depth}\n");
+            for level in 1..=3 {
+                text.push_str(&format!("[operation.L{level}]\n"));
+                if level > 1 {
+                    text.push_str(&format!("parent = \"L{}\"\n", level - 1));
+                }
+            }
+            text
+        };
+        directory.write("operations.toml", &file("2"));
+        assert!(Roster::load(&directory.0).is_err());
+        directory.write("operations.toml", &file("\"none\""));
+        let roster = Roster::load(&directory.0).unwrap();
+        assert_eq!(roster.settings().max_operation_depth, None);
+        directory.write("operations.toml", &file("\"deep\""));
+        assert!(Roster::load(&directory.0).is_err());
+    }
+
+    #[test]
+    fn lineage_is_nearest_first_and_a_subtree_holds_every_level_below() {
+        let roster = built(
+            vec![
+                Operation::new("BODYGUARD"),
+                Operation::new("FORTITUDE").with_parent("BODYGUARD"),
+                Operation::new("NORTH").with_parent("FORTITUDE"),
+                Operation::new("SOUTH").with_parent("FORTITUDE"),
+                Operation::new("ZEPPELIN").with_parent("BODYGUARD"),
+                Operation::new("OTHER"),
+            ],
+            Some(DEFAULT_MAX_OPERATION_DEPTH),
+        )
+        .unwrap();
+        assert_eq!(roster.lineage("SOUTH"), ["FORTITUDE", "BODYGUARD"]);
+        assert!(roster.lineage("BODYGUARD").is_empty());
+        assert_eq!(roster.parent("NORTH"), Some("FORTITUDE"));
+        assert_eq!(roster.parent("OTHER"), None);
+        assert_eq!(roster.children("BODYGUARD"), ["FORTITUDE", "ZEPPELIN"]);
+        assert_eq!(
+            roster.subtree("BODYGUARD"),
+            ["BODYGUARD", "FORTITUDE", "NORTH", "SOUTH", "ZEPPELIN"]
+        );
+        assert_eq!(roster.subtree("NORTH"), ["NORTH"]);
+        assert!(roster.subtree("missing").is_empty());
+        assert!(roster.operation("FORTITUDE").unwrap().has_nowhere_to_work());
     }
 
     #[test]

@@ -408,6 +408,22 @@ mod tests {
     }
 
     #[test]
+    fn a_brief_for_an_operation_with_nowhere_to_work_is_refused_naming_it() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "parent = \"P\"\n[operation.P]\n", RETIRING);
+        let for_parent: Brief = serde_json::from_value(serde_json::json!({
+            "title": "Inspect", "id": "b-2", "operation": "P", "role": "case-officer",
+        }))
+        .unwrap();
+        assert_eq!(
+            resolve_brief_assignment(&state, &for_parent).unwrap_err(),
+            "Operation \"P\" has nowhere to work"
+        );
+        assert_eq!(state.roster.parent("G"), Some("P"));
+        assert!(resolve_brief_assignment(&state, &brief("case-officer", None)).is_ok());
+    }
+
+    #[test]
     fn retired_agents_pass_their_work_to_the_backup_and_desk_duty_caps_clearance() {
         let root = tempfile::tempdir().unwrap();
         let mut state = test_state(root.path(), "clearance = \"00\"\n", RETIRING);

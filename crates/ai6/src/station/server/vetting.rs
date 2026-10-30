@@ -1429,7 +1429,7 @@ mod tests {
         let mut state = control_only_state(root, "mock-agent");
         fs::write(
             root.join("operations.toml"),
-            format!("[operation.G]\n{settings}"),
+            format!("[operation.G]\nworkspace = {{ source = \"/srv/g\" }}\n{settings}"),
         )
         .unwrap();
         state.roster = Arc::new(Roster::load(root).unwrap());

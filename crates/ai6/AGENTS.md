@@ -277,6 +277,7 @@ impl AgentRole {
 #[non_exhaustive]
 pub struct Operation {
     pub id: String,
+    pub parent: Option<String>,                   // the parent Operation's codename; None: a root
     pub name: Option<String>,
     pub description: String,
     pub path: Option<PathBuf>,
@@ -311,7 +312,12 @@ impl Operation {
     /// The defaults a file gives `[operation.ID]`: clearance "field", cover "covert",
     /// on_blown "flag", strict exposure and green ink, `Workspace::default()`.
     pub fn new(id: impl Into<String>) -> Self;
-    /// The checks the file loader runs after resolving an Operation.
+    #[must_use] pub fn with_parent(self, parent: impl Into<String>) -> Self;
+    /// No `path`, `theater` or `workspace.source`: it only groups others, and intake fails
+    /// its briefs with "Operation \"P\" has nowhere to work".
+    pub fn has_nowhere_to_work(&self) -> bool;
+    /// The checks the file loader runs after resolving an Operation; whether `parent` is
+    /// registered is checked with the roster.
     pub fn validate(&self) -> Result<(), RosterError>;
     /// `workspace.provider`, else `"git"` when the source or `path` holds a `.git`, else `None`.
     pub fn safe_house_provider(&self) -> Option<String>;
@@ -349,6 +355,12 @@ impl Roster {
     pub fn builder() -> RosterBuilder;
     pub fn operation(&self, key: &str) -> Result<&Operation, RosterError>;
     pub fn operations(&self) -> impl Iterator<Item = &Operation>;
+    pub fn settings(&self) -> &RosterSettings;                // the `roster` record
+    // The tree of Operations; `key` is a codename or project name, unknown ones give nothing.
+    pub fn parent(&self, key: &str) -> Option<&str>;
+    pub fn children(&self, key: &str) -> Vec<&str>;           // codename order
+    pub fn lineage(&self, key: &str) -> Vec<&str>;            // ancestors, nearest first
+    pub fn subtree(&self, key: &str) -> Vec<&str>;            // key first, then depth first
     pub fn role(&self, key: &str) -> Result<&AgentRole, RosterError>;
     pub fn roles(&self) -> impl Iterator<Item = &AgentRole>;
     pub fn agent(&self, operation_key: Option<&str>, agent_key: &str)
@@ -369,8 +381,23 @@ impl RosterBuilder {
     pub fn role(self, role: AgentRole) -> Self;
     pub fn cover(self, cover: Cover) -> Self;      // replaces a built-in of the same name
     pub fn assistant(self, settings: AssistantSettings) -> Self;
+    pub fn settings(self, settings: RosterSettings) -> Self;
+    pub fn max_operation_depth(self, depth: Option<usize>) -> Self;   // None: no bound
     pub fn build(self) -> Result<Roster, RosterError>;   // Roster::from_parts; settings validated
 }
+/// The `roster` record: a `[roster]` table in the global `operations` file (serde; unknown
+/// keys refused). `max_operation_depth` reads a number, or "none" (JSON null too).
+#[non_exhaustive] #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RosterSettings {
+    pub max_operation_depth: Option<usize>,   // levels, a root the first; default Some(64); 0 refused
+}
+impl RosterSettings {   // Default: the defaults above
+    pub fn new() -> Self;
+    #[must_use] pub fn with_max_operation_depth(self, depth: Option<usize>) -> Self;
+    pub fn validate(&self) -> Result<(), RosterError>;
+    pub fn weakenings(&self) -> Vec<String>;  // "roster.max_operation_depth none is looser than the default 64"
+}
+pub const DEFAULT_MAX_OPERATION_DEPTH: usize = 64;
 pub fn config_dir() -> Result<PathBuf, RosterError>;
 
 // ai6::directorates::m::assistant, re-exported at the crate root
@@ -509,6 +536,13 @@ Agent is complete as given (it inherits nothing); an Operation checkout's
 and its `station_labels` lists the Station labels a Station must carry to run its Missions.
 `stations = ["id", ..]` optionally lists the Stations allowed to run them; a Mission's brief
 may narrow that list but never widen it. `theater` binds the Operation to one Theater by ID.
+
+Operations form a tree: `parent` names another Operation's codename, and an Operation
+without one is a root. Every roster source (`load`, `from_parts`, `builder`, each
+`ConfigProvider`) refuses a `parent` that is not registered and a cycle (the message names
+the chain, `A -> C -> B -> A`), whatever the settings, and a tree deeper than
+`RosterSettings::max_operation_depth`; so a provider refuses removing an Operation that still
+has children. The Station logs `RosterSettings::weakenings` at start and on reload.
 
 An Agent is a codename; its `handler`, `model` and `effort` are the codename's current
 occupant. An `AgentRole` (`[role.<id>]`) is a job description only: a `purpose` and a
@@ -720,21 +754,22 @@ pub trait ConfigProvider: Send + Sync {
     /// Global and each Station scope that holds records (default: Global).
     fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError>;
 }
-pub const IMPORT_ORDER: [ConfigRecord; 17];   // each family after those it refers to
+pub const IMPORT_ORDER: [ConfigRecord; 18];   // each family after those it refers to
 pub fn family_document(record: ConfigRecord, records) -> Result<String, RosterError>;   // TOML
 pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, RosterError>;
 #[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater, Loadout, Sandbox,
-    Mcp, Secret, Pool, Cables, Plugin, Station, Tls, Access, Unex }
+    Mcp, Secret, Pool, Cables, Plugin, Station, Tls, Access, Unex, Roster }
 impl ConfigRecord {
-    pub const ALL: [Self; 17];
+    pub const ALL: [Self; 18];                  // Roster first
     pub const SINGLETON_KEY: &'static str;      // "settings": a singleton family's one record
-    pub const fn name(self) -> &'static str;    // "operation", "agent", ... "unex"
+    pub const fn name(self) -> &'static str;    // "operation", "agent", ... "unex", "roster"
     pub fn from_name(name: &str) -> Option<Self>;
-    pub const fn file(self) -> &'static str;    // operations | agents | covers | theaters | loadouts
-                                                // | cables | plugins | station | tls | access | unex
-    pub const fn is_singleton(self) -> bool;    // Assistant, Cables, Station, Tls, Access, Unex
-    pub const fn is_whole_file(self) -> bool;   // the singletons but Assistant
+    pub const fn file(self) -> &'static str;    // operations (Operation, Roster) | agents | covers
+                                                // | theaters | loadouts | cables | plugins | station
+                                                // | tls | access | unex
+    pub const fn is_singleton(self) -> bool;    // Assistant, Cables, Station, Tls, Access, Unex, Roster
+    pub const fn is_whole_file(self) -> bool;   // the singletons but Assistant and Roster
     pub const fn station_scoped(self) -> bool;  // Theater, the loadout families, Cables, Plugin, Station, Tls
     pub const fn applies_live(self) -> bool;    // all but Theater, Cables, Plugin, Station, Tls, Unex
 }

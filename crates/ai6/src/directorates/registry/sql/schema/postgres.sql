@@ -365,3 +365,11 @@ CREATE TABLE ai6_config_unex (
     revision BIGINT NOT NULL,
     PRIMARY KEY (scope, key)
 );
+
+CREATE TABLE ai6_config_roster (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
+);

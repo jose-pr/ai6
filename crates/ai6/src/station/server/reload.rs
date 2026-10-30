@@ -173,6 +173,9 @@ pub(super) fn poll(state: &DaemonState) -> bool {
     }
     if roster {
         super::vetting::log_weakenings(&current.roster);
+        for weakened in current.roster.settings().weakenings() {
+            eprintln!("ai6: {weakened}");
+        }
         #[cfg(feature = "publisher")]
         super::assistant::log_weakenings(&current.roster);
         super::agents::log_retirements(&current.roster, current.clock.now());

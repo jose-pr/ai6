@@ -37,7 +37,8 @@ use sha2::{Digest, Sha256};
 use crate::directorates::m::access::{RoleAuthorizer, role_authorizer_from_toml};
 use crate::directorates::m::cover::{Covers, cover_from};
 use crate::directorates::m::roster::{
-    Roster, RosterError, RosterErrorKind, error, error_of, roster_from_definitions,
+    Roster, RosterDefinitions, RosterError, RosterErrorKind, error, error_of,
+    roster_from_definitions,
 };
 use crate::directorates::m::theaters::Theaters;
 use crate::directorates::q::LoadoutCatalog;
@@ -89,11 +90,16 @@ pub enum ConfigRecord {
     /// Universal Exports' sign-in, limits and assistant ([`UnexRecord`]): the whole `unex`
     /// file; a singleton.
     Unex,
+    /// Settings of the whole roster ([`RosterSettings`](crate::RosterSettings)), such as how
+    /// deep the tree of Operations may be: the keys of the `[roster]` table of the
+    /// `operations` file; a singleton.
+    Roster,
 }
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
+        Self::Roster,
         Self::Operation,
         Self::Agent,
         Self::Role,
@@ -118,7 +124,7 @@ impl ConfigRecord {
 
     /// The family's name: `operation`, `agent`, `role`, `assistant`, `cover`, `theater`,
     /// `loadout`, `sandbox`, `mcp`, `secret`, `pool`, `cables`, `plugin`, `station`, `tls`,
-    /// `access` or `unex`. For a family that shares its file, it is also its table there.
+    /// `access`, `unex` or `roster`. For a family that shares its file, it is also its table there.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Operation => "operation",
@@ -138,6 +144,7 @@ impl ConfigRecord {
             Self::Tls => "tls",
             Self::Access => "access",
             Self::Unex => "unex",
+            Self::Roster => "roster",
         }
     }
 
@@ -149,7 +156,7 @@ impl ConfigRecord {
     /// The family file that holds it, without its extension.
     pub const fn file(self) -> &'static str {
         match self {
-            Self::Operation => "operations",
+            Self::Operation | Self::Roster => "operations",
             Self::Agent | Self::Role | Self::Assistant => "agents",
             Self::Cover => "covers",
             Self::Theater => "theaters",
@@ -167,13 +174,19 @@ impl ConfigRecord {
     pub const fn is_singleton(self) -> bool {
         matches!(
             self,
-            Self::Assistant | Self::Cables | Self::Station | Self::Tls | Self::Access | Self::Unex
+            Self::Assistant
+                | Self::Cables
+                | Self::Station
+                | Self::Tls
+                | Self::Access
+                | Self::Unex
+                | Self::Roster
         )
     }
 
     /// Whether the record is its whole family file rather than a table in it.
     pub const fn is_whole_file(self) -> bool {
-        self.is_singleton() && !matches!(self, Self::Assistant)
+        self.is_singleton() && !matches!(self, Self::Assistant | Self::Roster)
     }
 
     /// Whether a Station may have records of its own in this family.
@@ -769,7 +782,8 @@ pub trait ConfigProvider: Send + Sync {
 
 /// The families in the order an import stores them, so each refers only to records already
 /// stored: roles before the Agents that hold them, Agents before the Operations that name them.
-pub const IMPORT_ORDER: [ConfigRecord; 17] = [
+pub const IMPORT_ORDER: [ConfigRecord; 18] = [
+    ConfigRecord::Roster,
     ConfigRecord::Role,
     ConfigRecord::Cover,
     ConfigRecord::Assistant,
@@ -1016,12 +1030,19 @@ pub(crate) fn assemble(
         .into_iter()
         .next()
         .map(|(_, definition)| definition);
+    let settings = family(ConfigRecord::Roster)
+        .into_iter()
+        .next()
+        .map(|(_, definition)| definition);
     let roster = roster_from_definitions(
-        family(ConfigRecord::Operation),
-        family(ConfigRecord::Agent),
-        family(ConfigRecord::Role),
+        RosterDefinitions {
+            operations: family(ConfigRecord::Operation),
+            agents: family(ConfigRecord::Agent),
+            roles: family(ConfigRecord::Role),
+            assistant,
+            settings,
+        },
         covers,
-        assistant,
         base,
         source,
     )?;

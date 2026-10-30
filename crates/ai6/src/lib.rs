@@ -54,8 +54,8 @@ pub use directorates::m::promotion::{
 };
 pub use directorates::m::roster::{
     Agent, AgentQuery, AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS,
-    DEFAULT_RETIRE_WARNING_DAYS, OnLost, OnRetire, Operation, Retirement, Roster, RosterBuilder,
-    RosterError, RosterErrorKind, Workspace,
+    DEFAULT_MAX_OPERATION_DEPTH, DEFAULT_RETIRE_WARNING_DAYS, OnLost, OnRetire, Operation,
+    Retirement, Roster, RosterBuilder, RosterError, RosterErrorKind, RosterSettings, Workspace,
 };
 pub use directorates::m::theaters::{
     AgentMode, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind, EphemeralAccess,

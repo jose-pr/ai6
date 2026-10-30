@@ -78,6 +78,7 @@ fn kind_of(kind: &str) -> Result<ConfigRecord, ApiError> {
         "roles" => "role",
         "covers" => "cover",
         "assistant" => "assistant",
+        "roster" => "roster",
         _ => return Err(ApiError::not_found()),
     };
     ConfigRecord::from_name(name).ok_or_else(ApiError::not_found)

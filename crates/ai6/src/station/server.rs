@@ -908,6 +908,9 @@ where
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
     vetting::log_weakenings(&roster);
+    for weakened in roster.settings().weakenings() {
+        eprintln!("ai6: {weakened}");
+    }
     #[cfg(feature = "publisher")]
     assistant::log_weakenings(&roster);
     agents::log_retirements(&roster, Clock::system().now());
@@ -2925,6 +2928,9 @@ fn resolve_brief_assignment(
         .roster
         .operation(station_key)
         .map_err(|error| error.to_string())?;
+    if operation.has_nowhere_to_work() {
+        return Err(format!("Operation {:?} has nowhere to work", operation.id));
+    }
     let role = brief
         .role
         .as_deref()
@@ -8181,7 +8187,7 @@ mod tests {
         fs::create_dir_all(&queued).unwrap();
         fs::write(
             dir.path().join("operations.toml"),
-            "[operation.G]\nstation_labels = { gpu = \"yes\" }\n",
+            "[operation.G]\nworkspace = { source = \"/srv/g\" }\nstation_labels = { gpu = \"yes\" }\n",
         )
         .unwrap();
         fs::write(
@@ -8294,7 +8300,11 @@ mod tests {
     /// A Headquarters Station with no execution role of its own over `registry`, posting
     /// Agent 007 with `handler` to Operation G.
     pub(super) fn control_only_state(root: &Path, handler: &str) -> DaemonState {
-        fs::write(root.join("operations.toml"), "[operation.G]\n").unwrap();
+        fs::write(
+            root.join("operations.toml"),
+            "[operation.G]\nworkspace = { source = \"/srv/g\" }\n",
+        )
+        .unwrap();
         fs::write(
             root.join("agents.toml"),
             format!("[agent.007]\nhandler = {handler:?}\n"),
