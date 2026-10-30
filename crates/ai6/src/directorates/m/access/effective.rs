@@ -335,6 +335,22 @@ pub(super) fn compile_with_actions(
 }
 
 impl EffectiveAccess {
+    /// Adds the compiled tiers of Operation records.
+    pub(super) fn with_operations(
+        mut self,
+        operations: BTreeMap<String, Tier>,
+        orphaned: BTreeMap<String, Vec<Orphan>>,
+    ) -> Self {
+        self.operations = operations;
+        self.orphaned = orphaned;
+        self
+    }
+
+    /// The limits the policy asks of every tier.
+    pub(super) fn limits_of(policy: &AccessPolicy) -> Result<RoleLimits, AccessPolicyError> {
+        limits(policy)
+    }
+
     /// Whether `person` is a chief subject, stored or from the host.
     pub fn is_chief(&self, person: &Person) -> bool {
         self.chiefs.iter().any(|subject| subject.matches(person))
@@ -372,8 +388,8 @@ impl EffectiveAccess {
             .filter_map(|id| self.operations.get(id))
     }
 
-    /// Whether `person` holds `action` at `scope` through the chief and the access tiers
-    /// (compartments do not count). `lineage` names the ancestors of an Operation scope.
+    /// Whether `person` holds `action` at `scope` through the chief and the access tiers.
+    /// `lineage` names the ancestors of an Operation scope.
     pub fn holds(&self, person: &Person, action: &str, scope: &str, lineage: &Lineage) -> bool {
         if self.is_chief(person) {
             return true;

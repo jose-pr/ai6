@@ -35,7 +35,7 @@ use serde::Deserialize as _;
 use sha2::{Digest, Sha256};
 
 use crate::bounds::Limit;
-use crate::directorates::m::access::{AccessPolicy, compile};
+use crate::directorates::m::access::{AccessPolicy, OperationAccess, compile};
 use crate::directorates::m::cover::{Covers, cover_from};
 use crate::directorates::m::roster::{
     Roster, RosterDefinitions, RosterError, RosterErrorKind, error, error_of,
@@ -86,9 +86,14 @@ pub enum ConfigRecord {
     /// The Station TLS policy (a coqui-peer-tls `Policy` document): the whole `tls` file; a
     /// singleton.
     Tls,
-    /// Universal Exports' role policy: `[role.<name>]` and `[[rule]]` of the whole `access`
+    /// The global access policy ([`AccessPolicy`]): `[role.<name>]`, `[[rule]]`, `chief` and
+    /// `delegable` of the whole `access`
     /// file; a singleton.
     Access,
+    /// An Operation's own access policy: the `[role.<name>]` tables and `[[rule]]` entries of an
+    /// [`OperationAccess`], keyed by Operation ID, in the `[operation_access.<id>]` tables of the
+    /// `operation_access` file; global only.
+    OperationAccess,
     /// Universal Exports' sign-in, limits and assistant ([`UnexRecord`]): the whole `unex`
     /// file; a singleton.
     Unex,
@@ -100,7 +105,7 @@ pub enum ConfigRecord {
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Roster,
         Self::Operation,
         Self::Agent,
@@ -118,6 +123,7 @@ impl ConfigRecord {
         Self::Station,
         Self::Tls,
         Self::Access,
+        Self::OperationAccess,
         Self::Unex,
     ];
 
@@ -145,6 +151,7 @@ impl ConfigRecord {
             Self::Station => "station",
             Self::Tls => "tls",
             Self::Access => "access",
+            Self::OperationAccess => "operation_access",
             Self::Unex => "unex",
             Self::Roster => "roster",
         }
@@ -168,6 +175,7 @@ impl ConfigRecord {
             Self::Station => "station",
             Self::Tls => "tls",
             Self::Access => "access",
+            Self::OperationAccess => "operation_access",
             Self::Unex => "unex",
         }
     }
@@ -208,7 +216,7 @@ impl ConfigRecord {
         )
     }
 
-    /// Whether a running Station, or Universal Exports for `access`, applies a change
+    /// Whether a running Station, or Universal Exports for `access` and `operation_access`, applies a change
     /// without a restart.
     pub const fn applies_live(self) -> bool {
         !matches!(
@@ -394,6 +402,8 @@ pub struct Settings {
     /// Universal Exports' role policy document (the `access` record); `None` denies every
     /// action.
     pub access: Option<serde_json::Value>,
+    /// Each Operation's own access policy (the `operation_access` records), by Operation ID.
+    pub operation_access: BTreeMap<String, OperationAccess>,
     /// Universal Exports' sign-in, limits and assistant (the `unex` record).
     pub unex: UnexRecord,
     /// The limits the provider read these settings within.
@@ -970,7 +980,7 @@ pub trait ConfigProvider: Send + Sync {
 
 /// The families in the order an import stores them, so each refers only to records already
 /// stored: roles before the Agents that hold them, Agents before the Operations that name them.
-pub const IMPORT_ORDER: [ConfigRecord; 18] = [
+pub const IMPORT_ORDER: [ConfigRecord; 19] = [
     ConfigRecord::Roster,
     ConfigRecord::Role,
     ConfigRecord::Cover,
@@ -988,6 +998,7 @@ pub const IMPORT_ORDER: [ConfigRecord; 18] = [
     ConfigRecord::Station,
     ConfigRecord::Tls,
     ConfigRecord::Access,
+    ConfigRecord::OperationAccess,
     ConfigRecord::Unex,
 ];
 
@@ -1340,6 +1351,15 @@ pub(crate) fn assemble(
             .and_then(|policy| compile(&policy, &[]))
             .map_err(|reason| error(format!("{source}: access: {reason}")))?;
     }
+    let mut operation_access = BTreeMap::new();
+    for (operation, definition) in family(ConfigRecord::OperationAccess) {
+        let record = OperationAccess::from_json(&definition).map_err(|reason| {
+            error(format!(
+                "{source}: operation_access {operation:?}: {reason}"
+            ))
+        })?;
+        operation_access.insert(operation, record);
+    }
     let unex = match family(ConfigRecord::Unex).into_iter().next() {
         Some((_, definition)) => UnexRecord::deserialize(definition)
             .map_err(|reason| error(format!("{source}: unex: {reason}")))?,
@@ -1363,6 +1383,7 @@ pub(crate) fn assemble(
             station,
             tls,
             access,
+            operation_access,
             unex,
             limits: limits.clone(),
         },
