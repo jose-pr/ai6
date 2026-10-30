@@ -60,6 +60,15 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   roster first: a refused edit shows why and changes nothing; an accepted one reaches every
   Station at its next poll. Moneypenny's settings are one record, keyed `assistant`; after an
   edit, each setting it leaves looser than its default is shown.
+- Access (after Audit): the roles (the built-in `chief` is fixed; role editor with a switch per
+  action, greyed with the reason when you do not hold it or the delegation cap withholds it),
+  the ordered rules (drag handles or move buttons; Save sends the whole list with the revision
+  and a stale one asks to reload), the delegation cap with its weakenings, the chief list
+  (host chiefs read-only), orphaned rules, the accounts (disable, enable, groups with
+  `access.manage`, and a password reset whose new password shows once in a dialog and is kept
+  nowhere) and a Check that explains an answer. It shows with `access.read` or
+  `account.manage`; an Operation's own policy opens from that Operation's card (`access.read`
+  there) and holds only actions within the cap.
 - Green ink: the irreversible steps Agents wait to take (scope, Agent, Mission, reason,
   expiry), each approved for a chosen time with an optional note or rejected with a reason
   (`approval.decide`), and the Operation's class authorisations with their uses, revoking
@@ -219,7 +228,7 @@ pages and may load what they need.
 ## Layout
 
 A top bar, a rail of pages (Overview, Operations, Missions, Sessions, Agents, Stations,
-Green Ink, Briefings, Roster, Account Pools, Timeline, Audit; each shown only with its
+Green Ink, Briefings, Roster, Account Pools, Timeline, Audit, Access; each shown only with its
 permission) and the page, Overview after sign-in. From 1200 px wide the rail has labels
 beside its icons, from 900 px labels below them, and narrower it opens from a menu button,
 one view at a time, its pages as rows with icon tiles. Below 600 px (a phone) the top bar

@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guatiao/guatiao.dart' as guatiao;
 
+import 'access/access_page.dart';
 import 'agents/agents_page.dart';
 import 'assistant/assistant_controller.dart';
 import 'assistant/chat_layout.dart';
@@ -824,6 +825,37 @@ class MissionBoard extends ChangeNotifier {
   bool get canManageRoster =>
       !demo && (userSession?.roster.contains('roster.manage') ?? false);
 
+  /// The person's actions on the global access policy and the accounts (`access.read`,
+  /// `access.manage`, `account.manage`).
+  List<String> get globalActions => userSession?.globalActions ?? const [];
+
+  /// Operations whose own access policy this account may read (`access.read`).
+  List<String> get accessOperations => _operationsWith('access.read');
+
+  /// Whether the Access page has anything to show this person: the global policy, the
+  /// accounts, or an Operation's own policy.
+  bool get canOpenAccess =>
+      globalActions.contains('access.read') ||
+      globalActions.contains('account.manage') ||
+      (userSession?.operations.any(
+            (operation) => operation.actions.contains('access.read'),
+          ) ??
+          false);
+
+  /// Sends one request of the Access page; a write names the `revision` it read, which the
+  /// gateway checks (`If-Match`).
+  Future<http.Response> accessRequest(
+    String method,
+    String path, {
+    Object? body,
+    String? revision,
+  }) => _userRequest(
+    method,
+    path,
+    body: body,
+    headers: {if (revision != null) 'if-match': '"$revision"'},
+  );
+
   /// The roster records of one kind (`operations`, `agents`, `roles`, `covers` or
   /// `assistant`).
   Future<RosterRecords> loadRoster(String kind) async {
@@ -1128,11 +1160,13 @@ class MissionBoard extends ChangeNotifier {
     String method,
     String path, {
     Object? body,
+    Map<String, String>? headers,
   }) async {
     final token = accessToken;
     if (token == null) throw StateError('Sign in first.');
     final request = http.Request(method, apiOrigin.resolve(path))
       ..headers['authorization'] = 'Bearer $token';
+    if (headers != null) request.headers.addAll(headers);
     if (body != null) {
       request.headers['content-type'] = 'application/json';
       request.body = jsonEncode(body);
@@ -2239,6 +2273,7 @@ class UserSessionSummary {
     required this.operations,
     this.stations = const [],
     this.roster = const [],
+    this.globalActions = const [],
   });
 
   final String personId;
@@ -2251,6 +2286,9 @@ class UserSessionSummary {
 
   /// The person's actions on the roster every Station reads (`roster.read`, `roster.manage`).
   final List<String> roster;
+
+  /// The person's actions on the global access policy and the accounts.
+  final List<String> globalActions;
 
   factory UserSessionSummary.fromJson(Map<String, dynamic> json) =>
       UserSessionSummary(
@@ -2273,6 +2311,8 @@ class UserSessionSummary {
             )
             .toList(growable: false),
         roster: (json['roster'] as List<dynamic>? ?? const []).cast<String>(),
+        globalActions: (json['global_actions'] as List<dynamic>? ?? const [])
+            .cast<String>(),
       );
 }
 
@@ -3097,6 +3137,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     if (board.poolOperations.isNotEmpty) OoPage.pools,
     if (board.timelineOperations.isNotEmpty) OoPage.timeline,
     if (board.demo || board.canReadAudit) OoPage.audit,
+    if (board.canOpenAccess) OoPage.access,
   ];
 
   void _openSession(BuildContext context, SessionSummary session) {
@@ -3267,6 +3308,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               onRoute: onRoute,
             ),
             OoPage.audit => AuditLogPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.access => AccessPage(
               board: board,
               route: route,
               onRoute: onRoute,

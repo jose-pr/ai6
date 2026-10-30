@@ -2155,8 +2155,8 @@ struct UserProfile {
     stations: Vec<UserStationAccess>,
     /// The actions the person holds on the roster (`config:roster`).
     roster: Vec<String>,
-    /// The actions the person holds on the global access policy (`access.read`, `access.manage`)
-    /// and the accounts (`account.manage`).
+    /// The actions the person holds on the global access policy (`access.read`, `access.manage`),
+    /// the accounts (`account.manage`) and other people's memory (`assistant.memory.admin`).
     global_actions: Vec<String>,
 }
 
@@ -2587,6 +2587,7 @@ async fn user_profile(
             ("access.read", ai6::CONFIG_ACCESS),
             ("access.manage", ai6::CONFIG_ACCESS),
             ("account.manage", ai6::CONFIG_ACCOUNTS),
+            ("assistant.memory.admin", "config:assistant"),
         ] {
             let allowed = authorizer
                 .authorize(AuthorizationRequest {

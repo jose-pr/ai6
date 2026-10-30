@@ -63,6 +63,18 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
   `roster.read`) and prints `lineage` (`A > B`), `inherit` and each written key as
   `key = <JSON value>\town` or `\tfrom <Operation>`. An Operation not in the profile is an
   error.
+- `ai6ctl access show [--operation X]` prints the policy (`GET /v1/user/access` or the
+  Operation's): `revision`, `role`, `rule N`, `delegable`, `chief stored`, `chief host` (and
+  `inherited`, `binding`, `orphaned` for an Operation). `access role set NAME --actions a,b
+  [--description T] [--operation X]` and `access role remove NAME` read the revision, then write
+  with it. `access rules export FILE` writes `revision = "…"` and `[[rule]]` entries; `access
+  rules import FILE` sends the whole list under that revision and fails when the policy changed
+  since. `access delegable set a,b`, `access chief set SUBJECT…` (chief only) and `access check
+  SUBJECT ACTION RESOURCE` (prints `allowed|denied`, tier, rule and role). A refusal prints the
+  gateway's reason and exits `1`.
+- `ai6ctl accounts [list]`, `create NAME [--groups g,h]`, `disable NAME`, `enable NAME`, `groups
+  NAME g,h` and `reset-password NAME` use `/v1/user/accounts`; a generated password is printed
+  once as `password\t…`, to stdout only. Accounts are never deleted through the API.
 - `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission and its provider
   Sessions; `--operation` disambiguates a Mission ID used by several Operations.
 - `ai6ctl sessions [--operation <ID>] [--mission <ID>] [--state <STATE>]` filters the
@@ -149,7 +161,7 @@ needs), a missing item or a rejected or expired control, `2` for invalid argumen
 
 ## Gotchas
 
-- The only writes are the controls and green ink decisions above; no flag accepts the
+- The only writes are the controls, green ink decisions and access and account changes above; no flag accepts the
   Station channel bearer or a terminal-attachment token.
 - `mission <ID>` and `session <ID>` still show; a Mission or Session literally named
   `cancel`, `retry`, `resume` or `interrupt` is shown with `ai6ctl missions` or

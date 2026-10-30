@@ -4,6 +4,8 @@ use std::net::IpAddr;
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod access;
+
 use clap::{Args, Parser, Subcommand};
 use reqwest::{Client, Method, StatusCode, Url};
 use serde::Deserialize;
@@ -139,6 +141,18 @@ enum Command {
     HeldBriefs {
         #[command(subcommand)]
         command: HeldCommand,
+    },
+    /// Read and change the access policy: roles, ordered rules, the delegation cap and the
+    /// chief list, globally or for one Operation; or explain an answer.
+    Access {
+        #[command(subcommand)]
+        command: access::AccessCommand,
+    },
+    /// List the accounts people sign in with, and make, disable, enable or reset them (needs
+    /// account.manage).
+    Accounts {
+        #[command(subcommand)]
+        command: Option<access::AccountsCommand>,
     },
     /// List the pool accounts an Operation may draw from: Sessions using each, quota used,
     /// until when it is limited and tokens today (needs pool.read on the Operation).
@@ -628,6 +642,14 @@ async fn run() -> Result<(), String> {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let filter = operation.as_deref().map(|operation| (operation, subtree));
             print_missions(missions(&client, &server, &token, filter).await?);
+        }
+        Command::Access { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            access::run_access(&client, &server, &token, command).await?;
+        }
+        Command::Accounts { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            access::run_accounts(&client, &server, &token, command).await?;
         }
         Command::Operations { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;

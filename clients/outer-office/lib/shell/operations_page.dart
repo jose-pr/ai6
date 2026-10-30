@@ -136,6 +136,12 @@ class _OperationsPageState extends State<OperationsPage> {
                   .withField('operation_id', operation.operationId)
                   .withField('subtree', 'true'),
             ),
+            onAccess: operation.actions.contains('access.read')
+                ? () => onRoute(
+                    OoRoute(OoPage.access)
+                        .withField('operation_id', operation.operationId),
+                  )
+                : null,
           ),
         );
       },
@@ -153,9 +159,13 @@ class _OperationCard extends StatelessWidget {
     required this.folded,
     required this.onToggle,
     required this.onSubtree,
+    required this.onAccess,
   });
 
   final UserOperationAccess operation;
+
+  /// Opens the Operation's own access policy; `null` without `access.read` there.
+  final VoidCallback? onAccess;
 
   /// The Operations directly under it, and the working and queued Missions of it and all
   /// beneath it.
@@ -230,6 +240,14 @@ class _OperationCard extends StatelessWidget {
                 ],
               ),
             ],
+            if (onAccess != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: onAccess,
+                  child: const Text('Access'),
+                ),
+              ),
             if (counts.isNotEmpty) ...[
               const SizedBox(height: 12),
               Wrap(

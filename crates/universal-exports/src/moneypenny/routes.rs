@@ -58,6 +58,7 @@ const STATION_TABS: &[&str] = &["overview", "theaters", "settings", "placement"]
 const AGENT_TABS: &[&str] = &["agents", "roles"];
 const GREEN_INK_TABS: &[&str] = &["inbox", "classes"];
 const BRIEFING_TABS: &[&str] = &["proposals", "held"];
+const ACCESS_TABS: &[&str] = &["roles", "rules", "accounts", "check"];
 const ROSTER_KINDS: &[&str] = &["operation", "agent", "role", "cover", "assistant"];
 
 /// What a field holds.
@@ -88,11 +89,12 @@ pub(crate) enum Page {
     Pools,
     Timeline,
     Audit,
+    Access,
     Memory,
 }
 
 impl Page {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::Overview,
         Self::Operations,
         Self::Missions,
@@ -105,6 +107,7 @@ impl Page {
         Self::Pools,
         Self::Timeline,
         Self::Audit,
+        Self::Access,
         Self::Memory,
     ];
 
@@ -123,6 +126,7 @@ impl Page {
             Self::Pools => "pools",
             Self::Timeline => "timeline",
             Self::Audit => "audit",
+            Self::Access => "access",
             Self::Memory => "memory",
         }
     }
@@ -185,6 +189,7 @@ impl Page {
             Self::Pools => &[("operation_id", Identifier), ("pool", Identifier)],
             Self::Timeline => &[("operation_id", Identifier), ("mission_id", Identifier)],
             Self::Audit => &[("operation_id", Identifier), ("station_id", Identifier)],
+            Self::Access => &[("tab", OneOf(ACCESS_TABS)), ("operation_id", Identifier)],
         }
     }
 
@@ -457,6 +462,14 @@ impl Route {
             }
             Page::Audit if has("operation_id") && has("station_id") => {
                 return Err("audit takes operation_id or station_id, not both".to_owned());
+            }
+            Page::Access
+                if has("operation_id")
+                    && fields.iter().any(|(name, field)| {
+                        *name == "tab" && *field == Field::Text("accounts".to_owned())
+                    }) =>
+            {
+                return Err("accounts is not a tab of an Operation's access".to_owned());
             }
             _ => {}
         }

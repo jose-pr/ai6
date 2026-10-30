@@ -51,6 +51,9 @@
       "uri": "app:/timeline?operation_id=G&mission_id=mission-7"
     },
     {"json": {"page": "audit", "station_id": "hq"}, "uri": "app:/audit?station_id=hq"},
+    {"json": {"page": "access"}, "uri": "app:/access"},
+    {"json": {"page": "access", "tab": "accounts"}, "uri": "app:/access?tab=accounts"},
+    {"json": {"page": "access", "tab": "rules", "operation_id": "G"}, "uri": "app:/access?tab=rules&operation_id=G"},
     {"json": {"page": "memory"}, "uri": "app:/memory"}
   ],
   "invalid": [
@@ -81,6 +84,8 @@
     {"json": {"page": "stations", "tab": "terminals"}, "reason": "tab is one of overview, theaters, settings, placement"},
     {"json": {"page": "roster", "kind": "agents"}, "reason": "kind is one of operation, agent, role, cover, assistant"},
     {"json": {"page": "audit", "operation_id": "G", "station_id": "hq"}, "reason": "audit takes operation_id or station_id, not both"},
+    {"json": {"page": "access", "tab": "accounts", "operation_id": "G"}, "reason": "accounts is not a tab of an Operation's access"},
+    {"json": {"page": "access", "tab": "people"}, "reason": "tab is one of roles, rules, accounts, check"},
     {"uri": "https://example.org/missions", "reason": "a route link starts with app:/"},
     {"uri": "app:/missions/G/mission-7", "reason": "unknown page missions/G/mission-7"},
     {"uri": "app:/stations/worker", "reason": "unknown page stations/worker"},
