@@ -59,7 +59,7 @@ impl Runner for FakeEngine {
                     let (name, value) = pair.split_once('=').unwrap();
                     command.env(name, value);
                 }
-                run_process(&mut command, input)
+                run_process(&mut command, input, std::time::Duration::from_secs(1))
             }
             other => panic!("unexpected engine command {other:?}"),
         }

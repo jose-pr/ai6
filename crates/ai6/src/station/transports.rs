@@ -1087,6 +1087,9 @@ pub(crate) mod testing {
                     timeout_ms: spec.timeout_ms,
                     max_output: spec.max_output,
                 },
+                std::time::Duration::from_millis(
+                    crate::directorates::q::transport::kit::DEFAULT_READER_GRACE_MS,
+                ),
             )?
             .to_value()
             .map_err(internal)

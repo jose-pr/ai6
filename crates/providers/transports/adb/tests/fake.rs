@@ -28,7 +28,11 @@ impl Runner for FakeDevice {
         match words.as_slice() {
             ["get-state"] => Ok(text(self.state)),
             ["shell", "getprop ro.product.cpu.abi"] => Ok(text("arm64-v8a\n")),
-            ["shell", script] => run_process(Command::new("sh").arg("-c").arg(script), input),
+            ["shell", script] => run_process(
+                Command::new("sh").arg("-c").arg(script),
+                input,
+                std::time::Duration::from_secs(1),
+            ),
             ["reverse", "--remove", port] => {
                 self.seen.lock().unwrap().removed.push((*port).to_owned());
                 Ok(text(""))

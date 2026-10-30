@@ -6,9 +6,13 @@ and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
 No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) only. The crate
-root exports `Local`, which implements `ai6::directorates::q::transport::Transport`; the
-library is both an `rlib` and the Guatiao `cdylib` a Station loads. Provider ID: `local`.
-It takes no configuration. No unsafe code.
+root exports `Local` and `LocalConfig`; `Local` implements `ai6::directorates::q::transport::Transport`;
+the library is both an `rlib` and the Guatiao `cdylib` a Station loads. Provider ID: `local`.
+No unsafe code.
+
+`LocalConfig` (`ToValue`, `FromValue`, `Schema`, `Default`; `Local::new(LocalConfig)`), set by a
+Station in `[providers.local]`: `reader_grace_ms` (default 1000), how long a call waits for the
+output pipes once the program has ended.
 
 ## Capabilities
 
@@ -38,6 +42,6 @@ opens terminals on its own host with its Terminal provider and adds that capabil
 ## Gotchas
 
 - A descendant of a timed-out program can keep running and holds the output pipes; the
-  call waits at most one second for the pipes before returning what it has.
+  call waits at most `reader_grace_ms` (one second) for the pipes before returning what it has.
 - After renaming or removing a provider library, clean the plugin directory: a Station
   loads every provider library it finds.

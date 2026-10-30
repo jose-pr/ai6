@@ -17,6 +17,7 @@ mod settings;
 
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use ai6::directorates::q::transport::kit::{self, ProcessInput, Shell, command_line, run_process};
 use ai6::guatiao::library::{Object, ProviderError};
@@ -40,6 +41,7 @@ pub trait Runner: Send + Sync {
 struct Process {
     executable: String,
     serial: Option<String>,
+    reader_grace: Duration,
 }
 
 impl Runner for Process {
@@ -49,7 +51,7 @@ impl Runner for Process {
             command.arg("-s").arg(serial);
         }
         command.args(args);
-        run_process(&mut command, input)
+        run_process(&mut command, input, self.reader_grace)
     }
 }
 
@@ -75,6 +77,7 @@ impl TryFrom<TransportConfig> for Adb {
             .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?;
         Ok(Self::with_runner(Arc::new(Process {
             executable: settings.executable(),
+            reader_grace: settings.reader_grace(),
             serial: settings.serial,
         })))
     }

@@ -1,11 +1,13 @@
 use ai6::directorates::q::transport::kit::{ProcessInput, run_process};
+use std::time::Duration;
+
 use ai6::guatiao::Status;
 use ai6::guatiao::library::ProviderError;
 use ai6::{Output, RunSpec};
 
 use crate::refuse;
 
-pub(crate) fn run(spec: &RunSpec) -> Result<Output, ProviderError> {
+pub(crate) fn run(spec: &RunSpec, reader_grace: Duration) -> Result<Output, ProviderError> {
     let (program, args) = spec
         .argv
         .split_first()
@@ -25,5 +27,6 @@ pub(crate) fn run(spec: &RunSpec) -> Result<Output, ProviderError> {
             timeout_ms: spec.timeout_ms,
             max_output: spec.max_output,
         },
+        reader_grace,
     )
 }

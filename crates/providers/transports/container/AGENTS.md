@@ -22,6 +22,7 @@ keys are refused.
 | `container` | required | The running container, by name or ID. |
 | `engine` | `docker` | The engine's client; `podman` works the same. |
 | `user` | the container's | The user to run commands as (`-u`). |
+| `reader_grace_ms` | 1000 | How long the output readers get to finish once a command has ended; a descendant that outlives it can hold a pipe open. |
 
 ## Capabilities
 

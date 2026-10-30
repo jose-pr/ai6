@@ -15,19 +15,57 @@ ai6::guatiao::providers!(Local);
 mod files;
 mod process;
 
+use ai6::directorates::q::transport::kit::DEFAULT_READER_GRACE_MS;
 use ai6::guatiao::library::ProviderError;
-use ai6::guatiao::{FromValue, Status, ToValue, Value};
+use ai6::guatiao::{FromValue, Schema, Status, ToValue, Value};
 use ai6::{Capabilities, ReadSpec, RunSpec, Transport, WriteSpec};
 
 /// The Station's own host as a transport.
-#[derive(Default, ai6::guatiao::Provider)]
+/// `local` transport configuration; every field has a default.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::ai6::guatiao)]
+pub struct LocalConfig {
+    /// Milliseconds the output readers get to finish once a command has ended; a descendant
+    /// that outlives it can hold a pipe open indefinitely. Default 1000.
+    #[map(default = DEFAULT_READER_GRACE_MS)]
+    pub reader_grace_ms: u64,
+}
+
+impl Default for LocalConfig {
+    fn default() -> Self {
+        Self {
+            reader_grace_ms: DEFAULT_READER_GRACE_MS,
+        }
+    }
+}
+
+/// The Station's own host.
+#[derive(Debug, Clone, Copy, Default, ai6::guatiao::Provider)]
 #[provider(
     Transport,
     id = "local",
     name = "local",
-    crate = ::ai6::guatiao
+    crate = ::ai6::guatiao,
+    config = LocalConfig
 )]
-pub struct Local;
+pub struct Local {
+    config: LocalConfig,
+}
+
+impl Local {
+    /// A transport with `config`.
+    pub fn new(config: LocalConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl TryFrom<LocalConfig> for Local {
+    type Error = ProviderError;
+
+    fn try_from(config: LocalConfig) -> Result<Self, Self::Error> {
+        Ok(Self::new(config))
+    }
+}
 
 impl Transport for Local {
     fn capabilities(&self) -> Result<Value, ProviderError> {
@@ -44,7 +82,10 @@ impl Transport for Local {
 
     fn run(&self, spec: &Value) -> Result<Value, ProviderError> {
         let spec = spec_of::<RunSpec>(spec)?;
-        value(&process::run(&spec)?)
+        value(&process::run(
+            &spec,
+            std::time::Duration::from_millis(self.config.reader_grace_ms),
+        )?)
     }
 
     fn read_file(&self, spec: &Value) -> Result<Value, ProviderError> {

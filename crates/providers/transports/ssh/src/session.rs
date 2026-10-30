@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
 
 use ai6::guatiao::Status;
 use ai6::guatiao::library::ProviderError;
@@ -14,9 +13,6 @@ use tokio::net::TcpStream;
 
 use crate::refuse;
 use crate::settings::Settings;
-
-const KEEPALIVE: Duration = Duration::from_secs(30);
-const KEEPALIVE_MAX: usize = 3;
 
 /// What the host's key must be for the connection to go on.
 #[derive(Debug, Clone)]
@@ -296,8 +292,8 @@ impl Link {
         };
         let key = self.load_key()?;
         let config = Arc::new(client::Config {
-            keepalive_interval: Some(KEEPALIVE),
-            keepalive_max: KEEPALIVE_MAX,
+            keepalive_interval: settings.keepalive(),
+            keepalive_max: settings.keepalive_max(),
             ..client::Config::default()
         });
         let handler = Client {

@@ -22,9 +22,10 @@ use super::{DirEntry, DirListing, FileData, Output, ReadSpec, WriteSpec};
 pub const EXIT_NOT_FOUND: i64 = 44;
 
 const POLL: Duration = Duration::from_millis(5);
-/// How long output readers get to finish after the program has ended. A descendant that
-/// outlives it can hold a pipe open indefinitely.
-const READER_GRACE: Duration = Duration::from_secs(1);
+/// Milliseconds output readers get to finish after the program has ended unless a transport's
+/// `reader_grace_ms` says otherwise. A descendant that outlives it can hold a pipe open
+/// indefinitely.
+pub const DEFAULT_READER_GRACE_MS: u64 = 1_000;
 
 /// Quotes `word` so a POSIX shell reads it back as exactly one word.
 pub fn quote(word: &str) -> String {
@@ -95,11 +96,13 @@ pub struct ProcessInput<'a> {
     pub max_output: u64,
 }
 
-/// Runs `command` to completion. A process that cannot be started is an error (`NOT_FOUND`
-/// when its program does not exist); one that fails is a normal [`Output`].
+/// Runs `command` to completion, giving the output readers `reader_grace` to finish once the
+/// program has ended. A process that cannot be started is an error (`NOT_FOUND` when its
+/// program does not exist); one that fails is a normal [`Output`].
 pub fn run_process(
     command: &mut Command,
     input: &ProcessInput<'_>,
+    reader_grace: Duration,
 ) -> Result<Output, ProviderError> {
     command
         .stdin(if input.stdin.is_some() {
@@ -143,8 +146,8 @@ pub fn run_process(
         thread::sleep(POLL);
     };
 
-    let (stdout, out_truncated) = collect(stdout);
-    let (stderr, err_truncated) = collect(stderr);
+    let (stdout, out_truncated) = collect(stdout, reader_grace);
+    let (stderr, err_truncated) = collect(stderr, reader_grace);
     Ok(Output {
         code: if timed_out {
             None
@@ -180,9 +183,12 @@ fn capture(mut pipe: impl Read + Send + 'static, limit: usize) -> mpsc::Receiver
     receiver
 }
 
-fn collect(receiver: Option<mpsc::Receiver<(Vec<u8>, bool)>>) -> (Vec<u8>, bool) {
+fn collect(
+    receiver: Option<mpsc::Receiver<(Vec<u8>, bool)>>,
+    reader_grace: Duration,
+) -> (Vec<u8>, bool) {
     receiver
-        .and_then(|receiver| receiver.recv_timeout(READER_GRACE).ok())
+        .and_then(|receiver| receiver.recv_timeout(reader_grace).ok())
         .unwrap_or_default()
 }
 
@@ -370,7 +376,26 @@ mod tests {
         let missing = run_process(
             &mut Command::new("ai6-no-such-program"),
             &ProcessInput::default(),
+            Duration::from_millis(DEFAULT_READER_GRACE_MS),
         );
         assert!(missing.is_err_and(|e| e.status == Status::GUATIAO_ERR_NOT_FOUND));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_reader_grace_bounds_the_wait_for_a_descendant_holding_the_pipe() {
+        let started = Instant::now();
+        let output = run_process(
+            Command::new("sh").arg("-c").arg("sleep 5 & echo hi"),
+            &ProcessInput::default(),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(output.code, Some(0));
     }
 }

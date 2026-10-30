@@ -17,6 +17,7 @@ mod settings;
 
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use ai6::directorates::q::transport::kit::{self, ProcessInput, Shell, run_process};
 use ai6::guatiao::library::ProviderError;
@@ -35,11 +36,16 @@ pub trait Runner: Send + Sync {
 /// Starts the engine's executable.
 struct Process {
     executable: String,
+    reader_grace: Duration,
 }
 
 impl Runner for Process {
     fn engine(&self, args: &[String], input: &ProcessInput<'_>) -> Result<Output, ProviderError> {
-        run_process(Command::new(&self.executable).args(args), input)
+        run_process(
+            Command::new(&self.executable).args(args),
+            input,
+            self.reader_grace,
+        )
     }
 }
 
@@ -68,6 +74,7 @@ impl TryFrom<TransportConfig> for Container {
         Ok(Self::with_runner(
             Arc::new(Process {
                 executable: settings.engine(),
+                reader_grace: settings.reader_grace(),
             }),
             settings.container,
             settings.user,

@@ -1030,6 +1030,9 @@ pub struct SshAccess {
     pub host_key: Option<String>,            // "sha256:HEX" of the host's public key
     pub trust_on_first_use: bool,            // weaker than a pin; reported
     pub connect_timeout_secs: Option<u64>,
+    pub exit_grace_ms: Option<u64>,          // 1000: output awaited after a command exited
+    pub keepalive_secs: Option<u64>,         // 30; 0 sends none
+    pub keepalive_max: Option<usize>,        // 3 unanswered probes
 }
 impl SshAccess {
     pub fn new(host: impl Into<String>) -> Self;
@@ -1292,7 +1295,9 @@ pub fn command_line(argv: &[String], cwd: Option<&str>, env: Option<&BTreeMap<St
     -> Result<String, String>;                           // cd 'cwd' && exec env 'K=V' 'argv0' 'arg'…
 pub fn is_variable_name(name: &str) -> bool;
 pub struct ProcessInput<'a> { pub stdin: Option<&'a [u8]>, pub timeout_ms: u64, pub max_output: u64 }
-pub fn run_process(command: &mut Command, input: &ProcessInput<'_>) -> Result<Output, ProviderError>;
+pub fn run_process(command: &mut Command, input: &ProcessInput<'_>, reader_grace: Duration)
+    -> Result<Output, ProviderError>;
+pub const DEFAULT_READER_GRACE_MS: u64 = 1_000;   // a transport's `reader_grace_ms` default
 pub fn io_error(error: &io::Error, what: &str) -> ProviderError;   // NotFound -> GUATIAO_ERR_NOT_FOUND
 pub trait Shell { fn sh(&self, script: &str, stdin: Option<&[u8]>, max_output: u64) -> Result<Output, ProviderError>; }
 pub fn read_file(shell: &dyn Shell, spec: &ReadSpec) -> Result<FileData, ProviderError>;
@@ -1301,8 +1306,9 @@ pub fn list_dir(shell: &dyn Shell, path: &str) -> Result<DirListing, ProviderErr
 pub const EXIT_NOT_FOUND: i64 = 44;
 ```
 
-`run_process` kills a process at its timeout (not its descendants) and keeps at most
-`max_output` bytes of each stream. The file functions are POSIX `sh` scripts over `Shell`
+`run_process` kills a process at its timeout (not its descendants), keeps at most
+`max_output` bytes of each stream and gives the output readers `reader_grace` to finish once the
+program has ended. The file functions are POSIX `sh` scripts over `Shell`
 (`wc`, `tail`, `head`, `cat`, `mkdir`, `printf`): a script that exits `EXIT_NOT_FOUND` is
 `GUATIAO_ERR_NOT_FOUND`, and a name holding a tab or a newline is not listed correctly.
 

@@ -5,6 +5,9 @@ use serde::Deserialize;
 
 const DEFAULT_PORT: u16 = 22;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const DEFAULT_EXIT_GRACE: Duration = Duration::from_secs(1);
+const DEFAULT_KEEPALIVE_SECS: u64 = 30;
+const DEFAULT_KEEPALIVE_MAX: usize = 3;
 
 /// A Theater's SSH settings, as the Station serializes `SshAccess`.
 #[derive(Debug, Clone, Deserialize)]
@@ -23,6 +26,16 @@ pub(crate) struct Settings {
     pub trust_on_first_use: bool,
     #[serde(default)]
     pub connect_timeout_secs: Option<u64>,
+    /// Milliseconds output and the end of the channel are awaited after a command has exited;
+    /// a descendant that outlives it can keep the channel open indefinitely. Default 1000.
+    #[serde(default)]
+    pub exit_grace_ms: Option<u64>,
+    /// Seconds between keepalive probes of an idle connection; `0` sends none. Default 30.
+    #[serde(default)]
+    pub keepalive_secs: Option<u64>,
+    /// Unanswered keepalive probes before the connection is dropped. Default 3.
+    #[serde(default)]
+    pub keepalive_max: Option<usize>,
 }
 
 impl Settings {
@@ -52,6 +65,23 @@ impl Settings {
     pub(crate) fn connect_timeout(&self) -> Duration {
         self.connect_timeout_secs
             .map_or(DEFAULT_CONNECT_TIMEOUT, Duration::from_secs)
+    }
+
+    pub(crate) fn exit_grace(&self) -> Duration {
+        self.exit_grace_ms
+            .map_or(DEFAULT_EXIT_GRACE, Duration::from_millis)
+    }
+
+    /// The keepalive interval, `None` when the setting turns it off.
+    pub(crate) fn keepalive(&self) -> Option<Duration> {
+        match self.keepalive_secs.unwrap_or(DEFAULT_KEEPALIVE_SECS) {
+            0 => None,
+            secs => Some(Duration::from_secs(secs)),
+        }
+    }
+
+    pub(crate) fn keepalive_max(&self) -> usize {
+        self.keepalive_max.unwrap_or(DEFAULT_KEEPALIVE_MAX)
     }
 
     /// The remote user: the setting, else the Station's own user name.
@@ -139,5 +169,20 @@ mod tests {
         assert_eq!(settings.identity_path().unwrap(), PathBuf::from("/abs/key"));
         let expanded = expand_home("~/k");
         assert!(expanded.ends_with("k") && expanded.as_os_str() != "~/k");
+    }
+
+    #[test]
+    fn the_session_bounds_are_settings_with_defaults() {
+        let settings = Settings::parse("host = \"h\"\n").unwrap();
+        assert_eq!(settings.exit_grace(), Duration::from_secs(1));
+        assert_eq!(settings.keepalive(), Some(Duration::from_secs(30)));
+        assert_eq!(settings.keepalive_max(), 3);
+        let settings = Settings::parse(
+            "host = \"h\"\nexit_grace_ms = 50\nkeepalive_secs = 0\nkeepalive_max = 9\n",
+        )
+        .unwrap();
+        assert_eq!(settings.exit_grace(), Duration::from_millis(50));
+        assert_eq!(settings.keepalive(), None);
+        assert_eq!(settings.keepalive_max(), 9);
     }
 }

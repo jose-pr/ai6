@@ -19,14 +19,14 @@ fn expand(name: &str) -> String {
 }
 
 fn client() -> TransportClient {
-    TransportClient::new(Box::new(Local))
+    TransportClient::new(Box::new(Local::default()))
 }
 
 #[test]
 fn the_local_transport_passes_the_contract_suite() {
     let scratch = tempfile::tempdir().unwrap();
     contract::check(
-        Box::new(Local),
+        Box::new(Local::default()),
         &Host {
             shell: SHELL,
             expand,
@@ -42,7 +42,7 @@ fn it_claims_exactly_what_it_does() {
     assert!(!capabilities.terminal && !capabilities.forward);
     assert_eq!(capabilities.os.as_deref(), Some(std::env::consts::OS));
     assert_eq!(capabilities.arch.as_deref(), Some(std::env::consts::ARCH));
-    assert!(Local.probe().is_ok());
+    assert!(Local::default().probe().is_ok());
 }
 
 #[test]
@@ -88,4 +88,21 @@ fn a_program_that_outlives_its_timeout_is_killed() {
 #[test]
 fn an_empty_argv_is_refused() {
     assert!(client().run(&RunSpec::default()).is_err());
+}
+
+#[test]
+fn the_reader_grace_is_a_config_key_with_a_default() {
+    use ai6::guatiao::{FromValue, ToValue};
+    use ai6_transport_local::LocalConfig;
+    let empty = std::collections::BTreeMap::<String, u64>::new()
+        .to_value()
+        .unwrap();
+    assert_eq!(
+        LocalConfig::from_value(&empty).unwrap(),
+        LocalConfig::default()
+    );
+    let set = std::collections::BTreeMap::from([("reader_grace_ms".to_owned(), 5_u64)])
+        .to_value()
+        .unwrap();
+    assert_eq!(LocalConfig::from_value(&set).unwrap().reader_grace_ms, 5);
 }

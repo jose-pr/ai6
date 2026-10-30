@@ -136,6 +136,12 @@ refused. The SSH client is built into the `ssh` transport provider (`russh`), so
 depends on an installed `ssh` or on `ControlMaster`, and it behaves the same on every OS. The
 remote side must have a POSIX shell.
 
+Three more optional keys bound a connection: `exit_grace_ms` (default 1000) is how long output and
+the end of the channel are awaited once a command has exited, `keepalive_secs` (default 30, `0`
+sends none) the seconds between keepalive probes of an idle connection and `keepalive_max`
+(default 3) the unanswered probes before it is dropped. `connect_timeout_secs` (default 15) is
+the wait for the connection and login.
+
 **Pin the host key.** `host_key = "sha256:HEX"` is the SHA-256 of the host's public key,
 the same text a peer ID uses. Get it on the host with:
 
@@ -173,7 +179,10 @@ Theater's declared facts (`GET /v1/stations`, and the Theater's tooltip in Outer
 The `adb`, `container` and `qemu` transports are configured with
 `access = { transport = { provider = "adb", config = { serial = "emulator-5554" } } }` (and
 `{ container = "build", engine = "podman" }`, `{ address = "127.0.0.1:4555" }`); each
-provider's API header lists its settings.
+provider's API header lists its settings. Besides what names the target, `adb` and `container` take
+`reader_grace_ms` (default 1000, how long the output readers get once a command has ended), and the
+Station's own host (the `local` transport) takes it from `[providers.local]` of the `station`
+record.
 
 A Theater that has not answered yet is probed in the background, so a dead host never delays
 a check-in; until it answers the Theater is listed as unreachable with the reason, and
@@ -249,6 +258,9 @@ install = { git = "dnf install -y git" }
   knows, is kept for inspection: at most `keep_failed` (default 3) per template, each for at
   most `keep_failed_hours` (default 24), the oldest going first. A Station that restarts
   adopts the Theaters the provider still lists.
+- The `ephemeral-container` provider's `config` also takes `engine_timeout_ms` (default 600000, how
+  long one engine command may run, `0` to wait for it), `engine_output_bytes` (default 1048576, the
+  output of an engine command kept) and `reader_grace_ms` (default 1000).
 - Placement chooses the template like any Theater (its requirements count as met, since they
   are fitted when a Theater is made) and never chooses a Theater made for another Mission;
   check-ins publish those with `made_for`.

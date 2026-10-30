@@ -18,10 +18,6 @@ use crate::command::signal_number;
 use crate::refuse;
 use crate::session::Link;
 
-/// How long output and the end of the channel are awaited after the program has exited. A
-/// descendant that outlives it can keep the channel open indefinitely.
-const EXIT_GRACE: Duration = Duration::from_secs(1);
-
 pub(crate) async fn run(link: &Link, spec: &RunSpec) -> Result<Output, ProviderError> {
     let command = command_line(&spec.argv, spec.cwd.as_deref(), spec.env.as_ref())
         .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?;
@@ -36,6 +32,9 @@ pub(crate) async fn run(link: &Link, spec: &RunSpec) -> Result<Output, ProviderE
     sent.await
         .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
 
+    // How long output and the end of the channel are awaited after the program has exited: a
+    // descendant that outlives it can keep the channel open indefinitely.
+    let exit_grace = link.settings().exit_grace();
     let limit = usize::try_from(spec.max_output).unwrap_or(usize::MAX);
     let deadline = (spec.timeout_ms > 0)
         .then(|| tokio::time::Instant::now() + Duration::from_millis(spec.timeout_ms));
@@ -44,9 +43,9 @@ pub(crate) async fn run(link: &Link, spec: &RunSpec) -> Result<Output, ProviderE
     let mut timed_out = false;
     loop {
         let until = match (deadline, exited_at) {
-            (Some(deadline), Some(exited)) => Some(deadline.min(exited + EXIT_GRACE)),
+            (Some(deadline), Some(exited)) => Some(deadline.min(exited + exit_grace)),
             (Some(deadline), None) => Some(deadline),
-            (None, Some(exited)) => Some(exited + EXIT_GRACE),
+            (None, Some(exited)) => Some(exited + exit_grace),
             (None, None) => None,
         };
         let message = match until {

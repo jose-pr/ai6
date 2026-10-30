@@ -25,7 +25,10 @@ without contacting the host.
 | `identity` | first of `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa` | Path of the private key file; a leading `~/` is expanded. |
 | `host_key` | none | `sha256:HEX`, the SHA-256 of the host's public key blob (the text `awk '{print $2}' key.pub \| base64 -d \| sha256sum` gives). |
 | `trust_on_first_use` | `false` | Accept the first key seen when no `host_key` is set. |
-| `connect_timeout_secs` | 15 | Connection and login. |
+| `connect_timeout_secs` | 15 | Connection and login; 0 is refused (it could never connect). |
+| `exit_grace_ms` | 1000 | How long output and the end of the channel are awaited after a command has exited; a descendant that outlives it can keep the channel open. |
+| `keepalive_secs` | 30 | Seconds between keepalive probes of an idle connection; `0` sends none. |
+| `keepalive_max` | 3 | Unanswered probes before the connection is dropped. |
 
 **Keys are never in configuration**: only the path of an unencrypted private key file. A
 passphrase-protected key is refused with a message saying so; there is no agent support.

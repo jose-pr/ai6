@@ -212,6 +212,16 @@ pub struct SshAccess {
     /// Seconds to wait for the connection and login; 15 when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect_timeout_secs: Option<u64>,
+    /// Milliseconds output and the end of the channel are awaited after a command has exited;
+    /// 1000 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_grace_ms: Option<u64>,
+    /// Seconds between keepalive probes of an idle connection, `0` for none; 30 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive_secs: Option<u64>,
+    /// Unanswered keepalive probes before the connection is dropped; 3 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive_max: Option<usize>,
 }
 
 impl SshAccess {
@@ -225,6 +235,9 @@ impl SshAccess {
             host_key: None,
             trust_on_first_use: false,
             connect_timeout_secs: None,
+            exit_grace_ms: None,
+            keepalive_secs: None,
+            keepalive_max: None,
         }
     }
 
@@ -1158,6 +1171,29 @@ agents = "remote-hands"
             TheaterAccess::Local.transport().unwrap(),
             ("local".to_owned(), String::new())
         );
+    }
+
+    #[test]
+    fn ssh_session_bounds_reach_the_ssh_transports_settings() {
+        let access: SshAccess = toml::from_str(
+            "host = \"h\"
+exit_grace_ms = 50
+keepalive_secs = 0
+keepalive_max = 9
+",
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                access.exit_grace_ms,
+                access.keepalive_secs,
+                access.keepalive_max
+            ),
+            (Some(50), Some(0), Some(9))
+        );
+        let (_, settings) = TheaterAccess::Ssh(access).transport().unwrap();
+        assert!(settings.contains("keepalive_secs = 0"), "{settings}");
+        assert!(SshAccess::new("h").exit_grace_ms.is_none());
     }
 
     #[test]

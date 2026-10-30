@@ -20,6 +20,7 @@ refused.
 | --- | --- | --- |
 | `serial` | none | The device as `adb devices` lists it (`emulator-5554`, `192.168.240.112:5555`). Without it adb takes the only device and refuses when there are several. Passed as `-s`. |
 | `executable` | `adb` | The adb executable. |
+| `reader_grace_ms` | 1000 | How long the output readers get to finish once a command has ended; a descendant that outlives it can hold a pipe open. |
 
 ## Capabilities
 
