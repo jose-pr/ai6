@@ -8,6 +8,7 @@ pub mod config;
 pub mod cover;
 pub mod harness;
 pub mod identity;
+pub mod inherit;
 pub mod limits;
 pub mod mission;
 pub mod placement;

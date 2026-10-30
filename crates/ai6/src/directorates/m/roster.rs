@@ -16,6 +16,7 @@ use crate::directorates::m::approvals::{GreenInkDefinition, GreenInkPolicy};
 use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::harness::HarnessPolicy;
+use crate::directorates::m::inherit;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
@@ -284,6 +285,10 @@ pub struct Operation {
     pub id: String,
     /// The codename of the Operation it is subordinate to; `None` for a root.
     pub parent: Option<String>,
+    /// Whether its definition is layered over its ancestors' (`inherit`, true unless
+    /// configured). `false` takes no policy from them; the tree still counts for access, pools
+    /// and Cables.
+    pub inherit: bool,
     /// Project name, also accepted as a lookup key.
     pub name: Option<String>,
     /// Human-readable project purpose.
@@ -348,6 +353,8 @@ pub struct Operation {
     pub harness: HarnessPolicy,
     /// When M asks a person to raise an Agent's clearance here.
     pub promotion: PromotionPolicy,
+    /// Each key its definition was resolved with, dotted, and the Operation that wrote it.
+    origins: BTreeMap<String, String>,
 }
 
 /// How an Operation's Missions get their working directory (`workspace = { .. }`).
@@ -411,6 +418,13 @@ impl Operation {
     pub fn with_parent(mut self, parent: impl Into<String>) -> Self {
         self.parent = Some(parent.into());
         self
+    }
+
+    /// Each key its definition was resolved with, dotted (`green_ink.kinds`), and the codename
+    /// of the Operation that wrote it: this one, or the ancestor it was inherited from. A key
+    /// no definition wrote has its default and no entry; an Operation built in code has none.
+    pub fn origins(&self) -> &BTreeMap<String, String> {
+        &self.origins
     }
 
     /// Whether a Mission of this Operation has no place to work: no `path`, `theater` or
@@ -1254,17 +1268,61 @@ fn check_tree(
 
 /// The Operations of `definitions`, each the keys of its `[operation.<id>]` table, resolved
 /// and checked; `source` names where they came from in error messages.
+///
+/// The tree is checked against `settings` first; then each definition is layered over its
+/// ancestors' ([`inherit::layer`]) up to the nearest one that does not inherit, and read
+/// with its presets and defaults.
 fn resolve_operations(
     definitions: impl IntoIterator<Item = (String, serde_json::Value)>,
     settings: &RosterSettings,
     source: &dyn fmt::Display,
 ) -> Result<Vec<Operation>, RosterError> {
-    let _ = settings;
-    let mut operations = Vec::new();
+    let invalid = |id: &str, reason: &dyn fmt::Display| {
+        error(format!("{source}: Operation {id:?}: {reason}"))
+    };
+    let mut tables = BTreeMap::new();
     for (id, definition) in definitions {
-        let definition = OperationDefinition::deserialize(definition)
-            .map_err(|reason| error(format!("{source}: Operation {id:?}: {reason}")))?;
-        operations.push(definition.resolve(id, source)?);
+        let serde_json::Value::Object(table) = definition else {
+            return Err(invalid(&id, &"the definition is not a table"));
+        };
+        tables.insert(id, table);
+    }
+    let mut parents = BTreeMap::new();
+    let mut inherits = BTreeMap::new();
+    for (id, table) in &tables {
+        let parent = match table.get("parent") {
+            None => None,
+            Some(serde_json::Value::String(parent)) => Some(parent.as_str()),
+            Some(_) => return Err(invalid(id, &"parent must be an Operation's codename")),
+        };
+        let inherit = match table.get("inherit") {
+            None => true,
+            Some(serde_json::Value::Bool(inherit)) => *inherit,
+            Some(_) => return Err(invalid(id, &"inherit must be true or false")),
+        };
+        parents.insert(id.as_str(), parent);
+        inherits.insert(id.as_str(), inherit);
+    }
+    check_tree(&parents, settings.max_operation_depth)
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
+    let mut operations = Vec::new();
+    for (id, table) in &tables {
+        let mut chain = vec![(id.as_str(), table)];
+        let mut current = id.as_str();
+        while inherits[current]
+            && let Some(parent) = parents[current]
+        {
+            chain.push((parent, &tables[parent]));
+            current = parent;
+        }
+        chain.reverse();
+        let layered = inherit::layer(&chain);
+        let definition =
+            OperationDefinition::deserialize(serde_json::Value::Object(layered.definition))
+                .map_err(|reason| invalid(id, &reason))?;
+        let mut operation = definition.resolve(id.clone(), source)?;
+        operation.origins = layered.origins;
+        operations.push(operation);
     }
     Ok(operations)
 }
@@ -1284,6 +1342,7 @@ struct AgentsDocument {
 #[serde(default, deny_unknown_fields)]
 struct OperationDefinition {
     parent: Option<String>,
+    inherit: Option<bool>,
     name: Option<String>,
     description: String,
     path: Option<String>,
@@ -1382,6 +1441,7 @@ impl OperationDefinition {
         Ok(Operation {
             id,
             parent: self.parent,
+            inherit: self.inherit.unwrap_or(true),
             name: self.name,
             description: self.description,
             path,
@@ -1444,6 +1504,7 @@ impl OperationDefinition {
             pools: self.pools,
             harness: self.harness,
             promotion,
+            origins: BTreeMap::new(),
         })
     }
 }
@@ -2828,6 +2889,117 @@ sources = {{ jira = \"GUA\" }}\n",
         assert_eq!(roster.subtree("NORTH"), ["NORTH"]);
         assert!(roster.subtree("missing").is_empty());
         assert!(roster.operation("FORTITUDE").unwrap().has_nowhere_to_work());
+    }
+
+    #[test]
+    fn a_subordinate_operation_layers_its_keys_over_its_parents() {
+        use crate::directorates::m::approvals::{ActionScope, Requirement};
+        let directory = TestDirectory::new();
+        directory.write(
+            "operations.toml",
+            "[operation.BODYGUARD]\ndescription = \"The deception plan\"\npath = \"/srv/lcs\"\n\
+             stations = [\"hq-1\"]\nstation_labels = { site = \"london\" }\n\
+             workspace = { source = \"/srv/plans\", base = \"main\" }\n\
+             sources = { jira = \"LCS\" }\n\
+             [operation.BODYGUARD.green_ink]\npreset = \"licensed\"\n\
+             [operation.BODYGUARD.sleepers.weekly]\nschedule = \"0 3 * * 0\"\ntitle = \"Review\"\n\
+             [operation.FORTITUDE]\nparent = \"BODYGUARD\"\nstation_labels = { gpu = \"yes\" }\n\
+             green_ink = { kinds = [\"deploy\"] }\n\
+             [operation.SOUTH]\nparent = \"FORTITUDE\"\npath = \"/srv/south\"\n\
+             stations = [\"lab\"]\n\
+             [operation.ZEPPELIN]\nparent = \"BODYGUARD\"\ninherit = false\npath = \"/srv/z\"\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        let push = ActionScope::try_new("push", "origin:main").unwrap();
+        let south = roster.operation("SOUTH").unwrap();
+        assert_eq!(
+            south.green_ink.requirement("00", &push),
+            Requirement::NotRequired,
+            "the root's licensed preset reaches a grandchild"
+        );
+        assert!(south.green_ink.kinds().any(|kind| kind == "deploy"));
+        assert_eq!(
+            south.station_labels,
+            BTreeMap::from([
+                ("gpu".to_owned(), "yes".to_owned()),
+                ("site".to_owned(), "london".to_owned()),
+            ])
+        );
+        assert_eq!(south.stations, ["lab"], "an array replaces");
+        assert_eq!(south.workspace.base, "main");
+        assert_eq!(
+            south.workspace.source, None,
+            "workspace.source is never inherited"
+        );
+        assert!(south.sources.is_empty() && south.sleepers.is_empty());
+        assert_eq!(south.description, "");
+        assert_eq!(south.path.as_deref(), Some(Path::new("/srv/south")));
+
+        let origin = |operation: &Operation, key: &str| operation.origins().get(key).cloned();
+        assert_eq!(
+            origin(south, "green_ink.preset").as_deref(),
+            Some("BODYGUARD")
+        );
+        assert_eq!(
+            origin(south, "green_ink.kinds").as_deref(),
+            Some("FORTITUDE")
+        );
+        assert_eq!(
+            origin(south, "station_labels.gpu").as_deref(),
+            Some("FORTITUDE")
+        );
+        assert_eq!(origin(south, "stations").as_deref(), Some("SOUTH"));
+        assert_eq!(origin(south, "path").as_deref(), Some("SOUTH"));
+        assert_eq!(origin(south, "sources"), None);
+        assert_eq!(origin(south, "clearance"), None, "a default has no writer");
+
+        let zeppelin = roster.operation("ZEPPELIN").unwrap();
+        assert!(!zeppelin.inherit);
+        assert_eq!(
+            roster.lineage("ZEPPELIN"),
+            ["BODYGUARD"],
+            "still in the tree"
+        );
+        let mut defaults = Operation::new("ZEPPELIN").with_parent("BODYGUARD");
+        defaults.inherit = false;
+        defaults.path = Some(PathBuf::from("/srv/z"));
+        assert_eq!(
+            zeppelin.green_ink, defaults.green_ink,
+            "strict, its own default"
+        );
+        assert_eq!(zeppelin.station_labels, defaults.station_labels);
+        assert_eq!(zeppelin.stations, defaults.stations);
+
+        let built = Roster::builder()
+            .operation(Operation::new("P").with_parent("Q"))
+            .operation({
+                let mut parent = Operation::new("Q");
+                parent.stations = vec!["hq-1".to_owned()];
+                parent
+            })
+            .build()
+            .unwrap();
+        let child = built.operation("P").unwrap();
+        assert!(
+            child.stations.is_empty(),
+            "a record built in code takes nothing"
+        );
+        assert!(child.origins().is_empty());
+
+        directory.write(
+            "operations.toml",
+            "[operation.A]\n[operation.B]\nparent = \"A\"\ninherit = \"no\"\n",
+        );
+        let refused = Roster::load(&directory.0).unwrap_err().to_string();
+        assert!(
+            refused.contains("inherit must be true or false"),
+            "{refused}"
+        );
+        directory.write(
+            "operations.toml",
+            "[operation.A]\nclearance = \"cosmic\"\n[operation.B]\nparent = \"A\"\n",
+        );
+        assert!(Roster::load(&directory.0).is_err());
     }
 
     #[test]

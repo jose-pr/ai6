@@ -469,7 +469,10 @@ mod tests {
             "its parent is not stored yet"
         );
         for (key, definition) in [
-            ("BODYGUARD", json!({})),
+            (
+                "BODYGUARD",
+                json!({"station_labels": {"site": "london"}, "green_ink": {"preset": "licensed"}}),
+            ),
             ("FORTITUDE", json!({"parent": "BODYGUARD"})),
             ("SOUTH", {
                 let mut south = checkout.clone();
@@ -483,6 +486,12 @@ mod tests {
         }
         let from_sql = provider.load("").unwrap().roster;
         assert_eq!(from_sql.lineage("SOUTH"), ["FORTITUDE", "BODYGUARD"]);
+        let south = from_sql.operation("SOUTH").unwrap();
+        assert_eq!(south.station_labels["site"], "london");
+        assert_eq!(
+            south.origins().get("green_ink.preset").map(String::as_str),
+            Some("BODYGUARD")
+        );
 
         let refused = provider
             .remove(ConfigRecord::Operation, &GLOBAL, "FORTITUDE")
@@ -526,12 +535,14 @@ mod tests {
             .max_operation_depth(None)
             .build()
             .unwrap();
+        for id in ["BODYGUARD", "FORTITUDE", "SOUTH"] {
+            assert_eq!(from_files.operation(id), unbounded.operation(id), "{id}");
+        }
+        // Records built in code take nothing from their parent: only the tree is the same.
         for roster in [&from_files, &from_code] {
             assert_eq!(roster.settings(), unbounded.settings());
-            for id in ["BODYGUARD", "FORTITUDE", "SOUTH"] {
-                assert_eq!(roster.operation(id), unbounded.operation(id), "{id}");
-            }
             assert_eq!(roster.subtree("BODYGUARD"), unbounded.subtree("BODYGUARD"));
+            assert_eq!(roster.lineage("SOUTH"), unbounded.lineage("SOUTH"));
         }
     }
 

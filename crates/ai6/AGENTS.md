@@ -278,6 +278,7 @@ impl AgentRole {
 pub struct Operation {
     pub id: String,
     pub parent: Option<String>,                   // the parent Operation's codename; None: a root
+    pub inherit: bool,                            // layered over its ancestors; default true
     pub name: Option<String>,
     pub description: String,
     pub path: Option<PathBuf>,
@@ -313,6 +314,10 @@ impl Operation {
     /// on_blown "flag", strict exposure and green ink, `Workspace::default()`.
     pub fn new(id: impl Into<String>) -> Self;
     #[must_use] pub fn with_parent(self, parent: impl Into<String>) -> Self;
+    /// Each key its definition was resolved with, dotted ("green_ink.kinds"), and the
+    /// codename of the Operation that wrote it; defaults have no entry, a record built in code
+    /// has none.
+    pub fn origins(&self) -> &BTreeMap<String, String>;
     /// No `path`, `theater` or `workspace.source`: it only groups others, and intake fails
     /// its briefs with "Operation \"P\" has nowhere to work".
     pub fn has_nowhere_to_work(&self) -> bool;
@@ -543,6 +548,20 @@ without one is a root. Every roster source (`load`, `from_parts`, `builder`, eac
 the chain, `A -> C -> B -> A`), whatever the settings, and a tree deeper than
 `RosterSettings::max_operation_depth`; so a provider refuses removing an Operation that still
 has children. The Station logs `RosterSettings::weakenings` at start and on reload.
+
+A definition (files, a `ConfigProvider`) is layered over its ancestors' before it is read:
+as JSON tables, root first and the Operation last, tables merging key by key at any depth
+(`station_labels`, `green_ink`, `budget`, `vetting`, `workspace`, ...) while scalars, arrays
+and `cover_identity` replace (`roster`, `stations`, `pools`, `clearance`, `cover`,
+`on_limit`). Presets and defaults then apply once, so a child's `green_ink.kinds` alone keeps
+its parent's `preset`. Never inherited: `ai6::directorates::m::inherit::NOT_INHERITED`
+(`name`, `description`, `path`, `theater`, `config`, `workspace.source`, `sources`,
+`sleepers`, `parent`, `inherit`), so a child neither reads its parent's checkout
+`.ai6/agents.toml` nor runs its Sleepers. `inherit = false` takes nothing from above it, and
+its own children take nothing from above it either; it stays in the tree for access, pools
+and Cables. A child cannot return a parent's key to unset except that way. Counters
+(`max_concurrent`, budgets, vetting rates) stay per Operation. A record built in code takes
+nothing from its parent. Weakening reports read the resolved records.
 
 An Agent is a codename; its `handler`, `model` and `effort` are the codename's current
 occupant. An `AgentRole` (`[role.<id>]`) is a job description only: a `purpose` and a
