@@ -103,7 +103,7 @@ pub(crate) struct Conversation {
     /// outside text; raised for good, never lowered by a narrower later job.
     pub(crate) scripts_reach_hosts: bool,
     /// What the Station running the harness reported each shared change call was made from,
-    /// oldest first, until the call takes it; at most [`ai6::MAX_ASSISTANT_SHARED_BASES`].
+    /// oldest first, until the call takes it; at most `[assistant.limits] shared_bases`.
     pub(crate) shared_bases: VecDeque<AssistantSharedBase>,
     /// The Station that took a message the person then stopped, until it takes another: its
     /// harness is cut off from her Cables, and the only reports taken from it are the Cables
@@ -140,7 +140,14 @@ impl fmt::Debug for Conversation {
 }
 
 impl Conversation {
-    pub(crate) fn new(id: String, person_id: String, bearer: String, now: f64) -> Self {
+    /// A new conversation whose open sockets may fall `buffer` events behind.
+    pub(crate) fn new(
+        id: String,
+        person_id: String,
+        bearer: String,
+        now: f64,
+        buffer: usize,
+    ) -> Self {
         Self {
             id,
             person_id,
@@ -152,7 +159,7 @@ impl Conversation {
             answered: false,
             pending: None,
             bearer,
-            events: broadcast::channel(EVENT_BUFFER).0,
+            events: broadcast::channel(buffer).0,
             notes: Vec::new(),
             proposals: Vec::new(),
             live: false,
@@ -167,14 +174,14 @@ impl Conversation {
         }
     }
 
-    /// Keeps the shared bases a Station reported, dropping the oldest past
-    /// [`ai6::MAX_ASSISTANT_SHARED_BASES`] and any [`AssistantSharedBase::validate`] refuses.
-    pub(crate) fn keep_shared_bases(&mut self, reported: &[AssistantSharedBase]) {
-        for base in reported.iter().take(ai6::MAX_ASSISTANT_SHARED_BASES) {
+    /// Keeps the shared bases a Station reported, dropping the oldest past `most` and any
+    /// [`AssistantSharedBase::validate`] refuses.
+    pub(crate) fn keep_shared_bases(&mut self, reported: &[AssistantSharedBase], most: ai6::Limit) {
+        for base in reported.iter().take(most.or_max()) {
             if base.validate().is_ok() {
-                if self.shared_bases.len() == ai6::MAX_ASSISTANT_SHARED_BASES {
-                    self.shared_bases.pop_front();
-                }
+                while !most.allows(self.shared_bases.len() + 1)
+                    && self.shared_bases.pop_front().is_some()
+                {}
                 self.shared_bases.push_back(base.clone());
             }
         }
@@ -237,9 +244,6 @@ impl Conversation {
             .send(serde_json::json!({"type": "busy", "busy": busy}));
     }
 }
-
-/// Events buffered for a slow app before it is told it fell behind.
-const EVENT_BUFFER: usize = 256;
 
 /// Every conversation, bounded per person, in total and by age.
 #[derive(Debug, Default)]
@@ -357,7 +361,7 @@ mod tests {
         for (id, person, at) in conversations {
             store.conversations.insert(
                 (*id).to_owned(),
-                Conversation::new((*id).to_owned(), (*person).to_owned(), "t".into(), *at),
+                Conversation::new((*id).to_owned(), (*person).to_owned(), "t".into(), *at, 256),
             );
         }
         store
@@ -385,7 +389,7 @@ mod tests {
 
     #[test]
     fn entries_are_bounded_and_the_bearer_is_never_printed() {
-        let mut conversation = Conversation::new("c".into(), "p".into(), "secret".into(), 1.0);
+        let mut conversation = Conversation::new("c".into(), "p".into(), "secret".into(), 1.0, 256);
         for at in 0..5 {
             conversation.push(
                 Entry {
@@ -424,7 +428,7 @@ mod tests {
             entries: usize::MAX,
             bytes: usize::MAX,
         };
-        let mut conversation = Conversation::new("c".into(), "p".into(), "t".into(), 1.0);
+        let mut conversation = Conversation::new("c".into(), "p".into(), "t".into(), 1.0, 256);
         for at in 0..4 {
             conversation.push(
                 view(f64::from(at), 1_000),
@@ -439,7 +443,7 @@ mod tests {
 
         let mut store = Store::default();
         for (id, first) in [("a", 0.0), ("b", 10.0)] {
-            let mut conversation = Conversation::new(id.into(), "p".into(), "t".into(), first);
+            let mut conversation = Conversation::new(id.into(), "p".into(), "t".into(), first, 256);
             conversation.push(view(first, 1_000), unbounded);
             conversation.push(
                 Entry {

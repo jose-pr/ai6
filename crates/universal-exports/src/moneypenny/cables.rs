@@ -2,7 +2,7 @@
 //!
 //! The Station serves her Cable tools; Universal Exports decides what they may do. Each job
 //! carries the Operations where the person holds `cable.send` or `cable.read` (at most
-//! [`ai6::MAX_ASSISTANT_CABLE_GRANTS`]) and whether the conversation is exposed
+//! `[assistant.limits] cable_grants`) and whether the conversation is exposed
 //! (`Conversation.exposed`, the one record of it). A Station asks again before each send
 //! (`GET /v1/station/assistant/exposure`), so a send in the same turn as a read waits too.
 //! An exposed send reaches the app as a proposal: the person confirms it (audited
@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use ai6::{
     AssistantCable, AssistantCableDecision, AssistantCableGrant, AssistantEvent, AuditRecord,
-    EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, MAX_ASSISTANT_CABLE_GRANTS,
+    EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, Limit,
 };
 use axum::http::Method;
 use serde_json::{Value, json};
@@ -24,7 +24,8 @@ use super::actions::{self, CableHold, Draft, Proposal, Scope};
 use super::store::{Bounds, Conversation, Entry, Role};
 use super::tools::Call;
 use super::{
-    Assistant, Control, PROPOSALS_FULL, audit, control_job, digest, now, room_for_proposal,
+    Assistant, AssistantConfig, Control, audit, control_job, digest, now, proposals_full,
+    room_for_proposal,
 };
 use crate::{Gateway, authorize_resource_action, resolve_user};
 
@@ -39,9 +40,12 @@ pub(super) struct After {
 }
 
 /// The Operations where `person` may send or read Cables: those the Stations check in with,
-/// at most [`MAX_ASSISTANT_CABLE_GRANTS`], in order. Empty when the gateway has no Registry or
-/// authorizer.
-pub(super) async fn grants(gateway: &Gateway, person: &ai6::Person) -> Vec<AssistantCableGrant> {
+/// at most `most`, in order. Empty when the gateway has no Registry or authorizer.
+pub(super) async fn grants(
+    gateway: &Gateway,
+    person: &ai6::Person,
+    most: Limit,
+) -> Vec<AssistantCableGrant> {
     let (Some(registry), Some(access)) = (gateway.registry.clone(), gateway.access.as_ref()) else {
         return Vec::new();
     };
@@ -68,6 +72,9 @@ pub(super) async fn grants(gateway: &Gateway, person: &ai6::Person) -> Vec<Assis
                     ))
                     .is_ok_and(|decision| decision.allowed)
             };
+            if !most.allows(grants.len() + 1) {
+                break;
+            }
             let (send, read) = (allowed("cable.send"), allowed("cable.read"));
             if send || read {
                 grants.push(AssistantCableGrant {
@@ -75,9 +82,6 @@ pub(super) async fn grants(gateway: &Gateway, person: &ai6::Person) -> Vec<Assis
                     send,
                     read,
                 });
-            }
-            if grants.len() == MAX_ASSISTANT_CABLE_GRANTS {
-                break;
             }
         }
         Some(grants)
@@ -89,24 +93,24 @@ pub(super) async fn grants(gateway: &Gateway, person: &ai6::Person) -> Vec<Assis
 }
 
 /// Records one Cable event of a Station's report in the conversation, refusing a proposed
-/// body past `body_bytes` (the Registry's `[registry.limits.cables] body_bytes`).
+/// body past the `cables` record's `body_bytes` ([`AssistantConfig::with_cable_limits`]).
 pub(super) fn apply(
     conversation: &mut Conversation,
     event: &AssistantEvent,
     station: &str,
     bounds: Bounds,
-    body_bytes: ai6::Limit,
+    config: &AssistantConfig,
     after: &mut After,
 ) {
     match event.kind.as_str() {
         EVENT_CABLE_PROPOSAL => {
             if let Some(cable) = &event.cable {
-                propose(conversation, cable, station, bounds, body_bytes, after);
+                propose(conversation, cable, station, bounds, config, after);
             }
         }
         EVENT_CABLE_SENT => {
             if let Some(cable) = &event.cable {
-                sent(conversation, cable, after);
+                sent(conversation, cable, config, after);
             }
         }
         _ => {}
@@ -119,7 +123,7 @@ fn propose(
     cable: &AssistantCable,
     station: &str,
     bounds: Bounds,
-    body_bytes: ai6::Limit,
+    config: &AssistantConfig,
     after: &mut After,
 ) {
     let Some(body) = cable.body.clone() else {
@@ -139,7 +143,7 @@ fn propose(
         || !valid(&cable.target)
         || !valid(&cable.recipient)
         || cable.request_digest() != cable.digest
-        || !body_bytes.allows(body.len())
+        || !config.cable_body_bytes.allows(body.len())
         || actions::hidden_characters(&shown, "cable").is_err()
         || actions::hidden_characters(&Value::String(cable.target.clone()), "target").is_err()
     {
@@ -161,12 +165,15 @@ fn propose(
         digest: cable.digest.clone(),
         station: station.to_owned(),
     };
-    if !room_for_proposal(conversation) {
+    if !room_for_proposal(conversation, &config.gateway) {
         // The Station drops what cannot be shown; nothing waits unseen.
         conversation.push(
             Entry {
                 role: Role::Error,
-                text: format!("Moneypenny asked to send a Cable, but {PROPOSALS_FULL}"),
+                text: format!(
+                    "Moneypenny asked to send a Cable, but {}",
+                    proposals_full(&config.gateway)
+                ),
                 at: now(),
                 data: None,
             },
@@ -178,7 +185,7 @@ fn propose(
     let reply = cable.target.starts_with("reply:");
     let lifetime = match cable.ttl_seconds {
         Some(ttl) => format!("{ttl} seconds"),
-        None => "15 minutes".to_owned(),
+        None => format!("{} seconds", config.cable_default_ttl.0.as_secs_f64()),
     };
     let summary = format!(
         "{} {} in Operation {}, valid for {lifetime}, held because Moneypenny has read text \
@@ -232,7 +239,12 @@ fn propose(
 }
 
 /// A Cable left for the person: audited, and the proposal it answers is done.
-fn sent(conversation: &mut Conversation, cable: &AssistantCable, after: &mut After) {
+fn sent(
+    conversation: &mut Conversation,
+    cable: &AssistantCable,
+    config: &AssistantConfig,
+    after: &mut After,
+) {
     let Some(cable_id) = cable.cable_id.clone() else {
         return;
     };
@@ -242,7 +254,10 @@ fn sent(conversation: &mut Conversation, cable: &AssistantCable, after: &mut Aft
         action: "moneypenny.cable.sent".to_owned(),
         operation: cable.operation.clone(),
         resource: None,
-        target: super::cut(&format!("{} {cable_id}", conversation.id), 512),
+        target: super::cut(
+            &format!("{} {cable_id}", conversation.id),
+            config.gateway.audit_target_bytes.or_max(),
+        ),
         at: now(),
     });
     let held = conversation.proposals.iter().find(|proposal| {
@@ -456,7 +471,7 @@ impl Assistant {
                 });
                 // The Station refuses it once the answer timeout has passed, so a late one
                 // sends nothing; the proposal fails half as long again after that.
-                let timeout = self.config.answer_timeout.as_secs_f64();
+                let timeout = self.config.gateway.answer_timeout.0.as_secs_f64();
                 job.token_expires_at = now() + timeout;
                 desk.cable_deadlines.insert(
                     job.job_id.clone(),

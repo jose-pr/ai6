@@ -454,9 +454,8 @@ audited as `config.refused`, and reported at check-in.
 The `station` record takes `max_concurrent_missions`, `stall_timeout`, `loop_timeout`,
 `loop_min_lines`, `blocked_after`, `max_runtime`, `history`, `normalize_digits`, `roles`
 (`control`, `execution`), `labels`, `terminal`, `resources_every`, `safe_house_caches`,
-`safe_house_cache_age`, `partial_line_bytes` (bytes of a terminal line the watchdog holds
-before it counts as a line, default 4,096) and `clone_timeout` (seconds a clone of one of
-Moneypenny's repositories may take, default 120); seconds may be fractional. Its tables bound
+`safe_house_cache_age` and `partial_line_bytes` (bytes of a terminal line the watchdog holds
+before it counts as a line, default 4,096); seconds may be fractional. Its tables bound
 and pace the Station's work ([Station runtime limits](#station-runtime-limits)), and its
 `[providers.<id>]` tables configure providers. The `tls` record is a coqui-peer-tls policy
 document (`profile = "modern" | "intermediate" | "legacy"`, `cipher_profiles`, `tls_versions`
@@ -680,7 +679,129 @@ The `cables` record takes `grants`, `inbound` and `channels`, and the relay's li
 `scope_burst` (per target scope, 10 and 50), `body_bytes` (UTF-8 bytes of a Cable's body,
 16 KiB; `"none"` takes the bound away), `max_ttl` (the longest lifetime a sender may ask for,
 in seconds, 86,400; `"none"` for no bound) and `default_ttl` (the lifetime of a Cable that
-asks for none, 900, within `max_ttl`). Each must be positive.
+asks for none, 900, within `max_ttl`). Each must be positive. Universal Exports reads
+`body_bytes` and `default_ttl` when it starts, to refuse a Cable Moneypenny proposes with a
+longer body and to tell the person how long one that names no lifetime lasts.
+
+### Moneypenny's limits
+
+Three tables of the `assistant` record bound and pace Moneypenny. They follow the
+[Limits](#limits) rules: a count or size is a whole number or `"none"` (no bound); seconds may
+be fractional; a key left out keeps its default. Each bound looser than its default (larger,
+or no bound; for `memory_import_depth`, smaller) is a weakening, logged by every Station and
+listed at its check-in with the record's other weakenings:
+`assistant.desk.live none is looser than the default 4`. The keys that only pace work
+(`token_margin`, the waits, retries and margins, `report_attempts`, `unlocked_stale`,
+`token_reuse_margin`, `sweep_every`, `shared_base_wait`) are never weakenings. Only what
+cannot work is refused: a message, context, event count, job size, conversation, live
+conversation or socket bound of 0, no report attempt, an event buffer of 0, a sweep every 0
+seconds.
+
+```toml
+# agents.toml
+[assistant.limits]
+message_bytes = 65536                 # longer messages; reported as a weakening
+
+[assistant.desk]
+live = 8                              # more harnesses on each Station; reported as a weakening
+idle = 300                            # close an idle harness after five minutes
+
+[assistant.gateway]
+conversations_per_person = 50
+token_ttl = 1800
+```
+
+`[assistant.limits]`: what passes between Universal Exports and a Station, which both check,
+and what a Station reads of her memory. A Station reads it for each job and harness start;
+Universal Exports when it starts.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `message_bytes` | 32 KiB | Bytes of one job's message; Universal Exports refuses a person's longer message |
+| `context_bytes` | 24 KiB | Bytes of a job's standing context and recap together; a recap stays under half |
+| `cable_grants` | 64 | Operations one job grants Cable actions in |
+| `skills` | 64 | Skills one job gives her |
+| `event_bytes` | 64 KiB | Bytes of one reported event's text; longer text is cut, and a memory change whose diff is longer is not kept |
+| `events` | 64 | Events in one report |
+| `change_bytes` | 64 KiB | Bytes of file content in one memory change, commit, memory write or memory read |
+| `change_files` | 32 | Files in one memory change or commit |
+| `commit_message_bytes` | 4,096 | Bytes of one commit's message |
+| `shared_bases` | 32 | Shared-change bases one event carries, and Universal Exports keeps per conversation |
+| `memory_list_files` | 1,000 | Files one memory listing names |
+| `memory_list_bytes` | 128 KiB | Bytes of paths one memory listing names |
+| `inlined_memory_bytes` | 32 KiB | Bytes of `MEMORY.md` inlined into her standing context |
+| `memory_file_bytes` | 256 KiB | Bytes of one memory file the desk reads; a longer one is read to this length |
+| `memory_files` | 1,024 | Memory files the desk reads at a turn's edge |
+| `memory_bytes` | 8 MiB | Bytes over all of them |
+| `memory_walk` | 10,000 | Files of `personal/` looked at to name what a turn changed |
+| `memory_import_depth` | 5 | How deep `@path` imports from her memory are followed to find outside text; Claude Code follows five |
+
+`[assistant.desk]`: how each Station's desk runs her harnesses. Read for each job, harness
+start and memory request; `known`, `parked` and `report_queue` at each use; `job_wait`,
+`job_bytes`, `job_retry`, `call_margin`, `report_attempts` and `report_retry` at each poll or
+report; `unlocked_stale` when the desk starts.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `idle` | 600 | Seconds a harness waits for the next message, or writes nothing while answering, before it is closed; `"none"` keeps it |
+| `live` | 4 | Harnesses a Station runs or starts at once; past it a message is refused and another Station is asked |
+| `token_margin` | 120 | Seconds before its tool token expires that a running harness is restarted with the job's |
+| `job_wait` | 1 | Seconds Universal Exports holds a job poll open |
+| `job_bytes` | 256 KiB | Bytes of one job as Universal Exports sends it |
+| `call_margin` | 2 | Seconds a request to Universal Exports may take past what it waits for |
+| `job_retry` | 0.5 | Seconds before a failed job poll is tried again |
+| `report_queue` | 256 | Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are dropped |
+| `report_attempts` | 3 | Times a report is sent before it counts as lost |
+| `report_retry` | 0.2 | Seconds between tries of a report that did not arrive |
+| `parked` | 64 | Memory changes kept on the Station because they could not be delivered; past it the oldest is dropped |
+| `known` | 1,024 | Conversations whose provider Session the desk remembers for a resume |
+| `close_wait` | 10 | Seconds a message waits for its conversation's closing harness |
+| `remove_retry` | 2 | Seconds removing a closed harness's directory is tried again |
+| `unlocked_stale` | 3,600 | Seconds before a working directory left by a desk that is gone, without its lock, is swept |
+| `clone_timeout` | 120 | Seconds a clone of one of her repositories may take; a memory request's clone also stops at its deadline |
+| `clone_bytes` | 512 MiB | Bytes a clone may hold on disk, then it is given up and removed |
+| `save_bytes` | 16 MiB | Bytes one save of her work in `personal/` may commit; past it nothing is saved and she is told |
+| `memory_requests` | 4 | The app's memory requests a Station makes at once; the next is refused |
+
+`[assistant.gateway]`: how Universal Exports keeps her conversations. Read when it starts.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `conversations_per_person` | 20 | Conversations kept for one person; the oldest goes first |
+| `conversations` | 2,000 | Conversations kept in all |
+| `conversation_age` | 604,800 (7 days) | Seconds a conversation is kept untouched |
+| `conversation_entries` | 500 | Entries kept per conversation |
+| `conversation_bytes` | 1 MiB | Bytes of entries kept per conversation; the oldest go first |
+| `person_bytes` | 4 MiB | Bytes of entries kept per person; a person's views go first |
+| `live_per_person` | 2 | One person's conversations with a harness running or an answer pending; the least recently used idle harness is closed to make room |
+| `tool_calls_per_minute` | 120 | Tool calls one conversation makes in a minute |
+| `memory_requests_per_person` | 2 | The app's memory requests waiting for a Station, for one person; `429` past it |
+| `memory_requests` | 16 | The same, for everyone |
+| `token_ttl` | 3,600 | Seconds a tool token given to a harness is accepted |
+| `token_reuse_margin` | 600 | Seconds a token must still have to be given to the next message; kept above `[assistant.desk] token_margin` |
+| `answer_timeout` | 60 | Seconds a Station has to take up a message before another is asked |
+| `answer_deadline` | 600 | Seconds an accepted message may go without word from its Station before it is given up |
+| `memory_timeout` | 30 | Seconds a Station has to answer a memory request |
+| `proposal_ttl` | 3,600 | Seconds a proposal waits for the person's confirmation |
+| `proposals` | 32 | Proposals waiting in one conversation |
+| `message_bytes` | 16 KiB | Bytes of one message the person writes |
+| `memory_message_bytes` | 1,024 | Bytes of a commit message the person writes for a memory change |
+| `change_message_chars` | 200 | Characters of the one-line message of a shared change she proposes |
+| `recap_bytes` | 8 KiB | Bytes of the recap a conversation's new harness starts with |
+| `ready_entries` | 100 | Entries the app is sent when it opens a conversation |
+| `ready_bytes` | 512 KiB | Bytes of those entries |
+| `socket_message_bytes` | 64 KiB | Bytes of one message on the app's socket |
+| `hello_timeout` | 10 | Seconds the app's socket has to say hello |
+| `max_wait` | 25 | Seconds a Station's job poll may be held open |
+| `sweep_every` | 1 | Seconds between an open conversation's looks for jobs no Station took up |
+| `shared_base_wait` | 5 | Seconds a shared change waits for its Station's report of what it was made from |
+| `event_buffer` | 256 | Events queued for a conversation's open sockets; one further behind is closed |
+| `route_bytes` | 4 MiB | Bytes of an AI6 route's answer to one of her tools |
+| `result_chars` | 200,000 | Characters of one tool's answer she is given; longer is cut |
+| `author_chars` | 200 | Characters of a person's name and email on her commits |
+| `audit_target_bytes` | 512 | Bytes of the target of an audit record of her actions |
+
+`[assistant.views]` bounds the views she shows ([Moneypenny](assistant.md#views-she-shows)).
 
 ### The directory provider
 

@@ -62,6 +62,8 @@ pub struct ViewLimits {
     pub svg_depth: usize,
     /// Bytes of the label of a page she offers with `navigate` (default 120).
     pub navigate_label_bytes: usize,
+    /// Bytes of an `id` in an SVG drawing (default 64).
+    pub svg_id_bytes: usize,
 }
 
 impl Default for ViewLimits {
@@ -86,6 +88,7 @@ impl Default for ViewLimits {
             svg_elements: 2_000,
             svg_depth: 16,
             navigate_label_bytes: 120,
+            svg_id_bytes: 64,
         }
     }
 }
@@ -114,6 +117,7 @@ impl ViewLimits {
             &mut self.svg_elements,
             &mut self.svg_depth,
             &mut self.navigate_label_bytes,
+            &mut self.svg_id_bytes,
         ] {
             *limit = (*limit).max(1);
         }

@@ -48,15 +48,10 @@ pub struct universal_exports::AssistantConfig
 impl universal_exports::AssistantConfig
 pub fn universal_exports::AssistantConfig::agent_id(&self) -> &str
 pub fn universal_exports::AssistantConfig::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, universal_exports::GatewayError>
-pub fn universal_exports::AssistantConfig::with_answer_deadline(self, core::time::Duration) -> Self
-pub fn universal_exports::AssistantConfig::with_answer_timeout(self, core::time::Duration) -> Self
-pub fn universal_exports::AssistantConfig::with_conversation_limits(self, usize, usize, core::time::Duration) -> Self
-pub fn universal_exports::AssistantConfig::with_live_conversations_per_person(self, usize) -> Self
-pub fn universal_exports::AssistantConfig::with_memory_limits(self, usize, usize) -> Self
-pub fn universal_exports::AssistantConfig::with_memory_requests(self, usize, usize) -> Self
+pub fn universal_exports::AssistantConfig::with_cable_limits(self, ai6::bounds::Limit, ai6::bounds::Seconds) -> Self
+pub fn universal_exports::AssistantConfig::with_gateway_limits(self, ai6::directorates::m::assistant::limits::AssistantGatewayLimits) -> core::result::Result<Self, universal_exports::GatewayError>
+pub fn universal_exports::AssistantConfig::with_limits(self, ai6::directorates::m::assistant::limits::AssistantLimits) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::AssistantConfig::with_route_text_bytes(self, usize) -> Self
-pub fn universal_exports::AssistantConfig::with_token_ttl(self, core::time::Duration) -> Self
-pub fn universal_exports::AssistantConfig::with_tool_calls_per_minute(self, u32) -> Self
 pub fn universal_exports::AssistantConfig::with_view_limits(self, universal_exports::ViewLimits) -> Self
 impl core::default::Default for universal_exports::AssistantConfig
 pub fn universal_exports::AssistantConfig::default() -> Self
@@ -309,6 +304,7 @@ pub universal_exports::ViewLimits::short_bytes: usize
 pub universal_exports::ViewLimits::svg_bytes: usize
 pub universal_exports::ViewLimits::svg_depth: usize
 pub universal_exports::ViewLimits::svg_elements: usize
+pub universal_exports::ViewLimits::svg_id_bytes: usize
 pub universal_exports::ViewLimits::text_bytes: usize
 pub universal_exports::ViewLimits::view_bytes: usize
 impl core::default::Default for universal_exports::ViewLimits

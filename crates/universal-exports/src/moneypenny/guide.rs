@@ -82,7 +82,8 @@ mod tests {
     #[test]
     fn the_starting_context_fits_a_job_and_every_guide_is_there() {
         let size: usize = context().iter().map(String::len).sum();
-        assert!(size < ai6::MAX_ASSISTANT_CONTEXT_BYTES / 2, "{size}");
+        let context = ai6::AssistantLimits::default().context_bytes.or_max();
+        assert!(size < context / 2, "{size}");
         for (topic, text) in GUIDES {
             assert!(text.starts_with('#') || text.contains("\n#"), "{topic}");
         }

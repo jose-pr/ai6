@@ -10,11 +10,10 @@
 use std::fs;
 use std::path::Path;
 
-use crate::directorates::m::assistant::RepoKind;
+use crate::directorates::m::assistant::{AssistantLimits, RepoKind};
 use crate::directorates::q::safehouse::{CheckpointFile, CheckpointSpec};
 use crate::directorates::section_00::assistant::{
-    MAX_ASSISTANT_CHANGE_BYTES, MAX_MEMORY_FILES, MAX_MEMORY_LIST_BYTES, MemoryAction,
-    MemoryAnswer, MemoryCommit, MemoryFile, MemoryOp,
+    MemoryAction, MemoryAnswer, MemoryCommit, MemoryFile, MemoryOp,
 };
 use crate::station::safehouse::SafeHouse;
 
@@ -42,13 +41,15 @@ impl Refusal {
     }
 }
 
-/// Makes `op` in a fresh shallow clone of its repository, made within `limits`; `digest` names
-/// the clone's safe house. Answers what was done and found, or why nothing was.
+/// Makes `op` in a fresh shallow clone of its repository, made within `limits`, a listing and
+/// a read within `bounds`; `digest` names the clone's safe house. Answers what was done and
+/// found, or why nothing was.
 pub(super) fn run(
     houses: &Houses,
     op: &MemoryOp,
     digest: &str,
     limits: CloneLimits,
+    bounds: &AssistantLimits,
 ) -> Result<(String, MemoryAnswer), Refusal> {
     let kind = RepoKind::of(&op.repo).map_err(plain)?;
     let changes = matches!(
@@ -99,7 +100,7 @@ pub(super) fn run(
             .map(str::to_owned),
         ..MemoryAnswer::default()
     };
-    let outcome = act(&house, &root, &op.action, answer);
+    let outcome = act(&house, &root, &op.action, answer, bounds);
     let _ = house.discard();
     outcome
 }
@@ -109,10 +110,11 @@ fn act(
     root: &Path,
     action: &MemoryAction,
     mut answer: MemoryAnswer,
+    bounds: &AssistantLimits,
 ) -> Result<(String, MemoryAnswer), Refusal> {
     match action {
         MemoryAction::List {} => {
-            let (files, more) = list(root);
+            let (files, more) = list(root, bounds);
             let said = format!(
                 "memory/ holds {}{} files",
                 files.len(),
@@ -123,7 +125,7 @@ fn act(
             Ok((said, answer))
         }
         MemoryAction::Read { path } => {
-            let text = read(root, path)?;
+            let text = read(root, path, bounds)?;
             answer.digest = Some(sha256_hex(text.as_bytes()));
             answer.text = Some(text);
             Ok((format!("read {path}"), answer))
@@ -135,7 +137,7 @@ fn act(
             commit,
         } => {
             if let Some(base) = base {
-                let holds = match read(root, path) {
+                let holds = match read(root, path, bounds) {
                     Ok(now) => Some(sha256_hex(now.as_bytes())),
                     Err(Refusal { missing: true, .. }) => None,
                     Err(refusal) => return Err(refusal),
@@ -176,12 +178,13 @@ fn act(
 }
 
 /// The files under `memory/`, in path order, and whether there were more than fit an answer.
-fn list(root: &Path) -> (Vec<MemoryFile>, bool) {
+fn list(root: &Path, bounds: &AssistantLimits) -> (Vec<MemoryFile>, bool) {
     let mut found = Vec::new();
     let mut more = false;
+    let files = bounds.memory_list_files.or_max();
     walk(&root.join(MEMORY), MEMORY, &mut |path, file| {
         // A bounded walk: past four times the answer's bound, the rest only make `more`.
-        if found.len() > 4 * MAX_MEMORY_FILES {
+        if found.len() > files.saturating_mul(4) {
             more = true;
         } else if let Ok(metadata) = fs::symlink_metadata(file) {
             found.push(MemoryFile {
@@ -194,10 +197,10 @@ fn list(root: &Path) -> (Vec<MemoryFile>, bool) {
     let mut bytes = 0;
     let fits = found
         .iter()
-        .take(MAX_MEMORY_FILES)
+        .take(files)
         .take_while(|file| {
             bytes += file.path.len();
-            bytes <= MAX_MEMORY_LIST_BYTES
+            bounds.memory_list_bytes.allows(bytes)
         })
         .count();
     more |= fits < found.len();
@@ -220,10 +223,11 @@ fn present(root: &Path, path: &str) -> Result<u64, Refusal> {
 }
 
 /// The text of `path` in the clone at `root`, a plain file reached through no link.
-fn read(root: &Path, path: &str) -> Result<String, Refusal> {
-    if present(root, path)? > MAX_ASSISTANT_CHANGE_BYTES as u64 {
+fn read(root: &Path, path: &str, bounds: &AssistantLimits) -> Result<String, Refusal> {
+    if !bounds.change_bytes.allows(present(root, path)?) {
         return Err(plain(format!(
-            "{path} holds more than {MAX_ASSISTANT_CHANGE_BYTES} bytes; open it in the repository"
+            "{path} holds more than {} bytes; open it in the repository",
+            bounds.change_bytes
         )));
     }
     let bytes = fs::read(in_tree(root, path)).map_err(|error| plain(format!("{path}: {error}")))?;

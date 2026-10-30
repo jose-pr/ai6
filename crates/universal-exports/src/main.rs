@@ -212,9 +212,15 @@ async fn run(cli: Cli) -> Result<(), String> {
     };
     gateway = gateway.with_roster(provider.clone());
     if record.assistant {
+        let settings = snapshot.roster.assistant();
+        let (body_bytes, _, default_ttl) = snapshot.settings.cables.message_limits();
         let mut assistant = AssistantConfig::new(record.assistant_agent.clone())
             .map_err(|error| format!("the assistant Agent is not valid: {error}"))?
-            .with_view_limits(view_limits(snapshot.roster.assistant().views())?);
+            .with_view_limits(view_limits(settings.views())?)
+            .with_limits(settings.limits().clone())
+            .and_then(|assistant| assistant.with_gateway_limits(settings.gateway().clone()))
+            .map_err(|error| format!("assistant: {error}"))?
+            .with_cable_limits(body_bytes, default_ttl);
         if let Some(bytes) = record.route_text_bytes {
             assistant =
                 assistant.with_route_text_bytes(usize::try_from(bytes).unwrap_or(usize::MAX));
@@ -373,6 +379,9 @@ fn view_limits(record: &ai6::AssistantViewLimits) -> Result<ViewLimits, String> 
             "navigate_label_bytes",
             record.navigate_label_bytes,
             &mut limits.navigate_label_bytes,
+            "svg_id_bytes",
+            record.svg_id_bytes,
+            &mut limits.svg_id_bytes,
         ),
     ] {
         if let Some(value) = value {
@@ -658,16 +667,17 @@ mod tests {
             ViewLimits::default()
         );
         let tuned = record(serde_json::json!({"views": {
-            "svg_bytes": 65536, "graph_nodes": 100, "navigate_label_bytes": 200
+            "svg_bytes": 65536, "graph_nodes": 100, "svg_id_bytes": 16, "navigate_label_bytes": 200
         }}));
         let tuned = view_limits(tuned.views()).unwrap();
         assert_eq!(
             (
                 tuned.svg_bytes,
                 tuned.graph_nodes,
+                tuned.svg_id_bytes,
                 tuned.navigate_label_bytes
             ),
-            (65536, 100, 200)
+            (65536, 100, 16, 200)
         );
         assert_eq!(ViewLimits::default().navigate_label_bytes, 120);
         assert_eq!(tuned.blocks, ViewLimits::default().blocks);

@@ -138,7 +138,6 @@ pub struct StationConfig {
     resources_every: Duration,
     config_poll: Duration,
     hygiene: crate::station::safehouse::SafeHouseHygiene,
-    assistant: AssistantDeskLimits,
     /// Where the Station keeps its state; `None` is the platform's state directory.
     state_dir: Option<PathBuf>,
     /// What the bootstrap file gives up against the defaults, reported at check-in.
@@ -152,56 +151,6 @@ pub struct StationConfig {
     runner_pins: Option<(crate::PinSet, crate::PluginProfile)>,
     /// The `station` record's tables: what bounds and paces the Station's work.
     limits: Arc<StationLimits>,
-}
-
-/// What Moneypenny's desk on a Station allows: how long cloning one of her repositories may
-/// take and how large it may grow, how much one save of her work may commit, and how many of
-/// the app's memory requests it makes at once. The defaults: 120 seconds and 512 MiB a clone,
-/// 16 MiB a save, 4 memory requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AssistantDeskLimits {
-    clone_timeout: Duration,
-    clone_bytes: u64,
-    save_bytes: u64,
-    memory_requests: usize,
-}
-
-impl Default for AssistantDeskLimits {
-    fn default() -> Self {
-        Self {
-            clone_timeout: Duration::from_secs(120),
-            clone_bytes: 512 * 1024 * 1024,
-            save_bytes: 16 * 1024 * 1024,
-            memory_requests: 4,
-        }
-    }
-}
-
-impl AssistantDeskLimits {
-    /// Gives up on a clone of one of her repositories after `timeout`, or once it holds more
-    /// than `max_bytes` on disk, and removes what it made.
-    #[must_use]
-    pub fn with_clone_limits(mut self, timeout: Duration, max_bytes: u64) -> Self {
-        self.clone_timeout = timeout;
-        self.clone_bytes = max_bytes;
-        self
-    }
-
-    /// Saves nothing of her work in `personal/` when what the save would commit holds more
-    /// than `max_bytes`; she and the person are told.
-    #[must_use]
-    pub fn with_save_limit(mut self, max_bytes: u64) -> Self {
-        self.save_bytes = max_bytes;
-        self
-    }
-
-    /// Makes at most `requests` (at least one) of the app's memory requests at once; a
-    /// Station with as many under way refuses the next, and Universal Exports says so.
-    #[must_use]
-    pub fn with_memory_requests(mut self, requests: usize) -> Self {
-        self.memory_requests = requests.max(1);
-        self
-    }
 }
 
 impl StationConfig {
@@ -255,13 +204,6 @@ impl StationConfig {
             Some(dir) => Ok(dir.clone()),
             None => crate::bootstrap::platform_state_dir().map_err(io::Error::from),
         }
-    }
-
-    /// What Moneypenny's desk allows here (default [`AssistantDeskLimits::default`]).
-    #[must_use]
-    pub fn with_assistant_limits(mut self, limits: AssistantDeskLimits) -> Self {
-        self.assistant = limits;
-        self
     }
 
     /// Sets which directories in a kept safe house are rebuildable caches and how long a
@@ -395,7 +337,6 @@ impl Default for StationConfig {
             resources_every: DEFAULT_RESOURCES_EVERY,
             config_poll: DEFAULT_CONFIG_POLL,
             hygiene: Default::default(),
-            assistant: AssistantDeskLimits::default(),
             state_dir: None,
             bootstrap_weakened: Vec::new(),
             protected_paths: Vec::new(),
@@ -692,9 +633,6 @@ fn apply_runtime(
         .watchdog
         .clone()
         .with_csi_bytes(runtime.terminal_output.csi_bytes);
-    if let Some(timeout) = runtime.clone_timeout {
-        config.station.assistant.clone_timeout = timeout.0;
-    }
     config.station.limits = Arc::new(runtime.limits());
     if let Some(caches) = &runtime.safe_house_caches {
         config.station.hygiene = std::mem::take(&mut config.station.hygiene)

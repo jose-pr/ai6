@@ -407,16 +407,18 @@ impl Default for AssistantConfig { /* agent "moneypenny", the defaults below */ 
 impl AssistantConfig {
     pub fn new(agent_id: impl Into<String>) -> Result<Self, GatewayError>; // InvalidConfiguration
     pub fn agent_id(&self) -> &str;
-    pub fn with_conversation_limits(self, per_person: usize, total: usize, max_age: Duration) -> Self;
-    pub fn with_token_ttl(self, ttl: Duration) -> Self;          // at least 60 s
-    pub fn with_answer_timeout(self, timeout: Duration) -> Self;
-    pub fn with_tool_calls_per_minute(self, calls: u32) -> Self;
-    pub fn with_answer_deadline(self, deadline: Duration) -> Self;
-    pub fn with_live_conversations_per_person(self, conversations: usize) -> Self; // at least 1
-    pub fn with_memory_limits(self, per_conversation: usize, per_person: usize) -> Self;
-    /// Memory requests waiting for a Station at once: per signed-in person (default 2) and in
-    /// all (default 16), each at least 1; past either the route answers 429
-    pub fn with_memory_requests(self, per_person: usize, total: usize) -> Self;
+    /// [assistant.limits]: jobs, reports and changes are held to them as the Stations do;
+    /// a person's message is refused past the smaller of these message_bytes and the
+    /// gateway table's. Err(InvalidConfiguration) for what AssistantLimits::validate refuses
+    pub fn with_limits(self, limits: ai6::AssistantLimits) -> Result<Self, GatewayError>;
+    /// [assistant.gateway]: conversations kept, live ones, tokens, answers, proposals,
+    /// memory requests (429 past either), tools, the socket. Err(InvalidConfiguration) for
+    /// what AssistantGatewayLimits::validate refuses
+    pub fn with_gateway_limits(self, limits: ai6::AssistantGatewayLimits)
+        -> Result<Self, GatewayError>;
+    /// The cables record's body_bytes and default_ttl (CableConfig::message_limits): a
+    /// proposed Cable with a longer body is refused; one naming no lifetime is shown with it
+    pub fn with_cable_limits(self, body_bytes: ai6::Limit, default_ttl: ai6::Seconds) -> Self;
     /// The longest `text` filter of an app route (default 128 bytes, at least 1), in her
     /// links and cards and in a message's `route`; past it the view is refused, or the page
     /// line dropped
@@ -436,14 +438,16 @@ pub struct ViewLimits {   // Default: the value in each comment
     pub graph_edges: usize /* 120 */, pub svg_bytes: usize /* 32 KiB */,
     pub svg_elements: usize /* 2000 */, pub svg_depth: usize /* 16 */,
     pub navigate_label_bytes: usize /* 120 */,
+    pub svg_id_bytes: usize /* 64 */,
 }
 impl Gateway { pub fn with_assistant(self, config: AssistantConfig) -> Self; }
 ```
 
-Defaults: 20 conversations a person and 2,000 in all (oldest idle one dropped first), each
-kept until untouched for 7 days with its newest 500 entries and at most 1 MiB of them (4 MiB a
-person: the person's oldest views are emptied first, then their oldest entries dropped;
-`with_memory_limits` takes at least 64 KiB a conversation); tool tokens accepted for one hour;
+The command reads `[assistant.limits]`, `[assistant.gateway]`, `[assistant.views]` and the
+`cables` record at start. Defaults: 20 conversations a person and 2,000 in all (oldest idle one
+dropped first), each kept until untouched for 7 days with its newest 500 entries and at most
+1 MiB of them (4 MiB a person: the person's oldest views are emptied first, then their oldest
+entries dropped); tool tokens accepted for one hour;
 a Station has 60 seconds to take up a message, and an accepted message is given up (an
 `error` entry, `busy` false) after 10 minutes without a report from its Station; 120 tool
 calls a conversation per minute; 2 conversations a person with a harness running or an answer
@@ -559,10 +563,11 @@ entry and a note for her.
 `propose_shared_change {group, path, content, message}` (group a `file_safe` name or `org`,
 path a repository path, content ≤ 64 KiB, message one line ≤ 200 characters, no hidden
 characters) is refused ("Refused: …") unless the person is in the group and it shares a
-repository (`org` is everyone's). It then waits up to 5 s for the conversation's Station to
+repository (`org` is everyone's). It then waits up to `shared_base_wait` (5 s) for the
+conversation's Station to
 report the call's `ai6::AssistantSharedBase` (on a `tool` event's `shared`, matched by group,
-path and the SHA-256 of `content`, used once; a conversation keeps at most
-`MAX_ASSISTANT_SHARED_BASES`) and is refused ("Nothing was proposed: …") without one. The
+path and the SHA-256 of `content`, used once; a conversation keeps at most `shared_bases`)
+and is refused ("Nothing was proposed: …") without one. The
 change carries it as `AssistantChange::base`, so the commit is refused when the file changed
 on `main` since. With that repository's `write = true` it is audited
 `moneypenny.shared.write` (resource `config:assistant`, target `CONVERSATION GROUP PATH`) and

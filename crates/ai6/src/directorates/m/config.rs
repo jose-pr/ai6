@@ -534,8 +534,6 @@ pub struct StationRuntime {
     pub head_of_station: limits::HeadOfStationLimits,
     /// Bytes of a terminal line the watchdog holds before it ends.
     pub partial_line_bytes: Option<Limit>,
-    /// Seconds a clone of one of Moneypenny's repositories may take.
-    pub clone_timeout: Option<crate::bounds::Seconds>,
     /// `[providers.<id>]`: provider `<id>`'s Guatiao configuration when the Station builds
     /// it with none of its own.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

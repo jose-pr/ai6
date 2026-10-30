@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::agent::{AssistantMode, AssistantNetwork, McpServerRef};
-use crate::directorates::m::assistant::{RepoKind, file_safe, skill_name};
+use crate::directorates::m::assistant::{AssistantLimits, RepoKind, file_safe, skill_name};
 
 /// The prefix of the environment variables holding the assistant's MCP endpoint
 /// (`AI6_MONEYPENNY_MCP_URL`, `AI6_MONEYPENNY_MCP_TOKEN`).
@@ -40,8 +40,6 @@ pub const ASSISTANT_CABLE_MCP_URL_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_URL";
 pub const ASSISTANT_CABLE_MCP_TOKEN_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_TOKEN";
 /// The name the harness knows an assistant's Cable endpoint by (`mcp__cables__<tool>`).
 pub const ASSISTANT_CABLE_MCP_SERVER: &str = "cables";
-/// The most Operations a job grants Cable actions in.
-pub const MAX_ASSISTANT_CABLE_GRANTS: usize = 64;
 
 impl AssistantMode {
     /// The mode of a Moneypenny Session that has only her own tools: the Universal Exports
@@ -344,14 +342,6 @@ impl AssistantReach {
 
 /// The endpoint's path on Universal Exports, relative to its origin.
 pub const ASSISTANT_MCP_PATH: &str = "v1/moneypenny/mcp";
-/// The longest message a job carries, in bytes.
-pub const MAX_ASSISTANT_MESSAGE_BYTES: usize = 32 * 1024;
-/// The most initial context a job carries, in bytes, all items together.
-pub const MAX_ASSISTANT_CONTEXT_BYTES: usize = 24 * 1024;
-/// The longest text one reported event carries, in bytes; longer text is cut.
-pub const MAX_ASSISTANT_EVENT_BYTES: usize = 64 * 1024;
-/// The most events one report carries.
-pub const MAX_ASSISTANT_EVENTS: usize = 64;
 
 /// A Station took the job: the harness has the message. `text` is unset.
 pub const EVENT_ACCEPTED: &str = "accepted";
@@ -394,22 +384,9 @@ pub const EVENT_CABLE_SENT: &str = "cable_sent";
 pub const COMMIT_MEMORY: &str = "memory";
 /// An [`AssistantCommit`] to a shared repository.
 pub const COMMIT_SHARED: &str = "shared";
-/// The most bytes of file content one memory change or commit carries.
-pub const MAX_ASSISTANT_CHANGE_BYTES: usize = 64 * 1024;
-/// The most files one memory change or commit carries.
-pub const MAX_ASSISTANT_CHANGE_FILES: usize = 32;
 /// Moneypenny's tool that changes one file of a shared repository, as Universal Exports
 /// serves it; Claude Code calls it `mcp__moneypenny__propose_shared_change`.
 pub const ASSISTANT_SHARED_CHANGE_TOOL: &str = "propose_shared_change";
-/// The most [`AssistantSharedBase`]s one event carries, and the most Universal Exports keeps
-/// for one conversation until their calls arrive.
-pub const MAX_ASSISTANT_SHARED_BASES: usize = 32;
-/// The most files a [`MemoryAction::List`] answer names, within [`MAX_MEMORY_LIST_BYTES`] of
-/// paths; [`MemoryAnswer::more`] says there are others.
-pub const MAX_MEMORY_FILES: usize = 1_000;
-/// The most bytes of paths a [`MemoryAction::List`] answer names, so the report that carries
-/// it stays well within what Universal Exports takes.
-pub const MAX_MEMORY_LIST_BYTES: usize = 128 * 1024;
 
 /// Where a person's conversation with the assistant keeps its work, sent with each message
 /// when the deployment gives people personal repositories (`[assistant] personal_repo`).
@@ -502,24 +479,22 @@ impl AssistantChange {
             .collect()
     }
 
-    /// Checks the change: at most [`MAX_ASSISTANT_CHANGE_FILES`] files and
-    /// [`MAX_ASSISTANT_CHANGE_BYTES`] of text, each path one to eight `/`-separated names of
-    /// letters, digits, `.`, `-` and `_` not starting with `.`, under `memory/` when `memory`,
-    /// and the digest matching.
+    /// Checks the change: at most `limits.change_files` files and `limits.change_bytes` of
+    /// text, each path one to eight `/`-separated names of letters, digits, `.`, `-` and `_`
+    /// not starting with `.`, under `memory/` when `memory`, and the digest matching.
     ///
     /// # Errors
     ///
     /// A message naming what is out of bounds.
-    pub fn validate(&self, memory: bool) -> Result<(), String> {
-        if self.files.is_empty() || self.files.len() > MAX_ASSISTANT_CHANGE_FILES {
-            return Err(format!(
-                "a change has 1 to {MAX_ASSISTANT_CHANGE_FILES} files"
-            ));
+    pub fn validate(&self, memory: bool, limits: &AssistantLimits) -> Result<(), String> {
+        if self.files.is_empty() || !limits.change_files.allows(self.files.len()) {
+            return Err(format!("a change has 1 to {} files", limits.change_files));
         }
         let bytes: usize = self.files.values().flatten().map(String::len).sum();
-        if bytes > MAX_ASSISTANT_CHANGE_BYTES {
+        if !limits.change_bytes.allows(bytes) {
             return Err(format!(
-                "a change holds at most {MAX_ASSISTANT_CHANGE_BYTES} bytes of text"
+                "a change holds at most {} bytes of text",
+                limits.change_bytes
             ));
         }
         for path in self.files.keys() {
@@ -575,13 +550,13 @@ pub struct AssistantCommit {
 impl AssistantCommit {
     /// Checks the commit: a known kind, a group name (`file_safe`) for a shared commit and none
     /// for a memory one, a repository of a known kind, the change as
-    /// [`AssistantChange::validate`] checks it, a message of 1 to 4,096 bytes and an author
-    /// without control characters or `<`, `>`.
+    /// [`AssistantChange::validate`] checks it, a message of 1 to `limits.commit_message_bytes`
+    /// bytes and an author without control characters or `<`, `>`.
     ///
     /// # Errors
     ///
     /// A message naming what is out of bounds.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String> {
         let memory = match self.kind.as_str() {
             COMMIT_MEMORY => true,
             COMMIT_SHARED => false,
@@ -596,12 +571,21 @@ impl AssistantCommit {
             }
         }
         RepoKind::of(&self.repo)?;
-        self.change.validate(memory)?;
-        if self.message.trim().is_empty() || self.message.len() > 4_096 {
-            return Err("a commit message is 1 to 4096 bytes".to_owned());
-        }
+        self.change.validate(memory, limits)?;
+        commit_message(&self.message, limits)?;
         author(&self.author_name, &self.author_email)
     }
+}
+
+/// Checks a commit message: 1 to `limits.commit_message_bytes` bytes, not only blanks.
+fn commit_message(message: &str, limits: &AssistantLimits) -> Result<(), String> {
+    if message.trim().is_empty() || !limits.commit_message_bytes.allows(message.len()) {
+        return Err(format!(
+            "a commit message is 1 to {} bytes",
+            limits.commit_message_bytes
+        ));
+    }
+    Ok(())
 }
 
 /// Checks a commit author: 1 to 256 bytes each, no control characters, `<` or `>`.
@@ -682,7 +666,8 @@ pub struct MemoryAnswer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
     /// The files a listing found, by path relative to the repository, in path order; at most
-    /// [`MAX_MEMORY_FILES`] and [`MAX_MEMORY_LIST_BYTES`] of paths.
+    /// [`AssistantLimits::memory_list_files`] and [`AssistantLimits::memory_list_bytes`] of
+    /// paths.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<MemoryFile>,
     /// The listing found more files than it names.
@@ -720,13 +705,13 @@ pub fn memory_path(path: &str) -> bool {
 
 impl MemoryOp {
     /// Checks the operation: a repository of a known kind, paths as [`memory_path`] wants
-    /// them, text within [`MAX_ASSISTANT_CHANGE_BYTES`], a base of 64 hex digits, and a commit
-    /// as [`AssistantCommit::validate`] wants its message and author.
+    /// them, text within `limits.change_bytes`, a base of 64 hex digits, and a commit as
+    /// [`AssistantCommit::validate`] wants its message and author.
     ///
     /// # Errors
     ///
     /// A message naming what is out of bounds.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String> {
         RepoKind::of(&self.repo)?;
         let (path, commit) = match &self.action {
             MemoryAction::List {} => return Ok(()),
@@ -737,9 +722,10 @@ impl MemoryOp {
                 base,
                 commit,
             } => {
-                if text.len() > MAX_ASSISTANT_CHANGE_BYTES {
+                if !limits.change_bytes.allows(text.len()) {
                     return Err(format!(
-                        "a memory file holds at most {MAX_ASSISTANT_CHANGE_BYTES} bytes of text"
+                        "a memory file holds at most {} bytes of text",
+                        limits.change_bytes
                     ));
                 }
                 if base.as_ref().is_some_and(|base| {
@@ -755,9 +741,7 @@ impl MemoryOp {
             return Err(format!("{path:?} is not a file of the person's memory"));
         }
         if let Some(commit) = commit {
-            if commit.message.trim().is_empty() || commit.message.len() > 4_096 {
-                return Err("a commit message is 1 to 4096 bytes".to_owned());
-            }
+            commit_message(&commit.message, limits)?;
             author(&commit.author_name, &commit.author_email)?;
         }
         Ok(())
@@ -841,7 +825,7 @@ pub struct AssistantJob {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<AssistantCommit>,
     /// The Operations where the person may send or read Cables, at most
-    /// [`MAX_ASSISTANT_CABLE_GRANTS`]; empty, the harness has no Cable endpoint. Requires
+    /// [`AssistantLimits::cable_grants`]; empty, the harness has no Cable endpoint. Requires
     /// `person_id`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cables: Vec<AssistantCableGrant>,
@@ -862,7 +846,7 @@ pub struct AssistantJob {
     #[serde(default)]
     pub reach: AssistantReach,
     /// The skills of the roster's catalog the person is given (`[assistant.skills]`, less what
-    /// their group and person tables leave out), at most [`MAX_ASSISTANT_SKILLS`]; the Station
+    /// their group and person tables leave out), at most [`AssistantLimits::skills`]; the Station
     /// installs each from its own catalog and refuses one its own roster does not give the
     /// person.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -874,9 +858,6 @@ pub struct AssistantJob {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<String>>,
 }
-
-/// The most skills a job gives the assistant.
-pub const MAX_ASSISTANT_SKILLS: usize = 64;
 
 /// What a person may do with Cables in one Operation, through the assistant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -928,17 +909,17 @@ pub struct AssistantCable {
 
 impl AssistantJob {
     /// Checks the job's bounds: identities of 1 to 256 bytes without control characters, a
-    /// message within [`MAX_ASSISTANT_MESSAGE_BYTES`] (empty only to close, interrupt, commit,
-    /// confirm or discard a held Cable, or look at or change the person's memory, of which a
-    /// job does one), context within [`MAX_ASSISTANT_CONTEXT_BYTES`], a token of 32 to 512
-    /// bytes, a workspace, commit and memory operation as their own `validate` checks them,
-    /// Cable grants for at most [`MAX_ASSISTANT_CABLE_GRANTS`] distinct Operations, with the
-    /// person they are for, and at most [`MAX_ASSISTANT_SKILLS`] distinct skill names.
+    /// message within `limits.message_bytes` (empty only to close, interrupt, commit, confirm
+    /// or discard a held Cable, or look at or change the person's memory, of which a job does
+    /// one), context and recap within `limits.context_bytes`, a token of 32 to 512 bytes, a
+    /// workspace, commit and memory operation as their own `validate` checks them, Cable grants
+    /// for at most `limits.cable_grants` distinct Operations, with the person they are for,
+    /// and at most `limits.skills` distinct skill names.
     ///
     /// # Errors
     ///
     /// A message naming the first field out of bounds.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String> {
         for (name, value) in [
             ("job_id", self.job_id.as_str()),
             ("conversation_id", self.conversation_id.as_str()),
@@ -971,7 +952,7 @@ impl AssistantJob {
             );
         }
         let control = controls.contains(&true);
-        if self.message.len() > MAX_ASSISTANT_MESSAGE_BYTES
+        if !limits.message_bytes.allows(self.message.len())
             || (self.message.trim().is_empty() && !control)
         {
             return Err("message is empty or too long".to_owned());
@@ -1003,9 +984,10 @@ impl AssistantJob {
                 return Err("a Cable decision's id or digest is not valid".to_owned());
             }
         }
-        if self.cables.len() > MAX_ASSISTANT_CABLE_GRANTS {
+        if !limits.cable_grants.allows(self.cables.len()) {
             return Err(format!(
-                "Cable grants name more than {MAX_ASSISTANT_CABLE_GRANTS} Operations"
+                "Cable grants name more than {} Operations",
+                limits.cable_grants
             ));
         }
         let mut operations = std::collections::BTreeSet::new();
@@ -1015,14 +997,15 @@ impl AssistantJob {
             }
         }
         let mut skills = std::collections::BTreeSet::new();
-        if self.skills.len() > MAX_ASSISTANT_SKILLS
+        if !limits.skills.allows(self.skills.len())
             || !self
                 .skills
                 .iter()
                 .all(|skill| skill_name(skill) && skills.insert(skill.as_str()))
         {
             return Err(format!(
-                "skills are more than {MAX_ASSISTANT_SKILLS}, repeated or not skill names"
+                "skills are more than {}, repeated or not skill names",
+                limits.skills
             ));
         }
         if let Some(workspace) = &self.workspace {
@@ -1032,19 +1015,21 @@ impl AssistantJob {
         }
         if let Some(commit) = &self.commit {
             commit
-                .validate()
+                .validate(limits)
                 .map_err(|reason| format!("commit: {reason}"))?;
         }
         if let Some(memory) = &self.memory {
             memory
-                .validate()
+                .validate(limits)
                 .map_err(|reason| format!("memory: {reason}"))?;
         }
         self.reach
             .validate()
             .map_err(|reason| format!("reach: {reason}"))?;
         let recap = self.recap.as_ref().map_or(0, String::len);
-        if self.context.iter().map(String::len).sum::<usize>() + recap > MAX_ASSISTANT_CONTEXT_BYTES
+        if !limits
+            .context_bytes
+            .allows(self.context.iter().map(String::len).sum::<usize>() + recap)
         {
             return Err("context is too long".to_owned());
         }
@@ -1146,8 +1131,19 @@ pub struct AssistantReport {
     /// The provider Session the harness runs, once the provider has issued it.
     #[serde(default)]
     pub session_id: Option<String>,
-    /// The events, oldest first; at most [`MAX_ASSISTANT_EVENTS`].
+    /// The events, oldest first; at most [`AssistantLimits::events`].
     pub events: Vec<AssistantEvent>,
+}
+
+impl AssistantReport {
+    /// Cuts each event's text to `limits.event_bytes` on a character boundary.
+    pub fn cut_texts(&mut self, limits: &AssistantLimits) {
+        for event in &mut self.events {
+            if let Some(text) = event.text.take() {
+                event.text = Some(cut(text, limits.event_bytes.or_max()));
+            }
+        }
+    }
 }
 
 /// One thing the assistant's harness did, in provider-neutral terms.
@@ -1157,7 +1153,8 @@ pub struct AssistantEvent {
     /// One of the `EVENT_*` kinds; a Station may report others, which Universal Exports
     /// ignores.
     pub kind: String,
-    /// The event's text, at most [`MAX_ASSISTANT_EVENT_BYTES`].
+    /// The event's text, at most [`AssistantLimits::event_bytes`] once the report is cut
+    /// ([`AssistantReport::cut_texts`]).
     #[serde(default)]
     pub text: Option<String>,
     /// The tools a [`EVENT_TOOL`] event called, as the harness names them.
@@ -1174,18 +1171,17 @@ pub struct AssistantEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryAnswer>,
     /// What each [`ASSISTANT_SHARED_CHANGE_TOOL`] call of an [`EVENT_TOOL`] event was made
-    /// from, at most [`MAX_ASSISTANT_SHARED_BASES`].
+    /// from, at most [`AssistantLimits::shared_bases`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared: Vec<AssistantSharedBase>,
 }
 
 impl AssistantEvent {
-    /// An event of `kind` with `text`, cut to [`MAX_ASSISTANT_EVENT_BYTES`] on a character
-    /// boundary.
+    /// An event of `kind` with `text`.
     pub fn new(kind: &str, text: Option<String>) -> Self {
         Self {
             kind: kind.to_owned(),
-            text: text.map(|text| cut(text, MAX_ASSISTANT_EVENT_BYTES)),
+            text,
             tools: Vec::new(),
             change: None,
             cable: None,
@@ -1257,6 +1253,11 @@ fn cut(mut text: String, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bounds::Limit;
+
+    fn limits() -> AssistantLimits {
+        AssistantLimits::default()
+    }
 
     fn job() -> AssistantJob {
         AssistantJob {
@@ -1358,7 +1359,7 @@ mod tests {
             },
         ] {
             let job = op(action);
-            assert_eq!(job.validate(), Ok(()), "{job:?}");
+            assert_eq!(job.validate(&limits()), Ok(()), "{job:?}");
             let encoded = serde_json::to_value(&job).unwrap();
             assert_eq!(
                 serde_json::from_value::<AssistantJob>(encoded).unwrap(),
@@ -1367,10 +1368,10 @@ mod tests {
         }
         let mut unnamed = op(MemoryAction::List {});
         unnamed.person_id = None;
-        assert!(unnamed.validate().is_err(), "whose memory?");
+        assert!(unnamed.validate(&limits()).is_err(), "whose memory?");
         let mut both = op(MemoryAction::List {});
         both.close = true;
-        assert!(both.validate().is_err(), "a job does one thing");
+        assert!(both.validate(&limits()).is_err(), "a job does one thing");
         for path in [
             "memory/",
             "memory",
@@ -1382,15 +1383,15 @@ mod tests {
             "/memory/a.md",
             "memory//a.md",
         ] {
-            assert!(op(write(path)).validate().is_err(), "{path}");
+            assert!(op(write(path)).validate(&limits()).is_err(), "{path}");
         }
         let large = op(MemoryAction::Write {
             path: "memory/big.md".to_owned(),
-            text: "x".repeat(MAX_ASSISTANT_CHANGE_BYTES + 1),
+            text: "x".repeat(64 * 1024 + 1),
             base: None,
             commit: memory_commit(),
         });
-        assert!(large.validate().is_err());
+        assert!(large.validate(&limits()).is_err());
         let based = |base: &str| {
             op(MemoryAction::Write {
                 path: "memory/a.md".to_owned(),
@@ -1399,8 +1400,8 @@ mod tests {
                 commit: memory_commit(),
             })
         };
-        assert_eq!(based(&"a".repeat(64)).validate(), Ok(()));
-        assert!(based("abc").validate().is_err());
+        assert_eq!(based(&"a".repeat(64)).validate(&limits()), Ok(()));
+        assert!(based("abc").validate(&limits()).is_err());
         let mut forged = memory_commit();
         forged.author_email = "eve>@example.invalid".to_owned();
         assert!(
@@ -1408,7 +1409,7 @@ mod tests {
                 path: "memory/a.md".to_owned(),
                 commit: forged,
             })
-            .validate()
+            .validate(&limits())
             .is_err()
         );
         let unknown =
@@ -1499,7 +1500,7 @@ mod tests {
         }
         let mut wild = job();
         wild.reach = reach(&["python3"], "limited", &["*"]);
-        assert!(wild.validate().unwrap_err().contains("host"));
+        assert!(wild.validate(&limits()).unwrap_err().contains("host"));
         let mut mode = AssistantMode::moneypenny();
         mode.network.allowed_hosts.push("*".to_owned());
         assert!(mode.validate().is_err(), "a bare wildcard is not a host");
@@ -1514,15 +1515,15 @@ mod tests {
         };
         let mut granted = job();
         granted.cables = vec![grant("G")];
-        assert!(granted.validate().is_err(), "whose grants?");
+        assert!(granted.validate(&limits()).is_err(), "whose grants?");
         granted.person_id = Some("person-007".to_owned());
-        assert_eq!(granted.validate(), Ok(()));
+        assert_eq!(granted.validate(&limits()), Ok(()));
         granted.cables.push(grant("G"));
-        assert!(granted.validate().is_err(), "an Operation once");
-        granted.cables = (0..=MAX_ASSISTANT_CABLE_GRANTS)
+        assert!(granted.validate(&limits()).is_err(), "an Operation once");
+        granted.cables = (0..=64)
             .map(|index| grant(&format!("op-{index}")))
             .collect();
-        assert!(granted.validate().is_err());
+        assert!(granted.validate(&limits()).is_err());
         let encoded = serde_json::to_value(job()).unwrap();
         assert!(encoded.get("cables").is_none());
 
@@ -1533,15 +1534,15 @@ mod tests {
             digest: "d".repeat(64),
         });
         assert_eq!(
-            confirm.validate(),
+            confirm.validate(&limits()),
             Ok(()),
             "a confirmation carries no message"
         );
         confirm.close = true;
-        assert!(confirm.validate().is_err());
+        assert!(confirm.validate(&limits()).is_err());
         confirm.close = false;
         confirm.cable_discard = confirm.cable_confirm.clone();
-        assert!(confirm.validate().is_err());
+        assert!(confirm.validate(&limits()).is_err());
     }
 
     fn change() -> AssistantChange {
@@ -1571,49 +1572,52 @@ mod tests {
             person_id: Some("eve".to_owned()),
             ..job()
         };
-        assert_eq!(committing.validate(), Ok(()));
+        assert_eq!(committing.validate(&limits()), Ok(()));
         let mut both = committing.clone();
         both.close = true;
-        assert!(both.validate().is_err(), "a job does one thing");
+        assert!(both.validate(&limits()).is_err(), "a job does one thing");
 
         let mut forged = commit();
         forged.change.files.insert("memory/x.md".to_owned(), None);
-        assert!(forged.validate().unwrap_err().contains("digest"));
+        assert!(forged.validate(&limits()).unwrap_err().contains("digest"));
         let mut outside = commit();
         outside.change = AssistantChange::new(BTreeMap::from([(
             "notes/a.md".to_owned(),
             Some("a".to_owned()),
         )]));
         assert!(
-            outside.validate().is_err(),
+            outside.validate(&limits()).is_err(),
             "a memory commit writes memory/ only"
         );
         outside.kind = COMMIT_SHARED.to_owned();
         assert!(
-            outside.validate().is_err(),
+            outside.validate(&limits()).is_err(),
             "a shared commit names its group"
         );
         outside.group = Some("ops".to_owned());
-        assert_eq!(outside.validate(), Ok(()));
+        assert_eq!(outside.validate(&limits()), Ok(()));
         let mut grouped = commit();
         grouped.group = Some("ops".to_owned());
-        assert!(grouped.validate().is_err(), "a memory commit names none");
+        assert!(
+            grouped.validate(&limits()).is_err(),
+            "a memory commit names none"
+        );
         for path in [".git/config", "memory/../x", "/etc/passwd", "a\\b"] {
             let mut bad = commit();
             bad.kind = COMMIT_SHARED.to_owned();
             bad.group = Some("ops".to_owned());
             bad.change = AssistantChange::new(BTreeMap::from([(path.to_owned(), None)]));
-            assert!(bad.validate().is_err(), "{path}");
+            assert!(bad.validate(&limits()).is_err(), "{path}");
         }
         let mut large = commit();
         large.change = AssistantChange::new(BTreeMap::from([(
             "memory/big.md".to_owned(),
-            Some("x".repeat(MAX_ASSISTANT_CHANGE_BYTES + 1)),
+            Some("x".repeat(64 * 1024 + 1)),
         )]));
-        assert!(large.validate().is_err());
+        assert!(large.validate(&limits()).is_err());
         let mut author = commit();
         author.author_name = "Eve <evil@example.invalid>".to_owned();
-        assert!(author.validate().is_err());
+        assert!(author.validate(&limits()).is_err());
 
         let mut working = job();
         working.workspace = Some(AssistantWorkspace {
@@ -1622,7 +1626,10 @@ mod tests {
             author_name: "Eve".to_owned(),
             author_email: "eve@example.invalid".to_owned(),
         });
-        assert!(working.validate().is_err(), "a remote helper is refused");
+        assert!(
+            working.validate(&limits()).is_err(),
+            "a remote helper is refused"
+        );
         let encoded = serde_json::to_value(&committing).unwrap();
         assert_eq!(
             serde_json::from_value::<AssistantJob>(encoded).unwrap(),
@@ -1684,45 +1691,50 @@ mod tests {
 
     #[test]
     fn a_job_is_bounded_and_its_token_never_printed() {
-        assert_eq!(job().validate(), Ok(()));
+        assert_eq!(job().validate(&limits()), Ok(()));
         let shown = format!("{:?}", job());
         assert!(!shown.contains(&"t".repeat(43)), "{shown}");
         let mut blank = job();
         blank.message = "  ".to_owned();
-        assert!(blank.validate().is_err());
+        assert!(blank.validate(&limits()).is_err());
         blank.close = true;
-        assert_eq!(blank.validate(), Ok(()), "a close carries no message");
+        assert_eq!(
+            blank.validate(&limits()),
+            Ok(()),
+            "a close carries no message"
+        );
         blank.interrupt = true;
-        assert!(blank.validate().is_err(), "a job closes or interrupts");
+        assert!(
+            blank.validate(&limits()).is_err(),
+            "a job closes or interrupts"
+        );
         blank.close = false;
-        assert_eq!(blank.validate(), Ok(()), "nor does an interrupt");
+        assert_eq!(blank.validate(&limits()), Ok(()), "nor does an interrupt");
         let mut long = job();
-        long.message = "x".repeat(MAX_ASSISTANT_MESSAGE_BYTES + 1);
-        assert!(long.validate().is_err());
+        long.message = "x".repeat(32 * 1024 + 1);
+        assert!(long.validate(&limits()).is_err());
         let mut token = job();
         token.mcp_token = "short".to_owned();
-        assert!(token.validate().is_err());
+        assert!(token.validate(&limits()).is_err());
         let mut control = job();
         control.conversation_id = "a\nb".to_owned();
-        assert!(control.validate().is_err());
+        assert!(control.validate(&limits()).is_err());
     }
 
     #[test]
     fn a_job_names_its_skills_once_each_and_a_mode_installs_them_somewhere() {
         let mut given = job();
         given.skills = vec!["charts".to_owned(), "report-writer".to_owned()];
-        assert_eq!(given.validate(), Ok(()));
+        assert_eq!(given.validate(&limits()), Ok(()));
         for skills in [
             vec!["charts".to_owned(), "charts".to_owned()],
             vec!["../charts".to_owned()],
             vec!["Charts".to_owned()],
-            (0..=MAX_ASSISTANT_SKILLS)
-                .map(|n| format!("skill-{n}"))
-                .collect(),
+            (0..=64).map(|n| format!("skill-{n}")).collect(),
         ] {
             let mut bad = job();
             bad.skills = skills;
-            assert!(bad.validate().is_err(), "{:?}", bad.skills);
+            assert!(bad.validate(&limits()).is_err(), "{:?}", bad.skills);
         }
 
         let mut mode = AssistantMode::moneypenny();
@@ -1776,11 +1788,39 @@ mod tests {
 
     #[test]
     fn event_text_is_cut_on_a_character_boundary() {
-        let text = "é".repeat(MAX_ASSISTANT_EVENT_BYTES);
-        let event = AssistantEvent::new(EVENT_TEXT, Some(text));
-        let kept = event.text.unwrap();
-        assert!(kept.len() <= MAX_ASSISTANT_EVENT_BYTES);
-        assert!(kept.chars().all(|c| c == 'é'));
+        let mut limits = limits();
+        limits.event_bytes = Limit::at(5);
+        let mut report = AssistantReport {
+            station_id: "s".to_owned(),
+            conversation_id: "c".to_owned(),
+            job_id: None,
+            session_id: None,
+            events: vec![AssistantEvent::new(EVENT_TEXT, Some("é".repeat(4)))],
+        };
+        report.cut_texts(&limits);
+        assert_eq!(report.events[0].text.as_deref(), Some("éé"));
+        limits.event_bytes = Limit::UNBOUNDED;
+        report.events[0].text = Some("é".repeat(4));
+        report.cut_texts(&limits);
+        assert_eq!(report.events[0].text.as_deref(), Some("éééé"));
+    }
+
+    #[test]
+    fn a_job_is_held_to_the_limits_it_is_checked_against() {
+        let mut short = limits();
+        short.message_bytes = Limit::at(8);
+        let mut long = job();
+        long.message = "x".repeat(9);
+        assert_eq!(long.validate(&limits()), Ok(()));
+        assert_eq!(
+            long.validate(&short),
+            Err("message is empty or too long".to_owned())
+        );
+        long.message = "x".repeat(8);
+        assert_eq!(long.validate(&short), Ok(()));
+        short.message_bytes = Limit::UNBOUNDED;
+        long.message = "x".repeat(1 << 20);
+        assert_eq!(long.validate(&short), Ok(()));
     }
 
     #[test]

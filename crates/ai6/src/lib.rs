@@ -29,8 +29,8 @@ pub use directorates::m::approvals::{
     SAFE_HOUSE_DELETE, classify, clearance_at_least,
 };
 pub use directorates::m::assistant::{
-    AssistantNarrowing, AssistantSettings, AssistantViewLimits, NetworkPolicy, RepoKind,
-    SharedRepo, SkillEntry,
+    AssistantDeskLimits, AssistantGatewayLimits, AssistantLimits, AssistantNarrowing,
+    AssistantSettings, AssistantViewLimits, NetworkPolicy, RepoKind, SharedRepo, SkillEntry,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::m::config::SqlProvider;
@@ -192,18 +192,15 @@ pub use directorates::section_00::assistant::{
     AssistantReport, AssistantSharedBase, AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED,
     EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
     EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
-    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MAX_ASSISTANT_CABLE_GRANTS, MAX_ASSISTANT_CHANGE_BYTES,
-    MAX_ASSISTANT_CHANGE_FILES, MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENT_BYTES,
-    MAX_ASSISTANT_EVENTS, MAX_ASSISTANT_MESSAGE_BYTES, MAX_ASSISTANT_SHARED_BASES,
-    MAX_MEMORY_FILES, MAX_MEMORY_LIST_BYTES, MemoryAction, MemoryAnswer, MemoryCommit, MemoryFile,
+    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAction, MemoryAnswer, MemoryCommit, MemoryFile,
     MemoryOp, SCRIPT_ENVIRONMENT, credential_dir_var, host_pattern, interpreter_name, memory_path,
     outside_tool,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]
 pub use station::server::{
-    AssistantDeskLimits, DEFAULT_CONFIG_POLL, DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS,
-    DEFAULT_RESOURCES_EVERY, ServeConfig, StationConfig, StationRole, serve, serve_with_capacity,
-    serve_with_config_dir, serve_with_config_dir_and_capacity, serve_with_options,
-    serve_with_plugins, serve_with_plugins_and_capacity,
+    DEFAULT_CONFIG_POLL, DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_RESOURCES_EVERY,
+    ServeConfig, StationConfig, StationRole, serve, serve_with_capacity, serve_with_config_dir,
+    serve_with_config_dir_and_capacity, serve_with_options, serve_with_plugins,
+    serve_with_plugins_and_capacity,
 };

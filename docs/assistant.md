@@ -24,10 +24,12 @@ context = "The operators here prefer short answers."
 Each message the person sends goes from the app to Universal Exports, which hands it to a
 Station: the one already running the conversation, else the Headquarters Station, else any
 healthy Station. A Station that has no such Agent, no such handler, a quarantine on it, or
-four assistant Sessions running or starting already refuses, and the next one is asked. A
+four assistant Sessions running or starting already (`[assistant.desk] live`) refuses, and the
+next one is asked. A
 Station takes each conversation's messages in order and different conversations' at the same
 time, so one whose repositories are slow to clone holds up no one else. The Station keeps
-one harness per conversation, so a follow-up reaches it at once; after ten idle minutes it
+one harness per conversation, so a follow-up reaches it at once; after ten idle minutes
+(`[assistant.desk] idle`) it
 closes, and the next message resumes the same provider Session. A harness that exits or
 fails is closed at once and the conversation shows why, with the harness's exit status and
 its last words; so is one that writes nothing for ten minutes while answering. A Session that
@@ -734,6 +736,7 @@ the `assistant` record), each at least 1; Universal Exports reads them when it s
 | `graph_nodes`, `graph_edges` | nodes and edges of a graph | 60, 120 |
 | `svg_bytes`, `svg_elements`, `svg_depth` | bytes, elements and nesting of a drawing | 32768, 2000, 16 |
 | `navigate_label_bytes` | bytes of the label of a [page she points to](#pages-she-points-to) | 120 |
+| `svg_id_bytes` | bytes of an `id` in a drawing | 64 |
 
 ```toml
 [assistant.views]
@@ -810,17 +813,19 @@ answered does nothing.
 | The Agent she is | `moneypenny` | the `unex` record's `assistant_agent` ([Configuration](configuration.md)) |
 | Serve her at all | yes | the `unex` record's `assistant` |
 | The bounds of her views | [Views she shows](#views-she-shows) | `[assistant.views]` |
-| Conversations kept | 20 a person, 2,000 in all, 7 days | `AssistantConfig::with_conversation_limits` |
-| Tool token lifetime | 1 hour | `AssistantConfig::with_token_ttl` |
-| Time for a Station to take a message | 60 seconds | `AssistantConfig::with_answer_timeout` |
-| Tool calls per conversation | 120 a minute | `AssistantConfig::with_tool_calls_per_minute` |
-| Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `AssistantConfig::with_live_conversations_per_person` |
-| How long an answer may go without word from its Station | 10 minutes, then it is given up | `AssistantConfig::with_answer_deadline` |
-| Memory kept | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `AssistantConfig::with_memory_limits` |
-| Memory requests waiting for a Station | 2 a person, 16 in all; `429` past either | `AssistantConfig::with_memory_requests` |
-| Memory requests a Station makes at once | 4; the next is refused | `AssistantDeskLimits::with_memory_requests` (`StationConfig::with_assistant_limits`) |
-| A clone of one of her repositories | 120 seconds and 512 MiB, then given up and removed | `AssistantDeskLimits::with_clone_limits` |
-| What one save of her work commits | 16 MiB; past it nothing is saved and she is told | `AssistantDeskLimits::with_save_limit` |
+| What a job, a report and her memory may hold | 32 KiB a message, 64 events a report, and so on | `[assistant.limits]` ([Moneypenny's limits](configuration.md#moneypennys-limits)) |
+| Conversations kept | 20 a person, 2,000 in all, 7 days | `[assistant.gateway]` `conversations_per_person`, `conversations`, `conversation_age` |
+| Tool token lifetime | 1 hour | `[assistant.gateway] token_ttl` |
+| Time for a Station to take a message | 60 seconds | `[assistant.gateway] answer_timeout` |
+| Tool calls per conversation | 120 a minute | `[assistant.gateway] tool_calls_per_minute` |
+| Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `[assistant.gateway] live_per_person` |
+| How long an answer may go without word from its Station | 10 minutes, then it is given up | `[assistant.gateway] answer_deadline` |
+| Memory kept | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `[assistant.gateway]` `conversation_bytes`, `person_bytes`, `ready_entries` |
+| Memory requests waiting for a Station | 2 a person, 16 in all; `429` past either | `[assistant.gateway]` `memory_requests_per_person`, `memory_requests` |
+| Assistant Sessions on one Station | 4 running or starting; closed after 10 idle minutes | `[assistant.desk]` `live`, `idle` |
+| Memory requests a Station makes at once | 4; the next is refused | `[assistant.desk] memory_requests` |
+| A clone of one of her repositories | 120 seconds and 512 MiB, then given up and removed | `[assistant.desk]` `clone_timeout`, `clone_bytes` |
+| What one save of her work commits | 16 MiB; past it nothing is saved and she is told | `[assistant.desk] save_bytes` |
 | Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml`, or the `assistant` record of a SQL roster |
 | Shared repositories | none | `[assistant.shared.<group>]`, `[assistant.org]` (`write = false`) |
 | Run on an elevated Station | no | `[assistant] allow_elevated` |

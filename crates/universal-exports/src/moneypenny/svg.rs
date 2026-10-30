@@ -16,8 +16,6 @@ use super::views::ViewLimits;
 
 /// The SVG namespace; an element in any other is refused.
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
-/// The longest `id`: part of the id syntax this module accepts, not a size bound.
-const MAX_ID: usize = 64;
 
 const ELEMENTS: &[&str] = &[
     "svg",
@@ -250,13 +248,14 @@ fn check(
         if key == "id" {
             let id = attribute.value();
             if id.is_empty()
-                || id.len() > MAX_ID
+                || id.len() > limits.svg_id_bytes
                 || !id
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
             {
                 return Err(format!(
-                    "an id is 1 to {MAX_ID} letters, digits, '-', '_' or '.', not {id:?}"
+                    "an id is 1 to {} letters, digits, '-', '_' or '.', not {id:?}",
+                    limits.svg_id_bytes
                 ));
             }
             if !ids.insert(id.to_owned()) {
@@ -411,6 +410,24 @@ mod tests {
   <rect x="0" y="0" width="40" height="20" fill="url(#glow)"/>
   <text x="5" y="40">hq &lt;-&gt; worker</text>
 </svg>"##;
+
+    #[test]
+    fn an_id_is_held_to_its_setting() {
+        let drawing = |id: &str| {
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">                 <title>t</title><rect id=\"{id}\"/></svg>"
+            )
+        };
+        let tight = ViewLimits {
+            svg_id_bytes: 4,
+            ..ViewLimits::default()
+        };
+        assert!(super::sanitize(&drawing("abcd"), &tight).is_ok());
+        let refused = super::sanitize(&drawing("abcde"), &tight).unwrap_err();
+        assert!(refused.contains("1 to 4"), "{refused}");
+        assert!(sanitize(&drawing(&"a".repeat(64))).is_ok());
+        assert!(sanitize(&drawing(&"a".repeat(65))).is_err());
+    }
 
     #[test]
     fn an_allowed_drawing_is_kept_in_canonical_form_which_parses_to_itself() {

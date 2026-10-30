@@ -20,6 +20,15 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use super::*;
 use crate::{AccessProviders, GatewayConfig, GatewayLimits, issue_access_token_record};
 
+/// The default settings with `[assistant.gateway]` changed by `change`.
+fn tuned(change: impl FnOnce(&mut AssistantGatewayLimits)) -> AssistantConfig {
+    let mut limits = AssistantGatewayLimits::default();
+    change(&mut limits);
+    AssistantConfig::default()
+        .with_gateway_limits(limits)
+        .unwrap()
+}
+
 const STATION_TOKEN: &str = "m-token-that-is-long-enough-for-testing";
 
 struct People;
@@ -622,8 +631,7 @@ async fn the_tools_refuse_what_the_person_may_not_do() {
 
 #[tokio::test]
 async fn a_refused_or_unanswered_job_goes_to_another_station_and_stations_are_checked() {
-    let served =
-        served(AssistantConfig::default().with_answer_timeout(Duration::from_secs(1))).await;
+    let served = served(tuned(|limits| limits.answer_timeout = Seconds::new(1))).await;
     let (mut app, _) = open(&served, &served.operator).await;
     say(&mut app, "hello", None).await;
     let job = take(&served, "hq").await;
@@ -2036,8 +2044,7 @@ async fn a_stopped_message_a_station_took_cuts_its_harness_off() {
 
 #[tokio::test]
 async fn an_accepted_answer_that_never_comes_is_given_up() {
-    let served =
-        served(AssistantConfig::default().with_answer_deadline(Duration::from_secs(1))).await;
+    let served = served(tuned(|limits| limits.answer_deadline = Seconds::new(1))).await;
     let (mut app, _) = accepted(&served, &served.operator, "hello?").await;
     let frames = receive_until(&mut app, |frame| {
         frame["type"] == "busy" && frame["busy"] == false
@@ -2056,7 +2063,11 @@ async fn an_accepted_answer_that_never_comes_is_given_up() {
 
 #[tokio::test]
 async fn views_are_held_to_a_budget_and_ready_sends_only_the_newest() {
-    let served = served(AssistantConfig::default().with_memory_limits(64 * 1024, 96 * 1024)).await;
+    let served = served(tuned(|limits| {
+        limits.conversation_bytes = Limit::at(64 * 1024);
+        limits.person_bytes = Limit::at(96 * 1024);
+    }))
+    .await;
     let (mut app, job) = accepted(&served, &served.operator, "Show me lots.").await;
     let rows: Vec<Value> = (0..200)
         .map(|row| json!([format!("{row:0>400}"), row]))
@@ -2440,7 +2451,10 @@ async fn a_shared_change_is_a_proposal_direct_when_allowed_and_refused_to_a_non_
         commit.change.base["docs/on-call.md"],
         Some(digest("On call: M.\n"))
     );
-    assert_eq!(commit.change.validate(false), Ok(()));
+    assert_eq!(
+        commit.change.validate(false, &AssistantLimits::default()),
+        Ok(())
+    );
     assert!(
         commit
             .message
@@ -2576,7 +2590,10 @@ async fn a_shared_change_waits_for_its_base_and_is_refused_without_one() {
             .starts_with("Nothing was proposed"),
         "{refused}"
     );
-    assert!(started.elapsed() >= SHARED_BASE_WAIT);
+    assert!(
+        started.elapsed() >= Duration::from_secs(5),
+        "the default shared_base_wait"
+    );
     let frames = finish(&served, &mut app, &job).await;
     let proposals = frames
         .iter()
@@ -2992,8 +3009,7 @@ async fn a_station_reads_the_persons_cable_permissions_as_they_are_now() {
 
 #[tokio::test]
 async fn a_confirmed_cable_no_station_sends_in_time_fails() {
-    let served =
-        served(AssistantConfig::default().with_answer_timeout(Duration::from_secs(1))).await;
+    let served = served(tuned(|limits| limits.answer_timeout = Seconds::new(1))).await;
     let (mut app, job) = accepted(&served, &served.operator, "Tell 008 to deploy.").await;
     report(
         &served,
@@ -3045,10 +3061,32 @@ fn held_cable(id: &str, body: &str) -> ai6::AssistantCable {
 }
 
 #[tokio::test]
+async fn a_message_longer_than_a_job_may_carry_is_refused() {
+    let mut limits = AssistantLimits::default();
+    limits.message_bytes = Limit::at(8);
+    let served = served(AssistantConfig::default().with_limits(limits).unwrap()).await;
+    let (mut app, _) = open(&served, &served.operator).await;
+    say(&mut app, "123456789", None).await;
+    let frames = receive_until(&mut app, |frame| frame["type"] == "error").await;
+    let refused = frames.last().unwrap();
+    assert_eq!(refused["code"], "bad_request", "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .is_some_and(|text| text.contains("1 to 8 bytes")),
+        "{refused}"
+    );
+    assert!(nothing_for(&served, "hq").await);
+    say(&mut app, "12345678", None).await;
+    assert_eq!(take(&served, "hq").await.message, "12345678");
+}
+
+#[tokio::test]
 async fn a_full_list_of_proposals_refuses_a_held_cable_and_drops_none_waiting() {
-    let served = served(AssistantConfig::default()).await;
+    const MOST: usize = 3;
+    let served = served(tuned(|limits| limits.proposals = Limit::at(MOST as u64))).await;
     let (mut app, job) = accepted(&served, &served.operator, "Tell everyone.").await;
-    let events = (0..=super::actions::MAX_PROPOSALS)
+    let events = (0..=MOST)
         .map(|index| held(&format!("held-{index}"), &format!("Step {index}.")))
         .collect();
     report(&served, "hq", &job, None, events).await;
@@ -3057,15 +3095,15 @@ async fn a_full_list_of_proposals_refuses_a_held_cable_and_drops_none_waiting() 
         .iter()
         .filter(|frame| frame["entry"]["role"] == "proposal")
         .count();
-    assert_eq!(proposals, super::actions::MAX_PROPOSALS);
+    assert_eq!(proposals, MOST);
     assert!(
         frames.iter().any(|frame| frame["entry"]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("already wait"))),
+            .is_some_and(|text| text.contains("3 proposals already wait"))),
         "{frames:?}"
     );
     let discard = take(&served, "hq").await;
-    let last = format!("held-{}", super::actions::MAX_PROPOSALS);
+    let last = format!("held-{MOST}");
     assert_eq!(
         discard.cable_discard.map(|decision| decision.id),
         Some(last),
@@ -3372,7 +3410,10 @@ async fn answer_memory(
 #[tokio::test]
 async fn memory_requests_past_their_limits_are_refused_and_free_their_place_when_done() {
     let served = served_with(
-        AssistantConfig::default().with_memory_requests(1, 2),
+        tuned(|limits| {
+            limits.memory_requests_per_person = Limit::at(1);
+            limits.memory_requests = Limit::at(2);
+        }),
         Some(personal_roster()),
     )
     .await;
@@ -3573,7 +3614,11 @@ async fn a_persons_memory_is_read_by_them_and_by_an_audited_admin_only() {
 
 #[tokio::test]
 async fn the_persons_changes_are_audited_commits_by_them_and_refusals_keep_their_words() {
-    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
+    let served = served_with(
+        tuned(|limits| limits.memory_timeout = Seconds::new(5)),
+        Some(personal_roster()),
+    )
+    .await;
 
     let asked = memory_request(
         &served,
@@ -3682,7 +3727,7 @@ async fn the_persons_changes_are_audited_commits_by_them_and_refusals_keep_their
         ("/notes/a%20b.md", Some(json!({"content": "x"}))),
         (
             "/big.md",
-            Some(json!({"content": "x".repeat(ai6::MAX_ASSISTANT_CHANGE_BYTES + 1)})),
+            Some(json!({"content": "x".repeat(64 * 1024 + 1)})),
         ),
         (
             "/a.md",

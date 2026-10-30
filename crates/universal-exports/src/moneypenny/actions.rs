@@ -18,11 +18,6 @@ use super::tools::{
     Call, Outcome, check, encode, id, object, operation, optional_id, string, text,
 };
 
-/// How long a proposal waits for the person, in seconds.
-pub(crate) const PROPOSAL_TTL_SECS: f64 = 3_600.0;
-/// The most proposals one conversation keeps; finished ones go first.
-pub(crate) const MAX_PROPOSALS: usize = 32;
-
 /// Where the permission a write needs is checked.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Scope {
@@ -117,9 +112,14 @@ pub(crate) fn shared_change_schema() -> Value {
 }
 
 /// Checks [`SHARED_CHANGE`]'s input: the schema, no hidden character, a repository path, at
-/// most [`ai6::MAX_ASSISTANT_CHANGE_BYTES`] of text and a one-line subject of 1 to 200
-/// characters. Answers group, path, content and subject.
-pub(crate) fn shared_change(input: &Value) -> Result<(&str, &str, &str, &str), Outcome> {
+/// most `[assistant.limits] change_bytes` of text and a one-line subject of 1 to
+/// `[assistant.gateway] change_message_chars` characters. Answers group, path, content and
+/// subject.
+pub(crate) fn shared_change<'a>(
+    input: &'a Value,
+    limits: &ai6::AssistantLimits,
+    gateway: &ai6::AssistantGatewayLimits,
+) -> Result<(&'a str, &'a str, &'a str, &'a str), Outcome> {
     let invalid = |problem: String| Outcome::error(format!("INVALID_INPUT: {problem}"));
     check(&shared_change_schema(), input, "input").map_err(invalid)?;
     hidden_characters(input, "input").map_err(invalid)?;
@@ -138,16 +138,18 @@ pub(crate) fn shared_change(input: &Value) -> Result<(&str, &str, &str, &str), O
             "{path:?} is not a file path inside a repository"
         )));
     }
-    if content.len() > ai6::MAX_ASSISTANT_CHANGE_BYTES {
+    if !limits.change_bytes.allows(content.len()) {
         return Err(invalid(format!(
             "content is longer than {} bytes",
-            ai6::MAX_ASSISTANT_CHANGE_BYTES
+            limits.change_bytes
         )));
     }
-    if message.trim().is_empty() || message.chars().count() > 200 || message.contains('\n') {
-        return Err(invalid(
-            "message is one line of 1 to 200 characters".to_owned(),
-        ));
+    let chars = gateway.change_message_chars;
+    if message.trim().is_empty() || !chars.allows(message.chars().count()) || message.contains('\n')
+    {
+        return Err(invalid(format!(
+            "message is one line of 1 to {chars} characters"
+        )));
     }
     Ok((group, path, content, message))
 }

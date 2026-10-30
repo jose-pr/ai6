@@ -49,12 +49,12 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use ai6::{
-    AssistantChange, AssistantCommit, AssistantEvent, AssistantJob, AssistantReach,
-    AssistantReport, AssistantSettings, AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED,
-    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
-    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MAX_ASSISTANT_CONTEXT_BYTES, MAX_ASSISTANT_EVENTS,
-    MAX_ASSISTANT_MESSAGE_BYTES, outside_tool,
+    AssistantChange, AssistantCommit, AssistantEvent, AssistantGatewayLimits, AssistantJob,
+    AssistantLimits, AssistantReach, AssistantReport, AssistantSettings, AssistantWorkspace,
+    COMMIT_MEMORY, COMMIT_SHARED, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT,
+    EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
+    EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, Limit, Seconds,
+    outside_tool,
 };
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
@@ -78,40 +78,23 @@ use store::{Bounds, Conversation, Entry, Pending, Role, Store};
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssistantConfig {
     agent_id: String,
-    per_person: usize,
-    total: usize,
-    max_age: Duration,
-    max_entries: usize,
-    token_ttl: Duration,
-    answer_timeout: Duration,
-    answer_deadline: Duration,
-    tool_calls_per_minute: u32,
-    live_per_person: usize,
-    conversation_bytes: usize,
-    person_bytes: usize,
-    memory_per_person: usize,
-    memory_total: usize,
+    limits: AssistantLimits,
+    gateway: AssistantGatewayLimits,
+    cable_body_bytes: Limit,
+    cable_default_ttl: Seconds,
     route_text_bytes: usize,
     views: views::ViewLimits,
 }
 
 impl Default for AssistantConfig {
     fn default() -> Self {
+        let (cable_body_bytes, _, cable_default_ttl) = ai6::CableConfig::default().message_limits();
         Self {
             agent_id: "moneypenny".to_owned(),
-            per_person: 20,
-            total: 2_000,
-            max_age: Duration::from_secs(7 * 24 * 3_600),
-            max_entries: 500,
-            token_ttl: Duration::from_secs(3_600),
-            answer_timeout: Duration::from_secs(60),
-            answer_deadline: Duration::from_secs(10 * 60),
-            tool_calls_per_minute: 120,
-            live_per_person: 2,
-            conversation_bytes: 1024 * 1024,
-            person_bytes: 4 * 1024 * 1024,
-            memory_per_person: 2,
-            memory_total: 16,
+            limits: AssistantLimits::default(),
+            gateway: AssistantGatewayLimits::default(),
+            cable_body_bytes,
+            cable_default_ttl,
             route_text_bytes: routes::DEFAULT_TEXT_BYTES,
             views: views::ViewLimits::default(),
         }
@@ -156,80 +139,65 @@ impl AssistantConfig {
         }
     }
 
-    /// Keeps at most `per_person` conversations for one person (default 20) and `total` in
-    /// all (default 2,000), each until it has been untouched for `max_age` (default 7 days).
-    /// The oldest goes first; zero counts become one.
-    #[must_use]
-    pub fn with_conversation_limits(
+    /// Holds jobs, reports and memory requests to `limits` (`[assistant.limits]`), as the
+    /// Stations do.
+    ///
+    /// # Errors
+    ///
+    /// [`GatewayError::InvalidConfiguration`] for limits
+    /// [`AssistantLimits::validate`] refuses.
+    pub fn with_limits(mut self, limits: AssistantLimits) -> Result<Self, GatewayError> {
+        limits
+            .validate()
+            .map_err(|_| GatewayError::InvalidConfiguration)?;
+        self.limits = limits;
+        Ok(self)
+    }
+
+    /// Keeps her conversations within `limits` (`[assistant.gateway]`): how many are kept and
+    /// for how long, how much each holds, how many run at once, her tokens, proposals,
+    /// memory requests and tools.
+    ///
+    /// # Errors
+    ///
+    /// [`GatewayError::InvalidConfiguration`] for limits
+    /// [`AssistantGatewayLimits::validate`] refuses.
+    pub fn with_gateway_limits(
         mut self,
-        per_person: usize,
-        total: usize,
-        max_age: Duration,
-    ) -> Self {
-        self.per_person = per_person.max(1);
-        self.total = total.max(1);
-        self.max_age = max_age;
+        limits: AssistantGatewayLimits,
+    ) -> Result<Self, GatewayError> {
+        limits
+            .validate()
+            .map_err(|_| GatewayError::InvalidConfiguration)?;
+        self.gateway = limits;
+        Ok(self)
+    }
+
+    /// Refuses a Cable she proposes with a body past `body_bytes`, and tells the person a
+    /// Cable that names no lifetime lasts `default_ttl`: the `cables` record's values
+    /// ([`ai6::CableConfig::message_limits`]), which the relay applies.
+    #[must_use]
+    pub fn with_cable_limits(mut self, body_bytes: Limit, default_ttl: Seconds) -> Self {
+        self.cable_body_bytes = body_bytes;
+        self.cable_default_ttl = default_ttl;
         self
     }
 
-    /// How long a token given to a harness for its tools is accepted (default one hour,
-    /// at least one minute). A harness is restarted with a fresh token before its own
-    /// expires.
-    #[must_use]
-    pub fn with_token_ttl(mut self, ttl: Duration) -> Self {
-        self.token_ttl = ttl.max(Duration::from_secs(60));
-        self
+    /// `[assistant.limits]` as the gateway holds jobs and reports to them.
+    pub(crate) fn limits(&self) -> &AssistantLimits {
+        &self.limits
     }
 
-    /// How long a Station has to take up a message before another is asked (default 60
-    /// seconds).
-    #[must_use]
-    pub fn with_answer_timeout(mut self, timeout: Duration) -> Self {
-        self.answer_timeout = timeout;
-        self
-    }
-
-    /// How long an accepted message may go without word from its Station before the answer
-    /// is given up (default 10 minutes).
-    #[must_use]
-    pub fn with_answer_deadline(mut self, deadline: Duration) -> Self {
-        self.answer_deadline = deadline;
-        self
-    }
-
-    /// How many of one person's conversations may have a harness running or a message being
-    /// answered at once (default 2, at least 1). Past it, the person's least recently used
-    /// idle harness is closed; when every one is answering, the message is refused.
-    #[must_use]
-    pub fn with_live_conversations_per_person(mut self, conversations: usize) -> Self {
-        self.live_per_person = conversations.max(1);
-        self
-    }
-
-    /// The bytes of entries kept per conversation (default 1 MiB) and per person (default
-    /// 4 MiB); the oldest go first, a person's views before anything else.
-    #[must_use]
-    pub fn with_memory_limits(mut self, per_conversation: usize, per_person: usize) -> Self {
-        self.conversation_bytes = per_conversation.max(64 * 1024);
-        self.person_bytes = per_person.max(self.conversation_bytes);
-        self
+    /// `[assistant.gateway]`.
+    pub(crate) fn gateway(&self) -> &AssistantGatewayLimits {
+        &self.gateway
     }
 
     fn bounds(&self) -> Bounds {
         Bounds {
-            entries: self.max_entries,
-            bytes: self.conversation_bytes,
+            entries: self.gateway.conversation_entries.or_max(),
+            bytes: self.gateway.conversation_bytes.or_max(),
         }
-    }
-
-    /// How many of the app's memory requests (`/v1/user/assistant/memory`) wait for a Station
-    /// at once: `per_person` for one signed-in person (default 2) and `total` in all (default
-    /// 16), each at least one. Past either the request is refused `429`.
-    #[must_use]
-    pub fn with_memory_requests(mut self, per_person: usize, total: usize) -> Self {
-        self.memory_per_person = per_person.max(1);
-        self.memory_total = total.max(1);
-        self
     }
 
     /// The bounds of the views she shows ([`ViewLimits`], each at least 1); the app is sent
@@ -239,13 +207,15 @@ impl AssistantConfig {
         self.views = limits.at_least_one();
         self
     }
+}
 
-    /// How many tool calls one conversation may make in a minute (default 120).
-    #[must_use]
-    pub fn with_tool_calls_per_minute(mut self, calls: u32) -> Self {
-        self.tool_calls_per_minute = calls.max(1);
-        self
-    }
+/// `[assistant.gateway]` of `gateway`'s assistant, the defaults without one.
+fn gateway_limits(gateway: &Gateway) -> AssistantGatewayLimits {
+    gateway
+        .assistant
+        .as_ref()
+        .map(|assistant| assistant.config.gateway.clone())
+        .unwrap_or_default()
 }
 
 /// The token a harness presents: whose conversation it is, and the Station whose harness was
@@ -391,11 +361,12 @@ async fn assistant_settings(gateway: &Gateway) -> Result<AssistantSettings, Stri
 fn workspace_for(
     settings: &AssistantSettings,
     person: &ai6::Person,
+    author_chars: Limit,
 ) -> Result<Option<AssistantWorkspace>, String> {
     let Some(personal) = settings.personal_repo_for(&person.id)? else {
         return Ok(None);
     };
-    let (author_name, author_email) = author_of(person);
+    let (author_name, author_email) = author_of(person, author_chars);
     Ok(Some(AssistantWorkspace {
         personal,
         shared: settings
@@ -408,8 +379,9 @@ fn workspace_for(
 }
 
 /// The name and email `person`'s commits are authored with: the directory's, without control
-/// characters, `<` or `>`; an email under the reserved `.invalid` domain when it has none.
-fn author_of(person: &ai6::Person) -> (String, String) {
+/// characters, `<` or `>`, each at most `chars` characters; an email under the reserved
+/// `.invalid` domain when it has none.
+fn author_of(person: &ai6::Person, chars: Limit) -> (String, String) {
     let printable = |value: &str| -> String {
         value
             .chars()
@@ -423,7 +395,7 @@ fn author_of(person: &ai6::Person) -> (String, String) {
             .collect::<String>()
             .trim()
             .chars()
-            .take(200)
+            .take(chars.or_max())
             .collect()
     };
     let name = printable(person.display_name.as_deref().unwrap_or(&person.name));
@@ -502,25 +474,6 @@ impl fmt::Debug for Assistant {
     }
 }
 
-/// A token with less left than this is not given to another message: a Station restarts a
-/// harness whose token has under two minutes left, so the new one must outlast that.
-const TOKEN_REUSE_MARGIN_SECS: f64 = 600.0;
-/// The most entries `ready` sends, newest first, and their most bytes.
-const READY_ENTRIES: usize = 100;
-const READY_BYTES: usize = 512 * 1024;
-/// The longest message the app may send, in bytes.
-const MAX_MESSAGE_BYTES: usize = 16 * 1024;
-/// How much of the conversation so far a new harness is given, in bytes.
-const MAX_RECAP_BYTES: usize = 8 * 1024;
-/// How long the app has to say hello.
-const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
-/// The longest a Station's poll is held open.
-const MAX_WAIT_MS: u64 = 25_000;
-/// How often an open conversation socket looks for jobs no Station took up.
-const SWEEP_EVERY: Duration = Duration::from_secs(1);
-/// How long a shared change call waits for its Station's report of what it was made from.
-const SHARED_BASE_WAIT: Duration = Duration::from_secs(5);
-
 fn digest(token: &str) -> String {
     Sha256::digest(token.as_bytes())
         .iter()
@@ -570,21 +523,27 @@ impl Assistant {
             conversation.bearer = bearer.to_owned();
             return (
                 conversation.id.clone(),
-                ready(conversation, &self.config.views),
+                ready(conversation, &self.config.views, &self.config.gateway),
                 conversation.events.subscribe(),
             );
         }
+        let limits = &self.config.gateway;
         desk.store.make_room(
             person_id,
             now,
-            self.config.max_age.as_secs_f64(),
-            self.config.per_person,
-            self.config.total,
+            limits.conversation_age.as_secs_f64(),
+            limits.conversations_per_person.or_max(),
+            limits.conversations.or_max(),
         );
         let id = Uuid::new_v4().to_string();
-        let conversation =
-            Conversation::new(id.clone(), person_id.to_owned(), bearer.to_owned(), now);
-        let shown = ready(&conversation, &self.config.views);
+        let conversation = Conversation::new(
+            id.clone(),
+            person_id.to_owned(),
+            bearer.to_owned(),
+            now,
+            usize::try_from(limits.event_buffer).unwrap_or(usize::MAX),
+        );
+        let shown = ready(&conversation, &self.config.views, limits);
         let events = conversation.events.subscribe();
         desk.store.conversations.insert(id.clone(), conversation);
         (id, shown, events)
@@ -600,11 +559,17 @@ impl Assistant {
         text: &str,
         route: Option<&Value>,
     ) -> Result<(), (&'static str, String)> {
-        if text.trim().is_empty() || text.len() > MAX_MESSAGE_BYTES {
-            return Err((
-                "bad_request",
-                format!("A message is 1 to {MAX_MESSAGE_BYTES} bytes."),
-            ));
+        // A job carries the message whole or not at all: the smaller bound applies.
+        let most = match (
+            self.config.gateway.message_bytes.get(),
+            self.config.limits.message_bytes.get(),
+        ) {
+            (Some(own), Some(job)) => Limit::at(own.min(job)),
+            (Some(bound), None) | (None, Some(bound)) => Limit::at(bound),
+            (None, None) => Limit::UNBOUNDED,
+        };
+        if text.trim().is_empty() || !most.allows(text.len()) {
+            return Err(("bad_request", format!("A message is 1 to {most} bytes.")));
         }
         let bearer = self
             .desk()
@@ -657,18 +622,19 @@ impl Assistant {
                 format!("Moneypenny cannot keep a workspace for you: {reason}"),
             )
         })?;
-        let workspace = workspace_for(&settings, &person).map_err(|reason| {
-            (
-                "unavailable",
-                format!("Moneypenny cannot keep a workspace for you: {reason}"),
-            )
-        })?;
+        let workspace = workspace_for(&settings, &person, self.config.gateway.author_chars)
+            .map_err(|reason| {
+                (
+                    "unavailable",
+                    format!("Moneypenny cannot keep a workspace for you: {reason}"),
+                )
+            })?;
         // Read again for every message, so a narrowed table reaches her next turn: her reach,
         // and her skills, the catalog's less what the person's group and person tables leave out.
         let reach = settings.reach_for(&person.id, &person.groups);
         let skills = settings.skills_for(&person.id, &person.groups);
         // Read again for every message, so a permission removed reaches her next turn.
-        let cables = cables::grants(gateway, &person).await;
+        let cables = cables::grants(gateway, &person, self.config.limits.cable_grants).await;
         {
             let mut desk = self.desk();
             let conversation = desk
@@ -691,7 +657,8 @@ impl Assistant {
                 .filter(|other| other.busy || other.live)
                 .map(|other| (other.updated_at, other.id.clone(), other.busy))
                 .collect();
-            let over = (others.len() + 1).saturating_sub(self.config.live_per_person);
+            let over =
+                (others.len() + 1).saturating_sub(self.config.gateway.live_per_person.or_max());
             if over > 0 {
                 others.retain(|(_, _, busy)| !busy);
                 if others.len() < over {
@@ -712,14 +679,17 @@ impl Assistant {
                 .owned(conversation_id, person_id)
                 .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
             let context = guide::context();
-            let recap = recap(conversation);
+            let recap = recap(conversation, &self.config);
             let mut parts = std::mem::take(&mut conversation.notes);
             parts.push(message.to_owned());
             let job = AssistantJob {
                 job_id: Uuid::new_v4().to_string(),
                 conversation_id: conversation_id.to_owned(),
                 agent_id: self.config.agent_id.clone(),
-                message: cut(&parts.join("\n\n"), MAX_ASSISTANT_MESSAGE_BYTES),
+                message: cut(
+                    &parts.join("\n\n"),
+                    self.config.limits.message_bytes.or_max(),
+                ),
                 context,
                 recap,
                 // Set when the job is placed: the token is bound to its Station.
@@ -810,13 +780,15 @@ impl Assistant {
                     .token
                     .clone()
                     .filter(|(_, held_by, expires_at)| {
-                        *held_by == station && *expires_at > now + TOKEN_REUSE_MARGIN_SECS
+                        *held_by == station
+                            && *expires_at
+                                > now + self.config.gateway.token_reuse_margin.0.as_secs_f64()
                     });
                 let (token, expires_at) = match reuse {
                     Some((token, _, expires_at)) => (token, expires_at),
                     None => (
                         format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
-                        now + self.config.token_ttl.as_secs_f64(),
+                        now + self.config.gateway.token_ttl.0.as_secs_f64(),
                     ),
                 };
                 conversation.token = Some((token.clone(), station.clone(), expires_at));
@@ -866,7 +838,7 @@ impl Assistant {
     /// by every Station poll and by every open conversation socket, so a job is moved on
     /// even when no Station polls at all.
     async fn sweep(&self, gateway: &Gateway) {
-        let timeout = self.config.answer_timeout.as_secs_f64();
+        let timeout = self.config.gateway.answer_timeout.0.as_secs_f64();
         let now = now();
         let mut again = Vec::new();
         {
@@ -887,7 +859,7 @@ impl Assistant {
             }
             // An accepted message whose Station went quiet is given up, so the conversation
             // can take another message and be evicted like any idle one.
-            let deadline = self.config.answer_deadline.as_secs_f64();
+            let deadline = self.config.gateway.answer_deadline.0.as_secs_f64();
             let bounds = self.config.bounds();
             for conversation in desk.store.conversations.values_mut() {
                 if conversation.busy
@@ -944,16 +916,12 @@ impl Assistant {
 
     /// Applies a Station's report; `Err` with the HTTP status it earns.
     async fn report(&self, gateway: &Gateway, report: AssistantReport) -> Result<(), StatusCode> {
-        if report.events.len() > MAX_ASSISTANT_EVENTS
+        if !self.config.limits.events.allows(report.events.len())
             || !ai6::directorates::section_00::assistant::valid_identity(&report.station_id)
         {
             return Err(StatusCode::BAD_REQUEST);
         }
         let max_entries = self.config.bounds();
-        let cable_body = gateway.registry.as_ref().map_or_else(
-            || ai6::CableLimits::default().body_bytes,
-            |registry| registry.limits().cables.body_bytes,
-        );
         let mut refused = false;
         let mut notify = false;
         let mut based = false;
@@ -1035,7 +1003,7 @@ impl Assistant {
                         event,
                         &report.station_id,
                         max_entries,
-                        cable_body,
+                        &self.config,
                         &mut after,
                     );
                 }
@@ -1087,7 +1055,7 @@ impl Assistant {
                 .filter(|event| report.job_id.is_none() || event.kind != EVENT_ACCEPTED)
             {
                 if !event.shared.is_empty() {
-                    conversation.keep_shared_bases(&event.shared);
+                    conversation.keep_shared_bases(&event.shared, self.config.limits.shared_bases);
                     based = true;
                 }
                 match (&event.change, event.kind.as_str()) {
@@ -1099,7 +1067,7 @@ impl Assistant {
                         event,
                         &report.station_id,
                         max_entries,
-                        cable_body,
+                        &self.config,
                         &mut after,
                     ),
                     _ => apply(conversation, event, max_entries),
@@ -1116,7 +1084,8 @@ impl Assistant {
             }
             if let Some(conversation) = desk.store.conversations.get(&report.conversation_id) {
                 let person = conversation.person_id.clone();
-                desk.store.trim_person(&person, self.config.person_bytes);
+                desk.store
+                    .trim_person(&person, self.config.gateway.person_bytes.or_max());
             }
         }
         self.follow_up(gateway, after).await;
@@ -1152,7 +1121,7 @@ impl Assistant {
         let Some(workspace) = conversation.workspace.clone() else {
             return false;
         };
-        if let Err(reason) = change.validate(true) {
+        if let Err(reason) = change.validate(true, &self.config.limits) {
             conversation.push(
                 Entry {
                     role: Role::Error,
@@ -1190,7 +1159,7 @@ impl Assistant {
             if let Some(body) = proposal.draft.call.body.as_mut() {
                 body["diff"] = json!(diff);
             }
-            if record_proposal(conversation, proposal, bounds) {
+            if record_proposal(conversation, proposal, bounds, &self.config.gateway) {
                 conversation.notes.push(format!(
                     "[App: your memory change ({paths}) waits for the person's confirmation, \
                      because this conversation read text others wrote.]"
@@ -1200,7 +1169,8 @@ impl Assistant {
                     Entry {
                         role: Role::Error,
                         text: format!(
-                            "Moneypenny's memory change ({paths}) was not kept: {PROPOSALS_FULL}"
+                            "Moneypenny's memory change ({paths}) was not kept: {}",
+                            proposals_full(&self.config.gateway)
                         ),
                         at: now(),
                         data: None,
@@ -1208,7 +1178,8 @@ impl Assistant {
                     bounds,
                 );
                 conversation.notes.push(format!(
-                    "[App: your memory change ({paths}) was not kept: {PROPOSALS_FULL}]"
+                    "[App: your memory change ({paths}) was not kept: {}]",
+                    proposals_full(&self.config.gateway)
                 ));
             }
             return false;
@@ -1309,8 +1280,8 @@ impl Assistant {
             else {
                 return tools::Outcome::error("The conversation is gone.");
             };
-            if !record_proposal(conversation, proposal, max_entries) {
-                return tools::Outcome::error(PROPOSALS_FULL);
+            if !record_proposal(conversation, proposal, max_entries, &self.config.gateway) {
+                return tools::Outcome::error(proposals_full(&self.config.gateway));
             }
         }
         tools::Outcome {
@@ -1338,7 +1309,7 @@ impl Assistant {
                 .store
                 .owned(conversation_id, &person.id)
                 .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
-            expire_proposals(conversation);
+            expire_proposals(conversation, &self.config.gateway);
             let proposal = conversation
                 .proposals
                 .iter_mut()
@@ -1518,10 +1489,11 @@ impl Assistant {
         granted: &Granted,
         input: &Value,
     ) -> tools::Outcome {
-        let (group, path, content, message) = match actions::shared_change(input) {
-            Ok(change) => change,
-            Err(outcome) => return outcome,
-        };
+        let (group, path, content, message) =
+            match actions::shared_change(input, &self.config.limits, &self.config.gateway) {
+                Ok(change) => change,
+                Err(outcome) => return outcome,
+            };
         let Ok(person) = resolve_user(gateway, &granted.bearer).await else {
             return tools::Outcome::error("The person's sign-in has ended; nothing was proposed.");
         };
@@ -1546,7 +1518,7 @@ impl Assistant {
                  call again."
             ));
         };
-        let (author_name, author_email) = author_of(&person);
+        let (author_name, author_email) = author_of(&person, self.config.gateway.author_chars);
         let commit = AssistantCommit {
             kind: COMMIT_SHARED.to_owned(),
             repo: shared.repo().to_owned(),
@@ -1617,8 +1589,8 @@ impl Assistant {
         else {
             return tools::Outcome::error("The conversation is gone.");
         };
-        if !record_proposal(conversation, proposal, bounds) {
-            return tools::Outcome::error(PROPOSALS_FULL);
+        if !record_proposal(conversation, proposal, bounds, &self.config.gateway) {
+            return tools::Outcome::error(proposals_full(&self.config.gateway));
         }
         tools::Outcome {
             text: format!(
@@ -1632,7 +1604,8 @@ impl Assistant {
     /// What the file `path` of `group`'s repository held when the conversation's call that
     /// writes `content` to it was made, as its Station reported it ([`ai6::AssistantSharedBase`]):
     /// its hex SHA-256, or `None` for no such file. The report and the call reach the gateway
-    /// separately, so this waits up to [`SHARED_BASE_WAIT`] for it; `None` when none came.
+    /// separately, so this waits up to `[assistant.gateway] shared_base_wait` for it; `None`
+    /// when none came.
     async fn shared_base(
         &self,
         conversation_id: &str,
@@ -1641,7 +1614,7 @@ impl Assistant {
         content: &str,
     ) -> Option<Option<String>> {
         let content = digest(content);
-        let deadline = tokio::time::Instant::now() + SHARED_BASE_WAIT;
+        let deadline = tokio::time::Instant::now() + self.config.gateway.shared_base_wait.0;
         loop {
             let notified = self.based.notified();
             tokio::pin!(notified);
@@ -1693,9 +1666,13 @@ impl Assistant {
             Ok((status, value)) if status.is_success() => Ok(format!(
                 "AI6 answered {}: {}",
                 status.as_u16(),
-                tools::wrap(proposal.tool, &value)
+                tools::wrap(proposal.tool, &value, self.config.gateway.result_chars)
             )),
-            Ok((status, value)) => Err(tools::refusal(status, &value)),
+            Ok((status, value)) => Err(tools::refusal(
+                status,
+                &value,
+                self.config.gateway.result_chars,
+            )),
             Err(error) => Err(format!("The request failed: {error}")),
         }
     }
@@ -1734,8 +1711,10 @@ impl Assistant {
             },
             max_entries,
         );
-        desk.store
-            .trim_person(&granted.person_id, self.config.person_bytes);
+        desk.store.trim_person(
+            &granted.person_id,
+            self.config.gateway.person_bytes.or_max(),
+        );
         tools::Outcome {
             text: format!("Shown to the person as {id}."),
             is_error: false,
@@ -1930,7 +1909,8 @@ impl Assistant {
     /// Counts one tool call of the conversation; `false` past the minute's allowance.
     pub(crate) fn count_call(&self, conversation_id: &str) -> bool {
         let mut desk = self.desk();
-        let limit = self.config.tool_calls_per_minute;
+        let limit = self.config.gateway.tool_calls_per_minute;
+        // The minute of `tool_calls_per_minute`.
         desk.calls
             .retain(|_, (started, _)| started.elapsed() < Duration::from_secs(60));
         let (_, calls) = desk
@@ -1938,7 +1918,7 @@ impl Assistant {
             .entry(conversation_id.to_owned())
             .or_insert_with(|| (Instant::now(), 0));
         *calls += 1;
-        *calls <= limit
+        limit.allows(*calls)
     }
 }
 
@@ -1961,7 +1941,7 @@ async fn audit(
         action: action.to_owned(),
         operation,
         resource,
-        target: cut(target, 512),
+        target: cut(target, gateway_limits(gateway).audit_target_bytes.or_max()),
         at: now(),
     };
     tokio::task::spawn_blocking(move || registry.record_audit(&record))
@@ -1976,8 +1956,9 @@ fn record_proposal(
     conversation: &mut Conversation,
     proposal: actions::Proposal,
     bounds: Bounds,
+    limits: &AssistantGatewayLimits,
 ) -> bool {
-    if !room_for_proposal(conversation) {
+    if !room_for_proposal(conversation, limits) {
         return false;
     }
     conversation.push(
@@ -1994,14 +1975,19 @@ fn record_proposal(
 }
 
 /// What she is told when a proposal does not fit.
-const PROPOSALS_FULL: &str = "32 proposals already wait for the person, so nothing was \
-                              proposed. Ask them to confirm or cancel some first.";
+fn proposals_full(limits: &AssistantGatewayLimits) -> String {
+    format!(
+        "{} proposals already wait for the person, so nothing was proposed. Ask them to \
+         confirm or cancel some first.",
+        limits.proposals
+    )
+}
 
 /// Drops finished proposals until one more fits; `false` when every one kept still waits for
 /// the person or is being carried out, which are never dropped.
-fn room_for_proposal(conversation: &mut Conversation) -> bool {
-    expire_proposals(conversation);
-    while conversation.proposals.len() >= actions::MAX_PROPOSALS {
+fn room_for_proposal(conversation: &mut Conversation, limits: &AssistantGatewayLimits) -> bool {
+    expire_proposals(conversation, limits);
+    while !limits.proposals.allows(conversation.proposals.len() + 1) {
         let Some(finished) = conversation
             .proposals
             .iter()
@@ -2059,12 +2045,13 @@ pub(crate) struct Granted {
     pub(crate) bearer: String,
 }
 
-/// Marks proposals older than their lifetime expired.
-fn expire_proposals(conversation: &mut Conversation) {
+/// Marks proposals older than `[assistant.gateway] proposal_ttl` expired.
+fn expire_proposals(conversation: &mut Conversation, limits: &AssistantGatewayLimits) {
     let now = now();
+    let ttl = limits.proposal_ttl.0.as_secs_f64();
     let mut expired = Vec::new();
     for proposal in &mut conversation.proposals {
-        if proposal.status == "pending" && now - proposal.created_at > actions::PROPOSAL_TTL_SECS {
+        if proposal.status == "pending" && now - proposal.created_at > ttl {
             proposal.status = "expired";
             expired.push(proposal.clone());
         }
@@ -2076,14 +2063,24 @@ fn expire_proposals(conversation: &mut Conversation) {
 
 /// What the app is shown when it opens a conversation.
 ///
-/// Only the newest entries that fit [`READY_ENTRIES`] and [`READY_BYTES`] are sent; `earlier`
-/// counts those left out. `view_limits` are the bounds the app checks views against.
-fn ready(conversation: &Conversation, limits: &views::ViewLimits) -> Value {
+/// Only the newest entries that fit `[assistant.gateway] ready_entries` and `ready_bytes` are
+/// sent; `earlier` counts those left out. `view_limits` are the bounds the app checks views
+/// against.
+fn ready(
+    conversation: &Conversation,
+    limits: &views::ViewLimits,
+    gateway: &AssistantGatewayLimits,
+) -> Value {
     let mut shown = Vec::new();
     let mut bytes = 0;
-    for entry in conversation.entries.iter().rev().take(READY_ENTRIES) {
+    for entry in conversation
+        .entries
+        .iter()
+        .rev()
+        .take(gateway.ready_entries.or_max())
+    {
         bytes += store::entry_bytes(entry);
-        if bytes > READY_BYTES && !shown.is_empty() {
+        if !gateway.ready_bytes.allows(bytes) && !shown.is_empty() {
             break;
         }
         shown.push(entry);
@@ -2100,8 +2097,9 @@ fn ready(conversation: &Conversation, limits: &views::ViewLimits) -> Value {
 }
 
 /// The end of the conversation so far, for a harness that starts without its provider
-/// Session's own memory of it.
-fn recap(conversation: &Conversation) -> Option<String> {
+/// Session's own memory of it: at most `[assistant.gateway] recap_bytes`, and under half of
+/// `[assistant.limits] context_bytes`, the rest being her standing context.
+fn recap(conversation: &Conversation, config: &AssistantConfig) -> Option<String> {
     let mut lines = Vec::new();
     let mut size = 0;
     for entry in conversation.entries.iter().rev() {
@@ -2112,7 +2110,7 @@ fn recap(conversation: &Conversation) -> Option<String> {
         };
         let line = format!("{who}: {}", entry.text);
         size += line.len();
-        if size > MAX_RECAP_BYTES {
+        if !config.gateway.recap_bytes.allows(size) {
             break;
         }
         lines.push(line);
@@ -2125,7 +2123,12 @@ fn recap(conversation: &Conversation) -> Option<String> {
         "Earlier in this conversation (a recap; the app restarted your session):\n\n{}",
         lines.join("\n\n")
     );
-    (recap.len() < MAX_ASSISTANT_CONTEXT_BYTES / 2).then_some(recap)
+    let half = config
+        .limits
+        .context_bytes
+        .get()
+        .map_or(u64::MAX, |bytes| bytes / 2);
+    (u64::try_from(recap.len()).unwrap_or(u64::MAX) < half).then_some(recap)
 }
 
 /// The line that tells Moneypenny which app page the person was on when they sent a message:
@@ -2382,8 +2385,9 @@ pub(crate) async fn socket(State(gateway): State<Gateway>, upgrade: WebSocketUpg
     if gateway.assistant.is_none() {
         return ApiError::unavailable().into_response();
     }
+    let most = gateway_limits(&gateway).socket_message_bytes.or_max();
     upgrade
-        .max_message_size(64 * 1024)
+        .max_message_size(most)
         .on_upgrade(move |socket| converse(socket, gateway))
 }
 
@@ -2392,7 +2396,8 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
         return;
     };
     let (mut sender, mut receiver) = socket.split();
-    let hello = tokio::time::timeout(HELLO_TIMEOUT, receiver.next()).await;
+    let hello =
+        tokio::time::timeout(assistant.config.gateway.hello_timeout.0, receiver.next()).await;
     let Ok(Some(Ok(Message::Text(hello)))) = hello else {
         let _ = sender.send(close(1008, "say hello first")).await;
         return;
@@ -2420,7 +2425,7 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
     if sender.send(frame(&shown)).await.is_err() {
         return;
     }
-    let mut sweep = tokio::time::interval(SWEEP_EVERY);
+    let mut sweep = tokio::time::interval(assistant.config.gateway.sweep_every.0);
     loop {
         tokio::select! {
             _ = sweep.tick() => assistant.sweep(&gateway).await,
@@ -2546,7 +2551,9 @@ pub(crate) async fn next(
     let Some(assistant) = gateway.assistant.clone() else {
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
-    let wait = Duration::from_millis(query.wait_ms.unwrap_or(1_000).min(MAX_WAIT_MS));
+    // A Station that names no wait is held for one second.
+    let wait = Duration::from_millis(query.wait_ms.unwrap_or(1_000))
+        .min(assistant.config.gateway.max_wait.0);
     let deadline = tokio::time::Instant::now() + wait;
     loop {
         let notified = assistant.ready.notified();

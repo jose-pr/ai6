@@ -479,14 +479,38 @@ pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, wr
                                 // denied_networks ([]: nothing denied, under open too),
                                 // unsandboxed_scripts (false), skills.<name> {path, pin}, skills_unpinned,
                                 // skills_allow_tools, group.<group> and person.<id> narrowing tables,
-                                // views (AssistantViewLimits)
+                                // views (AssistantViewLimits), limits (AssistantLimits),
+                                // desk (AssistantDeskLimits), gateway (AssistantGatewayLimits);
+                                // a table at its default is not serialized
 // [assistant.views], what Universal Exports holds her views to: Option<u64> each, absent =
 // its default; validate() refuses 0 as "assistant.views.<key> must be at least 1"
 #[non_exhaustive] #[derive(Default, Serialize, Deserialize)]
 pub struct AssistantViewLimits { pub blocks, view_bytes, text_bytes, short_bytes, columns,
     rows, items, series, points, pie_slices, diff_bytes, fields, schedule_rows, graph_nodes,
-    graph_edges, svg_bytes, svg_elements, svg_depth, navigate_label_bytes: Option<u64> }
+    graph_edges, svg_bytes, svg_elements, svg_depth, svg_id_bytes, navigate_label_bytes: Option<u64> }
 impl AssistantViewLimits { pub fn set(&self) -> Vec<(&'static str, u64)>; }  // the ones given
+// [assistant.limits], [assistant.desk], [assistant.gateway]: #[non_exhaustive], Default = the
+// documented defaults (docs/configuration.md "Moneypenny's limits"), serde(default,
+// deny_unknown_fields); Limit / TimeLimit fields take a number, null or "none".
+pub struct AssistantLimits { pub cable_grants, message_bytes, context_bytes, event_bytes,
+    events, change_bytes, change_files, commit_message_bytes, shared_bases, memory_list_files,
+    memory_list_bytes, skills, inlined_memory_bytes, memory_file_bytes, memory_files,
+    memory_bytes, memory_walk, memory_import_depth: Limit }   // contract checks; both sides
+pub struct AssistantDeskLimits { pub idle: TimeLimit, pub live, job_bytes, report_queue, parked,
+    known, clone_bytes, save_bytes, memory_requests: Limit, pub report_attempts: u32,
+    pub token_margin, job_wait, call_margin, job_retry, report_retry, close_wait, remove_retry,
+    unlocked_stale, clone_timeout: Seconds }   // a Station's desk; read per job / start / use
+pub struct AssistantGatewayLimits { pub conversations_per_person, conversations,
+    conversation_entries, conversation_bytes, person_bytes, live_per_person,
+    tool_calls_per_minute, memory_requests_per_person, memory_requests, proposals,
+    message_bytes, memory_message_bytes, change_message_chars, recap_bytes, ready_entries,
+    ready_bytes, socket_message_bytes, route_bytes, result_chars, author_chars,
+    audit_target_bytes: Limit, pub conversation_age: TimeLimit, pub event_buffer: u64,
+    pub token_ttl, token_reuse_margin, answer_timeout, answer_deadline, memory_timeout,
+    proposal_ttl, hello_timeout, max_wait, sweep_every, shared_base_wait: Seconds }
+// each: validate() -> Result<(), String> refuses only what cannot work ("assistant.<table>.<key>:
+// at least 1"); weakenings() -> Vec<String>, one line per bound looser than its default
+// (bounds::looser; pace keys left out; memory_import_depth: smaller is looser)
 impl AssistantSettings {
     pub fn new() -> Self;   // keeps nothing, python3 in the sandbox, no host, no skill, refuses elevated Stations
     pub fn with_personal_repo(self, template: impl Into<String>) -> Self; // {person} | {person_digest}
@@ -504,6 +528,12 @@ impl AssistantSettings {
     pub fn with_person(self, person: impl Into<String>, narrowing: AssistantNarrowing) -> Self;
     pub fn with_views(self, views: AssistantViewLimits) -> Self;
     pub fn views(&self) -> &AssistantViewLimits;
+    pub fn with_limits(self, limits: AssistantLimits) -> Self;
+    pub fn limits(&self) -> &AssistantLimits;
+    pub fn with_desk(self, desk: AssistantDeskLimits) -> Self;
+    pub fn desk(&self) -> &AssistantDeskLimits;
+    pub fn with_gateway(self, gateway: AssistantGatewayLimits) -> Self;
+    pub fn gateway(&self) -> &AssistantGatewayLimits;
     pub fn personal_repo(&self) -> Option<&str>;
     pub fn shared(&self) -> &BTreeMap<String, SharedRepo>;
     pub fn org(&self) -> Option<&SharedRepo>;
@@ -527,7 +557,8 @@ impl AssistantSettings {
     pub fn shared_for(&self, groups: &[String]) -> impl Iterator<Item = (&str, &SharedRepo)>;
     pub fn shared_named(&self, name: &str, groups: &[String]) -> Option<&SharedRepo>;
     /// allow_elevated, each write = true, network = "open", unsandboxed_scripts = true,
-    /// skills_unpinned, skills_allow_tools, each SHA-1 skill pin
+    /// skills_unpinned, skills_allow_tools, each SHA-1 skill pin, then each looser bound of
+    /// limits, desk and gateway
     pub fn weakenings(&self) -> Vec<String>;
     /// What replacing `current` loosens or redirects: weakenings `current` lacks, interpreters,
     /// hosts or a looser network, a changed personal/shared/org repository, a skill added or
@@ -815,7 +846,7 @@ impl Settings {
 pub struct StationRuntime { max_concurrent_missions, stall_timeout, loop_timeout, loop_min_lines,
     blocked_after, max_runtime, history, normalize_digits, roles, labels, terminal,
     resources_every, safe_house_caches, safe_house_cache_age,   // seconds as f64
-    partial_line_bytes: Option<Limit>, clone_timeout: Option<Seconds>,
+    partial_line_bytes: Option<Limit>,
     // the tables, each #[serde(default)]: see "Station runtime limits"
     scheduler, publisher, sources, transports, recovery, vetting, accounts, approvals, harness,
     provision, secrets, terminal_output, green_ink, detached, runner, audit, theaters,
@@ -1862,14 +1893,12 @@ adds a placement label, `with_theater` declares a Theater in code,
 `with_safe_house_hygiene(SafeHouseHygiene)` sets which directories of a kept safe house are
 rebuildable caches and how long a terminal Mission's safe house is left alone first,
 `with_loadouts(LoadoutCatalog)` replaces `loadouts.toml`,
-`with_assistant_limits(AssistantDeskLimits)` bounds Moneypenny's desk
-(`AssistantDeskLimits::default()` then `with_clone_limits(timeout, max_bytes)`, default 120 s
-(the `station` record's `clone_timeout` sets it) and 512 MiB a clone of her repositories,
-given up and removed past either;
-`with_save_limit(max_bytes)`, default 16 MiB of work a save of `personal/` commits, past which
-nothing is saved and a notice says why; `with_memory_requests(n)`, default 4 memory jobs at
-once, past which the next is `rejected` at once; a memory job past its `token_expires_at` is
-`rejected` too, and its shallow clone (`depth` 1) is given up at that deadline),
+Moneypenny's desk runs by the roster's `[assistant.desk]` (`AssistantDeskLimits`, read per
+job, harness start and memory request): a clone of her repositories is given up and removed
+past `clone_timeout` or `clone_bytes`, a save of `personal/` past `save_bytes` saves nothing
+and a notice says why, and past `memory_requests` memory jobs at once the next is `rejected`;
+a memory job past its `token_expires_at` is `rejected` too, and its shallow clone (`depth` 1)
+is given up at that deadline;
 `with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets`,
 `with_account_login(impl AccountLogin + 'static)` replaces `CommandLogin` for Codex pool
 accounts, `with_account_homes(dir)` moves their per-Mission `CODEX_HOME`s from
@@ -3335,11 +3364,8 @@ pub const ASSISTANT_CABLE_MCP_ENV_PREFIX: &str = "AI6_ASSISTANT_CABLE_MCP";
 pub const ASSISTANT_CABLE_MCP_URL_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_URL";
 pub const ASSISTANT_CABLE_MCP_TOKEN_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_TOKEN";
 pub const ASSISTANT_CABLE_MCP_SERVER: &str = "cables";
-pub const MAX_ASSISTANT_CABLE_GRANTS: usize = 64;
-pub const MAX_ASSISTANT_MESSAGE_BYTES: usize = 32 * 1024;
-pub const MAX_ASSISTANT_CONTEXT_BYTES: usize = 24 * 1024;     // all context items together
-pub const MAX_ASSISTANT_EVENT_BYTES: usize = 64 * 1024;       // longer event text is cut
-pub const MAX_ASSISTANT_EVENTS: usize = 64;                   // per report
+// The bounds of jobs, reports and changes are AssistantLimits ([assistant.limits]), passed to
+// each validate(); both the Station and Universal Exports check them.
 pub const EVENT_ACCEPTED, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, EVENT_COMPLETED,
           EVENT_FAILED, EVENT_LIMIT, EVENT_INTERRUPTED, EVENT_CLOSED: &str; // "accepted", …
 pub const EVENT_MEMORY_CHANGES: &str = "memory_changes"; // text: unified diff; `change`: the files
@@ -3347,10 +3373,6 @@ pub const EVENT_NOTICE: &str = "notice";       // text: work saved elsewhere tha
 pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal"; // `cable`: held, body included
 pub const EVENT_CABLE_SENT: &str = "cable_sent";      // `cable`: sent, `cable_id` set
 pub const COMMIT_MEMORY: &str = "memory"; pub const COMMIT_SHARED: &str = "shared";
-pub const MAX_ASSISTANT_CHANGE_BYTES: usize = 64 * 1024;  // text of one change or commit
-pub const MAX_ASSISTANT_CHANGE_FILES: usize = 32;
-pub const MAX_MEMORY_FILES: usize = 1_000;          // files one memory listing names
-pub const MAX_MEMORY_LIST_BYTES: usize = 128 * 1024; // bytes of paths one listing names
 pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
     pub message: String, pub context: Vec<String> /* default: standing context */,
     pub recap: Option<String> /* default, omitted when None: for a harness started afresh only */,
@@ -3374,8 +3396,7 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
                                        requires person_id; None makes a group-narrowing roster
                                        refuse and gives no group's repository */ }
                                                      // Debug redacts the token
-pub const MAX_ASSISTANT_SKILLS: usize = 64;
-impl AssistantJob { pub fn validate(&self) -> Result<(), String>; }
+impl AssistantJob { pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
 pub struct MemoryOp { pub repo: String /* the person's personal repository */,
     pub action: MemoryAction }
 pub enum MemoryAction {                              // serde: {"kind": "list"|"read"|"write"|"forget", …}
@@ -3385,7 +3406,7 @@ pub enum MemoryAction {                              // serde: {"kind": "list"|"
     Forget { path: String, commit: MemoryCommit } }
 pub struct MemoryCommit { pub message: String /* trailer included */,
     pub author_name: String, pub author_email: String /* the person's, as committer too */ }
-impl MemoryOp { pub fn validate(&self) -> Result<(), String>; }
+impl MemoryOp { pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
 pub struct MemoryAnswer { pub commit: Option<String> /* main read at, or the commit made */,
     pub files: Vec<MemoryFile> /* list, path order */, pub more: bool,
     pub text: Option<String> /* read */, pub digest: Option<String> /* hex SHA-256 of text read or written */,
@@ -3418,14 +3439,16 @@ pub struct AssistantChange { pub digest: String /* hex SHA-256 of the files, the
         of the text it was made from, None = did not exist; a commit is refused when it differs */ }
 impl AssistantChange { pub fn new(files) -> Self /* no base */; pub fn based(files, base) -> Self;
     pub fn digest_of(&files) -> String; pub fn digest_over(&files, &base) -> String;
-    pub fn validate(&self, memory: bool) -> Result<(), String>; } // bases only of its files, 64 hex
+    pub fn validate(&self, memory: bool, limits: &AssistantLimits) -> Result<(), String>; }
+    // bases only of its files, 64 hex
 pub struct AssistantCommit { pub kind: String /* COMMIT_MEMORY | COMMIT_SHARED */,
     pub repo: String,
     pub group: Option<String> /* default, omitted when None; required for COMMIT_SHARED (a group
                                  or "org", file_safe), refused for COMMIT_MEMORY */,
     pub change: AssistantChange, pub message: String /* trailer included */,
     pub author_name: String, pub author_email: String }
-impl AssistantCommit { pub fn validate(&self) -> Result<(), String>; }
+impl AssistantCommit { pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
+    // message 1 to commit_message_bytes
 impl AssistantWorkspace { pub fn validate(&self) -> Result<(), String>; }
 pub fn repository_path(path: &str) -> bool; // 1-8 `/`-separated names, none starting with `.`
 pub struct AssistantCableGrant { pub operation: String, pub send: bool, pub read: bool }
@@ -3440,15 +3463,16 @@ impl AssistantCable { pub fn request_digest(&self) -> String; } // SHA-256 hex o
     // target, recipient, ttl and body, each prefixed with its byte length and `:`
 pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
     pub job_id: Option<String>, pub session_id: Option<String>, pub events: Vec<AssistantEvent> }
+impl AssistantReport { pub fn cut_texts(&mut self, limits: &AssistantLimits); } // each text to
+    // event_bytes, on a char boundary; the desk cuts every report it sends
 pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,
     pub change: Option<AssistantChange> /* default, omitted when None */,
     pub cable: Option<AssistantCable> /* default, omitted when None */,
     pub memory: Option<MemoryAnswer> /* default, omitted when None: a memory job's answer */,
     pub shared: Vec<AssistantSharedBase> /* default, omitted when empty: on a `tool` event,
-        one per propose_shared_change call, at most MAX_ASSISTANT_SHARED_BASES */ }
-impl AssistantEvent { pub fn new(kind: &str, text: Option<String>) -> Self; } // cuts text
+        one per propose_shared_change call, at most shared_bases */ }
+impl AssistantEvent { pub fn new(kind: &str, text: Option<String>) -> Self; } // text as given
 pub const ASSISTANT_SHARED_CHANGE_TOOL: &str = "propose_shared_change";
-pub const MAX_ASSISTANT_SHARED_BASES: usize = 32; // per event, and kept per conversation
 pub struct AssistantSharedBase { pub group: String /* the call's, the checkout name */,
     pub path: String, pub content: String /* hex SHA-256 of the call's content */,
     pub base: Option<String> /* hex SHA-256 of the file in her shared/<group>/ checkout, None = no file */ }
@@ -3457,18 +3481,18 @@ impl AssistantSharedBase { pub fn validate(&self) -> Result<(), String>; } // fi
 pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control characters
 ```
 
-All are serde types with unknown fields refused. `validate` checks identities, a message
-of at most `MAX_ASSISTANT_MESSAGE_BYTES` (blank only with `close`, `interrupt`, `commit`,
-`cable_confirm`, `cable_discard` or `memory`, of which a job sets one), the context bound (context and
-recap together), a token of 32-512 bytes without whitespace, a workspace (repositories of a
-known `RepoKind`, checkout names as `file_safe` names, an author without control characters,
-`<` or `>`), a commit (a known kind; the change's 1-32 files within
-`MAX_ASSISTANT_CHANGE_BYTES`, each `repository_path`, under `memory/` for `COMMIT_MEMORY`, its
-digest matching; a message of 1-4096 bytes), at most `MAX_ASSISTANT_CABLE_GRANTS` Cable
-grants for distinct valid Operations, which need `person_id`, a memory operation (a
-repository of a known kind; a `memory_path`; text within `MAX_ASSISTANT_CHANGE_BYTES`; a base
-of 64 hex digits; a commit message of 1-4096 bytes and an author as for a commit), which needs
-`person_id` too, and at most `MAX_ASSISTANT_SKILLS` distinct `skill_name` skills. A job's
+All are serde types with unknown fields refused. `validate(&AssistantLimits)` checks
+identities, a message of at most `message_bytes` (blank only with `close`, `interrupt`,
+`commit`, `cable_confirm`, `cable_discard` or `memory`, of which a job sets one), the
+`context_bytes` bound (context and recap together), a token of 32-512 bytes without
+whitespace, a workspace (repositories of a known `RepoKind`, checkout names as `file_safe`
+names, an author without control characters, `<` or `>`), a commit (a known kind; the
+change's 1 to `change_files` files within `change_bytes`, each `repository_path`, under
+`memory/` for `COMMIT_MEMORY`, its digest matching; a message of 1 to `commit_message_bytes`),
+at most `cable_grants` Cable grants for distinct valid Operations, which need `person_id`, a
+memory operation (a repository of a known kind; a `memory_path`; text within `change_bytes`; a
+base of 64 hex digits; a commit message and an author as for a commit), which needs
+`person_id` too, and at most `skills` distinct `skill_name` skills. A job's
 answer is one report with its `job_id` and one `accepted` (for a commit, text saying where it
 landed) or `rejected` event (text: the reason), a memory job's with its `memory` answer; the
 harness's own events follow in reports without a `job_id`.
@@ -4106,12 +4130,13 @@ or removes a file in the conversation's directory through a symbolic link, junct
 reparse point (refused, or skipped when it walks a tree), and the provider checks links out as
 plain files.
 
-A `memory` job starts no harness and runs on a task of its own (at most four at once, the rest
-waiting their turn), so no conversation waits for it: the desk clones the person's repository
+A `memory` job starts no harness and runs on a task of its own (at most `[assistant.desk]
+memory_requests` at once, the next refused), so no conversation waits for it: the desk clones the person's repository
 into a temporary directory (a local one is created bare first, as for a conversation), does the
 action, and removes the clone. `List {}` answers every plain file under `memory/` (hidden names and links
-skipped, at most `MAX_MEMORY_FILES` and `MAX_MEMORY_LIST_BYTES`, `more` beyond) and the commit
-`main` is at; `Read` the text (a file over 64 KiB or not UTF-8 is refused) and its digest;
+skipped, at most `memory_list_files` and `memory_list_bytes`, `more` beyond) and the commit
+`main` is at; `Read` the text (a file over `change_bytes` or not UTF-8 is refused) and its
+digest;
 `Write` and `Forget` commit exactly that file to `main` as the person (author and committer),
 with no fallback branch: a `main` that refuses it twice refuses the job. A `Write` whose
 `base` the file no longer holds is refused with `changed` (checked in the clone, then again

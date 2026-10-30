@@ -5,10 +5,11 @@
 //! assistant Agent (its handler, model, effort and the model credentials its environment
 //! carries) in [`AssistantMode`]: no built-in tool and exactly one MCP server, Universal
 //! Exports' endpoint, reached with the job's token. A running harness takes the next message
-//! as it is; one idle for [`IDLE`] is closed, and the next message resumes its provider
+//! as it is; one idle for `[assistant.desk] idle` is closed, and the next message resumes its
+//! provider
 //! Session. What the harness says is reported back as [`AssistantReport`]s. A harness that
 //! fails or exits is reported `failed`, with its handler's reason, and closed at once, which
-//! frees its slot; so is one that writes nothing for [`IDLE`] while answering. A resume that
+//! frees its slot; so is one that writes nothing for that long while answering. A resume that
 //! fails, when asked or before the resumed harness confirms its Session, goes to the
 //! Station's log and the conversation starts afresh with its recap.
 //!
@@ -52,7 +53,8 @@ use url::Url;
 #[cfg(feature = "cables-mcp")]
 use super::cables_mcp::{AssistantEndpoint, AssistantIdentity, CableGate, Standing};
 use super::{DaemonState, medical, station_terminal, unix_now, vetting};
-use crate::directorates::m::assistant::AssistantSettings;
+use crate::bounds::{Limit, TimeLimit};
+use crate::directorates::m::assistant::{AssistantDeskLimits, AssistantLimits, AssistantSettings};
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::section_00::agent::{
@@ -69,30 +71,26 @@ use crate::directorates::section_00::assistant::{
 use crate::guatiao::library::Object;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
 
-/// How long a harness may wait for the next message before the desk closes it.
-pub(super) const IDLE: Duration = Duration::from_secs(10 * 60);
-/// The most assistant harnesses a Station runs at once.
-pub(super) const MAX_LIVE: usize = 4;
-/// A harness whose token expires within this many seconds is restarted with the job's.
-const TOKEN_MARGIN_SECS: f64 = 120.0;
 /// How long one read of a harness's events waits, so a message never waits long for the lock.
 const READ_SLICE_MS: i64 = 250;
 /// The prefix of the directory that holds the assistants' working directories.
 const AREA_PREFIX: &str = "ai6-assistant-";
-/// How long Universal Exports holds a job poll open.
-const JOB_WAIT_MS: u64 = 1_000;
-/// Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are
-/// dropped, and the gateway sees a gap. A report [`must_deliver`] marks is never dropped for room.
-const REPORT_QUEUE: usize = 256;
-/// Memory changes kept on the Station because they could not be delivered, until the
-/// conversation's next message here sends them again; past it the oldest is logged and dropped.
-const MAX_PARKED: usize = 64;
 /// How long a stopping desk waits between looks at its queue.
 const STOP_CHECK: Duration = Duration::from_millis(250);
-/// Conversations whose provider Session the desk remembers for a resume.
-const MAX_KNOWN: usize = 1_024;
-/// How long removing a closed harness's working directory is tried again.
-const REMOVE_RETRY: Duration = Duration::from_secs(2);
+
+/// The `[assistant]` tables the desk works by, read afresh each time they are asked for:
+/// `[assistant.limits]` and `[assistant.desk]`.
+type Tables = Arc<dyn Fn() -> (AssistantLimits, AssistantDeskLimits) + Send + Sync>;
+
+/// [`Tables`] read from the Station's roster as it is now.
+fn roster_tables(state: &DaemonState) -> Tables {
+    let state = state.clone();
+    Arc::new(move || {
+        let current = state.current();
+        let settings = current.roster.assistant();
+        (settings.limits().clone(), settings.desk().clone())
+    })
+}
 
 /// A harness, shared by the desk (to send it messages) and its pump (to read it).
 type SharedSession = Arc<Mutex<Object<dyn AgentSession>>>;
@@ -137,13 +135,18 @@ type Queued = (AssistantReport, Option<Answered>);
 /// message until Universal Exports has its `accepted`, the conversation's reports wait, and
 /// once that `accepted` is refused none is sent but the Cables the harness sent, which
 /// Universal Exports audits. A memory change that cannot be delivered is kept aside, never
-/// lost: it goes again with the conversation's next message here.
+/// lost: it goes again with the conversation's next message here. Ordinary reports waiting
+/// for their message's answer are bounded by `[assistant.desk] report_queue`, past which the
+/// newest are dropped and the gateway sees a gap; a report [`must_deliver`] marks is never
+/// dropped for room.
 #[derive(Clone)]
 struct Outbox {
     report: Reporter,
     held: Arc<Mutex<BTreeMap<String, Held>>>,
-    /// Memory changes that could not be delivered, oldest first ([`MAX_PARKED`]).
+    /// Memory changes that could not be delivered, oldest first, at most
+    /// `[assistant.desk] parked`.
     parked: Arc<Mutex<std::collections::VecDeque<AssistantReport>>>,
+    tables: Tables,
 }
 
 /// A conversation's reports while its message's answer is unsettled, or after it was refused.
@@ -175,7 +178,25 @@ impl Outbox {
             report,
             held: Arc::default(),
             parked: Arc::default(),
+            tables: Arc::new(Default::default),
         }
+    }
+
+    /// Works by `tables` in place of the defaults.
+    fn with_tables(mut self, tables: Tables) -> Self {
+        self.tables = tables;
+        self
+    }
+
+    /// `[assistant.desk]` as it is now.
+    fn desk(&self) -> AssistantDeskLimits {
+        (self.tables)().1
+    }
+
+    /// Hands `report` to the link, its texts cut to `[assistant.limits] event_bytes`.
+    fn emit(&self, mut report: AssistantReport, answered: Option<Answered>) {
+        report.cut_texts(&(self.tables)().0);
+        (self.report)(report, answered);
     }
 
     /// Sends `report`, or keeps it while its conversation's message is unsettled.
@@ -187,7 +208,7 @@ impl Outbox {
             None => self.deliver(report),
             Some(Held::Refused) => self.refused(&report),
             Some(Held::Waiting(waiting))
-                if waiting.len() < REPORT_QUEUE || must_deliver(&report) =>
+                if self.desk().report_queue.allows(waiting.len() + 1) || must_deliver(&report) =>
             {
                 waiting.push(report);
             }
@@ -213,10 +234,10 @@ impl Outbox {
     /// took it.
     fn deliver(&self, report: AssistantReport) {
         let Some(memory) = only(&report, EVENT_MEMORY_CHANGES) else {
-            return (self.report)(report, None);
+            return self.emit(report, None);
         };
         let (answered, delivery) = tokio::sync::oneshot::channel();
-        (self.report)(report, Some(answered));
+        self.emit(report, Some(answered));
         let outbox = self.clone();
         let watched = std::thread::Builder::new()
             .name("ai6-assistant-memory".to_owned())
@@ -239,13 +260,20 @@ impl Outbox {
                  or kept, so it was lost"
             );
         };
-        if parked.len() >= MAX_PARKED
+        let room = self.desk().parked;
+        while !room.allows(parked.len() + 1)
             && let Some(lost) = parked.pop_front()
         {
             eprintln!(
-                "ai6: assistant conversation {}: a memory change kept aside was dropped: {MAX_PARKED} \
+                "ai6: assistant conversation {}: a memory change kept aside was dropped: {room} \
                  wait already",
                 conversation_digest(&lost.conversation_id)
+            );
+        }
+        if !room.allows(parked.len() + 1) {
+            return eprintln!(
+                "ai6: assistant conversation {digest}: a memory change could not be delivered, \
+                 and assistant.desk.parked keeps none, so it was lost"
             );
         }
         eprintln!(
@@ -293,7 +321,7 @@ impl Outbox {
             .first()
             .is_some_and(|event| event.kind == EVENT_ACCEPTED);
         let (answered, delivery) = tokio::sync::oneshot::channel();
-        (self.report)(report, Some(answered));
+        self.emit(report, Some(answered));
         // An answer that never reached Universal Exports is not a refusal.
         let delivery = delivery.await;
         let refused = delivery == Ok(Delivery::Refused);
@@ -572,8 +600,8 @@ pub(super) struct Desk {
     harness: Arc<dyn Harness>,
     outbox: Outbox,
     mcp_url: String,
-    idle: Duration,
-    max_live: usize,
+    /// `[assistant.limits]` and `[assistant.desk]`, read at each job and harness start.
+    tables: Tables,
     live: Arc<Mutex<BTreeMap<String, Live>>>,
     /// Harnesses being started, not yet in `live`.
     starting: AtomicUsize,
@@ -588,8 +616,30 @@ pub(super) struct Desk {
     log: Logger,
     /// Universal Exports' record of exposure.
     exposure: Arc<dyn Exposure>,
-    /// Turns for memory jobs, as many as `AssistantDeskLimits` allows at once.
-    memory_jobs: Arc<tokio::sync::Semaphore>,
+    /// Memory jobs under way, at most `[assistant.desk] memory_requests`.
+    memory_jobs: Arc<AtomicUsize>,
+}
+
+/// A memory job's turn, held until it is done.
+struct MemoryTurn(Arc<AtomicUsize>);
+
+impl MemoryTurn {
+    /// A turn among `running`, unless as many as `limit` are under way.
+    fn take(running: &Arc<AtomicUsize>, limit: Limit) -> Option<Self> {
+        let before = running.fetch_add(1, Ordering::AcqRel);
+        if limit.allows(before + 1) {
+            Some(Self(running.clone()))
+        } else {
+            running.fetch_sub(1, Ordering::AcqRel);
+            None
+        }
+    }
+}
+
+impl Drop for MemoryTurn {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 impl Desk {
@@ -600,14 +650,13 @@ impl Desk {
         mcp_url: String,
     ) -> Self {
         let plugins = state.plugins.clone();
-        let memory_requests = state.station.assistant.memory_requests;
+        let tables = roster_tables(&state);
         Self {
             state,
             harness,
-            outbox: Outbox::new(report),
+            outbox: Outbox::new(report).with_tables(tables.clone()),
             mcp_url,
-            idle: IDLE,
-            max_live: MAX_LIVE,
+            tables,
             live: Arc::default(),
             starting: AtomicUsize::new(0),
             known: Arc::default(),
@@ -621,15 +670,29 @@ impl Desk {
             elevation: OnceLock::new(),
             log: Arc::new(|line| eprintln!("ai6: {line}")),
             exposure: Arc::new(Unreachable),
-            memory_jobs: Arc::new(tokio::sync::Semaphore::new(memory_requests)),
+            memory_jobs: Arc::default(),
         }
     }
 
+    /// Works by `tables` in place of the roster's.
     #[cfg(test)]
-    fn with_limits(mut self, idle: Duration, max_live: usize) -> Self {
-        self.idle = idle;
-        self.max_live = max_live;
+    fn with_tables(mut self, tables: Tables) -> Self {
+        self.outbox = self.outbox.clone().with_tables(tables.clone());
+        self.tables = tables;
         self
+    }
+
+    /// Closes a harness idle for `idle` and runs at most `max_live`, the rest of the
+    /// roster's tables kept.
+    #[cfg(test)]
+    fn with_limits(self, idle: Duration, max_live: u64) -> Self {
+        let tables = self.tables.clone();
+        self.with_tables(Arc::new(move || {
+            let (limits, mut desk) = tables();
+            desk.idle = TimeLimit::at(idle);
+            desk.live = Limit::at(max_live);
+            (limits, desk)
+        }))
     }
 
     #[cfg(test)]
@@ -783,15 +846,14 @@ impl Desk {
     /// Takes a memory job on a task of its own, so a slow clone holds up no conversation:
     /// answers `accepted` with what it did and found, or `rejected` with why nothing was done,
     /// each with its [`MemoryAnswer`]. Universal Exports gives the request up at the job's
-    /// `token_expires_at`, so a job past it is refused, and so is one past the Station's
-    /// [`AssistantDeskLimits`] of memory requests at once; none waits for a turn. Its clone
-    /// is given up at that deadline too.
-    ///
-    /// [`AssistantDeskLimits`]: super::AssistantDeskLimits
+    /// `token_expires_at`, so a job past it is refused, and so is one past
+    /// `[assistant.desk] memory_requests` at once; none waits for a turn. Its clone is given up
+    /// at that deadline too.
     fn handle_memory(&self, job: AssistantJob) {
         let left = job.token_expires_at - unix_now();
+        let (bounds, desk) = (self.tables)();
         let taken = job
-            .validate()
+            .validate(&bounds)
             .and_then(|()| self.check_elevation())
             .and_then(|()| self.check_repositories(&job))
             .and_then(|()| job.memory.clone().ok_or_else(|| "no memory job".to_owned()))
@@ -803,14 +865,15 @@ impl Desk {
                             .to_owned(),
                     );
                 }
-                let turn = self.memory_jobs.clone().try_acquire_owned().map_err(|_| {
-                    "this Station is making as many memory requests as it may; nothing was \
-                     done, so ask again shortly"
-                        .to_owned()
-                })?;
+                let turn =
+                    MemoryTurn::take(&self.memory_jobs, desk.memory_requests).ok_or_else(|| {
+                        "this Station is making as many memory requests as it may; nothing \
+                         was done, so ask again shortly"
+                            .to_owned()
+                    })?;
                 Ok((op, turn))
             });
-        let limits = workspace::CloneLimits::of(&self.state.station.assistant);
+        let limits = workspace::CloneLimits::of(&desk);
         let limits = workspace::CloneLimits {
             timeout: limits.timeout.min(Duration::from_secs_f64(left.max(0.0))),
             ..limits
@@ -825,7 +888,7 @@ impl Desk {
                     let digest = conversation_digest(&job.conversation_id);
                     tokio::task::spawn_blocking(move || {
                         let _turn = turn;
-                        memory::run(&houses, &op, &digest, limits)
+                        memory::run(&houses, &op, &digest, limits, &bounds)
                     })
                     .await
                     .unwrap_or_else(|error| Err(memory::Refusal::of(error.to_string())))
@@ -863,7 +926,8 @@ impl Desk {
     }
 
     async fn take(&self, job: &AssistantJob) -> Result<Option<String>, String> {
-        job.validate()?;
+        let (bounds, desk) = (self.tables)();
+        job.validate(&bounds)?;
         self.check_elevation()?;
         self.check_repositories(job)?;
         self.check_skills(job)?;
@@ -895,7 +959,8 @@ impl Desk {
         }
         let running = self.running(&job.conversation_id);
         if let Some((session, flags, expires, started_under, workspace)) = running {
-            if expires > unix_now() + TOKEN_MARGIN_SECS && started_under == started {
+            if expires > unix_now() + desk.token_margin.0.as_secs_f64() && started_under == started
+            {
                 #[cfg(feature = "cables-mcp")]
                 if let Some(cables) = self.cables_of(&job.conversation_id) {
                     cables.update(&job.cables, job.exposed);
@@ -939,7 +1004,8 @@ impl Desk {
             self.close(&job.conversation_id);
         }
         // A harness that has stopped may still be removing the directory the next one uses.
-        self.wait_closed(&job.conversation_id).await;
+        self.wait_closed(&job.conversation_id, desk.close_wait.0)
+            .await;
         if self
             .live
             .lock()
@@ -964,7 +1030,7 @@ impl Desk {
             .and_then(|live| live.workspace.clone());
         let houses = self.houses.clone();
         let digest = conversation_digest(&job.conversation_id);
-        let limits = workspace::CloneLimits::of(&self.state.station.assistant);
+        let limits = workspace::CloneLimits::of(&(self.tables)().1);
         tokio::task::spawn_blocking(move || {
             if commit.kind == COMMIT_MEMORY
                 && let Some(workspace) = workspace
@@ -999,10 +1065,15 @@ impl Desk {
         if !self.harness.available(&handler) {
             return Err(format!("this Station has no {handler:?} handler"));
         }
+        let desk = (self.tables)().1;
+        let retry = desk.remove_retry.0;
         // Conversations start at once, so one starting holds its place until it runs.
         let _starting = {
             let live = self.live.lock().map_err(|_| "assistant lock failed")?;
-            if live.len() + self.starting.load(Ordering::Acquire) >= self.max_live {
+            if !desk
+                .live
+                .allows(live.len() + self.starting.load(Ordering::Acquire) + 1)
+            {
                 return Err("this Station runs as many assistant Sessions as it may".to_owned());
             }
             self.starting.fetch_add(1, Ordering::AcqRel);
@@ -1036,7 +1107,7 @@ impl Desk {
         let installed = match installed {
             Ok(installed) => installed,
             Err(reason) => {
-                remove_area(&area);
+                remove_area(&area, retry);
                 return Err(reason);
             }
         };
@@ -1044,7 +1115,7 @@ impl Desk {
             match self.workspace(job, &area, &installed.names).await {
                 Ok(prepared) => prepared,
                 Err(reason) => {
-                    remove_area(&area);
+                    remove_area(&area, retry);
                     return Err(reason);
                 }
             };
@@ -1057,7 +1128,7 @@ impl Desk {
         let reach = match self.capped_reach(job) {
             Ok(reach) => reach,
             Err(reason) => {
-                remove_area(&area);
+                remove_area(&area, retry);
                 return Err(reason);
             }
         };
@@ -1070,7 +1141,7 @@ impl Desk {
         // of the harness, and each conversation keeps its own. The sandbox denies reading it.
         if let Some(config) = config_dir(Path::new(&area)) {
             if let Err(error) = std::fs::create_dir_all(&config) {
-                remove_area(&area);
+                remove_area(&area, retry);
                 return Err(format!(
                     "assistant configuration directory not made: {error}"
                 ));
@@ -1086,7 +1157,7 @@ impl Desk {
         // files under `CLAUDE_CODE_TMPDIR`, so both point here.
         if let Some(temp) = temp_dir(Path::new(&area)) {
             if let Err(error) = std::fs::create_dir_all(&temp) {
-                remove_area(&area);
+                remove_area(&area, retry);
                 return Err(format!("assistant temporary directory not made: {error}"));
             }
             let temp = temp.to_string_lossy().into_owned();
@@ -1101,7 +1172,7 @@ impl Desk {
         {
             Ok(cables) => cables,
             Err(reason) => {
-                remove_area(&area);
+                remove_area(&area, retry);
                 return Err(reason);
             }
         };
@@ -1200,7 +1271,7 @@ impl Desk {
         let (session, fallback) = match started {
             Ok(started) => started,
             Err(error) => {
-                remove_area(&area);
+                remove_area(&area, retry);
                 return Err(format!("the assistant harness did not start: {error}"));
             }
         };
@@ -1234,7 +1305,8 @@ impl Desk {
             session,
             flags,
             area,
-            idle: self.idle,
+            idle: desk.idle,
+            remove_retry: retry,
             outbox: self.outbox.clone(),
             live: self.live.clone(),
             known: self.known.clone(),
@@ -1546,7 +1618,7 @@ impl Desk {
         let file = context.clone();
         let exposed = job.exposed;
         let skills = skills.to_vec();
-        let limits = self.state.station.assistant;
+        let (bounds, limits) = (self.tables)();
         let (mut workspace, notices) = tokio::task::spawn_blocking(move || {
             Workspace::prepare(
                 &houses,
@@ -1558,6 +1630,7 @@ impl Desk {
                 exposed,
                 &skills,
                 &limits,
+                &bounds,
             )
         })
         .await
@@ -1627,8 +1700,9 @@ impl Desk {
         }
     }
 
-    async fn wait_closed(&self, conversation: &str) {
-        let deadline = Instant::now() + Duration::from_secs(10);
+    /// Waits up to `wait` for `conversation`'s harness to have closed.
+    async fn wait_closed(&self, conversation: &str, wait: Duration) {
+        let deadline = Instant::now() + wait;
         while Instant::now() < deadline
             && self
                 .live
@@ -1669,7 +1743,7 @@ impl Desk {
     }
 }
 
-/// A harness being started, counted against [`Desk::max_live`] until it is dropped.
+/// A harness being started, counted against `[assistant.desk] live` until it is dropped.
 struct Starting<'a>(&'a AtomicUsize);
 
 impl Drop for Starting<'_> {
@@ -1685,7 +1759,10 @@ struct Pump {
     session: SharedSession,
     flags: Arc<Flags>,
     area: String,
-    idle: Duration,
+    /// How long it may wait for a message, or write nothing while answering.
+    idle: TimeLimit,
+    /// How long removing its directory is tried again.
+    remove_retry: Duration,
     outbox: Outbox,
     live: Arc<Mutex<BTreeMap<String, Live>>>,
     known: Arc<Mutex<BTreeMap<String, String>>>,
@@ -1803,21 +1880,19 @@ impl Pump {
                     }
                 }
                 Ok(None) => {
-                    let quiet = self
-                        .flags
-                        .last_active
-                        .lock()
-                        .is_ok_and(|last| last.elapsed() >= self.idle);
+                    let idle = self.idle.get();
+                    let past = |since: Instant| idle.is_some_and(|idle| since.elapsed() >= idle);
+                    let quiet = self.flags.last_active.lock().is_ok_and(|last| past(*last));
                     if !self.flags.busy.load(Ordering::Acquire) {
                         if quiet {
                             break Some("idle".to_owned());
                         }
-                    } else if quiet && heard.elapsed() >= self.idle {
+                    } else if quiet && past(heard) {
                         // A harness that hangs while answering would hold its slot for good.
                         let reason = format!(
-                            "the assistant harness wrote nothing for {} seconds while \
-                             answering; it was closed",
-                            self.idle.as_secs()
+                            "the assistant harness wrote nothing for {} while answering; it \
+                             was closed",
+                            self.idle
                         );
                         self.send(
                             session_id.as_ref(),
@@ -1845,7 +1920,7 @@ impl Pump {
         if !saved.is_empty() {
             self.send(session_id.as_ref(), saved);
         }
-        remove_area(&self.area);
+        remove_area(&self.area, self.remove_retry);
         if let Ok(mut live) = self.live.lock()
             && live
                 .get(&self.conversation_id)
@@ -1987,10 +2062,16 @@ impl Pump {
 
     fn remember(&self, session_id: &str) {
         if let Ok(mut known) = self.known.lock() {
-            if known.len() >= MAX_KNOWN && !known.contains_key(&self.conversation_id) {
-                // Forget an arbitrary one; a forgotten conversation starts afresh.
-                if let Some(first) = known.keys().next().cloned() {
+            let room = self.outbox.desk().known;
+            if !known.contains_key(&self.conversation_id) {
+                // Forget arbitrary ones; a forgotten conversation starts afresh.
+                while !room.allows(known.len() + 1)
+                    && let Some(first) = known.keys().next().cloned()
+                {
                     known.remove(&first);
+                }
+                if !room.allows(known.len() + 1) {
+                    return;
                 }
             }
             known.insert(self.conversation_id.clone(), session_id.to_owned());
@@ -2082,10 +2163,6 @@ impl Drop for Desk {
     }
 }
 
-/// How old a directory of working directories without a lock file, or a lock file without its
-/// directory, must be to be swept.
-const UNLOCKED_STALE: Duration = Duration::from_secs(3_600);
-
 /// A desk's directory of working directories, and the lock beside it that says the desk
 /// still runs.
 struct Root {
@@ -2158,8 +2235,8 @@ fn new_root_in(temp: &Path) -> Result<Root, String> {
 /// with the conversations' directories, context files (her memory, inlined) and git
 /// directories in them, and their lock files. A directory whose lock another desk holds is left
 /// alone, and so is one without a lock file, or a lock file without its directory, younger than
-/// [`UNLOCKED_STALE`]. Answers how many directories were removed.
-fn sweep_stale_roots(temp: &Path) -> usize {
+/// `stale`. Answers how many directories were removed.
+fn sweep_stale_roots(temp: &Path, stale: Duration) -> usize {
     use fs2::FileExt;
     let Ok(entries) = std::fs::read_dir(temp) else {
         return 0;
@@ -2169,7 +2246,7 @@ fn sweep_stale_roots(temp: &Path) -> usize {
             .and_then(|metadata| metadata.modified())
             .ok()
             .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|age| age >= UNLOCKED_STALE)
+            .is_some_and(|age| age >= stale)
     };
     let mut swept = 0;
     for entry in entries.flatten() {
@@ -2246,8 +2323,8 @@ fn config_dir(area: &Path) -> Option<PathBuf> {
 }
 
 /// Removes a conversation's directory [`Desk::area`] made, its context file and its git
-/// directories, and nothing else.
-fn remove_area(path: &str) {
+/// directories, and nothing else, each tried again for up to `retry`.
+fn remove_area(path: &str, retry: Duration) {
     let path = Path::new(path);
     let root = path.parent();
     let made_here = root.and_then(Path::parent) == Some(std::env::temp_dir().as_path())
@@ -2266,22 +2343,23 @@ fn remove_area(path: &str) {
         let _ = std::fs::remove_file(context);
     }
     if let Some(repos) = repos_dir(path) {
-        remove_tree(&repos);
+        remove_tree(&repos, retry);
     }
     if let Some(config) = config_dir(path) {
-        remove_tree(&config);
+        remove_tree(&config, retry);
     }
     if let Some(temp) = temp_dir(path) {
-        remove_tree(&temp);
+        remove_tree(&temp, retry);
     }
-    remove_tree(path);
+    remove_tree(path, retry);
 }
 
-/// Removes `path` and everything under it, trying again while Windows still holds it.
-fn remove_tree(path: &Path) {
+/// Removes `path` and everything under it, trying again for up to `retry` while Windows still
+/// holds it.
+fn remove_tree(path: &Path, retry: Duration) {
     // Windows refuses to remove a directory a process still has open (os error 32), which a
     // harness's processes do for a moment after they have exited, so it is tried again.
-    let deadline = Instant::now() + REMOVE_RETRY;
+    let deadline = Instant::now() + retry;
     let mut delay = Duration::from_millis(5);
     loop {
         match std::fs::remove_dir_all(path) {
@@ -2334,7 +2412,8 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     let Some(publisher) = &state.publisher else {
         return Ok(None);
     };
-    let swept = sweep_stale_roots(&std::env::temp_dir());
+    let tables = roster_tables(state);
+    let swept = sweep_stale_roots(&std::env::temp_dir(), tables().1.unlocked_stale.0);
     if swept > 0 {
         eprintln!("ai6: removed {swept} assistant directories desks that are gone left behind");
     }
@@ -2350,6 +2429,7 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
         origin,
         token,
         station: state.station_id.clone(),
+        tables: tables.clone(),
     };
     let running = state.stopping.clone();
     let poll_link = link.clone();
@@ -2365,9 +2445,12 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
         })?;
     let report: Reporter = Arc::new(move |report, answered| {
         // What must reach Universal Exports always gets in line; an ordinary report only while
-        // fewer than REPORT_QUEUE wait.
+        // fewer than `[assistant.desk] report_queue` wait.
         if is_ordinary(&report, answered.as_ref())
-            && ordinary.fetch_add(1, Ordering::AcqRel) >= REPORT_QUEUE
+            && !tables()
+                .1
+                .report_queue
+                .allows(ordinary.fetch_add(1, Ordering::AcqRel) + 1)
         {
             ordinary.fetch_sub(1, Ordering::AcqRel);
             eprintln!(
@@ -2445,6 +2528,8 @@ struct Link {
     origin: Url,
     token: String,
     station: String,
+    /// `[assistant.desk]` paces its polls and retries.
+    tables: Tables,
 }
 
 /// `GET` and `POST /v1/station/assistant/exposure`.
@@ -2454,7 +2539,7 @@ impl Exposure for Link {
             .origin
             .join("v1/station/assistant/exposure")
             .map_err(|error| error.to_string())?;
-        Self::agent(Duration::ZERO)
+        self.agent(Duration::ZERO)
             .post(endpoint.as_str())
             .header("Authorization", &format!("Bearer {}", self.token))
             .send_json(serde_json::json!({
@@ -2509,7 +2594,7 @@ impl Link {
                 .query_pairs_mut()
                 .append_pair("operation", operation);
         }
-        Self::agent(Duration::ZERO)
+        self.agent(Duration::ZERO)
             .get(endpoint.as_str())
             .header("Authorization", &format!("Bearer {}", self.token))
             .call()
@@ -2519,25 +2604,29 @@ impl Link {
             .map_err(|error| error.to_string())
     }
 
-    fn agent(wait: Duration) -> ureq::Agent {
+    /// An agent whose requests may take `wait` and `[assistant.desk] call_margin` more.
+    fn agent(&self, wait: Duration) -> ureq::Agent {
         ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(2) + wait))
+            .timeout_global(Some((self.tables)().1.call_margin.0 + wait))
             .max_redirects(0)
             .build()
             .into()
     }
 
     fn take_jobs(&self, stopping: &AtomicBool, jobs: &mpsc::Sender<AssistantJob>) {
-        let Ok(mut endpoint) = self.origin.join("v1/station/assistant/next") else {
+        let Ok(base) = self.origin.join("v1/station/assistant/next") else {
             return;
         };
-        endpoint
-            .query_pairs_mut()
-            .append_pair("station", &self.station)
-            .append_pair("wait_ms", &JOB_WAIT_MS.to_string());
-        let agent = Self::agent(Duration::from_millis(JOB_WAIT_MS));
         while !stopping.load(Ordering::Acquire) {
-            let response = agent
+            let desk = (self.tables)().1;
+            let wait = desk.job_wait.0;
+            let mut endpoint = base.clone();
+            endpoint
+                .query_pairs_mut()
+                .append_pair("station", &self.station)
+                .append_pair("wait_ms", &wait.as_millis().to_string());
+            let response = self
+                .agent(wait)
                 .get(endpoint.as_str())
                 .header("Authorization", &format!("Bearer {}", self.token))
                 .call();
@@ -2545,13 +2634,13 @@ impl Link {
                 Ok(mut response) if response.status().as_u16() == 200 => response
                     .body_mut()
                     .with_config()
-                    .limit(256 * 1024)
+                    .limit(desk.job_bytes.get().unwrap_or(u64::MAX))
                     .read_to_vec()
                     .ok()
                     .and_then(|body| serde_json::from_slice::<AssistantJob>(&body).ok()),
                 Ok(response) if response.status().as_u16() == 204 => continue,
                 _ => {
-                    std::thread::sleep(Duration::from_millis(500));
+                    std::thread::sleep(desk.job_retry.0);
                     continue;
                 }
             };
@@ -2570,13 +2659,14 @@ impl Link {
         let Ok(endpoint) = self.origin.join("v1/station/assistant/reports") else {
             return;
         };
-        let agent = Self::agent(Duration::ZERO);
         while let Ok((report, answered)) = queued.recv() {
             if is_ordinary(&report, answered.as_ref()) {
                 ordinary.fetch_sub(1, Ordering::AcqRel);
             }
+            let desk = (self.tables)().1;
+            let agent = self.agent(Duration::ZERO);
             let mut delivery = Delivery::Lost;
-            for _ in 0..3 {
+            for _ in 0..desk.report_attempts {
                 let sent = agent
                     .post(endpoint.as_str())
                     .header("Authorization", &format!("Bearer {}", self.token))
@@ -2592,7 +2682,7 @@ impl Link {
                         break;
                     }
                     Err(ureq::Error::StatusCode(_)) => break,
-                    Err(_) => std::thread::sleep(Duration::from_millis(200)),
+                    Err(_) => std::thread::sleep(desk.report_retry.0),
                 }
             }
             if let Some(answered) = answered {
@@ -2614,6 +2704,10 @@ mod tests {
 
     use super::super::tests::test_state;
     use super::*;
+
+    /// `[assistant.desk]`'s default `idle` and `report_queue`.
+    const IDLE: Duration = Duration::from_secs(600);
+    const REPORT_QUEUE: usize = 256;
     use crate::directorates::section_00::assistant::{
         AssistantChange, AssistantCommit, AssistantWorkspace, COMMIT_SHARED, MemoryAction,
         MemoryCommit, MemoryFile, MemoryOp,
@@ -3423,6 +3517,38 @@ mod tests {
         fixture.desk.close_all();
     }
 
+    #[tokio::test]
+    async fn the_rosters_assistant_limits_bound_each_job_and_report() {
+        let agents = format!(
+            "{AGENTS}[assistant.limits]
+message_bytes = 8
+event_bytes = 7
+"
+        );
+        let fixture = on_station(
+            &agents,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        fixture.desk.handle(job("c-long", "123456789")).await;
+        assert_eq!(kinds(&fixture, "c-long"), [EVENT_REJECTED]);
+        fixture.desk.handle(job("c-short", "12345678")).await;
+        until(|| kinds(&fixture, "c-short").contains(&EVENT_COMPLETED.to_owned())).await;
+        let reports = fixture.reports.lock().unwrap();
+        let texts: Vec<&str> = reports
+            .iter()
+            .flat_map(|report| report.events.iter())
+            .filter_map(|event| event.text.as_deref())
+            .collect();
+        assert!(texts.contains(&"message"), "the refusal, cut: {texts:?}");
+        assert!(texts.iter().all(|text| text.len() <= 7), "{texts:?}");
+        drop(reports);
+        fixture.desk.close_all();
+    }
+
     /// A gateway that answers every report with `status` and counts them.
     fn refusing_gateway(status: u16) -> (Url, std::thread::JoinHandle<usize>) {
         use std::io::{BufRead, BufReader, Read, Write};
@@ -3472,6 +3598,7 @@ mod tests {
                 origin,
                 token: "station-token".to_owned(),
                 station: "hq".to_owned(),
+                tables: Arc::new(Default::default),
             };
             let (reports, queued) = std::sync::mpsc::sync_channel(4);
             let report = |job: Option<&str>, kind: &str| AssistantReport {
@@ -3544,6 +3671,7 @@ mod tests {
             report,
             held,
             parked: Arc::default(),
+            tables: Arc::new(Default::default),
         };
         answers
     }
@@ -4100,13 +4228,16 @@ mod tests {
             .current_dir(&area)
             .spawn()
             .unwrap();
-        remove_area(&area.to_string_lossy());
+        remove_area(&area.to_string_lossy(), Duration::from_secs(2));
         assert!(!area.exists());
         holder.wait().unwrap();
         let path = root.path.clone();
         drop(root);
         std::fs::remove_dir_all(path).unwrap();
     }
+
+    /// `[assistant.desk]`'s default `unlocked_stale`.
+    const STALE: Duration = Duration::from_secs(3_600);
 
     #[test]
     fn a_starting_desk_sweeps_what_gone_desks_left_and_nothing_a_live_one_holds() {
@@ -4132,7 +4263,7 @@ mod tests {
         let other = temp.path().join("someone-else");
         std::fs::create_dir_all(&other).unwrap();
 
-        assert_eq!(sweep_stale_roots(temp.path()), 1);
+        assert_eq!(sweep_stale_roots(temp.path(), STALE), 1);
         assert!(!gone.exists(), "its context file went with it");
         assert!(!root_lock(&gone).exists(), "and its lock");
         assert!(
@@ -4146,7 +4277,7 @@ mod tests {
         // so the lock can stay taken for a moment after the desk lets go.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while live.exists() && std::time::Instant::now() < deadline {
-            if sweep_stale_roots(temp.path()) == 0 {
+            if sweep_stale_roots(temp.path(), STALE) == 0 {
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
         }
@@ -4160,7 +4291,7 @@ mod tests {
         // sweep takes the lock file.
         let making = root_lock(&temp.path().join(format!("{AREA_PREFIX}abc")));
         std::fs::File::create(&making).unwrap();
-        assert_eq!(sweep_stale_roots(temp.path()), 0);
+        assert_eq!(sweep_stale_roots(temp.path(), STALE), 0);
         assert!(making.exists(), "too young, whoever holds it");
         std::fs::remove_file(&making).unwrap();
 
@@ -4171,7 +4302,7 @@ mod tests {
             let temp = temp.path().to_path_buf();
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Acquire) {
-                    sweep_stale_roots(&temp);
+                    sweep_stale_roots(&temp, STALE);
                 }
             })
         };
@@ -4192,10 +4323,10 @@ mod tests {
                 .into_owned();
             assert!(name.starts_with(AREA_PREFIX), "{name}");
         }
-        assert_eq!(sweep_stale_roots(temp.path()), 0, "all held");
+        assert_eq!(sweep_stale_roots(temp.path(), STALE), 0, "all held");
         drop(roots);
         assert_eq!(
-            sweep_stale_roots(temp.path()),
+            sweep_stale_roots(temp.path(), STALE),
             50,
             "once their desks let go"
         );
@@ -4668,7 +4799,12 @@ mod tests {
             let _ = held.lock().unwrap().recv_timeout(Duration::from_secs(30));
             houses()
         });
-        fixture.desk_mut().memory_jobs = Arc::new(tokio::sync::Semaphore::new(1));
+        let tables = fixture.desk.tables.clone();
+        fixture.desk_mut().tables = Arc::new(move || {
+            let (limits, mut desk) = tables();
+            desk.memory_requests = Limit::at(1);
+            (limits, desk)
+        });
         let write = |id: &str| {
             remembering(
                 id,
@@ -4682,7 +4818,7 @@ mod tests {
             )
         };
         fixture.desk.handle(write("slow")).await;
-        until(|| fixture.desk.memory_jobs.available_permits() == 0).await;
+        until(|| fixture.desk.memory_jobs.load(Ordering::Acquire) == 1).await;
         fixture.desk.handle(write("next")).await;
         let (kind, text, _) = memory_answer(&fixture, "next").await;
         assert_eq!(kind, EVENT_REJECTED);

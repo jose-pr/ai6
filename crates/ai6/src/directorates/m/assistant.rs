@@ -56,6 +56,10 @@ use crate::directorates::section_00::assistant::{
 use crate::directorates::section_00::denied::DenyList;
 use crate::station::limits::HarnessLimits;
 
+mod limits;
+
+pub use limits::{AssistantDeskLimits, AssistantGatewayLimits, AssistantLimits};
+
 /// The name a person's identifier takes in `personal_repo`.
 pub const PERSON_PLACEHOLDER: &str = "{person}";
 /// The name of 16 hex digits of the SHA-256 of a person's identifier in `personal_repo`.
@@ -86,6 +90,16 @@ pub struct AssistantSettings {
     person: BTreeMap<String, AssistantNarrowing>,
     #[serde(skip_serializing_if = "AssistantViewLimits::is_unset")]
     views: AssistantViewLimits,
+    #[serde(skip_serializing_if = "is_default")]
+    limits: AssistantLimits,
+    #[serde(skip_serializing_if = "is_default")]
+    desk: AssistantDeskLimits,
+    #[serde(skip_serializing_if = "is_default")]
+    gateway: AssistantGatewayLimits,
+}
+
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 impl Default for AssistantSettings {
@@ -106,6 +120,9 @@ impl Default for AssistantSettings {
             group: BTreeMap::new(),
             person: BTreeMap::new(),
             views: AssistantViewLimits::default(),
+            limits: AssistantLimits::default(),
+            desk: AssistantDeskLimits::default(),
+            gateway: AssistantGatewayLimits::default(),
         }
     }
 }
@@ -173,6 +190,9 @@ pub struct AssistantViewLimits {
     /// Bytes of the label of a page she offers with `navigate` (default 120).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub navigate_label_bytes: Option<u64>,
+    /// Bytes of an `id` in an SVG drawing (default 64).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub svg_id_bytes: Option<u64>,
 }
 
 impl AssistantViewLimits {
@@ -202,6 +222,7 @@ impl AssistantViewLimits {
             ("svg_elements", self.svg_elements),
             ("svg_depth", self.svg_depth),
             ("navigate_label_bytes", self.navigate_label_bytes),
+            ("svg_id_bytes", self.svg_id_bytes),
         ]
         .into_iter()
         .filter_map(|(key, value)| value.map(|value| (key, value)))
@@ -860,6 +881,43 @@ impl AssistantSettings {
         self
     }
 
+    /// The bounds of what passes between Universal Exports and a Station for her,
+    /// `[assistant.limits]`.
+    pub fn limits(&self) -> &AssistantLimits {
+        &self.limits
+    }
+
+    /// Sets the bounds of what passes between Universal Exports and a Station for her.
+    #[must_use]
+    pub fn with_limits(mut self, limits: AssistantLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// How a Station's desk runs her harnesses, `[assistant.desk]`.
+    pub fn desk(&self) -> &AssistantDeskLimits {
+        &self.desk
+    }
+
+    /// Sets how a Station's desk runs her harnesses.
+    #[must_use]
+    pub fn with_desk(mut self, desk: AssistantDeskLimits) -> Self {
+        self.desk = desk;
+        self
+    }
+
+    /// How Universal Exports keeps her conversations, `[assistant.gateway]`.
+    pub fn gateway(&self) -> &AssistantGatewayLimits {
+        &self.gateway
+    }
+
+    /// Sets how Universal Exports keeps her conversations.
+    #[must_use]
+    pub fn with_gateway(mut self, gateway: AssistantGatewayLimits) -> Self {
+        self.gateway = gateway;
+        self
+    }
+
     /// Whether her scripts may run unsandboxed where the harness has no sandbox.
     pub fn unsandboxed_scripts(&self) -> bool {
         self.unsandboxed_scripts
@@ -1031,6 +1089,9 @@ impl AssistantSettings {
         if let Some((key, _)) = self.views.set().into_iter().find(|(_, value)| *value == 0) {
             return Err(format!("assistant.views.{key} must be at least 1"));
         }
+        self.limits.validate()?;
+        self.desk.validate()?;
+        self.gateway.validate()?;
         if let Some(template) = &self.personal_repo {
             RepoKind::of(template)
                 .map_err(|reason| format!("assistant.personal_repo: {reason}"))?;
@@ -1226,6 +1287,9 @@ impl AssistantSettings {
                 weakened.push(format!("assistant.skills.{name}.pin is SHA-1 ({pin})"));
             }
         }
+        weakened.extend(self.limits.weakenings());
+        weakened.extend(self.desk.weakenings());
+        weakened.extend(self.gateway.weakenings());
         weakened
     }
 
@@ -1726,6 +1790,75 @@ mod tests {
             assert!(settings.validate().is_err(), "{bad}");
         }
         assert!(toml::from_str::<AssistantSettings>("shell = true").is_err());
+    }
+
+    #[test]
+    fn looser_limits_are_weakenings_and_unworkable_ones_are_refused() {
+        let toml = r#"
+            [limits]
+            message_bytes = 8
+            [desk]
+            live = "none"
+            job_retry = 30
+            [gateway]
+            proposals = 100
+            [views]
+            svg_id_bytes = 16
+        "#;
+        let settings: AssistantSettings = toml::from_str(toml).unwrap();
+        assert_eq!(settings.validate(), Ok(()));
+        assert_eq!(settings.limits().message_bytes, crate::bounds::Limit::at(8));
+        assert_eq!(settings.views().svg_id_bytes, Some(16));
+        assert_eq!(
+            settings.weakenings(),
+            [
+                "assistant.desk.live none is looser than the default 4",
+                "assistant.gateway.proposals 100 is looser than the default 32",
+            ]
+        );
+        let default = AssistantSettings::default();
+        assert!(
+            settings
+                .changes_from(&default)
+                .contains(&"assistant.desk.live none is looser than the default 4".to_owned())
+        );
+        assert_eq!(
+            serde_json::to_value(&default).unwrap().get("desk"),
+            None,
+            "defaults are not written out"
+        );
+        for (bad, key) in [
+            (
+                "[limits]
+events = 0",
+                "assistant.limits.events",
+            ),
+            (
+                "[desk]
+report_attempts = 0",
+                "assistant.desk.report_attempts",
+            ),
+            (
+                "[gateway]
+event_buffer = 0",
+                "assistant.gateway.event_buffer",
+            ),
+            (
+                "[views]
+svg_id_bytes = 0",
+                "assistant.views.svg_id_bytes",
+            ),
+        ] {
+            let settings: AssistantSettings = toml::from_str(bad).unwrap();
+            assert!(settings.validate().unwrap_err().contains(key), "{bad}");
+        }
+        assert!(
+            toml::from_str::<AssistantSettings>(
+                "[desk]
+lives = 1"
+            )
+            .is_err()
+        );
     }
 
     /// Writes a skill directory `name` under `root` whose `SKILL.md` has `front` after its

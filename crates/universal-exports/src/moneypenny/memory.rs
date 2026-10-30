@@ -5,7 +5,8 @@
 //!
 //! Universal Exports has no checkout of any repository: each request becomes a memory job
 //! ([`ai6::MemoryOp`]) for the Headquarters Station, else the first healthy one, which makes it
-//! in a clone of its own and answers within [`MEMORY_TIMEOUT`], or the request fails with
+//! in a clone of its own and answers within `[assistant.gateway] memory_timeout`, or the
+//! request fails with
 //! `504`. A person reads and changes their own memory only. `?person=<id>` reads another
 //! person's with [`MEMORY_ADMIN`] on `config:assistant`, audited `assistant.memory.read`; a
 //! change to another person's is refused even then. A change is audited
@@ -15,7 +16,6 @@
 //! Errors are `{"error": "<what happened>"}`, worded for the person.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use ai6::{
     AssistantEvent, AssistantJob, AssistantReport, EVENT_ACCEPTED, MemoryAction, MemoryAnswer,
@@ -32,21 +32,11 @@ use uuid::Uuid;
 use super::{ASSISTANT_AUDIT_RESOURCE, Assistant, audit, author_of, healthy_stations, now};
 use crate::{ApiError, Gateway, authorize_resource_action, bearer, resolve_user};
 
-/// How long a Station has to answer a memory request.
-const MEMORY_TIMEOUT: Duration = if cfg!(test) {
-    Duration::from_secs(5)
-} else {
-    Duration::from_secs(30)
-};
-
 /// The action that reads another person's memory, on [`ASSISTANT_AUDIT_RESOURCE`].
 pub(crate) const MEMORY_ADMIN: &str = "assistant.memory.admin";
 
 /// The trailer of every commit the person makes from the app.
 const TRAILER: &str = "Via: Universal Exports";
-
-/// The longest commit message a person may give, in bytes.
-const MAX_MESSAGE_BYTES: usize = 1_024;
 
 /// `?person=<id>`: whose memory, when it is not the signed-in person's.
 #[derive(Deserialize)]
@@ -232,11 +222,12 @@ impl Memory {
     /// The commit of a change the signed-in person makes: their `message`, else `subject`,
     /// then the trailer.
     fn commit(&self, message: Option<String>, subject: String) -> Result<MemoryCommit, Refused> {
+        let limits = self.assistant.config.gateway();
         let subject = match message.map(|message| message.trim().to_owned()) {
             None => subject,
             Some(message)
                 if !message.is_empty()
-                    && message.len() <= MAX_MESSAGE_BYTES
+                    && limits.memory_message_bytes.allows(message.len())
                     && !message.chars().any(|c| c.is_control() && c != '\n') =>
             {
                 message
@@ -245,13 +236,13 @@ impl Memory {
                 return Err(refused(
                     StatusCode::BAD_REQUEST,
                     format!(
-                        "A commit message is 1 to {MAX_MESSAGE_BYTES} bytes, without control \
-                         characters."
+                        "A commit message is 1 to {} bytes, without control characters.",
+                        limits.memory_message_bytes
                     ),
                 ));
             }
         };
-        let (author_name, author_email) = author_of(&self.person);
+        let (author_name, author_email) = author_of(&self.person, limits.author_chars);
         Ok(MemoryCommit {
             message: format!("{subject}\n\n{TRAILER}"),
             author_name,
@@ -406,7 +397,10 @@ impl<'a> Waiting<'a> {
         let mut desk = assistant.desk();
         let total: usize = desk.memory_waiting.values().sum();
         let mine = desk.memory_waiting.get(requester).copied().unwrap_or(0);
-        if mine >= assistant.config.memory_per_person || total >= assistant.config.memory_total {
+        let limits = assistant.config.gateway();
+        if !limits.memory_requests_per_person.allows(mine + 1)
+            || !limits.memory_requests.allows(total + 1)
+        {
             return Err(refused(
                 StatusCode::TOO_MANY_REQUESTS,
                 "Too many memory requests are waiting; nothing was done. Try again shortly.",
@@ -444,7 +438,7 @@ impl Assistant {
             recap: None,
             // Never accepted anywhere: a memory job starts no harness.
             mcp_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
-            token_expires_at: now() + MEMORY_TIMEOUT.as_secs_f64(),
+            token_expires_at: now() + self.config.gateway().memory_timeout.0.as_secs_f64(),
             session_id: None,
             close: false,
             interrupt: false,
@@ -461,7 +455,7 @@ impl Assistant {
             skills: Vec::new(),
             groups: None,
         };
-        job.validate()
+        job.validate(self.config.limits())
             .map_err(|reason| refused(StatusCode::BAD_REQUEST, sentence(&reason)))?;
         Ok(job)
     }
@@ -508,7 +502,8 @@ impl Assistant {
             desk.controls.push((station, job));
         }
         self.ready.notify_waiters();
-        if let Ok(Ok(report)) = tokio::time::timeout(MEMORY_TIMEOUT, answer).await
+        let timeout = self.config.gateway().memory_timeout.0;
+        if let Ok(Ok(report)) = tokio::time::timeout(timeout, answer).await
             && let Some(event) = report.events.into_iter().next()
         {
             return Ok(event);
