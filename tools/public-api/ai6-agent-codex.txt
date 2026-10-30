@@ -15,6 +15,7 @@ pub ai6_agent_codex::CodexConfig::tail_line_bytes: u64
 pub ai6_agent_codex::CodexConfig::tail_lines: u64
 pub ai6_agent_codex::CodexConfig::tool_check_lifetime_secs: u64
 pub ai6_agent_codex::CodexConfig::tool_command_timeout_ms: u64
+pub ai6_agent_codex::CodexConfig::tree_scans: u64
 impl core::convert::TryFrom<ai6_agent_codex::CodexConfig> for ai6_agent_codex::CodexHandler
 pub type ai6_agent_codex::CodexHandler::Error = guatiao::library::kind::ProviderError
 pub fn ai6_agent_codex::CodexHandler::try_from(ai6_agent_codex::CodexConfig) -> core::result::Result<Self, Self::Error>
