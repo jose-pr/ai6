@@ -88,6 +88,10 @@ pub struct CodexConfig {
     /// 300.
     #[map(default = 300)]
     pub sandbox_error_chars: u64,
+    /// On Unix, how many times the process table is read again when the sandbox probe's
+    /// process tree is killed. Default 32; Windows ignores it.
+    #[map(default = 32)]
+    pub tree_scans: u64,
     /// Seconds the tool check's feature list stands for the same Codex, settings and
     /// environment. Default 900.
     #[map(default = 900)]
@@ -113,6 +117,7 @@ impl Default for CodexConfig {
             sandbox_probe_timeout_ms: 60_000,
             sandbox_probe_lifetime_secs: 900,
             sandbox_error_chars: 300,
+            tree_scans: 32,
             tool_check_lifetime_secs: 900,
             tool_command_timeout_ms: 120_000,
         }

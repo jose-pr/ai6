@@ -291,6 +291,7 @@ pub(crate) fn unavailable(
     let executable = config.executable.as_str();
     let lifetime = Duration::from_secs(config.sandbox_probe_lifetime_secs);
     let timeout = Duration::from_millis(config.sandbox_probe_timeout_ms);
+    let tree_scans = usize::try_from(config.tree_scans).unwrap_or(usize::MAX);
     type Key = (String, Vec<(String, Option<String>)>);
     type Answers = Mutex<HashMap<Key, (Instant, Option<String>)>>;
     static ANSWERS: OnceLock<Answers> = OnceLock::new();
@@ -315,7 +316,7 @@ pub(crate) fn unavailable(
         executable,
         environment,
         &|argv: &[String], cwd: &Path, environment: &BTreeMap<String, String>| {
-            run_for(argv, cwd, environment, timeout)
+            run_for(argv, cwd, environment, timeout, tree_scans)
         },
         usize::try_from(config.sandbox_error_chars).unwrap_or(usize::MAX),
     );
@@ -409,6 +410,7 @@ fn run_for(
     cwd: &Path,
     environment: &BTreeMap<String, String>,
     timeout: Duration,
+    tree_scans: usize,
 ) -> std::io::Result<(bool, String)> {
     let program = find_program(&argv[0], environment).unwrap_or_else(|| PathBuf::from(&argv[0]));
     let mut command = std::process::Command::new(program);
@@ -420,7 +422,7 @@ fn run_for(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    let (mut child, tree) = tree::spawn(&mut command)?;
+    let (mut child, tree) = tree::spawn(&mut command, tree_scans)?;
     let deadline = Instant::now() + timeout;
     let status = loop {
         if let Some(status) = child.try_wait()? {
@@ -452,10 +454,13 @@ mod tree {
     use crate::process_tree::ProcessTree;
 
     /// Spawns `command` leading a process group of its own.
-    pub(super) fn spawn(command: &mut Command) -> std::io::Result<(Child, ProcessTree)> {
+    pub(super) fn spawn(
+        command: &mut Command,
+        scans: usize,
+    ) -> std::io::Result<(Child, ProcessTree)> {
         command.process_group(0);
         let mut child = command.spawn()?;
-        match ProcessTree::of(Some(child.id())) {
+        match ProcessTree::of(Some(child.id()), scans) {
             Ok(tree) => Ok((child, tree)),
             Err(error) => {
                 let _ = child.kill();
@@ -489,7 +494,7 @@ mod tree {
 
     /// Spawns `command` suspended, puts it in a new Job Object and only then lets it run, so
     /// nothing it starts is outside the job.
-    pub(super) fn spawn(command: &mut Command) -> io::Result<(Child, ProcessTree)> {
+    pub(super) fn spawn(command: &mut Command, _scans: usize) -> io::Result<(Child, ProcessTree)> {
         let tree = ProcessTree::new()?;
         command.creation_flags(CREATE_SUSPENDED);
         let mut child = command.spawn()?;
@@ -866,6 +871,7 @@ mod tests {
             &std::env::temp_dir(),
             &environment,
             Duration::from_secs(1),
+            32,
         )
         .unwrap();
         assert!(!succeeded && output.contains("did not finish"), "{output}");

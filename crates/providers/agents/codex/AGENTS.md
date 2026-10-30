@@ -33,6 +33,7 @@ milliseconds and `_secs` seconds.
 | `sandbox_probe_timeout_ms` | 60000 | How long the probe of the scripts sandbox may run |
 | `sandbox_probe_lifetime_secs` | 900 | How long the probe's answer stands per executable and configuration environment |
 | `sandbox_error_chars` | 300 | Characters of the probe's last line quoted when the sandbox did not run |
+| `tree_scans` | 32 | Unix: times the process table is read again when the probe's process tree is killed; Windows ignores it |
 | `tool_check_lifetime_secs` | 900 | How long the tool check's feature list stands |
 | `tool_command_timeout_ms` | 120000 | How long one of the tool check's commands may run |
 
