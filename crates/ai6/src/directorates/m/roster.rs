@@ -17,6 +17,7 @@ use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::harness::HarnessPolicy;
 use crate::directorates::m::inherit;
+use crate::directorates::m::issues::{IssuePolicy, IssuesDefinition};
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
@@ -339,6 +340,8 @@ pub struct Operation {
     pub quarantine: QuarantinePolicy,
     /// Which irreversible steps need a person's approval; strict unless configured.
     pub green_ink: GreenInkPolicy,
+    /// What AI6 writes on a Mission's linked issues and how; strict unless configured.
+    pub issues: IssuePolicy,
     /// How briefs are vetted before they are placed; every check on unless configured.
     pub vetting: VettingPolicy,
     /// Work sources (trackers, CI) this Operation takes briefs from.
@@ -1376,6 +1379,7 @@ struct OperationDefinition {
     exposure: ExposureDefinition,
     quarantine: QuarantineDefinition,
     green_ink: GreenInkDefinition,
+    issues: IssuesDefinition,
     vetting: Option<toml::Value>,
     sources: toml::Table,
     sleepers: BTreeMap<String, Sleeper>,
@@ -1439,6 +1443,10 @@ impl OperationDefinition {
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         let green_ink = self
             .green_ink
+            .resolve()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let issues = self
+            .issues
             .resolve()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         let vetting = policy_from_toml(self.vetting.as_ref())
@@ -1508,6 +1516,7 @@ impl OperationDefinition {
             exposure,
             quarantine,
             green_ink,
+            issues,
             vetting,
             sources: self.sources,
             sleepers: self.sleepers,
