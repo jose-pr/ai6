@@ -97,6 +97,19 @@ class AssistantController extends ChangeNotifier {
   ViewLimits viewLimits = const ViewLimits();
   bool busy = false;
 
+  /// A password Universal Exports made for an account the person confirmed resetting, until the
+  /// panel has shown it: it is never an entry of the conversation and never reaches Moneypenny.
+  String? _reveal;
+
+  /// Takes the waiting password, once.
+  String? takeReveal() {
+    final secret = _reveal;
+    _reveal = null;
+    return secret;
+  }
+
+  bool get hasReveal => _reveal != null;
+
   /// The person asked to stop the answer, and it has not stopped yet.
   bool stopping = false;
   bool connected = false;
@@ -187,6 +200,8 @@ class AssistantController extends ChangeNotifier {
                 ? entry.withData(proposal)
                 : entry,
         ];
+      case 'reveal':
+        _reveal = message['secret'] as String?;
       case 'busy':
         busy = message['busy'] == true;
         if (!busy) stopping = false;

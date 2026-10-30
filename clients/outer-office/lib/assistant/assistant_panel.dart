@@ -78,13 +78,53 @@ class _AssistantPanelState extends State<AssistantPanel> {
   @override
   void initState() {
     super.initState();
+    widget.controller.addListener(_showReveal);
     widget.controller.open();
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_showReveal);
     _ownMessage?.dispose();
     super.dispose();
+  }
+
+  /// Shows a password the person just confirmed resetting, once, outside the conversation.
+  void _showReveal() {
+    if (!widget.controller.hasReveal) return;
+    final secret = widget.controller.takeReveal();
+    if (secret == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('New password'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Shown once, only to you. Copy it now; it is not kept anywhere.',
+              ),
+              const SizedBox(height: 12),
+              SelectableText(secret),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Clipboard.setData(ClipboardData(text: secret)),
+              child: const Text('Copy'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   void _send() {
