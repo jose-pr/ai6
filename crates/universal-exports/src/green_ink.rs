@@ -28,10 +28,6 @@ use crate::{
     ensure_operation_registered, resolve_user, unix_timestamp,
 };
 
-/// The longest an approval or class authorisation may be granted for: one year.
-pub(crate) const MAX_GRANT: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-const MAX_NOTE_CHARS: usize = 1_024;
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ApproveRequest {
@@ -86,19 +82,19 @@ fn valid_id(id: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn grant(seconds: u64) -> Result<f64, ApiError> {
-    if seconds == 0 || seconds > MAX_GRANT.as_secs() {
+pub(crate) fn grant(seconds: u64, most: ai6::TimeLimit) -> Result<f64, ApiError> {
+    if seconds == 0 || !most.allows(Duration::from_secs(seconds)) {
         return Err(ApiError::bad_request());
     }
     Ok(seconds as f64)
 }
 
-fn note(text: Option<String>) -> Result<Option<String>, ApiError> {
+fn note(text: Option<String>, chars: ai6::Limit) -> Result<Option<String>, ApiError> {
     let Some(text) = text.map(|text| text.trim().to_owned()) else {
         return Ok(None);
     };
     if text.is_empty()
-        || text.chars().count() > MAX_NOTE_CHARS
+        || !chars.allows(text.chars().count())
         || text
             .chars()
             .any(|character| character.is_control() && character != '\n')
@@ -193,8 +189,13 @@ pub(crate) async fn approve(
     valid_id(&request_id)?;
     let lasts = request
         .expires_in_secs
-        .map_or(Ok(DEFAULT_APPROVAL_TTL.as_secs_f64()), grant)?;
-    let note = note(request.note)?;
+        .map_or(Ok(DEFAULT_APPROVAL_TTL.as_secs_f64()), |seconds| {
+            grant(seconds, gateway.config.unex().text.green_ink_max_grant)
+        })?;
+    let note = note(
+        request.note,
+        gateway.config.unex().text.green_ink_note_chars,
+    )?;
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "approval.decide").await?;
     let now = unix_timestamp()?;
@@ -231,7 +232,10 @@ pub(crate) async fn reject(
     Json(request): Json<RejectRequest>,
 ) -> Result<Json<Approval>, ApiError> {
     valid_id(&request_id)?;
-    let reason = note(request.reason)?;
+    let reason = note(
+        request.reason,
+        gateway.config.unex().text.green_ink_note_chars,
+    )?;
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "approval.decide").await?;
     let now = unix_timestamp()?;
@@ -389,7 +393,10 @@ pub(crate) async fn create_class(
     Path(operation_id): Path<String>,
     Json(request): Json<ClassRequest>,
 ) -> Result<(StatusCode, Json<ClassAuthorization>), ApiError> {
-    let lasts = grant(request.expires_in_secs)?;
+    let lasts = grant(
+        request.expires_in_secs,
+        gateway.config.unex().text.green_ink_max_grant,
+    )?;
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "approval.class").await?;
     let now = unix_timestamp()?;

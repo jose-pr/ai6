@@ -36,7 +36,12 @@ pub struct GatewayLimits {
     pub max_input_frames_per_second: u32,
     pub input_queue_capacity: usize,
     pub fanout_capacity: usize,
+    pub buffer_budget_bytes: ai6::Limit,    // 512 MiB; none takes the budget check away
+    pub client_slots: ai6::Limit,           // 100,000; none takes the slot check away
+    pub station_token_min_bytes: usize,     // 32
+    pub origin_bytes: ai6::Limit,           // 2,048
 }
+impl From<&ai6::UnexGatewayLimits> for GatewayLimits {}   // the `unex` record's [gateway]
 
 pub struct GatewayConfig { /* fields are private */ }
 impl GatewayConfig {
@@ -49,27 +54,34 @@ impl GatewayConfig {
     ) -> Result<Self, GatewayError>;
     pub fn public_origin(&self) -> &str;
     pub fn with_login_limits(self, login: LoginLimits) -> Self;
+    // [controls], [timeline] and [text] of the `unex` record; the defaults without it.
+    pub fn with_unex_limits(self, limits: ai6::UnexLimits) -> Self;
 }
 
 pub struct LoginLimits {
     pub per_address: std::num::NonZeroU32,       // tries a minute from one address; default 5
     pub per_name: std::num::NonZeroU32,          // tries in ten minutes for one name; default 10
     pub address_header: Option<axum::http::HeaderName>,  // default None
+    pub name_bytes: usize,                       // 64: a longer name is counted by its first bytes
+    pub forget_every: u32,                       // 256 tries between sweeps, at least 1
+    pub address_window: std::time::Duration,     // 60 s
+    pub name_window: std::time::Duration,        // 600 s
 }
 ```
 
 `GatewayLimits::default()` allows 16 Sessions, 12 clients per Session, 64
 scrollback events, 256 KiB per frame, 40 input frames per second, 64 queued
-inputs and 8 fanout events. Config validation requires an HTTPS origin, a
-32-byte minimum Station credential, finite non-zero bounds, TTLs no longer than 300
-seconds, at most 100,000 client slots, and a maximum aggregate 512 MiB budget
-for history, fanout, input and socket write buffers. `GatewayConfig` formats its
+inputs and 8 fanout events. Config validation requires an HTTPS origin of at most
+`origin_bytes`, a Station credential of at least `station_token_min_bytes` (32), finite non-zero
+bounds, TTLs of more than zero, at most `client_slots` (100,000) client slots, and, within
+`buffer_budget_bytes` (512 MiB), the buffers for history, fanout, input and socket writes;
+there is no ceiling on a frame or a TTL, and a `Limit` of none takes its check away. `GatewayConfig` formats its
 Station credential as `[REDACTED]`.
 
 `LoginLimits` bounds `POST /v1/auth/login` when a password or key is checked (an identity the
 trusted proxy asserts is not counted). Before any Authenticator is asked, a try is counted
 against the client address (an IPv6 address counts as its /64 network) and against the account
-name (trimmed, lowercased, the first 64 bytes). A try past either count is refused with `429`
+name (trimmed, lowercased, the first `[login] name_bytes`, 64, bytes). A try past either count is refused with `429`
 and a `Retry-After` of the seconds to wait, even if its secret is right; an address that is
 held off does not use up a name's tries. The gateway listens on loopback behind a reverse
 proxy, so every connection comes from the proxy: set `address_header` to the header the proxy
@@ -107,13 +119,12 @@ impl AccessProviders {
         header: axum::http::HeaderName,
         lookup_by: impl Into<String>,
     ) -> Self;
-    // Err below MIN_PROXY_SECRET_LEN (32) or without a proxy identity. Without a secret no
+    // Err below `min_bytes` (unex.cfg's `proxy_secret_min_bytes`, 32) or without a proxy identity. Without a secret no
     // asserted identity is accepted: login with the identity header also needs
     // PROXY_SECRET_HEADER ("x-ai6-proxy-secret") equal to it, else 401.
-    pub fn with_proxy_secret(self, secret: impl Into<String>) -> Result<Self, String>;
+    pub fn with_proxy_secret(self, secret: impl Into<String>, min_bytes: usize) -> Result<Self, String>;
 }
 pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
-pub const MIN_PROXY_SECRET_LEN: usize = 32;
 ```
 
 `universal-exports` reads the secret from `unex.cfg`'s `proxy_secret` and refuses to start
@@ -353,8 +364,8 @@ action, Agent, message and Session returns the first status with `200`, with any
 ## Activity timeline
 
 ```rust
-pub const DEFAULT_TIMELINE_PAGE: usize = 50;
-pub const MAX_TIMELINE_PAGE: usize = 200;
+// A page holds `[timeline] page` (50) items unless it asks for more, up to `[timeline] max_page`
+// (200); an item's text is cut at `[timeline] text_chars` (256).
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -51,6 +51,8 @@ pub const DEFAULT_POLL: Duration = Duration::from_secs(5);
 pub const UNEX_FILE_NAME: &str = "unex.cfg";
 /// The environment variable naming Universal Exports' bootstrap file.
 pub const UNEX_CONFIG_ENV: &str = "UNEX_CONFIG";
+/// The fewest bytes a reverse-proxy secret holds unless `unex.cfg` says otherwise.
+pub const DEFAULT_PROXY_SECRET_MIN_BYTES: u64 = 32;
 /// The loopback listener Universal Exports uses when its bootstrap file names none.
 pub const DEFAULT_UNEX_LISTEN: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
     std::net::Ipv4Addr::LOCALHOST,
@@ -398,6 +400,9 @@ pub struct UnexBootstrap {
     /// What a trusted reverse proxy sends in `X-AI6-Proxy-Secret`, when it asserts who is
     /// signed in.
     pub proxy_secret: Option<SecretRef>,
+    /// The fewest bytes the reverse-proxy secret may hold. Default [`DEFAULT_PROXY_SECRET_MIN_BYTES`];
+    /// a smaller value is a weakening.
+    pub proxy_secret_min_bytes: Option<u64>,
     /// Where it keeps its state: verified copies of provider libraries, and the Registry when
     /// nothing else names one. Default: the platform's state directory.
     pub state_dir: Option<PathBuf>,
@@ -491,6 +496,14 @@ impl Located<UnexBootstrap> {
         self.value.listen.unwrap_or(DEFAULT_UNEX_LISTEN)
     }
 
+    /// The fewest bytes the reverse-proxy secret may hold: `proxy_secret_min_bytes`, else
+    /// [`DEFAULT_PROXY_SECRET_MIN_BYTES`].
+    pub fn proxy_secret_min_bytes(&self) -> u64 {
+        self.value
+            .proxy_secret_min_bytes
+            .unwrap_or(DEFAULT_PROXY_SECRET_MIN_BYTES)
+    }
+
     /// Each secret of the file that is read from the environment or written inline, and each
     /// `[registry]` or `[provider]` limit looser than its default, worded for a log line.
     pub fn weakenings(&self) -> Vec<String> {
@@ -504,6 +517,12 @@ impl Located<UnexBootstrap> {
             if let Some(weakening) = secret.and_then(SecretRef::weakening) {
                 weakened.push(format!("the {what} is {weakening}"));
             }
+        }
+        if self.proxy_secret_min_bytes() < DEFAULT_PROXY_SECRET_MIN_BYTES {
+            weakened.push(format!(
+                "proxy_secret_min_bytes {} is looser than the default {DEFAULT_PROXY_SECRET_MIN_BYTES}",
+                self.proxy_secret_min_bytes()
+            ));
         }
         weakened.extend(limit_weakenings(&self.value.registry, &self.value.provider));
         weakened
@@ -1024,6 +1043,28 @@ mod tests {
         assert_eq!(
             located.weakenings(),
             ["provider.access_policy_bytes none is looser than the default 1048576"]
+        );
+    }
+
+    #[test]
+    fn unex_cfg_reads_the_proxy_secret_floor_and_reports_a_lower_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("unex.cfg");
+        std::fs::write(&path, "").unwrap();
+        let located = UnexBootstrap::find(Some(&path)).unwrap();
+        assert_eq!(located.proxy_secret_min_bytes(), 32);
+        assert!(located.weakenings().is_empty());
+        std::fs::write(
+            &path,
+            "proxy_secret_min_bytes = 8
+",
+        )
+        .unwrap();
+        let located = UnexBootstrap::find(Some(&path)).unwrap();
+        assert_eq!(located.proxy_secret_min_bytes(), 8);
+        assert_eq!(
+            located.weakenings(),
+            ["proxy_secret_min_bytes 8 is looser than the default 32"]
         );
     }
 

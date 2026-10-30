@@ -22,11 +22,6 @@ use crate::{
 
 /// The authorization resource of the roster.
 pub(crate) const ROSTER_RESOURCE: &str = "config:roster";
-/// The Registry's bound on an audit target.
-const MAX_TARGET_BYTES: usize = 512;
-/// The longest record key the routes accept.
-const MAX_KEY_BYTES: usize = 128;
-
 /// One roster record as its source holds it.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -104,8 +99,8 @@ fn kind_of(kind: &str) -> Result<ConfigRecord, ApiError> {
     ConfigRecord::from_name(name).ok_or_else(ApiError::not_found)
 }
 
-fn checked_key(key: &str) -> Result<(), ApiError> {
-    if key.trim().is_empty() || key.len() > MAX_KEY_BYTES || key.chars().any(char::is_control) {
+fn checked_key(key: &str, bytes: ai6::Limit) -> Result<(), ApiError> {
+    if key.trim().is_empty() || !bytes.allows(key.len()) || key.chars().any(char::is_control) {
         Err(ApiError::bad_request())
     } else {
         Ok(())
@@ -117,7 +112,7 @@ fn source(gateway: &Gateway) -> Result<std::sync::Arc<dyn ai6::ConfigProvider>, 
 }
 
 /// `text` on one line, cut to the audit target's bound at a character boundary.
-fn bounded(text: &str) -> String {
+fn bounded(text: &str, bytes: ai6::Limit) -> String {
     let mut line = text
         .chars()
         .map(|character| {
@@ -128,8 +123,8 @@ fn bounded(text: &str) -> String {
             }
         })
         .collect::<String>();
-    if line.len() > MAX_TARGET_BYTES {
-        let mut end = MAX_TARGET_BYTES - '…'.len_utf8();
+    if !bytes.allows(line.len()) {
+        let mut end = bytes.or_max().saturating_sub('…'.len_utf8());
         while !line.is_char_boundary(end) {
             end -= 1;
         }
@@ -152,7 +147,7 @@ async fn audit(
         action: action.to_owned(),
         operation: String::new(),
         resource: Some(ROSTER_RESOURCE.to_owned()),
-        target: bounded(target),
+        target: bounded(target, gateway.config.unex().text.roster_target_bytes),
         at: unix_timestamp()?,
     };
     tokio::task::spawn_blocking(move || registry.record_audit(&record))
@@ -279,7 +274,7 @@ pub(crate) async fn put_record(
 ) -> Result<Response, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let record = kind_of(&kind)?;
-    checked_key(&key)?;
+    checked_key(&key, gateway.config.unex().text.roster_key_bytes)?;
     if !definition.is_object() {
         return Err(ApiError::bad_request());
     }
@@ -334,7 +329,7 @@ pub(crate) async fn remove_record(
 ) -> Result<Response, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let record = kind_of(&kind)?;
-    checked_key(&key)?;
+    checked_key(&key, gateway.config.unex().text.roster_key_bytes)?;
     authorize_resource_action(
         &gateway,
         person.clone(),

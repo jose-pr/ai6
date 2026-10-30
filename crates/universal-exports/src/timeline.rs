@@ -20,12 +20,6 @@ use serde::{Deserialize, Serialize};
 use crate::controls::ControlStatus;
 use crate::{ApiError, Gateway, authorize_operation_action, bearer, resolve_user, unix_timestamp};
 
-/// Items in a page unless the request asks for fewer or more.
-pub const DEFAULT_TIMELINE_PAGE: usize = 50;
-/// The most items one page returns.
-pub const MAX_TIMELINE_PAGE: usize = 200;
-const MAX_TEXT_CHARS: usize = 256;
-
 /// Audit actions whose target is a Mission ID.
 const MISSION_AUDITS: [&str; 5] = [
     "mission.create.requested",
@@ -85,57 +79,60 @@ pub(crate) struct TimelineQuery {
 }
 
 /// Text from a record as the timeline shows it: no control characters, bounded.
-fn clean(value: &str) -> String {
+fn clean(value: &str, chars: usize) -> String {
     value
         .chars()
         .filter(|character| !character.is_control())
-        .take(MAX_TEXT_CHARS)
+        .take(chars)
         .collect()
 }
 
-fn clean_option(value: Option<&str>) -> Option<String> {
-    value.map(clean).filter(|value| !value.is_empty())
+fn clean_option(value: Option<&str>, chars: usize) -> Option<String> {
+    value
+        .map(|value| clean(value, chars))
+        .filter(|value| !value.is_empty())
 }
 
-fn from_event(event: TimelineEvent) -> TimelineItem {
+fn from_event(event: TimelineEvent, chars: usize) -> TimelineItem {
     TimelineItem {
         id: format!("event:{}", event.id),
         at: event.at,
-        kind: clean(&event.kind),
-        action: clean(&event.action),
-        operation_id: clean(&event.operation),
-        station_id: clean_option(event.station.as_deref()),
-        mission_id: clean_option(event.mission.as_deref()),
-        session_id: clean_option(event.session.as_deref()),
-        actor: clean_option(event.actor.as_deref()),
+        kind: clean(&event.kind, chars),
+        action: clean(&event.action, chars),
+        operation_id: clean(&event.operation, chars),
+        station_id: clean_option(event.station.as_deref(), chars),
+        mission_id: clean_option(event.mission.as_deref(), chars),
+        session_id: clean_option(event.session.as_deref(), chars),
+        actor: clean_option(event.actor.as_deref(), chars),
         target: None,
         detail: event
             .detail
             .iter()
-            .map(|(key, value)| (clean(key), clean(value)))
+            .map(|(key, value)| (clean(key, chars), clean(value, chars)))
             .collect(),
     }
 }
 
-fn from_audit(record: &AuditRecord, operation: &str) -> TimelineItem {
+fn from_audit(record: &AuditRecord, operation: &str, chars: usize) -> TimelineItem {
     TimelineItem {
         id: format!("audit:{}", record.id),
         at: record.at,
         kind: "audit".to_owned(),
-        action: clean(&record.action),
+        action: clean(&record.action, chars),
         operation_id: operation.to_owned(),
         station_id: clean_option(
             record
                 .resource
                 .as_deref()
                 .and_then(|resource| resource.strip_prefix("station:")),
+            chars,
         ),
         mission_id: MISSION_AUDITS
             .contains(&record.action.as_str())
-            .then(|| clean(&record.target)),
+            .then(|| clean(&record.target, chars)),
         session_id: None,
-        actor: clean_option(Some(&record.actor)),
-        target: clean_option(Some(&record.target)),
+        actor: clean_option(Some(&record.actor), chars),
+        target: clean_option(Some(&record.target), chars),
         detail: BTreeMap::new(),
     }
 }
@@ -170,8 +167,11 @@ pub(crate) async fn operation_timeline(
 ) -> Result<Json<TimelinePage>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
-    let limit = query.limit.unwrap_or(DEFAULT_TIMELINE_PAGE);
-    if limit == 0 || limit > MAX_TIMELINE_PAGE {
+    let table = &gateway.config.unex().timeline;
+    let limit = query
+        .limit
+        .unwrap_or_else(|| usize::try_from(table.page).unwrap_or(usize::MAX));
+    if limit == 0 || !table.max_page.allows(limit) {
         return Err(ApiError::bad_request());
     }
     let mission = query
@@ -194,12 +194,13 @@ pub(crate) async fn operation_timeline(
         .authorizer
         .clone();
     let operation = operation.to_string();
+    let chars = table.text_chars.or_max();
     let page = tokio::task::spawn_blocking(move || {
         let mut items = registry
             .timeline_events(&operation)
             .map_err(|_| ApiError::internal())?
             .into_iter()
-            .map(from_event)
+            .map(|event| from_event(event, chars))
             .collect::<Vec<_>>();
         let hosts = registry
             .stations(Duration::MAX)
@@ -247,7 +248,7 @@ pub(crate) async fn operation_timeline(
                 false
             };
             if visible {
-                items.push(from_audit(&record, &operation));
+                items.push(from_audit(&record, &operation, chars));
             }
         }
         if let Some(mission) = &mission {
@@ -303,7 +304,10 @@ pub(crate) async fn record_control(gateway: &Gateway, status: &ControlStatus) {
         event = event.detail("state", state.clone());
     }
     if let Some(reason) = &status.reason {
-        event = event.detail("reason", clean(reason));
+        event = event.detail(
+            "reason",
+            clean(reason, gateway.config.unex().timeline.text_chars.or_max()),
+        );
     }
     let _ = tokio::task::spawn_blocking(move || registry.record_event(&event)).await;
 }

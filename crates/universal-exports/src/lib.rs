@@ -61,10 +61,7 @@ pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
-pub use timeline::{DEFAULT_TIMELINE_PAGE, MAX_TIMELINE_PAGE, TimelineItem, TimelinePage};
-
-const MAX_BUFFER_BUDGET_BYTES: usize = 512 * 1024 * 1024;
-const MAX_CLIENT_SLOTS: usize = 100_000;
+pub use timeline::{TimelineItem, TimelinePage};
 
 /// Limits and trusted origin for one gateway instance.
 ///
@@ -77,6 +74,7 @@ pub struct GatewayConfig {
     attach_token_ttl: Duration,
     write_lease_ttl: Duration,
     login: LoginLimits,
+    unex: ai6::UnexLimits,
 }
 
 /// Finite state, payload, fanout and input limits for one gateway.
@@ -96,6 +94,16 @@ pub struct GatewayLimits {
     pub input_queue_capacity: usize,
     /// Capacity of each per-Session viewer fanout queue.
     pub fanout_capacity: usize,
+    /// Bytes the gateway may hold in buffers across every Session and connection; the
+    /// configuration is refused when its limits could exceed it.
+    pub buffer_budget_bytes: ai6::Limit,
+    /// Connections the gateway keeps slots for; the configuration is refused when its
+    /// Sessions times connections per Session could exceed it.
+    pub client_slots: ai6::Limit,
+    /// The fewest bytes the Station token may hold.
+    pub station_token_min_bytes: usize,
+    /// The most bytes the public origin may hold.
+    pub origin_bytes: ai6::Limit,
 }
 
 /// User identity providers used to authenticate and authorize Universal Exports requests.
@@ -118,9 +126,6 @@ struct ProxyIdentity {
 /// The header in which the trusted reverse proxy proves it sent a request that asserts an
 /// identity: anything that reaches the gateway's port directly can set the identity header too.
 pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
-
-/// The shortest proxy secret accepted.
-pub const MIN_PROXY_SECRET_LEN: usize = 32;
 
 impl AccessProviders {
     /// Combines the configured authentication, identity and authorization providers.
@@ -178,13 +183,17 @@ impl AccessProviders {
     ///
     /// # Errors
     ///
-    /// A message when `secret` is shorter than [`MIN_PROXY_SECRET_LEN`] or there is no proxy
+    /// A message when `secret` is shorter than `min_bytes` or there is no proxy
     /// identity to guard.
-    pub fn with_proxy_secret(mut self, secret: impl Into<String>) -> Result<Self, String> {
+    pub fn with_proxy_secret(
+        mut self,
+        secret: impl Into<String>,
+        min_bytes: usize,
+    ) -> Result<Self, String> {
         let secret = secret.into();
-        if secret.len() < MIN_PROXY_SECRET_LEN {
+        if secret.len() < min_bytes {
             return Err(format!(
-                "the proxy secret must be at least {MIN_PROXY_SECRET_LEN} characters"
+                "the proxy secret must be at least {min_bytes} characters"
             ));
         }
         let proxy = self
@@ -212,12 +221,41 @@ impl Default for GatewayLimits {
             max_input_frames_per_second: 40,
             input_queue_capacity: 64,
             fanout_capacity: 8,
+            buffer_budget_bytes: ai6::Limit::at(512 * 1024 * 1024),
+            client_slots: ai6::Limit::at(100_000),
+            station_token_min_bytes: 32,
+            origin_bytes: ai6::Limit::at(2048),
+        }
+    }
+}
+
+impl From<&ai6::UnexGatewayLimits> for GatewayLimits {
+    /// The record's `[gateway]` table, an absent bound being as large as the type holds.
+    fn from(table: &ai6::UnexGatewayLimits) -> Self {
+        Self {
+            max_sessions: table.sessions.or_max(),
+            max_clients_per_session: table.clients_per_session.or_max(),
+            scrollback_events: table.scrollback_events.or_max(),
+            max_frame_bytes: table.frame_bytes.or_max(),
+            max_input_frames_per_second: table
+                .input_frames_per_second
+                .get()
+                .map_or(u32::MAX, |rate| u32::try_from(rate).unwrap_or(u32::MAX)),
+            input_queue_capacity: usize::try_from(table.input_queue).unwrap_or(usize::MAX),
+            fanout_capacity: usize::try_from(table.fanout).unwrap_or(usize::MAX),
+            buffer_budget_bytes: table.buffer_budget_bytes,
+            client_slots: table.client_slots,
+            station_token_min_bytes: usize::try_from(table.station_token_min_bytes)
+                .unwrap_or(usize::MAX),
+            origin_bytes: table.origin_bytes,
         }
     }
 }
 
 impl GatewayConfig {
-    /// Creates a gateway config and rejects unsafe or unbounded resource settings.
+    /// Creates a gateway config and rejects limits that cannot work together: a zero where
+    /// nothing could pass, and Sessions, connections and frames that could hold more than
+    /// `buffer_budget_bytes` or `client_slots` allow.
     pub fn new(
         public_origin: impl Into<String>,
         station_token: impl Into<String>,
@@ -245,6 +283,14 @@ impl GatewayConfig {
             .map(|bytes| bytes.max(256 * 1024));
         let socket_budget =
             client_slots_or_max(limits).checked_mul(socket_buffer.unwrap_or(usize::MAX));
+        let over_budget = |bytes: Option<usize>| match limits.buffer_budget_bytes.get() {
+            Some(budget) => bytes.is_none_or(|bytes| bytes as u64 > budget),
+            None => false,
+        };
+        let over_slots = |slots: Option<usize>| match limits.client_slots.get() {
+            Some(budget) => slots.is_none_or(|slots| slots as u64 > budget),
+            None => false,
+        };
         let total_buffers = history_budget
             .and_then(|history| fanout_budget.and_then(|fanout| history.checked_add(fanout)))
             .and_then(|buffers| buffers.checked_add(input_bytes.unwrap_or(usize::MAX)))
@@ -254,22 +300,19 @@ impl GatewayConfig {
             .checked_mul(limits.max_clients_per_session);
         if authority.is_empty()
             || authority.contains(['/', '?', '#', '@'])
-            || public_origin.len() > 2048
-            || station_token.len() < 32
+            || !limits.origin_bytes.allows(public_origin.len())
+            || station_token.len() < limits.station_token_min_bytes
             || limits.max_sessions == 0
             || limits.max_clients_per_session == 0
             || limits.scrollback_events == 0
             || limits.max_frame_bytes == 0
-            || limits.max_frame_bytes > 1024 * 1024
             || limits.max_input_frames_per_second == 0
             || limits.input_queue_capacity == 0
             || limits.fanout_capacity == 0
-            || client_slots.is_none_or(|slots| slots > MAX_CLIENT_SLOTS)
-            || total_buffers.is_none_or(|bytes| bytes > MAX_BUFFER_BUDGET_BYTES)
+            || over_slots(client_slots)
+            || over_budget(total_buffers)
             || attach_token_ttl.is_zero()
-            || attach_token_ttl > Duration::from_secs(300)
             || write_lease_ttl.is_zero()
-            || write_lease_ttl > Duration::from_secs(300)
         {
             return Err(GatewayError::InvalidConfiguration);
         }
@@ -280,7 +323,21 @@ impl GatewayConfig {
             attach_token_ttl,
             write_lease_ttl,
             login: LoginLimits::default(),
+            unex: ai6::UnexLimits::default(),
         })
+    }
+
+    /// Replaces the default `[controls]`, `[timeline]` and `[text]` limits (and `[login]`'s
+    /// pace) with the `unex` record's; the `[gateway]` table is `limits` of [`GatewayConfig::new`].
+    #[must_use]
+    pub fn with_unex_limits(mut self, limits: ai6::UnexLimits) -> Self {
+        self.unex = limits;
+        self
+    }
+
+    /// The `unex` record's limit tables this gateway runs by.
+    pub(crate) fn unex(&self) -> &ai6::UnexLimits {
+        &self.unex
     }
 
     /// Replaces the default limits on password and key tries at the login route.
@@ -305,6 +362,7 @@ impl fmt::Debug for GatewayConfig {
             .field("attach_token_ttl", &self.attach_token_ttl)
             .field("write_lease_ttl", &self.write_lease_ttl)
             .field("login", &self.login)
+            .field("unex", &self.unex)
             .finish()
     }
 }
@@ -500,6 +558,7 @@ impl Gateway {
     pub fn new(config: GatewayConfig) -> Self {
         let (input_tx, input_rx) = mpsc::channel(config.limits.input_queue_capacity);
         let login_guard = std::sync::Arc::new(LoginGuard::new(&config.login));
+        let controls = ControlBook::new(config.unex().controls.clone());
         Self {
             config: std::sync::Arc::new(config),
             inner: std::sync::Arc::new(Mutex::new(Inner::default())),
@@ -509,7 +568,7 @@ impl Gateway {
             access: None,
             roster: None,
             login_guard,
-            controls: Arc::default(),
+            controls: Arc::new(std::sync::Mutex::new(controls)),
             control_ready: Arc::default(),
             assistant: None,
         }
@@ -4149,6 +4208,7 @@ mod tests {
             max_input_frames_per_second: 20,
             input_queue_capacity: 2,
             fanout_capacity: 2,
+            ..GatewayLimits::default()
         }
     }
 
@@ -4886,6 +4946,7 @@ mod tests {
             per_address: std::num::NonZeroU32::new(3).unwrap(),
             per_name: std::num::NonZeroU32::new(100).unwrap(),
             address_header: None,
+            ..LoginLimits::default()
         })
         .await;
         let client = reqwest::Client::new();
@@ -4914,6 +4975,7 @@ mod tests {
             per_address: std::num::NonZeroU32::new(100).unwrap(),
             per_name: std::num::NonZeroU32::new(2).unwrap(),
             address_header: Some(HeaderName::from_static("x-forwarded-for")),
+            ..LoginLimits::default()
         })
         .await;
         let client = reqwest::Client::new();
@@ -4932,6 +4994,7 @@ mod tests {
             per_address: std::num::NonZeroU32::new(1).unwrap(),
             per_name: std::num::NonZeroU32::new(100).unwrap(),
             address_header: Some(HeaderName::from_static("x-forwarded-for")),
+            ..LoginLimits::default()
         })
         .await;
         let first = try_login(&client, &base, "alice", "right", Some("198.51.100.1")).await;
@@ -5157,7 +5220,7 @@ mod tests {
                 Arc::new(authorizer),
             )
             .with_proxy_identity(HeaderName::from_static("x-forwarded-user"), "name")
-            .with_proxy_secret(PROXY_TEST_SECRET)
+            .with_proxy_secret(PROXY_TEST_SECRET, 32)
             .unwrap(),
         );
         for (station, mission, session) in [
@@ -6535,6 +6598,54 @@ mod tests {
                 .unwrap()
             )
             .contains("[REDACTED]")
+        );
+    }
+
+    #[test]
+    fn the_former_ceilings_are_settings() {
+        let token = "m-token-that-is-long-enough-for-testing";
+        let mut limits = GatewayLimits {
+            max_frame_bytes: 4 * 1024 * 1024,
+            buffer_budget_bytes: ai6::Limit::UNBOUNDED,
+            ..GatewayLimits::default()
+        };
+        // A frame past 1 MiB and a lease past five minutes are refused by no ceiling now.
+        assert!(
+            GatewayConfig::new(
+                "https://localhost",
+                token,
+                limits,
+                Duration::from_secs(3_600),
+                Duration::from_secs(900),
+            )
+            .is_ok()
+        );
+        // The budget is still a bound while it is one: the same frames overrun 512 MiB.
+        limits.buffer_budget_bytes = GatewayLimits::default().buffer_budget_bytes;
+        assert!(
+            GatewayConfig::new(
+                "https://localhost",
+                token,
+                limits,
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .is_err()
+        );
+        // The Station token's least size is a setting too.
+        let short = GatewayLimits {
+            station_token_min_bytes: 4,
+            ..GatewayLimits::default()
+        };
+        assert!(
+            GatewayConfig::new(
+                "https://localhost",
+                "abcd",
+                short,
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .is_ok()
         );
     }
 

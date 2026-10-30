@@ -66,6 +66,9 @@ pub use directorates::m::theaters::{
     LOCAL_THEATER, RunnerSettings, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind,
     TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
 };
+pub use directorates::m::unex_limits::{
+    ControlLimits, LoginTable, TextLimits, UnexGatewayLimits, UnexLimits, UnexTimelineLimits,
+};
 pub use directorates::m::vetting::{
     CHIEF_OF_STAFF_ROLE, DEFAULT_MAX_BRIEF_BYTES, DEFAULT_MAX_PER_HOUR,
     DEFAULT_MAX_PER_SOURCE_PER_HOUR, Finding, FindingKind, KnownWork, PROPOSAL_SOURCE,

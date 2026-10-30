@@ -25,14 +25,12 @@ use axum::http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::green_ink::MAX_GRANT;
 use crate::{
     ApiError, Gateway, GatewayError, authorize_operation_action, bearer,
     ensure_operation_registered, resolve_user, unix_timestamp,
 };
 
 const CLEARANCES: [&str; 3] = ["desk", "field", "00"];
-const MAX_REASON_CHARS: usize = 512;
 
 /// One Agent of an Operation and its record there.
 #[non_exhaustive]
@@ -368,11 +366,22 @@ pub(crate) async fn lower(
     let reason = request.reason.trim().to_owned();
     if !CLEARANCES.contains(&request.clearance.as_str())
         || reason.is_empty()
-        || reason.chars().count() > MAX_REASON_CHARS
+        || !gateway
+            .config
+            .unex()
+            .text
+            .agent_reason_chars
+            .allows(reason.chars().count())
         || reason.chars().any(char::is_control)
-        || request
-            .expires_in_secs
-            .is_some_and(|secs| secs == 0 || secs > MAX_GRANT.as_secs())
+        || request.expires_in_secs.is_some_and(|secs| {
+            secs == 0
+                || !gateway
+                    .config
+                    .unex()
+                    .text
+                    .green_ink_max_grant
+                    .allows(std::time::Duration::from_secs(secs))
+        })
     {
         return Err(ApiError::bad_request());
     }

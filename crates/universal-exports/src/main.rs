@@ -21,8 +21,6 @@ use universal_exports::{
     ViewLimits,
 };
 
-const MAX_PROVIDER_CONFIG_DEPTH: usize = 64;
-
 #[derive(Debug, Parser)]
 #[command(
     name = "universal-exports",
@@ -175,14 +173,19 @@ async fn run(cli: Cli) -> Result<(), String> {
     for weakening in record.weakenings() {
         eprintln!("universal-exports: warning: {weakening}");
     }
+    record
+        .limits()
+        .validate()
+        .map_err(|error| format!("unex.{error}"))?;
     let config = GatewayConfig::new(
         public_origin,
         station_token.as_str().to_owned(),
-        GatewayLimits::default(),
-        Duration::from_secs(300),
-        Duration::from_secs(30),
+        GatewayLimits::from(&record.gateway),
+        record.gateway.attach_token_ttl.0,
+        record.gateway.write_lease_ttl.0,
     )
     .map_err(|error| format!("gateway configuration failed: {error}"))?
+    .with_unex_limits(record.limits())
     .with_login_limits(login_limits(record)?);
     let registry_location = settings
         .located
@@ -423,6 +426,10 @@ fn login_limits(record: &UnexRecord) -> Result<LoginLimits, String> {
             "login_tries_per_name",
         )?,
         address_header,
+        name_bytes: record.login.name_bytes.or_max(),
+        forget_every: u32::try_from(record.login.forget_every).unwrap_or(u32::MAX),
+        address_window: record.login.address_window.0,
+        name_window: record.login.name_window.0,
     })
 }
 
@@ -506,7 +513,9 @@ fn configured_access(
     let config = |value: &Option<serde_json::Map<String, JsonValue>>| {
         value
             .clone()
-            .map(|object| json_to_provider_value(JsonValue::Object(object), 0))
+            .map(|object| {
+                json_to_provider_value(JsonValue::Object(object), 0, record.provider_config_depth)
+            })
             .transpose()
     };
     let authenticator_config = config(&record.authenticator_config)?;
@@ -540,7 +549,7 @@ fn configured_access(
         (Some(authenticator), Some(name)) => {
             AccessProviders::new(authenticator, directory, authorizer)
                 .with_proxy_identity(header(name)?, record.proxy_lookup_by.clone())
-                .with_proxy_secret(proxy_secret(settings)?)?
+                .with_proxy_secret(proxy_secret(settings)?, proxy_secret_min(settings))?
         }
         (Some(authenticator), None) => AccessProviders::new(authenticator, directory, authorizer),
         (None, Some(name)) => AccessProviders::from_reverse_proxy(
@@ -549,12 +558,17 @@ fn configured_access(
             header(name)?,
             record.proxy_lookup_by.clone(),
         )
-        .with_proxy_secret(proxy_secret(settings)?)?,
+        .with_proxy_secret(proxy_secret(settings)?, proxy_secret_min(settings))?,
         (None, None) => {
             return Err("configure unex.authenticator or unex.proxy_user_header".to_owned());
         }
     };
     Ok(Some(access))
+}
+
+/// `unex.cfg`'s `proxy_secret_min_bytes`: the fewest bytes the proxy secret may hold.
+fn proxy_secret_min(settings: &Settings) -> usize {
+    usize::try_from(settings.located.proxy_secret_min_bytes()).unwrap_or(usize::MAX)
 }
 
 /// `unex.cfg`'s `proxy_secret`, which the reverse proxy sends in `X-AI6-Proxy-Secret`.
@@ -576,10 +590,14 @@ fn proxy_secret(settings: &Settings) -> Result<String, String> {
         .map_err(|error| format!("proxy_secret: {error}"))
 }
 
-fn json_to_provider_value(value: JsonValue, depth: usize) -> Result<Value, String> {
-    if depth > MAX_PROVIDER_CONFIG_DEPTH {
+fn json_to_provider_value(
+    value: JsonValue,
+    depth: usize,
+    most: ai6::Limit,
+) -> Result<Value, String> {
+    if !most.allows(depth) {
         return Err(format!(
-            "provider configuration exceeds {MAX_PROVIDER_CONFIG_DEPTH} nested values"
+            "provider configuration exceeds {most} nested values"
         ));
     }
     match value {
@@ -594,14 +612,14 @@ fn json_to_provider_value(value: JsonValue, depth: usize) -> Result<Value, Strin
         JsonValue::Array(values) => {
             let mut converted = VecDeque::with_capacity(values.len());
             for value in values {
-                converted.push_back(json_to_provider_value(value, depth + 1)?);
+                converted.push_back(json_to_provider_value(value, depth + 1, most)?);
             }
             encode_provider_value(&converted)
         }
         JsonValue::Object(values) => {
             let mut converted = BTreeMap::new();
             for (key, value) in values {
-                converted.insert(key, json_to_provider_value(value, depth + 1)?);
+                converted.insert(key, json_to_provider_value(value, depth + 1, most)?);
             }
             encode_provider_value(&converted)
         }
@@ -705,6 +723,7 @@ mod tests {
         let value = json_to_provider_value(
             serde_json::json!({"path": "accounts.toml", "enabled": true, "nested": [1, true, null]}),
             0,
+            ai6::Limit::at(64),
         )
         .unwrap();
         let fields = BTreeMap::<String, Value>::from_value(&value).unwrap();
@@ -721,11 +740,13 @@ mod tests {
     #[test]
     fn provider_config_rejects_more_than_sixty_four_nested_values() {
         let mut nested = serde_json::Value::Null;
-        for _ in 0..=MAX_PROVIDER_CONFIG_DEPTH {
+        for _ in 0..=64 {
             nested = serde_json::Value::Array(vec![nested]);
         }
-        let error = json_to_provider_value(serde_json::json!({ "nested": nested }), 0).unwrap_err();
+        let value = serde_json::json!({ "nested": nested });
+        let error = json_to_provider_value(value.clone(), 0, ai6::Limit::at(64)).unwrap_err();
         assert!(error.contains("64 nested values"), "{error}");
+        assert!(json_to_provider_value(value, 0, ai6::Limit::UNBOUNDED).is_ok());
     }
 
     #[test]

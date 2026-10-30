@@ -22,8 +22,6 @@ use crate::{
     ensure_operation_registered, resolve_user, unix_timestamp,
 };
 
-const MAX_REASON_CHARS: usize = 1_024;
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RefuseRequest {
@@ -180,7 +178,12 @@ pub(crate) async fn refuse(
 ) -> Result<Json<HeldBriefDecision>, ApiError> {
     valid_key(&key)?;
     let reason = request.reason.unwrap_or_default().trim().to_owned();
-    if reason.chars().count() > MAX_REASON_CHARS
+    if !gateway
+        .config
+        .unex()
+        .text
+        .held_reason_chars
+        .allows(reason.chars().count())
         || reason
             .chars()
             .any(|character| character.is_control() && character != '\n')

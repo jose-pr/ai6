@@ -664,6 +664,25 @@ pub struct UnexRecord {
     /// The longest `text` filter an Outer Office route may carry, in bytes: in Moneypenny's
     /// links and cards, and in the page a message was sent from. Unset is 128; 0 reads as 1.
     pub route_text_bytes: Option<u64>,
+    /// How deeply nested a provider configuration may be. Default 64; `null` or `"none"` for
+    /// no bound.
+    #[serde(default = "UnexRecord::default_provider_config_depth")]
+    pub provider_config_depth: crate::bounds::Limit,
+    /// `[gateway]`.
+    #[serde(default)]
+    pub gateway: super::unex_limits::UnexGatewayLimits,
+    /// `[controls]`.
+    #[serde(default)]
+    pub controls: super::unex_limits::ControlLimits,
+    /// `[timeline]`.
+    #[serde(default)]
+    pub timeline: super::unex_limits::UnexTimelineLimits,
+    /// `[login]`.
+    #[serde(default)]
+    pub login: super::unex_limits::LoginTable,
+    /// `[text]`.
+    #[serde(default)]
+    pub text: super::unex_limits::TextLimits,
 }
 
 impl Default for UnexRecord {
@@ -686,6 +705,12 @@ impl Default for UnexRecord {
             assistant: Self::default_assistant(),
             assistant_agent: Self::default_assistant_agent(),
             route_text_bytes: None,
+            provider_config_depth: Self::default_provider_config_depth(),
+            gateway: Default::default(),
+            controls: Default::default(),
+            timeline: Default::default(),
+            login: Default::default(),
+            text: Default::default(),
         }
     }
 }
@@ -733,7 +758,35 @@ impl UnexRecord {
                 inline(name, &serde_json::Value::Object(config.clone()), &mut found);
             }
         }
+        found.extend(self.limits().weakenings());
+        if self.provider_config_depth.get().is_none() {
+            found.push(format!(
+                "unex.provider_config_depth none is looser than the default {}",
+                Self::default_provider_config_depth()
+            ));
+        } else if self.provider_config_depth.get() > Self::default_provider_config_depth().get() {
+            found.push(format!(
+                "unex.provider_config_depth {} is looser than the default {}",
+                self.provider_config_depth,
+                Self::default_provider_config_depth()
+            ));
+        }
         found
+    }
+
+    /// The five limit tables together.
+    pub fn limits(&self) -> super::unex_limits::UnexLimits {
+        super::unex_limits::UnexLimits {
+            gateway: self.gateway.clone(),
+            controls: self.controls.clone(),
+            timeline: self.timeline.clone(),
+            login: self.login.clone(),
+            text: self.text.clone(),
+        }
+    }
+
+    fn default_provider_config_depth() -> crate::bounds::Limit {
+        crate::bounds::Limit::at(64)
     }
 
     fn default_lookup_by() -> String {

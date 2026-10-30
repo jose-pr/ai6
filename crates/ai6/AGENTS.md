@@ -859,8 +859,16 @@ pub struct UnexRecord { authenticator, authenticator_config, directory, director
     authorizer, authorizer_config, proxy_user_header, proxy_lookup_by /* "name" */,
     login_tries_per_address, login_tries_per_name, client_address_header, access_cache_ttl,
     access_cache_negative_ttl, access_cache_entries, assistant /* true */,
-    assistant_agent /* "moneypenny" */, route_text_bytes /* None: 128 */ }
-impl UnexRecord { pub fn weakenings(&self) -> Vec<String>; }   // inline credentials in *_config
+    assistant_agent /* "moneypenny" */, route_text_bytes /* None: 128 */,
+    provider_config_depth: Limit /* 64 */,
+    gateway: UnexGatewayLimits, controls: ControlLimits, timeline: UnexTimelineLimits,
+    login: LoginTable, text: TextLimits }          // [gateway] [controls] [timeline] [login] [text]
+impl UnexRecord { pub fn weakenings(&self) -> Vec<String>;   // inline credentials, and each looser limit
+    pub fn limits(&self) -> UnexLimits; }                   // the five tables together
+pub struct UnexLimits { pub gateway, pub controls, pub timeline, pub login, pub text }
+impl UnexLimits { pub fn validate(&self) -> Result<(), String>;   // zeros where nothing could pass
+    pub fn weakenings(&self) -> Vec<String>; }
+// bootstrap: UnexBootstrap.proxy_secret_min_bytes (32, DEFAULT_PROXY_SECRET_MIN_BYTES), smaller is a weakening
 #[non_exhaustive] #[derive(Clone)]
 pub struct ConfigSnapshot { pub revision: ConfigRevision, pub roster: Roster, pub settings: Settings }
 impl ConfigSnapshot {

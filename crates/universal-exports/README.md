@@ -229,7 +229,7 @@ newer activity arriving between pages does not shift or repeat older items.
 
 The gateway refuses request bodies and websocket frames above the configured
 limit. Its configured history, fanout, input queue and per-viewer socket buffers
-cannot exceed a combined 512 MiB budget.
+cannot exceed a combined budget (`[gateway] buffer_budget_bytes`, 512 MiB).
 
 `GET /v1/board` returns sorted `BoardSession` records. `GET /v1/missions` returns
 sorted `BoardMission` records with their registered Sessions and published Mission

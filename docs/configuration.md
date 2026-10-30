@@ -368,7 +368,9 @@ it.
 
 ### `ai6ctl`
 
-`ai6ctl` has no file of its own. Its Universal Exports origin is `--server`, else `UNEX_URL`,
+`ai6ctl` has no file of its own. `--timeout SECONDS` (default 5, fractions allowed, `0` for no
+limit) bounds each HTTP request and the control commands take `--poll-interval SECONDS` (default
+0.5). Its Universal Exports origin is `--server`, else `UNEX_URL`,
 else `[unex] url` of the `ai6.cfg` found as above (`--config` included), else
 `http://127.0.0.1:7082`. Its user token comes only from `UNEX_ACCESS_TOKEN`; it never reads the
 Station's `[unex] token`.
@@ -468,6 +470,84 @@ logged and sent at check-in as `tls_weakened`. The `unex` record takes `authenti
 `moneypenny`) and `route_text_bytes` (default 128, the longest `text` filter of an Outer
 Office page link Moneypenny's views and page context may carry). A credential written inline in one of those configurations is reported as a
 weakening: name a file there instead.
+
+### Universal Exports limits
+
+`unex.cfg` takes one more key, `proxy_secret_min_bytes` (default 32): the fewest bytes the
+reverse-proxy secret may hold. A smaller value is a weakening.
+
+The `unex` record's tables bound and pace the gateway, and apply at restart. They follow the
+[Limits](#limits) rules: a count or size is a whole number and `null` or `"none"` takes the
+bound away, seconds may be fractional, a value looser than its default is reported at start,
+and only a zero where nothing could pass is refused. Flat keys: `provider_config_depth`
+(default 64) is how deeply nested a provider configuration may be.
+
+```toml
+[gateway]
+sessions = 32                         # live Sessions, instead of 16
+frame_bytes = "none"                  # no bound on a frame (a weakening)
+
+[controls]
+pending_per_station = 8
+```
+
+`[gateway]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `sessions` | 16 | Live provider Sessions |
+| `clients_per_session` | 12 | Simultaneous browser connections to one Session |
+| `scrollback_events` | 64 | Value frames kept per Session for a client that joins late |
+| `frame_bytes` | 256 KiB | Bytes of one WebSocket or ingress frame |
+| `input_frames_per_second` | 40 | Browser input frames accepted per connection per second |
+| `input_queue` | 64 | Capacity of the queue between the gateway and its Stations, at least 1 |
+| `fanout` | 8 | Capacity of each per-Session viewer queue, at least 1 |
+| `buffer_budget_bytes` | 512 MiB | Bytes the gateway may hold in buffers; the configuration is refused when its limits could exceed it |
+| `client_slots` | 100,000 | Connections the gateway keeps slots for; refused when Sessions times connections could exceed it |
+| `attach_token_ttl` | 300 | Seconds an attach token lives, more than 0 |
+| `write_lease_ttl` | 30 | Seconds a terminal write lease lives, more than 0 |
+| `station_token_min_bytes` | 32 | Characters the Station token holds at least; smaller is looser |
+| `origin_bytes` | 2,048 | Bytes of the public origin |
+
+`[controls]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `controls` | 1,024 | Controls held for status reads and replays; the oldest finished goes first |
+| `pending_per_station` | 64 | Controls one Station may have open |
+| `ttl` | 120 | Seconds an open control waits for its Station before it expires |
+| `poll_wait` | 1 | Seconds a Station's poll waits when it names no wait |
+| `max_poll_wait` | 25 | The longest wait a Station's poll may ask for, in seconds |
+| `idempotency_key_bytes` | 128 | Bytes of an idempotency key |
+| `reason_chars` | 512 | Characters of an operator's reason; longer text is cut |
+
+`[timeline]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `page` | 50 | Items in a page when the request names no limit, at least 1 |
+| `max_page` | 200 | The most items a page may ask for |
+| `text_chars` | 256 | Characters of one item's text; longer text is cut |
+
+`[login]` (the tries allowed are the flat `login_tries_per_address` and `login_tries_per_name`)
+
+| Key | Default | What |
+| --- | --- | --- |
+| `name_bytes` | 64 | Bytes of an account name the tries are counted under |
+| `forget_every` | 256 | Tries between sweeps that forget old counters, at least 1 |
+| `address_window` | 60 | Seconds one client address's tries are counted over |
+| `name_window` | 600 | Seconds one account name's tries are counted over |
+
+`[text]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `agent_reason_chars` | 512 | Characters of the reason that lowers an Agent's clearance |
+| `green_ink_max_grant` | one year | The longest a green ink grant or a clearance may last, in seconds |
+| `green_ink_note_chars` | 1,024 | Characters of a green ink note |
+| `held_reason_chars` | 1,024 | Characters of the reason for a held brief's decision |
+| `roster_target_bytes` | 512 | Bytes of a roster record's target line; longer text is cut |
+| `roster_key_bytes` | 128 | Bytes of a roster record's key |
 
 ### Station runtime limits
 

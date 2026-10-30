@@ -17,13 +17,6 @@ use governor::middleware::NoOpMiddleware;
 use governor::state::keyed::DashMapStateStore;
 use governor::{Quota, RateLimiter};
 
-/// The longest an account name is told apart by; longer names count as one.
-const NAME_BYTES: usize = 64;
-/// Every this many checks, the counts of addresses and names gone quiet are dropped.
-const FORGET_EVERY: u32 = 256;
-const MINUTE: Duration = Duration::from_secs(60);
-const TEN_MINUTES: Duration = Duration::from_secs(600);
-
 /// How many password or key tries the login route allows, and where it finds the address a
 /// try came from. Every field has a default that is safe for a gateway on the public
 /// internet; raise a count for an office behind one address.
@@ -37,6 +30,15 @@ pub struct LoginLimits {
     /// `x-forwarded-for` (the last entry is used) or `x-real-ip`. The gateway listens on
     /// loopback behind that proxy, so without it every try comes from one address. Default none.
     pub address_header: Option<HeaderName>,
+    /// The longest an account name is told apart by; longer names count as one. Default 64.
+    pub name_bytes: usize,
+    /// Every this many checks, the counts of addresses and names gone quiet are dropped, at
+    /// least 1. Default 256.
+    pub forget_every: u32,
+    /// How long a try from one address is counted. Default one minute.
+    pub address_window: Duration,
+    /// How long a try for one account name is counted. Default ten minutes.
+    pub name_window: Duration,
 }
 
 impl Default for LoginLimits {
@@ -45,6 +47,10 @@ impl Default for LoginLimits {
             per_address: NonZeroU32::new(5).unwrap_or(NonZeroU32::MIN),
             per_name: NonZeroU32::new(10).unwrap_or(NonZeroU32::MIN),
             address_header: None,
+            name_bytes: 64,
+            forget_every: 256,
+            address_window: Duration::from_secs(60),
+            name_window: Duration::from_secs(600),
         }
     }
 }
@@ -58,6 +64,8 @@ pub(crate) struct LoginGuard {
     names: Counted<String>,
     address_header: Option<HeaderName>,
     checks: AtomicU32,
+    name_bytes: usize,
+    forget_every: u32,
 }
 
 impl LoginGuard {
@@ -65,16 +73,18 @@ impl LoginGuard {
         let clock = DefaultClock::default();
         Self {
             addresses: RateLimiter::dashmap_with_clock(
-                quota(MINUTE, limits.per_address),
+                quota(limits.address_window, limits.per_address),
                 clock.clone(),
             ),
             names: RateLimiter::dashmap_with_clock(
-                quota(TEN_MINUTES, limits.per_name),
+                quota(limits.name_window, limits.per_name),
                 clock.clone(),
             ),
             clock,
             address_header: limits.address_header.clone(),
             checks: AtomicU32::new(0),
+            name_bytes: limits.name_bytes,
+            forget_every: limits.forget_every.max(1),
         }
     }
 
@@ -94,7 +104,8 @@ impl LoginGuard {
     /// Counts a try from `source` for `name`. `Some(wait)` when it is one too many, and it is
     /// then not to be judged.
     pub(crate) fn tried(&self, source: IpAddr, name: &str) -> Option<Duration> {
-        if self.checks.fetch_add(1, Ordering::Relaxed) % FORGET_EVERY == FORGET_EVERY - 1 {
+        if self.checks.fetch_add(1, Ordering::Relaxed) % self.forget_every == self.forget_every - 1
+        {
             self.forget();
         }
         let now = self.clock.now();
@@ -103,7 +114,7 @@ impl LoginGuard {
         }
         // Counted only for a try the address was allowed, so an address held off cannot use
         // up a name's tries.
-        let refused = self.names.check_key(&called(name)).err()?;
+        let refused = self.names.check_key(&called(name, self.name_bytes)).err()?;
         Some(refused.wait_time_from(now))
     }
 
@@ -143,9 +154,9 @@ fn network(address: IpAddr) -> IpAddr {
 
 /// What a try is counted against for a name: the name as accounts are told apart, and no
 /// longer than is worth keeping.
-fn called(name: &str) -> String {
+fn called(name: &str, name_bytes: usize) -> String {
     let lowered = name.trim().to_lowercase();
-    let mut end = lowered.len().min(NAME_BYTES);
+    let mut end = lowered.len().min(name_bytes);
     while !lowered.is_char_boundary(end) {
         end -= 1;
     }
@@ -161,6 +172,7 @@ mod tests {
             per_address: NonZeroU32::new(per_address).unwrap(),
             per_name: NonZeroU32::new(per_name).unwrap(),
             address_header: None,
+            ..LoginLimits::default()
         }
     }
 
@@ -184,7 +196,7 @@ mod tests {
             assert!(guard.tried(source, "alice").is_none(), "try {attempt}");
         }
         let wait = guard.tried(source, "alice").expect("the fourth is refused");
-        assert!(wait > Duration::ZERO && wait <= MINUTE);
+        assert!(wait > Duration::ZERO && wait <= Duration::from_secs(60));
         assert!(guard.tried(address("192.0.2.2"), "alice").is_none());
     }
 
@@ -219,8 +231,13 @@ mod tests {
     #[test]
     fn a_long_name_is_counted_by_its_first_bytes_without_splitting_a_character() {
         let long = "é".repeat(100);
-        assert!(called(&long).len() <= NAME_BYTES);
-        assert!(called(&long).chars().all(|character| character == 'é'));
+        assert!(called(&long, 64).len() <= 64);
+        assert!(called(&long, 64).chars().all(|character| character == 'é'));
+        assert_eq!(
+            called(&long, 5).len(),
+            4,
+            "the name_bytes setting bounds it"
+        );
     }
 
     #[test]

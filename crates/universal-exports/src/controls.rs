@@ -25,16 +25,6 @@ use crate::{
     unix_timestamp,
 };
 
-/// Controls retained for status reads and idempotent replays; the oldest finished go first.
-pub(crate) const MAX_CONTROLS: usize = 1_024;
-/// Controls waiting for one Station before new ones are refused.
-const MAX_PENDING_PER_STATION: usize = 64;
-/// A control no Station took, or took and never reported, within this is marked expired.
-pub(crate) const CONTROL_TTL: Duration = Duration::from_secs(120);
-const DEFAULT_POLL_WAIT: Duration = Duration::from_millis(1_000);
-const MAX_POLL_WAIT: Duration = Duration::from_secs(25);
-const MAX_IDEMPOTENCY_KEY_BYTES: usize = 128;
-const MAX_REASON_CHARS: usize = 512;
 /// The Mission states a Station may report after a control.
 const MISSION_STATES: [&str; 10] = [
     "queued",
@@ -113,19 +103,38 @@ struct Entry {
 }
 
 /// The gateway's bounded memory of controls: one queue per Station, plus every control's status.
-#[derive(Default)]
 pub(crate) struct ControlBook {
+    /// `[controls]`: controls retained for status reads and idempotent replays (the oldest
+    /// finished go first), controls waiting for one Station before new ones are refused, and how
+    /// long a control no Station finished is open before it expires.
+    limits: ai6::ControlLimits,
     entries: HashMap<String, Entry>,
     order: VecDeque<String>,
     pending: HashMap<String, VecDeque<String>>,
     keys: HashMap<IdempotencyKey, String>,
 }
 
+impl Default for ControlBook {
+    fn default() -> Self {
+        Self::new(ai6::ControlLimits::default())
+    }
+}
+
 impl ControlBook {
+    pub(crate) fn new(limits: ai6::ControlLimits) -> Self {
+        Self {
+            limits,
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            pending: HashMap::new(),
+            keys: HashMap::new(),
+        }
+    }
+
     /// Marks controls no Station finished in time as expired.
     fn expire(&mut self, now: Instant, wall: f64) {
         for entry in self.entries.values_mut() {
-            if entry.status.is_open() && now.duration_since(entry.created) > CONTROL_TTL {
+            if entry.status.is_open() && now.duration_since(entry.created) > self.limits.ttl.0 {
                 entry.status.status = "expired".to_owned();
                 entry.status.finished_at = Some(wall);
             }
@@ -144,11 +153,11 @@ impl ControlBook {
         if self
             .pending
             .get(&station)
-            .is_some_and(|queue| queue.len() >= MAX_PENDING_PER_STATION)
+            .is_some_and(|queue| !self.limits.pending_per_station.allows(queue.len() + 1))
         {
             return Err(GatewayError::Backpressure);
         }
-        while self.entries.len() >= MAX_CONTROLS {
+        while !self.limits.controls.allows(self.entries.len() + 1) {
             let finished = self.order.iter().position(|id| {
                 self.entries
                     .get(id)
@@ -376,10 +385,8 @@ fn audit_action(action: ControlAction) -> &'static str {
     }
 }
 
-fn valid_key(key: &str) -> bool {
-    !key.trim().is_empty()
-        && key.len() <= MAX_IDEMPOTENCY_KEY_BYTES
-        && !key.contains(char::is_control)
+fn valid_key(key: &str, limit: ai6::Limit) -> bool {
+    !key.trim().is_empty() && limit.allows(key.len()) && !key.contains(char::is_control)
 }
 
 pub(crate) async fn request_control(
@@ -392,8 +399,10 @@ pub(crate) async fn request_control(
     let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
     let mission = MissionId::new(mission_id).map_err(|_| ApiError::bad_request())?;
     let action = ControlAction::parse(&request.action).ok_or_else(ApiError::bad_request)?;
-    if !valid_key(&request.idempotency_key)
-        || (request.agent.is_some() && action != ControlAction::Retry)
+    if !valid_key(
+        &request.idempotency_key,
+        gateway.config.unex().controls.idempotency_key_bytes,
+    ) || (request.agent.is_some() && action != ControlAction::Retry)
         || (request.message.is_some() && action != ControlAction::Resume)
     {
         return Err(ApiError::bad_request());
@@ -567,10 +576,14 @@ pub(crate) async fn next_station_control(
 ) -> Result<Response, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
     StationSettings::try_new(poll.station.clone(), 1).map_err(|_| ApiError::bad_request())?;
+    let table = &gateway.config.unex().controls;
     let wait = poll
         .wait_ms
-        .map_or(DEFAULT_POLL_WAIT, Duration::from_millis)
-        .min(MAX_POLL_WAIT);
+        .map_or(table.poll_wait.0, Duration::from_millis);
+    let wait = table
+        .max_poll_wait
+        .get()
+        .map_or(wait, |most| wait.min(most));
     let Some(control) = gateway.next_control(&poll.station, wait).await? else {
         return Response::builder()
             .status(StatusCode::NO_CONTENT)
@@ -616,7 +629,7 @@ pub(crate) async fn report_station_control(
         reason
             .chars()
             .filter(|character| !character.is_control())
-            .take(MAX_REASON_CHARS)
+            .take(gateway.config.unex().controls.reason_chars.or_max())
             .collect()
     });
     let wall = unix_timestamp()?;
@@ -1174,10 +1187,8 @@ pub(crate) mod tests {
         assert_eq!(asked.status(), StatusCode::ACCEPTED);
     }
 
-    #[test]
-    fn open_controls_expire_and_the_book_stays_bounded() {
-        let mut book = ControlBook::default();
-        let entry = |id: usize| Entry {
+    fn entry(id: usize) -> Entry {
+        Entry {
             status: ControlStatus {
                 control_id: format!("control-{id}"),
                 operation_id: "G".to_owned(),
@@ -1212,7 +1223,14 @@ pub(crate) mod tests {
                 key: format!("key-{id}"),
             },
             created: Instant::now(),
-        };
+        }
+    }
+
+    #[test]
+    fn open_controls_expire_and_the_book_stays_bounded() {
+        let mut book = ControlBook::default();
+        const MAX_CONTROLS: usize = 1_024;
+        const CONTROL_TTL: Duration = Duration::from_secs(120);
         for id in 0..MAX_CONTROLS {
             book.insert(entry(id)).unwrap();
         }
@@ -1231,5 +1249,21 @@ pub(crate) mod tests {
         assert_eq!(book.entries.len(), MAX_CONTROLS);
         assert!(!book.entries.contains_key("control-0"));
         assert!(!book.keys.values().any(|id| id == "control-0"));
+    }
+    fn limited(pending: ai6::Limit) -> ai6::ControlLimits {
+        let mut limits = ai6::ControlLimits::default();
+        limits.pending_per_station = pending;
+        limits
+    }
+
+    #[test]
+    fn a_station_with_its_limit_of_open_controls_has_the_next_refused() {
+        let mut book = ControlBook::new(limited(ai6::Limit::at(1)));
+        book.insert(entry(0)).unwrap();
+        assert_eq!(book.insert(entry(32)), Err(GatewayError::Backpressure));
+        book.insert(entry(1)).unwrap();
+        let mut roomy = ControlBook::new(limited(ai6::Limit::UNBOUNDED));
+        roomy.insert(entry(0)).unwrap();
+        roomy.insert(entry(32)).unwrap();
     }
 }
