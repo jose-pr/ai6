@@ -522,13 +522,14 @@ past that, a brief that would be held waits in the queue.
 
 ## Sources
 
-A **Source** is a Guatiao provider that polls a tracker or CI system for work and posts the
-outcome back: `github` (labeled issues and pull requests) and `jira` (a JQL search). An
-Operation names its sources under `sources.<provider>` in `operations.toml`
-([settings](operations.md#sources)).
+A **Source** is a Guatiao provider that polls a tracker or CI system for work: `github`
+(labeled issues and pull requests) and `jira` (a JQL search). The same providers also serve
+the **Tracker** kind, which reads, comments on, labels and creates issues, so the outcome goes
+back through the tracker the work came from. An Operation names its tracker instances under
+`sources.<name>` in `operations.toml` ([settings](operations.md#sources)).
 
 ```text
-tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Source.report ─► comment on the item
+tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.post ─► comment on the item
 ```
 
 - **Where it runs.** Only the Station holding the Headquarters lease polls, every
@@ -547,7 +548,8 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Source.repo
 - **Credentials.** A source names environment variables (`token_env`, `email_env`); values
   are read when needed and never written to configuration, logs or error messages.
 - **CX report.** When a Mission ends, the Headquarters Station posts a comment on the
-  item (and may add a label or move a Jira issue): the outcome, plus what the
+  item (and may add the instance's `done` or `failed` status label or make its status
+  transition): the outcome, plus what the
   Operation's cover policy allows. `covert` says only that the work finished or could not
   be completed, and the branch; `partial` adds that AI helped and the Mission ID; `overt`
   also names the Agent and the provider Session IDs. A report that fails is retried a few

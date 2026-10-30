@@ -155,9 +155,11 @@ error naming the key.
 
 ## Sources
 
-`sources` lists where an Operation's work comes from. Each key names a Source provider and
-holds that provider's settings; the Station holding the Headquarters lease polls them and
-queues what it finds. See [Sources](missions.md#sources).
+`sources` lists the tracker instances an Operation uses. Each key names an instance and holds
+its settings; `provider` names the provider that serves it (default: the key), so two
+GitHub repositories are two instances. The Station holding the Headquarters lease polls each
+instance and queues what it finds, unless `intake = false` keeps it for linking and creating
+only. See [Sources](missions.md#sources).
 
 ```toml
 [operation.G.sources.github]
@@ -169,6 +171,21 @@ interval_secs = 120
 site = "https://example.atlassian.net"
 project = "GUA"
 email_env = "JIRA_EMAIL"
+```
+
+```toml
+[operation.G.sources.board]
+provider = "github"
+repo = "jose-pr/ai6"
+status_labels = { done = "ai6:done", failed = "ai6:failed" }   # written when a Mission ends
+
+[operation.G.sources.tracker]
+provider = "jira"
+site = "https://example.atlassian.net"
+project = "GUA"
+email_env = "JIRA_EMAIL"
+intake = false                                              # never polled for work
+status_transitions = { done = "In Review" }
 ```
 
 Credentials are never configured: a source names the environment variable that holds its

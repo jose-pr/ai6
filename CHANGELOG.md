@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Trackers: a second Guatiao kind (`ai6_tracker`) the `github` and `jira` providers serve
+  beside `ai6_source`, built from the same `sources.<name>` table and token. A Tracker reads
+  an issue, lists the replies that may answer a question, posts and edits a comment, changes
+  labels, assignees, state or a workflow transition, creates an issue (a child under a
+  parent) and links issues; what an instance can do is discovered, and a call it cannot make
+  fails naming what it can. An instance is named by its key under `sources`, `provider`
+  picks the provider (default: the key), and `intake = false` keeps it out of polling. A
+  Mission's outcome is a comment plus the instance's `status_labels` and `status_transitions`
+  entry for it, replacing `done_label`, `failed_label`, `done_transition` and
+  `failed_transition`; `Source::report` and `CxReport` are removed. Jira Cloud text takes
+  headings, lists, code blocks and links.
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a
