@@ -277,6 +277,11 @@ Each managed Session receives a separate loopback MCP endpoint when AI6 is built
 ID. Claude and Codex receive bearer credentials through their launch environment, never
 in process arguments or persisted configuration. Remote SSH tunneling is not implemented.
 
+An `operation` recipient (`operation:P`) reaches the live Agents of that Operation and of
+every Operation under it. It needs an explicit send grant for the sender, and each receiver
+a receive grant on its own Operation or on one it is subordinate to; nothing is granted by
+default.
+
 Moneypenny has Cable tools of her own, acting for the person she talks to, within that
 person's `cable.send` and `cable.read` and the Station's Cable policy; a Cable she sends
 shows as `moneypenny for <person>` and reaches only Agents of its Operation ([Moneypenny's
@@ -431,7 +436,7 @@ others. Pools are declared beside the loadouts, in `loadouts.toml`:
 ```toml
 [pool.claude-team]
 handler = "claude"              # the AgentHandler whose Sessions draw from it
-operations = ["ai6-*"]          # globs on Operation IDs; default: every Operation
+operations = ["ai6-*"]          # globs on Operation IDs or an ancestor's; default: every Operation
 strategy = "headroom"           # or "round_robin" or "priority"
 
 [pool.claude-team.account.alice]

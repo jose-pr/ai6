@@ -2,8 +2,7 @@
 
 AI6 borrows its names from the Secret Intelligence Service of the James Bond novels and
 films, and from real public intelligence vocabulary where Bond has no word. The names
-are a convention, not decoration: each one says who owns a decision, and the fiction's
-rules turn out to be good rules for running coding agents.
+are a convention, not decoration: each one says who owns a decision.
 
 ## Directorates and posts
 
@@ -45,9 +44,9 @@ Infrastructure  Station ──────────────────�
   acting on a remote Theater through the transport (remote-hands mode).
 - **Safe house**: a Mission's isolated workspace inside its Theater, made by a safe-house provider (`git` cuts a worktree).
 
-**Campaign** (above Operations), **Objective** (a Mission's intended outcome), **Task**
-and **Step** (planning detail inside a Mission) are words for briefs and plans; AI6 does
-not store them as records.
+**Objective** (a Mission's intended outcome), **Task** and **Step** (planning detail
+inside a Mission) are words for briefs and plans; AI6 does not store them as records.
+Operations nest: [Subordinate Operations](operations.md#subordinate-operations).
 
 ## Agents, roles and clearance
 
@@ -60,8 +59,8 @@ only. An Agent lists the roles it is qualified for. M posts the highest-priority
 qualified Agent whose handler is available.
 
 **A backup for every 00.** The next qualified Agent is the backup: when `007`'s handler is
-unavailable, `008` takes the Mission. Role names follow real intelligence job titles
-(case officer, targeter, analyst, reports officer); they grant nothing.
+unavailable, `008` takes the Mission. Role names are real intelligence job titles; they
+grant nothing.
 
 | Clearance | May |
 | --- | --- |
@@ -118,6 +117,7 @@ see it, and the credential it needs is leased only against an approval.
 | **Agent** | a codename that owns a harness, model and effort: `[agent.007]` in `agents.toml` |
 | **Role** | a job description an Agent can be qualified for: `[role.case-officer]` (purpose and policy) |
 | **Operation** | a global project and its policy (`operations.toml`, `operation_id`) |
+| **Subordinate Operation** | an Operation whose `parent` names another |
 | **Mission / Mission ID** | one brief and unit of work under an Operation (`mission_id`) |
 | **Session / Session ID** | one provider-issued agent run, unchanged when resumed (`session_id`) |
 | **Station** | a node running the daemon (`ai6 serve --station`, `station_id`) |

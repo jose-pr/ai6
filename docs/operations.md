@@ -303,6 +303,56 @@ title = "Update dependencies"
 prompt = "Update the lockfile and run the tests."
 ```
 
+## Subordinate Operations
+
+An Operation can sit under another: `parent` names the parent Operation's ID, and an
+Operation without one is a root. There is one kind of Operation at every level, so a parent
+passes its policy, its access and its pools to the Operations under it without a second set
+of keys, and the tree can be as deep as the work is.
+
+```toml
+[operation.BODYGUARD]            # groups the others: no path, theater or workspace.source
+roster = ["007", "006"]
+clearance = "field"
+green_ink = { preset = "strict" }
+
+[operation.FORTITUDE]
+parent = "BODYGUARD"
+path = "~/projects/fortitude"
+green_ink = { kinds = ["push"] }   # keeps BODYGUARD's preset
+
+[operation.FORTITUDE_SOUTH]
+parent = "FORTITUDE"
+path = "~/projects/fortitude-south"
+```
+
+- **A grouping Operation** is an ordinary Operation with no `path`, `theater` or
+  `workspace.source`. A brief for it is refused: `Operation BODYGUARD has nowhere to work`.
+- **Policy is layered**, the ancestors' keys first and the Operation's own last. Tables merge
+  key by key at any depth (`station_labels`, `green_ink`, `budget`, `vetting`, `workspace`);
+  scalars and arrays replace (`roster`, `stations`, `pools`, `clearance`, `cover`,
+  `on_limit`, and `cover_identity` as a whole). The nearest Operation wins. Presets and
+  defaults apply once to the layered result, so a key a parent wrote counts as written.
+- **Never inherited**, because they name a checkout or create work: `name`, `description`,
+  `path`, `theater`, `config`, `workspace.source`, `sources`, `sleepers`, and the Operation's
+  own `parent` and `inherit`. A child does not read its parent's `.ai6/agents.toml` either.
+- **`inherit = false`** takes no policy from above, and nothing under it takes policy from
+  above it either. The Operation stays in the tree for [access](access.md#the-access-policy),
+  [pools](agents.md#account-pools) and [Cables](agents.md#cables). A child cannot return a
+  parent's key to unset in any other way.
+- **Counters stay per Operation**: `max_concurrent`, `budget.operation_cost_usd_per_day` and
+  the vetting rates are not shared down the tree.
+- **A parent that is not registered, or a cycle, refuses the roster**; the message names the
+  chain (`A -> C -> B -> A`). Removing an Operation that still has subordinates is refused
+  the same way; moving one is an edit of `parent`.
+- **Depth** is an option: the `[roster]` table of the global `operations` file takes
+  `max_operation_depth`, a number of levels counting a root as the first, default `64`, or
+  `"none"` for no bound. Looser than the default is logged as a weakening.
+
+Universal Exports serves the resolved record and the Operation that wrote each key (`GET
+/v1/user/roster/operation/{id}/effective`); `ai6ctl operations show G --effective` prints
+it, and Outer Office marks each inherited key "from P".
+
 ## Where configuration comes from
 
 A Station's configuration (Operations, Agents, roles, covers, Moneypenny's settings and its

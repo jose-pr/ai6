@@ -62,6 +62,16 @@ them](assistant.md#your-memory-in-the-app) with no action at all, and nobody els
 `assistant.memory.admin` on `config:assistant` lets an administrator read anyone's, each read
 audited `assistant.memory.read`, and change none.
 
+A rule on an Operation reaches the Operations under it: Universal Exports names a request's
+ancestors (the Operation's parent, then its parent's, nearest first, from the Stations'
+check-ins), and a rule whose scope is one of them matches as well, unless it sets
+`propagate = false`. The first match still decides, so a child is narrowed by a rule placed
+before its parent's. An Operation no Station has reported has no ancestors, so only rules on
+it and on `*` apply. A person sees an ancestor Operation only with `mission.read` on it; one
+they cannot read is never named, and its subordinates stand at the top of their board.
+`[limits] ancestors` (a number or `"none"`, default 64) bounds the ancestry a request may
+carry; more is an error, not a denial.
+
 ```toml
 [role.viewer]
 actions = ["mission.read", "session.read"]

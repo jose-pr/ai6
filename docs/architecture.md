@@ -124,7 +124,9 @@ file and resource access require separate authorization.
 
 An `agent` recipient is unicast. `station`, `theater`, `global` and named `channel`
 recipients are broadcasts with bounded audiences resolved by the relay at acceptance.
-Station delivery requires Station membership and a send grant. Theater and custom
+An `operation` recipient reaches the Agents of one Operation and of the Operations under it;
+each receiver needs a receive grant on its Operation or an ancestor's. Station delivery
+requires Station membership and a send grant. Theater and custom
 channel delivery require explicit grants for each sender and receiver; Global requires
 an exceptional explicit grant and is never a default. The relay rechecks receiver policy
 at delivery. Each receiver may `deliver`, `hold`, or `refuse`. Held Cables remain hidden

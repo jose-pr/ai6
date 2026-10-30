@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
+  An Operation's `parent` names another Operation; a child layers its keys over its
+  ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a
+  rule, pool glob or Cable grant on a parent reaches the Operations under it
+  (`propagate = false` on a rule stops that), and a missing parent or a cycle refuses the
+  roster. `max_operation_depth` bounds the depth (default 64). Universal Exports lists
+  Missions by subtree and serves an Operation's effective policy and where each key comes
+  from; `ai6ctl operations` and Outer Office show the tree.
 - Configuration moved to bootstrap files and a configuration provider
   ([Configuration](https://jose-pr.github.io/ai6/configuration/)). A Station and the `ai6`
   command read `ai6.cfg`, Universal Exports `unex.cfg`, and Outer Office `OO.cfg`, each found
