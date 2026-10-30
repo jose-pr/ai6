@@ -14,7 +14,7 @@ use std::sync::Once;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ai6::{CxReport, Source, SourceBatch, SourceItem, SourcePoll};
+use ai6::{Source, SourceBatch, SourceItem, SourcePoll, Tracker, TrackerPost, TrackerUpdate};
 use ai6_source_github::Github;
 use serde_json::{Value, json};
 
@@ -122,14 +122,22 @@ impl Live {
         self.opened.retain(|opened| *opened != number);
     }
 
-    fn report(&self, number: u64, outcome: &str, body: &str) -> CxReport {
-        CxReport {
-            item_id: self.id(number),
-            mission_id: format!("m-{}", self.stamp),
-            outcome: outcome.to_owned(),
-            body: body.to_owned(),
-            branch: Some("agent/live-test".to_owned()),
-        }
+    /// What a finished Mission writes: a comment, then the label of its outcome.
+    fn finish(&self, provider: &Github, number: u64, label: &str, body: &str) {
+        provider
+            .post(TrackerPost {
+                item: self.id(number),
+                body: body.to_owned(),
+                ..TrackerPost::default()
+            })
+            .unwrap();
+        provider
+            .update(TrackerUpdate {
+                item: self.id(number),
+                add_labels: vec![label.to_owned()],
+                ..TrackerUpdate::default()
+            })
+            .unwrap();
     }
 }
 
@@ -176,12 +184,12 @@ fn find<'a>(items: &'a [SourceItem], id: &str) -> Option<&'a SourceItem> {
 
 #[test]
 #[ignore = "calls the real GitHub: set AI6_TEST_LIVE_SOURCES and see the top of this file"]
-fn a_labelled_issue_is_polled_and_its_report_reaches_the_issue() {
+fn a_labelled_issue_is_polled_and_its_outcome_reaches_the_issue() {
     let mut live = Live::from_env();
     let labelled = live.open("labelled", Some(NON_ASCII), &["ai6:ready"]);
     let no_body = live.open("labelled, no body", None, &["ai6:ready"]);
     let unlabelled = live.open("no label", Some("Must not be polled."), &[]);
-    let provider = live.provider("done_label = \"ai6:done\"\nfailed_label = \"ai6:failed\"");
+    let provider = live.provider("");
 
     let (labelled_id, no_body_id) = (live.id(labelled), live.id(no_body));
     let batch = poll_until(&provider, None, |items| {
@@ -215,9 +223,7 @@ fn a_labelled_issue_is_polled_and_its_report_reaches_the_issue() {
     );
 
     let text = "AI6 test data: the report. ñandú 🧪\nBranch: `agent/live-test`";
-    provider
-        .report(live.report(labelled, "done", text))
-        .unwrap();
+    live.finish(&provider, labelled, "ai6:done", text);
     let comments = live.request("GET", &format!("/issues/{labelled}/comments"), None);
     assert_eq!(comments.as_array().unwrap().len(), 1);
     assert_eq!(comments[0]["body"], text);
@@ -231,9 +237,7 @@ fn a_labelled_issue_is_polled_and_its_report_reaches_the_issue() {
     assert!(labels.contains(&"ai6:done"), "{labels:?}");
     assert!(!labels.contains(&"ai6:failed"), "{labels:?}");
 
-    provider
-        .report(live.report(no_body, "failed", "AI6 test data: it failed."))
-        .unwrap();
+    live.finish(&provider, no_body, "ai6:failed", "AI6 test data: it failed.");
     let issue = live.request("GET", &format!("/issues/{no_body}"), None);
     assert!(
         issue["labels"]
@@ -251,7 +255,7 @@ fn a_labelled_issue_is_polled_and_its_report_reaches_the_issue() {
     });
     assert!(
         find(&moved.items, &no_body_id).is_some(),
-        "a report moves updated_at, so the next poll sees the issue again"
+        "a comment moves updated_at, so the next poll sees the issue again"
     );
 
     live.close(labelled);

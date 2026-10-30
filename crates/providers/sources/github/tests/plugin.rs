@@ -1,11 +1,11 @@
 //! Loads the built provider library through the Station's plugin host, so the models cross
-//! the real Guatiao boundary, and runs one poll and one report against a loopback server.
+//! the real Guatiao boundary, and runs one poll and one post against a loopback server.
 
 use std::sync::Once;
 
 use ai6::guatiao::ToValue;
 use ai6::station::plugins::{PluginBuildError, Plugins};
-use ai6::{CxReport, SourceConfig, SourcePoll};
+use ai6::{SourceConfig, SourcePoll, TrackerPost};
 
 mod support;
 use support::{canned, serve};
@@ -36,16 +36,15 @@ fn plugins() -> Plugins {
 }
 
 #[test]
-fn the_built_library_loads_as_a_source_and_serves_a_poll_and_a_report() {
+fn the_built_library_loads_as_a_source_and_a_tracker_and_serves_a_poll_and_a_post() {
     let plugins = plugins();
-    assert!(
-        plugins
-            .sources()
-            .iter()
-            .any(|provider| provider.id == "github"),
-        "{:?}",
-        plugins.scan_summary()
-    );
+    for providers in [plugins.sources(), plugins.trackers()] {
+        assert!(
+            providers.iter().any(|provider| provider.id == "github"),
+            "{:?}",
+            plugins.scan_summary()
+        );
+    }
 
     let fake = serve(|_| {
         vec![
@@ -68,15 +67,24 @@ fn the_built_library_loads_as_a_source_and_serves_a_poll_and_a_report() {
     assert_eq!(batch.items[0].id, "o/r#2");
     assert_eq!(batch.cursor.as_deref(), Some("2026-11-01T15:56:02Z"));
 
-    source
-        .report(CxReport {
-            item_id: "o/r#2".to_owned(),
-            mission_id: "m".to_owned(),
-            outcome: "done".to_owned(),
+    let tracker = plugins
+        .tracker(
+            "github",
+            Some(&config(&format!(
+                "repo = \"o/r\"\ntoken_env = \"{TOKEN_VAR}\"\napi_url = \"{}\"",
+                fake.base
+            ))),
+        )
+        .unwrap();
+    let posted = tracker
+        .post(TrackerPost {
+            item: "o/r#2".to_owned(),
             body: "The requested work is finished.".to_owned(),
-            branch: None,
+            edit: None,
+            marker: None,
         })
         .unwrap();
+    assert_eq!(posted.id, "5");
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests[1].target, "/repos/o/r/issues/2/comments");
 }

@@ -16,7 +16,7 @@ use std::sync::Once;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ai6::{CxReport, Source, SourceItem, SourcePoll};
+use ai6::{Source, SourceItem, SourcePoll, Tracker, TrackerPost, TrackerUpdate};
 use ai6_source_jira::Jira;
 use data_encoding::BASE64;
 use serde_json::{Value, json};
@@ -174,14 +174,22 @@ impl Live {
             .to_owned()
     }
 
-    fn report(&self, key: &str, outcome: &str, body: &str) -> CxReport {
-        CxReport {
-            item_id: key.to_owned(),
-            mission_id: format!("m-{}", self.stamp),
-            outcome: outcome.to_owned(),
-            body: body.to_owned(),
-            branch: None,
-        }
+    /// What a finished Mission writes: a comment, then the transition of its outcome.
+    fn finish(&self, provider: &Jira, key: &str, transition: &str, body: &str) {
+        provider
+            .post(TrackerPost {
+                item: key.to_owned(),
+                body: body.to_owned(),
+                ..TrackerPost::default()
+            })
+            .unwrap();
+        provider
+            .update(TrackerUpdate {
+                item: key.to_owned(),
+                transition: Some(transition.to_owned()),
+                ..TrackerUpdate::default()
+            })
+            .unwrap();
     }
 
     /// Polls until `wanted` holds, since a change reaches Jira's search index some time later.
@@ -240,11 +248,7 @@ fn a_labelled_issue_is_polled_commented_on_and_transitioned() {
 
     let in_progress = live.transition_into(&rich, "indeterminate").unwrap();
     let done = live.transition_into(&plain, "done").unwrap();
-    let provider = live.provider(&format!(
-        "done_transition = \"{}\"\nfailed_transition = \"{}\"",
-        in_progress.name.to_uppercase(),
-        done.id,
-    ));
+    let provider = live.provider("");
 
     let items = live.poll_until(&provider, None, |items| {
         has(items, &rich) && has(items, &plain)
@@ -275,7 +279,7 @@ fn a_labelled_issue_is_polled_commented_on_and_transitioned() {
     );
 
     let text = "AI6 test data: the report. ñandú 🧪\n\nBranch: `agent/live-test`";
-    provider.report(live.report(&rich, "done", text)).unwrap();
+    live.finish(&provider, &rich, &in_progress.name.to_uppercase(), text);
     assert_eq!(live.status(&rich), in_progress.status);
     let comments = live.get(&format!("/issue/{rich}/comment"));
     assert_eq!(comments["comments"].as_array().unwrap().len(), 1);
@@ -286,9 +290,7 @@ fn a_labelled_issue_is_polled_commented_on_and_transitioned() {
     );
     assert_eq!(stored[2]["content"][0]["text"], "Branch: `agent/live-test`");
 
-    provider
-        .report(live.report(&plain, "failed", "AI6 test data: it failed."))
-        .unwrap();
+    live.finish(&provider, &plain, &done.id, "AI6 test data: it failed.");
     assert_eq!(live.status(&plain), done.status, "matched by transition ID");
     let without = live.poll_until(&provider, None, |items| !has(items, &plain));
     assert!(has(&without, &rich), "a done issue leaves the search");
