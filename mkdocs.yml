@@ -43,6 +43,7 @@ nav:
       - Theaters: theaters.md
       - Missions and intake: missions.md
       - Agents and clearance: agents.md
+      - The Agent Client Protocol: acp.md
       - Moneypenny, the assistant: assistant.md
       - Terminals: terminals.md
       - The watchdog: watchdog.md
@@ -57,6 +58,7 @@ nav:
           - ai6: https://jose-pr.github.io/ai6/rust/ai6/index.html
           - universal-exports: https://jose-pr.github.io/ai6/rust/universal_exports/index.html
           - ai6-diptel: https://jose-pr.github.io/ai6/rust/ai6_diptel/index.html
+          - ai6-agent-acp: https://jose-pr.github.io/ai6/rust/ai6_agent_acp/index.html
           - ai6-agent-claude: https://jose-pr.github.io/ai6/rust/ai6_agent_claude/index.html
           - ai6-agent-codex: https://jose-pr.github.io/ai6/rust/ai6_agent_codex/index.html
           - ai6-terminal-pty: https://jose-pr.github.io/ai6/rust/ai6_terminal_pty/index.html

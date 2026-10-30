@@ -16,6 +16,12 @@ provider-issued Session ID; AI6 retains that ID when resuming the same Session. 
 loads handler libraries the way it loads every provider: by pin or publisher signature
 under the `strict` profile ([Stations](stations.md#provider-libraries-pins-and-publishers)).
 
+The `acp` handler (`ai6-agent-acp`) runs any agent that speaks the Agent Client Protocol: the
+Claude and Codex adapters, `gemini --acp`, or your own. An Agent configures it with a
+`handler_settings` table (`command`, `args`, `env`, `meta`, option ids and timeouts); any
+handler's settings reach its provider as TOML, which the provider validates and refuses unknown
+keys in. See [the Agent Client Protocol](acp.md).
+
 A handler declares how its harness talks over standard input and output
 (`AgentHandler::stdio`), never which terminal provider it runs in. Claude Code
 (`claude -p --input-format stream-json`) and Codex (`codex app-server`) speak JSON, so both

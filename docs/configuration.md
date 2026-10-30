@@ -180,6 +180,18 @@ menu on desktop writes `[unex] url` back in the format the file declares, keepin
 line; a YAML file keeps its comments, a TOML or JSON one does not. The address applies at the
 next start.
 
+## Agent handler settings
+
+An Agent's `handler_settings` table in the roster (`agents` family) configures its handler
+provider; it is empty for the Claude and Codex handlers. The `acp` handler's keys (`command`,
+`args`, `env`, `meta`, `model_option`, `effort_option`, `protocol` and the timeouts
+`initialize_timeout_ms` 20000, `request_timeout_ms` 30000, `start_timeout_ms` 60000,
+`close_grace_ms` 2000) are in [the Agent Client Protocol](acp.md#settings). A Theater's `runner`
+table bounds a Station's connection to its field runner with `connect_timeout_ms` 30000,
+`initialize_timeout_ms` 20000 and `request_timeout_ms` 30000
+([Theaters](theaters.md)); `ai6 runner serve` takes `--pump-poll-ms` 250, `--feed-poll-ms` 50 and
+`--replay-batch` 256.
+
 ## Configuration providers
 
 A provider holds records of each **family**, each record either **global** or one
