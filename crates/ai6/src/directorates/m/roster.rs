@@ -20,6 +20,7 @@ use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
 use crate::directorates::m::harness::HarnessPolicy;
 use crate::directorates::m::inherit;
+use crate::directorates::m::issues::IssuePolicy;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
@@ -382,6 +383,8 @@ pub struct Operation {
     pub quarantine: QuarantinePolicy,
     /// Which irreversible steps need a person's approval; strict unless configured.
     pub green_ink: GreenInkPolicy,
+    /// What AI6 writes on a Mission's linked issues and how; strict unless configured.
+    pub issues: IssuePolicy,
     /// How briefs are vetted before they are placed; every check on unless configured.
     pub vetting: VettingPolicy,
     /// Work sources (trackers, CI) this Operation takes briefs from.
@@ -1552,6 +1555,11 @@ pub(crate) struct OperationDefinition {
     #[map(default)]
     #[form(form)]
     green_ink: GreenInkDefinition,
+    /// What AI6 writes on the issues its Missions are linked to, and what Agents may ask for there.
+    #[schema(title = "Linked issues", section = "safety", advanced)]
+    #[map(default)]
+    #[form(form)]
+    issues: IssuePolicy,
     /// How briefs are checked before they are placed.
     #[schema(title = "Vetting", section = "safety", advanced)]
     vetting: Option<VettingSetting>,
@@ -1610,6 +1618,7 @@ impl Default for OperationDefinition {
             exposure: ExposureDefinition::default(),
             quarantine: QuarantineDefinition::default(),
             green_ink: GreenInkDefinition::default(),
+            issues: IssuePolicy::default(),
             vetting: None,
             harness: HarnessPolicy::default(),
             promotion: PromotionDefinition::default(),
@@ -1703,6 +1712,10 @@ impl OperationDefinition {
             .green_ink
             .resolve()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        self.issues
+            .validate()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let issues = self.issues.clone();
         let vetting = policy_of(self.vetting.as_ref())
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         let promotion = self
@@ -1744,6 +1757,7 @@ impl OperationDefinition {
             exposure,
             quarantine,
             green_ink,
+            issues,
             vetting,
             sources: self.sources,
             sleepers: self.sleepers,
