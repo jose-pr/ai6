@@ -116,6 +116,8 @@ see it, and the credential it needs is leased only against an approval.
 | --- | --- |
 | **Agent** | a codename that owns a harness, model and effort: `[agent.007]` in `agents.toml` |
 | **Role** | a job description an Agent can be qualified for: `[role.case-officer]` (purpose and policy) |
+| **Chief (C)** | the built-in role that holds every action |
+| **Controller** | the built-in admin role; at `operation:X`, that Operation's admin |
 | **Operation** | a global project and its policy (`operations.toml`, `operation_id`) |
 | **Subordinate Operation** | an Operation whose `parent` names another |
 | **Mission / Mission ID** | one brief and unit of work under an Operation (`mission_id`) |
@@ -126,10 +128,10 @@ see it, and the credential it needs is leased only against an approval.
 | **Relocation** | Headquarters authority moving to a fallback Station |
 | **Outstation** | an execution-only Station |
 | **Check-in / gone dark** | a Station's recurring Registry record / a Station whose check-ins lapsed |
-| **Extraction** | carrying a Mission on when its Station goes dark, or its runner does: another Station adopts a Session a runner keeps alive, or a lost Session is tried again with a hand-off (`recovery` in code; an Operation's `on_lost` and `lost_after_secs`) |
+| **Extraction** | carrying a Mission on when its Station or runner is lost: another Station adopts a runner's Session, or a lost one is retried with a hand-off (`recovery`; `on_lost`, `lost_after_secs`) |
 | **Theater** | the host or environment a Session runs in (an Operation's `theater`) |
 | **Safe house** | a Mission's isolated workspace, made by a safe-house provider (`SafeHouseProvider`; the `workspace` key on an Operation) |
-| **Registry** | the shared store for briefs, leases, check-ins and audit (`RegistryBackend`: a shared directory, `FileRegistry`, or a database, `SqlRegistry`) |
+| **Registry** | the shared store for briefs, leases, check-ins and audit (`RegistryBackend`: `FileRegistry` or `SqlRegistry`) |
 | **Brief / debrief** | a Mission's request / the outcome the Registry files when it ends |
 | **Dead drop** | how the Registry works: briefs and outcomes exchanged without the sides meeting |
 | **Cable** | a durable, addressed agent-to-agent message with a relay-authenticated sender |
@@ -138,6 +140,6 @@ see it, and the credential it needs is leased only against an approval.
 | **Cover / blown** | an Operation's commit attribution policy / a commit that broke it |
 | **Clearance** | `desk`, `field` or `00`: what an Agent may do without asking |
 | **Green ink** | a person's recorded approval of one irreversible step an Agent asked to take (`request_approval`; an Operation's `green_ink` policy) |
-| **Class authorisation** | a standing approval of a kind of step on matching targets, for named Agents or roles, until it expires, runs out of uses or is revoked |
+| **Class authorisation** | a standing approval of a kind of step on matching targets, until it ends or is revoked |
 | **HUMINT / SIGINT** | briefs from people / briefs from signals such as CI failures and alerts |
 | **Exfiltration route** | how work leaves a safe house: with `git`, the kept branch and its commits |
