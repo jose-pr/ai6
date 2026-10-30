@@ -37,14 +37,13 @@ fn plugins() -> Plugins {
 #[test]
 fn the_built_library_loads_as_a_source_and_serves_a_poll() {
     let plugins = plugins();
-    assert!(
-        plugins
-            .sources()
-            .iter()
-            .any(|provider| provider.id == "jira"),
-        "{:?}",
-        plugins.scan_summary()
-    );
+    for providers in [plugins.sources(), plugins.trackers()] {
+        assert!(
+            providers.iter().any(|provider| provider.id == "jira"),
+            "{:?}",
+            plugins.scan_summary()
+        );
+    }
     let fake = serve(|_| vec![canned(200, include_str!("fixtures/cloud_page2.json"))]);
     let source = plugins
         .source(

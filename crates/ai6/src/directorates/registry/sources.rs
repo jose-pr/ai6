@@ -70,31 +70,13 @@ pub struct SourceBatch {
     pub cursor: Option<String>,
 }
 
-/// The outcome of a Mission, sent back to the item that started it.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
-#[map(crate = ::guatiao)]
-pub struct CxReport {
-    /// The [`SourceItem::id`] the Mission came from.
-    pub item_id: String,
-    /// The AI6 Mission ID.
-    pub mission_id: String,
-    /// `done`, `failed` or another terminal Mission state.
-    pub outcome: String,
-    /// The comment text, already worded for the Operation's cover policy.
-    pub body: String,
-    /// The Git branch holding the work, when the Mission kept a safe house.
-    pub branch: Option<String>,
-}
-
-/// A tracker or CI system that supplies work and receives its outcome.
+/// A tracker or CI system that supplies work. What is written back to a tracker goes through
+/// the [`Tracker`](super::tracker::Tracker) kind.
 #[guatiao::kind(name = "ai6_source")]
 pub trait Source: Send + Sync {
     /// Returns the items that changed since `request.cursor` and match the filters the
     /// provider was configured with. Blocks for the duration of the network exchange.
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
-
-    /// Posts a Mission outcome to the item it came from.
-    fn report(&self, report: CxReport) -> Result<(), ProviderError>;
 }
 
 /// What happened to one item when it was offered to the Registry.
@@ -513,7 +495,7 @@ mod tests {
     // A changed required signature affects every built source provider.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(SourceVtable::FLOOR_HASH, 728542076);
+        assert_eq!(SourceVtable::FLOOR_HASH, 1796254243);
     }
 
     fn an_item_becomes_one_brief_and_changes_update_it(store: &dyn Store) {

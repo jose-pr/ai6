@@ -171,7 +171,7 @@ pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization,
 };
 pub use directorates::registry::sources::{
-    CxReport, FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, Source, SourceBatch, SourceConfig,
+    FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, Source, SourceBatch, SourceConfig,
     SourceItem, SourcePoll, source_brief,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
@@ -181,6 +181,10 @@ pub use directorates::registry::store::{
     MissionProposal, StationRecord, StationSettings,
 };
 pub use directorates::registry::timeline::TimelineEvent;
+pub use directorates::registry::tracker::{
+    IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Tracker, TrackerCapabilities,
+    TrackerIssue, TrackerLink, TrackerPost, TrackerUpdate,
+};
 pub use directorates::registry::vetting::{Clearance, HeldBrief};
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,

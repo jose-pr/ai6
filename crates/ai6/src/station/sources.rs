@@ -1,8 +1,10 @@
 //! Source polling, CX reports and sleepers, run by the Station that holds the Headquarters lease.
 //!
-//! Each Operation lists its Sources under `sources.<provider>` in `operations.toml`. The
-//! desk polls each one on an interval, queues what it finds as briefs, and posts the
-//! outcome of every finished Mission back to the item it came from. Cursors live in the
+//! Each Operation lists its tracker instances under `sources.<name>` in `operations.toml`;
+//! `provider` names the provider (default: the key) and `intake = false` keeps an instance
+//! out of polling. The desk polls each polled instance on an interval, queues what it
+//! finds as briefs, and posts the outcome of every finished Mission back to the item it
+//! came from through the Tracker kind. Cursors live in the
 //! Registry, so a Station that takes over the Headquarters lease resumes where the last
 //! one stopped. Authorized sleepers queue their briefs from the same pass.
 
@@ -17,8 +19,9 @@ use crate::directorates::m::roster::{Operation, Roster};
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::sleepers::{Fire, Sleeper};
 use crate::directorates::registry::sources::{
-    CxReport, FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
+    FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
+use crate::directorates::registry::tracker::{Tracker, TrackerPost, TrackerUpdate};
 
 use crate::station::limits::SourceLimits;
 use crate::station::plugins::Plugins;
@@ -27,8 +30,39 @@ use guatiao::ToValue;
 /// Constructs the provider for a provider ID and an Operation's settings.
 type SourceBuilder<'a> = dyn Fn(&str, &toml::Table) -> Result<Box<dyn Source>, String> + 'a;
 
-/// Providers already built during one report pass, by (Operation, provider).
-type SourceCache = BTreeMap<(String, String), Result<Box<dyn Source>, String>>;
+/// Constructs the Tracker for a provider ID and an instance's settings.
+type TrackerBuilder<'a> = dyn Fn(&str, &toml::Table) -> Result<Box<dyn Tracker>, String> + 'a;
+
+/// Trackers already built during one report pass, by (Operation, instance).
+type TrackerCache = BTreeMap<(String, String), Result<Box<dyn Tracker>, String>>;
+
+/// The words a Mission's progress is written in on an instance: a label or a workflow
+/// transition per milestone. Unset milestones write nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct StatusWords {
+    /// While an Agent works.
+    pub working: Option<String>,
+    /// While the Mission waits for an answer on the issue.
+    pub waiting: Option<String>,
+    /// While the Mission is paused.
+    pub paused: Option<String>,
+    /// When the Mission ended successfully.
+    pub done: Option<String>,
+    /// When the Mission ended without completing.
+    pub failed: Option<String>,
+}
+
+impl StatusWords {
+    /// The word for a Mission outcome: `done` for a successful one, `failed` otherwise.
+    pub(crate) fn for_outcome(&self, outcome: &str) -> Option<&str> {
+        if outcome == "done" {
+            self.done.as_deref()
+        } else {
+            self.failed.as_deref()
+        }
+    }
+}
 
 /// What one poll of one source changed.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -39,19 +73,29 @@ pub(crate) struct PollSummary {
     pub skipped: usize,
 }
 
-/// A source provider as configured for one Operation.
+/// A tracker instance as configured for one Operation.
 pub(crate) struct SourceSetup {
+    /// The key under `sources`: what briefs, cursors and linked issues call the instance.
+    pub name: String,
+    /// The provider that serves it.
     pub provider: String,
+    /// The settings the provider is built with.
     pub settings: toml::Table,
     pub interval: Duration,
+    /// Whether the instance is polled for work; `false` for one used only to link or create.
+    pub intake: bool,
+    /// Labels the Station writes for Mission milestones.
+    pub status_labels: StatusWords,
+    /// Workflow transitions the Station makes for Mission milestones.
+    pub status_transitions: StatusWords,
 }
 
-/// Reads an Operation's `sources` table into per-provider settings.
+/// Reads an Operation's `sources` table into per-instance settings.
 ///
 /// A table value holds the provider's settings; a bare string is shorthand for
-/// `{ target = "<string>" }`. `interval_secs` belongs to the desk and is not passed on: it
-/// defaults to `limits.poll` and is raised to `limits.min_poll`, so a typo cannot hammer a
-/// tracker.
+/// `{ target = "<string>" }`. `provider`, `intake` and `interval_secs` belong to the desk
+/// and are not passed on: `provider` defaults to the key, `intake` to `true`, and the
+/// interval to `limits.poll`, raised to `limits.min_poll`, so a typo cannot hammer a tracker.
 pub(crate) fn source_setups(
     operation: &Operation,
     limits: &SourceLimits,
@@ -59,7 +103,7 @@ pub(crate) fn source_setups(
     operation
         .sources
         .iter()
-        .map(|(provider, value)| {
+        .map(|(name, value)| {
             let mut settings = match value {
                 toml::Value::Table(table) => table.clone(),
                 toml::Value::String(target) => {
@@ -69,11 +113,43 @@ pub(crate) fn source_setups(
                 }
                 _ => {
                     return Err(format!(
-                        "Operation {}: sources.{provider} must be a table or a string",
+                        "Operation {}: sources.{name} must be a table or a string",
                         operation.id
                     ));
                 }
             };
+            let provider = match settings.remove("provider") {
+                None => name.clone(),
+                Some(toml::Value::String(provider)) if !provider.is_empty() => provider,
+                Some(_) => {
+                    return Err(format!(
+                        "Operation {}: sources.{name}.provider must be a provider ID",
+                        operation.id
+                    ));
+                }
+            };
+            let intake = match settings.remove("intake") {
+                None => true,
+                Some(toml::Value::Boolean(intake)) => intake,
+                Some(_) => {
+                    return Err(format!(
+                        "Operation {}: sources.{name}.intake must be true or false",
+                        operation.id
+                    ));
+                }
+            };
+            let words = |key: &str| -> Result<StatusWords, String> {
+                settings.get(key).map_or_else(
+                    || Ok(StatusWords::default()),
+                    |value| {
+                        value.clone().try_into().map_err(|error| {
+                            format!("Operation {}: sources.{name}.{key}: {error}", operation.id)
+                        })
+                    },
+                )
+            };
+            let status_labels = words("status_labels")?;
+            let status_transitions = words("status_transitions")?;
             let interval = match settings.remove("interval_secs") {
                 None => limits.poll.0,
                 Some(toml::Value::Integer(seconds)) if seconds > 0 => {
@@ -81,15 +157,19 @@ pub(crate) fn source_setups(
                 }
                 Some(_) => {
                     return Err(format!(
-                        "Operation {}: sources.{provider}.interval_secs must be a positive integer",
+                        "Operation {}: sources.{name}.interval_secs must be a positive integer",
                         operation.id
                     ));
                 }
             };
             Ok(SourceSetup {
-                provider: provider.clone(),
+                name: name.clone(),
+                provider,
                 settings,
                 interval,
+                intake,
+                status_labels,
+                status_transitions,
             })
         })
         .collect()
@@ -107,6 +187,21 @@ fn build_source(
         .map_err(|error| error.to_string())?;
     plugins
         .source(provider, Some(&config))
+        .map_err(|error| error.to_string())
+}
+
+/// Builds the Tracker for one instance's settings through the plugin host.
+fn build_tracker(
+    plugins: &Plugins,
+    provider: &str,
+    settings: &toml::Table,
+) -> Result<Box<dyn Tracker>, String> {
+    let settings_toml = toml::to_string(settings).map_err(|error| error.to_string())?;
+    let config = SourceConfig { settings_toml }
+        .to_value()
+        .map_err(|error| error.to_string())?;
+    plugins
+        .tracker(provider, Some(&config))
         .map_err(|error| error.to_string())
 }
 
@@ -144,6 +239,21 @@ pub(crate) fn poll_source(
             .map_err(|error| format!("cursor not stored: {error}"))?;
     }
     Ok(summary)
+}
+
+/// The outcome of a Mission, worded for the item that started it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CxReport {
+    /// The item ID the Mission came from.
+    pub item_id: String,
+    /// The AI6 Mission ID.
+    pub mission_id: String,
+    /// `done`, `failed` or another terminal Mission state.
+    pub outcome: String,
+    /// The comment text, already worded for the Operation's cover policy.
+    pub body: String,
+    /// The Git branch holding the work, when the Mission kept a safe house.
+    pub branch: Option<String>,
 }
 
 /// Words the report for the Operation's cover policy.
@@ -219,21 +329,21 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
 
 /// Posts the outcome of each finished source Mission back to its item.
 ///
-/// `build` constructs the provider for an Operation's settings. A report that fails is
+/// `build` constructs the Tracker for an instance's settings. A report that fails is
 /// retried on later passes, up to the Registry's attempt limit.
 pub(crate) fn report_finished(
     registry: &dyn RegistryBackend,
     roster: &Roster,
-    build: &SourceBuilder<'_>,
+    build: &TrackerBuilder<'_>,
     limits: &SourceLimits,
 ) -> usize {
     let Ok(finished) = registry.unreported_source_briefs() else {
         return 0;
     };
-    let mut sources = SourceCache::new();
+    let mut trackers = TrackerCache::new();
     let mut reported = 0;
     for entry in finished {
-        let result = report_one(roster, build, limits, &mut sources, &entry);
+        let result = report_one(roster, build, limits, &mut trackers, &entry);
         match result {
             Ok(()) => {
                 reported += 1;
@@ -253,12 +363,12 @@ pub(crate) fn report_finished(
 
 fn report_one(
     roster: &Roster,
-    build: &SourceBuilder<'_>,
+    build: &TrackerBuilder<'_>,
     limits: &SourceLimits,
-    sources: &mut SourceCache,
+    trackers: &mut TrackerCache,
     entry: &FinishedSourceBrief,
 ) -> Result<(), String> {
-    let provider = entry
+    let instance = entry
         .brief
         .source
         .trim_start_matches(crate::SOURCE_BRIEF_PREFIX);
@@ -272,25 +382,49 @@ fn report_one(
     let setup = source_setups(operation, limits)
         .into_iter()
         .filter_map(Result::ok)
-        .find(|setup| setup.provider == provider)
+        .find(|setup| setup.name == instance)
         .ok_or_else(|| {
             format!(
-                "Operation {} no longer configures source {provider}",
+                "Operation {} no longer configures source {instance}",
                 operation.id
             )
         })?;
-    if !reportable(&entry.brief, provider) {
+    if !reportable(&entry.brief, instance) {
         return Err(format!(
-            "the brief has no provenance from source {provider}, so nothing is posted for it"
+            "the brief has no provenance from source {instance}, so nothing is posted for it"
         ));
     }
-    let source = sources
-        .entry((operation.id.clone(), provider.to_owned()))
-        .or_insert_with(|| build(provider, &setup.settings));
-    let source = source.as_ref().map_err(Clone::clone)?;
-    source
-        .report(compose_report(cover.disclosure(), entry))
-        .map_err(|error| error.to_string())
+    let tracker = trackers
+        .entry((operation.id.clone(), instance.to_owned()))
+        .or_insert_with(|| build(&setup.provider, &setup.settings));
+    let tracker = tracker.as_ref().map_err(Clone::clone)?;
+    let report = compose_report(cover.disclosure(), entry);
+    tracker
+        .post(TrackerPost {
+            item: report.item_id.clone(),
+            body: report.body.clone(),
+            edit: None,
+            marker: None,
+        })
+        .map_err(|error| error.to_string())?;
+    let update = TrackerUpdate {
+        item: report.item_id.clone(),
+        add_labels: setup
+            .status_labels
+            .for_outcome(&report.outcome)
+            .map(str::to_owned)
+            .into_iter()
+            .collect(),
+        transition: setup
+            .status_transitions
+            .for_outcome(&report.outcome)
+            .map(str::to_owned),
+        ..TrackerUpdate::default()
+    };
+    if update.add_labels.is_empty() && update.transition.is_none() {
+        return Ok(());
+    }
+    tracker.update(update).map_err(|error| error.to_string())
 }
 
 /// Queues the brief of every authorized sleeper whose latest window has not fired.
@@ -472,7 +606,9 @@ impl SourceDesk {
     pub(crate) fn run(&self, plugins: &Plugins, roster: &Roster, registry: &dyn RegistryBackend) {
         let build =
             |provider: &str, settings: &toml::Table| build_source(plugins, provider, settings);
-        self.run_with(roster, registry, &build);
+        let build_tracker =
+            |provider: &str, settings: &toml::Table| build_tracker(plugins, provider, settings);
+        self.run_with(roster, registry, &build, &build_tracker);
     }
 
     pub(crate) fn run_with(
@@ -480,6 +616,7 @@ impl SourceDesk {
         roster: &Roster,
         registry: &dyn RegistryBackend,
         build: &SourceBuilder<'_>,
+        build_tracker: &TrackerBuilder<'_>,
     ) {
         let now = Instant::now();
         for operation in roster.operations() {
@@ -491,7 +628,10 @@ impl SourceDesk {
                         continue;
                     }
                 };
-                let key = (operation.id.clone(), setup.provider.clone());
+                if !setup.intake {
+                    continue;
+                }
+                let key = (operation.id.clone(), setup.name.clone());
                 let due = self
                     .due
                     .lock()
@@ -509,19 +649,19 @@ impl SourceDesk {
                         registry,
                         &self.station,
                         &operation.id,
-                        &setup.provider,
+                        &setup.name,
                         source.as_ref(),
                     )
                 });
                 match result {
                     Ok(summary) if summary.queued + summary.updated > 0 => eprintln!(
                         "ai6: source {} for Operation {}: {} queued, {} updated",
-                        setup.provider, operation.id, summary.queued, summary.updated
+                        setup.name, operation.id, summary.queued, summary.updated
                     ),
                     Ok(_) => {}
                     Err(error) => eprintln!(
                         "ai6: source {} for Operation {}: {error}",
-                        setup.provider, operation.id
+                        setup.name, operation.id
                     ),
                 }
             }
@@ -538,7 +678,7 @@ impl SourceDesk {
             })
             .unwrap_or(false);
         if report_due {
-            report_finished(registry, roster, build, &self.limits);
+            report_finished(registry, roster, build_tracker, &self.limits);
         }
         let sleepers_due = self
             .next_sleepers
@@ -569,11 +709,14 @@ mod tests {
     use crate::directorates::registry::sources::{SourceBatch, SourceItem};
     use crate::directorates::registry::store::FileRegistry;
 
-    static POSTED: Mutex<Vec<CxReport>> = Mutex::new(Vec::new());
+    /// Every comment the fake tracker was asked to post, as (item, body).
+    static POSTED: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+    /// Every update the fake tracker was asked to make.
+    static UPDATED: Mutex<Vec<TrackerUpdate>> = Mutex::new(Vec::new());
 
-    /// Serves the ids listed in its settings; remembers every report it is given.
+    /// Serves the ids listed in its settings; remembers every comment and update it is given.
     #[derive(Provider)]
-    #[provider(Source, id = "fake", name = "fake", config = SourceConfig)]
+    #[provider(Source, Tracker, id = "fake", name = "fake", config = SourceConfig)]
     struct Fake {
         ids: Vec<String>,
         body: String,
@@ -629,10 +772,46 @@ mod tests {
                 cursor: Some(next.to_string()),
             })
         }
+    }
 
-        fn report(&self, report: CxReport) -> Result<(), ProviderError> {
-            POSTED.lock().unwrap().push(report);
+    impl Tracker for Fake {
+        fn capabilities(
+            &self,
+            _item: Option<String>,
+        ) -> Result<crate::TrackerCapabilities, ProviderError> {
+            Ok(crate::TrackerCapabilities {
+                comment: true,
+                ..Default::default()
+            })
+        }
+
+        fn issue(&self, _item: String) -> Result<crate::TrackerIssue, ProviderError> {
+            Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "fake"))
+        }
+
+        fn replies(&self, _request: crate::ReplyPoll) -> Result<crate::ReplyBatch, ProviderError> {
+            Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "fake"))
+        }
+
+        fn post(&self, post: TrackerPost) -> Result<crate::PostedComment, ProviderError> {
+            POSTED.lock().unwrap().push((post.item, post.body));
+            Ok(crate::PostedComment {
+                id: "1".to_owned(),
+                url: None,
+            })
+        }
+
+        fn update(&self, update: TrackerUpdate) -> Result<(), ProviderError> {
+            UPDATED.lock().unwrap().push(update);
             Ok(())
+        }
+
+        fn create(&self, _spec: crate::IssueSpec) -> Result<crate::TrackerIssue, ProviderError> {
+            Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "fake"))
+        }
+
+        fn link(&self, _link: crate::TrackerLink) -> Result<(), ProviderError> {
+            Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "fake"))
         }
     }
 
@@ -776,12 +955,80 @@ mod tests {
         desk.run(&plugins, &roster, &registry);
 
         let posted = POSTED.lock().unwrap();
-        let mine: Vec<_> = posted.iter().filter(|r| r.item_id == "report-me").collect();
+        let mine: Vec<_> = posted
+            .iter()
+            .filter(|(item, _)| item == "report-me")
+            .collect();
         assert_eq!(mine.len(), 1);
-        assert_eq!(mine[0].outcome, "done");
-        assert_eq!(mine[0].branch.as_deref(), Some("agent/fix"));
-        assert!(mine[0].body.contains("007"));
-        assert!(mine[0].body.contains("sess-1"));
+        assert!(mine[0].1.contains("ended: done"));
+        assert!(mine[0].1.contains("agent/fix"));
+        assert!(mine[0].1.contains("007"));
+        assert!(mine[0].1.contains("sess-1"));
+    }
+
+    #[test]
+    fn a_report_applies_the_status_label_and_transition_of_the_outcome() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_with(
+            "overt",
+            "{ fake = { ids = [\"labelled\"], status_labels = { done = \"ai6:done\", failed = \"ai6:failed\" }, status_transitions = { done = \"Done\" } } }",
+        );
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        finish_all(
+            &registry,
+            true,
+            serde_json::json!({ "state": "done", "mission_id": "m" }),
+        );
+        desk.due.lock().unwrap().clear();
+        *desk.next_report.lock().unwrap() = Instant::now();
+        desk.run(&plugins, &roster, &registry);
+        let updated = UPDATED.lock().unwrap();
+        let update = updated
+            .iter()
+            .find(|update| update.item == "labelled")
+            .expect("the outcome's label and transition were written");
+        assert_eq!(update.add_labels, ["ai6:done"]);
+        assert_eq!(update.transition.as_deref(), Some("Done"));
+    }
+
+    #[test]
+    fn an_instance_name_may_differ_from_its_provider_and_intake_can_be_off() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_with(
+            "covert",
+            "{ board = { provider = \"fake\", ids = [\"1\"] }, mirror = { provider = \"fake\", ids = [\"2\"], intake = false } }",
+        );
+        let setups: Vec<_> =
+            source_setups(roster.operation("G").unwrap(), &SourceLimits::default())
+                .into_iter()
+                .map(Result::unwrap)
+                .collect();
+        let board = setups.iter().find(|setup| setup.name == "board").unwrap();
+        assert_eq!(board.provider, "fake");
+        assert!(board.intake);
+        assert!(!board.settings.contains_key("provider"));
+        assert!(!board.settings.contains_key("intake"));
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        let queued = registry.list_new().unwrap();
+        assert_eq!(
+            queued.len(),
+            1,
+            "the intake = false instance is never polled"
+        );
+        assert_eq!(queued[0].key(), "source_board--1");
+        assert!(registry.source_cursor("G", "mirror").unwrap().is_none());
+        let (_dir, roster) = roster_with("covert", "{ board = { provider = 3 } }");
+        assert!(
+            source_setups(roster.operation("G").unwrap(), &SourceLimits::default())
+                .remove(0)
+                .is_err()
+        );
     }
 
     /// 2026-10-25T10:00:00Z, a Sunday.

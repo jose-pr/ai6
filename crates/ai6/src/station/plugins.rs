@@ -29,6 +29,7 @@ use crate::directorates::q::terminal::{
 };
 use crate::directorates::q::transport::Transport;
 use crate::directorates::registry::sources::Source;
+use crate::directorates::registry::tracker::Tracker;
 use crate::directorates::section_00::agent::AgentHandler;
 
 /// A loaded provider visible to the daemon.
@@ -362,6 +363,11 @@ impl Plugins {
         providers(&self.registry, <dyn Source>::NAME)
     }
 
+    /// Returns the Tracker providers and their reported availability.
+    pub fn trackers(&self) -> Vec<ProviderInfo> {
+        providers(&self.registry, <dyn Tracker>::NAME)
+    }
+
     /// Returns the configured credential authenticators.
     pub fn authenticators(&self) -> Vec<ProviderInfo> {
         providers(&self.registry, <dyn Authenticator>::NAME)
@@ -501,6 +507,16 @@ impl Plugins {
         self.build::<dyn Source>(provider, config)
     }
 
+    /// Constructs a Tracker from its provider ID and Guatiao config (a `SourceConfig`: the
+    /// same settings table builds the Source).
+    pub fn tracker(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+    ) -> Result<Box<dyn Tracker>, PluginBuildError> {
+        self.build::<dyn Tracker>(provider, config)
+    }
+
     /// Constructs an Authenticator from its provider ID and optional Guatiao config.
     pub fn authenticator(
         &self,
@@ -581,6 +597,7 @@ fn declares_ai6_kind(declared: &Declared) -> Result<(), String> {
                     | "ai6_transport"
                     | "ai6_theater_provider"
                     | "ai6_source"
+                    | "ai6_tracker"
             )
     }) {
         Ok(())

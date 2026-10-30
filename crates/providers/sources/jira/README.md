@@ -19,7 +19,8 @@ configured, a workflow transition. See the
   Server or Data Center (REST v2).
 - Reads its credentials from environment variables the Operation names; they are never
   configured or logged.
-- Comments the Mission outcome on the issue and can move it through a named transition.
+- As a Tracker, reads, comments on (Markdown becomes rich text), labels, assigns,
+  transitions, creates and links issues, and lists the replies that may answer a question.
 - Builds as both a Rust library and the Guatiao provider library a Station loads.
 
 ## Installation
@@ -40,7 +41,7 @@ site = "https://example.atlassian.net"
 project = "GUA"
 email_env = "JIRA_EMAIL"
 token_env = "JIRA_API_TOKEN"
-done_transition = "In Review"
+status_transitions = { done = "In Review" }
 ```
 
 Then start a Station that holds the Headquarters lease with the library on its plugin path:

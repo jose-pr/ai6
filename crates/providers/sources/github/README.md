@@ -18,7 +18,8 @@ the [API header](https://github.com/jose-pr/ai6/blob/main/crates/providers/sourc
   configured or logged.
 - Reports a rate limit as an error and tries again on the next poll; pagination never
   leaves the configured API origin.
-- Comments the Mission outcome on the issue and can add a label for success or failure.
+- As a Tracker, reads, comments on, labels, assigns, closes and creates issues, attaches
+  sub-issues, and lists the replies that may answer a question.
 - Builds as both a Rust library and the Guatiao provider library a Station loads.
 
 ## Installation

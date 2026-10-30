@@ -2520,17 +2520,9 @@ pub struct SourceItem {
 }
 pub struct SourcePoll { pub cursor: Option<String> }
 pub struct SourceBatch { pub items: Vec<SourceItem>, pub cursor: Option<String> }
-pub struct CxReport {
-    pub item_id: String,
-    pub mission_id: String,
-    pub outcome: String,       // "done", "failed", ...
-    pub body: String,          // already worded for the Operation's cover policy
-    pub branch: Option<String>,
-}
 #[guatiao::kind(name = "ai6_source")]
 pub trait Source: Send + Sync {
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
-    fn report(&self, report: CxReport) -> Result<(), ProviderError>;
 }
 pub const SOURCE_BRIEF_PREFIX: &str = "source:";
 
@@ -2547,8 +2539,9 @@ SourceStore::mark_source_reported(finished: &FinishedSourceBrief, reported: bool
 ```
 
 A provider receives its settings as `SourceConfig::settings_toml` and validates them itself;
-the Station removes its own `interval_secs` key first. `poll` and `report` block on the
-network and are called off the async runtime. A provider returns an error for a rate limit
+the Station removes its own `provider`, `intake` and `interval_secs` keys first. `poll` blocks
+on the network and is called off the async runtime. Writing to a tracker is the Tracker kind
+below. A provider returns an error for a rate limit
 or a refused credential; the Station polls again at its next interval.
 
 `source_brief` keys the brief `source_<provider>--<id>` (the brief's `source` is
@@ -2561,12 +2554,128 @@ text cannot contain it. `ingest_source_item` queues the brief, updates a brief s
 `[registry.limits.sources] report_attempts`, five, attempts each); `mark_source_reported`
 records an attempt.
 
-On the Station, the Headquarters holder runs a source desk: per Operation and provider it
-polls on `interval_secs` (default 60 s, minimum 10 s), ingests the batch, then stores the
-cursor; every 15 s it posts a `CxReport` for each unreported finished source brief. The
-finished outcome carries `state`, `mission_id`, `session_ids`, `agent` and `branch`. Report
+On the Station, the Headquarters holder runs a source desk: per Operation and instance
+(`sources.<name>`; `provider` names the provider, default the key; `intake = false` keeps an
+instance out of polling) it polls on `interval_secs` (default 60 s, the `[sources] min_poll`
+floor), ingests the batch, then stores the cursor; every 15 s it posts a comment through the
+Tracker for each unreported finished source brief and applies the instance's
+`status_labels` / `status_transitions` entry for the outcome (`done`, else `failed`). The
+`provider` argument of `SourceStore` and the brief's key and `source` hold the instance name.
+The finished outcome carries `state`, `mission_id`, `session_ids`, `agent` and `branch`. Report
 wording follows `Cover::disclosure()`: `Hidden` (covert), `Assisted` (partial) or `Full`
 (overt).
+
+## Trackers (`ai6::directorates::registry::tracker`)
+
+A Tracker is the second Guatiao kind (`ai6_tracker`) the tracker providers (`github`, `jira`)
+serve, built from the same `SourceConfig` as their Source. Every method is blocking and names
+an issue by its item ID (`owner/repo#12`, `GUA-12`). An item outside the instance's
+repository or project fails `GUATIAO_ERR_BAD_VALUE` (`foreign item ...`); a call the
+instance cannot make fails `GUATIAO_ERR_UNSUPPORTED` naming what it can do.
+
+```rust
+pub struct TrackerCapabilities {
+    pub comment: bool, pub edit_comment: bool,
+    pub labels: Vec<String>, pub free_labels: bool,   // the tracker's labels; free_labels: any is accepted
+    pub transitions: Vec<String>,                     // per item (Jira)
+    pub assign: bool, pub close: bool, pub create: bool,
+    pub issue_types: Vec<String>, pub priorities: Vec<String>,
+    pub children: String,        // "none" | "sub_issues" | "subtasks" | "parent"
+    pub links: Vec<String>,      // "issue_links", "remote_links"; empty: only text links
+    pub replies: bool,
+    pub visibility: String,      // "public" | "private" | "unknown"
+    pub markers: bool,
+}
+pub struct TrackerIssue { pub id, native_id, title, body, state /* open|closed */: String,
+    pub labels: Vec<String>, pub assignees: Vec<String>, pub url: Option<String>,
+    pub updated: String, pub parent: Option<String>, pub author_id: Option<String> }
+pub struct ReplyPoll { pub items: Vec<String>, pub since: Option<String> }
+pub struct Reply { pub id, item, author_id, author: String, pub permitted: bool,
+    pub own: bool, pub body: String, pub created: String }   // body untrusted
+pub struct ReplyBatch { pub replies: Vec<Reply>, pub cursor: Option<String> }
+pub struct TrackerPost { pub item: String, pub body: String, pub edit: Option<String>, pub marker: Option<String> }
+pub struct PostedComment { pub id: String, pub url: Option<String> }
+pub struct TrackerUpdate { pub item: String, pub add_labels: Vec<String>, pub remove_labels: Vec<String>,
+    pub transition: Option<String>, pub add_assignees: Vec<String>, pub remove_assignees: Vec<String>,
+    pub state: Option<String> /* open|closed */ }
+pub struct IssueSpec { pub title: String, pub body: String, pub labels: Vec<String>,
+    pub issue_type: Option<String>, pub priority: Option<String>, pub parent: Option<String> }
+pub struct TrackerLink { pub from: String, pub to: Option<String>, pub relation: String, pub url: Option<String> }
+#[guatiao::kind(name = "ai6_tracker")]
+pub trait Tracker: Send + Sync {
+    fn capabilities(&self, item: Option<String>) -> Result<TrackerCapabilities, ProviderError>;
+    fn issue(&self, item: String) -> Result<TrackerIssue, ProviderError>;
+    fn replies(&self, request: ReplyPoll) -> Result<ReplyBatch, ProviderError>;
+    fn post(&self, post: TrackerPost) -> Result<PostedComment, ProviderError>;
+    fn update(&self, update: TrackerUpdate) -> Result<(), ProviderError>;
+    fn create(&self, spec: IssueSpec) -> Result<TrackerIssue, ProviderError>;
+    fn link(&self, link: TrackerLink) -> Result<(), ProviderError>;
+}
+Plugins::trackers() -> Vec<ProviderInfo>;  Plugins::tracker(provider, config: Option<&Value>) -> Result<Box<dyn Tracker>, PluginBuildError>
+```
+
+`Reply::permitted` is the provider's judgement that the author may answer for the issue (its
+author or reporter, a repository owner, member or collaborator, a Jira assignee, or someone the
+instance's `reply_authors` names); `own` marks the identity AI6 posts as. Settings both kinds
+read: the Source's, plus `status_labels` and `status_transitions` (`working`, `waiting`,
+`paused`, `done`, `failed`), `agent_labels`, `reply_authors`, `reply_associations` (GitHub),
+`issue_type`, `subtask_type` and `priority_map`.
+
+## Trackers (`ai6::directorates::registry::tracker`)
+
+A Tracker is the second Guatiao kind (`ai6_tracker`) the tracker providers (`github`, `jira`)
+serve, built from the same `SourceConfig` as their Source. Every method is blocking and names
+an issue by its item ID (`owner/repo#12`, `GUA-12`). An item outside the instance's
+repository or project fails `GUATIAO_ERR_BAD_VALUE` (`foreign item ...`); a call the
+instance cannot make fails `GUATIAO_ERR_UNSUPPORTED` naming what it can do.
+
+```rust
+pub struct TrackerCapabilities {
+    pub comment: bool, pub edit_comment: bool,
+    pub labels: Vec<String>, pub free_labels: bool,   // the tracker's labels; free_labels: any is accepted
+    pub transitions: Vec<String>,                     // per item (Jira)
+    pub assign: bool, pub close: bool, pub create: bool,
+    pub issue_types: Vec<String>, pub priorities: Vec<String>,
+    pub children: String,        // "none" | "sub_issues" | "subtasks" | "parent"
+    pub links: Vec<String>,      // "issue_links", "remote_links"; empty: only text links
+    pub replies: bool,
+    pub visibility: String,      // "public" | "private" | "unknown"
+    pub markers: bool,
+}
+pub struct TrackerIssue { pub id, native_id, title, body, state /* open|closed */: String,
+    pub labels: Vec<String>, pub assignees: Vec<String>, pub url: Option<String>,
+    pub updated: String, pub parent: Option<String>, pub author_id: Option<String> }
+pub struct ReplyPoll { pub items: Vec<String>, pub since: Option<String> }
+pub struct Reply { pub id, item, author_id, author: String, pub permitted: bool,
+    pub own: bool, pub body: String, pub created: String }   // body untrusted
+pub struct ReplyBatch { pub replies: Vec<Reply>, pub cursor: Option<String> }
+pub struct TrackerPost { pub item: String, pub body: String, pub edit: Option<String>, pub marker: Option<String> }
+pub struct PostedComment { pub id: String, pub url: Option<String> }
+pub struct TrackerUpdate { pub item: String, pub add_labels: Vec<String>, pub remove_labels: Vec<String>,
+    pub transition: Option<String>, pub add_assignees: Vec<String>, pub remove_assignees: Vec<String>,
+    pub state: Option<String> /* open|closed */ }
+pub struct IssueSpec { pub title: String, pub body: String, pub labels: Vec<String>,
+    pub issue_type: Option<String>, pub priority: Option<String>, pub parent: Option<String> }
+pub struct TrackerLink { pub from: String, pub to: Option<String>, pub relation: String, pub url: Option<String> }
+#[guatiao::kind(name = "ai6_tracker")]
+pub trait Tracker: Send + Sync {
+    fn capabilities(&self, item: Option<String>) -> Result<TrackerCapabilities, ProviderError>;
+    fn issue(&self, item: String) -> Result<TrackerIssue, ProviderError>;
+    fn replies(&self, request: ReplyPoll) -> Result<ReplyBatch, ProviderError>;
+    fn post(&self, post: TrackerPost) -> Result<PostedComment, ProviderError>;
+    fn update(&self, update: TrackerUpdate) -> Result<(), ProviderError>;
+    fn create(&self, spec: IssueSpec) -> Result<TrackerIssue, ProviderError>;
+    fn link(&self, link: TrackerLink) -> Result<(), ProviderError>;
+}
+Plugins::trackers() -> Vec<ProviderInfo>;  Plugins::tracker(provider, config: Option<&Value>) -> Result<Box<dyn Tracker>, PluginBuildError>
+```
+
+`Reply::permitted` is the provider's judgement that the author may answer for the issue (its
+author or reporter, a repository owner, member or collaborator, a Jira assignee, or someone the
+instance's `reply_authors` names); `own` marks the identity AI6 posts as. Settings both kinds
+read: the Source's, plus `status_labels` and `status_transitions` (`working`, `waiting`,
+`paused`, `done`, `failed`), `agent_labels`, `reply_authors`, `reply_associations` (GitHub),
+`issue_type`, `subtask_type` and `priority_map`.
 
 ## Sleepers (`ai6::directorates::registry::sleepers`)
 

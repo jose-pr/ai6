@@ -3860,12 +3860,6 @@ pub ai6::directorates::registry::sources::Ingest::InFlight
 pub ai6::directorates::registry::sources::Ingest::Queued
 pub ai6::directorates::registry::sources::Ingest::Unchanged
 pub ai6::directorates::registry::sources::Ingest::Updated
-pub struct ai6::directorates::registry::sources::CxReport
-pub ai6::directorates::registry::sources::CxReport::body: alloc::string::String
-pub ai6::directorates::registry::sources::CxReport::branch: core::option::Option<alloc::string::String>
-pub ai6::directorates::registry::sources::CxReport::item_id: alloc::string::String
-pub ai6::directorates::registry::sources::CxReport::mission_id: alloc::string::String
-pub ai6::directorates::registry::sources::CxReport::outcome: alloc::string::String
 pub struct ai6::directorates::registry::sources::FinishedSourceBrief
 pub ai6::directorates::registry::sources::FinishedSourceBrief::brief: ai6::directorates::registry::store::Brief
 pub ai6::directorates::registry::sources::FinishedSourceBrief::ok: bool
@@ -3888,13 +3882,10 @@ pub ai6::directorates::registry::sources::SourcePoll::cursor: core::option::Opti
 pub const ai6::directorates::registry::sources::SOURCE_BRIEF_PREFIX: &str
 pub trait ai6::directorates::registry::sources::Source: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::registry::sources::Source::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
-pub fn ai6::directorates::registry::sources::Source::report(&self, ai6::directorates::registry::sources::CxReport) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::sources::Source for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
-pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>::report(&self, ai6::directorates::registry::sources::CxReport) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::sources::Source for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
-pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::report(&self, ai6::directorates::registry::sources::CxReport) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub trait ai6::directorates::registry::sources::SourceStore
 pub fn ai6::directorates::registry::sources::SourceStore::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::sources::SourceStore::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
@@ -4435,6 +4426,102 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::timeline_events(&self, &st
 impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
+pub mod ai6::directorates::registry::tracker
+pub struct ai6::directorates::registry::tracker::IssueSpec
+pub ai6::directorates::registry::tracker::IssueSpec::body: alloc::string::String
+pub ai6::directorates::registry::tracker::IssueSpec::issue_type: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::IssueSpec::labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::IssueSpec::parent: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::IssueSpec::priority: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::IssueSpec::title: alloc::string::String
+pub struct ai6::directorates::registry::tracker::PostedComment
+pub ai6::directorates::registry::tracker::PostedComment::id: alloc::string::String
+pub ai6::directorates::registry::tracker::PostedComment::url: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::registry::tracker::Reply
+pub ai6::directorates::registry::tracker::Reply::author: alloc::string::String
+pub ai6::directorates::registry::tracker::Reply::author_id: alloc::string::String
+pub ai6::directorates::registry::tracker::Reply::body: alloc::string::String
+pub ai6::directorates::registry::tracker::Reply::created: alloc::string::String
+pub ai6::directorates::registry::tracker::Reply::id: alloc::string::String
+pub ai6::directorates::registry::tracker::Reply::item: alloc::string::String
+pub ai6::directorates::registry::tracker::Reply::own: bool
+pub ai6::directorates::registry::tracker::Reply::permitted: bool
+pub struct ai6::directorates::registry::tracker::ReplyBatch
+pub ai6::directorates::registry::tracker::ReplyBatch::cursor: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::ReplyBatch::replies: alloc::vec::Vec<ai6::directorates::registry::tracker::Reply>
+pub struct ai6::directorates::registry::tracker::ReplyPoll
+pub ai6::directorates::registry::tracker::ReplyPoll::items: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::ReplyPoll::since: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::registry::tracker::TrackerCapabilities
+pub ai6::directorates::registry::tracker::TrackerCapabilities::assign: bool
+pub ai6::directorates::registry::tracker::TrackerCapabilities::children: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerCapabilities::close: bool
+pub ai6::directorates::registry::tracker::TrackerCapabilities::comment: bool
+pub ai6::directorates::registry::tracker::TrackerCapabilities::create: bool
+pub ai6::directorates::registry::tracker::TrackerCapabilities::edit_comment: bool
+pub ai6::directorates::registry::tracker::TrackerCapabilities::free_labels: bool
+pub ai6::directorates::registry::tracker::TrackerCapabilities::issue_types: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerCapabilities::labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerCapabilities::links: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerCapabilities::markers: bool
+pub ai6::directorates::registry::tracker::TrackerCapabilities::priorities: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerCapabilities::replies: bool
+pub ai6::directorates::registry::tracker::TrackerCapabilities::transitions: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerCapabilities::visibility: alloc::string::String
+pub struct ai6::directorates::registry::tracker::TrackerIssue
+pub ai6::directorates::registry::tracker::TrackerIssue::assignees: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerIssue::author_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerIssue::body: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerIssue::id: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerIssue::labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerIssue::native_id: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerIssue::parent: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerIssue::state: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerIssue::title: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerIssue::updated: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerIssue::url: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::registry::tracker::TrackerLink
+pub ai6::directorates::registry::tracker::TrackerLink::from: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerLink::relation: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerLink::to: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerLink::url: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::registry::tracker::TrackerPost
+pub ai6::directorates::registry::tracker::TrackerPost::body: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerPost::edit: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerPost::item: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerPost::marker: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::registry::tracker::TrackerUpdate
+pub ai6::directorates::registry::tracker::TrackerUpdate::add_assignees: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerUpdate::add_labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerUpdate::item: alloc::string::String
+pub ai6::directorates::registry::tracker::TrackerUpdate::remove_assignees: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerUpdate::remove_labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerUpdate::state: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::TrackerUpdate::transition: core::option::Option<alloc::string::String>
+pub trait ai6::directorates::registry::tracker::Tracker: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::registry::tracker::Tracker::capabilities(&self, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::registry::tracker::TrackerCapabilities, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::registry::tracker::Tracker::create(&self, ai6::directorates::registry::tracker::IssueSpec) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::registry::tracker::Tracker::issue(&self, alloc::string::String) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::registry::tracker::Tracker::link(&self, ai6::directorates::registry::tracker::TrackerLink) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::registry::tracker::Tracker::post(&self, ai6::directorates::registry::tracker::TrackerPost) -> core::result::Result<ai6::directorates::registry::tracker::PostedComment, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::registry::tracker::Tracker::replies(&self, ai6::directorates::registry::tracker::ReplyPoll) -> core::result::Result<ai6::directorates::registry::tracker::ReplyBatch, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::registry::tracker::Tracker::update(&self, ai6::directorates::registry::tracker::TrackerUpdate) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::registry::tracker::Tracker for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::capabilities(&self, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::registry::tracker::TrackerCapabilities, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::create(&self, ai6::directorates::registry::tracker::IssueSpec) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::issue(&self, alloc::string::String) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::link(&self, ai6::directorates::registry::tracker::TrackerLink) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::post(&self, ai6::directorates::registry::tracker::TrackerPost) -> core::result::Result<ai6::directorates::registry::tracker::PostedComment, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::replies(&self, ai6::directorates::registry::tracker::ReplyPoll) -> core::result::Result<ai6::directorates::registry::tracker::ReplyBatch, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::update(&self, ai6::directorates::registry::tracker::TrackerUpdate) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::registry::tracker::Tracker for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::capabilities(&self, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::registry::tracker::TrackerCapabilities, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::create(&self, ai6::directorates::registry::tracker::IssueSpec) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::issue(&self, alloc::string::String) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::link(&self, ai6::directorates::registry::tracker::TrackerLink) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::post(&self, ai6::directorates::registry::tracker::TrackerPost) -> core::result::Result<ai6::directorates::registry::tracker::PostedComment, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::replies(&self, ai6::directorates::registry::tracker::ReplyPoll) -> core::result::Result<ai6::directorates::registry::tracker::ReplyBatch, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::update(&self, ai6::directorates::registry::tracker::TrackerUpdate) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub mod ai6::directorates::registry::usage
 pub trait ai6::directorates::registry::usage::UsageStore
 pub fn ai6::directorates::registry::usage::UsageStore::mission_usage(&self, core::option::Option<&str>, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::medical::usage::MissionUsage>>
@@ -5109,6 +5196,8 @@ pub fn ai6::station::plugins::Plugins::terminals(&self) -> alloc::vec::Vec<ai6::
 pub fn ai6::station::plugins::Plugins::theater_provider(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::ephemeral::TheaterProvider>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::theater_providers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::theater_transport(&self, &ai6::directorates::m::theaters::TheaterAccess) -> core::result::Result<ai6::directorates::q::transport::TransportClient, alloc::string::String>
+pub fn ai6::station::plugins::Plugins::tracker(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::tracker::Tracker>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::trackers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::transport(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::transport::Transport>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::transports(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::with_provider_configs(self, alloc::collections::btree::map::BTreeMap<alloc::string::String, guatiao::value::value::Value>) -> Self
@@ -6687,12 +6776,6 @@ pub struct ai6::CronError(_)
 impl core::error::Error for ai6::directorates::registry::sleepers::CronError
 impl core::fmt::Display for ai6::directorates::registry::sleepers::CronError
 pub fn ai6::directorates::registry::sleepers::CronError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::CxReport
-pub ai6::CxReport::body: alloc::string::String
-pub ai6::CxReport::branch: core::option::Option<alloc::string::String>
-pub ai6::CxReport::item_id: alloc::string::String
-pub ai6::CxReport::mission_id: alloc::string::String
-pub ai6::CxReport::outcome: alloc::string::String
 pub struct ai6::DirEntry
 pub ai6::DirEntry::kind: alloc::string::String
 pub ai6::DirEntry::name: alloc::string::String
@@ -6972,6 +7055,13 @@ pub ai6::Incident::operation: core::option::Option<alloc::string::String>
 impl core::error::Error for ai6::directorates::m::identity::InvalidIdentity
 impl core::fmt::Display for ai6::directorates::m::identity::InvalidIdentity
 pub fn ai6::directorates::m::identity::InvalidIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::IssueSpec
+pub ai6::IssueSpec::body: alloc::string::String
+pub ai6::IssueSpec::issue_type: core::option::Option<alloc::string::String>
+pub ai6::IssueSpec::labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::IssueSpec::parent: core::option::Option<alloc::string::String>
+pub ai6::IssueSpec::priority: core::option::Option<alloc::string::String>
+pub ai6::IssueSpec::title: alloc::string::String
 #[non_exhaustive] pub struct ai6::KnownWork
 pub ai6::KnownWork::reference: alloc::string::String
 pub ai6::KnownWork::title: alloc::string::String
@@ -7263,6 +7353,9 @@ pub ai6::PlacementRequest::deciding_station: core::option::Option<alloc::string:
 pub ai6::PlacementRequest::role: core::option::Option<alloc::string::String>
 pub ai6::PlacementRequest::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::PlacementRequest::tags: alloc::vec::Vec<alloc::string::String>
+pub struct ai6::PostedComment
+pub ai6::PostedComment::id: alloc::string::String
+pub ai6::PostedComment::url: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::ProbeReport
 pub ai6::ProbeReport::ambient: alloc::vec::Vec<alloc::string::String>
 pub ai6::ProbeReport::checked_at: u64
@@ -7450,6 +7543,21 @@ impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::held_record_bytes(&self) -> ai6::bounds::Limit
 impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub struct ai6::Reply
+pub ai6::Reply::author: alloc::string::String
+pub ai6::Reply::author_id: alloc::string::String
+pub ai6::Reply::body: alloc::string::String
+pub ai6::Reply::created: alloc::string::String
+pub ai6::Reply::id: alloc::string::String
+pub ai6::Reply::item: alloc::string::String
+pub ai6::Reply::own: bool
+pub ai6::Reply::permitted: bool
+pub struct ai6::ReplyBatch
+pub ai6::ReplyBatch::cursor: core::option::Option<alloc::string::String>
+pub ai6::ReplyBatch::replies: alloc::vec::Vec<ai6::directorates::registry::tracker::Reply>
+pub struct ai6::ReplyPoll
+pub ai6::ReplyPoll::items: alloc::vec::Vec<alloc::string::String>
+pub ai6::ReplyPoll::since: core::option::Option<alloc::string::String>
 pub struct ai6::RequiredProgram
 impl ai6::directorates::q::provision::RequiredProgram
 pub fn ai6::directorates::q::provision::RequiredProgram::at_least(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, alloc::string::String>
@@ -8308,6 +8416,52 @@ pub ai6::TokenUsage::cost_micro_usd: u64
 pub ai6::TokenUsage::cumulative: bool
 pub ai6::TokenUsage::input: u64
 pub ai6::TokenUsage::output: u64
+pub struct ai6::TrackerCapabilities
+pub ai6::TrackerCapabilities::assign: bool
+pub ai6::TrackerCapabilities::children: alloc::string::String
+pub ai6::TrackerCapabilities::close: bool
+pub ai6::TrackerCapabilities::comment: bool
+pub ai6::TrackerCapabilities::create: bool
+pub ai6::TrackerCapabilities::edit_comment: bool
+pub ai6::TrackerCapabilities::free_labels: bool
+pub ai6::TrackerCapabilities::issue_types: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerCapabilities::labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerCapabilities::links: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerCapabilities::markers: bool
+pub ai6::TrackerCapabilities::priorities: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerCapabilities::replies: bool
+pub ai6::TrackerCapabilities::transitions: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerCapabilities::visibility: alloc::string::String
+pub struct ai6::TrackerIssue
+pub ai6::TrackerIssue::assignees: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerIssue::author_id: core::option::Option<alloc::string::String>
+pub ai6::TrackerIssue::body: alloc::string::String
+pub ai6::TrackerIssue::id: alloc::string::String
+pub ai6::TrackerIssue::labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerIssue::native_id: alloc::string::String
+pub ai6::TrackerIssue::parent: core::option::Option<alloc::string::String>
+pub ai6::TrackerIssue::state: alloc::string::String
+pub ai6::TrackerIssue::title: alloc::string::String
+pub ai6::TrackerIssue::updated: alloc::string::String
+pub ai6::TrackerIssue::url: core::option::Option<alloc::string::String>
+pub struct ai6::TrackerLink
+pub ai6::TrackerLink::from: alloc::string::String
+pub ai6::TrackerLink::relation: alloc::string::String
+pub ai6::TrackerLink::to: core::option::Option<alloc::string::String>
+pub ai6::TrackerLink::url: core::option::Option<alloc::string::String>
+pub struct ai6::TrackerPost
+pub ai6::TrackerPost::body: alloc::string::String
+pub ai6::TrackerPost::edit: core::option::Option<alloc::string::String>
+pub ai6::TrackerPost::item: alloc::string::String
+pub ai6::TrackerPost::marker: core::option::Option<alloc::string::String>
+pub struct ai6::TrackerUpdate
+pub ai6::TrackerUpdate::add_assignees: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerUpdate::add_labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerUpdate::item: alloc::string::String
+pub ai6::TrackerUpdate::remove_assignees: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerUpdate::remove_labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::TrackerUpdate::state: core::option::Option<alloc::string::String>
+pub ai6::TrackerUpdate::transition: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::TransportAccess
 pub ai6::TransportAccess::config: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::TransportAccess::provider: alloc::string::String
@@ -9028,13 +9182,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 pub trait ai6::Source: core::marker::Send + core::marker::Sync
 pub fn ai6::Source::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
-pub fn ai6::Source::report(&self, ai6::directorates::registry::sources::CxReport) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::sources::Source for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
-pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>::report(&self, ai6::directorates::registry::sources::CxReport) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::sources::Source for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
-pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::report(&self, ai6::directorates::registry::sources::CxReport) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub trait ai6::SourceStore
 pub fn ai6::SourceStore::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::SourceStore::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
@@ -9134,6 +9285,30 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::timeline_events(&self, &st
 impl ai6::directorates::registry::timeline::TimelineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::record_event(&self, &ai6::directorates::registry::timeline::TimelineEvent) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::timeline_events(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::timeline::TimelineEvent>>
+pub trait ai6::Tracker: core::marker::Send + core::marker::Sync
+pub fn ai6::Tracker::capabilities(&self, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::registry::tracker::TrackerCapabilities, guatiao::library::kind::ProviderError>
+pub fn ai6::Tracker::create(&self, ai6::directorates::registry::tracker::IssueSpec) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn ai6::Tracker::issue(&self, alloc::string::String) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn ai6::Tracker::link(&self, ai6::directorates::registry::tracker::TrackerLink) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::Tracker::post(&self, ai6::directorates::registry::tracker::TrackerPost) -> core::result::Result<ai6::directorates::registry::tracker::PostedComment, guatiao::library::kind::ProviderError>
+pub fn ai6::Tracker::replies(&self, ai6::directorates::registry::tracker::ReplyPoll) -> core::result::Result<ai6::directorates::registry::tracker::ReplyBatch, guatiao::library::kind::ProviderError>
+pub fn ai6::Tracker::update(&self, ai6::directorates::registry::tracker::TrackerUpdate) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::registry::tracker::Tracker for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::capabilities(&self, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::registry::tracker::TrackerCapabilities, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::create(&self, ai6::directorates::registry::tracker::IssueSpec) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::issue(&self, alloc::string::String) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::link(&self, ai6::directorates::registry::tracker::TrackerLink) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::post(&self, ai6::directorates::registry::tracker::TrackerPost) -> core::result::Result<ai6::directorates::registry::tracker::PostedComment, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::replies(&self, ai6::directorates::registry::tracker::ReplyPoll) -> core::result::Result<ai6::directorates::registry::tracker::ReplyBatch, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::tracker::Tracker>::update(&self, ai6::directorates::registry::tracker::TrackerUpdate) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+impl ai6::directorates::registry::tracker::Tracker for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::capabilities(&self, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::registry::tracker::TrackerCapabilities, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::create(&self, ai6::directorates::registry::tracker::IssueSpec) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::issue(&self, alloc::string::String) -> core::result::Result<ai6::directorates::registry::tracker::TrackerIssue, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::link(&self, ai6::directorates::registry::tracker::TrackerLink) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::post(&self, ai6::directorates::registry::tracker::TrackerPost) -> core::result::Result<ai6::directorates::registry::tracker::PostedComment, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::replies(&self, ai6::directorates::registry::tracker::ReplyPoll) -> core::result::Result<ai6::directorates::registry::tracker::ReplyBatch, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::tracker::Tracker>::update(&self, ai6::directorates::registry::tracker::TrackerUpdate) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub trait ai6::Transport: core::marker::Send + core::marker::Sync
 pub fn ai6::Transport::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::Transport::capabilities_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>

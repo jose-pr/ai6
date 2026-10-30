@@ -26,5 +26,6 @@ pub mod store;
 #[cfg(test)]
 pub(crate) mod suite;
 pub mod timeline;
+pub mod tracker;
 pub mod usage;
 pub mod vetting;
