@@ -121,6 +121,9 @@ state_dir = "/var/lib/unex"           # verified provider libraries, and a defau
 [provider]                            # as in ai6.cfg: the same provider the Stations read
 [registry]                            # as in ai6.cfg
 [plugins]                             # as in ai6.cfg
+
+[access]                              # who is always chief, whatever the access policy says
+chief = ["account:root"]              # account:NAME, person:ID or group:NAME
 ```
 
 `universal-exports` takes `--config`, `--provider`, `--registry`, `--listen`,
@@ -219,7 +222,7 @@ The `station` record takes `max_concurrent_missions`, `stall_timeout`, `loop_tim
 document (`profile = "modern" | "intermediate" | "legacy"`, `cipher_profiles`, `tls_versions`
 and the rest), read over the library's default; whatever it gives up against that default is
 logged and sent at check-in as `tls_weakened`. The `unex` record takes `authenticator`,
-`directory`, `authorizer` and their `*_config` objects (handed to the provider as they are),
+`directory`, `authorizer`, `accounts` (the provider that keeps the accounts the account routes manage) and their `*_config` objects (handed to the provider as they are),
 `proxy_user_header`, `proxy_lookup_by`, `login_tries_per_address`, `login_tries_per_name`,
 `client_address_header`, `access_cache_ttl`, `access_cache_negative_ttl`,
 `access_cache_entries`, `assistant` (default `true`), `assistant_agent` (default

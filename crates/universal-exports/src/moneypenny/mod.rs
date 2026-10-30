@@ -1367,7 +1367,7 @@ impl Assistant {
             .execute(gateway, conversation_id, person, token, &draft)
             .await;
         let (status, result) = match &outcome {
-            Ok(text) => ("done", text.clone()),
+            Ok((text, _)) => ("done", text.clone()),
             Err(text) => ("failed", text.clone()),
         };
         let note = format!(
@@ -1388,6 +1388,12 @@ impl Assistant {
                 proposal.result = Some(result);
                 let shown = proposal.clone();
                 conversation.show_proposal(&shown);
+            }
+            // The app, and only the app, is told the new password, once; it is in no entry.
+            if let Ok((_, Some(secret))) = &outcome {
+                let _ = conversation.events.send(serde_json::json!({
+                    "type": "reveal", "proposal": proposal_id, "secret": secret
+                }));
             }
             if conversation.busy {
                 conversation.notes.push(note.clone());
@@ -1664,7 +1670,7 @@ impl Assistant {
         person: &ai6::Person,
         token: &str,
         proposal: &actions::Proposal,
-    ) -> Result<String, String> {
+    ) -> Result<(String, Option<String>), String> {
         let (operation, resource) = match &proposal.draft.scope {
             actions::Scope::Operation(operation) => (operation.clone(), None),
             actions::Scope::Resource(resource) => (String::new(), Some(resource.clone())),
@@ -1684,11 +1690,20 @@ impl Assistant {
         )
         .await?;
         match tools::route(gateway, token, &proposal.draft.call).await {
-            Ok((status, value)) if status.is_success() => Ok(format!(
-                "AI6 answered {}: {}",
-                status.as_u16(),
-                tools::wrap(proposal.tool, &value)
-            )),
+            Ok((status, mut value)) if status.is_success() => {
+                // A password made for an account goes to the person's app only, never into
+                // what she reads.
+                let secret = (proposal.tool == "propose_account_change")
+                    .then(|| value.as_object_mut()?.remove("secret"))
+                    .flatten()
+                    .and_then(|secret| secret.as_str().map(str::to_owned));
+                let shown = format!(
+                    "AI6 answered {}: {}",
+                    status.as_u16(),
+                    tools::wrap(proposal.tool, &value)
+                );
+                Ok((shown, secret))
+            }
             Ok((status, value)) => Err(tools::refusal(status, &value)),
             Err(error) => Err(format!("The request failed: {error}")),
         }

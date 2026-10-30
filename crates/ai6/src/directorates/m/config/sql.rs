@@ -7,7 +7,7 @@ use std::io;
 
 use super::{
     ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
-    Layer, assemble, check_placement, merged,
+    Layer, assemble, check_placement, conflict, merged,
 };
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
 use crate::directorates::registry::sql::SqlOptions;
@@ -194,6 +194,9 @@ impl SqlProvider {
             Err(reason) if reason.kind() == io::ErrorKind::InvalidInput => {
                 Err(error(reason.to_string()))
             }
+            Err(reason) if reason.kind() == io::ErrorKind::AlreadyExists => {
+                Err(error_of(RosterErrorKind::Conflict, reason.to_string()))
+            }
             Err(reason) => Err(failed(reason)),
         }
     }
@@ -271,6 +274,56 @@ impl ConfigProvider for SqlProvider {
                 &sql,
                 &[scope_text.into(), key.into(), text.into(), revision.into()],
             )? > 0)
+        })?
+        .ok_or_else(|| {
+            error_of(
+                RosterErrorKind::Unavailable,
+                format!("{SOURCE}: the {record} {key:?} was not stored"),
+            )
+        })
+    }
+
+    fn put_if(
+        &self,
+        record: ConfigRecord,
+        scope: &ConfigScope,
+        key: &str,
+        expected: Option<&serde_json::Value>,
+        definition: &serde_json::Value,
+    ) -> Result<ConfigRevision, RosterError> {
+        if key.trim().is_empty() || !definition.is_object() {
+            return Err(error(format!(
+                "{SOURCE}: a {record} needs a key and a JSON object"
+            )));
+        }
+        check_placement(record, scope, key, &SOURCE)?;
+        let text = definition.to_string();
+        let sql = format!(
+            "INSERT INTO {} (scope, key, definition, revision) VALUES ($1, $2, $3, $4) \n             ON CONFLICT (scope, key) DO UPDATE SET definition = excluded.definition, \n             revision = excluded.revision",
+            table(record)
+        );
+        let scope_text = scope.as_text();
+        self.change(scope, move |tx, revision| {
+            let stored = family(tx, record)?
+                .into_iter()
+                .find(|(row_scope, row_key, _)| *row_scope == scope_text && row_key == key)
+                .map(|(_, _, text)| serde_json::from_str::<serde_json::Value>(&text))
+                .transpose()
+                .map_err(|reason| io::Error::new(io::ErrorKind::InvalidData, reason))?;
+            if stored.as_ref() != expected {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "changed"));
+            }
+            Ok(tx.execute(
+                &sql,
+                &[scope_text.into(), key.into(), text.into(), revision.into()],
+            )? > 0)
+        })
+        .map_err(|failure| {
+            if failure.kind() == RosterErrorKind::Conflict {
+                conflict(record, key)
+            } else {
+                failure
+            }
         })?
         .ok_or_else(|| {
             error_of(
@@ -741,6 +794,44 @@ mod tests {
         );
     }
 
+    fn a_record_is_stored_only_when_it_is_what_the_writer_read(location: &str) {
+        let provider = SqlProvider::open(location).unwrap();
+        let key = ConfigRecord::SINGLETON_KEY;
+        let first = json!({"role": {"viewer": {"actions": ["mission.read"]}}});
+        let second = json!({"role": {"viewer": {"actions": ["mission.read", "session.read"]}}});
+        let access = ConfigRecord::Access;
+        provider.put_if(access, &GLOBAL, key, None, &first).unwrap();
+        let stale = provider
+            .put_if(access, &GLOBAL, key, None, &second)
+            .unwrap_err();
+        assert_eq!(stale.kind(), RosterErrorKind::Conflict, "{stale}");
+        let wrong = provider
+            .put_if(access, &GLOBAL, key, Some(&second), &second)
+            .unwrap_err();
+        assert_eq!(wrong.kind(), RosterErrorKind::Conflict);
+        provider
+            .put_if(access, &GLOBAL, key, Some(&first), &second)
+            .unwrap();
+        let stored = provider.definitions(access, &GLOBAL).unwrap().records;
+        assert_eq!(stored, [(key.to_owned(), second.clone())]);
+        let invalid = provider
+            .put_if(
+                access,
+                &GLOBAL,
+                key,
+                Some(&second),
+                &json!({"role": {"x": {"actions": []}}}),
+            )
+            .unwrap_err();
+        assert_eq!(invalid.kind(), RosterErrorKind::Invalid, "{invalid}");
+        let still = provider.definitions(access, &GLOBAL).unwrap().records;
+        assert_eq!(
+            still,
+            [(key.to_owned(), second)],
+            "a refused write changes nothing"
+        );
+    }
+
     fn run(case: fn(&str)) {
         #[cfg(feature = "sqlite")]
         {
@@ -775,6 +866,11 @@ mod tests {
     #[test]
     fn a_sql_station_scoped_record_changes_only_that_station() {
         run(a_station_scoped_record_changes_only_that_station);
+    }
+
+    #[test]
+    fn a_sql_record_is_stored_only_when_it_is_what_the_writer_read() {
+        run(a_record_is_stored_only_when_it_is_what_the_writer_read);
     }
 
     #[test]

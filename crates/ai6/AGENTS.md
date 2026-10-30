@@ -448,6 +448,7 @@ pub enum RosterErrorKind {
     Invalid,       // the configuration is not acceptable; a refused change changed nothing
     Unavailable,   // could not be read or written (I/O, database); retrying may succeed
     ReadOnly,      // the ConfigProvider takes no put/remove
+    Conflict,      // put_if: the stored record is not the one the writer read
 }
 impl Roster {
     pub fn load(root: impl Into<PathBuf>) -> Result<Self, RosterError>;
@@ -768,7 +769,8 @@ pub struct SecretSettings { dir: Option<PathBuf> }
 pub struct UnexSettings { url: String, token: Option<SecretRef> }  // a url alone publishes nothing
 pub struct Bootstrap { station, state_dir, listen, provider, registry, identity, plugins, secrets: SecretSettings, unex: Option<UnexSettings> }
 pub struct UnexBootstrap { listen, public_origin: Option<String>, station_token: Option<SecretRef>,
-    proxy_secret: Option<SecretRef>, state_dir, provider, registry, plugins }
+    proxy_secret: Option<SecretRef>, state_dir, provider, registry, plugins,
+    access: AccessSettings { chief: Vec<String> } }   // [access] chief: always-chief subjects
 impl ProviderSettings { pub fn poll(&self) -> Duration; }                  // DEFAULT_POLL; 0 turns reload off
 impl RegistrySettings { pub fn headquarters_lease(&self) -> Duration; }    // DEFAULT_LEASE
 
@@ -865,6 +867,11 @@ pub trait ConfigProvider: Send + Sync {
     fn definitions(&self, record: ConfigRecord, scope: &ConfigScope) -> Result<ConfigDefinitions, RosterError>;
     /// Store / remove one record, checking every view it touches first; default ReadOnly.
     fn put(&self, record: ConfigRecord, scope: &ConfigScope, key: &str, definition: &serde_json::Value)
+        -> Result<ConfigRevision, RosterError>;
+    /// Store only when the stored record is `expected` (None: none); Conflict otherwise. SQL
+    /// checks and stores in one transaction; the default reads then puts.
+    fn put_if(&self, record: ConfigRecord, scope: &ConfigScope, key: &str,
+        expected: Option<&serde_json::Value>, definition: &serde_json::Value)
         -> Result<ConfigRevision, RosterError>;
     fn remove(&self, record: ConfigRecord, scope: &ConfigScope, key: &str)
         -> Result<Option<ConfigRevision>, RosterError>;   // None: there was none

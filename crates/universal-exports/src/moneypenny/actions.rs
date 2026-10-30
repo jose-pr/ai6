@@ -304,6 +304,204 @@ pub(crate) fn write_tools() -> &'static [WriteTool] {
 
 static WRITE_TOOLS: &[WriteTool] = &[
     WriteTool {
+        name: "propose_access_change",
+        description: "Propose one change of the access policy: set or remove a role, replace \
+                      the whole ordered rule list, or set the delegation cap (global only). \
+                      With operation_id it is that Operation's own policy, else the global \
+                      one. Name the revision you read with the access tool. The server \
+                      refuses what the person could not grant themselves, and a stale \
+                      revision. Nothing changes until the person confirms it in the app. \
+                      Needs access.manage.",
+        schema: || {
+            object(
+                &[
+                    (
+                        "operation_id",
+                        text("An Operation, for its own policy; omit for the global one."),
+                    ),
+                    (
+                        "change",
+                        json!({"type": "string",
+                               "enum": ["set_role", "remove_role", "set_rules", "set_delegable"],
+                               "description": "What to change."}),
+                    ),
+                    ("revision", text("The revision the access tool showed.")),
+                    ("role", text("The role, for set_role and remove_role.")),
+                    (
+                        "actions",
+                        strings(
+                            "The role's actions, or the cap's, for set_role and set_delegable.",
+                        ),
+                    ),
+                    ("description", text("What the role is for, for set_role.")),
+                    (
+                        "rules",
+                        json!({"type": "array", "description": "The whole ordered list.",
+                               "items": {"type": "object", "properties": {
+                                   "subject": {"type": "string"},
+                                   "scope": {"type": "string"},
+                                   "role": {"type": "string"},
+                                   "propagate": {"type": "boolean"}}}}),
+                    ),
+                ],
+                &["change", "revision"],
+            )
+        },
+        plan: |input, _| {
+            let change = string(input, "change").ok_or("change is required")?;
+            let revision = id(input, "revision")?;
+            let operation = optional_id(input, "operation_id")?;
+            let base = match operation {
+                Some(operation) => format!("/v1/user/operations/{}/access", encode(operation)),
+                None => "/v1/user/access".to_owned(),
+            };
+            let query = format!("?revision={}", encode(revision));
+            let (method, tail, body, summary) = match change {
+                "set_role" => {
+                    let role = id(input, "role")?;
+                    let mut body =
+                        json!({"actions": input.get("actions").cloned().unwrap_or(json!([]))});
+                    if let Some(description) = string(input, "description") {
+                        body["description"] = json!(description);
+                    }
+                    let summary = format!("Set role {role} to {}", body["actions"]);
+                    (
+                        Method::PUT,
+                        format!("/roles/{}", encode(role)),
+                        Some(body),
+                        summary,
+                    )
+                }
+                "remove_role" => {
+                    let role = id(input, "role")?;
+                    (
+                        Method::DELETE,
+                        format!("/roles/{}", encode(role)),
+                        None,
+                        format!("Remove role {role}"),
+                    )
+                }
+                "set_rules" => {
+                    let rules = input.get("rules").cloned().ok_or("rules is required")?;
+                    let summary = format!("Replace the rule list with {rules}");
+                    (
+                        Method::PUT,
+                        "/rules".to_owned(),
+                        Some(json!({ "rules": rules })),
+                        summary,
+                    )
+                }
+                "set_delegable" if operation.is_none() => {
+                    let actions = input.get("actions").cloned().ok_or("actions is required")?;
+                    let summary = format!("Set the delegation cap to {actions}");
+                    (
+                        Method::PUT,
+                        "/delegable".to_owned(),
+                        Some(json!({ "actions": actions })),
+                        summary,
+                    )
+                }
+                _ => return Err("that change is not available here".to_owned()),
+            };
+            let (scope, summary) = match operation {
+                Some(operation) => (
+                    Scope::Operation(operation.to_owned()),
+                    format!("{summary} for Operation {operation}"),
+                ),
+                None => (Scope::Resource("config:access".to_owned()), summary),
+            };
+            Ok(Draft {
+                summary,
+                call: Call {
+                    method,
+                    path: format!("{base}{tail}{query}"),
+                    body,
+                },
+                scope,
+                action: "access.manage",
+            })
+        },
+    },
+    WriteTool {
+        name: "propose_account_change",
+        description: "Propose an account change: create one, disable or enable it, set its \
+                      groups (which also needs access.manage), or reset its password. A \
+                      password is never shown to you: the app shows it to the person once \
+                      after they confirm. Nothing changes until the person confirms it in \
+                      the app. Needs account.manage.",
+        schema: || {
+            object(
+                &[
+                    ("name", text("The account name.")),
+                    (
+                        "change",
+                        json!({"type": "string",
+                               "enum": ["create", "disable", "enable", "set_groups",
+                                        "reset_password"],
+                               "description": "What to do."}),
+                    ),
+                    ("groups", strings("The groups, for set_groups and create.")),
+                ],
+                &["name", "change"],
+            )
+        },
+        plan: |input, _| {
+            let name = id(input, "name")?;
+            let change = string(input, "change").ok_or("change is required")?;
+            let path = format!("/v1/user/accounts/{}", encode(name));
+            let (method, path, body, summary) = match change {
+                "create" => {
+                    let body = input
+                        .get("groups")
+                        .map_or(json!({}), |groups| json!({ "groups": groups }));
+                    (
+                        Method::PUT,
+                        path,
+                        Some(body),
+                        format!("Create account {name}"),
+                    )
+                }
+                "disable" => (
+                    Method::PUT,
+                    path,
+                    Some(json!({"disabled": true})),
+                    format!("Disable account {name}"),
+                ),
+                "enable" => (
+                    Method::PUT,
+                    path,
+                    Some(json!({"disabled": false})),
+                    format!("Enable account {name}"),
+                ),
+                "set_groups" => {
+                    let groups = input.get("groups").cloned().ok_or("groups is required")?;
+                    let summary = format!("Set the groups of account {name} to {groups}");
+                    (
+                        Method::PUT,
+                        path,
+                        Some(json!({ "groups": groups })),
+                        summary,
+                    )
+                }
+                "reset_password" => (
+                    Method::POST,
+                    format!("{path}/secret"),
+                    None,
+                    format!(
+                        "Reset the password of account {name} (shown to the person once, not to me)"
+                    ),
+                ),
+                _ => return Err("unknown change".to_owned()),
+            };
+            Ok(Draft {
+                summary,
+                call: Call { method, path, body },
+                scope: Scope::Resource("config:accounts".to_owned()),
+                action: "account.manage",
+            })
+        },
+    },
+    WriteTool {
         name: "propose_class_authorization",
         description: "Propose a class authorisation (a standing approval of a kind of \
                       irreversible step) in an Operation. Nothing changes until the person \
@@ -646,6 +844,53 @@ static WRITE_TOOLS: &[WriteTool] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_access_tools_name_the_revision_and_the_scope() {
+        let find = |name: &str| write_tools().iter().find(|tool| tool.name == name).unwrap();
+        let draft = find("propose_access_change")
+            .draft(
+                &json!({"change": "set_role", "role": "reviewer", "revision": "abc",
+                        "actions": ["mission.read"], "operation_id": "P"}),
+                "p1",
+                None,
+            )
+            .unwrap();
+        assert_eq!(draft.action, "access.manage");
+        assert_eq!(draft.scope, Scope::Operation("P".to_owned()));
+        assert_eq!(
+            draft.call.path,
+            "/v1/user/operations/P/access/roles/reviewer?revision=abc"
+        );
+        let global = find("propose_access_change")
+            .draft(
+                &json!({"change": "set_delegable", "revision": "0", "actions": []}),
+                "p2",
+                None,
+            )
+            .unwrap();
+        assert_eq!(global.scope, Scope::Resource("config:access".to_owned()));
+        assert!(
+            find("propose_access_change")
+                .draft(
+                    &json!({"change": "set_delegable", "revision": "0", "operation_id": "P",
+                            "actions": []}),
+                    "p3",
+                    None,
+                )
+                .is_err(),
+            "the cap is global"
+        );
+        let reset = find("propose_account_change")
+            .draft(
+                &json!({"name": "ann", "change": "reset_password"}),
+                "p4",
+                None,
+            )
+            .unwrap();
+        assert_eq!(reset.call.path, "/v1/user/accounts/ann/secret");
+        assert_eq!(reset.action, "account.manage");
+    }
 
     #[test]
     fn write_tools_are_sorted_strict_and_never_send_unchecked_input() {

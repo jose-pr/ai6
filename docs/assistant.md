@@ -143,6 +143,8 @@ Moneypenny changes nothing herself. Her write tools only propose:
 | `propose_held_brief_decision` | Releasing or refusing a held brief | `mission.create` |
 | `propose_roster_edit`, `propose_roster_removal` | A roster record set or removed | `roster.manage` |
 | `propose_station_settings` | A Station's limits | `station.configure` |
+| `propose_access_change` | A role, the rule list or the delegation cap, global or of one Operation | `access.manage` there |
+| `propose_account_change` | An account made, disabled, enabled, given groups or its password reset | `account.manage` |
 | `propose_class_authorization` | A class authorisation | `approval.class` |
 | `propose_shared_change` | One file of a group's shared repository ([workspace](#her-workspace-and-memory)) | membership of the group |
 

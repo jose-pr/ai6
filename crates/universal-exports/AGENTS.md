@@ -907,8 +907,51 @@ The optional `cli` feature builds the service command:
   checked against the provider's `plugin` records under `[plugins] profile`. The Directory and
   a plugin Authorizer are loaded behind coqui-access-kit's cache; a lifetime past the default
   is printed as a warning. The gateway polls the provider every `[provider] poll` seconds and
-  swaps in a changed `access` record (a refused one keeps the last good policy); a changed
+  swaps in a changed `access` or `operation_access` record (a refused one keeps the last good policy); a changed
   `unex` or `plugin` record is logged as needing a restart.
+
+### Access administration (`access_admin.rs`, `accounts.rs`)
+
+`LiveAccess` (`new(provider, host_chiefs, managed_by)`, `apply(&snapshot)`, `reload()`,
+`seed(&snapshot, &registry)`, `observe_lineage`, `effective()`, `invalid()`) holds the compiled
+policy: the `access` and `operation_access` records over the tree the Stations last published
+(`Gateway::operation_tree` hands each tree to it, so Operation policies are recompiled when the
+tree moves). It is the `Authorizer` of `AccessProviders`; with a plugin `Authorizer`
+(`EitherAuthorizer`) the chief tier still applies and every write route answers `409 access is
+managed by authorizer ID`. `Gateway::with_access_admin(live)` and `with_accounts(Arc<dyn
+Accounts>)` serve the routes. Seeding: at start with user access and no `access` record, the
+built-in roles are written create-only and audited `access.seeded`; a read-only provider
+(`FileProvider`) keeps them in memory, a record that exists is never seeded again.
+`unex.cfg [access] chief` subjects are always chief and cannot be removed through the API;
+with none anywhere the start logs that nobody can change access.
+
+Every write takes the revision read, `If-Match: "<revision>"` or `?revision=` (`428` without,
+`409` when stale or when the provider is read-only), checks the guard (`400 {"error": reason}`),
+stores with `ConfigProvider::put_if` (compare-and-swap in SQL) and audits before answering.
+A revision is `0` for no stored record, else a digest of the stored record.
+
+| Route | Needs | Answers |
+| --- | --- | --- |
+| `GET /v1/user/access` | `access.read` at `config:access` | `revision`, `writable`, `managed_by?`, `roles` (`chief` first, `built_in`, `editable`), `rules` (`editor`, `changed_unix`), `delegable { actions, default, weakenings }`, `chief { stored, host }`, `invalid?` |
+| `PUT`, `DELETE /v1/user/access/roles/{role}` | `access.manage` at `config:access` | `{revision}`; a role a rule names cannot be deleted (`409` naming the rules); body `{actions, description?}` |
+| `PUT /v1/user/access/rules` | same | whole ordered list `{rules: [{subject, scope, role, propagate?}]}` |
+| `PUT /v1/user/access/delegable` | same | `{actions: [..] or null}` |
+| `PUT /v1/user/access/chief` | same, and a chief | `{chief: [..]}` |
+| `GET /v1/user/access/check?subject=&action=&resource=` | `access.read` at the resource (`config:access` if not an Operation) | `{allowed, tier, rule_index, role}` |
+| `GET /v1/user/operations/{op}/access` | `access.read` at the Operation | its record, `inherited` roles from readable ancestors, `orphaned`, `bindings` that reach it (a hidden ancestor is not named), `delegable` |
+| `PUT`, `DELETE .../operations/{op}/access/roles/{role}`, `PUT .../access/rules` | `access.manage` at the Operation | `{revision}` |
+| `GET /v1/user/accounts` | `account.manage` at `config:accounts` | accounts, never a secret |
+| `PUT /v1/user/accounts/{name}` | same | `{groups?, disabled?, expires_unix?}`; makes or changes; a new account's password is in `secret` once; a `groups` change also needs `access.manage` (`400`); an account that is, or would become, chief needs a chief (`400`) |
+| `POST /v1/user/accounts/{name}/secret` | same | a new password in `secret`, once, in no audit record or log |
+
+Audit: `access.update`, `access.remove`, `access.refused`, `access.seeded`, `account.update`,
+`account.secret`, `account.refused` (`operation` set for an Operation record; never a secret).
+The profile gains `global_actions` (`access.read`, `access.manage`, `account.manage`) and each
+Operation's actions gain `access.read` and `access.manage`. The accounts provider is the `unex`
+record's `accounts` (`accounts_config`), else the authenticator when it offers accounts;
+without one the routes answer `409 no account provider`. Moneypenny reads with the `access`
+tool and proposes with `propose_access_change` and `propose_account_change`; a reset password
+goes to the app as a `reveal` event on the conversation, never into her transcript.
 
 `universal-exports` returns `0` after graceful shutdown, `1` when configuration or
 listener startup fails, and `2` for invalid arguments. The operator command-line client is

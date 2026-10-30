@@ -193,6 +193,62 @@ pub(crate) fn read_tools() -> &'static [Tool] {
 
 static READ_TOOLS: &[Tool] = &[
     Tool {
+        name: "access",
+        description: "Who may do what. Without operation_id, the global access policy: roles \
+                      (the built-in chief, controller, operator and auditor among them), \
+                      ordered rules, the delegation cap and the chief list, with the revision \
+                      to name when proposing a change. With operation_id, that Operation's \
+                      own roles, rules, the roles it inherits and who is bound there. With \
+                      subject (account:NAME, person:ID or group:NAME), action and resource \
+                      too, why that subject is or is not allowed. Needs access.read.",
+        schema: || {
+            object(
+                &[
+                    (
+                        "operation_id",
+                        text("An Operation, for its own policy; omit for the global one."),
+                    ),
+                    (
+                        "subject",
+                        text("account:NAME, person:ID or group:NAME, for a check."),
+                    ),
+                    (
+                        "action",
+                        text("The action to check, such as mission.create."),
+                    ),
+                    (
+                        "resource",
+                        text("operation:ID, station:ID or *, for a check."),
+                    ),
+                ],
+                &[],
+            )
+        },
+        plan: |input, _| {
+            if input.contains_key("subject") {
+                let subject = string(input, "subject").ok_or("subject is required")?;
+                let action = string(input, "action").ok_or("action is required for a check")?;
+                let resource =
+                    string(input, "resource").ok_or("resource is required for a check")?;
+                return Ok(Plan::Read(vec![(
+                    "result",
+                    Call::get(format!(
+                        "/v1/user/access/check?subject={}&action={}&resource={}",
+                        encode(subject),
+                        encode(action),
+                        encode(resource)
+                    )),
+                )]));
+            }
+            let path = match optional_id(input, "operation_id")? {
+                Some(operation) => format!("/v1/user/operations/{}/access", encode(operation)),
+                None => "/v1/user/access".to_owned(),
+            };
+            Ok(Plan::Read(vec![("result", Call::get(path))]))
+        },
+        post: None,
+    },
+    Tool {
         name: "agent_roles",
         description: "The Agent roles (purpose and policy) an Operation's Missions may be given. \
                       Needs agent.read on the Operation.",

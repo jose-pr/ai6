@@ -596,6 +596,9 @@ pub enum RosterErrorKind {
     Unavailable,
     /// The source does not take changes ([`ConfigProvider::put`](crate::ConfigProvider::put)).
     ReadOnly,
+    /// A change that named the record it expected ([`ConfigProvider::put_if`](crate::ConfigProvider::put_if))
+    /// found another: it was changed meanwhile.
+    Conflict,
 }
 
 impl RosterError {

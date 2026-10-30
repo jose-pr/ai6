@@ -167,6 +167,13 @@ pub universal_exports::EffectiveOperation::lineage: alloc::vec::Vec<alloc::strin
 pub universal_exports::EffectiveOperation::operation_id: alloc::string::String
 pub universal_exports::EffectiveOperation::origins: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub universal_exports::EffectiveOperation::revision: alloc::string::String
+pub struct universal_exports::EitherAuthorizer
+pub universal_exports::EitherAuthorizer::live: alloc::sync::Arc<universal_exports::LiveAccess>
+pub universal_exports::EitherAuthorizer::plugin: alloc::sync::Arc<dyn coqui_access::kind::Authorizer>
+impl coqui_access::kind::Authorizer for universal_exports::EitherAuthorizer
+pub fn universal_exports::EitherAuthorizer::authorize(&self, coqui_access::model::AuthorizationRequest) -> core::result::Result<coqui_access::model::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for universal_exports::EitherAuthorizer
+pub fn universal_exports::EitherAuthorizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::Gateway
 impl universal_exports::Gateway
 pub async fn universal_exports::Gateway::attach(&self, &ai6_diptel::SessionId, &str, u64) -> core::result::Result<universal_exports::Attachment, universal_exports::GatewayError>
@@ -189,6 +196,8 @@ pub fn universal_exports::Gateway::router(self) -> axum::routing::Router
 pub async fn universal_exports::Gateway::serve_loopback<F>(self, u16, F) -> core::result::Result<(), core::io::error::Error> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn universal_exports::Gateway::submit_input(&self, &ai6_diptel::SessionId, &str, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, universal_exports::AccessProviders) -> Self
+pub fn universal_exports::Gateway::with_access_admin(self, alloc::sync::Arc<universal_exports::LiveAccess>) -> Self
+pub fn universal_exports::Gateway::with_accounts(self, alloc::sync::Arc<dyn coqui_access::kind::Accounts>) -> Self
 pub fn universal_exports::Gateway::with_assistant(self, universal_exports::AssistantConfig) -> Self
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
 pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>) -> Self
@@ -232,6 +241,21 @@ pub universal_exports::LaunchManifest::station_id: alloc::string::String
 pub universal_exports::LaunchManifest::terminal_provider: alloc::string::String
 pub universal_exports::LaunchManifest::theater_id: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::working_directory: alloc::string::String
+pub struct universal_exports::LiveAccess
+impl universal_exports::LiveAccess
+pub fn universal_exports::LiveAccess::apply(&self, &ai6::directorates::m::config::ConfigSnapshot)
+pub fn universal_exports::LiveAccess::effective(&self) -> alloc::sync::Arc<ai6::directorates::m::access::effective::EffectiveAccess>
+pub fn universal_exports::LiveAccess::has_no_chief(&self) -> bool
+pub fn universal_exports::LiveAccess::invalid(&self) -> core::option::Option<alloc::string::String>
+pub fn universal_exports::LiveAccess::mark_invalid(&self, &str)
+pub fn universal_exports::LiveAccess::new(alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>, alloc::vec::Vec<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, alloc::string::String>
+pub fn universal_exports::LiveAccess::observe_lineage(&self, ai6::directorates::m::access::lineage::Lineage)
+pub fn universal_exports::LiveAccess::reload(&self) -> core::result::Result<(), alloc::string::String>
+pub fn universal_exports::LiveAccess::seed(&self, &ai6::directorates::m::config::ConfigSnapshot, &alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> core::result::Result<bool, alloc::string::String>
+impl coqui_access::kind::Authorizer for universal_exports::LiveAccess
+pub fn universal_exports::LiveAccess::authorize(&self, coqui_access::model::AuthorizationRequest) -> core::result::Result<coqui_access::model::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for universal_exports::LiveAccess
+pub fn universal_exports::LiveAccess::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::LoginLimits
 pub universal_exports::LoginLimits::address_header: core::option::Option<http::header::name::HeaderName>
 pub universal_exports::LoginLimits::per_address: core::num::nonzero::NonZeroU32

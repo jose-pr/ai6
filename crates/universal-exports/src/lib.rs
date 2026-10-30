@@ -3,6 +3,8 @@
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+mod access_admin;
+mod accounts;
 mod agents;
 mod controls;
 mod green_ink;
@@ -52,6 +54,7 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use tree::{OperationTree, operation_request, resource_request};
 use uuid::Uuid;
 
+pub use access_admin::{EitherAuthorizer, LiveAccess};
 pub use agents::{AgentView, RetirementNotice};
 use controls::ControlBook;
 pub use controls::ControlStatus;
@@ -437,6 +440,8 @@ pub struct Gateway {
     registry: Option<Arc<dyn RegistryBackend>>,
     access: Option<AccessProviders>,
     roster: Option<Arc<dyn ConfigProvider>>,
+    access_admin: Option<Arc<access_admin::LiveAccess>>,
+    accounts: Option<Arc<dyn ai6::Accounts>>,
     login_guard: std::sync::Arc<LoginGuard>,
     controls: Arc<std::sync::Mutex<ControlBook>>,
     control_ready: Arc<tokio::sync::Notify>,
@@ -508,6 +513,8 @@ impl Gateway {
             registry: None,
             access: None,
             roster: None,
+            access_admin: None,
+            accounts: None,
             login_guard,
             controls: Arc::default(),
             control_ready: Arc::default(),
@@ -539,6 +546,22 @@ impl Gateway {
     #[must_use]
     pub fn with_roster(mut self, source: Arc<dyn ConfigProvider>) -> Self {
         self.roster = Some(source);
+        self
+    }
+
+    /// Serves the access administration routes (`/v1/user/access`, an Operation's `access`) over
+    /// `access`, the policy in force.
+    #[must_use]
+    pub fn with_access_admin(mut self, access: Arc<access_admin::LiveAccess>) -> Self {
+        self.access_admin = Some(access);
+        self
+    }
+
+    /// Serves the account routes (`/v1/user/accounts`) over `accounts`, the provider that keeps
+    /// the accounts people sign in with.
+    #[must_use]
+    pub fn with_accounts(mut self, accounts: Arc<dyn ai6::Accounts>) -> Self {
+        self.accounts = Some(accounts);
         self
     }
 
@@ -1213,6 +1236,46 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit",
                 post(pools::clear_limit),
+            )
+            .route("/v1/user/access", get(access_admin::read_global_policy))
+            .route(
+                "/v1/user/access/roles/{role}",
+                axum::routing::put(access_admin::put_role).delete(access_admin::delete_role),
+            )
+            .route(
+                "/v1/user/access/rules",
+                axum::routing::put(access_admin::put_rules),
+            )
+            .route(
+                "/v1/user/access/delegable",
+                axum::routing::put(access_admin::put_delegable),
+            )
+            .route(
+                "/v1/user/access/chief",
+                axum::routing::put(access_admin::put_chief),
+            )
+            .route("/v1/user/access/check", get(access_admin::check))
+            .route(
+                "/v1/user/operations/{operation_id}/access",
+                get(access_admin::read_operation_policy),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/access/roles/{role}",
+                axum::routing::put(access_admin::put_operation_role)
+                    .delete(access_admin::delete_operation_role),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/access/rules",
+                axum::routing::put(access_admin::put_operation_rules),
+            )
+            .route("/v1/user/accounts", get(accounts::list))
+            .route(
+                "/v1/user/accounts/{name}",
+                axum::routing::put(accounts::put_account),
+            )
+            .route(
+                "/v1/user/accounts/{name}/secret",
+                post(accounts::reset_secret),
             )
             .route("/v1/user/roster/{kind}", get(roster::records))
             .route(
@@ -2092,6 +2155,9 @@ struct UserProfile {
     stations: Vec<UserStationAccess>,
     /// The actions the person holds on the roster (`config:roster`).
     roster: Vec<String>,
+    /// The actions the person holds on the global access policy (`access.read`, `access.manage`)
+    /// and the accounts (`account.manage`).
+    global_actions: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -2408,7 +2474,8 @@ async fn user_profile(
         .clone();
     let authorization_person = person.clone();
     let tree = OperationTree::from_check_ins(&station_records);
-    let (operations, stations, roster) = tokio::task::spawn_blocking(move || {
+    observe_tree(&gateway, &tree);
+    let (operations, stations, roster, global_actions) = tokio::task::spawn_blocking(move || {
         let mut operation_ids: BTreeSet<String> = tree.operations().map(str::to_owned).collect();
         let mut stations = Vec::new();
         for station in &station_records {
@@ -2465,8 +2532,9 @@ async fn user_profile(
                 "agent.configure",
                 "pool.read",
                 "pool.manage",
-                "cable.send",
                 "cable.read",
+                "access.read",
+                "access.manage",
             ] {
                 let allowed = authorizer
                     .authorize(operation_request(
@@ -2514,7 +2582,26 @@ async fn user_profile(
                 roster.push(action.to_owned());
             }
         }
-        Ok::<_, ApiError>((operations, stations, roster))
+        let mut global_actions = Vec::new();
+        for (action, resource) in [
+            ("access.read", ai6::CONFIG_ACCESS),
+            ("access.manage", ai6::CONFIG_ACCESS),
+            ("account.manage", ai6::CONFIG_ACCOUNTS),
+        ] {
+            let allowed = authorizer
+                .authorize(AuthorizationRequest {
+                    person: authorization_person.clone(),
+                    action: action.to_owned(),
+                    resource: resource.to_owned(),
+                    ancestors: Vec::new(),
+                })
+                .map_err(|_| ApiError::internal())?
+                .allowed;
+            if allowed {
+                global_actions.push(action.to_owned());
+            }
+        }
+        Ok::<_, ApiError>((operations, stations, roster, global_actions))
     })
     .await
     .map_err(|_| ApiError::internal())??;
@@ -2527,6 +2614,7 @@ async fn user_profile(
         operations,
         stations,
         roster,
+        global_actions,
     }))
 }
 
@@ -2550,11 +2638,21 @@ async fn operation_tree(gateway: &Gateway) -> Result<OperationTree, ApiError> {
     let Some(registry) = gateway.registry.clone() else {
         return Ok(OperationTree::default());
     };
-    tokio::task::spawn_blocking(move || registry.stations(Duration::MAX))
+    let tree = tokio::task::spawn_blocking(move || registry.stations(Duration::MAX))
         .await
         .map_err(|_| ApiError::internal())?
         .map(|records| OperationTree::from_check_ins(&records))
-        .map_err(|_| ApiError::internal())
+        .map_err(|_| ApiError::internal())?;
+    observe_tree(gateway, &tree);
+    Ok(tree)
+}
+
+/// Tells the access policy the tree the Stations last published, so Operation policies are
+/// checked against it.
+fn observe_tree(gateway: &Gateway, tree: &OperationTree) {
+    if let Some(access) = &gateway.access_admin {
+        access.observe_lineage(access_admin::tree_lineage(tree));
+    }
 }
 
 async fn authorize_resource_action(

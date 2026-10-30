@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   holds `access.manage` there manages them and can hand out only what they hold, down the
   Operations a grant reaches. A rule the tree or the cap leaves without effect is listed as
   orphaned and the rest of the record stays in force.
+- Access administration through Universal Exports. A first start with user access seeds the
+  `controller`, `operator` and `auditor` roles (audited `access.seeded`); `unex.cfg [access] chief`
+  names subjects that are always chief. `GET/PUT /v1/user/access` (roles, rules, the delegation
+  cap, the chief list, `check`) and `/v1/user/operations/{id}/access` change the policy under an
+  `If-Match` revision and the no-escalation guard, audited; `/v1/user/accounts` makes, disables and
+  resets accounts (a password is shown once, never audited), with the `unex` record's `accounts`
+  provider. Moneypenny reads with `access` and proposes with `propose_access_change` and
+  `propose_account_change`; a reset password reaches only the app. `ConfigProvider::put_if` stores
+  a record only when it is the one the writer read.
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a

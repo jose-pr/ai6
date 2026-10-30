@@ -365,6 +365,18 @@ pub struct Bootstrap {
     pub unex: Option<UnexSettings>,
 }
 
+/// `[access]` of `unex.cfg`: who is chief before any record is read.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccessSettings {
+    /// Subjects (`account:<name>`, `person:<id>`, `group:<name>`) that are always chief, whatever
+    /// the access policy says: host access is already the trust root. None of them can be
+    /// removed through the API.
+    #[serde(default)]
+    pub chief: Vec<String>,
+}
+
 /// `unex.cfg`: what Universal Exports needs before it reaches the configuration provider.
 /// The sign-in providers, login limits, access policy and assistant settings are records in
 /// the provider.
@@ -394,6 +406,9 @@ pub struct UnexBootstrap {
     /// `[plugins]`, as in `ai6.cfg`.
     #[serde(default)]
     pub plugins: PluginSettings,
+    /// `[access]`.
+    #[serde(default)]
+    pub access: AccessSettings,
 }
 
 impl UnexBootstrap {

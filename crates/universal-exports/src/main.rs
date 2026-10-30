@@ -4,21 +4,18 @@ use std::collections::{BTreeMap, VecDeque};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use ai6::guatiao::{ToValue, Value};
-use ai6::{
-    Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer, ConfigProvider,
-    ConfigRevision, Directory, EffectiveAccess, UnexRecord,
-};
+use ai6::{Authenticator, Authorizer, ConfigProvider, Directory, UnexRecord};
 use clap::Parser;
 use coqui_access_kit::CacheOptions;
 use guatiao::value::Number;
 use serde_json::Value as JsonValue;
 use universal_exports::{
-    AccessProviders, AssistantConfig, Gateway, GatewayConfig, GatewayLimits, LoginLimits,
-    ViewLimits,
+    AccessProviders, AssistantConfig, EitherAuthorizer, Gateway, GatewayConfig, GatewayLimits,
+    LiveAccess, LoginLimits, ViewLimits,
 };
 
 const MAX_PROVIDER_CONFIG_DEPTH: usize = 64;
@@ -166,7 +163,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     let snapshot = provider
         .load("")
         .map_err(|error| format!("the configuration provider: {error}"))?;
-    let record = &snapshot.settings.unex;
+    let record = snapshot.settings.unex.clone();
     for weakening in record.weakenings() {
         eprintln!("universal-exports: warning: {weakening}");
     }
@@ -178,7 +175,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Duration::from_secs(30),
     )
     .map_err(|error| format!("gateway configuration failed: {error}"))?
-    .with_login_limits(login_limits(record)?);
+    .with_login_limits(login_limits(&record)?);
     let registry_location = settings
         .located
         .registry_location()
@@ -195,14 +192,49 @@ async fn run(cli: Cli) -> Result<(), String> {
             ai6::directorates::registry::sql::redact(&registry_location)
         );
     }
-    let policy = Arc::new(LivePolicy::new(
-        snapshot.revision,
-        effective_policy(&snapshot.settings)?,
-    ));
-    let access = configured_access(&settings, &snapshot, policy.clone())
+    let host_chiefs = settings.located.value.access.chief.clone();
+    for subject in &host_chiefs {
+        subject
+            .parse::<ai6::Subject>()
+            .map_err(|_| format!("unex.cfg [access] chief: {subject:?} is not account:<name>, person:<id> or group:<name>"))?;
+    }
+    let live = Arc::new(
+        LiveAccess::new(provider.clone(), host_chiefs, record.authorizer.clone())
+            .map_err(|error| format!("user access configuration failed: {error}"))?,
+    );
+    let mut snapshot = snapshot;
+    if user_access_configured(&record) {
+        let seeded = {
+            let (live, snapshot) = (live.clone(), snapshot.clone());
+            let registry = registry.clone();
+            tokio::task::spawn_blocking(move || live.seed(&snapshot, &registry))
+                .await
+                .map_err(|error| error.to_string())?
+                .map_err(|error| format!("seeding the access policy failed: {error}"))?
+        };
+        if seeded {
+            snapshot = provider
+                .load("")
+                .map_err(|error| format!("the configuration provider: {error}"))?;
+        }
+    }
+    live.apply(&snapshot);
+    let access = configured_access(&settings, &snapshot, &live)
         .map_err(|error| format!("user access configuration failed: {error}"))?;
+    if access.is_some() && live.has_no_chief() {
+        eprintln!(
+            "universal-exports: access: no chief; nobody can change access; set [access] chief in unex.cfg"
+        );
+    }
     let mut gateway = match access {
-        Some(access) => Gateway::with_access(config, registry, access),
+        Some((access, accounts)) => {
+            let gateway =
+                Gateway::with_access(config, registry, access).with_access_admin(live.clone());
+            match accounts {
+                Some(accounts) => gateway.with_accounts(accounts),
+                None => gateway,
+            }
+        }
         None => Gateway::with_registry(config, registry),
     };
     gateway = gateway.with_roster(provider.clone());
@@ -218,7 +250,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
     let poll = settings.located.value.provider.poll();
     if !poll.is_zero() {
-        tokio::spawn(follow_policy(provider, policy, snapshot.clone(), poll));
+        tokio::spawn(follow_policy(provider, live, snapshot.clone(), poll));
     }
     gateway
         .serve_loopback(listen.port(), shutdown_signal())
@@ -226,93 +258,46 @@ async fn run(cli: Cli) -> Result<(), String> {
         .map_err(|error| format!("gateway listener failed: {error}"))
 }
 
-/// The access policy of the `access` record compiled, or one that denies every action when
-/// there is none.
-fn effective_policy(settings: &ai6::Settings) -> Result<EffectiveAccess, String> {
-    let policy = settings.access_policy()?.unwrap_or_default();
-    ai6::compile(&policy, &[]).map_err(|error| error.to_string())
-}
-
-/// The role policy of the `access` record, replaced while the gateway runs when the record
-/// changes; a policy the provider does not accept is refused and the last good one kept.
-struct LivePolicy {
-    current: RwLock<(ConfigRevision, Arc<EffectiveAccess>)>,
-}
-
-impl LivePolicy {
-    fn new(revision: ConfigRevision, policy: EffectiveAccess) -> Self {
-        Self {
-            current: RwLock::new((revision, Arc::new(policy))),
-        }
-    }
-
-    fn revision(&self) -> ConfigRevision {
-        self.current
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .0
-    }
-
-    fn replace(&self, revision: ConfigRevision, policy: EffectiveAccess) {
-        *self.current.write().unwrap_or_else(PoisonError::into_inner) =
-            (revision, Arc::new(policy));
-    }
-}
-
-impl Authorizer for LivePolicy {
-    fn authorize(
-        &self,
-        request: AuthorizationRequest,
-    ) -> Result<AuthorizationDecision, ai6::guatiao::library::ProviderError> {
-        let policy = self
-            .current
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .1
-            .clone();
-        policy.authorize(request)
-    }
-}
-
-/// Reads the provider every `every` and applies a changed `access` record; a changed record
-/// of a family only a restart applies (`unex`, `plugin`) is logged as needing one.
+/// Reads the provider every `every` and applies a changed `access` or `operation_access`
+/// record; a changed record of a family only a restart applies (`unex`, `plugin`) is logged as
+/// needing one. A configuration the provider refuses keeps the policy in force, and the access
+/// admin shows why.
 async fn follow_policy(
     provider: Arc<dyn ConfigProvider>,
-    policy: Arc<LivePolicy>,
+    live: Arc<LiveAccess>,
     started: ai6::ConfigSnapshot,
     every: Duration,
 ) {
+    let mut since = started.revision;
     let started = Arc::new(started);
     let mut refused = None;
     let mut restart: Vec<ai6::ConfigRecord> = Vec::new();
     loop {
         tokio::time::sleep(every).await;
-        let (provider, policy, base) = (provider.clone(), policy.clone(), started.clone());
-        let since = policy.revision();
-        let outcome = tokio::task::spawn_blocking(move || {
-            let snapshot = match provider.changes_since("", since) {
-                Ok(Some(snapshot)) => snapshot,
-                Ok(None) => return Ok(None),
-                Err(error) => return Err((None, error.to_string())),
-            };
-            let changed: Vec<ai6::ConfigRecord> = base
-                .changed_families(&snapshot)
-                .into_iter()
-                .filter(|record| {
-                    matches!(record, ai6::ConfigRecord::Unex | ai6::ConfigRecord::Plugin)
-                })
-                .collect();
-            match effective_policy(&snapshot.settings) {
-                Ok(authorizer) => {
-                    policy.replace(snapshot.revision, authorizer);
-                    Ok(Some((snapshot.revision, changed)))
-                }
-                Err(error) => Err((Some(snapshot.revision), error)),
-            }
-        })
-        .await;
+        let (provider, live, base) = (provider.clone(), live.clone(), started.clone());
+        let outcome = {
+            let live = live.clone();
+            tokio::task::spawn_blocking(move || {
+                let snapshot = match provider.changes_since("", since) {
+                    Ok(Some(snapshot)) => snapshot,
+                    Ok(None) => return Ok(None),
+                    Err(error) => return Err(error.to_string()),
+                };
+                let changed: Vec<ai6::ConfigRecord> = base
+                    .changed_families(&snapshot)
+                    .into_iter()
+                    .filter(|record| {
+                        matches!(record, ai6::ConfigRecord::Unex | ai6::ConfigRecord::Plugin)
+                    })
+                    .collect();
+                live.apply(&snapshot);
+                Ok(Some((snapshot.revision, changed)))
+            })
+            .await
+        };
         match outcome {
             Ok(Ok(Some((revision, changed)))) => {
+                since = revision;
                 refused = None;
                 eprintln!(
                     "universal-exports: configuration revision {} applied",
@@ -329,13 +314,15 @@ async fn follow_policy(
                 restart = changed;
             }
             Ok(Ok(None)) => {}
-            Ok(Err((revision, error))) if refused != Some(revision) => {
-                eprintln!(
-                    "universal-exports: configuration refused, keeping the access policy it runs: {error}"
-                );
-                refused = Some(revision);
+            Ok(Err(error)) => {
+                if refused.as_ref() != Some(&error) {
+                    eprintln!(
+                        "universal-exports: configuration refused, keeping the access policy it runs: {error}"
+                    );
+                    live.mark_invalid(&error);
+                    refused = Some(error);
+                }
             }
-            Ok(Err(_)) => {}
             Err(error) => eprintln!("universal-exports: configuration poll failed: {error}"),
         }
     }
@@ -470,17 +457,26 @@ fn access_cache(record: &UnexRecord) -> Result<CacheOptions, String> {
     Ok(cache)
 }
 
+/// Whether the `unex` record asks for user sign-in and access.
+fn user_access_configured(record: &UnexRecord) -> bool {
+    record.authenticator.is_some()
+        || record.proxy_user_header.is_some()
+        || record.directory.is_some()
+        || record.authorizer.is_some()
+}
+
+/// The user access providers and the accounts provider, when there is one.
+type Configured = (AccessProviders, Option<Arc<dyn ai6::Accounts>>);
+
+/// The user access providers `snapshot` configures, with the accounts provider when there is
+/// one; `None` without user access.
 fn configured_access(
     settings: &Settings,
     snapshot: &ai6::ConfigSnapshot,
-    policy: Arc<LivePolicy>,
-) -> Result<Option<AccessProviders>, String> {
+    live: &Arc<LiveAccess>,
+) -> Result<Option<Configured>, String> {
     let record = &snapshot.settings.unex;
-    let needs_directory = record.authenticator.is_some()
-        || record.proxy_user_header.is_some()
-        || record.directory.is_some()
-        || snapshot.settings.access.is_some()
-        || record.authorizer.is_some();
+    let needs_directory = user_access_configured(record) || snapshot.settings.access.is_some();
     if !needs_directory {
         return Ok(None);
     }
@@ -520,11 +516,34 @@ fn configured_access(
         .cached_directory(directory_id, directory_config.as_ref(), cache)
         .map_err(|error| error.to_string())?;
     let authorizer: Arc<dyn Authorizer> = match &record.authorizer {
-        Some(provider) => plugins
-            .cached_authorizer(provider, authorizer_config.as_ref(), cache)
-            .map_err(|error| error.to_string())?,
-        None => policy,
+        Some(provider) => Arc::new(EitherAuthorizer {
+            live: live.clone(),
+            plugin: plugins
+                .cached_authorizer(provider, authorizer_config.as_ref(), cache)
+                .map_err(|error| error.to_string())?,
+        }),
+        None => live.clone(),
     };
+    let accounts_id = record.accounts.as_deref().or_else(|| {
+        let offered = plugins.account_managers();
+        record
+            .authenticator
+            .as_deref()
+            .filter(|id| offered.iter().any(|info| info.id == *id))
+    });
+    let accounts: Option<Arc<dyn ai6::Accounts>> = accounts_id
+        .map(|id| {
+            let wanted = if record.accounts.is_some() {
+                config(&record.accounts_config)?
+            } else {
+                authenticator_config.clone()
+            };
+            plugins
+                .accounts(id, wanted.as_ref())
+                .map(Arc::from)
+                .map_err(|error| error.to_string())
+        })
+        .transpose()?;
     let header = |header: &str| {
         axum::http::HeaderName::from_bytes(header.as_bytes())
             .map_err(|_| "unex.proxy_user_header is not a valid HTTP header name".to_owned())
@@ -547,7 +566,7 @@ fn configured_access(
             return Err("configure unex.authenticator or unex.proxy_user_header".to_owned());
         }
     };
-    Ok(Some(access))
+    Ok(Some((access, accounts)))
 }
 
 /// `unex.cfg`'s `proxy_secret`, which the reverse proxy sends in `X-AI6-Proxy-Secret`.
@@ -718,21 +737,6 @@ mod tests {
         }
         let error = json_to_provider_value(serde_json::json!({ "nested": nested }), 0).unwrap_err();
         assert!(error.contains("64 nested values"), "{error}");
-    }
-
-    #[test]
-    fn a_changed_access_record_replaces_the_policy_and_a_bad_one_is_kept_out() {
-        let policy = LivePolicy::new(
-            ConfigRevision::new(1),
-            ai6::compile(&ai6::AccessPolicy::default(), &[]).unwrap(),
-        );
-        let allowed = ai6::access_from_toml(
-            "[role.viewer]\nactions = [\"mission.read\"]\n\
-             [[rule]]\nsubject = \"group:ops\"\nscope = \"operation:G\"\nrole = \"viewer\"\n",
-        )
-        .unwrap();
-        policy.replace(ConfigRevision::new(2), allowed);
-        assert_eq!(policy.revision(), ConfigRevision::new(2));
     }
 
     #[test]

@@ -317,6 +317,14 @@ pub struct ConfigStatus {
     pub needs_restart: Vec<String>,
 }
 
+/// The record changed since it was read.
+fn conflict(record: ConfigRecord, key: &str) -> RosterError {
+    error_of(
+        RosterErrorKind::Conflict,
+        format!("the {record} {key:?} changed since it was read"),
+    )
+}
+
 fn read_only() -> RosterError {
     error_of(
         RosterErrorKind::ReadOnly,
@@ -512,10 +520,16 @@ pub struct UnexRecord {
     pub directory: Option<String>,
     /// The Directory's configuration.
     pub directory_config: Option<serde_json::Map<String, serde_json::Value>>,
-    /// A custom Authorizer provider ID, in place of the `access` record's role policy.
+    /// A custom Authorizer provider ID, in place of the `access` record's role policy; the
+    /// gateway's chief tier still applies beside it.
     pub authorizer: Option<String>,
     /// The custom Authorizer's configuration.
     pub authorizer_config: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The Accounts provider ID that keeps the accounts people sign in with, for the account
+    /// routes; unset is the Authenticator when it offers accounts too.
+    pub accounts: Option<String>,
+    /// The Accounts provider's configuration.
+    pub accounts_config: Option<serde_json::Map<String, serde_json::Value>>,
     /// The sanitized header a trusted reverse proxy sets to the signed-in user.
     pub proxy_user_header: Option<String>,
     /// The Directory attribute that resolves the reverse proxy's user.
@@ -553,6 +567,8 @@ impl Default for UnexRecord {
             directory_config: None,
             authorizer: None,
             authorizer_config: None,
+            accounts: None,
+            accounts_config: None,
             proxy_user_header: None,
             proxy_lookup_by: Self::default_lookup_by(),
             login_tries_per_address: None,
@@ -606,6 +622,7 @@ impl UnexRecord {
             ("authenticator_config", &self.authenticator_config),
             ("directory_config", &self.directory_config),
             ("authorizer_config", &self.authorizer_config),
+            ("accounts_config", &self.accounts_config),
         ] {
             if let Some(config) = config {
                 inline(name, &serde_json::Value::Object(config.clone()), &mut found);
@@ -744,6 +761,34 @@ pub trait ConfigProvider: Send + Sync {
     ) -> Result<ConfigRevision, RosterError> {
         let _ = (record, scope, key, definition);
         Err(read_only())
+    }
+
+    /// Stores one record only when the stored one is `expected` (`None`: there is none), and
+    /// returns the revision the provider moved to. A provider with transactions checks and
+    /// stores in one; the default reads and then stores, so two writers can race.
+    ///
+    /// # Errors
+    ///
+    /// [`RosterErrorKind::Conflict`] when the stored record is not `expected`; otherwise as
+    /// [`put`](ConfigProvider::put).
+    fn put_if(
+        &self,
+        record: ConfigRecord,
+        scope: &ConfigScope,
+        key: &str,
+        expected: Option<&serde_json::Value>,
+        definition: &serde_json::Value,
+    ) -> Result<ConfigRevision, RosterError> {
+        let stored = self
+            .definitions(record, scope)?
+            .records
+            .into_iter()
+            .find(|(stored, _)| stored == key)
+            .map(|(_, definition)| definition);
+        if stored.as_ref() != expected {
+            return Err(conflict(record, key));
+        }
+        self.put(record, scope, key, definition)
     }
 
     /// Removes one record; `None` when there was none.
