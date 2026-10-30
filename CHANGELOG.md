@@ -97,6 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `propose_account_change`; a reset password reaches only the app. `ConfigProvider::put_if` stores
   a record only when it is the one the writer read. `[text] access_name_bytes` in the `unex`
   record (128 by default) bounds a role name, an Operation ID or an account name in these routes.
+- `ai6ctl access` (show, role set and remove, rules export and import, delegable, chief, check)
+  and `ai6ctl accounts` (list, create, disable, enable, groups, reset-password), and an Access
+  page in Outer Office: roles with a switch per action greyed where you could not give it, the
+  ordered rules, the cap, accounts and a Check, for the global policy and for one Operation.
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a

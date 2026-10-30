@@ -18,6 +18,7 @@ enum OoPage {
   pools('pools', 'Account Pools', OoIconName.pools),
   timeline('timeline', 'Timeline', OoIconName.timeline),
   audit('audit', 'Audit', OoIconName.audit),
+  access('access', 'Access', OoIconName.settings),
 
   /// Her memory of the person; opened from her chat, not the rail.
   memory('memory', "Moneypenny's memory", OoIconName.moneypenny);

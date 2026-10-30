@@ -17,6 +17,7 @@ clap = { workspace = true, features = ["env", "error-context", "suggestions"] }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
+toml = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]

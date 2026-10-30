@@ -121,6 +121,10 @@ const _fields = <OoPage, List<_Field>>{
     _Field('operation_id', _Kind.identifier),
     _Field('station_id', _Kind.identifier),
   ],
+  OoPage.access: [
+    _Field('tab', _Kind.oneOf, ['roles', 'rules', 'accounts', 'check']),
+    _Field('operation_id', _Kind.identifier),
+  ],
   OoPage.memory: [],
 };
 
@@ -403,6 +407,13 @@ OoRoute _checked(OoPage page, List<(String, Object)> values) {
   if (page == OoPage.audit && has('operation_id') && has('station_id')) {
     throw const FormatException(
       'audit takes operation_id or station_id, not both',
+    );
+  }
+  if (page == OoPage.access &&
+      has('operation_id') &&
+      values.any((entry) => entry.$1 == 'tab' && entry.$2 == 'accounts')) {
+    throw const FormatException(
+      "accounts is not a tab of an Operation's access",
     );
   }
   return OoRoute._(page, {for (final (name, value) in values) name: value});
