@@ -60,8 +60,8 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.ensureVisible(find.text('Open Briefings'));
-    await tester.tap(find.text('Open Briefings'));
+    await tester.ensureVisible(find.text('Open Briefings').first);
+    await tester.tap(find.text('Open Briefings').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Held briefs'));
     await tester.pumpAndSettle();
@@ -134,7 +134,7 @@ void main() {
     await tester.ensureVisible(find.text('Open Stations'));
     await tester.tap(find.text('Open Stations'));
     await tester.pumpAndSettle();
-    expect(find.text('station-control-01'), findsOneWidget);
+    expect(find.text('station-remote-02'), findsOneWidget);
   });
 
   testWidgets('Operations counts each Operation\'s Missions by state', (
@@ -189,7 +189,7 @@ void main() {
       'preview-session-008',
       'preview-session-021',
     ]);
-    await tester.tap(find.text('Updated (UTC)'));
+    await tester.tap(find.text('Updated'));
     await tester.pumpAndSettle();
     expect(order(), [
       'preview-session-008',
@@ -197,7 +197,7 @@ void main() {
       'preview-session-007',
     ]);
     expect(find.text('Sorted by: updated'), findsOneWidget);
-    await tester.tap(find.text('Updated (UTC)'));
+    await tester.tap(find.text('Updated'));
     await tester.pumpAndSettle();
     expect(order().first, 'preview-session-007');
     await tester.tap(find.text('State'));

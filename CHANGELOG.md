@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office says how current and how complete what it shows is. Each source of the board
+  (Stations, Sessions, Missions, held briefs, green ink, Mission proposals, timeline) settles
+  on its own: a failed read keeps the last data and says "Last updated", a 403 hides it, a
+  401 signs out and clears everything, and a strip appears only while the gateway is
+  unreachable. Overview and the bell say nothing needs the person only when every attention
+  source was read, and now include green ink requests and Mission proposals waiting, each
+  opening its own request. A control the person asked for is sending, accepted, applied,
+  refused or an outcome unknown, disables its Mission's menu while open, and lists under
+  **Your requests** with **Check again**, which never posts twice. Times are relative with
+  the exact local time on hover; search says it covers what loaded and opens with Ctrl+K.
 - Outer Office's Missions page is a queue and its Mission, Station and Operation routes open
   detail views over what the board already holds. Rows say state, place and age (relative
   times with the exact local time on hover), sorted newest update first by default with ties

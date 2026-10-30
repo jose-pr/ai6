@@ -168,12 +168,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('push · origin:refs/heads/main'), findsOneWidget);
-    expect(
-      find.text(
-        'Agent 007 · Mission mission-007 · expires 2026-12-24T04:26:40Z',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Agent 007 · Mission mission-007 · '), findsOneWidget);
+    expect(find.textContaining('expires in '), findsOneWidget);
     expect(find.text('The release branch passed review.'), findsOneWidget);
 
     await tester.tap(find.text('Approve…'));

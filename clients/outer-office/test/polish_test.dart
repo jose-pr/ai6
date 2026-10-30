@@ -79,7 +79,7 @@ void main() {
     for (final tooltip in [
       'Open navigation menu',
       'Search',
-      'Notifications: 3 need your attention',
+      'Needs attention: 5',
       'Operator account and preferences',
     ]) {
       expect(find.byTooltip(tooltip), findsOneWidget, reason: tooltip);
@@ -120,8 +120,8 @@ void main() {
     tester,
   ) async {
     await demoAt(tester, const Size(1400, 900));
-    final bell = find.byTooltip('Notifications: 3 need your attention');
-    expect(find.descendant(of: bell, matching: find.text('3')), findsOneWidget);
+    final bell = find.byTooltip('Needs attention: 5');
+    expect(find.descendant(of: bell, matching: find.text('5')), findsOneWidget);
     await tester.tap(bell);
     await tester.pumpAndSettle();
     final item = find.descendant(
@@ -131,7 +131,7 @@ void main() {
     expect(item, findsOneWidget);
     await tester.tap(item);
     await tester.pumpAndSettle();
-    expect(find.text('station-control-01'), findsOneWidget);
+    expect(find.text('station-remote-02'), findsOneWidget);
   });
 
   testWidgets('search finds what the board holds and opens its page', (

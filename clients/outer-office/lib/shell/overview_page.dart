@@ -13,7 +13,9 @@ import '../theme/oo_decor.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
 import '../timeline/timeline_page.dart';
+import '../routes/oo_route.dart';
 import 'missions_board.dart';
+import 'oo_freshness.dart';
 import 'oo_shell.dart';
 import 'top_bar.dart';
 
@@ -26,6 +28,7 @@ class OverviewPage extends StatelessWidget {
     required this.board,
     required this.pages,
     required this.onOpen,
+    required this.onRoute,
     this.assistant,
     this.onAsk,
     this.activityEvery = RefreshSettings.defaultOverview,
@@ -37,6 +40,9 @@ class OverviewPage extends StatelessWidget {
   /// The pages this person may open; links go only to these.
   final List<OoPage> pages;
   final ValueChanged<OoPage> onOpen;
+
+  /// Opens the page an attention item points to, with its filters.
+  final ValueChanged<OoRoute> onRoute;
 
   /// The conversation with Moneypenny; null in the demo and before sign-in.
   final AssistantController? assistant;
@@ -71,6 +77,7 @@ class OverviewPage extends StatelessWidget {
     final operations = board.userSession?.operations ?? const [];
     final busyOperations = active.map((mission) => mission.operationId).toSet();
     final attention = attentionItems(board, tokens);
+    final gaps = attentionGaps(board);
     final muted = TextStyle(color: tokens.muted);
 
     final heroText = Padding(
@@ -185,6 +192,7 @@ class OverviewPage extends StatelessWidget {
       assistant: assistant,
       onAsk: onAsk,
       waiting: attention.length,
+      covered: gaps == null,
     );
     final gap = phone ? 12.0 : 16.0;
     final side = width >= 1000;
@@ -256,11 +264,13 @@ class OverviewPage extends StatelessWidget {
           ],
           SizedBox(height: gap),
           if (attention.isEmpty)
-            const OoBackdrop(
+            OoBackdrop(
               padding: EdgeInsets.zero,
               child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Text('Nothing needs your attention.'),
+                padding: const EdgeInsets.all(20),
+                child: gaps == null
+                    ? const Text('Nothing needs your attention.')
+                    : Text('Nothing found in what loaded. $gaps'),
               ),
             )
           else
@@ -281,16 +291,18 @@ class OverviewPage extends StatelessWidget {
                         maxLines: phone ? 3 : 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: pages.contains(item.page) && !phone
+                      subtitle: OoTime(item.at),
+                      trailing: pages.contains(item.route.page) && !phone
                           ? TextButton(
-                              onPressed: () => onOpen(item.page),
-                              child: Text('Open ${item.page.label}'),
+                              onPressed: () => onRoute(item.route),
+                              child: Text('Open ${item.route.page.label}'),
                             )
                           : null,
-                      onTap: pages.contains(item.page) && phone
-                          ? () => onOpen(item.page)
+                      onTap: pages.contains(item.route.page) && phone
+                          ? () => onRoute(item.route)
                           : null,
                     ),
+                  if (gaps != null) Text(gaps, style: muted),
                 ],
               ),
             ),
@@ -384,7 +396,7 @@ class _ActiveOperations extends StatelessWidget {
         children: [
           if (operations.isEmpty)
             Text(
-              'No Operations are open to this account.',
+              'No Operations you can see. A controller grants access to Operations.',
               style: TextStyle(color: tokens.muted),
             ),
           for (final operation in operations.take(4))
@@ -599,9 +611,9 @@ class _RecentActivityState extends State<_RecentActivity> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: 50,
-                    child: Text(
-                      _clock(item.at),
+                    width: 84,
+                    child: OoTime(
+                      item.at,
                       style: text.labelMedium?.copyWith(color: tokens.muted),
                     ),
                   ),
@@ -677,17 +689,6 @@ const _months = [
 
 DateTime _local(double seconds) =>
     DateTime.fromMillisecondsSinceEpoch((seconds * 1000).round()).toLocal();
-
-/// Local time as `14:32`, or the date for an earlier day.
-String _clock(double seconds) {
-  final at = _local(seconds);
-  final now = DateTime.now();
-  if (at.year == now.year && at.month == now.month && at.day == now.day) {
-    return '${at.hour.toString().padLeft(2, '0')}:'
-        '${at.minute.toString().padLeft(2, '0')}';
-  }
-  return '${_months[at.month - 1]} ${at.day}';
-}
 
 /// The Missions waiting to run: queued Missions on the board, oldest first, then briefs
 /// vetting holds for review. Briefs no Station has placed yet are not on the board.
@@ -869,11 +870,15 @@ class _MoneypennyCard extends StatefulWidget {
     required this.assistant,
     required this.onAsk,
     required this.waiting,
+    required this.covered,
   });
 
   final MissionBoard board;
   final AssistantController? assistant;
   final ValueChanged<String>? onAsk;
+
+  /// Whether every attention source was read: only then may she say nothing needs them.
+  final bool covered;
 
   /// How many things need the person's attention.
   final int waiting;
@@ -919,6 +924,7 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
     final greeting = [
       'Good $part${name.isEmpty ? '' : ', $name'}.',
       switch (widget.waiting) {
+        0 when !widget.covered => 'Nothing found in what loaded.',
         0 => 'Nothing needs your attention right now.',
         1 => 'One item needs your attention.',
         final count => '$count items need your attention.',

@@ -152,7 +152,8 @@ void main() {
       expect(relative(300), '5 min ago');
       expect(relative(3 * 3600), '3 h ago');
       expect(relative(2 * 86400), '2 d ago');
-      expect(relative(-30), 'just now', reason: 'a time ahead of this clock');
+      expect(relative(-30), 'in 30 s', reason: 'a deadline');
+      expect(relative(-2), 'just now', reason: 'clocks differ a little');
       expect(
         ooExactTime(1_800_000_000),
         matches(

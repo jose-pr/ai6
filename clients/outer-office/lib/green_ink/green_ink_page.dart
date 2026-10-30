@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../shell/oo_freshness.dart';
 
 /// The time in UTC, to the second.
 String utcTime(double at) => DateTime.fromMillisecondsSinceEpoch(
@@ -382,10 +383,19 @@ class _GreenInkPageState extends State<GreenInkPage> {
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                             const SizedBox(height: 4),
-                            Text(
-                              'Agent ${request.agent} · '
-                              'Mission ${request.missionId} · '
-                              'expires ${utcTime(request.expiresAt)}',
+                            Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  'Agent ${request.agent} · '
+                                  'Mission ${request.missionId} · ',
+                                ),
+                                OoTime(
+                                  request.expiresAt,
+                                  prefix: 'expires ',
+                                  style: DefaultTextStyle.of(context).style,
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 8),
                             Text(request.reason),

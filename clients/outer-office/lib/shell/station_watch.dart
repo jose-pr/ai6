@@ -129,6 +129,20 @@ class StationCard extends StatelessWidget {
   final ValueChanged<OoRoute> onRoute;
   final bool detailed;
 
+  /// How many seconds the Station has gone without checking in, once that is more than three
+  /// times the board's own interval; `null` before then, and always when the board does not
+  /// poll.
+  int? get _silent {
+    final every = board.pollInterval;
+    if (every == null || station.seen <= 0) return null;
+    final seconds = ooClock()
+        .difference(
+          DateTime.fromMillisecondsSinceEpoch((station.seen * 1000).round()),
+        )
+        .inSeconds;
+    return seconds > 3 * every.inSeconds ? seconds : null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
@@ -169,6 +183,13 @@ class StationCard extends StatelessWidget {
                   station.healthy ? 'Online' : 'Dark',
                   style: text.labelLarge,
                 ),
+                if (_silent case final seconds?) ...[
+                  const SizedBox(width: 10),
+                  Text(
+                    'No check-in for $seconds s',
+                    style: text.labelMedium?.copyWith(color: tokens.warning),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 4),

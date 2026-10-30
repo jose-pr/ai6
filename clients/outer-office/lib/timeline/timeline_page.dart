@@ -6,6 +6,7 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
+import '../shell/oo_freshness.dart';
 
 /// One entry of an Operation's activity timeline: metadata only.
 @immutable
@@ -67,12 +68,6 @@ class TimelineItemSummary {
     if (target != null && target != missionId) target!,
     if (actor != null) 'by $actor',
   ].join(' · ');
-
-  /// The time in UTC, to the second.
-  String get when => DateTime.fromMillisecondsSinceEpoch(
-    (at * 1000).round(),
-    isUtc: true,
-  ).toIso8601String().replaceFirst(RegExp(r'\.\d+Z$'), 'Z');
 }
 
 /// One page of a timeline, newest first.
@@ -361,8 +356,8 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
                             '${entry.key}: ${entry.value}',
                         ].join('\n'),
                       ),
-                      trailing: Text(
-                        item.when,
+                      trailing: OoTime(
+                        item.at,
                         style: Theme.of(context).textTheme.labelSmall,
                       ),
                       isThreeLine: item.detail.isNotEmpty,

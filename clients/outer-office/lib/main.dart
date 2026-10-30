@@ -179,7 +179,7 @@ class MissionBoard extends ChangeNotifier {
     this.onBackdropChanged,
     this.assistantChannel,
     http.Client? client,
-    Duration? pollInterval = RefreshSettings.defaultSessions,
+    this.pollInterval = RefreshSettings.defaultSessions,
     this.limits = const OoLimits(),
   }) : themeId = ooThemePreference(themeId),
        _client = client ?? http.Client() {
@@ -334,6 +334,11 @@ class MissionBoard extends ChangeNotifier {
       );
       heldBriefs = _demoHeldBriefs('G');
       missionProposals = _demoMissionProposals;
+      greenInkRequests = _demoGreenInk('G');
+      for (final source in BoardSource.values) {
+        _freshness[source] = OoFreshness.live;
+        _lastGood[source] = ooClock();
+      }
       loading = false;
       return;
     }
@@ -346,6 +351,9 @@ class MissionBoard extends ChangeNotifier {
 
   final Uri apiOrigin;
   final bool demo;
+
+  /// How often the board reads again; `null` reads only when asked.
+  final Duration? pollInterval;
 
   /// `OO.cfg`'s refresh, control, page, terminal and input settings.
   final OoLimits limits;
@@ -371,7 +379,72 @@ class MissionBoard extends ChangeNotifier {
   /// The Mission proposals waiting for a decision, in the Operations where this account may
   /// decide them; read at most every [slowEvery], not with each refresh.
   List<MissionProposalSummary> missionProposals = const [];
-  DateTime? _proposalsAt;
+
+  /// The green ink requests waiting for a decision, in the Operations where this account may
+  /// decide them; read at most every [slowEvery].
+  List<GreenInkRequestSummary> greenInkRequests = const [];
+  DateTime? _slowAt;
+
+  final _freshness = <BoardSource, OoFreshness>{
+    for (final source in BoardSource.values) source: OoFreshness.loading,
+  };
+  final _lastGood = <BoardSource, DateTime>{};
+
+  /// How current what the board holds from [source] is.
+  OoFreshness freshness(BoardSource source) => _freshness[source]!;
+
+  /// When [source] was last read successfully; `null` before it was.
+  DateTime? lastUpdated(BoardSource source) => _lastGood[source];
+
+  /// Whether the gateway answered nothing usable to the last read of the board, so what is
+  /// shown is the last it said.
+  bool get unreachable => switch (freshness(BoardSource.board)) {
+    OoFreshness.stale || OoFreshness.unavailable => true,
+    _ => false,
+  };
+
+  /// The sources whose state does not let the board say "nothing" about what they cover:
+  /// anything not read and current.
+  List<BoardSource> gaps(Iterable<BoardSource> sources) => [
+    for (final source in sources)
+      if (freshness(source) != OoFreshness.live) source,
+  ];
+
+  void _live(BoardSource source) {
+    _freshness[source] = OoFreshness.live;
+    _lastGood[source] = ooClock();
+  }
+
+  /// A read of [source] failed: its last data stays, marked stale, or it is unavailable when
+  /// there never was any; a 403 means the person may not see it.
+  void _failed(BoardSource source, {bool forbidden = false}) {
+    _freshness[source] = forbidden
+        ? OoFreshness.noAccess
+        : _lastGood.containsKey(source)
+        ? OoFreshness.stale
+        : OoFreshness.unavailable;
+  }
+
+  /// The controls the person asked for, one per Mission (the latest), in this sign-in only.
+  Map<(String, String), PendingControl> requests = const {};
+
+  /// Whether a request for the Mission has not reached its end.
+  bool requestInProgress(String operationId, String missionId) =>
+      requests[(operationId, missionId)]?.open ?? false;
+
+  /// The requests that have not reached their end, oldest first.
+  List<PendingControl> get openRequests => [
+    for (final request in requests.values)
+      if (request.open) request,
+  ];
+
+  void _request(PendingControl request) {
+    requests = Map.unmodifiable({
+      ...requests,
+      (request.operationId, request.missionId): request,
+    });
+    notifyListeners();
+  }
 
   /// How often the sources that change slowly are read again.
   static const slowEvery = Duration(seconds: 15);
@@ -522,16 +595,41 @@ class MissionBoard extends ChangeNotifier {
   Map<(String, String), ControlStatusSummary> controls = const {};
   int _controlSerial = 0;
 
-  void _recordControl(ControlStatusSummary status) {
+  /// Keeps [status] as the latest control of its Mission and moves the Mission's request to
+  /// where it stands: accepted while open, applied or refused once the Station answered, and
+  /// with [ended], outcome unknown when it is still open.
+  void _recordControl(
+    ControlStatusSummary status,
+    String action, {
+    bool ended = false,
+  }) {
     controls = Map.unmodifiable({
       ...controls,
       (status.operationId, status.missionId): status,
+    });
+    final stage = switch (status.status) {
+      'applied' => ControlStage.applied,
+      'rejected' || 'expired' => ControlStage.refused,
+      _ => ended ? ControlStage.unknown : ControlStage.accepted,
+    };
+    requests = Map.unmodifiable({
+      ...requests,
+      (status.operationId, status.missionId): PendingControl(
+        operationId: status.operationId,
+        missionId: status.missionId,
+        action: action,
+        stage: stage,
+        controlId: status.controlId,
+        stationId: status.stationId,
+      ),
     });
     notifyListeners();
   }
 
   /// Asks the Station holding a Mission to cancel, retry, resume or interrupt it, and
-  /// follows the control for up to [wait] until the Station reports its outcome.
+  /// follows the control for up to [wait] until the Station reports its outcome. The request
+  /// is open (sending, accepted, then outcome unknown if the wait ends first) until the
+  /// Station applies or refuses it; [checkControl] reads it again without asking twice.
   Future<ControlStatusSummary> requestControl({
     required String operationId,
     required String missionId,
@@ -554,25 +652,50 @@ class MissionBoard extends ChangeNotifier {
     if (token == null) {
       throw StateError('Sign in before controlling a Mission.');
     }
+    if (requestInProgress(operationId, missionId)) {
+      throw StateError('A request is in progress for this Mission.');
+    }
     final path =
         '/v1/user/operations/${Uri.encodeComponent(operationId)}'
         '/missions/${Uri.encodeComponent(missionId)}/actions';
-    final response = await _client.post(
-      apiOrigin.resolve(path),
-      headers: {
-        'authorization': 'Bearer $token',
-        'content-type': 'application/json',
-      },
-      body: jsonEncode({
-        'action': action,
-        'idempotency_key':
-            'oo-${DateTime.now().microsecondsSinceEpoch}-${_controlSerial++}',
-        'agent': ?agent,
-        'message': ?message,
-        'session_id': ?sessionId,
-      }),
+    _request(
+      PendingControl(
+        operationId: operationId,
+        missionId: missionId,
+        action: action,
+        stage: ControlStage.sending,
+      ),
     );
+    void dropRequest() {
+      requests = Map.unmodifiable(
+        {...requests}..remove((operationId, missionId)),
+      );
+      notifyListeners();
+    }
+
+    final http.Response response;
+    try {
+      response = await _client.post(
+        apiOrigin.resolve(path),
+        headers: {
+          'authorization': 'Bearer $token',
+          'content-type': 'application/json',
+        },
+        body: jsonEncode({
+          'action': action,
+          'idempotency_key':
+              'oo-${DateTime.now().microsecondsSinceEpoch}-${_controlSerial++}',
+          'agent': ?agent,
+          'message': ?message,
+          'session_id': ?sessionId,
+        }),
+      );
+    } on Object {
+      dropRequest();
+      rethrow;
+    }
     if (response.statusCode != 202 && response.statusCode != 200) {
+      dropRequest();
       throw StateError(switch (response.statusCode) {
         403 => 'This account cannot control Missions in this Operation.',
         404 =>
@@ -586,10 +709,15 @@ class MissionBoard extends ChangeNotifier {
     var status = ControlStatusSummary.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
-    _recordControl(status);
-    final deadline = DateTime.now().add(wait ?? limits.controls.wait);
-    while (status.isOpen && DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(pollEvery ?? limits.controls.poll);
+    _recordControl(status, action);
+    // The wait counts the pauses, not the clock, so a long wait is the same everywhere.
+    var waited = Duration.zero;
+    final limit = wait ?? limits.controls.wait;
+    final pause = pollEvery ?? limits.controls.poll;
+    while (status.isOpen && waited < limit) {
+      await Future<void>.delayed(pause);
+      waited += pause;
+      if (accessToken != token) return status;
       final polled = await _client.get(
         apiOrigin.resolve('$path/${Uri.encodeComponent(status.controlId)}'),
         headers: {'authorization': 'Bearer $token'},
@@ -598,9 +726,37 @@ class MissionBoard extends ChangeNotifier {
       status = ControlStatusSummary.fromJson(
         jsonDecode(polled.body) as Map<String, dynamic>,
       );
-      _recordControl(status);
+      _recordControl(status, action);
     }
+    _recordControl(status, action, ended: true);
     await refresh();
+    return status;
+  }
+
+  /// Reads the control a Mission's open request names once more, never asking again.
+  Future<ControlStatusSummary?> checkControl(
+    String operationId,
+    String missionId,
+  ) async {
+    final request = requests[(operationId, missionId)];
+    final controlId = request?.controlId;
+    final token = accessToken;
+    if (request == null || controlId == null || token == null || demo) {
+      return null;
+    }
+    final polled = await _client.get(
+      apiOrigin.resolve(
+        '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+        '/missions/${Uri.encodeComponent(missionId)}/actions/'
+        '${Uri.encodeComponent(controlId)}',
+      ),
+      headers: {'authorization': 'Bearer $token'},
+    );
+    if (polled.statusCode != 200 || accessToken != token) return null;
+    final status = ControlStatusSummary.fromJson(
+      jsonDecode(polled.body) as Map<String, dynamic>,
+    );
+    _recordControl(status, request.action, ended: true);
     return status;
   }
 
@@ -644,7 +800,10 @@ class MissionBoard extends ChangeNotifier {
       headers: {'authorization': 'Bearer $token'},
     );
     if (response.statusCode != 200) {
-      throw StateError('The gateway refused Mission proposals.');
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused Mission proposals.',
+      );
     }
     return (jsonDecode(response.body) as List<dynamic>)
         .map(
@@ -693,7 +852,10 @@ class MissionBoard extends ChangeNotifier {
       '/v1/user/operations/${Uri.encodeComponent(operationId)}/held-briefs',
     );
     if (response.statusCode != 200) {
-      throw StateError('The gateway refused the held briefs.');
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the held briefs.',
+      );
     }
     return [
       for (final held in jsonDecode(response.body) as List<dynamic>)
@@ -701,27 +863,52 @@ class MissionBoard extends ChangeNotifier {
     ];
   }
 
-  /// The briefs vetting holds in every Operation whose held briefs this account may review
-  /// (`mission.create`); an Operation the gateway refuses is left out.
-  Future<List<HeldBriefSummary>> _loadAllHeldBriefs() async {
-    final held = await Future.wait([
-      for (final operationId in proposalOperations)
-        loadHeldBriefs(operationId)
-            .catchError((Object _) => const <HeldBriefSummary>[]),
+  /// Reads one list from each of [operations]; counts the Operations the gateway refused
+  /// (403) and those that failed otherwise.
+  Future<_Sweep<T>> _sweep<T>(
+    List<String> operations,
+    Future<List<T>> Function(String operationId) load,
+  ) async {
+    var refused = 0;
+    var failed = 0;
+    final lists = await Future.wait([
+      for (final operation in operations)
+        load(operation).catchError((Object error) {
+          if (error is GatewayRefused && error.statusCode == 403) {
+            refused++;
+          } else {
+            failed++;
+          }
+          return <T>[];
+        }),
     ]);
-    return [for (final briefs in held) ...briefs];
+    return _Sweep(
+      [for (final list in lists) ...list],
+      operations.length,
+      refused,
+      failed,
+    );
   }
 
-  /// The Mission proposals in every Operation where this account may decide them; an
-  /// Operation the gateway refuses is left out.
-  Future<List<MissionProposalSummary>> _loadAllProposals() async {
-    final proposals = await Future.wait([
-      for (final operationId in proposalOperations)
-        loadMissionProposals(operationId)
-            .catchError((Object _) => const <MissionProposalSummary>[]),
-    ]);
-    return [for (final list in proposals) ...list];
+  /// Settles [source] from what its [sweep] gave: live, or not asked, or refused everywhere
+  /// (no access, its data gone), or stale.
+  List<T> _settle<T>(BoardSource source, _Sweep<T> sweep, List<T> current) {
+    if (sweep.asked == 0 ||
+        (sweep.failed == 0 && sweep.refused < sweep.asked)) {
+      _live(source);
+      return sweep.items;
+    }
+    if (sweep.failed == 0) {
+      _failed(source, forbidden: true);
+      return const [];
+    }
+    _failed(source);
+    return current;
   }
+
+  /// The Mission proposals in every Operation where this account may decide them.
+  Future<_Sweep<MissionProposalSummary>> _loadAllProposals() =>
+      _sweep(proposalOperations, loadMissionProposals);
 
   static List<HeldBriefSummary> _demoHeldBriefs(String operationId) => [
     HeldBriefSummary(
@@ -823,23 +1010,31 @@ class MissionBoard extends ChangeNotifier {
     }
     final token = accessToken;
     if (token == null) throw StateError('Sign in before viewing the timeline.');
-    final response = await _client.get(
-      apiOrigin
-          .resolve(
-            '/v1/user/operations/${Uri.encodeComponent(operationId)}/timeline',
-          )
-          .replace(
-            queryParameters: {
-              'limit': '${limit ?? limits.pages.timeline}',
-              'mission': ?missionId,
-              'cursor': ?cursor,
-            },
-          ),
-      headers: {'authorization': 'Bearer $token'},
-    );
+    final http.Response response;
+    try {
+      response = await _client.get(
+        apiOrigin
+            .resolve(
+              '/v1/user/operations/${Uri.encodeComponent(operationId)}/timeline',
+            )
+            .replace(
+              queryParameters: {
+                'limit': '${limit ?? limits.pages.timeline}',
+                'mission': ?missionId,
+                'cursor': ?cursor,
+              },
+            ),
+        headers: {'authorization': 'Bearer $token'},
+      );
+    } on Object {
+      _failed(BoardSource.timeline);
+      rethrow;
+    }
     if (response.statusCode != 200) {
+      _failed(BoardSource.timeline, forbidden: response.statusCode == 403);
       throw StateError('The gateway refused the Operation timeline.');
     }
+    _live(BoardSource.timeline);
     return TimelinePageSummary.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
@@ -1173,29 +1368,32 @@ class MissionBoard extends ChangeNotifier {
   }
 
   /// The steps waiting for green ink in an Operation, oldest first.
+  static List<GreenInkRequestSummary> _demoGreenInk(String operationId) => [
+    GreenInkRequestSummary(
+      id: 'green-ink-preview',
+      operationId: operationId,
+      missionId: 'mission-007',
+      sessionId: 'preview-session-007',
+      agent: '007',
+      kind: 'push',
+      target: 'origin:refs/heads/main',
+      reason: 'The release branch passed review; push it to main.',
+      requestedAt: 1_798_000_000,
+      expiresAt: 1_798_086_400,
+    ),
+  ];
+
   Future<List<GreenInkRequestSummary>> loadGreenInk(String operationId) async {
-    if (demo) {
-      return [
-        GreenInkRequestSummary(
-          id: 'green-ink-preview',
-          operationId: operationId,
-          missionId: 'mission-007',
-          sessionId: 'preview-session-007',
-          agent: '007',
-          kind: 'push',
-          target: 'origin:refs/heads/main',
-          reason: 'The release branch passed review; push it to main.',
-          requestedAt: 1_798_000_000,
-          expiresAt: 1_798_086_400,
-        ),
-      ];
-    }
+    if (demo) return _demoGreenInk(operationId);
     final response = await _userRequest(
       'GET',
       '/v1/user/operations/${Uri.encodeComponent(operationId)}/green-ink',
     );
     if (response.statusCode != 200) {
-      throw StateError('The gateway refused the green ink inbox.');
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the green ink inbox.',
+      );
     }
     return [
       for (final request in jsonDecode(response.body) as List<dynamic>)
@@ -1476,74 +1674,161 @@ class MissionBoard extends ChangeNotifier {
     return records;
   }
 
+  /// A read of [path] with the signed-in token; `null` when the gateway did not answer.
+  Future<http.Response?> _core(String path) async {
+    try {
+      return await _client.get(
+        apiOrigin.resolve(path),
+        headers: {'authorization': 'Bearer $accessToken'},
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Reads the board again. Each source settles on its own: a failed read keeps that
+  /// source's last data and marks it stale, a 403 hides it, and a 401 ends the sign-in.
   Future<void> refresh() async {
-    if (demo || accessToken == null) {
+    final token = accessToken;
+    if (demo || token == null) {
       notifyListeners();
       return;
     }
     try {
       final responses = await Future.wait([
-        _client.get(
-          apiOrigin.resolve('/v1/board'),
-          headers: {'authorization': 'Bearer $accessToken'},
-        ),
-        _client.get(
-          apiOrigin.resolve('/v1/missions'),
-          headers: {'authorization': 'Bearer $accessToken'},
-        ),
-        _client.get(
-          apiOrigin.resolve('/v1/stations'),
-          headers: {'authorization': 'Bearer $accessToken'},
-        ),
-        _client.get(
-          apiOrigin.resolve('/v1/user/profile'),
-          headers: {'authorization': 'Bearer $accessToken'},
-        ),
+        _core('/v1/board'),
+        _core('/v1/missions'),
+        _core('/v1/stations'),
+        _core('/v1/user/profile'),
       ]);
-      if (responses.any((response) => response.statusCode != 200)) {
-        throw StateError(
-          'Universal Exports returned an unsuccessful response.',
+      if (accessToken != token) return;
+      if (responses.any((response) => response?.statusCode == 401)) {
+        _signedOut('Your sign-in ended. Sign in again.');
+        return;
+      }
+      var failed = false;
+      // Parses a 200 into [source]'s data; anything else leaves the data and marks it.
+      void settle(
+        BoardSource source,
+        http.Response? response,
+        void Function(String body) apply,
+      ) {
+        if (response?.statusCode == 200) {
+          try {
+            apply(response!.body);
+            _live(source);
+            return;
+          } on Object {
+            // An unreadable answer counts as a failed read.
+          }
+        }
+        failed = true;
+        _failed(source, forbidden: response?.statusCode == 403);
+      }
+
+      settle(BoardSource.board, responses[0], (body) {
+        sessions = (jsonDecode(body) as List<dynamic>)
+            .map(
+              (item) => SessionSummary.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(growable: false);
+      });
+      settle(BoardSource.missions, responses[1], (body) {
+        final missions = jsonDecode(body) as List<dynamic>;
+        missionBriefs = missions
+            .map(
+              (item) => MissionBriefSummary.fromMissionJson(
+                item as Map<String, dynamic>,
+              ),
+            )
+            .whereType<MissionBriefSummary>()
+            .toList(growable: false);
+        missionAttempts = {
+          for (final item in missions.cast<Map<String, dynamic>>())
+            (item['operation_id'] as String, item['mission_id'] as String): [
+              for (final attempt
+                  in (item['attempts'] as List<dynamic>? ?? const []))
+                MissionAttemptSummary.fromJson(attempt as Map<String, dynamic>),
+            ],
+        };
+      });
+      settle(BoardSource.stations, responses[2], (body) {
+        stationBoard = StationBoardSummary.fromJson(
+          jsonDecode(body) as Map<String, dynamic>,
+        );
+      });
+      final profile = responses[3];
+      if (profile?.statusCode == 200) {
+        try {
+          userSession = UserSessionSummary.fromJson(
+            jsonDecode(profile!.body) as Map<String, dynamic>,
+          );
+        } on Object {
+          failed = true;
+        }
+      } else {
+        failed = true;
+      }
+      heldBriefs = _settle(
+        BoardSource.heldBriefs,
+        await _sweep(proposalOperations, loadHeldBriefs),
+        heldBriefs,
+      );
+      final now = ooClock();
+      if (_slowAt == null || now.difference(_slowAt!) >= slowEvery) {
+        _slowAt = now;
+        missionProposals = _settle(
+          BoardSource.proposals,
+          await _loadAllProposals(),
+          missionProposals,
+        );
+        greenInkRequests = _settle(
+          BoardSource.greenInk,
+          await _sweep(greenInkOperations, loadGreenInk),
+          greenInkRequests,
         );
       }
-      final body = jsonDecode(responses[0].body) as List<dynamic>;
-      sessions = body
-          .map((item) => SessionSummary.fromJson(item as Map<String, dynamic>))
-          .toList(growable: false);
-      final missions = jsonDecode(responses[1].body) as List<dynamic>;
-      missionBriefs = missions
-          .map(
-            (item) => MissionBriefSummary.fromMissionJson(
-              item as Map<String, dynamic>,
-            ),
-          )
-          .whereType<MissionBriefSummary>()
-          .toList(growable: false);
-      missionAttempts = {
-        for (final item in missions.cast<Map<String, dynamic>>())
-          (item['operation_id'] as String, item['mission_id'] as String): [
-            for (final attempt
-                in (item['attempts'] as List<dynamic>? ?? const []))
-              MissionAttemptSummary.fromJson(attempt as Map<String, dynamic>),
-          ],
-      };
-      stationBoard = StationBoardSummary.fromJson(
-        jsonDecode(responses[2].body) as Map<String, dynamic>,
-      );
-      userSession = UserSessionSummary.fromJson(
-        jsonDecode(responses[3].body) as Map<String, dynamic>,
-      );
-      heldBriefs = await _loadAllHeldBriefs();
-      final now = ooClock();
-      if (_proposalsAt == null || now.difference(_proposalsAt!) >= slowEvery) {
-        _proposalsAt = now;
-        missionProposals = await _loadAllProposals();
-      }
-      error = null;
+      if (accessToken != token) return;
+      error = failed ? 'Could not load Stations from Universal Exports.' : null;
     } on Object {
       error = 'Could not load Stations from Universal Exports.';
     } finally {
       loading = false;
       notifyListeners();
+    }
+  }
+
+  /// Ends the sign-in because the gateway no longer accepts the token: every view of the
+  /// board, attention item, open request and Station fact is dropped before the sign-in page
+  /// shows, and [why] is said there.
+  void _signedOut(String why) {
+    _clearBoard();
+    loginError = why;
+    notifyListeners();
+  }
+
+  void _clearBoard() {
+    accessToken = null;
+    sessions = const [];
+    missionBriefs = const [];
+    missionAttempts = const {};
+    auditEntries = const [];
+    heldBriefs = const [];
+    missionProposals = const [];
+    greenInkRequests = const [];
+    controls = const {};
+    requests = const {};
+    userSession = null;
+    stationBoard = const StationBoardSummary(
+      headquartersStation: null,
+      stations: [],
+    );
+    error = null;
+    loading = false;
+    _slowAt = null;
+    _lastGood.clear();
+    for (final source in BoardSource.values) {
+      _freshness[source] = OoFreshness.loading;
     }
   }
 
@@ -1633,12 +1918,8 @@ class MissionBoard extends ChangeNotifier {
 
   Future<void> logout() async {
     final token = accessToken;
-    accessToken = null;
-    sessions = const [];
-    userSession = null;
-    error = null;
+    _clearBoard();
     loginError = null;
-    loading = false;
     notifyListeners();
     if (token != null) {
       try {
@@ -1993,6 +2274,29 @@ class HostResources {
       'sampled $sampledTime',
     ].join(' · ');
   }
+}
+
+/// The gateway answered a read with a status other than 200.
+class GatewayRefused implements Exception {
+  const GatewayRefused(this.statusCode, this.message);
+
+  final int statusCode;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// What reading one list from each of several Operations gave.
+class _Sweep<T> {
+  const _Sweep(this.items, this.asked, this.refused, this.failed);
+
+  final List<T> items;
+
+  /// How many Operations were read, and how many the gateway refused (403) or failed.
+  final int asked;
+  final int refused;
+  final int failed;
 }
 
 /// The gateway answered 403 to a placement preview: the person may not see where an
@@ -2953,6 +3257,27 @@ Widget boardThemedApp(
   ),
 );
 
+/// Marks the app as running on sample data, not a gateway's.
+class _DemoChip extends StatelessWidget {
+  const _DemoChip();
+
+  @override
+  Widget build(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < OoBreakpoints.phone
+      ? const Tooltip(
+          message: 'Demo data',
+          child: Icon(Icons.science_outlined, semanticLabel: 'Demo data'),
+        )
+      : const Padding(
+          padding: EdgeInsets.only(right: 8),
+          child: Chip(
+            avatar: Icon(Icons.science_outlined, size: 16),
+            label: Text('Demo data'),
+            visualDensity: VisualDensity.compact,
+          ),
+        );
+}
+
 class _LoginPage extends StatefulWidget {
   const _LoginPage({required this.board});
 
@@ -3163,13 +3488,24 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     }
   }
 
-  void _open(OoPage page) {
-    // An expanded chat hides the page; going to a page shows it.
+  void _open(OoPage page) => _openRoute(OoRoute(page));
+
+  /// Opens a page of the person's own choosing: an expanded chat hides the page, so it docks.
+  void _openRoute(OoRoute route) {
     if (widget.chat case final chat? when chat.layout == ChatLayout.expanded) {
       chat.dock();
     }
-    widget.onRoute(OoRoute(page));
+    widget.onRoute(route);
   }
+
+  /// The board sources the page shows, whose staleness it says.
+  static List<BoardSource> _sourcesOf(OoPage page) => switch (page) {
+    OoPage.overview || OoPage.memory => attentionSources,
+    OoPage.missions => const [BoardSource.board, BoardSource.missions],
+    OoPage.operations || OoPage.sessions => const [BoardSource.board],
+    OoPage.stations => const [BoardSource.stations],
+    _ => const [],
+  };
 
   /// The tab a person picks, kept in the route.
   void _tab(OoRoute route, String tab) =>
@@ -3187,6 +3523,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               pages: pages,
               onOpen: _open,
               activityEvery: board.limits.refresh.overview,
+              onRoute: _openRoute,
               assistant: widget.chat?.controller,
               onAsk: (text) {
                 widget.chat?.open();
@@ -3427,6 +3764,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           ),
         ),
         actions: [
+          if (widget.board.demo) const _DemoChip(),
           if (!phone)
             Builder(
               builder: (context) => IconButton(
@@ -3445,8 +3783,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
             ),
           AnimatedBuilder(
             animation: widget.board,
-            builder: (context, _) =>
-                AttentionBell(board: widget.board, pages: pages, onOpen: _open),
+            builder: (context, _) => AttentionBell(
+              board: widget.board,
+              pages: pages,
+              onOpen: _openRoute,
+            ),
           ),
           if (!phone)
             IconButton(
@@ -3481,6 +3822,18 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                   ],
                 ),
               if (widget.openedByMoneypenny) const OpenedByMoneypenny(),
+              AnimatedBuilder(
+                animation: widget.board,
+                builder: (context, _) => Column(
+                  children: [
+                    GatewayStrip(board: widget.board),
+                    FreshnessNote(
+                      board: widget.board,
+                      sources: _sourcesOf(route.page),
+                    ),
+                  ],
+                ),
+              ),
               Expanded(child: _pageBody(context, route, pages)),
             ],
           ),
@@ -4587,15 +4940,17 @@ class _AuditLogPageState extends State<AuditLogPage> {
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final record = records[index];
-                final at = DateTime.fromMillisecondsSinceEpoch(
-                  (record.at * 1000).round(),
-                  isUtc: true,
-                ).toLocal();
                 return ListTile(
                   leading: const Icon(Icons.receipt_long_outlined),
                   title: Text('${record.actor} · ${record.action}'),
-                  subtitle: Text(
-                    '${record.resource ?? 'Operation ${record.operation}'} · ${record.target}\n$at',
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${record.resource ?? 'Operation ${record.operation}'} · ${record.target}',
+                      ),
+                      OoTime(record.at),
+                    ],
                   ),
                   isThreeLine: true,
                 );

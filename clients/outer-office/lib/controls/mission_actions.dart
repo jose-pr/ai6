@@ -80,6 +80,64 @@ class ControlStatusSummary {
   }
 }
 
+/// Where a control the person asked for stands.
+enum ControlStage {
+  /// Posted; the gateway has not answered yet.
+  sending('Sending'),
+
+  /// The gateway took it and the Station has not reported.
+  accepted('Accepted, waiting for the Station'),
+
+  /// The Station applied it.
+  applied('Applied'),
+
+  /// The Station or the gateway refused it, or it expired.
+  refused('Refused'),
+
+  /// Still open when the follow ended: it may yet apply.
+  unknown('Outcome unknown');
+
+  const ControlStage(this.label);
+
+  final String label;
+}
+
+/// One control the person asked for in this sign-in.
+@immutable
+class PendingControl {
+  const PendingControl({
+    required this.operationId,
+    required this.missionId,
+    required this.action,
+    required this.stage,
+    this.controlId,
+    this.stationId,
+  });
+
+  final String operationId;
+  final String missionId;
+
+  /// The wire spelling: `cancel`, `retry`, `resume` or `interrupt`.
+  final String action;
+  final ControlStage stage;
+
+  /// The gateway's ID once it accepted the request; checking again reads this one.
+  final String? controlId;
+  final String? stationId;
+
+  /// Whether it has not reached its end: sending, accepted or outcome unknown.
+  bool get open => switch (stage) {
+    ControlStage.applied || ControlStage.refused => false,
+    _ => true,
+  };
+
+  /// What the person asked for, as the menu names it.
+  String get effect => _labels[action] ?? action;
+
+  /// `Operation G › mission-007`.
+  String get target => 'Operation $operationId › $missionId';
+}
+
 const _labels = {
   'cancel': 'Cancel Mission',
   'retry': 'Retry Mission',
@@ -173,10 +231,21 @@ class MissionActionsMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final current = currentSession(sessions);
-    final options = missionControls(
-      state: current?.state,
-      permitted: board.canControlMission(operationId),
-    );
+    final busy = board.requestInProgress(operationId, missionId);
+    final options = [
+      for (final option in missionControls(
+        state: current?.state,
+        permitted: board.canControlMission(operationId),
+      ))
+        busy
+            ? MissionControlOption(
+                action: option.action,
+                label: option.label,
+                icon: option.icon,
+                unavailable: 'A request is in progress',
+              )
+            : option,
+    ];
     return PopupMenuButton<String>(
       tooltip: 'Mission actions',
       icon: const Icon(Icons.more_vert),

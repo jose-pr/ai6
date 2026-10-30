@@ -1,9 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../green_ink/green_ink_page.dart' show utcTime;
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../shell/oo_freshness.dart';
 
 /// One thing vetting found in a brief.
 @immutable
@@ -344,9 +344,16 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 4),
-          Text(
-            '${revealInvisible(held.source)} · ${held.key} · '
-            'held ${utcTime(held.heldAt)}',
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('${revealInvisible(held.source)} · ${held.key} · '),
+              OoTime(
+                held.heldAt,
+                prefix: 'held ',
+                style: DefaultTextStyle.of(context).style,
+              ),
+            ],
           ),
           if (held.url != null) Text(revealInvisible(held.url!)),
           const SizedBox(height: 8),

@@ -65,15 +65,37 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   Operations (each with the share of its Missions done) and the Stations; counts of
   Operations, Stations online and dark, active Missions and waiting Sessions; recent
   activity from the Operations' timelines (with `audit.read`); Upcoming, the Missions
-  waiting to run (queued Missions oldest first, then held briefs); a Moneypenny card whose
-  quick questions and field open her chat and ask her; and what needs attention (blocked
-  Sessions, briefs vetting holds in the Operations where the person has `mission.create`,
-  dark Stations), each with a link to its page. Operations: each Operation's Missions by
+  waiting to run (queued Missions oldest first, then held briefs, each labelled); a
+  Moneypenny card whose quick questions and field open her chat and ask her; and what needs
+  attention (blocked Sessions, green ink requests waiting where the person has
+  `approval.decide`, briefs vetting holds and Mission proposals waiting where the person has
+  `mission.create`, dark Stations), each saying what, where and when and linking to its page
+  or request. It says nothing needs the person only when every source was read; otherwise
+  "Nothing found in what loaded" and the sources it could not read by name. With no visible
+  Operation it says "No Operations you can see" and that a controller grants access, never
+  whether any exist. Operations: each Operation's Missions by
   state; Sessions: every Session in a table sorted by any column (a list on a phone).
 - The top bar: the OO wordmark, search across the Operations, Missions, Sessions and
-  Stations on the board, **Ask Moneypenny**, a bell counting what needs attention (its
-  menu opens each item's page), appearance settings, and the person's chip (initials, name
-  and first directory group) opening the operator menu.
+  Stations on the board (Ctrl+K, or ⌘K on macOS, opens it unless the key would type a
+  character into a text field; results say they are "in the loaded board" and a miss says
+  "No matches in the loaded board"), **Ask Moneypenny**, the bell **Needs attention** (a
+  count of the items above, derived and never stored, with no unread state; its menu opens
+  each item's page and, under **Your requests**, lists the controls you asked for that are
+  not yet applied or refused, offering **Check again** on an outcome unknown), a **Demo
+  data** chip in the demo, appearance settings, and the person's chip (initials, name and
+  first directory group) opening the operator menu.
+- Freshness: each source (Stations, Sessions, Missions, held briefs, green ink, Mission
+  proposals, timeline) is read on its own. A failed read keeps that source's last data and
+  the page says "Last updated 14:02:31"; while the gateway is unreachable a strip says so
+  and when the data is from; a 403 hides a source (it is not shown empty); a 401 signs the
+  person out and drops every view, item and request before the sign-in page shows. Every
+  time is relative text with the exact local time and zone on hover and in its semantics
+  label. A Station that has not checked in for three board intervals reads "No check-in for
+  N s" beside its state word.
+- A control (cancel, retry, resume, interrupt) is sending, accepted, then applied or
+  refused; one still open after ten seconds is an outcome unknown. While a request is open
+  the Mission's action menu is disabled ("A request is in progress"); **Check again** reads
+  the same control and never posts a second time. Requests are not kept across a reload.
 - Roster: the Operations, Agents, Agent roles, cover policies and Moneypenny's settings every
   Station reads, with the revision each Station runs and what any Station refused or waits to
   restart for (`roster.read`); with `roster.manage` and a roster that takes edits (SQL), add,

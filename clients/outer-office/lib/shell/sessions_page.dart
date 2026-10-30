@@ -7,6 +7,7 @@ import '../theme/oo_backdrop.dart';
 import '../theme/oo_decor.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
+import 'oo_freshness.dart';
 import 'oo_shell.dart';
 
 /// The Sessions a Sessions [route] selects from the board, in its order: by Operation,
@@ -50,15 +51,6 @@ List<SessionSummary> routeSessions(MissionBoard board, OoRoute route) {
     });
   return route['order'] == 'desc' ? sessions.reversed.toList() : sessions;
 }
-
-/// When the board last heard of [session], in UTC to the second; a dash before it has.
-String _updated(SessionSummary session) => switch (session.updatedAt) {
-  final at? => DateTime.fromMillisecondsSinceEpoch(
-    (at * 1000).round(),
-    isUtc: true,
-  ).toIso8601String().substring(11, 19),
-  null => '—',
-};
 
 /// Every Session on the board, filtered and sorted by the route, in a table; a row opens the
 /// Session. The route's `session_id` shows that Session's facts above the table, read-only.
@@ -162,7 +154,7 @@ class SessionsPage extends StatelessWidget {
                   ('Mission', 'mission'),
                   ('Session', 'session'),
                   ('State', 'state'),
-                  ('Updated (UTC)', 'updated'),
+                  ('Updated', 'updated'),
                 ])
                   DataColumn(
                     label: Text(label),
@@ -202,7 +194,7 @@ class SessionsPage extends StatelessWidget {
                           ],
                         ),
                       ),
-                      DataCell(Text(_updated(session))),
+                      DataCell(OoTime(session.updatedAt, style: null)),
                     ],
                   ),
               ],

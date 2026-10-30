@@ -473,7 +473,7 @@ class MoneypennyChat extends ChangeNotifier {
     if (key != LogicalKeyboardKey.keyI && key != LogicalKeyboardKey.keyO) {
       return false;
     }
-    if (_types(event, focused)) return false;
+    if (keyTypesCharacter(event, focused)) return false;
     if (key == LogicalKeyboardKey.keyO) {
       if (!canPopOut) return false;
       togglePopOut();
@@ -490,18 +490,6 @@ class MoneypennyChat extends ChangeNotifier {
     return true;
   }
 
-  /// Whether [event] would type a character into the focused text field. A browser reports
-  /// Ctrl+Alt+I with the character `i`; only a character other than the key's own counts.
-  static bool _types(KeyEvent event, FocusNode? focused) {
-    final character = event.character;
-    if (character == null || focused?.context == null) return false;
-    final editing =
-        focused!.context!.widget is EditableText ||
-        focused.context!.findAncestorWidgetOfExactType<EditableText>() != null;
-    if (!editing) return false;
-    return character.toLowerCase() != event.logicalKey.keyLabel.toLowerCase();
-  }
-
   @override
   void dispose() {
     _disposed = true;
@@ -516,4 +504,16 @@ class MoneypennyChat extends ChangeNotifier {
     route.dispose();
     super.dispose();
   }
+}
+
+/// Whether [event] would type a character into the focused text field. A browser reports
+/// Ctrl+Alt+I with the character `i`; only a character other than the key's own counts.
+bool keyTypesCharacter(KeyEvent event, FocusNode? focused) {
+  final character = event.character;
+  if (character == null || focused?.context == null) return false;
+  final editing =
+      focused!.context!.widget is EditableText ||
+      focused.context!.findAncestorWidgetOfExactType<EditableText>() != null;
+  if (!editing) return false;
+  return character.toLowerCase() != event.logicalKey.keyLabel.toLowerCase();
 }
