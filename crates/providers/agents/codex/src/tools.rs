@@ -25,10 +25,6 @@ use serde_json::Value;
 use crate::sandbox::SCRIPT_FEATURES;
 use crate::{internal, refuse};
 
-/// The longest terminal control sequence stripped from Codex's output, as a Station's
-/// `[terminal_output] csi_bytes` defaults to.
-const CSI_BYTES: ai6::Limit = ai6::Limit::at(64);
-
 /// The environment variable that chooses what a failed tool check does: `strict` (the
 /// default) refuses to start, `warn` starts and reports a weakening.
 pub const TOOL_CHECK_ENV: &str = "AI6_CODEX_TOOL_CHECK";
@@ -46,13 +42,6 @@ pub const KEPT_FEATURES: [&str; 5] = [
     // the check would see less than the thread is given.
     "incremental_tools",
 ];
-
-/// How long a feature list stands for the same Codex, settings and environment; the user's
-/// own Codex configuration can change under it.
-const CHECK_LIFETIME: Duration = Duration::from_secs(15 * 60);
-
-/// How long one of the check's commands may run.
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// What a failed check does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -95,8 +84,8 @@ pub(crate) struct FeatureList {
 }
 
 /// Reads `codex features list` output; `None` when no line reads as a feature.
-pub(crate) fn feature_list(output: &[u8]) -> Option<FeatureList> {
-    let text = String::from_utf8_lossy(&strip_controls(output, CSI_BYTES)).replace('\r', "");
+pub(crate) fn feature_list(output: &[u8], csi: ai6::Limit) -> Option<FeatureList> {
+    let text = String::from_utf8_lossy(&strip_controls(output, csi)).replace('\r', "");
     let mut read = 0;
     let mut list = FeatureList::default();
     for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
@@ -122,9 +111,9 @@ pub(crate) fn feature_list(output: &[u8]) -> Option<FeatureList> {
 /// The server names in `codex mcp list --json` output; `None` unless it is one JSON array of
 /// objects, each with a string `name`, with nothing after it. The output also holds each
 /// server's environment values, so nothing else of it is kept.
-pub(crate) fn mcp_server_names(output: &[u8]) -> Option<Vec<String>> {
+pub(crate) fn mcp_server_names(output: &[u8], csi: ai6::Limit) -> Option<Vec<String>> {
     // Pretty-printed JSON, as `offered_tools` reads it: every line break can go.
-    let mut text = strip_controls(output, CSI_BYTES);
+    let mut text = strip_controls(output, csi);
     text.retain(|byte| !matches!(byte, b'\r' | b'\n'));
     let start = (0..text.len()).find(|&at| opens_server_list(&text[at..]))?;
     let servers: Value = serde_json::from_slice(&text[start..]).ok()?;
@@ -176,8 +165,8 @@ pub(crate) fn switch_off_servers(
 /// a namespace; `None` unless the output is one JSON array of input items, holding at least
 /// one `message` and otherwise only `additional_tools`, with nothing after it, so an unknown
 /// shape is never read as "no tools".
-pub(crate) fn offered_tools(output: &[u8]) -> Option<Vec<String>> {
-    let items = prompt_items(output)?;
+pub(crate) fn offered_tools(output: &[u8], csi: ai6::Limit) -> Option<Vec<String>> {
+    let items = prompt_items(output, csi)?;
     let mut tools = Vec::new();
     let mut messages = 0;
     for item in &items {
@@ -191,10 +180,10 @@ pub(crate) fn offered_tools(output: &[u8]) -> Option<Vec<String>> {
 }
 
 /// The one JSON array of input items in `codex debug prompt-input` output.
-fn prompt_items(output: &[u8]) -> Option<Vec<Value>> {
+fn prompt_items(output: &[u8], csi: ai6::Limit) -> Option<Vec<Value>> {
     // The output is pretty-printed JSON, and a terminal may break a long line: JSON text holds
     // no raw line break, so every one can go.
-    let mut text = strip_controls(output, CSI_BYTES);
+    let mut text = strip_controls(output, csi);
     text.retain(|byte| !matches!(byte, b'\r' | b'\n'));
     let start = (0..text.len()).find(|&at| opens_item_list(&text[at..]))?;
     // One value, then only whitespace: `from_slice` refuses anything after it.
@@ -209,8 +198,8 @@ fn prompt_items(output: &[u8]) -> Option<Vec<Value>> {
 /// declaration:` heading: `Some` empty when `exec` is not offered, `None` when its declarations
 /// cannot be read. Codex leaves deferred tools (an MCP server's, in 0.164.0) out of the
 /// description, so those are not seen here.
-pub(crate) fn exec_nested(output: &[u8]) -> Option<Vec<String>> {
-    let exec = prompt_items(output)?
+pub(crate) fn exec_nested(output: &[u8], csi: ai6::Limit) -> Option<Vec<String>> {
+    let exec = prompt_items(output, csi)?
         .iter()
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
         .filter_map(|item| item.get("tools")?.as_array())
@@ -481,19 +470,22 @@ pub(crate) struct Probe<'a> {
     pub(crate) scripts: bool,
     /// Whether it may change files through Codex's patch tool.
     pub(crate) files: bool,
+    /// The handler's configuration: terminal control bytes, the check's lifetime and timeout.
+    pub(crate) config: &'a crate::CodexConfig,
 }
 
 impl Probe<'_> {
     /// Runs the check. The features and MCP servers to switch off are reused for the same
-    /// Codex, settings and configuration environment for [`CHECK_LIFETIME`]; what Codex offers
+    /// Codex, settings and configuration environment for `tool_check_lifetime_secs`; what Codex offers
     /// is rendered on every start, so a change the key cannot see (a configuration file
     /// edited) is caught there, except an MCP server added to the user's configuration, whose
     /// tools `prompt-input` does not render: it is switched off once the lifetime has passed.
     pub(crate) fn check(&self) -> Result<Checked, ProviderError> {
+        let lifetime = Duration::from_secs(self.config.tool_check_lifetime_secs);
         let check = ToolCheck::from_environment(self.environment)?;
         let version = String::from_utf8_lossy(&strip_controls(
             &self.capture(&[self.executable.to_owned(), "--version".to_owned()])?,
-            CSI_BYTES,
+            self.csi(),
         ))
         .trim()
         .to_owned();
@@ -518,7 +510,7 @@ impl Probe<'_> {
         let cached = feature_lists().lock().ok().and_then(|lists| {
             lists
                 .get(&key)
-                .filter(|(at, _)| at.elapsed() < CHECK_LIFETIME)
+                .filter(|(at, _)| at.elapsed() < lifetime)
                 .map(|(_, switched)| switched.clone())
         });
         let (overrides, read) = match cached {
@@ -526,7 +518,7 @@ impl Probe<'_> {
             None => {
                 let switched = self.switch_off(check)?;
                 if let Ok(mut lists) = feature_lists().lock() {
-                    lists.retain(|_, (at, _)| at.elapsed() < CHECK_LIFETIME);
+                    lists.retain(|_, (at, _)| at.elapsed() < lifetime);
                     lists.insert(key, (Instant::now(), switched.clone()));
                 }
                 switched
@@ -544,8 +536,8 @@ impl Probe<'_> {
             scripts: self.scripts,
             files: self.files,
         };
-        let offered = offered_tools(&output);
-        let nested = exec_nested(&output);
+        let offered = offered_tools(&output, self.csi());
+        let nested = exec_nested(&output, self.csi());
         if let Some(found) = judge(offered.as_deref(), nested.as_deref(), allowed, check)
             .map_err(|reason| refuse(Status::GUATIAO_ERR_UNSUPPORTED, reason))?
         {
@@ -562,7 +554,10 @@ impl Probe<'_> {
     /// --json` with those features off; and what a `warn` check found reading them.
     fn switch_off(&self, check: ToolCheck) -> Result<SwitchedOff, ProviderError> {
         let mut found = Vec::new();
-        let list = feature_list(&self.capture(&self.command(&["features", "list"], &[]))?);
+        let list = feature_list(
+            &self.capture(&self.command(&["features", "list"], &[]))?,
+            self.csi(),
+        );
         match &list {
             None => found.push(
                 "the features Codex enables could not be read from `codex features list`"
@@ -584,8 +579,10 @@ impl Probe<'_> {
             .filter(|name| !(self.scripts && SCRIPT_FEATURES.contains(&name.as_str())))
             .flat_map(|name| ["-c".to_owned(), format!("features.{name}=false")])
             .collect::<Vec<_>>();
-        let listed =
-            mcp_server_names(&self.capture(&self.command(&["mcp", "list", "--json"], &overrides))?);
+        let listed = mcp_server_names(
+            &self.capture(&self.command(&["mcp", "list", "--json"], &overrides))?,
+            self.csi(),
+        );
         match listed {
             None => found.push(
                 "the MCP servers of Codex's configuration could not be read from \
@@ -608,6 +605,10 @@ impl Probe<'_> {
         Ok((overrides, (!found.is_empty()).then(|| found.join("; "))))
     }
 
+    /// The longest terminal control sequence stripped from what a command prints.
+    fn csi(&self) -> ai6::Limit {
+        ai6::Limit::at(self.config.csi_bytes)
+    }
     /// `codex <words>` with the app server's settings and `more`.
     fn command(&self, words: &[&str], more: &[String]) -> Vec<String> {
         let mut argv = vec![self.executable.to_owned()];
@@ -627,7 +628,7 @@ impl Probe<'_> {
             cols: STREAM_COLS,
         };
         let session = self.terminal.spawn(&spec.to_value().map_err(internal)?)?;
-        let deadline = Instant::now() + COMMAND_TIMEOUT;
+        let deadline = Instant::now() + Duration::from_millis(self.config.tool_command_timeout_ms);
         let mut output = Vec::new();
         let mut buffer = vec![0_u8; 65536];
         let mut exited = false;
@@ -663,6 +664,7 @@ impl Probe<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const CSI: ai6::Limit = ai6::Limit::at(64);
 
     /// `codex debug prompt-input`, `codex features list` and `codex mcp list --json` output
     /// of Codex 0.164.0 on Windows, model descriptions shortened, message text and server
@@ -698,7 +700,7 @@ mod tests {
 
     #[test]
     fn the_settings_before_the_check_left_code_mode_agents_and_computer_use_on() {
-        let offered = offered_tools(BEFORE.as_bytes()).unwrap();
+        let offered = offered_tools(BEFORE.as_bytes(), CSI).unwrap();
         for tool in [
             "functions.exec",
             "functions.request_user_input",
@@ -715,7 +717,7 @@ mod tests {
 
     #[test]
     fn an_answer_only_thread_offered_the_catalogs_exec_and_wait_is_refused() {
-        let offered = offered_tools(ANSWER_ONLY.as_bytes()).unwrap();
+        let offered = offered_tools(ANSWER_ONLY.as_bytes(), CSI).unwrap();
         assert_eq!(
             offered,
             ["functions.exec", "functions.wait"],
@@ -740,7 +742,7 @@ mod tests {
 
     #[test]
     fn an_assistant_whose_server_codex_does_not_offer_is_refused() {
-        let offered = offered_tools(ASSISTANT.as_bytes()).unwrap();
+        let offered = offered_tools(ASSISTANT.as_bytes(), CSI).unwrap();
         let refused = judge(
             Some(&offered),
             None,
@@ -758,10 +760,10 @@ mod tests {
     #[test]
     fn the_users_mcp_servers_but_the_threads_are_switched_off_by_name() {
         assert_eq!(
-            mcp_server_names(MCP_LIST.as_bytes()).unwrap(),
+            mcp_server_names(MCP_LIST.as_bytes(), CSI).unwrap(),
             ["node_repl"]
         );
-        let listed = mcp_server_names(MCP_LIST_ASSISTANT.as_bytes()).unwrap();
+        let listed = mcp_server_names(MCP_LIST_ASSISTANT.as_bytes(), CSI).unwrap();
         assert_eq!(
             listed,
             ["moneypenny", "node_repl"],
@@ -806,12 +808,12 @@ mod tests {
 
     #[test]
     fn mcp_list_output_is_read_exactly_or_not_at_all() {
-        assert_eq!(mcp_server_names(b"[]\n"), Some(Vec::new()));
+        assert_eq!(mcp_server_names(b"[]\n", CSI), Some(Vec::new()));
         let mut rendered = b"\x1b[?25l\x1b]0;codex\x07\r\n".to_vec();
         rendered.extend_from_slice(MCP_LIST.replace('\n', "\r\n").as_bytes());
         assert_eq!(
-            mcp_server_names(&rendered),
-            mcp_server_names(MCP_LIST.as_bytes())
+            mcp_server_names(&rendered, CSI),
+            mcp_server_names(MCP_LIST.as_bytes(), CSI)
         );
         for output in [
             "",
@@ -823,13 +825,13 @@ mod tests {
             "[] trailing",
             "[{\"name\":\"a\"}] [{\"name\":\"b\"}]",
         ] {
-            assert_eq!(mcp_server_names(output.as_bytes()), None, "{output}");
+            assert_eq!(mcp_server_names(output.as_bytes(), CSI), None, "{output}");
         }
     }
 
     #[test]
     fn extra_tools_are_refused_and_named_or_started_as_a_weakening() {
-        let offered = offered_tools(CODE_MODE.as_bytes()).unwrap();
+        let offered = offered_tools(CODE_MODE.as_bytes(), CSI).unwrap();
         assert!(offered.iter().any(|tool| tool == "mcp__moneypenny.board"));
         let refused = judge(
             Some(&offered),
@@ -865,8 +867,8 @@ mod tests {
     #[test]
     fn a_scripts_thread_is_offered_code_mode_alone_and_passes_only_with_scripts() {
         let servers = moneypenny();
-        let offered = offered_tools(SCRIPTS.as_bytes()).unwrap();
-        let nested = exec_nested(SCRIPTS.as_bytes()).unwrap();
+        let offered = offered_tools(SCRIPTS.as_bytes(), CSI).unwrap();
+        let nested = exec_nested(SCRIPTS.as_bytes(), CSI).unwrap();
         assert_eq!(
             offered, CODE_MODE_TOOLS,
             "the server's tools are nested in exec"
@@ -908,8 +910,8 @@ mod tests {
     #[test]
     fn exec_nests_only_the_command_tools_the_patch_tool_with_files_and_the_servers() {
         let servers = moneypenny();
-        let offered = offered_tools(SCRIPTS.as_bytes()).unwrap();
-        let nested = exec_nested(SCRIPTS.as_bytes()).unwrap();
+        let offered = offered_tools(SCRIPTS.as_bytes(), CSI).unwrap();
+        let nested = exec_nested(SCRIPTS.as_bytes(), CSI).unwrap();
         let no_files = Allowed {
             servers: &servers,
             scripts: true,
@@ -928,7 +930,7 @@ mod tests {
                        };\\n```";
         let at = SCRIPTS.find("\\n\\n## clock").unwrap();
         let widened = format!("{}{browser}{}", &SCRIPTS[..at], &SCRIPTS[at..]);
-        let nested = exec_nested(widened.as_bytes()).unwrap();
+        let nested = exec_nested(widened.as_bytes(), CSI).unwrap();
         assert!(
             nested.iter().any(|tool| tool == "browser__open"),
             "{nested:?}"
@@ -954,7 +956,7 @@ mod tests {
 
         let cut = SCRIPTS.replacen("exec tool declaration:", "", 1);
         assert_eq!(
-            exec_nested(cut.as_bytes()),
+            exec_nested(cut.as_bytes(), CSI),
             None,
             "a declaration without its heading"
         );
@@ -969,11 +971,14 @@ mod tests {
             .contains("could not be read")
         );
         assert_eq!(
-            exec_nested(ANSWER_ONLY.as_bytes()),
+            exec_nested(ANSWER_ONLY.as_bytes(), CSI),
             None,
             "the older fixtures cut exec's description"
         );
-        assert_eq!(exec_nested(b"[{\"type\":\"message\"}]"), Some(Vec::new()));
+        assert_eq!(
+            exec_nested(b"[{\"type\":\"message\"}]", CSI),
+            Some(Vec::new())
+        );
     }
 
     #[test]
@@ -1018,7 +1023,7 @@ mod tests {
             // A list that does not open with an item.
             "[1, {\"type\":\"message\"}]",
         ] {
-            let offered = offered_tools(output.as_bytes());
+            let offered = offered_tools(output.as_bytes(), CSI);
             assert_eq!(offered, None, "{output}");
             assert!(judge(None, None, allow(&[], false), ToolCheck::Strict).is_err());
             assert!(
@@ -1038,14 +1043,14 @@ mod tests {
         rendered.extend_from_slice(b"\r\n\x1b[23;80H");
         rendered.extend_from_slice(tail.as_bytes());
         assert_eq!(
-            offered_tools(&rendered),
-            offered_tools(CODE_MODE.as_bytes())
+            offered_tools(&rendered, CSI),
+            offered_tools(CODE_MODE.as_bytes(), CSI)
         );
     }
 
     #[test]
     fn the_feature_list_names_what_is_on() {
-        let list = feature_list(FEATURES.as_bytes()).unwrap();
+        let list = feature_list(FEATURES.as_bytes(), CSI).unwrap();
         assert_eq!(list.unread, Vec::<String>::new(), "every line is a feature");
         let enabled = list.enabled;
         for feature in [
@@ -1067,10 +1072,10 @@ mod tests {
             KEPT_FEATURES.contains(&"incremental_tools"),
             "kept, or prompt-input renders no tool"
         );
-        assert_eq!(feature_list(b"Error: no such command\n"), None);
+        assert_eq!(feature_list(b"Error: no such command\n", CSI), None);
         let noisy = format!("{FEATURES}\nWARNING: plugin cache is stale\n");
         assert_eq!(
-            feature_list(noisy.as_bytes()).unwrap().unread,
+            feature_list(noisy.as_bytes(), CSI).unwrap().unread,
             ["WARNING: plugin cache is stale"],
             "a line that is not a feature is kept, for the check to judge"
         );

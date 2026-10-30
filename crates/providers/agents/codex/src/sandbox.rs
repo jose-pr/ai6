@@ -22,6 +22,7 @@ use ai6::directorates::section_00::programs::{
 };
 use serde_json::Value;
 
+use crate::CodexConfig;
 use crate::tools::CONFIG_ENVIRONMENT;
 
 /// The permission profile an assistant's scripts run under.
@@ -35,9 +36,6 @@ pub(crate) const SCRIPT_FEATURES: [&str; 3] = ["code_mode_host", "shell_tool", "
 
 /// What the probe prints when Codex ran it inside its sandbox.
 const PROBE_MARKER: &str = "AI6_CODEX_SANDBOX_OK";
-/// How long the probe may run, and how long its answer stands.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
-const PROBE_LIFETIME: Duration = Duration::from_secs(15 * 60);
 
 /// The sandbox a scripts thread's commands run in: [`PROFILE`] with these filesystem rules
 /// ([`rules`]), keeping only [`SCRIPT_ENVIRONMENT`] in a command's environment.
@@ -284,12 +282,15 @@ fn read_dirs(
 }
 
 /// Why Codex cannot run an assistant's scripts in its sandbox here, `None` when it can: the
-/// answer of [`probe`] with the process runner, kept for [`PROBE_LIFETIME`] per executable and
-/// configuration environment.
+/// answer of [`probe`] with the process runner, kept for `sandbox_probe_lifetime_secs` per executable
+/// and configuration environment.
 pub(crate) fn unavailable(
-    executable: &str,
+    config: &CodexConfig,
     environment: &BTreeMap<String, String>,
 ) -> Option<String> {
+    let executable = config.executable.as_str();
+    let lifetime = Duration::from_secs(config.sandbox_probe_lifetime_secs);
+    let timeout = Duration::from_millis(config.sandbox_probe_timeout_ms);
     type Key = (String, Vec<(String, Option<String>)>);
     type Answers = Mutex<HashMap<Key, (Instant, Option<String>)>>;
     static ANSWERS: OnceLock<Answers> = OnceLock::new();
@@ -304,15 +305,22 @@ pub(crate) fn unavailable(
     let cached = answers.lock().ok().and_then(|answers| {
         answers
             .get(&key)
-            .filter(|(at, _)| at.elapsed() < PROBE_LIFETIME)
+            .filter(|(at, _)| at.elapsed() < lifetime)
             .map(|(_, answer)| answer.clone())
     });
     if let Some(answer) = cached {
         return answer;
     }
-    let answer = probe(executable, environment, &run);
+    let answer = probe(
+        executable,
+        environment,
+        &|argv: &[String], cwd: &Path, environment: &BTreeMap<String, String>| {
+            run_for(argv, cwd, environment, timeout)
+        },
+        usize::try_from(config.sandbox_error_chars).unwrap_or(usize::MAX),
+    );
     if let Ok(mut answers) = answers.lock() {
-        answers.retain(|_, (at, _)| at.elapsed() < PROBE_LIFETIME);
+        answers.retain(|_, (at, _)| at.elapsed() < lifetime);
         answers.insert(key, (Instant::now(), answer.clone()));
     }
     answer
@@ -328,6 +336,7 @@ pub(crate) fn probe(
     executable: &str,
     environment: &BTreeMap<String, String>,
     runner: &Runner<'_>,
+    error_chars: usize,
 ) -> Option<String> {
     let dir = match tempfile::Builder::new()
         .prefix("ai6-codex-probe-")
@@ -340,13 +349,14 @@ pub(crate) fn probe(
             ));
         }
     };
-    probe_in(executable, environment, runner, dir.path())
+    probe_in(executable, environment, runner, error_chars, dir.path())
 }
 
 fn probe_in(
     executable: &str,
     environment: &BTreeMap<String, String>,
     runner: &Runner<'_>,
+    error_chars: usize,
     dir: &Path,
 ) -> Option<String> {
     let rules = rules(executable, &canonical(dir), environment, &[], &[], &[]);
@@ -380,7 +390,7 @@ fn probe_in(
         .map(str::trim)
         .rfind(|line| !line.is_empty())
         .unwrap_or("no output");
-    let last: String = last.chars().take(300).collect();
+    let last: String = last.chars().take(error_chars).collect();
     Some(format!(
         "Codex's sandbox did not run a command here{}: {last}",
         if cfg!(windows) {
@@ -391,16 +401,7 @@ fn probe_in(
     ))
 }
 
-/// Runs `argv` in `cwd` with exactly `environment`, killed after [`PROBE_TIMEOUT`].
-fn run(
-    argv: &[String],
-    cwd: &Path,
-    environment: &BTreeMap<String, String>,
-) -> std::io::Result<(bool, String)> {
-    run_for(argv, cwd, environment, PROBE_TIMEOUT)
-}
-
-/// [`run`] with `timeout`. The command and everything it starts form one process tree (its own
+/// Runs `argv` in `cwd` with exactly `environment`, killed after `timeout`. The command and everything it starts form one process tree (its own
 /// process group on Unix, a kill-on-close Job Object on Windows), killed whole once it exits or
 /// times out, so nothing it left behind keeps running or holds its output open.
 fn run_for(
@@ -885,7 +886,7 @@ mod tests {
                 .push((argv.to_vec(), cwd.to_path_buf()));
             Ok((true, format!("{PROBE_MARKER}\r\n")))
         };
-        assert_eq!(probe("codex", &BTreeMap::new(), &ran), None);
+        assert_eq!(probe("codex", &BTreeMap::new(), &ran, 300), None);
         let (argv, cwd) = seen.lock().unwrap()[0].clone();
         let at = argv.iter().position(|word| word == "sandbox").unwrap();
         assert_eq!(argv[at..at + 4], ["sandbox", "-P", PROBE_PROFILE, "--"]);
@@ -910,19 +911,19 @@ mod tests {
                 "windows sandbox failed: MXC is unavailable\n".to_owned(),
             ))
         };
-        let reason = probe("codex", &BTreeMap::new(), &failed).unwrap();
+        let reason = probe("codex", &BTreeMap::new(), &failed, 300).unwrap();
         assert!(reason.contains("MXC is unavailable"), "{reason}");
         let silent =
             |_: &[String], _: &Path, _: &BTreeMap<String, String>| Ok((true, String::new()));
         assert!(
-            probe("codex", &BTreeMap::new(), &silent).is_some(),
+            probe("codex", &BTreeMap::new(), &silent, 300).is_some(),
             "success without the marker is not a sandbox that ran it"
         );
         let missing = |_: &[String], _: &Path, _: &BTreeMap<String, String>| {
             Err(std::io::Error::from(std::io::ErrorKind::NotFound))
         };
         assert!(
-            probe("codex", &BTreeMap::new(), &missing)
+            probe("codex", &BTreeMap::new(), &missing, 300)
                 .unwrap()
                 .contains("did not run")
         );

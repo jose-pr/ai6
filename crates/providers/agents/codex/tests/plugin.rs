@@ -27,3 +27,27 @@ fn the_built_library_is_built_with_its_default_settings() {
         .handler("codex", None)
         .expect("every Codex handler setting has a default");
 }
+
+/// Whether the library builds  with the Station record's `[providers.codex]` table `config`.
+fn builds_with(config: serde_json::Value) -> bool {
+    let configs = std::collections::BTreeMap::from([("codex".to_owned(), config)]);
+    plugins()
+        .with_provider_configs(ai6::station::plugins::provider_configs(&configs).unwrap())
+        .handler("codex", None)
+        .is_ok()
+}
+
+#[test]
+fn the_built_library_reads_its_limits_from_its_configuration() {
+    assert!(builds_with(
+        serde_json::json!({ "tail_lines": 3, "exit_wait_ms": 0, "csi_bytes": 128 })
+    ));
+    assert!(
+        !builds_with(serde_json::json!({ "tail_lines": "many" })),
+        "a limit that is not a number is refused"
+    );
+    assert!(
+        !builds_with(serde_json::json!({ "no_such_limit": 1 })),
+        "an unknown key is refused"
+    );
+}

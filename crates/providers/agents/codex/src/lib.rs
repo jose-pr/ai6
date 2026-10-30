@@ -47,6 +47,82 @@ pub struct CodexConfig {
     /// Executable visible to the AI6-owned terminal environment.
     #[map(default = String::from("codex"))]
     pub executable: String,
+    /// Bytes of one line of the app server's output a Session holds before handing over what it
+    /// has. Default 67108864 (64 MiB).
+    #[map(default = 64 * 1024 * 1024)]
+    pub json_line_bytes: u64,
+    /// Bytes of one terminal control sequence before it is dropped, from the app server's
+    /// output and from the commands of the tool check. Default 64.
+    #[map(default = 64)]
+    pub csi_bytes: u64,
+    /// Bytes an assistant's context file may hold. Default 1048576 (1 MiB).
+    #[map(default = 1024 * 1024)]
+    pub context_file_bytes: u64,
+    /// How many of the last non-JSON lines a failed Session quotes. Default 8.
+    #[map(default = 8)]
+    pub tail_lines: u64,
+    /// Bytes of each of those lines a failed Session quotes. Default 512.
+    #[map(default = 512)]
+    pub tail_line_bytes: u64,
+    /// Milliseconds a closing Session waits for the app server to have exited. Default 2000.
+    #[map(default = 2_000)]
+    pub close_wait_ms: u64,
+    /// Milliseconds the end of the output waits for the app server's exit status. Default 1000.
+    #[map(default = 1_000)]
+    pub exit_wait_ms: u64,
+    /// Milliseconds the app server may take to answer `initialize`. Default 20000.
+    #[map(default = 20_000)]
+    pub start_timeout_ms: u64,
+    /// Milliseconds the app server may take to answer a thread request (`thread/start`,
+    /// `thread/resume`, `config/read`). Default 30000.
+    #[map(default = 30_000)]
+    pub request_timeout_ms: u64,
+    /// Milliseconds the sandbox probe of an assistant's scripts may run. Default 60000.
+    #[map(default = 60_000)]
+    pub sandbox_probe_timeout_ms: u64,
+    /// Seconds the answer of that probe stands per executable and configuration environment.
+    /// Default 900.
+    #[map(default = 900)]
+    pub sandbox_probe_lifetime_secs: u64,
+    /// Characters of the probe's last output line quoted when the sandbox did not run. Default
+    /// 300.
+    #[map(default = 300)]
+    pub sandbox_error_chars: u64,
+    /// Seconds the tool check's feature list stands for the same Codex, settings and
+    /// environment. Default 900.
+    #[map(default = 900)]
+    pub tool_check_lifetime_secs: u64,
+    /// Milliseconds one of the tool check's commands may run. Default 120000.
+    #[map(default = 120_000)]
+    pub tool_command_timeout_ms: u64,
+}
+
+impl Default for CodexConfig {
+    fn default() -> Self {
+        Self {
+            executable: String::from("codex"),
+            json_line_bytes: 64 * 1024 * 1024,
+            csi_bytes: 64,
+            context_file_bytes: 1024 * 1024,
+            tail_lines: 8,
+            tail_line_bytes: 512,
+            close_wait_ms: 2_000,
+            exit_wait_ms: 1_000,
+            start_timeout_ms: 20_000,
+            request_timeout_ms: 30_000,
+            sandbox_probe_timeout_ms: 60_000,
+            sandbox_probe_lifetime_secs: 900,
+            sandbox_error_chars: 300,
+            tool_check_lifetime_secs: 900,
+            tool_command_timeout_ms: 120_000,
+        }
+    }
+}
+
+impl CodexConfig {
+    fn millis(&self, ms: u64) -> Duration {
+        Duration::from_millis(ms)
+    }
 }
 
 /// Starts and resumes Codex through its app-server protocol.
@@ -89,7 +165,7 @@ impl AgentHandler for CodexHandler {
         &self,
         environment: std::collections::BTreeMap<String, String>,
     ) -> Result<Option<String>, ProviderError> {
-        Ok(sandbox::unavailable(&self.config.executable, &environment))
+        Ok(sandbox::unavailable(&self.config, &environment))
     }
 
     fn assistant_skills(&self) -> Result<Option<String>, ProviderError> {
@@ -122,6 +198,7 @@ impl AgentHandler for CodexHandler {
             &request.working_directory,
             &request.environment,
             Mode {
+                config: &self.config,
                 project_settings: request.project_settings,
                 answer_only: request.answer_only || request.assistant.is_some(),
                 assistant: request.assistant.as_ref(),
@@ -133,6 +210,7 @@ impl AgentHandler for CodexHandler {
             .filter(|_| !(request.answer_only || request.assistant.is_some()));
         let scripts = Scripts::of(request.assistant.as_ref());
         let mut session = CodexSession::new(process, request.effort)
+            .limited_by(&self.config)
             .with_gate(gate)
             .with_weakening(weakening)
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()))
@@ -143,13 +221,18 @@ impl AgentHandler for CodexHandler {
                 "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": {}
             }),
-            Duration::from_secs(20),
+            self.config.millis(self.config.start_timeout_ms),
         )?;
         session.notify("initialized", json!({}))?;
         if let Some(profile) = &profile {
             close_unless(
                 &session,
-                check_sandbox_config(&session, profile, &request.working_directory),
+                check_sandbox_config(
+                    &session,
+                    profile,
+                    &request.working_directory,
+                    self.config.millis(self.config.request_timeout_ms),
+                ),
             )?;
         }
         let mut params = json!({ "threadId": request.session_id.as_str(), "excludeTurns": true });
@@ -163,7 +246,11 @@ impl AgentHandler for CodexHandler {
             request.answer_only || request.assistant.is_some(),
             scripts,
         );
-        let response = match session.request("thread/resume", params, Duration::from_secs(30)) {
+        let response = match session.request(
+            "thread/resume",
+            params,
+            self.config.millis(self.config.request_timeout_ms),
+        ) {
             Ok(response) => response,
             Err(error) => {
                 let _ = session.close();
@@ -214,7 +301,11 @@ impl CodexHandler {
         let scripts = Scripts::of(request.assistant.as_ref());
         let mut instructions = request.initial_context.clone();
         if let Some(mode) = &request.assistant {
-            instructions.extend(assistant_instructions(mode, scripts)?);
+            instructions.extend(assistant_instructions(
+                mode,
+                scripts,
+                self.config.context_file_bytes,
+            )?);
         }
         let profile = scripts_profile(
             &self.config.executable,
@@ -228,6 +319,7 @@ impl CodexHandler {
             &request.working_directory,
             &request.environment,
             Mode {
+                config: &self.config,
                 project_settings: request.project_settings,
                 answer_only: request.answer_only || request.assistant.is_some(),
                 assistant: request.assistant.as_ref(),
@@ -237,6 +329,7 @@ impl CodexHandler {
         )?;
         let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
         let mut session = CodexSession::new(process, request.effort)
+            .limited_by(&self.config)
             .with_gate(gate)
             .with_weakening(weakening)
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()))
@@ -247,13 +340,18 @@ impl CodexHandler {
                 "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": {}
             }),
-            Duration::from_secs(20),
+            self.config.millis(self.config.start_timeout_ms),
         )?;
         session.notify("initialized", json!({}))?;
         if let Some(profile) = &profile {
             close_unless(
                 &session,
-                check_sandbox_config(&session, profile, &request.working_directory),
+                check_sandbox_config(
+                    &session,
+                    profile,
+                    &request.working_directory,
+                    self.config.millis(self.config.request_timeout_ms),
+                ),
             )?;
         }
         let mut params = json!({ "cwd": request.working_directory });
@@ -269,7 +367,11 @@ impl CodexHandler {
         if !instructions.is_empty() {
             params["developerInstructions"] = json!(instructions.join("\n\n"));
         }
-        let response = session.request("thread/start", params, Duration::from_secs(30))?;
+        let response = session.request(
+            "thread/start",
+            params,
+            self.config.millis(self.config.request_timeout_ms),
+        )?;
         if let Some(profile) = &profile {
             close_unless(
                 &session,
@@ -351,14 +453,12 @@ const NO_SKILL_LIST: &str = "Codex has no list of allowed skills: it loads the s
                              project, of the user's home directory and of the system, and its own \
                              bundled ones";
 
-/// The most a context file may hold.
-const MAX_CONTEXT_FILE_BYTES: u64 = 1024 * 1024;
-
 /// The developer instructions an assistant thread gets besides its initial context: the text
 /// of its `context_file`, and what it cannot do here that its mode suggests it could.
 fn assistant_instructions(
     mode: &AssistantMode,
     scripts: Scripts,
+    context_file_bytes: u64,
 ) -> Result<Vec<String>, ProviderError> {
     let mut parts = Vec::new();
     if let Some(file) = &mode.context_file {
@@ -370,10 +470,10 @@ fn assistant_instructions(
                 )
             })?
             .len();
-        if size > MAX_CONTEXT_FILE_BYTES {
+        if size > context_file_bytes {
             return Err(refuse(
                 Status::GUATIAO_ERR_BAD_VALUE,
-                format!("the context file holds {size} bytes, more than {MAX_CONTEXT_FILE_BYTES}"),
+                format!("the context file holds {size} bytes, more than {context_file_bytes}"),
             ));
         }
         let text = std::fs::read_to_string(file).map_err(|error| {
@@ -477,16 +577,15 @@ struct CodexSession {
     /// The last lines the app server wrote that were not JSON: its own diagnostics, which say
     /// why it exited when it exits.
     tail: Mutex<VecDeque<String>>,
+    /// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
+    tail_lines: usize,
+    tail_line_bytes: usize,
+    /// How long `close` waits for the app server to have exited, for a terminal whose `kill`
+    /// does not.
+    close_wait_ms: i64,
+    /// How long the end of the output waits for the app server's exit status.
+    exit_wait_ms: i64,
 }
-
-/// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
-const TAIL_LINES: usize = 8;
-const TAIL_LINE_BYTES: usize = 512;
-/// How long `close` waits for the app server to have exited, for a terminal whose `kill` does
-/// not.
-const CLOSE_WAIT_MS: i64 = 2_000;
-/// How long the end of the output waits for the app server's exit status.
-const EXIT_WAIT_MS: i64 = 1_000;
 
 impl CodexSession {
     fn new(terminal: Object<dyn TerminalSession>, effort: Option<String>) -> Self {
@@ -507,7 +606,24 @@ impl CodexSession {
             ended_reported: AtomicBool::new(false),
             ended_reason: Mutex::new(None),
             tail: Mutex::new(VecDeque::new()),
+            tail_lines: 8,
+            tail_line_bytes: 512,
+            close_wait_ms: 2_000,
+            exit_wait_ms: 1_000,
         }
+    }
+
+    /// Takes the bounds and waits from the handler's configuration.
+    fn limited_by(mut self, config: &CodexConfig) -> Self {
+        let mut limits = ai6::station::limits::TerminalOutputLimits::default();
+        limits.json_line_bytes = ai6::Limit::at(config.json_line_bytes);
+        limits.csi_bytes = ai6::Limit::at(config.csi_bytes);
+        self.output = Mutex::new(JsonLines::new(&limits));
+        self.tail_lines = usize::try_from(config.tail_lines).unwrap_or(usize::MAX);
+        self.tail_line_bytes = usize::try_from(config.tail_line_bytes).unwrap_or(usize::MAX);
+        self.close_wait_ms = i64::try_from(config.close_wait_ms).unwrap_or(i64::MAX);
+        self.exit_wait_ms = i64::try_from(config.exit_wait_ms).unwrap_or(i64::MAX);
+        self
     }
 
     /// How the app server ended, once its terminal says it has; `None` while it runs or when
@@ -529,7 +645,7 @@ impl CodexSession {
     }
 
     fn describe_exit(&self) -> String {
-        let how = match self.exited(EXIT_WAIT_MS) {
+        let how = match self.exited(self.exit_wait_ms) {
             Some(ExitInfo {
                 code: Some(code), ..
             }) => format!("exited with code {}", exit_code_text(code)),
@@ -552,10 +668,10 @@ impl CodexSession {
 
     fn remember_output(&self, line: &str) {
         if let Ok(mut tail) = self.tail.lock() {
-            if tail.len() == TAIL_LINES {
+            if tail.len() >= self.tail_lines {
                 tail.pop_front();
             }
-            let mut end = line.len().min(TAIL_LINE_BYTES);
+            let mut end = line.len().min(self.tail_line_bytes);
             while !line.is_char_boundary(end) {
                 end -= 1;
             }
@@ -1195,7 +1311,7 @@ impl AgentSession for CodexSession {
         self.terminal.kill()?;
         // The caller may remove the working directory next, which the app server holds until
         // it has exited; a terminal that cannot tell is not waited for.
-        let _ = self.terminal.exit_status(CLOSE_WAIT_MS);
+        let _ = self.terminal.exit_status(self.close_wait_ms);
         Ok(())
     }
 }
@@ -1211,6 +1327,8 @@ struct Mode<'a> {
     model: Option<&'a str>,
     /// The sandbox of an assistant's scripts, when they run in one.
     profile: Option<&'a sandbox::Profile>,
+    /// The handler's configuration: the tool check's and the sandbox probe's bounds.
+    config: &'a CodexConfig,
 }
 
 /// The sandbox `assistant`'s scripts run in, `None` when they run in none.
@@ -1231,12 +1349,9 @@ fn check_sandbox_config(
     session: &CodexSession,
     profile: &sandbox::Profile,
     cwd: &str,
+    timeout: Duration,
 ) -> Result<(), ProviderError> {
-    let result = session.request(
-        "config/read",
-        json!({ "cwd": cwd }),
-        Duration::from_secs(30),
-    )?;
+    let result = session.request("config/read", json!({ "cwd": cwd }), timeout)?;
     profile
         .check_config(&result)
         .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found))
@@ -1293,6 +1408,7 @@ fn spawn(
             model: mode.model,
             servers: &servers,
             scripts: scripts != Scripts::None,
+            config: mode.config,
             files: restriction(mode.answer_only, mode.assistant)
                 .is_some_and(|allowed| allowed.file_changes),
         }
@@ -1964,6 +2080,7 @@ mod tests {
             BTreeMap::from([("CODEX_FIXTURE_THREAD_ID".to_owned(), session_id.to_string())]);
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-process-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
 
@@ -2108,6 +2225,7 @@ mod tests {
         let approved = Arc::new(Mutex::new(Vec::new()));
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-gate-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let session = handler
@@ -2432,6 +2550,7 @@ mod tests {
         };
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-test".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let session = handler
@@ -2523,6 +2642,7 @@ mod tests {
         };
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-test".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let session = handler
@@ -2566,6 +2686,7 @@ mod tests {
         };
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-test".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
 
@@ -2806,6 +2927,36 @@ mod tests {
     }
 
     #[test]
+    fn the_configured_tail_bounds_what_a_failed_session_quotes() {
+        let config = CodexConfig {
+            tail_lines: 2,
+            tail_line_bytes: 4,
+            ..CodexConfig::default()
+        };
+        let session = CodexSession::new(EofTerminalSession.into_object(), None).limited_by(&config);
+        for line in ["one one", "two two", "three three"] {
+            session.remember_output(line);
+        }
+
+        let reason = session.exit_reason();
+        assert!(reason.ends_with("its last output:\ntwo \nthre"), "{reason}");
+    }
+
+    #[test]
+    fn the_configured_size_bounds_an_assistants_context_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("context.md");
+        std::fs::write(&file, "twelve bytes").unwrap();
+        let mut mode = AssistantMode::moneypenny();
+        mode.context_file = Some(file.to_string_lossy().into_owned());
+
+        let error = assistant_instructions(&mode, Scripts::None, 11).unwrap_err();
+        assert!(error.to_string().contains("more than 11"), "{error}");
+        let told = assistant_instructions(&mode, Scripts::None, 12).unwrap();
+        assert!(told.iter().any(|part| part == "twelve bytes"), "{told:?}");
+    }
+
+    #[test]
     fn remote_hands_adds_the_theater_server_and_a_read_only_sandbox() {
         let environment = std::collections::BTreeMap::from([
             (
@@ -2884,6 +3035,7 @@ mod tests {
         ]);
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-assistant-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let cwd = std::env::current_dir()
@@ -3104,6 +3256,7 @@ mod tests {
         mode.network.allowed_hosts.push("example.com".to_owned());
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-scripts-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let terminal = ProcessTerminal::new();
@@ -3206,6 +3359,7 @@ mod tests {
     fn a_users_codex_configuration_that_widens_the_scripts_sandbox_refuses_the_thread() {
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-widened-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let mut mode = AssistantMode::moneypenny();
@@ -3260,6 +3414,7 @@ mod tests {
     fn scripted_commands_run_and_are_reported_as_a_tool() {
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-commands-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         for unsandboxed in [false, true] {
@@ -3346,6 +3501,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-catalog-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let environment = BTreeMap::from([
@@ -3399,6 +3555,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-user-servers-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let environment = BTreeMap::from([(
@@ -3444,6 +3601,7 @@ mod tests {
             // An executable of its own, so the warned start reads its own list.
             let handler = CodexHandler::try_from(CodexConfig {
                 executable: format!("codex-mcp-unread-fixture-{index}"),
+                ..CodexConfig::default()
             })
             .unwrap();
             let mut environment =
@@ -3486,6 +3644,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-strict-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let environment = BTreeMap::from([(
@@ -3522,6 +3681,7 @@ mod tests {
     fn a_warned_thread_starts_and_reports_the_extra_tools_first() {
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-warn-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let environment = BTreeMap::from([
@@ -3552,6 +3712,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-pass-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let session = handler
@@ -3585,6 +3746,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-cache-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         for home in ["C:\\agents\\one", "C:\\agents\\one", "C:\\agents\\two"] {
@@ -3627,6 +3789,7 @@ mod tests {
     fn a_feature_list_with_lines_it_cannot_read_refuses_unless_warned() {
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-unread-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         let features = "code_mode_host stable true\nWARNING: the plugin cache is stale";
@@ -3677,6 +3840,7 @@ mod tests {
     fn a_restricted_thread_that_uses_a_tool_is_ended() {
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-trip-fixture".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         for item in [
@@ -3794,6 +3958,7 @@ mod tests {
         );
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex".to_owned(),
+            ..CodexConfig::default()
         })
         .unwrap();
         assert!(
@@ -3830,7 +3995,12 @@ mod tests {
                 file_changes: false,
             })
         );
-        let told = assistant_instructions(&mode, Scripts::None).unwrap();
+        let told = assistant_instructions(
+            &mode,
+            Scripts::None,
+            CodexConfig::default().context_file_bytes,
+        )
+        .unwrap();
         assert!(
             told.iter().any(|line| line.contains("no file tools")),
             "{told:?}"

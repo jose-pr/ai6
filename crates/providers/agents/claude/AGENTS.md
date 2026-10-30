@@ -9,10 +9,28 @@ No features. MSRV: Rust 1.89. The crate depends on `ai6`, `serde` and `serde_jso
 It exposes `ClaudeHandler` and `ClaudeConfig` from the root. The crate contains no
 `unsafe` code.
 
+## `ClaudeConfig`
+
+Every key is optional; each default is the value the handler used before it was a key. Counts
+and bytes are plain numbers (a large number takes the bound away); a key ending `_ms` is
+milliseconds.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `executable` | `claude` | Executable visible to the terminal environment |
+| `json_line_bytes` | 67108864 | Bytes of one line of Claude Code's output held before what there is is handed over |
+| `csi_bytes` | 64 | Bytes of one terminal control sequence before it is dropped |
+| `tail_lines` | 8 | Non-JSON lines a failed Session quotes |
+| `tail_line_bytes` | 512 | Bytes of each of those lines |
+| `close_wait_ms` | 2000 | How long `close` waits for Claude Code to have exited |
+| `exit_wait_ms` | 1000 | How long the end of the output waits for the exit status |
+
+A Station sets them in `[providers.claude]` of its `station` record.
+
 ## `ClaudeHandler`
 
 `ClaudeHandler` and `ClaudeConfig` implement the `ai6::directorates::section_00::agent::AgentHandler` Guatiao
-kind. `ClaudeConfig` selects the executable; `ClaudeHandler` launches Claude Code through
+kind. `ClaudeConfig` selects the executable and the handler's bounds; `ClaudeHandler` launches Claude Code through
 the terminal instance supplied by AI6. Initial context becomes appended system
 instructions (`--append-system-prompt`) before the task prompt is written to the stream.
 It, the model and the effort are each passed as one `--flag=VALUE` argument, so a value that

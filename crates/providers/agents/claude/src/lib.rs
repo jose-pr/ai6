@@ -36,6 +36,39 @@ pub struct ClaudeConfig {
     /// Executable visible to the AI6-owned terminal environment.
     #[map(default = String::from("claude"))]
     pub executable: String,
+    /// Bytes of one line of Claude Code's output the Session holds before handing over what it
+    /// has. Default 67108864 (64 MiB).
+    #[map(default = 64 * 1024 * 1024)]
+    pub json_line_bytes: u64,
+    /// Bytes of one terminal control sequence before it is dropped. Default 64.
+    #[map(default = 64)]
+    pub csi_bytes: u64,
+    /// How many of the last non-JSON lines a failed Session quotes. Default 8.
+    #[map(default = 8)]
+    pub tail_lines: u64,
+    /// Bytes of each of those lines a failed Session quotes. Default 512.
+    #[map(default = 512)]
+    pub tail_line_bytes: u64,
+    /// Milliseconds a closing Session waits for Claude Code to have exited. Default 2000.
+    #[map(default = 2_000)]
+    pub close_wait_ms: u64,
+    /// Milliseconds the end of the output waits for Claude Code's exit status. Default 1000.
+    #[map(default = 1_000)]
+    pub exit_wait_ms: u64,
+}
+
+impl Default for ClaudeConfig {
+    fn default() -> Self {
+        Self {
+            executable: String::from("claude"),
+            json_line_bytes: 64 * 1024 * 1024,
+            csi_bytes: 64,
+            tail_lines: 8,
+            tail_line_bytes: 512,
+            close_wait_ms: 2_000,
+            exit_wait_ms: 1_000,
+        }
+    }
 }
 
 /// Starts and resumes Claude Code streams for AI6 Agent Sessions.
@@ -141,6 +174,7 @@ impl AgentHandler for ClaudeHandler {
             ),
         )?;
         let operation = ClaudeSession::new(session, None)
+            .limited_by(&self.config)
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
         operation.send(&request.prompt)?;
         Ok(operation.into_object())
@@ -197,6 +231,7 @@ impl AgentHandler for ClaudeHandler {
             ),
         )?;
         let operation = ClaudeSession::new(session, Some(expected_session_id))
+            .limited_by(&self.config)
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
         // With stream-json input Claude Code writes nothing, not even its stream's
         // initialization, until it has read a message: the message goes first, and the Session
@@ -1035,15 +1070,15 @@ struct ClaudeSession {
     tail: Mutex<VecDeque<String>>,
     /// Numbers the control requests written to Claude, for their `request_id`.
     requests: AtomicU64,
+    /// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
+    tail_lines: usize,
+    tail_line_bytes: usize,
+    /// How long `close` waits for the harness to have exited, for a terminal whose `kill` does
+    /// not.
+    close_wait_ms: i64,
+    /// How long the end of the output waits for the harness's exit status.
+    exit_wait_ms: i64,
 }
-
-/// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
-const TAIL_LINES: usize = 8;
-const TAIL_LINE_BYTES: usize = 512;
-/// How long `close` waits for the harness to have exited, for a terminal whose `kill` does not.
-const CLOSE_WAIT_MS: i64 = 2_000;
-/// How long the end of the output waits for the harness's exit status.
-const EXIT_WAIT_MS: i64 = 1_000;
 
 impl ClaudeSession {
     fn new(terminal: Object<dyn TerminalSession>, expected_session_id: Option<SessionId>) -> Self {
@@ -1058,7 +1093,24 @@ impl ClaudeSession {
             tripped: AtomicBool::new(false),
             tail: Mutex::new(VecDeque::new()),
             requests: AtomicU64::new(0),
+            tail_lines: 8,
+            tail_line_bytes: 512,
+            close_wait_ms: 2_000,
+            exit_wait_ms: 1_000,
         }
+    }
+
+    /// Takes the bounds and waits from the handler's configuration.
+    fn limited_by(mut self, config: &ClaudeConfig) -> Self {
+        let mut limits = ai6::station::limits::TerminalOutputLimits::default();
+        limits.json_line_bytes = ai6::Limit::at(config.json_line_bytes);
+        limits.csi_bytes = ai6::Limit::at(config.csi_bytes);
+        self.output = Mutex::new(JsonLines::new(&limits));
+        self.tail_lines = usize::try_from(config.tail_lines).unwrap_or(usize::MAX);
+        self.tail_line_bytes = usize::try_from(config.tail_line_bytes).unwrap_or(usize::MAX);
+        self.close_wait_ms = i64::try_from(config.close_wait_ms).unwrap_or(i64::MAX);
+        self.exit_wait_ms = i64::try_from(config.exit_wait_ms).unwrap_or(i64::MAX);
+        self
     }
 
     /// How the harness ended, once its terminal says it has; `None` while it runs or when the
@@ -1073,7 +1125,7 @@ impl ClaudeSession {
     /// Why the Session ended without completing: the exit status and the last lines Claude
     /// wrote outside its stream.
     fn exit_reason(&self) -> String {
-        let how = match self.exited(EXIT_WAIT_MS) {
+        let how = match self.exited(self.exit_wait_ms) {
             Some(ExitInfo {
                 code: Some(code), ..
             }) => format!("exited with code {}", exit_code_text(code)),
@@ -1096,10 +1148,10 @@ impl ClaudeSession {
 
     fn remember_output(&self, line: &str) {
         if let Ok(mut tail) = self.tail.lock() {
-            if tail.len() == TAIL_LINES {
+            if tail.len() >= self.tail_lines {
                 tail.pop_front();
             }
-            let mut end = line.len().min(TAIL_LINE_BYTES);
+            let mut end = line.len().min(self.tail_line_bytes);
             while !line.is_char_boundary(end) {
                 end -= 1;
             }
@@ -1304,7 +1356,7 @@ impl ai6::directorates::section_00::agent::AgentSession for ClaudeSession {
         self.terminal.kill()?;
         // The caller may remove the working directory next, which the harness holds until it
         // has exited; a terminal that cannot tell is not waited for.
-        let _ = self.terminal.exit_status(CLOSE_WAIT_MS);
+        let _ = self.terminal.exit_status(self.close_wait_ms);
         Ok(())
     }
 }
@@ -1837,6 +1889,7 @@ mod tests {
         )]);
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-process-fixture".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
 
@@ -2041,6 +2094,7 @@ mod tests {
         };
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-test".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let session = handler
@@ -2124,6 +2178,7 @@ mod tests {
         };
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-test".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let session = handler
@@ -2184,6 +2239,7 @@ mod tests {
         };
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-test".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let session = handler
@@ -2269,6 +2325,7 @@ mod tests {
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
             let handler = ClaudeHandler::try_from(ClaudeConfig {
                 executable: "claude-test".to_owned(),
+                ..ClaudeConfig::default()
             })
             .unwrap();
             let session = handler
@@ -2325,6 +2382,7 @@ mod tests {
         };
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-test".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let session = handler
@@ -2362,6 +2420,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-silent-fixture".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let started = Instant::now();
@@ -2581,6 +2640,7 @@ mod tests {
         let terminal = ProcessTerminal::kept_open();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-exit-fixture".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let session = handler
@@ -2768,6 +2828,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-gate-fixture".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let working_directory = std::env::current_dir()
@@ -2842,6 +2903,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-settings-fixture".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let working_directory = std::env::current_dir()
@@ -2999,6 +3061,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-assistant-fixture".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let working_directory = std::env::current_dir()
@@ -3125,6 +3188,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-assistant-fixture".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let working_directory = std::env::current_dir()
@@ -3524,6 +3588,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-assistant-fixture".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let started = handler
@@ -4079,6 +4144,7 @@ mod tests {
         std::fs::remove_dir_all(&bin).unwrap();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude".to_owned(),
+            ..ClaudeConfig::default()
         })
         .unwrap();
         let here = handler.assistant_scripts(BTreeMap::new()).unwrap();

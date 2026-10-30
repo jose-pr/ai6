@@ -12,6 +12,32 @@ only `unsafe` code kills the sandbox probe's process tree: the terminal provider
 `crates/providers/terminals/process_tree/{unix,windows}.rs`, included with `#[path]`, and, on
 Windows, putting the probe in its Job Object before it runs.
 
+## `CodexConfig`
+
+Every key is optional; each default is the value the handler used before it was a key. Counts,
+bytes and characters are plain numbers (a large number takes the bound away); `_ms` is
+milliseconds and `_secs` seconds.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `executable` | `codex` | Executable visible to the terminal environment |
+| `json_line_bytes` | 67108864 | Bytes of one line of the app server's output held before what there is is handed over |
+| `csi_bytes` | 64 | Bytes of one terminal control sequence before it is dropped, in the app server's output and in the tool check's commands |
+| `context_file_bytes` | 1048576 | Bytes an assistant's context file may hold |
+| `tail_lines` | 8 | Non-JSON lines a failed Session quotes |
+| `tail_line_bytes` | 512 | Bytes of each of those lines |
+| `close_wait_ms` | 2000 | How long `close` waits for the app server to have exited |
+| `exit_wait_ms` | 1000 | How long the end of the output waits for the exit status |
+| `start_timeout_ms` | 20000 | How long the app server may take to answer `initialize` |
+| `request_timeout_ms` | 30000 | How long it may take to answer `thread/start`, `thread/resume` and `config/read` |
+| `sandbox_probe_timeout_ms` | 60000 | How long the probe of the scripts sandbox may run |
+| `sandbox_probe_lifetime_secs` | 900 | How long the probe's answer stands per executable and configuration environment |
+| `sandbox_error_chars` | 300 | Characters of the probe's last line quoted when the sandbox did not run |
+| `tool_check_lifetime_secs` | 900 | How long the tool check's feature list stands |
+| `tool_command_timeout_ms` | 120000 | How long one of the tool check's commands may run |
+
+A Station sets them in `[providers.codex]` of its `station` record.
+
 ## `CodexHandler`
 
 `CodexHandler` and `CodexConfig` implement `ai6::directorates::section_00::agent::AgentHandler`. The config
@@ -98,7 +124,7 @@ of AI6's servers; the Session has no gate, and `thread/start` and `thread/resume
 "disabled"}`. An assistant (`AgentStart::assistant`) gets the same, with `mcp_servers`
 holding exactly its servers, each with `default_tools_approval_mode="approve"` (under approval
 `never` Codex 0.164.0 fails every MCP call it would ask about), and `-c
-project_doc_max_bytes=0`: no `AGENTS.md` is read, and the mode's `context_file` (at most 1 MiB;
+project_doc_max_bytes=0`: no `AGENTS.md` is read, and the mode's `context_file` (at most `context_file_bytes`, 1 MiB by default;
 unreadable or larger refuses the start) is appended to the developer instructions on start,
 after `initial_context`. A mode with skills is refused (`GUATIAO_ERR_UNSUPPORTED`: Codex keeps
 no list of allowed skills), and `assistant_skills` says so, so a Station installs none.
@@ -162,7 +188,7 @@ permissions.ai6_assistant_probe={…} sandbox -P ai6_assistant_probe -- cmd.exe 
 with exactly the given environment (`std::process`, 60 s), and answers `None` only when it exits
 successfully having printed the marker. The probe leads a process group of its own (Unix) or
 starts suspended inside a kill-on-close Job Object (Windows), and that whole tree is killed once
-it exits or times out, so nothing it started outlives it or holds its output open; the answer is cached 15 minutes per executable and configuration
+it exits or times out, so nothing it started outlives it or holds its output open; the answer is cached `sandbox_probe_lifetime_secs` (15 minutes) per executable and configuration
 environment. Codex merges the `mcp_servers` table into the user's own MCP servers rather
 than replacing them (0.164.0: a user's `node_repl` started in an answer-only thread), so the
 tool check below also switches off each of the user's servers by name. Checked against the
@@ -227,7 +253,7 @@ functions.wait (code mode): her scripts may run any command inside Codex's sandb
 what was found, before any app server starts; `warn` starts it, prints `ai6: weakening: …` on
 standard error and queues an event of kind `weakened` with that text first. The feature and
 server switches apply in both. The feature list and the server list are cached together in
-the process for 15 minutes by executable, `--version` output, settings (without the working
+the process for `tool_check_lifetime_secs` (15 minutes) by executable, `--version` output, settings (without the working
 directory's `projects` entry and the scripts profile), mode, scripts and the values of `CODEX_HOME`, `HOME`, `USERPROFILE`,
 `APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME` and `PATH`; a failed read is not cached.
 `prompt-input` runs on every start and resume, but does not render the user's MCP servers
