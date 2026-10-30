@@ -12,6 +12,7 @@ mod moneypenny;
 mod pools;
 mod roster;
 mod timeline;
+mod tree;
 
 use core::future::Future;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -48,6 +49,7 @@ use guatiao::{Map, TryAsRef};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, broadcast, mpsc};
+use tree::{OperationTree, operation_request, resource_request};
 use uuid::Uuid;
 
 pub use agents::{AgentView, RetirementNotice};
@@ -58,7 +60,7 @@ use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
-pub use roster::{RosterChange, RosterRecord, RosterRecords};
+pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{DEFAULT_TIMELINE_PAGE, MAX_TIMELINE_PAGE, TimelineItem, TimelinePage};
 
 const MAX_BUFFER_BUDGET_BYTES: usize = 512 * 1024 * 1024;
@@ -1214,6 +1216,10 @@ impl Gateway {
             )
             .route("/v1/user/roster/{kind}", get(roster::records))
             .route(
+                "/v1/user/roster/operation/{id}/effective",
+                get(roster::effective),
+            )
+            .route(
                 "/v1/user/roster/{kind}/{key}",
                 axum::routing::put(roster::put_record).delete(roster::remove_record),
             )
@@ -1345,8 +1351,10 @@ async fn stations(
         .duration_since(UNIX_EPOCH)
         .map_err(|_| ApiError::internal())?
         .as_secs_f64();
+    let tree = OperationTree::from_check_ins(&station_records);
     let visible = tokio::task::spawn_blocking(move || {
         let mut stations = Vec::new();
+        let mut readable = BTreeSet::new();
         for station in station_records {
             let Some(operation_values) = station
                 .info()
@@ -1364,12 +1372,12 @@ async fn stations(
                     continue;
                 };
                 let allowed = authorizer
-                    .authorize(AuthorizationRequest {
-                        person: person.clone(),
-                        action: "mission.read".to_owned(),
-                        resource: format!("operation:{operation_id}"),
-                        ancestors: Vec::new(),
-                    })
+                    .authorize(operation_request(
+                        person.clone(),
+                        "mission.read",
+                        operation_id.as_str(),
+                        &tree,
+                    ))
                     .map_err(|_| ApiError::internal())?
                     .allowed;
                 if allowed {
@@ -1399,6 +1407,33 @@ async fn stations(
             stations.push(board);
         }
         stations.sort_by(|left: &BoardStation, right| left.station_id.cmp(&right.station_id));
+        // The tree's Operations the person may read, each under its nearest readable ancestor.
+        let named: BTreeSet<String> = stations
+            .iter()
+            .flat_map(|station| station.operations.iter().cloned())
+            .chain(tree.operations().map(str::to_owned))
+            .collect();
+        for operation in named {
+            if authorizer
+                .authorize(operation_request(
+                    person.clone(),
+                    "mission.read",
+                    &operation,
+                    &tree,
+                ))
+                .map_err(|_| ApiError::internal())?
+                .allowed
+            {
+                readable.insert(operation);
+            }
+        }
+        let operations = readable
+            .iter()
+            .map(|operation| BoardOperation {
+                operation_id: operation.clone(),
+                parent: tree.visible_parent(operation, |id| readable.contains(id)),
+            })
+            .collect();
         let headquarters_station = headquarters
             .filter(|lease| {
                 lease.expires() > now
@@ -1410,6 +1445,7 @@ async fn stations(
         Ok::<_, ApiError>(StationBoard {
             stations,
             headquarters_station,
+            operations,
         })
     })
     .await
@@ -1492,11 +1528,29 @@ fn station_theaters(info: &BTreeMap<String, serde_json::Value>) -> Vec<BoardThea
         .collect()
 }
 
+/// `GET /v1/missions` filters: one Operation, or with `subtree` that Operation and every
+/// Operation under it.
+#[derive(Debug, Default, Deserialize)]
+struct MissionsQuery {
+    operation: Option<String>,
+    #[serde(default)]
+    subtree: bool,
+}
+
 async fn missions(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
+    Query(query): Query<MissionsQuery>,
 ) -> Result<Json<Vec<BoardMission>>, ApiError> {
-    let sessions = authorized_board_sessions(&gateway, &headers).await?;
+    let mut sessions = authorized_board_sessions(&gateway, &headers).await?;
+    if let Some(operation) = &query.operation {
+        let tree = if query.subtree {
+            operation_tree(&gateway).await?
+        } else {
+            OperationTree::default()
+        };
+        sessions.retain(|session| tree.in_subtree(&session.operation_id, operation));
+    }
     Ok(Json(
         gateway.enrich_missions(group_missions(sessions)).await,
     ))
@@ -1581,18 +1635,16 @@ async fn create_user_mission(
     }
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
     let actor_id = person.id.clone();
-    let resource = format!("operation:{operation_id}");
-    let decision = tokio::task::spawn_blocking(move || {
-        providers.authorizer.authorize(AuthorizationRequest {
-            person: person.clone(),
-            action: "mission.create".to_owned(),
-            resource,
-            ancestors: Vec::new(),
-        })
-    })
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map_err(|_| ApiError::internal())?;
+    let check = operation_request(
+        person.clone(),
+        "mission.create",
+        operation_id.as_str(),
+        &operation_tree(&gateway).await?,
+    );
+    let decision = tokio::task::spawn_blocking(move || providers.authorizer.authorize(check))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
     if !decision.allowed {
         return Err(ApiError::forbidden());
     }
@@ -1931,6 +1983,7 @@ async fn authorized_board_sessions(
         .clone();
     let sessions = gateway.board_sessions().await;
     let registry = gateway.registry.clone();
+    let tree = operation_tree(gateway).await?;
     let visible = tokio::task::spawn_blocking(move || {
         // Exposure and the holding Station live in the shared Session records, keyed by the
         // provider's Session ID.
@@ -1950,12 +2003,12 @@ async fn authorized_board_sessions(
                 session.exposure.clone_from(sources);
             }
             let decision = authorizer
-                .authorize(AuthorizationRequest {
-                    person: person.clone(),
-                    action: "mission.read".to_owned(),
-                    resource: format!("operation:{}", session.operation_id),
-                    ancestors: Vec::new(),
-                })
+                .authorize(operation_request(
+                    person.clone(),
+                    "mission.read",
+                    &session.operation_id,
+                    &tree,
+                ))
                 .map_err(|_| ())?;
             if decision.allowed {
                 visible.push(session);
@@ -2044,6 +2097,10 @@ struct UserProfile {
 #[derive(Serialize)]
 struct UserOperationAccess {
     operation_id: String,
+    /// The nearest Operation above it the person may read; omitted for a root or when every
+    /// ancestor is hidden from them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<String>,
     actions: Vec<String>,
 }
 
@@ -2288,18 +2345,16 @@ async fn issue_user_attach_token(
         AttachMode::Read => "session.read",
         AttachMode::Write => "session.input",
     };
-    let resource = format!("operation:{}", grant.operation_id);
-    let decision = tokio::task::spawn_blocking(move || {
-        providers.authorizer.authorize(AuthorizationRequest {
-            person,
-            action: action.to_owned(),
-            resource,
-            ancestors: Vec::new(),
-        })
-    })
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map_err(|_| ApiError::internal())?;
+    let request = operation_request(
+        person,
+        action,
+        grant.operation_id.as_str(),
+        &operation_tree(&gateway).await?,
+    );
+    let decision = tokio::task::spawn_blocking(move || providers.authorizer.authorize(request))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
     if !decision.allowed {
         return Err(ApiError::forbidden());
     }
@@ -2352,8 +2407,9 @@ async fn user_profile(
         .authorizer
         .clone();
     let authorization_person = person.clone();
+    let tree = OperationTree::from_check_ins(&station_records);
     let (operations, stations, roster) = tokio::task::spawn_blocking(move || {
-        let mut operation_ids = BTreeSet::new();
+        let mut operation_ids: BTreeSet<String> = tree.operations().map(str::to_owned).collect();
         let mut stations = Vec::new();
         for station in &station_records {
             let station_id = station.station().to_owned();
@@ -2413,12 +2469,12 @@ async fn user_profile(
                 "cable.read",
             ] {
                 let allowed = authorizer
-                    .authorize(AuthorizationRequest {
-                        person: authorization_person.clone(),
-                        action: action.to_owned(),
-                        resource: format!("operation:{operation_id}"),
-                        ancestors: Vec::new(),
-                    })
+                    .authorize(operation_request(
+                        authorization_person.clone(),
+                        action,
+                        &operation_id,
+                        &tree,
+                    ))
                     .map_err(|_| ApiError::internal())?
                     .allowed;
                 if allowed {
@@ -2428,9 +2484,19 @@ async fn user_profile(
             if !actions.is_empty() {
                 operations.push(UserOperationAccess {
                     operation_id,
+                    parent: None,
                     actions,
                 });
             }
+        }
+        // An ancestor is named only when the person may read its Missions.
+        let readable: BTreeSet<String> = operations
+            .iter()
+            .filter(|access| access.actions.iter().any(|action| action == "mission.read"))
+            .map(|access| access.operation_id.clone())
+            .collect();
+        for access in &mut operations {
+            access.parent = tree.visible_parent(&access.operation_id, |id| readable.contains(id));
         }
         stations.sort_by(|left, right| left.station_id.cmp(&right.station_id));
         let mut roster = Vec::new();
@@ -2470,7 +2536,25 @@ async fn authorize_operation_action(
     operation_id: &OperationId,
     action: &'static str,
 ) -> Result<(), ApiError> {
-    authorize_resource_action(gateway, person, format!("operation:{operation_id}"), action).await
+    authorize_resource_action(
+        gateway,
+        person,
+        tree::operation_resource(operation_id.as_str()),
+        action,
+    )
+    .await
+}
+
+/// The tree of Operations from the Stations' latest check-ins; empty without a Registry.
+async fn operation_tree(gateway: &Gateway) -> Result<OperationTree, ApiError> {
+    let Some(registry) = gateway.registry.clone() else {
+        return Ok(OperationTree::default());
+    };
+    tokio::task::spawn_blocking(move || registry.stations(Duration::MAX))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map(|records| OperationTree::from_check_ins(&records))
+        .map_err(|_| ApiError::internal())
 }
 
 async fn authorize_resource_action(
@@ -2485,17 +2569,11 @@ async fn authorize_resource_action(
         .ok_or_else(ApiError::unavailable)?
         .authorizer
         .clone();
-    let decision = tokio::task::spawn_blocking(move || {
-        authorizer.authorize(AuthorizationRequest {
-            person,
-            action: action.to_owned(),
-            resource,
-            ancestors: Vec::new(),
-        })
-    })
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map_err(|_| ApiError::internal())?;
+    let request = resource_request(person, action, resource, &operation_tree(gateway).await?);
+    let decision = tokio::task::spawn_blocking(move || authorizer.authorize(request))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
     if decision.allowed {
         Ok(())
     } else {
@@ -2974,22 +3052,15 @@ async fn user_audit(
         .ok_or_else(ApiError::unavailable)?
         .authorizer
         .clone();
+    let tree = operation_tree(&gateway).await?;
     if let Some(operation_id) = &operation_filter {
         let scoped_authorizer = authorizer.clone();
-        let scoped_person = person.clone();
-        let resource = format!("operation:{operation_id}");
-        let allowed = tokio::task::spawn_blocking(move || {
-            scoped_authorizer.authorize(AuthorizationRequest {
-                person: scoped_person,
-                action: "audit.read".to_owned(),
-                resource,
-                ancestors: Vec::new(),
-            })
-        })
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|_| ApiError::internal())?
-        .allowed;
+        let request = operation_request(person.clone(), "audit.read", operation_id, &tree);
+        let allowed = tokio::task::spawn_blocking(move || scoped_authorizer.authorize(request))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(|_| ApiError::internal())?
+            .allowed;
         if !allowed {
             return Err(ApiError::forbidden());
         }
@@ -3028,7 +3099,7 @@ async fn user_audit(
             let resource = record
                 .resource
                 .clone()
-                .unwrap_or_else(|| format!("operation:{}", record.operation));
+                .unwrap_or_else(|| tree::operation_resource(&record.operation));
             if station_filter
                 .as_ref()
                 .is_some_and(|station_id| resource != format!("station:{station_id}"))
@@ -3036,12 +3107,12 @@ async fn user_audit(
                 continue;
             }
             let allowed = authorizer
-                .authorize(AuthorizationRequest {
-                    person: person.clone(),
-                    action: "audit.read".to_owned(),
+                .authorize(resource_request(
+                    person.clone(),
+                    "audit.read",
                     resource,
-                    ancestors: Vec::new(),
-                })
+                    &tree,
+                ))
                 .map_err(|_| ApiError::internal())?
                 .allowed;
             if allowed {
@@ -3318,6 +3389,21 @@ pub struct StationBoard {
     pub stations: Vec<BoardStation>,
     /// Current elected Headquarters Station, when visible and its lease is live.
     pub headquarters_station: Option<String>,
+    /// The Operations the person may read, from the Stations and the tree of Operations they
+    /// publish, each with its nearest readable ancestor.
+    pub operations: Vec<BoardOperation>,
+}
+
+/// One Operation on the board and where it sits in the tree as the person sees it.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BoardOperation {
+    /// Operation codename.
+    pub operation_id: String,
+    /// The nearest Operation above it the person may read; `None` (omitted) for a root or
+    /// when every ancestor is hidden from them, which are never named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// One daemon Station and the Operations it hosts for this user.

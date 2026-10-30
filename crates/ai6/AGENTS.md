@@ -323,6 +323,9 @@ impl Operation {
     /// codename of the Operation that wrote it; defaults have no entry, a record built in code
     /// has none.
     pub fn origins(&self) -> &BTreeMap<String, String>;
+    /// The `[operation.<id>]` keys it was resolved from, ancestors' layered in, before presets
+    /// and defaults; empty for a record built in code.
+    pub fn definition(&self) -> &serde_json::Map<String, serde_json::Value>;
     /// No `path`, `theater` or `workspace.source`: it only groups others, and intake fails
     /// its briefs with "Operation \"P\" has nowhere to work".
     pub fn has_nowhere_to_work(&self) -> bool;

@@ -944,3 +944,169 @@ async fn the_origin_comes_from_the_flag_then_unex_url_then_ai6_cfg() {
     assert!(!variable.status.success(), "UNEX_URL beats ai6.cfg");
     let _ = stop.send(());
 }
+
+/// A gateway over BODYGUARD > FORTITUDE > SOUTH and OTHER, a Mission in SOUTH and in OTHER,
+/// and a configuration directory holding those Operations.
+async fn start_tree_gateway() -> (String, oneshot::Sender<()>, String, tempfile::TempDir) {
+    let token = "exports-test-credential-with-more-than-32-bytes";
+    let directory = tempfile::tempdir().unwrap();
+    let registry = FileRegistry::open(directory.path().join("registry"));
+    registry
+        .check_in(
+            "station-01",
+            BTreeMap::from([
+                (
+                    "operations".to_owned(),
+                    serde_json::json!(["SOUTH", "OTHER"]),
+                ),
+                (
+                    "operation_lineage".to_owned(),
+                    serde_json::json!({
+                        "BODYGUARD": [], "FORTITUDE": ["BODYGUARD"],
+                        "SOUTH": ["FORTITUDE", "BODYGUARD"], "OTHER": []
+                    }),
+                ),
+            ]),
+        )
+        .unwrap();
+    let config = directory.path().join("config");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("operations.toml"),
+        "[operation.BODYGUARD]\n[operation.BODYGUARD.green_ink]\npreset = \"licensed\"\n\
+         [operation.FORTITUDE]\nparent = \"BODYGUARD\"\n\
+         [operation.SOUTH]\nparent = \"FORTITUDE\"\npath = \"/srv/south\"\n\
+         [operation.OTHER]\npath = \"/srv/other\"\n",
+    )
+    .unwrap();
+    let gateway = Gateway::with_access(
+        GatewayConfig::new(
+            "https://exports.example",
+            token,
+            GatewayLimits::default(),
+            Duration::from_secs(60),
+            Duration::from_secs(30),
+        )
+        .unwrap(),
+        Arc::new(registry),
+        AccessProviders::new(
+            Arc::new(TestAuthenticator),
+            Arc::new(TestDirectory),
+            Arc::new(TestAuthorizer),
+        ),
+    )
+    .with_roster(Arc::new(ai6::FileProvider::new(&config)));
+    for (operation, mission) in [("SOUTH", "m-south"), ("OTHER", "m-other")] {
+        let operation = OperationId::new(operation).unwrap();
+        let mission = MissionId::new(mission).unwrap();
+        let session = SessionId::new(format!("session-{mission}")).unwrap();
+        gateway
+            .register_session(token, operation.clone(), mission.clone(), session.clone())
+            .await
+            .unwrap();
+        gateway
+            .publish_lifecycle(
+                token,
+                LifecycleEvent {
+                    operation_id: operation,
+                    mission_id: mission,
+                    session_id: session,
+                    state: SessionState::Working,
+                    reason: None,
+                    sequence: 1,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown, stopped) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(listener, gateway.router())
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    let server = format!("http://{address}");
+    let login = reqwest::Client::new()
+        .post(format!("{server}/v1/auth/login"))
+        .header("origin", "https://exports.example")
+        .header("x-forwarded-proto", "https")
+        .json(&serde_json::json!({"name": "viewer", "secret": "secret"}))
+        .send()
+        .await
+        .unwrap();
+    let access_token = login.json::<serde_json::Value>().await.unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    (server, shutdown, access_token, directory)
+}
+
+#[tokio::test]
+async fn operations_prints_the_tree_shows_an_effective_policy_and_missions_take_a_subtree() {
+    let (server, shutdown, token, _directory) = start_tree_gateway().await;
+
+    let tree = lines(&ai6ctl(server.clone(), Some(token.clone()), &["operations"]).await);
+    let names: Vec<&str> = tree
+        .iter()
+        .map(|line| line.split('\t').next().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "OPERATION",
+            "BODYGUARD",
+            "  FORTITUDE",
+            "    SOUTH",
+            "OTHER"
+        ]
+    );
+    assert!(tree[1].contains("mission.read"), "{tree:?}");
+
+    let shown = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &["operations", "show", "SOUTH", "--effective"],
+        )
+        .await,
+    );
+    assert!(shown.contains(&"parent\tFORTITUDE".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"lineage\tFORTITUDE > BODYGUARD".to_owned()));
+    assert!(
+        shown.contains(&"green_ink.preset = \"licensed\"\tfrom BODYGUARD".to_owned()),
+        "{shown:?}"
+    );
+    assert!(shown.contains(&"path = \"/srv/south\"\town".to_owned()));
+    let unknown = ai6ctl(
+        server.clone(),
+        Some(token.clone()),
+        &["operations", "show", "MISSING"],
+    )
+    .await;
+    assert!(!unknown.status.success());
+
+    let subtree = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &["missions", "--operation", "BODYGUARD", "--subtree"],
+        )
+        .await,
+    );
+    assert_eq!(subtree, ["STATION\tMISSION\tSESSIONS", "SOUTH\tm-south\t1"]);
+    let own = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token),
+            &["missions", "--operation", "BODYGUARD"],
+        )
+        .await,
+    );
+    assert_eq!(own, ["STATION\tMISSION\tSESSIONS"]);
+    let _ = shutdown.send(());
+}

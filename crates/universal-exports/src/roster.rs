@@ -53,6 +53,26 @@ pub struct RosterRecords {
     pub records: Vec<RosterRecord>,
 }
 
+/// One Operation as its Stations resolve it: its definition with its ancestors' keys layered
+/// in, and which Operation wrote each key.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EffectiveOperation {
+    /// Operation codename.
+    pub operation_id: String,
+    /// The Operations it is subordinate to, nearest first.
+    pub lineage: Vec<String>,
+    /// Whether it takes policy from its ancestors.
+    pub inherit: bool,
+    /// The keys of its `[operation.<id>]` table with its ancestors' layered in, before
+    /// presets and defaults; a key no Operation wrote has its default and is absent.
+    pub definition: serde_json::Map<String, serde_json::Value>,
+    /// Each written key, dotted (`green_ink.kinds`), and the Operation that wrote it.
+    pub origins: std::collections::BTreeMap<String, String>,
+    /// The roster revision it was read at, in decimal.
+    pub revision: String,
+}
+
 /// An accepted edit.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -168,6 +188,39 @@ pub(crate) async fn records(
             .into_iter()
             .map(|(key, definition)| RosterRecord { key, definition })
             .collect(),
+    }))
+}
+
+/// `GET /v1/user/roster/operation/{id}/effective`: needs `roster.read`.
+pub(crate) async fn effective(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<EffectiveOperation>, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    checked_key(&id)?;
+    authorize_resource_action(&gateway, person, ROSTER_RESOURCE.to_owned(), "roster.read").await?;
+    let source = source(&gateway)?;
+    let snapshot = tokio::task::spawn_blocking(move || source.load(""))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::unavailable())?;
+    let operation = snapshot
+        .roster
+        .operation(&id)
+        .map_err(|_| ApiError::not_found())?;
+    Ok(Json(EffectiveOperation {
+        operation_id: operation.id.clone(),
+        lineage: snapshot
+            .roster
+            .lineage(&operation.id)
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        inherit: operation.inherit,
+        definition: operation.definition().clone(),
+        origins: operation.origins().clone(),
+        revision: snapshot.revision.get().to_string(),
     }))
 }
 

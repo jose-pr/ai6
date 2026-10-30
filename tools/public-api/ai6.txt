@@ -362,6 +362,7 @@ pub ai6::directorates::m::config::ConfigRecord::Operation
 pub ai6::directorates::m::config::ConfigRecord::Plugin
 pub ai6::directorates::m::config::ConfigRecord::Pool
 pub ai6::directorates::m::config::ConfigRecord::Role
+pub ai6::directorates::m::config::ConfigRecord::Roster
 pub ai6::directorates::m::config::ConfigRecord::Sandbox
 pub ai6::directorates::m::config::ConfigRecord::Secret
 pub ai6::directorates::m::config::ConfigRecord::Station
@@ -369,7 +370,7 @@ pub ai6::directorates::m::config::ConfigRecord::Theater
 pub ai6::directorates::m::config::ConfigRecord::Tls
 pub ai6::directorates::m::config::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 17]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 18]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -506,7 +507,7 @@ impl ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
-pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 17]
+pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 18]
 pub trait ai6::directorates::m::config::ConfigProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::definitions(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope) -> core::result::Result<ai6::directorates::m::config::ConfigDefinitions, ai6::directorates::m::roster::RosterError>
@@ -687,6 +688,8 @@ pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::va
 impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
 pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 pub const ai6::directorates::m::identity::MAX_ID_BYTES: usize
+pub mod ai6::directorates::m::inherit
+pub const ai6::directorates::m::inherit::NOT_INHERITED: [&str; 10]
 pub mod ai6::directorates::m::limits
 #[non_exhaustive] pub enum ai6::directorates::m::limits::OnLimit
 pub ai6::directorates::m::limits::OnLimit::Backup
@@ -973,6 +976,7 @@ pub ai6::directorates::m::roster::Operation::exposure: ai6::directorates::medica
 pub ai6::directorates::m::roster::Operation::green_ink: ai6::directorates::m::approvals::GreenInkPolicy
 pub ai6::directorates::m::roster::Operation::harness: ai6::directorates::m::harness::HarnessPolicy
 pub ai6::directorates::m::roster::Operation::id: alloc::string::String
+pub ai6::directorates::m::roster::Operation::inherit: bool
 pub ai6::directorates::m::roster::Operation::limit_fallback_secs: u64
 pub ai6::directorates::m::roster::Operation::lost_after_secs: u64
 pub ai6::directorates::m::roster::Operation::max_concurrent: core::option::Option<usize>
@@ -980,6 +984,7 @@ pub ai6::directorates::m::roster::Operation::name: core::option::Option<alloc::s
 pub ai6::directorates::m::roster::Operation::on_blown: alloc::string::String
 pub ai6::directorates::m::roster::Operation::on_limit: ai6::directorates::m::limits::OnLimit
 pub ai6::directorates::m::roster::Operation::on_lost: ai6::directorates::m::roster::OnLost
+pub ai6::directorates::m::roster::Operation::parent: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::directorates::m::roster::Operation::placement: ai6::directorates::m::placement::PlacementStrategy
 pub ai6::directorates::m::roster::Operation::pools: core::option::Option<alloc::vec::Vec<alloc::string::String>>
@@ -994,10 +999,14 @@ pub ai6::directorates::m::roster::Operation::theater: core::option::Option<alloc
 pub ai6::directorates::m::roster::Operation::vetting: ai6::directorates::m::vetting::VettingPolicy
 pub ai6::directorates::m::roster::Operation::workspace: ai6::directorates::m::roster::Workspace
 impl ai6::directorates::m::roster::Operation
+pub fn ai6::directorates::m::roster::Operation::definition(&self) -> &serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::m::roster::Operation::has_nowhere_to_work(&self) -> bool
+pub fn ai6::directorates::m::roster::Operation::origins(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub fn ai6::directorates::m::roster::Operation::safe_house_provider(&self) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::roster::Operation::with_parent(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl ai6::directorates::m::roster::Operation
 pub fn ai6::directorates::m::roster::Operation::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::Operation::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
-impl ai6::directorates::m::roster::Operation
-pub fn ai6::directorates::m::roster::Operation::safe_house_provider(&self) -> core::option::Option<alloc::string::String>
 pub struct ai6::directorates::m::roster::Roster
 impl ai6::directorates::m::roster::Roster
 pub fn ai6::directorates::m::roster::Roster::agent(&self, core::option::Option<&str>, &str) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
@@ -1006,27 +1015,43 @@ pub fn ai6::directorates::m::roster::Roster::agents_for_operation(&self, &str) -
 pub fn ai6::directorates::m::roster::Roster::assistant(&self) -> &ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::roster::Roster::builder() -> ai6::directorates::m::roster::RosterBuilder
 pub fn ai6::directorates::m::roster::Roster::check_agents(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::children(&self, &str) -> alloc::vec::Vec<&str>
 pub fn ai6::directorates::m::roster::Roster::from_parts(impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::roster::Operation>, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::roster::Agent>, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::roster::AgentRole>, ai6::directorates::m::cover::Covers) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::lineage(&self, &str) -> alloc::vec::Vec<&str>
 pub fn ai6::directorates::m::roster::Roster::load(impl core::convert::Into<std::path::PathBuf>) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::operation(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::Operation, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::Operation>
+pub fn ai6::directorates::m::roster::Roster::parent(&self, &str) -> core::option::Option<&str>
 pub fn ai6::directorates::m::roster::Roster::role(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::AgentRole, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::roles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::AgentRole>
 pub fn ai6::directorates::m::roster::Roster::select_agent(&self, &ai6::directorates::m::roster::AgentQuery<'_>) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::settings(&self) -> &ai6::directorates::m::roster::RosterSettings
+pub fn ai6::directorates::m::roster::Roster::subtree(&self, &str) -> alloc::vec::Vec<&str>
 pub struct ai6::directorates::m::roster::RosterBuilder
 impl ai6::directorates::m::roster::RosterBuilder
 pub fn ai6::directorates::m::roster::RosterBuilder::agent(self, ai6::directorates::m::roster::Agent) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::assistant(self, ai6::directorates::m::assistant::AssistantSettings) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::build(self) -> core::result::Result<ai6::directorates::m::roster::Roster, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterBuilder::cover(self, ai6::directorates::m::cover::Cover) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, core::option::Option<usize>) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directorates::m::roster::Operation) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::directorates::m::roster::RosterSettings) -> Self
 pub struct ai6::directorates::m::roster::RosterError
 impl ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::kind(&self) -> ai6::directorates::m::roster::RosterErrorKind
 impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::roster::RosterSettings
+pub ai6::directorates::m::roster::RosterSettings::max_operation_depth: core::option::Option<usize>
+impl ai6::directorates::m::roster::RosterSettings
+pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
+pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, core::option::Option<usize>) -> Self
+impl core::default::Default for ai6::directorates::m::roster::RosterSettings
+pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Workspace
 pub ai6::directorates::m::roster::Workspace::base: alloc::string::String
 pub ai6::directorates::m::roster::Workspace::branch: alloc::string::String
@@ -1038,6 +1063,7 @@ pub ai6::directorates::m::roster::Workspace::source: core::option::Option<std::p
 impl core::default::Default for ai6::directorates::m::roster::Workspace
 pub fn ai6::directorates::m::roster::Workspace::default() -> Self
 pub const ai6::directorates::m::roster::DEFAULT_CHECKPOINT_SECS: u64
+pub const ai6::directorates::m::roster::DEFAULT_MAX_OPERATION_DEPTH: usize
 pub const ai6::directorates::m::roster::DEFAULT_RETIRE_WARNING_DAYS: u32
 pub mod ai6::directorates::m::theaters
 #[non_exhaustive] pub enum ai6::directorates::m::theaters::AgentMode
@@ -1984,7 +2010,7 @@ pub struct ai6::directorates::q::AccountPool
 impl ai6::AccountPool
 pub fn ai6::AccountPool::account(self, ai6::Account) -> Self
 pub fn ai6::AccountPool::accounts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::Account>
-pub fn ai6::AccountPool::admits(&self, core::option::Option<&str>) -> bool
+pub fn ai6::AccountPool::admits(&self, core::option::Option<&str>, &[alloc::string::String]) -> bool
 pub fn ai6::AccountPool::balancing(&self) -> ai6::PoolStrategy
 pub fn ai6::AccountPool::get(&self, &str) -> core::option::Option<&ai6::Account>
 pub fn ai6::AccountPool::handler(&self) -> &str
@@ -2140,7 +2166,7 @@ pub fn ai6::directorates::q::SecretBackend::revoke(&self, &str) -> core::result:
 impl ai6::SecretBackend for ai6::StationSecrets
 pub fn ai6::StationSecrets::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
 pub fn ai6::StationSecrets::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
-pub fn ai6::directorates::q::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
+pub fn ai6::directorates::q::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
 pub fn ai6::directorates::q::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub mod ai6::directorates::registry
 pub mod ai6::directorates::registry::accounts
@@ -2937,6 +2963,7 @@ pub fn ai6::CableRelayError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::
 pub ai6::directorates::registry::cables::CableScope::Agent
 pub ai6::directorates::registry::cables::CableScope::Channel
 pub ai6::directorates::registry::cables::CableScope::Global
+pub ai6::directorates::registry::cables::CableScope::Operation
 pub ai6::directorates::registry::cables::CableScope::Station
 pub ai6::directorates::registry::cables::CableScope::Theater
 #[non_exhaustive] pub enum ai6::directorates::registry::cables::CableState
@@ -3103,6 +3130,7 @@ pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::
 pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableRelay::with_lineage(self, impl core::ops::function::Fn(&str) -> alloc::vec::Vec<alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_person_audit(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) -> core::result::Result<(), alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableRelease
 pub ai6::directorates::registry::cables::CableRelease::delivered: usize
@@ -4719,6 +4747,7 @@ pub fn ai6::CableRelayError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::
 pub ai6::CableScope::Agent
 pub ai6::CableScope::Channel
 pub ai6::CableScope::Global
+pub ai6::CableScope::Operation
 pub ai6::CableScope::Station
 pub ai6::CableScope::Theater
 #[non_exhaustive] pub enum ai6::CableState
@@ -4741,6 +4770,7 @@ pub ai6::ConfigRecord::Operation
 pub ai6::ConfigRecord::Plugin
 pub ai6::ConfigRecord::Pool
 pub ai6::ConfigRecord::Role
+pub ai6::ConfigRecord::Roster
 pub ai6::ConfigRecord::Sandbox
 pub ai6::ConfigRecord::Secret
 pub ai6::ConfigRecord::Station
@@ -4748,7 +4778,7 @@ pub ai6::ConfigRecord::Theater
 pub ai6::ConfigRecord::Tls
 pub ai6::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 17]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 18]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -5117,7 +5147,7 @@ pub struct ai6::AccountPool
 impl ai6::AccountPool
 pub fn ai6::AccountPool::account(self, ai6::Account) -> Self
 pub fn ai6::AccountPool::accounts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::Account>
-pub fn ai6::AccountPool::admits(&self, core::option::Option<&str>) -> bool
+pub fn ai6::AccountPool::admits(&self, core::option::Option<&str>, &[alloc::string::String]) -> bool
 pub fn ai6::AccountPool::balancing(&self) -> ai6::PoolStrategy
 pub fn ai6::AccountPool::get(&self, &str) -> core::option::Option<&ai6::Account>
 pub fn ai6::AccountPool::handler(&self) -> &str
@@ -5742,6 +5772,7 @@ pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::
 pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableRelay::with_lineage(self, impl core::ops::function::Fn(&str) -> alloc::vec::Vec<alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_person_audit(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) -> core::result::Result<(), alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 #[non_exhaustive] pub struct ai6::CableRelease
 pub ai6::CableRelease::delivered: usize
@@ -6345,6 +6376,7 @@ pub ai6::Operation::exposure: ai6::directorates::medical::exposure::ExposurePoli
 pub ai6::Operation::green_ink: ai6::directorates::m::approvals::GreenInkPolicy
 pub ai6::Operation::harness: ai6::directorates::m::harness::HarnessPolicy
 pub ai6::Operation::id: alloc::string::String
+pub ai6::Operation::inherit: bool
 pub ai6::Operation::limit_fallback_secs: u64
 pub ai6::Operation::lost_after_secs: u64
 pub ai6::Operation::max_concurrent: core::option::Option<usize>
@@ -6352,6 +6384,7 @@ pub ai6::Operation::name: core::option::Option<alloc::string::String>
 pub ai6::Operation::on_blown: alloc::string::String
 pub ai6::Operation::on_limit: ai6::directorates::m::limits::OnLimit
 pub ai6::Operation::on_lost: ai6::directorates::m::roster::OnLost
+pub ai6::Operation::parent: core::option::Option<alloc::string::String>
 pub ai6::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::Operation::placement: ai6::directorates::m::placement::PlacementStrategy
 pub ai6::Operation::pools: core::option::Option<alloc::vec::Vec<alloc::string::String>>
@@ -6366,10 +6399,14 @@ pub ai6::Operation::theater: core::option::Option<alloc::string::String>
 pub ai6::Operation::vetting: ai6::directorates::m::vetting::VettingPolicy
 pub ai6::Operation::workspace: ai6::directorates::m::roster::Workspace
 impl ai6::directorates::m::roster::Operation
+pub fn ai6::directorates::m::roster::Operation::definition(&self) -> &serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::m::roster::Operation::has_nowhere_to_work(&self) -> bool
+pub fn ai6::directorates::m::roster::Operation::origins(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub fn ai6::directorates::m::roster::Operation::safe_house_provider(&self) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::roster::Operation::with_parent(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl ai6::directorates::m::roster::Operation
 pub fn ai6::directorates::m::roster::Operation::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::Operation::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
-impl ai6::directorates::m::roster::Operation
-pub fn ai6::directorates::m::roster::Operation::safe_house_provider(&self) -> core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::OperationPolicy
 pub ai6::OperationPolicy::agents: alloc::vec::Vec<ai6::directorates::m::placement::AgentFacts>
 pub ai6::OperationPolicy::checkout: bool
@@ -6632,27 +6669,43 @@ pub fn ai6::directorates::m::roster::Roster::agents_for_operation(&self, &str) -
 pub fn ai6::directorates::m::roster::Roster::assistant(&self) -> &ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::roster::Roster::builder() -> ai6::directorates::m::roster::RosterBuilder
 pub fn ai6::directorates::m::roster::Roster::check_agents(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::children(&self, &str) -> alloc::vec::Vec<&str>
 pub fn ai6::directorates::m::roster::Roster::from_parts(impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::roster::Operation>, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::roster::Agent>, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::roster::AgentRole>, ai6::directorates::m::cover::Covers) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::lineage(&self, &str) -> alloc::vec::Vec<&str>
 pub fn ai6::directorates::m::roster::Roster::load(impl core::convert::Into<std::path::PathBuf>) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::operation(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::Operation, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::Operation>
+pub fn ai6::directorates::m::roster::Roster::parent(&self, &str) -> core::option::Option<&str>
 pub fn ai6::directorates::m::roster::Roster::role(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::AgentRole, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::roles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::AgentRole>
 pub fn ai6::directorates::m::roster::Roster::select_agent(&self, &ai6::directorates::m::roster::AgentQuery<'_>) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::Roster::settings(&self) -> &ai6::directorates::m::roster::RosterSettings
+pub fn ai6::directorates::m::roster::Roster::subtree(&self, &str) -> alloc::vec::Vec<&str>
 pub struct ai6::RosterBuilder
 impl ai6::directorates::m::roster::RosterBuilder
 pub fn ai6::directorates::m::roster::RosterBuilder::agent(self, ai6::directorates::m::roster::Agent) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::assistant(self, ai6::directorates::m::assistant::AssistantSettings) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::build(self) -> core::result::Result<ai6::directorates::m::roster::Roster, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterBuilder::cover(self, ai6::directorates::m::cover::Cover) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, core::option::Option<usize>) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directorates::m::roster::Operation) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::directorates::m::roster::RosterSettings) -> Self
 pub struct ai6::RosterError
 impl ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::kind(&self) -> ai6::directorates::m::roster::RosterErrorKind
 impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::RosterSettings
+pub ai6::RosterSettings::max_operation_depth: core::option::Option<usize>
+impl ai6::directorates::m::roster::RosterSettings
+pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
+pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, core::option::Option<usize>) -> Self
+impl core::default::Default for ai6::directorates::m::roster::RosterSettings
+pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
 #[non_exhaustive] pub struct ai6::Ruling
 pub ai6::Ruling::at: f64
 pub ai6::Ruling::decision: ai6::directorates::registry::approvals::Decision
@@ -7513,6 +7566,7 @@ pub const ai6::DEFAULT_LOOP_MIN_LINES: usize
 pub const ai6::DEFAULT_MAX_BRIEF_BYTES: usize
 pub const ai6::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
 pub const ai6::DEFAULT_MAX_CPU_PERCENT: u32
+pub const ai6::DEFAULT_MAX_OPERATION_DEPTH: usize
 pub const ai6::DEFAULT_MAX_OUTPUT: u64
 pub const ai6::DEFAULT_MAX_PER_HOUR: u32
 pub const ai6::DEFAULT_MAX_PER_SOURCE_PER_HOUR: u32
@@ -8207,7 +8261,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &st
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::cable_source(&str) -> alloc::string::String
 pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
-pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
+pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
 pub fn ai6::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6::directorates::q::terminal::TerminalOffer], core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::classify(&str, &dyn ai6::directorates::m::approvals::Repository) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>

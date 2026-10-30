@@ -52,7 +52,17 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
 - `ai6ctl pools clear-limit <POOL> <ACCOUNT> --operation <OPERATION_ID>` posts
   `.../pools/{pool}/{account}/clear-limit` and prints `pool/account: limit cleared`; 403 names
   `pool.manage`, 404 an account not declared for the Operation.
-- `ai6ctl missions [--operation <ID>]` lists visible Missions and Session counts.
+- `ai6ctl missions [--operation <ID> [--subtree]]` lists visible Missions and Session counts;
+  `--operation` asks the gateway for that Operation's (`GET /v1/missions?operation=`), and
+  `--subtree` also for every Operation under it (`&subtree=true`).
+- `ai6ctl operations` reads `GET /v1/user/profile` and prints `OPERATION\tACTIONS`, each
+  Operation indented two spaces under its `parent` (the nearest one the person may read; a
+  hidden ancestor is never named), roots and siblings in ID order.
+- `ai6ctl operations show <ID> [--effective]` prints `operation`, `parent` (`-` for none) and
+  `actions`; `--effective` also reads `GET /v1/user/roster/operation/{id}/effective` (needs
+  `roster.read`) and prints `lineage` (`A > B`), `inherit` and each written key as
+  `key = <JSON value>\town` or `\tfrom <Operation>`. An Operation not in the profile is an
+  error.
 - `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission and its provider
   Sessions; `--operation` disambiguates a Mission ID used by several Operations.
 - `ai6ctl sessions [--operation <ID>] [--mission <ID>] [--state <STATE>]` filters the

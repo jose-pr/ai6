@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use ai6::{
     AssistantCable, AssistantCableDecision, AssistantCableGrant, AssistantEvent, AuditRecord,
-    AuthorizationRequest, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, MAX_ASSISTANT_CABLE_GRANTS,
+    EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, MAX_ASSISTANT_CABLE_GRANTS,
 };
 use axum::http::Method;
 use serde_json::{Value, json};
@@ -47,9 +47,9 @@ pub(super) async fn grants(gateway: &Gateway, person: &ai6::Person) -> Vec<Assis
     };
     let (authorizer, person) = (access.authorizer.clone(), person.clone());
     tokio::task::spawn_blocking(move || {
-        let operations: BTreeSet<String> = registry
-            .stations(Duration::MAX)
-            .ok()?
+        let records = registry.stations(Duration::MAX).ok()?;
+        let tree = crate::tree::OperationTree::from_check_ins(&records);
+        let operations: BTreeSet<String> = records
             .iter()
             .filter_map(|station| station.info().get("operations")?.as_array().cloned())
             .flatten()
@@ -60,12 +60,12 @@ pub(super) async fn grants(gateway: &Gateway, person: &ai6::Person) -> Vec<Assis
         for operation in operations {
             let allowed = |action: &str| {
                 authorizer
-                    .authorize(AuthorizationRequest {
-                        person: person.clone(),
-                        action: action.to_owned(),
-                        resource: format!("operation:{operation}"),
-                        ancestors: Vec::new(),
-                    })
+                    .authorize(crate::tree::operation_request(
+                        person.clone(),
+                        action,
+                        &operation,
+                        &tree,
+                    ))
                     .is_ok_and(|decision| decision.allowed)
             };
             let (send, read) = (allowed("cable.send"), allowed("cable.read"));
@@ -347,16 +347,19 @@ impl Assistant {
         let Some(access) = gateway.access.as_ref() else {
             return (false, false);
         };
+        let Ok(tree) = crate::operation_tree(gateway).await else {
+            return (false, false);
+        };
         let (authorizer, operation) = (access.authorizer.clone(), operation.to_owned());
         tokio::task::spawn_blocking(move || {
             let allowed = |action: &str| {
                 authorizer
-                    .authorize(AuthorizationRequest {
-                        person: person.clone(),
-                        action: action.to_owned(),
-                        resource: format!("operation:{operation}"),
-                        ancestors: Vec::new(),
-                    })
+                    .authorize(crate::tree::operation_request(
+                        person.clone(),
+                        action,
+                        &operation,
+                        &tree,
+                    ))
                     .is_ok_and(|decision| decision.allowed)
             };
             (allowed("cable.send"), allowed("cable.read"))

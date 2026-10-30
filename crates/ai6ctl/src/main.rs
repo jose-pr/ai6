@@ -35,6 +35,19 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+enum OperationsCommand {
+    /// Show one Operation: its parent and your actions, and with --effective its resolved
+    /// policy and the Operation each key comes from (needs roster.read).
+    Show {
+        /// AI6 Operation ID.
+        operation: String,
+        /// Also show the resolved definition and where each key comes from.
+        #[arg(long)]
+        effective: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum Command {
     /// Check that the Universal Exports API is responding.
     Health,
@@ -66,6 +79,15 @@ enum Command {
         /// Keep Missions from this Operation.
         #[arg(long)]
         operation: Option<String>,
+        /// With --operation, also keep Missions of every Operation under it.
+        #[arg(long, requires = "operation")]
+        subtree: bool,
+    },
+    /// List the Operations you may act on as a tree, each under its nearest Operation you
+    /// may read, with your actions; or show one.
+    Operations {
+        #[command(subcommand)]
+        command: Option<OperationsCommand>,
     },
     /// Show one Mission and its provider Sessions, or cancel, retry or resume it.
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
@@ -602,14 +624,51 @@ async fn run() -> Result<(), String> {
             let roles = agent_roles(&client, &server, &token, &operation).await?;
             print_agent_roles(roles);
         }
-        Command::Missions { operation } => {
+        Command::Missions { operation, subtree } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let missions = missions(&client, &server, &token).await?;
-            print_missions(missions.into_iter().filter(|mission| {
-                operation
-                    .as_ref()
-                    .is_none_or(|value| &mission.operation_id == value)
-            }));
+            let filter = operation.as_deref().map(|operation| (operation, subtree));
+            print_missions(missions(&client, &server, &token, filter).await?);
+        }
+        Command::Operations { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let request = client
+                .get(endpoint(&server, "/v1/user/profile"))
+                .bearer_auth(&token);
+            let profile: Profile = send(request, "a signed-in user", "profile").await?;
+            match command {
+                None => print_operation_tree(&profile.operations),
+                Some(OperationsCommand::Show {
+                    operation,
+                    effective,
+                }) => {
+                    let access = profile
+                        .operations
+                        .iter()
+                        .find(|access| access.operation_id == operation)
+                        .ok_or_else(|| format!("no Operation {operation:?} you may act on"))?;
+                    println!("operation\t{}", plain(&access.operation_id));
+                    println!(
+                        "parent\t{}",
+                        access.parent.as_deref().map_or("-".to_owned(), plain)
+                    );
+                    println!("actions\t{}", access.actions.join(","));
+                    if effective {
+                        let mut url = server.clone();
+                        url.path_segments_mut()
+                            .map_err(|_| {
+                                "Universal Exports URL cannot contain path segments".to_owned()
+                            })?
+                            .extend(["v1", "user", "roster", "operation", &operation, "effective"]);
+                        let effective: EffectiveOperation = send(
+                            client.get(url).bearer_auth(&token),
+                            "roster.read on config:roster",
+                            "effective Operation",
+                        )
+                        .await?;
+                        print_effective(&effective);
+                    }
+                }
+            }
         }
         Command::Mission {
             control: Some(command),
@@ -695,7 +754,7 @@ async fn run() -> Result<(), String> {
         } => {
             let mission_id = mission_id.ok_or_else(|| "a Mission ID is required".to_owned())?;
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let matches = missions(&client, &server, &token)
+            let matches = missions(&client, &server, &token, None)
                 .await?
                 .into_iter()
                 .filter(|mission| {
@@ -877,8 +936,9 @@ async fn missions(
     client: &Client,
     server: &Url,
     access_token: &str,
+    filter: Option<(&str, bool)>,
 ) -> Result<Vec<BoardMission>, String> {
-    let response = missions_request(client, server, access_token)
+    let response = missions_request(client, server, access_token, filter)
         .send()
         .await
         .map_err(|_| "could not contact Universal Exports".to_owned())?;
@@ -1446,7 +1506,7 @@ async fn mission_operation(
     access_token: &str,
     mission_id: &str,
 ) -> Result<String, String> {
-    let mut operations = missions(client, server, access_token)
+    let mut operations = missions(client, server, access_token, None)
         .await?
         .into_iter()
         .filter(|mission| mission.mission_id == mission_id)
@@ -1604,10 +1664,22 @@ fn board_request(client: &Client, server: &Url, access_token: &str) -> reqwest::
         .bearer_auth(access_token)
 }
 
-fn missions_request(client: &Client, server: &Url, access_token: &str) -> reqwest::RequestBuilder {
-    client
-        .get(endpoint(server, "/v1/missions"))
-        .bearer_auth(access_token)
+/// `GET /v1/missions`, kept to one Operation (and with `true` the Operations under it).
+fn missions_request(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    filter: Option<(&str, bool)>,
+) -> reqwest::RequestBuilder {
+    let mut url = endpoint(server, "/v1/missions");
+    if let Some((operation, subtree)) = filter {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("operation", operation);
+        if subtree {
+            query.append_pair("subtree", "true");
+        }
+    }
+    client.get(url).bearer_auth(access_token)
 }
 
 fn stations_request(client: &Client, server: &Url, access_token: &str) -> reqwest::RequestBuilder {
@@ -1685,6 +1757,84 @@ fn print_agent_roles(roles: impl IntoIterator<Item = AgentRole>) {
             plain(&role.purpose),
             plain(&role.policy),
         );
+    }
+}
+
+/// The signed-in person's profile, as far as `operations` needs it.
+#[derive(Debug, Deserialize)]
+struct Profile {
+    operations: Vec<OperationAccess>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OperationAccess {
+    operation_id: String,
+    #[serde(default)]
+    parent: Option<String>,
+    actions: Vec<String>,
+}
+
+/// An Operation as its Stations resolve it.
+#[derive(Debug, Deserialize)]
+struct EffectiveOperation {
+    operation_id: String,
+    lineage: Vec<String>,
+    inherit: bool,
+    definition: serde_json::Map<String, serde_json::Value>,
+    origins: std::collections::BTreeMap<String, String>,
+}
+
+/// Each Operation indented under its parent, roots in ID order, with the person's actions.
+fn print_operation_tree(operations: &[OperationAccess]) {
+    fn print(operations: &[OperationAccess], parent: Option<&str>, depth: usize) {
+        let mut children: Vec<&OperationAccess> = operations
+            .iter()
+            .filter(|access| {
+                let listed = access
+                    .parent
+                    .as_deref()
+                    .filter(|id| operations.iter().any(|other| other.operation_id == *id));
+                listed == parent
+            })
+            .collect();
+        children.sort_by(|left, right| left.operation_id.cmp(&right.operation_id));
+        for access in children {
+            println!(
+                "{}{}\t{}",
+                "  ".repeat(depth),
+                plain(&access.operation_id),
+                access.actions.join(",")
+            );
+            // The profile names each Operation once, so the depth is bounded by its length.
+            if depth < operations.len() {
+                print(operations, Some(&access.operation_id), depth + 1);
+            }
+        }
+    }
+    println!("OPERATION\tACTIONS");
+    print(operations, None, 0);
+}
+
+/// The lineage and each written key of `effective`, with the Operation it comes from.
+fn print_effective(effective: &EffectiveOperation) {
+    println!("lineage\t{}", effective.lineage.join(" > "));
+    println!("inherit\t{}", effective.inherit);
+    for (key, writer) in &effective.origins {
+        let mut value = Some(&effective.definition);
+        let mut leaf = None;
+        for part in key.split('.') {
+            leaf = value.and_then(|table| table.get(part));
+            value = leaf.and_then(serde_json::Value::as_object);
+        }
+        let Some(leaf) = leaf else {
+            continue;
+        };
+        let source = if *writer == effective.operation_id {
+            "own".to_owned()
+        } else {
+            format!("from {}", plain(writer))
+        };
+        println!("{} = {}\t{source}", plain(key), plain(&leaf.to_string()));
     }
 }
 
@@ -1844,11 +1994,15 @@ mod tests {
     #[test]
     fn missions_request_uses_the_authorized_api_with_a_user_bearer() {
         let server = server_url("https://exports.example").unwrap();
-        let request = missions_request(&Client::new(), &server, "user-token")
+        let request = missions_request(&Client::new(), &server, "user-token", None)
             .build()
             .unwrap();
 
         assert_eq!(request.url().path(), "/v1/missions");
+        let subtree = missions_request(&Client::new(), &server, "t", Some(("P", true)))
+            .build()
+            .unwrap();
+        assert_eq!(subtree.url().query(), Some("operation=P&subtree=true"));
         assert_eq!(
             request
                 .headers()

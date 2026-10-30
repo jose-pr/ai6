@@ -170,6 +170,26 @@ pub struct MissionAttempt {
 pub struct StationBoard {
     pub stations: Vec<BoardStation>,
     pub headquarters_station: Option<String>,
+    pub operations: Vec<BoardOperation>,   // every Operation the person may read, in ID order
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BoardOperation {
+    pub operation_id: String,
+    pub parent: Option<String>,   // nearest readable ancestor; omitted for a root or when all are hidden
+}
+
+/// `GET /v1/user/roster/operation/{id}/effective`
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EffectiveOperation {
+    pub operation_id: String,
+    pub lineage: Vec<String>,                                   // ancestors, nearest first
+    pub inherit: bool,
+    pub definition: serde_json::Map<String, serde_json::Value>, // layered, before presets and defaults
+    pub origins: BTreeMap<String, String>,                      // dotted key -> Operation that wrote it
+    pub revision: String,
 }
 
 #[non_exhaustive]
@@ -259,8 +279,17 @@ values and initial context are never returned. The detail is scoped by the same
 Both models are non-exhaustive; downstream Rust code should deserialize them or
 read their public fields instead of constructing struct literals.
 
+Operations form a tree. Every request about an Operation names its ancestors
+(`operation:<id>`, nearest first) from the most recent Station check-in that carries
+`operation_lineage`, so a rule on a parent Operation reaches its subordinates unless it sets
+`propagate = false`; an Operation no check-in names has no ancestors (only its own and `*`
+rules apply). Every authorization of an Operation goes through one helper, so the tree reaches
+each route alike. A person sees an ancestor only with `mission.read` on it: `parent` in the
+profile and on the board is the nearest readable ancestor, and a hidden one is never named.
+
 `GET /v1/stations` returns this user's visible Station check-ins and hosted Operations
-from the shared Registry. A Station is healthy when its check-in is no older than 45
+from the shared Registry, and `operations`: every Operation of the Stations and of the tree
+the person may read, each with its `parent`. A Station is healthy when its check-in is no older than 45
 seconds; stale check-ins remain visible as offline. `headquarters_station` and each
 Station's `headquarters` marker are populated only for an unexpired elected Headquarters
 lease. The route filters Operations using `mission.read` and omits host and process
@@ -775,11 +804,12 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/board` | Requires a user bearer and returns Sessions for Operations allowed by `mission.read`, each with the `station_id` of its Registry record and the `agent` of its Mission's brief (`null` when unknown). |
 | `GET /v1/stations` | Requires a user bearer; returns visible Station health, hosted Operations and current Headquarters Station. |
 | `GET /v1/user/operations/{operation_id}/placement-preview` | Requires `mission.read` at the Operation; returns the eligible (Station, Theater, Agent) choices, best first, and a reason for each rejection. Optional `agent`, `role`, `stations`, `tags` query parameters narrow it. |
-| `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. |
+| `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. `?operation=P` keeps P's Missions; with `&subtree=true`, those of P and of every Operation under it. |
 | `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Session and UTC day) once a provider has reported any, and its `attempts` from the shared Session records. `GET /v1/missions` carries `attempts` too. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret. |
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. |
-| `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role, `approval.decide`/`approval.class`, `pool.read`, `pool.manage`, `cable.send` and `cable.read` actions; Station grants include `station.read`, `station.configure` and `audit.read`; `roster` lists the person's `roster.read`, `roster.manage` and `audit.read` on `config:roster`. Every action is computed by the Authorizer, not inferred from directory groups. |
+| `GET /v1/user/profile` | Requires a user bearer; returns directory identity plus effective Operation and Station actions. Operation grants include mission/session/audit/Agent-role, `approval.decide`/`approval.class`, `pool.read`, `pool.manage`, `cable.send` and `cable.read` actions; Station grants include `station.read`, `station.configure` and `audit.read`; `roster` lists the person's `roster.read`, `roster.manage` and `audit.read` on `config:roster`. Every action is computed by the Authorizer, not inferred from directory groups. Operations come from the Stations' `operations` and their tree (`operation_lineage`); each `operations` entry carries `parent`, the nearest Operation above it the person may read (omitted for a root or when every ancestor is hidden). |
+| `GET /v1/user/roster/operation/{id}/effective` | Requires `roster.read` on `config:roster` and a roster source (else `503`); `404` for an Operation the roster does not hold. Returns `EffectiveOperation`: its `lineage`, `inherit`, the `definition` its Stations resolve (its ancestors' keys layered in, before presets and defaults) and `origins`, the Operation that wrote each dotted key. |
 | `GET /v1/user/audit?operation_id=<id>&station_id=<id>&limit=<n>` | Requires a user bearer and `audit.read`; the optional Operation and Station filters are mutually exclusive. Returns at most 500 newest metadata-only records, filtered by the Authorizer for each resource. Records contain actor, action, resource scope, target and time; prompts, terminal output and secrets are excluded. |
 | `GET /v1/user/operations/{operation_id}/timeline?cursor=&mission=&limit=` | Requires `audit.read` on the Operation; returns a `TimelinePage` (see Activity timeline). |
 | `GET /v1/user/operations/{operation_id}/pools` | Requires `pool.read` on the Operation; returns a `PoolBoard { operation_id, accounts: Vec<BoardAccount> }`: each account a Station declared for the Operation with `pool`, `account`, `handler`, `kind`, `priority`, `max_concurrent`, `labels`, `active` (`BoardClaim { station_id, mission_id, since }`, this Operation's live claims only), `other_sessions` (the count of other Operations' live claims), `windows` (`BoardWindow { name, used_permille, resets_at, status }`), `limited_until` (only while in the future), `last_used` and `tokens_today` (UTC). Never a credential, its secret's name or a login directory. |

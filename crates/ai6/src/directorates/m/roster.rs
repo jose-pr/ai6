@@ -355,6 +355,8 @@ pub struct Operation {
     pub promotion: PromotionPolicy,
     /// Each key its definition was resolved with, dotted, and the Operation that wrote it.
     origins: BTreeMap<String, String>,
+    /// The definition it was resolved from, its ancestors' keys layered in.
+    definition: serde_json::Map<String, serde_json::Value>,
 }
 
 /// How an Operation's Missions get their working directory (`workspace = { .. }`).
@@ -425,6 +427,13 @@ impl Operation {
     /// no definition wrote has its default and no entry; an Operation built in code has none.
     pub fn origins(&self) -> &BTreeMap<String, String> {
         &self.origins
+    }
+
+    /// The definition it was resolved from, as the keys of an `[operation.<id>]` table with
+    /// its ancestors' keys layered in, before presets and defaults; [`origins`](Self::origins)
+    /// names the writer of each. Empty for an Operation built in code.
+    pub fn definition(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.definition
     }
 
     /// Whether a Mission of this Operation has no place to work: no `path`, `theater` or
@@ -1318,10 +1327,11 @@ fn resolve_operations(
         chain.reverse();
         let layered = inherit::layer(&chain);
         let definition =
-            OperationDefinition::deserialize(serde_json::Value::Object(layered.definition))
+            OperationDefinition::deserialize(serde_json::Value::Object(layered.definition.clone()))
                 .map_err(|reason| invalid(id, &reason))?;
         let mut operation = definition.resolve(id.clone(), source)?;
         operation.origins = layered.origins;
+        operation.definition = layered.definition;
         operations.push(operation);
     }
     Ok(operations)
@@ -1505,6 +1515,7 @@ impl OperationDefinition {
             harness: self.harness,
             promotion,
             origins: BTreeMap::new(),
+            definition: serde_json::Map::new(),
         })
     }
 }

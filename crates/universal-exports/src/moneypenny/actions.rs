@@ -35,7 +35,7 @@ pub(crate) enum Scope {
 impl Scope {
     pub(crate) fn resource(&self) -> String {
         match self {
-            Self::Operation(operation) => format!("operation:{operation}"),
+            Self::Operation(operation) => crate::tree::operation_resource(operation),
             Self::Resource(resource) => resource.clone(),
         }
     }

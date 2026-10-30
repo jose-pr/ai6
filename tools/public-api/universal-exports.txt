@@ -96,6 +96,9 @@ pub universal_exports::BoardMission::mission_id: alloc::string::String
 pub universal_exports::BoardMission::operation_id: alloc::string::String
 pub universal_exports::BoardMission::sessions: alloc::vec::Vec<universal_exports::BoardSession>
 pub universal_exports::BoardMission::usage: core::option::Option<ai6::directorates::medical::usage::MissionUsage>
+#[non_exhaustive] pub struct universal_exports::BoardOperation
+pub universal_exports::BoardOperation::operation_id: alloc::string::String
+pub universal_exports::BoardOperation::parent: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::BoardSession
 pub universal_exports::BoardSession::agent: core::option::Option<alloc::string::String>
 pub universal_exports::BoardSession::exposure: alloc::vec::Vec<alloc::string::String>
@@ -157,6 +160,13 @@ pub universal_exports::ControlStatus::session_id: core::option::Option<alloc::st
 pub universal_exports::ControlStatus::state: core::option::Option<alloc::string::String>
 pub universal_exports::ControlStatus::station_id: alloc::string::String
 pub universal_exports::ControlStatus::status: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::EffectiveOperation
+pub universal_exports::EffectiveOperation::definition: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub universal_exports::EffectiveOperation::inherit: bool
+pub universal_exports::EffectiveOperation::lineage: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::EffectiveOperation::operation_id: alloc::string::String
+pub universal_exports::EffectiveOperation::origins: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub universal_exports::EffectiveOperation::revision: alloc::string::String
 pub struct universal_exports::Gateway
 impl universal_exports::Gateway
 pub async fn universal_exports::Gateway::attach(&self, &ai6_diptel::SessionId, &str, u64) -> core::result::Result<universal_exports::Attachment, universal_exports::GatewayError>
@@ -263,6 +273,7 @@ pub universal_exports::RosterRecords::revision: alloc::string::String
 pub universal_exports::RosterRecords::writable: bool
 #[non_exhaustive] pub struct universal_exports::StationBoard
 pub universal_exports::StationBoard::headquarters_station: core::option::Option<alloc::string::String>
+pub universal_exports::StationBoard::operations: alloc::vec::Vec<universal_exports::BoardOperation>
 pub universal_exports::StationBoard::stations: alloc::vec::Vec<universal_exports::BoardStation>
 #[non_exhaustive] pub struct universal_exports::TimelineItem
 pub universal_exports::TimelineItem::action: alloc::string::String
