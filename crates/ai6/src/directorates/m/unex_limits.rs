@@ -189,6 +189,9 @@ pub struct TextLimits {
     pub roster_target_bytes: Limit,
     /// Bytes of a roster record's key. Default 128.
     pub roster_key_bytes: Limit,
+    /// Bytes of a role name, an Operation ID or an account name in the access and account
+    /// routes. Default 128.
+    pub access_name_bytes: Limit,
 }
 
 impl Default for TextLimits {
@@ -200,6 +203,7 @@ impl Default for TextLimits {
             held_reason_chars: Limit::at(1_024),
             roster_target_bytes: Limit::at(512),
             roster_key_bytes: Limit::at(128),
+            access_name_bytes: Limit::at(128),
         }
     }
 }

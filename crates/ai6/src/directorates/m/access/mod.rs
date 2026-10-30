@@ -23,7 +23,7 @@ use std::path::Path;
 pub use coqui_access::{
     AccountInfo, AccountPut, Accounts, Attempt, Authenticator, AuthorizationDecision,
     AuthorizationRequest, Authorizer, Description, Directory, KIND_PREFIX, Lookup, Person,
-    PutOutcome, Verdict, Waiting, takes,
+    PutOutcome, Subject, Verdict, Waiting, takes,
 };
 pub use coqui_roles::{
     Role, RoleAuthorizer, RoleAuthorizerBuilder, RolePolicy, RolePolicyError, Rule,

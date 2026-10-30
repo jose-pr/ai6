@@ -112,7 +112,7 @@ fn source(gateway: &Gateway) -> Result<std::sync::Arc<dyn ai6::ConfigProvider>, 
 }
 
 /// `text` on one line, cut to the audit target's bound at a character boundary.
-fn bounded(text: &str, bytes: ai6::Limit) -> String {
+pub(crate) fn bounded(text: &str, bytes: ai6::Limit) -> String {
     let mut line = text
         .chars()
         .map(|character| {
