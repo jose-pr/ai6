@@ -26,14 +26,25 @@ use serde::{Deserialize, Serialize};
 use crate::directorates::m::roster::CLEARANCES;
 
 /// The kinds of step every Operation governs.
-pub const BUILTIN_KINDS: [&str; 6] = [
+pub const BUILTIN_KINDS: [&str; 9] = [
     "push",
     "merge",
     "release",
     "delete",
     "clearance",
     SAFE_HOUSE_DELETE,
+    ISSUE_CLOSE,
+    ISSUE_ASSIGN,
+    ISSUE_COMMENT,
 ];
+/// The kind of step that closes or reopens an issue, or moves it into a done status; its
+/// target names the issue as `TRACKER:ITEM`.
+pub const ISSUE_CLOSE: &str = "issue-close";
+/// The kind of step that changes an issue's assignees; its target names the issue.
+pub const ISSUE_ASSIGN: &str = "issue-assign";
+/// The kind of step that posts on an issue an exposed Session may not post on directly; its
+/// target names the issue.
+pub const ISSUE_COMMENT: &str = "issue-comment";
 /// The kind of step that removes a kept safe house holding work that exists nowhere else; its
 /// target names the safe house and is compared as exact text.
 pub const SAFE_HOUSE_DELETE: &str = "safe-house-delete";
@@ -243,9 +254,10 @@ impl GreenInkPolicy {
     pub fn preset(preset: GreenInkPreset) -> Self {
         let unattended = match preset {
             GreenInkPreset::Strict => BTreeMap::new(),
-            GreenInkPreset::Licensed => {
-                BTreeMap::from([("00".to_owned(), ["push", "merge"].map(str::to_owned).into())])
-            }
+            GreenInkPreset::Licensed => BTreeMap::from([(
+                "00".to_owned(),
+                ["push", "merge", ISSUE_CLOSE].map(str::to_owned).into(),
+            )]),
         };
         let protected = DEFAULT_PROTECTED.map(str::to_owned).to_vec();
         Self {
@@ -500,7 +512,7 @@ mod tests {
             policy.requirement("field", &scope("push", "main")),
             Requirement::GreenInk
         );
-        assert_eq!(policy.weakenings().len(), 2);
+        assert_eq!(policy.weakenings().len(), 3, "push, merge and issue-close");
     }
 
     #[test]

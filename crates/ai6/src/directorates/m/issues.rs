@@ -40,6 +40,8 @@ pub enum OnTimeout {
     Resume,
     /// The Mission fails.
     Fail,
+    /// The Mission keeps waiting.
+    Wait,
 }
 
 /// What happens to a post that holds a secret.

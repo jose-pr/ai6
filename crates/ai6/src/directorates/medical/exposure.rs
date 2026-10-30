@@ -39,6 +39,12 @@ pub fn cable_source(sender: &str, limit: Limit) -> String {
     bounded(format!("cable:{sender}"), limit)
 }
 
+/// The source for a Session that read a reply on an issue of `tracker` (an instance name),
+/// cut to `limit` bytes.
+pub fn issue_source(tracker: &str, limit: Limit) -> String {
+    bounded(format!("issue:{tracker}"), limit)
+}
+
 /// The source for a Session whose tool call named `tool`, cut to `limit` bytes.
 pub fn tool_source(tool: &str, limit: Limit) -> String {
     bounded(format!("tool:{tool}"), limit)
@@ -58,7 +64,7 @@ fn bounded(mut source: String, limit: Limit) -> String {
 /// One way a Session was exposed, and when.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Exposure {
-    /// `brief:source`, `cable:SENDER`, `tool:NAME` or `review`.
+    /// `brief:source`, `cable:SENDER`, `issue:TRACKER`, `tool:NAME` or `review`.
     pub source: String,
     /// When it happened, as Unix seconds.
     pub at: f64,
@@ -77,15 +83,19 @@ pub enum Restriction {
     Cables,
     /// It is given no new secret leases.
     Secrets,
+    /// It posts directly only on the issues whose text exposed it and the children it
+    /// created; any other post waits for a person's green ink.
+    Issues,
 }
 
 impl Restriction {
     /// Every restriction.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Proposals,
         Self::Approvals,
         Self::Cables,
         Self::Secrets,
+        Self::Issues,
     ];
 
     /// The configuration spelling.
@@ -95,6 +105,7 @@ impl Restriction {
             Self::Approvals => "approvals",
             Self::Cables => "cables",
             Self::Secrets => "secrets",
+            Self::Issues => "issues",
         }
     }
 }
