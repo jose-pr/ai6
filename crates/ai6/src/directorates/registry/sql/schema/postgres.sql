@@ -389,3 +389,26 @@ CREATE TABLE ai6_issue_outbox (
     revision BIGINT NOT NULL
 );
 CREATE INDEX ai6_issue_outbox_state ON ai6_issue_outbox (state);
+
+-- The questions Agents asked on linked issues, one JSON list per Mission.
+CREATE TABLE ai6_issue_questions (
+    mission_id TEXT PRIMARY KEY,
+    questions TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+
+-- Comments from permitted authors of linked issues, one JSON list per Mission.
+CREATE TABLE ai6_issue_replies (
+    mission_id TEXT PRIMARY KEY,
+    replies TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+
+-- Where the last poll of an instance's replies stopped.
+CREATE TABLE ai6_issue_cursors (
+    operation TEXT NOT NULL,
+    tracker TEXT NOT NULL,
+    cursor TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (operation, tracker)
+);

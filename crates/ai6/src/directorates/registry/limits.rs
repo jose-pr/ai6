@@ -555,6 +555,11 @@ pub struct IssueLimits {
     pub outbox_records: Limit,
     /// Bytes of one outbox entry's text and payload. Default 128 KiB.
     pub entry_bytes: Limit,
+    /// Replies from a linked issue one Mission stores; delivered ones make room first.
+    /// Default 200.
+    pub replies_per_mission: Limit,
+    /// Bytes of one stored reply, cut past it. Default 64 KiB.
+    pub reply_bytes: Limit,
 }
 
 impl Default for IssueLimits {
@@ -563,6 +568,8 @@ impl Default for IssueLimits {
             links_per_mission: Limit::at(32),
             outbox_records: Limit::at(1_000),
             entry_bytes: Limit::at(128 * KIB),
+            replies_per_mission: Limit::at(200),
+            reply_bytes: Limit::at(64 * KIB),
         }
     }
 }
