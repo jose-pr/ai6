@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The `acp` handler (`ai6-agent-acp`): any Agent Client Protocol agent (the Claude and Codex
+  adapters, `gemini --acp`) is an Agent's handler, started with the Session's full
+  environment and judged by the green-ink gate. Configured by the Agent's `handler_settings`
+  (`command`, `args`, `env`, `meta`, option ids and timeouts).
 - An Agent's `handler_settings` table configures its handler provider (the provider validates
   it). Operator terminal input to a Claude or Codex Session, which speak JSON on plain pipes,
   is no longer written to the harness's input: typed lines become messages and Ctrl-C

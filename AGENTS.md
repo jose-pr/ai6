@@ -13,7 +13,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | `crates/universal-exports/` | Universal Exports: the authenticated public API gateway, Moneypenny's conversations and tools (`src/moneypenny/`), and the `universal-exports` command |
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The operator command: reads, and cancels, retries, resumes and interrupts Missions |
-| `crates/providers/{agents,terminals,transports,theaters,safehouses,sources}/` | Guatiao providers: Claude/Codex handlers, the `pty` terminal, the `local`, `ssh`, `adb`, `container` and `qemu` transports, the `ephemeral-container` Theater provider, the `git` and `copy` safe houses, GitHub and Jira Sources |
+| `crates/providers/{agents,terminals,transports,theaters,safehouses,sources}/` | Guatiao providers: Claude, Codex and `acp` (any Agent Client Protocol agent) handlers, the `pty` terminal, the `local`, `ssh`, `adb`, `container` and `qemu` transports, the `ephemeral-container` Theater provider, the `git` and `copy` safe houses, GitHub and Jira Sources |
 | `clients/outer-office/` | Outer Office (short name OO), the Flutter desktop/web operator app; Moneypenny is the AI assistant inside it |
 | `examples/config/` | A runnable Operation and Agent roster |
 | `docs/`, `mkdocs.yml` | Narrative guides; the Rust API reference is published under `/rust/` |

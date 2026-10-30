@@ -64,3 +64,18 @@ policy = "Act only through the Station's tools and within the limits the Station
 [role.technical-officer]
 purpose = "Diagnose Agent handler and tool issues and propose bounded technical changes."
 policy = "Follow the explicit technical brief; request authorization before changing credentials, policy or deployment."
+
+# Any Agent Client Protocol agent can be an Agent's handler. This one runs the Claude adapter
+# (Node 22 or later; AI6 installs nothing, so the version is pinned here). `env` is added under
+# the Session's own environment; set CLAUDE_CODE_EXECUTABLE to the `claude` it should drive.
+# With no roles, no Mission is placed on it until you give it some.
+[agent.009]
+handler = "acp"
+model = "sonnet"
+clearance = "field"
+priority = 5
+[agent.009.handler_settings]
+command = "npx"
+args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+# Codex:  command = "npx", args = ["-y", "@agentclientprotocol/codex-acp@2.5.0"]
+# Gemini: command = "gemini", args = ["--acp"]

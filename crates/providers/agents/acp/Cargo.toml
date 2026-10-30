@@ -1,0 +1,32 @@
+[package]
+name = "ai6-agent-acp"
+description = "AgentHandler provider that runs any Agent Client Protocol agent for AI6"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+exclude = [".*", "*.local.*"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "ai6-acp-fake-agent"
+path = "src/bin/fake_agent.rs"
+test = false
+
+[dependencies]
+ai6 = { path = "../../../ai6", default-features = false, features = ["acp", "gate"] }
+# The fake agent the tests start speaks ACP through the SDK.
+agent-client-protocol.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+ai6-terminal-pipe = { path = "../../terminals/pipe" }
+ai6 = { path = "../../../ai6", features = ["daemon"] }

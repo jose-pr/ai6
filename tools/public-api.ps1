@@ -13,6 +13,7 @@ $packages = @(
     'ai6',
     'ai6-diptel',
     'universal-exports',
+    'ai6-agent-acp',
     'ai6-agent-claude',
     'ai6-agent-codex',
     'ai6-terminal-pty',

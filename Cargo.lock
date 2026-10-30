@@ -144,6 +144,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai6-agent-acp"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "ai6",
+ "ai6-terminal-pipe",
+ "futures",
+ "serde",
+ "serde_json",
+ "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
 name = "ai6-agent-claude"
 version = "0.1.0"
 dependencies = [
