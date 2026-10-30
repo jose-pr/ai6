@@ -10,8 +10,7 @@ use std::time::Duration;
 use ai6::directorates::registry::backend::*;
 use ai6::guatiao::library::ProviderError;
 use ai6::{
-    Attempt, Authenticator, Directory, FileRegistry, Lookup, Person, Verdict,
-    role_authorizer_from_toml,
+    Attempt, Authenticator, Directory, FileRegistry, Lookup, Person, Verdict, access_from_toml,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -47,7 +46,7 @@ async fn disabled_assistant_polls_still_wait_before_returning_no_content() {
         AccessProviders::new(
             Arc::new(People),
             Arc::new(People),
-            Arc::new(role_authorizer_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
+            Arc::new(access_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
         ),
     );
     let poll = |gateway: Gateway, wait_ms: u64| async move {
@@ -203,7 +202,7 @@ async fn served_with(
         AccessProviders::new(
             Arc::new(People),
             Arc::new(People),
-            Arc::new(role_authorizer_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
+            Arc::new(access_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
         ),
     )
     .with_assistant(config);

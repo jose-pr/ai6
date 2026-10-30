@@ -71,6 +71,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `AcpSession` drives any ACP agent as an `AgentSession`, and `AcpFacade` serves any
   `AgentHandler` as an ACP agent, with AI6's environment, model, effort, policy and events
   carried in `_meta["dev.coqui.ai6/launch"]` and `_ai6/event`.
+- Built-in access roles. The gateway's people roles are now `chief`, `controller`, `operator` and
+  `auditor`: `chief` holds every action, is computed and never stored, and is named only in the
+  top-level `chief` list (and `unex.cfg`), which no stored rule shadows; the other three are
+  ordinary roles a first start seeds. New actions `access.read`, `access.manage` and
+  `account.manage`; a role bound at an Operation grants only the actions that mean something
+  there (`OPERATION_ACTIONS`). A change is guarded: an editor adds only what they hold, only a
+  chief changes the chief list, and the last chief cannot be removed. `ai6::access_from_toml`
+  returns an `EffectiveAccess` (the tiers evaluated together, with `explain`), replacing the
+  bare `RoleAuthorizer`.
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a

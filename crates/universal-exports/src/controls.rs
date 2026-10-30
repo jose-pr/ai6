@@ -658,8 +658,7 @@ pub(crate) mod tests {
     use ai6::FileRegistry;
     use ai6::guatiao::library::ProviderError;
     use ai6::{
-        Attempt, Authenticator, Directory, Lookup, NewSession, Person, Verdict,
-        role_authorizer_from_toml,
+        Attempt, Authenticator, Directory, Lookup, NewSession, Person, Verdict, access_from_toml,
     };
     use ai6_diptel::{FrameReceiver, IncomingFrame};
 
@@ -766,7 +765,7 @@ pub(crate) mod tests {
                 Duration::from_secs(60),
             )
             .unwrap();
-        let authorizer = role_authorizer_from_toml(roles, ai6::Limit::UNBOUNDED).unwrap();
+        let authorizer = access_from_toml(roles, ai6::Limit::UNBOUNDED).unwrap();
         let gateway = Gateway::with_access(
             GatewayConfig::new(
                 "https://localhost",

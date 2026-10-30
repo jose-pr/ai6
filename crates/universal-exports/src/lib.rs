@@ -5194,7 +5194,7 @@ mod tests {
             }
         }
 
-        let authorizer = ai6::role_authorizer_from_toml(
+        let authorizer = ai6::access_from_toml(
             r#"
                 [role.viewer]
                 actions = ["mission.read", "session.read"]

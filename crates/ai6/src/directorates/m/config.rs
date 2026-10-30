@@ -35,7 +35,7 @@ use serde::Deserialize as _;
 use sha2::{Digest, Sha256};
 
 use crate::bounds::Limit;
-use crate::directorates::m::access::{RoleAuthorizer, role_authorizer_from_toml};
+use crate::directorates::m::access::{AccessPolicy, compile};
 use crate::directorates::m::cover::{Covers, cover_from};
 use crate::directorates::m::roster::{
     Roster, RosterDefinitions, RosterError, RosterErrorKind, error, error_of,
@@ -401,25 +401,26 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// Universal Exports' role policy: the `access` record, else one that denies every
-    /// action.
+    /// The global access policy, the `access` record; `None` when there is none, which is not
+    /// the same as an empty one (a first start seeds the built-in roles only when there is no
+    /// record).
     ///
     /// # Errors
     ///
     /// The policy's error for a document it does not accept.
-    pub fn access_authorizer(&self) -> Result<RoleAuthorizer, String> {
-        match &self.access {
-            Some(document) => json_to_toml(document.clone())
-                .and_then(|value| {
-                    role_authorizer_from_toml(
-                        &toml::to_string(&value).unwrap_or_default(),
-                        self.limits.access_policy_bytes,
-                    )
-                    .map_err(|reason| reason.to_string())
-                })
-                .map_err(|reason| format!("access: {reason}")),
-            None => Ok(RoleAuthorizer::default()),
-        }
+    pub fn access_policy(&self) -> Result<Option<AccessPolicy>, String> {
+        self.access
+            .as_ref()
+            .map(|document| {
+                let text = json_to_toml(document.clone())
+                    .and_then(|value| toml::to_string(&value).map_err(|error| error.to_string()))?;
+                let policy = AccessPolicy::from_toml(&text, self.limits.access_policy_bytes)
+                    .map_err(|error| error.to_string())?;
+                compile(&policy, &[]).map_err(|error| error.to_string())?;
+                Ok(policy)
+            })
+            .transpose()
+            .map_err(|reason: String| format!("access: {reason}"))
     }
 
     /// The Station TLS policy: the `tls` record read over the library's default policy
@@ -1335,7 +1336,8 @@ pub(crate) fn assemble(
         .next()
         .map(|(_, definition)| definition);
     if let Some(text) = singleton(ConfigRecord::Access)? {
-        role_authorizer_from_toml(&text, limits.access_policy_bytes)
+        AccessPolicy::from_toml(&text, limits.access_policy_bytes)
+            .and_then(|policy| compile(&policy, &[]))
             .map_err(|reason| error(format!("{source}: access: {reason}")))?;
     }
     let unex = match family(ConfigRecord::Unex).into_iter().next() {
@@ -1397,7 +1399,7 @@ impl MemoryProvider {
     }
 
     /// This provider with `settings` instead of the defaults; their `limits` decide how
-    /// much of the access policy [`Settings::access_authorizer`] reads.
+    /// much of the access policy [`Settings::access_policy`] reads.
     #[must_use]
     pub fn with_settings(self, settings: Settings) -> Self {
         let mut state = self

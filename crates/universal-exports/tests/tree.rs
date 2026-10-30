@@ -8,7 +8,7 @@ use std::time::Duration;
 use ai6::directorates::registry::backend::*;
 use ai6::{
     Attempt, Authenticator, Directory, FileProvider, FileRegistry, Lookup, Person, Verdict,
-    guatiao::library::ProviderError, role_authorizer_from_toml,
+    access_from_toml, guatiao::library::ProviderError,
 };
 use ai6_diptel::{LifecycleEvent, MissionId, OperationId, SessionId, SessionState};
 use tokio::sync::oneshot;
@@ -74,7 +74,7 @@ async fn serve() -> (String, oneshot::Sender<()>, tempfile::TempDir) {
          station_labels = { site = \"dover\" }\n[operation.OTHER]\npath = \"/srv/other\"\n",
     )
     .unwrap();
-    let policy = role_authorizer_from_toml(
+    let policy = access_from_toml(
         r#"
             [role.viewer]
             actions = ["mission.read"]
