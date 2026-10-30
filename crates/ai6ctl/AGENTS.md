@@ -44,6 +44,13 @@ only for loopback, HTTPS is required elsewhere. Redirects are not followed.
 - `ai6ctl agent-roles --operation <OPERATION_ID>` lists role purpose, policy and whether
   the Operation overrides the Station definition (`agent.read` on that Operation). The
   Operation ID is encoded as one URL path segment.
+- `ai6ctl pages list` prints `GET /v1/user/pages` as tab-separated `ID KIND BYTES EXPIRES_UNIX
+  EXPOSED TITLE` (`EXPIRES_UNIX` is `remembered` without an expiry, `EXPOSED` `exposed` or `-`);
+  `pages open <ID> [--network none|own]` prints the link `POST /v1/user/pages/{id}/open` gives
+  (open it in a browser; it is bound to the access token); `pages remember <ID>` and `pages
+  forget <ID>` post `.../remember`; `pages rm <ID>` deletes. The ID is encoded as one path
+  segment; 404 reads "no such page of yours" (another person's page too). Sharing a page waits
+  for compartments.
 - `ai6ctl pools --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/pools`
   as tab-separated `POOL ACCOUNT KIND SESSIONS WINDOWS LIMITED_UNTIL_UNIX TOKENS_TODAY`:
   `SESSIONS` is `active/max_concurrent` (or the count without a limit), `WINDOWS`

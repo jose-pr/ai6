@@ -21,6 +21,7 @@ dependencies:
   shared_preferences: ^2.5.5
   # OO.cfg: TOML, or JSON or YAML when its first line names them.
   toml: ^0.18.0
+  url_launcher: ^6.3.3
   web: ^1.1.2
   web_socket_channel: ^3.0.3
   xterm2: ^5.4.0
@@ -30,6 +31,8 @@ dependencies:
 dev_dependencies:
   crypto: ^3.0.7
   flutter_lints: ^6.0.0
+  plugin_platform_interface: ^2.1.8
+  url_launcher_platform_interface: ^2.3.2
   flutter_test:
     sdk: flutter
 

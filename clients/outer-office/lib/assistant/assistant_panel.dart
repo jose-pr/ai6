@@ -12,6 +12,7 @@ import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_view.dart';
 import 'entry_kind.dart';
+import 'pages.dart';
 import 'navigation_card.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
@@ -34,6 +35,7 @@ class AssistantPanel extends StatefulWidget {
     this.textWidth,
     this.label,
     this.proposalWait = ControlSettings.defaultConfirming,
+    this.pageActions,
     super.key,
   });
 
@@ -73,6 +75,10 @@ class AssistantPanel extends StatefulWidget {
   /// How long a proposal may stay applying before its card says the outcome is unknown
   /// (`OO.cfg`'s `[controls] confirming`).
   final Duration proposalWait;
+
+  /// What the cards of pages she published ask of Universal Exports; without it a page card
+  /// shows her title only.
+  final PageActions? pageActions;
 
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
@@ -261,6 +267,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
                       controller: controller,
                       onOpen: widget.onOpen,
                       proposalWait: widget.proposalWait,
+                      pageActions: widget.pageActions,
                     )) {
                       // Views are tables and charts: they take the whole width.
                       final view when entry.role == 'view' => view,
@@ -358,9 +365,11 @@ class _EntryView extends StatelessWidget {
     required this.entry,
     required this.controller,
     required this.proposalWait,
+    this.pageActions,
     this.onOpen,
   });
 
+  final PageActions? pageActions;
   final Duration proposalWait;
   final AssistantEntry entry;
   final AssistantController controller;
@@ -430,6 +439,11 @@ class _EntryView extends StatelessWidget {
         confirmingAfter: proposalWait,
       ),
       'navigation' => NavigationCard(data: entry.data, onOpen: onOpen),
+      'page' when pageActions != null => PageCard(
+        data: entry.data,
+        actions: pageActions!,
+      ),
+      'page' => Text(revealInvisible(entry.text)),
       'view' => AssistantViewCard(
         json: entry.data?['view'],
         exposed: entry.data?['exposed'] == true,

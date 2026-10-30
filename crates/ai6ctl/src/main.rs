@@ -84,6 +84,12 @@ enum Command {
         #[arg(long)]
         operation: String,
     },
+    /// The pages Moneypenny published for you: list them, print a link to open one, keep or
+    /// release one, delete one. Sharing a page waits for compartments.
+    Pages {
+        #[command(subcommand)]
+        command: PagesCommand,
+    },
     /// List registered Missions, optionally filtered by Operation.
     Missions {
         /// Keep Missions from this Operation.
@@ -352,6 +358,37 @@ enum MissionCommand {
         message: Option<String>,
         #[command(flatten)]
         target: MissionTarget,
+    },
+}
+
+/// What `ai6ctl pages` does.
+#[derive(Debug, Subcommand)]
+enum PagesCommand {
+    /// List your pages: id, kind, size, expiry and whether each was made after outside text.
+    List,
+    /// Print a link to a page, valid for the time the gateway sets (an hour by default); open
+    /// it in a browser. The link is bound to this access token.
+    Open {
+        /// The page's id.
+        id: String,
+        /// Open it with the network off (`none`), or only its own files and feeds (`own`).
+        #[arg(long, value_parser = ["none", "own"])]
+        network: Option<String>,
+    },
+    /// Keep a page with no expiry.
+    Remember {
+        /// The page's id.
+        id: String,
+    },
+    /// Let a remembered page expire again, a day from now.
+    Forget {
+        /// The page's id.
+        id: String,
+    },
+    /// Delete a page.
+    Rm {
+        /// The page's id.
+        id: String,
     },
 }
 
@@ -639,6 +676,10 @@ async fn run() -> Result<(), String> {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let roles = agent_roles(&client, &server, &token, &operation).await?;
             print_agent_roles(roles);
+        }
+        Command::Pages { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            pages(&client, &server, &token, command).await?;
         }
         Command::Missions { operation, subtree } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -985,6 +1026,87 @@ async fn stations(
         .json()
         .await
         .map_err(|_| "Universal Exports returned an invalid Station list".to_owned())
+}
+
+/// `/v1/user/pages[/ID[/ACTION]]`, the id encoded as one path segment.
+fn pages_url(server: &Url, id: Option<&str>, action: Option<&str>) -> Url {
+    let mut url = server.clone();
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments.clear().extend(["v1", "user", "pages"]);
+        segments.extend(id).extend(action);
+    }
+    url
+}
+
+/// What a refused request to the pages routes means.
+fn pages_refusal(status: reqwest::StatusCode) -> String {
+    match status.as_u16() {
+        404 => "no such page of yours".to_owned(),
+        401 => "the access token is not valid; sign in again".to_owned(),
+        _ => format!("Universal Exports returned HTTP {status}"),
+    }
+}
+
+async fn pages(
+    client: &Client,
+    server: &Url,
+    token: &str,
+    command: PagesCommand,
+) -> Result<(), String> {
+    let request = match &command {
+        PagesCommand::List => client.get(pages_url(server, None, None)),
+        PagesCommand::Open { id, network } => client
+            .post(pages_url(server, Some(id), Some("open")))
+            .json(&serde_json::json!({"network": network})),
+        PagesCommand::Remember { id } => client
+            .post(pages_url(server, Some(id), Some("remember")))
+            .json(&serde_json::json!({"remember": true})),
+        PagesCommand::Forget { id } => client
+            .post(pages_url(server, Some(id), Some("remember")))
+            .json(&serde_json::json!({"remember": false})),
+        PagesCommand::Rm { id } => client.delete(pages_url(server, Some(id), None)),
+    };
+    let response = request
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(pages_refusal(status));
+    }
+    let invalid = || "Universal Exports returned an invalid page answer".to_owned();
+    match command {
+        PagesCommand::List => {
+            let list: Vec<serde_json::Value> = response.json().await.map_err(|_| invalid())?;
+            for page in list {
+                let text = |key: &str| plain(page[key].as_str().unwrap_or("-"));
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    text("id"),
+                    text("kind"),
+                    page["bytes"].as_u64().unwrap_or(0),
+                    page["expires_at"]
+                        .as_f64()
+                        .map_or_else(|| "remembered".to_owned(), |at| format!("{at:.0}")),
+                    if page["exposed"].as_bool() == Some(true) {
+                        "exposed"
+                    } else {
+                        "-"
+                    },
+                    text("title"),
+                );
+            }
+        }
+        PagesCommand::Open { .. } => {
+            let link: serde_json::Value = response.json().await.map_err(|_| invalid())?;
+            println!("{}", plain(link["url"].as_str().ok_or_else(invalid)?));
+        }
+        PagesCommand::Remember { id } => println!("{}: remembered", plain(&id)),
+        PagesCommand::Forget { id } => println!("{}: will expire", plain(&id)),
+        PagesCommand::Rm { id } => println!("{}: deleted", plain(&id)),
+    }
+    Ok(())
 }
 
 async fn agent_roles(

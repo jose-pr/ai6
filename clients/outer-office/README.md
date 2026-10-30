@@ -121,6 +121,11 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   `memory/` in the operator's personal repository: open, edit and save, add, or forget one
   (after a confirmation), each a commit by the operator. See the
   [assistant guide](https://jose-pr.github.io/ai6/assistant/).
+- Pages she publishes (a dashboard of live data, a report or a file) appear in her chat as a
+  card: kind, size, expiry or **Remembered**, what she read when it was made after outside
+  text, and the feeds it reads. **Open** launches it in a new browser tab (the system browser
+  on a desktop), never inside the app; the menu opens it with the network off, remembers or
+  forgets it and deletes it. Only you can open your pages.
 - Audit log for operators with `audit.read`; operator menu with identity, effective
   permissions per Operation, appearance and sign-out.
 - Six themes from the Outer Office design kit (Night Ops, the default, Black Ops, Dusk,

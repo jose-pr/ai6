@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
+import 'pages.dart' show PageActions;
 import '../shell/app_window.dart';
 import '../shell/oo_shell.dart';
 import 'assistant_controller.dart';
@@ -162,6 +163,7 @@ class MoneypennyChat extends ChangeNotifier {
     this.settings = const ChatSettings(),
     this.label,
     this.proposalWait = ControlSettings.defaultConfirming,
+    this.pageActions,
   }) : _width = settings.width {
     controller.addListener(_heard);
   }
@@ -175,6 +177,9 @@ class MoneypennyChat extends ChangeNotifier {
   /// How long a proposal may stay applying before its card says the outcome is unknown
   /// (`OO.cfg`'s `[controls] confirming`).
   final Duration proposalWait;
+
+  /// What the page cards ask of Universal Exports; none where there are no pages (the demo).
+  final PageActions? pageActions;
 
   final AssistantController controller;
   final ChatPreferences? preferences;
