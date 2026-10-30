@@ -7,7 +7,7 @@ use ai6::directorates::q::safehouse::{
     SafeHouseProvider, SafeHouseReport, SafeHouseSpec,
 };
 use ai6::guatiao::{FromValue, ToValue};
-use ai6_safehouse_git::Git;
+use ai6_safehouse_git::{Git, GitConfig};
 
 fn git(cwd: &Path, args: &[&str]) {
     let output = Command::new("git")
@@ -52,7 +52,7 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
         }),
         ..spec(&bare, &root.path().join("state"))
     };
-    let session = Git.open(&spec.to_value().unwrap()).unwrap();
+    let session = Git::default().open(&spec.to_value().unwrap()).unwrap();
     let info = SafeHouseInfo::from_value(&session.info().unwrap()).unwrap();
     // The provider reports the canonical path: a Windows short name or macOS /var is resolved.
     assert_eq!(
@@ -108,7 +108,7 @@ fn a_mission_works_in_a_worktree_and_its_commits_are_reported_through_the_kind()
     git(&repo, &["commit", "--quiet", "-m", "seed"]);
 
     let spec = spec(&repo, &root.path().join("state"));
-    let session = Git.open(&spec.to_value().unwrap()).unwrap();
+    let session = Git::default().open(&spec.to_value().unwrap()).unwrap();
     let info = SafeHouseInfo::from_value(&session.info().unwrap()).unwrap();
     assert!(info.isolated && info.supports_history);
     assert_eq!(
@@ -133,7 +133,7 @@ fn a_mission_works_in_a_worktree_and_its_commits_are_reported_through_the_kind()
 
     let report = SafeHouseReport::from_value(&session.finish().unwrap()).unwrap();
     assert!(report.kept);
-    let reopened = Git
+    let reopened = Git::default()
         .open(
             &SafeHouseSpec {
                 reopen: Some(report),
@@ -154,8 +154,34 @@ fn a_mission_works_in_a_worktree_and_its_commits_are_reported_through_the_kind()
 
 #[test]
 fn a_malformed_spec_is_refused_as_a_bad_value() {
-    let Err(error) = Git.open(&"not a spec".to_value().unwrap()) else {
+    let Err(error) = Git::default().open(&"not a spec".to_value().unwrap()) else {
         panic!("a string is not a spec");
     };
     assert_eq!(error.status, ai6::guatiao::Status::GUATIAO_ERR_BAD_VALUE);
+}
+
+/// `git_timeout_ms` is the deadline of every Git command: with none to spare, opening a
+/// worktree is refused as timed out, and with the default it works.
+#[test]
+fn the_configured_timeout_stops_a_git_command() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("repo");
+    fs::create_dir_all(&source).unwrap();
+    git(&source, &["init", "--quiet", "--initial-branch=main"]);
+    git(&source, &["config", "user.email", "a@example.invalid"]);
+    git(&source, &["config", "user.name", "a"]);
+    fs::write(source.join("a.txt"), "a\n").unwrap();
+    git(&source, &["add", "."]);
+    git(&source, &["commit", "--quiet", "-m", "first"]);
+    let spec = spec(&source, &root.path().join("state"));
+
+    let impatient = Git::new(GitConfig {
+        git_timeout_ms: 0,
+        ..GitConfig::default()
+    });
+    let Err(error) = impatient.open(&spec.to_value().unwrap()) else {
+        panic!("a command with no time must time out");
+    };
+    assert!(error.to_string().contains("timed out"), "{error}");
+    assert!(Git::default().open(&spec.to_value().unwrap()).is_ok());
 }

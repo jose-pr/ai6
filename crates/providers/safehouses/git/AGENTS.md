@@ -6,11 +6,20 @@ and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
 No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) and `sha2`. The crate
-root exports `Git`, which implements
+root exports `Git` and `GitConfig`; `Git` implements
 `ai6::directorates::q::safehouse::SafeHouseProvider`; the library is both an `rlib` and the
 Guatiao `cdylib` a Station loads. Provider ID: `git`. No unsafe code. Needs the `git`
-command on the `PATH` of the Station that loads it; every call has a 120 second deadline and
-runs with `GIT_TERMINAL_PROMPT=0`.
+command on the `PATH` of the Station that loads it; every call has a deadline (`git_timeout_ms`, 120 seconds)
+and runs with `GIT_TERMINAL_PROMPT=0`.
+
+`GitConfig` (`ToValue`, `FromValue`, `Schema`, `Default`; `Git::new(GitConfig)`): every key is
+optional and each default is the value the provider used before it was a key. A Station sets
+them in `[providers.git]`.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `git_timeout_ms` | 120000 | Milliseconds one Git command may run before it is killed |
+| `measure_every_ms` | 250 | Milliseconds between measurements of a size-bounded command's directories |
 
 ## Behaviour of `open(SafeHouseSpec)`
 
@@ -55,9 +64,9 @@ runs with `GIT_TERMINAL_PROMPT=0`.
   branches but not `<base>` is refused and the clone removed. Remote repositories are reached
   with the Station user's Git credentials. With `depth`, the clone is shallow (`--depth=N
   --no-single-branch`, and `--no-local` for a local repository so the depth holds). The clone
-  and its `checkout` run within `timeout_secs` (else the 120-second deadline) and, with
+  and its `checkout` run within `timeout_secs` (else `git_timeout_ms`) and, with
   `max_bytes`, are killed once the working tree and git directory hold more (measured every
-  250 ms and when the command ends); either way what the clone made is removed.
+  `measure_every_ms` and when the command ends); either way what the clone made is removed.
 
 ## Session behaviour
 

@@ -6,9 +6,16 @@ and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
 No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) only. The crate
-root exports `Copier`, which implements
+root exports `Copier` and `CopyConfig`; `Copier` implements
 `ai6::directorates::q::safehouse::SafeHouseProvider`; the library is both an `rlib` and the
 Guatiao `cdylib` a Station loads. Provider ID: `copy`. No unsafe code, no external command.
+
+`CopyConfig` (`ToValue`, `FromValue`, `Schema`, `Default`; `Copier::new(CopyConfig)`), set by a
+Station in `[providers.copy]`:
+
+| Key | Default | What |
+| --- | --- | --- |
+| `name_chars` | 72 | Characters of an Operation or Mission ID kept in the name of its directory, before the hash of the whole ID |
 
 ## Behaviour of `open(SafeHouseSpec)`
 

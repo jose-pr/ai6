@@ -16,18 +16,53 @@ use ai6::directorates::q::safehouse::{
     ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
 };
 use ai6::guatiao::library::{Object, ProviderError};
-use ai6::guatiao::{FromValue, Status, ToValue, Value};
+use ai6::guatiao::{FromValue, Schema, Status, ToValue, Value};
 
 use tree::Tree;
 
-#[derive(Default, ai6::guatiao::Provider)]
+/// `copy` provider configuration; every field has a default.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::ai6::guatiao)]
+pub struct CopyConfig {
+    /// Characters of an Operation or Mission ID kept in the name of its directory (a hash of
+    /// the whole ID follows, so distinct IDs never collide). Default 72.
+    #[map(default = 72)]
+    pub name_chars: u64,
+}
+
+impl Default for CopyConfig {
+    fn default() -> Self {
+        Self { name_chars: 72 }
+    }
+}
+
+/// Makes a Mission's workspace as a plain copy of the source directory.
+#[derive(Debug, Clone, Copy, Default, ai6::guatiao::Provider)]
 #[provider(
     SafeHouseProvider,
     id = "copy",
     name = "copy",
-    crate = ::ai6::guatiao
+    crate = ::ai6::guatiao,
+    config = CopyConfig
 )]
-pub struct Copier;
+pub struct Copier {
+    config: CopyConfig,
+}
+
+impl Copier {
+    /// A provider with `config`.
+    pub fn new(config: CopyConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl TryFrom<CopyConfig> for Copier {
+    type Error = ProviderError;
+
+    fn try_from(config: CopyConfig) -> Result<Self, Self::Error> {
+        Ok(Self::new(config))
+    }
+}
 
 impl SafeHouseProvider for Copier {
     fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
@@ -39,8 +74,11 @@ impl SafeHouseProvider for Copier {
                 "the copy provider does not clone repositories",
             ));
         }
-        let directory =
-            Tree::open(&spec).map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
+        let directory = Tree::open(
+            &spec,
+            usize::try_from(self.config.name_chars).unwrap_or(usize::MAX),
+        )
+        .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
         Ok(CopySafeHouse(directory).into_object())
     }
 }

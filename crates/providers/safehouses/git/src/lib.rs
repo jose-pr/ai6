@@ -19,25 +19,72 @@ use ai6::directorates::q::safehouse::{
     ChangeLog, CheckpointSpec, SafeHouseInfo, SafeHouseProvider, SafeHouseSession, SafeHouseSpec,
 };
 use ai6::guatiao::library::{Object, ProviderError};
-use ai6::guatiao::{FromValue, Status, ToValue, Value};
+use ai6::guatiao::{FromValue, Schema, Status, ToValue, Value};
 
-use worktree::Worktree;
+use worktree::{Runner, Worktree};
 
-#[derive(Default, ai6::guatiao::Provider)]
+/// `git` provider configuration; every field has a default.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::ai6::guatiao)]
+pub struct GitConfig {
+    /// Milliseconds one Git command may run before it is killed. Default 120000.
+    #[map(default = 120_000)]
+    pub git_timeout_ms: u64,
+    /// Milliseconds between measurements of the directories a size-bounded command (a clone)
+    /// fills. Default 250.
+    #[map(default = 250)]
+    pub measure_every_ms: u64,
+}
+
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self {
+            git_timeout_ms: 120_000,
+            measure_every_ms: 250,
+        }
+    }
+}
+
+/// Makes a Mission's workspace with Git: a worktree, or a clone.
+#[derive(Debug, Clone, Copy, Default, ai6::guatiao::Provider)]
 #[provider(
     SafeHouseProvider,
     id = "git",
     name = "git",
-    crate = ::ai6::guatiao
+    crate = ::ai6::guatiao,
+    config = GitConfig
 )]
-pub struct Git;
+pub struct Git {
+    config: GitConfig,
+}
+
+impl Git {
+    /// A provider with `config`.
+    pub fn new(config: GitConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl TryFrom<GitConfig> for Git {
+    type Error = ProviderError;
+
+    fn try_from(config: GitConfig) -> Result<Self, Self::Error> {
+        Ok(Self::new(config))
+    }
+}
 
 impl SafeHouseProvider for Git {
     fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
         let spec = SafeHouseSpec::from_value(spec)
             .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
-        let worktree =
-            Worktree::open(&spec).map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
+        let worktree = Worktree::open(
+            &spec,
+            Runner {
+                timeout: std::time::Duration::from_millis(self.config.git_timeout_ms),
+                measure_every: std::time::Duration::from_millis(self.config.measure_every_ms),
+            },
+        )
+        .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
         Ok(GitSafeHouse(worktree).into_object())
     }
 }

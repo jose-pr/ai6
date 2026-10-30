@@ -18,7 +18,7 @@ pub(crate) struct Tree {
 
 impl Tree {
     /// Copies, re-attaches to or adopts the safe house `spec` describes.
-    pub(crate) fn open(spec: &SafeHouseSpec) -> Result<Self, String> {
+    pub(crate) fn open(spec: &SafeHouseSpec, name_chars: usize) -> Result<Self, String> {
         let source = canonical(Path::new(&spec.source))?;
         if !source.is_dir() {
             return Err(format!("{} is not a directory", source.display()));
@@ -34,8 +34,8 @@ impl Tree {
         let root = canonical(root)?;
         let path = root
             .join("safe-houses")
-            .join(segment(&spec.operation_id))
-            .join(segment(&spec.mission_id));
+            .join(segment(&spec.operation_id, name_chars))
+            .join(segment(&spec.mission_id, name_chars));
         if let Some(report) = &spec.reopen {
             let kept = canonical(Path::new(&report.path))?;
             if !report.kept || kept != path || !kept.is_dir() {
@@ -107,8 +107,8 @@ fn strip_verbatim(path: PathBuf) -> PathBuf {
     path
 }
 
-/// A directory name for `value`: safe characters plus a hash, so distinct IDs never collide.
-fn segment(value: &str) -> String {
+/// A directory name for `value`: at most `name_chars` safe characters plus a hash, so distinct IDs never collide.
+fn segment(value: &str, name_chars: usize) -> String {
     let stem: String = value
         .chars()
         .map(|character| {
@@ -118,7 +118,7 @@ fn segment(value: &str) -> String {
                 '-'
             }
         })
-        .take(72)
+        .take(name_chars)
         .collect();
     let stem = stem.trim_matches('-');
     let stem = if stem.is_empty() { "id" } else { stem };

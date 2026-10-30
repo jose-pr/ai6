@@ -26,14 +26,14 @@ use ai6::directorates::q::safehouse::{
     SafeHouseSpec,
 };
 
-use crate::worktree::{Failure, Limits, Worktree, fail, git, git_limited, git_path};
+use crate::worktree::{Failure, Limits, Runner, Worktree, fail, git, git_limited, git_path};
 
 /// The settings every command of a clone runs with. `core.hooksPath` names a directory that
 /// is never made, so no hook runs; `core.symlinks=false` checks a link out as a plain file
 /// holding its target, so nothing in a working tree leads outside it. Every filter driver
 /// (`lfs` and each the global or system configuration names) is blanked and not required,
 /// so no `.gitattributes` in a repository makes a checkout or a save run one.
-fn hardened(git_dir: &Path) -> Vec<String> {
+fn hardened(run: &Runner, git_dir: &Path) -> Vec<String> {
     let mut settings = vec![
         "-c".to_owned(),
         format!(
@@ -51,7 +51,7 @@ fn hardened(git_dir: &Path) -> Vec<String> {
         "-c".to_owned(),
         "core.autocrlf=false".to_owned(),
     ];
-    for driver in filter_drivers() {
+    for driver in filter_drivers(run) {
         for key in ["clean", "smudge", "process"] {
             settings.extend(["-c".to_owned(), format!("filter.{driver}.{key}=")]);
         }
@@ -66,12 +66,13 @@ const HARDENED_ENV: (&str, &str) = ("GIT_LFS_SKIP_SMUDGE", "1");
 
 /// `lfs` and the filter drivers the Station user's global and system configuration define,
 /// read once.
-fn filter_drivers() -> &'static [String] {
+fn filter_drivers(run: &Runner) -> &'static [String] {
     static DRIVERS: OnceLock<Vec<String>> = OnceLock::new();
     DRIVERS.get_or_init(|| {
         let mut drivers = BTreeSet::from(["lfs".to_owned()]);
         for scope in ["--global", "--system"] {
             let listed = git(
+                run,
                 &std::env::temp_dir(),
                 &[
                     "config",
@@ -357,16 +358,21 @@ fn staged(repo: &Repo<'_>) -> Result<bool, Failure> {
 pub(crate) struct Repo<'a> {
     git_dir: &'a Path,
     work_tree: &'a Path,
+    run: Runner,
 }
 
 impl<'a> Repo<'a> {
-    pub(crate) fn new(git_dir: &'a Path, work_tree: &'a Path) -> Self {
-        Self { git_dir, work_tree }
+    pub(crate) fn new(git_dir: &'a Path, work_tree: &'a Path, run: Runner) -> Self {
+        Self {
+            git_dir,
+            work_tree,
+            run,
+        }
     }
 
     /// Runs `git args` with `env`, hardened, against this git directory and working tree.
     pub(crate) fn run(&self, args: &[&str], env: &[(&str, String)]) -> Result<String, Failure> {
-        self.git(args, env, None, &Limits::default())
+        self.git(args, env, None, &self.run.limits())
     }
 
     /// Runs `git args`, hardened, within `limits`.
@@ -376,7 +382,7 @@ impl<'a> Repo<'a> {
 
     /// Runs `git args`, hardened, with `input` on its standard input.
     fn input(&self, args: &[&str], input: &[u8]) -> Result<String, Failure> {
-        self.git(args, &[], Some(input), &Limits::default())
+        self.git(args, &[], Some(input), &self.run.limits())
     }
 
     fn git(
@@ -390,7 +396,7 @@ impl<'a> Repo<'a> {
             format!("--git-dir={}", self.git_dir.to_string_lossy()),
             format!("--work-tree={}", self.work_tree.to_string_lossy()),
         ];
-        all.extend(hardened(self.git_dir));
+        all.extend(hardened(&self.run, self.git_dir));
         all.extend(args.iter().map(|arg| (*arg).to_owned()));
         let all: Vec<&str> = all.iter().map(String::as_str).collect();
         let mut env = env.to_vec();
@@ -423,6 +429,7 @@ impl Worktree {
     pub(crate) fn clone_into(
         spec: &SafeHouseSpec,
         clone: &SafeHouseClone,
+        run: Runner,
     ) -> Result<Self, Failure> {
         let target = Path::new(&clone.path);
         if target.exists() {
@@ -445,7 +452,7 @@ impl Worktree {
             && let Some(local) = RepoKind::local_path(&spec.source)
             && !local.exists()
         {
-            create_bare(&local, &spec.base)?;
+            create_bare(&run, &local, &spec.base)?;
         }
         let name = target
             .file_name()
@@ -474,7 +481,7 @@ impl Worktree {
             }
             None => path.join(".git"),
         };
-        let mut args = hardened(&git_dir);
+        let mut args = hardened(&run, &git_dir);
         args.extend(["clone".to_owned(), "--quiet".to_owned()]);
         if clone.git_dir.is_some() {
             args.push(format!("--separate-git-dir={}", git_dir.to_string_lossy()));
@@ -493,9 +500,8 @@ impl Worktree {
         args.extend(["--".to_owned(), spec.source.clone(), name]);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let limits = Limits {
-            timeout: clone
-                .timeout_secs
-                .map_or(Limits::default().timeout, Duration::from_secs),
+            timeout: clone.timeout_secs.map_or(run.timeout, Duration::from_secs),
+            measure_every: run.measure_every,
             watch: vec![path.clone(), git_dir.clone()],
             max_bytes: clone.max_bytes,
         };
@@ -526,6 +532,7 @@ impl Worktree {
             isolated: true,
             cloned: true,
             git_dir: Some(git_dir),
+            run,
         };
         let repo = house.repo();
         let tracking = format!("refs/remotes/origin/{}", spec.base);
@@ -562,7 +569,11 @@ impl Worktree {
 
     /// How commands run against this clone.
     fn repo(&self) -> Repo<'_> {
-        Repo::new(self.git_dir.as_deref().unwrap_or(&self.path), &self.path)
+        Repo::new(
+            self.git_dir.as_deref().unwrap_or(&self.path),
+            &self.path,
+            self.run,
+        )
     }
 
     /// Commits everything in the working directory but hidden paths ([`HIDDEN_FILES`]) as
@@ -770,7 +781,7 @@ fn make_writable(path: &Path) {
 /// Makes `path` an empty bare repository whose `HEAD` names `branch`, private to the Station
 /// user: on Unix the directory is made `0700` and Git keeps everything it writes there `0600`
 /// (`core.sharedRepository=0600`), whatever the umask.
-fn create_bare(path: &Path, branch: &str) -> Result<(), Failure> {
+fn create_bare(run: &Runner, path: &Path, branch: &str) -> Result<(), Failure> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
@@ -782,10 +793,12 @@ fn create_bare(path: &Path, branch: &str) -> Result<(), Failure> {
     builder.create(path).map_err(|error| fail(path, error))?;
     let git_dir = format!("--git-dir={}", path.to_string_lossy());
     git(
+        run,
         parent,
         &[&git_dir, "init", "--quiet", "--bare", "--shared=0600"],
     )?;
     git(
+        run,
         parent,
         &[
             &git_dir,
@@ -800,6 +813,10 @@ fn create_bare(path: &Path, branch: &str) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn open(spec: &SafeHouseSpec) -> Result<Worktree, Failure> {
+        Worktree::open(spec, Runner::default())
+    }
     use ai6::directorates::q::safehouse::SafeHouseClone;
     use std::process::Command;
 
@@ -864,7 +881,7 @@ mod tests {
     fn a_missing_local_repository_is_created_bare_and_the_first_save_makes_main() {
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("people").join("eve.git");
-        let house = Worktree::open(&spec(
+        let house = open(&spec(
             &bare.to_string_lossy(),
             &root.path().join("one").join("personal"),
             true,
@@ -913,7 +930,7 @@ mod tests {
         );
 
         // The next clone starts from what was saved, and an existing source is never re-made.
-        let next = Worktree::open(&spec(
+        let next = open(&spec(
             &bare.to_string_lossy(),
             &root.path().join("two").join("personal"),
             true,
@@ -932,7 +949,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("people").join("eve.git");
-        let house = Worktree::open(&spec(
+        let house = open(&spec(
             &bare.to_string_lossy(),
             &root.path().join("personal"),
             true,
@@ -965,10 +982,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("eve.git");
         let source = bare.to_string_lossy().into_owned();
-        let a = Worktree::open(&spec(&source, &root.path().join("a"), true)).unwrap();
+        let a = open(&spec(&source, &root.path().join("a"), true)).unwrap();
         fs::write(a.path.join("shared.md"), "one\n").unwrap();
         a.save(&save_spec("moneypenny: one"), "main").unwrap();
-        let b = Worktree::open(&spec(&source, &root.path().join("b"), false)).unwrap();
+        let b = open(&spec(&source, &root.path().join("b"), false)).unwrap();
 
         // Another conversation moved main: a different file replays cleanly.
         fs::write(a.path.join("a.md"), "a\n").unwrap();
@@ -1007,7 +1024,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let missing = root.path().join("missing.git");
         assert!(
-            Worktree::open(&spec(
+            open(&spec(
                 &missing.to_string_lossy(),
                 &root.path().join("x"),
                 false
@@ -1022,7 +1039,7 @@ mod tests {
         fs::write(other.join("f"), "f").unwrap();
         run(&other, &["add", "f"]);
         run(&other, &["commit", "--quiet", "-m", "f"]);
-        let refused = Worktree::open(&spec(
+        let refused = open(&spec(
             &other.to_string_lossy(),
             &root.path().join("y"),
             false,
@@ -1034,7 +1051,7 @@ mod tests {
             "the failed clone is removed"
         );
         assert!(
-            Worktree::open(&spec("ext::sh -c x", &root.path().join("z"), true)).is_err(),
+            open(&spec("ext::sh -c x", &root.path().join("z"), true)).is_err(),
             "a remote helper is refused before Git sees it"
         );
     }
@@ -1070,7 +1087,7 @@ mod tests {
         if let Some(clone) = spec.clone.as_mut() {
             clone.git_dir = Some(git_dir.to_string_lossy().into_owned());
         }
-        let house = Worktree::open(&spec).unwrap();
+        let house = open(&spec).unwrap();
         assert!(
             !house.path.join(".git").exists(),
             "nothing of Git is left to write"
@@ -1156,7 +1173,7 @@ mod tests {
         if let Some(clone) = spec.clone.as_mut() {
             clone.git_dir = Some(git_dir.to_string_lossy().into_owned());
         }
-        let house = Worktree::open(&spec).unwrap();
+        let house = open(&spec).unwrap();
 
         // The clone's configuration names a filter program for `lfs`.
         let marker = root.path().join("filter-ran");
@@ -1219,7 +1236,7 @@ mod tests {
     fn hidden_paths_are_never_committed_by_a_save() {
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("eve.git");
-        let house = Worktree::open(&spec(
+        let house = open(&spec(
             &bare.to_string_lossy(),
             &root.path().join("personal"),
             true,
@@ -1248,10 +1265,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("eve.git");
         let source = bare.to_string_lossy().into_owned();
-        let a = Worktree::open(&spec(&source, &root.path().join("a"), true)).unwrap();
+        let a = open(&spec(&source, &root.path().join("a"), true)).unwrap();
         fs::write(a.path.join("x.md"), "x\n").unwrap();
         a.save(&save_spec("moneypenny: x"), "main").unwrap();
-        let b = Worktree::open(&spec(&source, &root.path().join("b"), false)).unwrap();
+        let b = open(&spec(&source, &root.path().join("b"), false)).unwrap();
         fs::write(a.path.join("y.md"), "y\n").unwrap();
         a.save(&save_spec("moneypenny: y"), "main").unwrap();
 
@@ -1282,7 +1299,7 @@ mod tests {
     fn a_save_leaves_out_what_it_is_told_to() {
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("eve.git");
-        let house = Worktree::open(&spec(
+        let house = open(&spec(
             &bare.to_string_lossy(),
             &root.path().join("personal"),
             true,
@@ -1309,7 +1326,7 @@ mod tests {
     fn a_recording_save_names_every_file_it_adds_or_changes_in_the_same_commit() {
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("eve.git");
-        let house = Worktree::open(&spec(
+        let house = open(&spec(
             &bare.to_string_lossy(),
             &root.path().join("personal"),
             true,
@@ -1375,12 +1392,12 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("eve.git");
         let source = bare.to_string_lossy().into_owned();
-        let a = Worktree::open(&spec(&source, &root.path().join("a"), true)).unwrap();
+        let a = open(&spec(&source, &root.path().join("a"), true)).unwrap();
         let mut exact = save_spec("moneypenny: exact");
         // No branch yet: a file that must not exist does not.
         exact.files = Some(vec![file("m.md", "one\n", Some(String::new()))]);
         a.save(&exact, "main").unwrap();
-        let b = Worktree::open(&spec(&source, &root.path().join("b"), false)).unwrap();
+        let b = open(&spec(&source, &root.path().join("b"), false)).unwrap();
 
         exact.files = Some(vec![file("m.md", "two\n", Some(hex("one\n")))]);
         a.save(&exact, "main").unwrap();
@@ -1447,7 +1464,7 @@ mod tests {
                     .is_symlink()
             );
         }
-        let house = Worktree::open(&spec(
+        let house = open(&spec(
             &bare.to_string_lossy(),
             &root.path().join("area").join("personal"),
             false,
@@ -1464,7 +1481,7 @@ mod tests {
     fn a_save_past_its_size_commits_and_pushes_nothing() {
         let root = tempfile::tempdir().unwrap();
         let bare = root.path().join("eve.git");
-        let house = Worktree::open(&spec(
+        let house = open(&spec(
             &bare.to_string_lossy(),
             &root.path().join("personal"),
             true,
@@ -1517,20 +1534,20 @@ mod tests {
             spec
         };
 
-        let shallow = Worktree::open(&with("one", &|clone| clone.depth = Some(1))).unwrap();
+        let shallow = open(&with("one", &|clone| clone.depth = Some(1))).unwrap();
         assert_eq!(
             run(&shallow.path, &["rev-list", "--count", "HEAD"]).trim(),
             "1"
         );
         shallow.discard().unwrap();
-        let whole = Worktree::open(&with("two", &|_| {})).unwrap();
+        let whole = open(&with("two", &|_| {})).unwrap();
         assert_eq!(
             run(&whole.path, &["rev-list", "--count", "HEAD"]).trim(),
             "2"
         );
         whole.discard().unwrap();
 
-        let refused = Worktree::open(&with("three", &|clone| {
+        let refused = open(&with("three", &|clone| {
             clone.max_bytes = Some(64 * 1024);
         }))
         .unwrap_err();
@@ -1554,7 +1571,7 @@ mod tests {
             clone.timeout_secs = Some(1);
         }
         let started = std::time::Instant::now();
-        let timed_out = Worktree::open(&silent).unwrap_err();
+        let timed_out = open(&silent).unwrap_err();
         assert!(
             timed_out.contains("timed out after 1 seconds"),
             "{timed_out}"

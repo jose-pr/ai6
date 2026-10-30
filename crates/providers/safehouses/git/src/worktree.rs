@@ -16,7 +16,35 @@ use ai6::directorates::q::safehouse::{
     Change, CheckpointSpec, SafeHouseCheckpoint, SafeHouseExports, SafeHouseReport, SafeHouseSpec,
 };
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(120);
+/// How the Git commands of one safe house run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Runner {
+    /// How long one command may run before it is killed.
+    pub(crate) timeout: Duration,
+    /// How often a command's watched directories are measured.
+    pub(crate) measure_every: Duration,
+}
+
+impl Default for Runner {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(120),
+            measure_every: Duration::from_millis(250),
+        }
+    }
+}
+
+impl Runner {
+    /// The limits of a command that watches no directory.
+    pub(crate) fn limits(&self) -> Limits {
+        Limits {
+            timeout: self.timeout,
+            measure_every: self.measure_every,
+            watch: Vec::new(),
+            max_bytes: None,
+        }
+    }
+}
 
 /// A rejected Git operation, as text for the provider error.
 pub(crate) type Failure = String;
@@ -34,23 +62,25 @@ pub(crate) struct Worktree {
     pub(crate) cloned: bool,
     /// A clone's git directory: every command names it and the working tree outright.
     pub(crate) git_dir: Option<PathBuf>,
+    /// How its Git commands run.
+    pub(crate) run: Runner,
 }
 
 impl Worktree {
     /// Creates, re-attaches or adopts the safe house `spec` describes.
-    pub(crate) fn open(spec: &SafeHouseSpec) -> Result<Self, Failure> {
+    pub(crate) fn open(spec: &SafeHouseSpec, run: Runner) -> Result<Self, Failure> {
         if let Some(clone) = &spec.clone {
-            return Self::clone_into(spec, clone);
+            return Self::clone_into(spec, clone, run);
         }
         match (&spec.reopen, spec.isolate) {
-            (None, true) => Self::create(spec),
-            (Some(report), true) => Self::reopen(spec, report),
-            (reopen, false) => Self::in_place(spec, reopen.as_ref()),
+            (None, true) => Self::create(spec, &run),
+            (Some(report), true) => Self::reopen(spec, report, &run),
+            (reopen, false) => Self::in_place(spec, reopen.as_ref(), &run),
         }
     }
 
-    fn create(spec: &SafeHouseSpec) -> Result<Self, Failure> {
-        let repository = checkout(&spec.source)?;
+    fn create(spec: &SafeHouseSpec, run: &Runner) -> Result<Self, Failure> {
+        let repository = checkout(run, &spec.source)?;
         let root = Path::new(&spec.state_root);
         fs::create_dir_all(root).map_err(|error| fail(root, error))?;
         let root = git_path(root.canonicalize().map_err(|error| fail(root, error))?);
@@ -63,9 +93,9 @@ impl Worktree {
         }
 
         let (branch, commit, base) = match &spec.checkpoint {
-            Some(checkpoint) => resume_point(&repository, checkpoint)?,
+            Some(checkpoint) => resume_point(run, &repository, checkpoint)?,
             None => {
-                let commit = resolve(&repository, &spec.base)?;
+                let commit = resolve(run, &repository, &spec.base)?;
                 let branch = branch_name(
                     &spec.branch,
                     &spec.mission_id,
@@ -75,7 +105,7 @@ impl Worktree {
                 (branch, commit.clone(), commit)
             }
         };
-        git(&repository, &["check-ref-format", "--branch", &branch])?;
+        git(run, &repository, &["check-ref-format", "--branch", &branch])?;
 
         let path = root
             .join("safe-houses")
@@ -88,6 +118,7 @@ impl Worktree {
             fs::create_dir_all(parent).map_err(|error| fail(parent, error))?;
         }
         git(
+            run,
             &repository,
             &[
                 "worktree",
@@ -106,6 +137,7 @@ impl Worktree {
             isolated: true,
             cloned: false,
             git_dir: None,
+            run: *run,
         })
     }
 
@@ -121,18 +153,18 @@ impl Worktree {
             .branch
             .as_ref()
             .ok_or("a safe house in place has no branch of its own to save to")?;
-        let head = resolve(&self.path, "HEAD")?;
+        let head = resolve(&self.run, &self.path, "HEAD")?;
         let tree = {
             // A private index, so the Agent's own staging area is untouched.
             let index = PrivateIndex::new();
             let env = [("GIT_INDEX_FILE", index.0.to_string_lossy().into_owned())];
-            git_with(&self.path, &["read-tree", "HEAD"], &env)?;
-            git_with(&self.path, &["add", "--all"], &env)?;
-            git_with(&self.path, &["write-tree"], &env)?
+            git_with(&self.run, &self.path, &["read-tree", "HEAD"], &env)?;
+            git_with(&self.run, &self.path, &["add", "--all"], &env)?;
+            git_with(&self.run, &self.path, &["write-tree"], &env)?
                 .trim()
                 .to_owned()
         };
-        let head_tree = git(&self.path, &["rev-parse", "HEAD^{tree}"])?
+        let head_tree = git(&self.run, &self.path, &["rev-parse", "HEAD^{tree}"])?
             .trim()
             .to_owned();
         let commit = if tree == head_tree {
@@ -150,6 +182,7 @@ impl Worktree {
                 }
             }
             git_with(
+                &self.run,
                 &self.path,
                 &["commit-tree", &tree, "-p", &head, "-m", &spec.message],
                 &env,
@@ -159,6 +192,7 @@ impl Worktree {
         };
         // Each checkpoint replaces the last on the branch; it holds everything the last did.
         git(
+            &self.run,
             &self.path,
             &[
                 "push",
@@ -176,14 +210,18 @@ impl Worktree {
         })
     }
 
-    fn reopen(spec: &SafeHouseSpec, report: &SafeHouseReport) -> Result<Self, Failure> {
+    fn reopen(
+        spec: &SafeHouseSpec,
+        report: &SafeHouseReport,
+        run: &Runner,
+    ) -> Result<Self, Failure> {
         if !report.kept {
             return Err("safe-house report is not active".to_owned());
         }
         let (Some(branch), Some(base)) = (&report.branch, &report.base) else {
             return Err("safe-house report has no branch or base".to_owned());
         };
-        let repository = checkout(&spec.source)?;
+        let repository = checkout(run, &spec.source)?;
         let path = git_path(
             Path::new(&report.path)
                 .canonicalize()
@@ -192,13 +230,13 @@ impl Worktree {
         if !path.is_dir() {
             return Err("safe-house worktree is not a directory".to_owned());
         }
-        let top = PathBuf::from(git(&path, &["rev-parse", "--show-toplevel"])?.trim())
+        let top = PathBuf::from(git(run, &path, &["rev-parse", "--show-toplevel"])?.trim())
             .canonicalize()
             .map_err(|error| format!("safe-house worktree root: {error}"))?;
         if git_path(top) != path {
             return Err("safe-house report path does not match its Git worktree".to_owned());
         }
-        let worktrees = git(&repository, &["worktree", "list", "--porcelain"])?;
+        let worktrees = git(run, &repository, &["worktree", "list", "--porcelain"])?;
         let registered = worktrees.lines().any(|line| {
             line.strip_prefix("worktree ")
                 .and_then(|value| Path::new(value).canonicalize().ok())
@@ -207,11 +245,11 @@ impl Worktree {
         if !registered {
             return Err("safe-house is not registered with the Operation repository".to_owned());
         }
-        let current = git(&path, &["symbolic-ref", "--short", "HEAD"])?;
+        let current = git(run, &path, &["symbolic-ref", "--short", "HEAD"])?;
         if current.trim() != branch {
             return Err("safe-house branch does not match its Mission report".to_owned());
         }
-        verify_base(&path, base)?;
+        verify_base(run, &path, base)?;
         Ok(Self {
             repository,
             path,
@@ -220,19 +258,24 @@ impl Worktree {
             isolated: true,
             cloned: false,
             git_dir: None,
+            run: *run,
         })
     }
 
     /// Works in the source checkout itself. The base is the commit checked out now, or the
     /// one a re-attached report recorded.
-    fn in_place(spec: &SafeHouseSpec, reopen: Option<&SafeHouseReport>) -> Result<Self, Failure> {
-        let path = checkout(&spec.source)?;
+    fn in_place(
+        spec: &SafeHouseSpec,
+        reopen: Option<&SafeHouseReport>,
+        run: &Runner,
+    ) -> Result<Self, Failure> {
+        let path = checkout(run, &spec.source)?;
         let base = match reopen.and_then(|report| report.base.as_deref()) {
             Some(base) => {
-                verify_base(&path, base)?;
+                verify_base(run, &path, base)?;
                 base.to_owned()
             }
-            None => git(&path, &["rev-parse", "--verify", "HEAD^{commit}"])?
+            None => git(run, &path, &["rev-parse", "--verify", "HEAD^{commit}"])?
                 .trim()
                 .to_owned(),
         };
@@ -244,6 +287,7 @@ impl Worktree {
             isolated: false,
             cloned: false,
             git_dir: None,
+            run: *run,
         })
     }
 
@@ -259,13 +303,14 @@ impl Worktree {
         if !self.isolated {
             return Ok(self.report(true, commits));
         }
-        let dirty = !git(&self.path, &["status", "--porcelain"])?
+        let dirty = !git(&self.run, &self.path, &["status", "--porcelain"])?
             .trim()
             .is_empty();
         if !commits.is_empty() || dirty {
             return Ok(self.report(true, commits));
         }
         git(
+            &self.run,
             &self.repository,
             &[
                 "worktree",
@@ -275,7 +320,7 @@ impl Worktree {
             ],
         )?;
         if let Some(branch) = &self.branch {
-            let _ = git(&self.repository, &["branch", "-D", branch]);
+            let _ = git(&self.run, &self.repository, &["branch", "-D", branch]);
         }
         Ok(self.report(false, Vec::new()))
     }
@@ -355,6 +400,7 @@ impl Worktree {
         }
         if self.path.exists() {
             git(
+                &self.run,
                 &self.repository,
                 &[
                     "worktree",
@@ -366,11 +412,11 @@ impl Worktree {
             )?;
         }
         if let Some(branch) = &self.branch
-            && !git(&self.repository, &["branch", "--list", branch])?
+            && !git(&self.run, &self.repository, &["branch", "--list", branch])?
                 .trim()
                 .is_empty()
         {
-            git(&self.repository, &["branch", "-D", branch])?;
+            git(&self.run, &self.repository, &["branch", "-D", branch])?;
         }
         Ok(())
     }
@@ -379,8 +425,8 @@ impl Worktree {
     /// [`crate::clone::Repo`] runs it.
     pub(crate) fn here(&self, args: &[&str]) -> Result<String, Failure> {
         match &self.git_dir {
-            Some(git_dir) => crate::clone::Repo::new(git_dir, &self.path).run(args, &[]),
-            None => git(&self.path, args),
+            Some(git_dir) => crate::clone::Repo::new(git_dir, &self.path, self.run).run(args, &[]),
+            None => git(&self.run, &self.path, args),
         }
     }
 
@@ -452,8 +498,9 @@ impl Worktree {
 }
 
 /// The commit `revision` names in `cwd`.
-pub(crate) fn resolve(cwd: &Path, revision: &str) -> Result<String, Failure> {
+pub(crate) fn resolve(run: &Runner, cwd: &Path, revision: &str) -> Result<String, Failure> {
     let commit = git(
+        run,
         cwd,
         &["rev-parse", "--verify", &format!("{revision}^{{commit}}")],
     )?
@@ -469,10 +516,12 @@ pub(crate) fn resolve(cwd: &Path, revision: &str) -> Result<String, Failure> {
 /// out, and the base its changes are counted from. The checkpoint's branch is fetched from
 /// its remote; its recorded commit is used when present, else the branch's newest one.
 fn resume_point(
+    run: &Runner,
     repository: &Path,
     checkpoint: &SafeHouseCheckpoint,
 ) -> Result<(String, String, String), Failure> {
     git(
+        run,
         repository,
         &[
             "fetch",
@@ -481,12 +530,19 @@ fn resume_point(
             &format!("refs/heads/{}", checkpoint.branch),
         ],
     )?;
-    let commit =
-        resolve(repository, &checkpoint.commit).or_else(|_| resolve(repository, "FETCH_HEAD"))?;
+    let commit = resolve(run, repository, &checkpoint.commit)
+        .or_else(|_| resolve(run, repository, "FETCH_HEAD"))?;
     let base = checkpoint
         .base
         .as_deref()
-        .filter(|base| git(repository, &["merge-base", "--is-ancestor", base, &commit]).is_ok())
+        .filter(|base| {
+            git(
+                run,
+                repository,
+                &["merge-base", "--is-ancestor", base, &commit],
+            )
+            .is_ok()
+        })
         .map_or_else(|| commit.clone(), str::to_owned);
     Ok((checkpoint.branch.clone(), commit, base))
 }
@@ -512,25 +568,26 @@ impl Drop for PrivateIndex {
 }
 
 /// The canonical top of the Git work tree at `source`.
-fn checkout(source: &str) -> Result<PathBuf, Failure> {
+fn checkout(run: &Runner, source: &str) -> Result<PathBuf, Failure> {
     let source = Path::new(source);
     let repository = git_path(source.canonicalize().map_err(|error| fail(source, error))?);
-    let inside = git(&repository, &["rev-parse", "--is-inside-work-tree"])?;
+    let inside = git(run, &repository, &["rev-parse", "--is-inside-work-tree"])?;
     if inside.trim() != "true" {
         return Err(format!("{} is not a Git checkout", repository.display()));
     }
     Ok(repository)
 }
 
-fn verify_base(path: &Path, base: &str) -> Result<(), Failure> {
+fn verify_base(run: &Runner, path: &Path, base: &str) -> Result<(), Failure> {
     let resolved = git(
+        run,
         path,
         &["rev-parse", "--verify", &format!("{base}^{{commit}}")],
     )?;
     if resolved.trim() != base {
         return Err("safe-house base commit does not match its Mission report".to_owned());
     }
-    git(path, &["merge-base", "--is-ancestor", base, "HEAD"])?;
+    git(run, path, &["merge-base", "--is-ancestor", base, "HEAD"])?;
     Ok(())
 }
 
@@ -611,39 +668,29 @@ fn path_segment(value: &str) -> String {
     format!("{stem}-{hash:016x}")
 }
 
-pub(crate) fn git(cwd: &Path, args: &[&str]) -> Result<String, Failure> {
-    git_with(cwd, args, &[])
+pub(crate) fn git(run: &Runner, cwd: &Path, args: &[&str]) -> Result<String, Failure> {
+    git_with(run, cwd, args, &[])
 }
 
 pub(crate) fn git_with(
+    run: &Runner,
     cwd: &Path,
     args: &[&str],
     env: &[(&str, String)],
 ) -> Result<String, Failure> {
-    git_input(cwd, args, env, None)
+    git_input(run, cwd, args, env, None)
 }
 
 /// How long a Git command may run, and how large the directories it fills may grow.
 pub(crate) struct Limits {
     /// Past it the command is killed.
     pub(crate) timeout: Duration,
+    /// How often the watched directories are measured.
+    pub(crate) measure_every: Duration,
     /// The command is killed once these directories hold more than `max_bytes` together.
     pub(crate) watch: Vec<PathBuf>,
     pub(crate) max_bytes: Option<u64>,
 }
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            timeout: GIT_TIMEOUT,
-            watch: Vec::new(),
-            max_bytes: None,
-        }
-    }
-}
-
-/// How often a command's watched directories are measured.
-const MEASURE_EVERY: Duration = Duration::from_millis(250);
 
 /// The bytes of the files under `paths`, never following a link.
 pub(crate) fn tree_bytes(paths: &[PathBuf]) -> u64 {
@@ -667,12 +714,13 @@ pub(crate) fn tree_bytes(paths: &[PathBuf]) -> u64 {
 
 /// [`git_with`], with `input` written to the command's standard input.
 pub(crate) fn git_input(
+    run: &Runner,
     cwd: &Path,
     args: &[&str],
     env: &[(&str, String)],
     input: Option<&[u8]>,
 ) -> Result<String, Failure> {
-    git_limited(cwd, args, env, input, &Limits::default())
+    git_limited(cwd, args, env, input, &run.limits())
 }
 
 /// [`git_input`] within `limits`.
@@ -726,7 +774,7 @@ pub(crate) fn git_limited(
     let status = loop {
         let over = limits
             .max_bytes
-            .filter(|_| measured.elapsed() >= MEASURE_EVERY)
+            .filter(|_| measured.elapsed() >= limits.measure_every)
             .and_then(|max| {
                 measured = Instant::now();
                 let bytes = tree_bytes(&limits.watch);
@@ -805,6 +853,18 @@ pub(crate) fn git_path(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn open(spec: &SafeHouseSpec) -> Result<Worktree, Failure> {
+        Worktree::open(spec, Runner::default())
+    }
+
+    fn git(cwd: &Path, args: &[&str]) -> Result<String, Failure> {
+        super::git(&Runner::default(), cwd, args)
+    }
+
+    fn resolve(cwd: &Path, revision: &str) -> Result<String, Failure> {
+        super::resolve(&Runner::default(), cwd, revision)
+    }
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -874,8 +934,7 @@ mod tests {
     fn untouched_worktree_and_branch_are_removed() {
         let temp = Temp::new();
         let repo = temp.repo();
-        let house =
-            Worktree::open(&temp.spec(&repo, "mission-1", "{operation}/{id}-{slug}")).unwrap();
+        let house = open(&temp.spec(&repo, "mission-1", "{operation}/{id}-{slug}")).unwrap();
         assert!(house.path.join("seed.txt").exists());
         let report = house.finish().unwrap();
         assert!(!report.kept);
@@ -892,7 +951,7 @@ mod tests {
     fn modified_worktree_is_kept_and_reported() {
         let temp = Temp::new();
         let repo = temp.repo();
-        let house = Worktree::open(&temp.spec(&repo, "mission-2", "{id}-{slug}")).unwrap();
+        let house = open(&temp.spec(&repo, "mission-2", "{id}-{slug}")).unwrap();
         fs::write(house.path.join("work.txt"), "work\n").unwrap();
         let report = house.finish().unwrap();
         assert!(report.kept);
@@ -904,7 +963,7 @@ mod tests {
     fn committed_worktree_is_kept_with_its_commit_summary() {
         let temp = Temp::new();
         let repo = temp.repo();
-        let house = Worktree::open(&temp.spec(&repo, "mission-commit", "{id}-{slug}")).unwrap();
+        let house = open(&temp.spec(&repo, "mission-commit", "{id}-{slug}")).unwrap();
         fs::write(house.path.join("work.txt"), "work\n").unwrap();
         temp.git(&house.path, &["add", "work.txt"]);
         temp.git(&house.path, &["commit", "--quiet", "-m", "add work"]);
@@ -930,7 +989,7 @@ mod tests {
             &repo,
             &["remote", "add", "origin", remote.to_string_lossy().as_ref()],
         );
-        let house = Worktree::open(&temp.spec(&repo, "mission-export", "{id}-{slug}")).unwrap();
+        let house = open(&temp.spec(&repo, "mission-export", "{id}-{slug}")).unwrap();
         assert_eq!(house.exports().unwrap(), SafeHouseExports::default());
 
         // A remote-tracking ref written locally, without the remote holding the commit, does not
@@ -1009,7 +1068,7 @@ mod tests {
         house.discard().unwrap();
         let mut in_place = temp.spec(&repo, "mission-export-2", "{id}");
         in_place.isolate = false;
-        assert!(Worktree::open(&in_place).unwrap().discard().is_err());
+        assert!(open(&in_place).unwrap().discard().is_err());
         assert!(repo.join("seed.txt").exists());
     }
 
@@ -1019,10 +1078,10 @@ mod tests {
         let repo = temp.repo();
         let mut inside = temp.spec(&repo, "mission-3", "{id}-{slug}");
         inside.state_root = repo.join(".ai6-state").to_string_lossy().into_owned();
-        assert!(Worktree::open(&inside).is_err());
+        assert!(open(&inside).is_err());
         let spec = temp.spec(&repo, "mission-3", "{id}-{slug}");
-        let house = Worktree::open(&spec).unwrap();
-        assert!(Worktree::open(&spec).is_err());
+        let house = open(&spec).unwrap();
+        assert!(open(&spec).is_err());
         house.finish().unwrap();
     }
 
@@ -1031,7 +1090,7 @@ mod tests {
         let temp = Temp::new();
         let repo = temp.repo();
         let spec = temp.spec(&repo, "mission-4", "{operation}/{id}-{slug}");
-        let house = Worktree::open(&spec).unwrap();
+        let house = open(&spec).unwrap();
         assert_eq!(
             house.branch.as_deref(),
             Some("G/mission-4-inspect-the-service")
@@ -1039,7 +1098,7 @@ mod tests {
         fs::write(house.path.join("work.txt"), "work\n").unwrap();
         let report = house.finish().unwrap();
         assert!(report.kept);
-        let reopened = Worktree::open(&SafeHouseSpec {
+        let reopened = open(&SafeHouseSpec {
             reopen: Some(report),
             ..spec
         })
@@ -1052,7 +1111,7 @@ mod tests {
         let temp = Temp::new();
         let repo = temp.repo();
         let spec = temp.spec(&repo, "mission-5", "{id}");
-        let house = Worktree::open(&spec).unwrap();
+        let house = open(&spec).unwrap();
         fs::write(house.path.join("work.txt"), "work\n").unwrap();
         let report = house.finish().unwrap();
         for bad in [
@@ -1073,7 +1132,7 @@ mod tests {
                 reopen: Some(bad),
                 ..spec.clone()
             };
-            assert!(Worktree::open(&attempt).is_err());
+            assert!(open(&attempt).is_err());
         }
     }
 
@@ -1085,7 +1144,7 @@ mod tests {
             isolate: false,
             ..temp.spec(&repo, "mission-6", "{id}")
         };
-        let house = Worktree::open(&spec).unwrap();
+        let house = open(&spec).unwrap();
         assert!(!house.isolated);
         assert_eq!(house.path, git_path(repo.canonicalize().unwrap()));
         assert!(house.changes().unwrap().is_empty());
@@ -1095,7 +1154,7 @@ mod tests {
         assert_eq!(house.changes().unwrap().len(), 1);
         let report = house.finish().unwrap();
         assert!(report.kept && repo.exists());
-        let again = Worktree::open(&SafeHouseSpec {
+        let again = open(&SafeHouseSpec {
             reopen: Some(SafeHouseReport {
                 kept: true,
                 ..report
@@ -1128,7 +1187,7 @@ mod tests {
         let repo = temp.repo();
         let remote = temp.0.join("remote.git");
         temp.git(&temp.0, &["init", "--quiet", "--bare", "remote.git"]);
-        let house = Worktree::open(&temp.spec(&repo, "mission-8", "{id}")).unwrap();
+        let house = open(&temp.spec(&repo, "mission-8", "{id}")).unwrap();
         fs::write(house.path.join("done.txt"), "done\n").unwrap();
         temp.git(&house.path, &["add", "done.txt"]);
         temp.git(&house.path, &["commit", "--quiet", "-m", "done part"]);
@@ -1190,7 +1249,7 @@ mod tests {
                 "HEAD:refs/heads/main",
             ],
         );
-        let house = Worktree::open(&temp.spec(&repo, "mission-9", "{id}")).unwrap();
+        let house = open(&temp.spec(&repo, "mission-9", "{id}")).unwrap();
         fs::write(house.path.join("half.txt"), "half done\n").unwrap();
         let saved = house.checkpoint(&checkpoint_spec(&remote)).unwrap();
 
@@ -1205,7 +1264,7 @@ mod tests {
         let mut spec = temp.spec(&other, "mission-9", "{id}");
         spec.state_root = temp.0.join("other-state").to_string_lossy().into_owned();
         spec.checkpoint = Some(saved.clone());
-        let resumed = Worktree::open(&spec).unwrap();
+        let resumed = open(&spec).unwrap();
         assert_eq!(resumed.branch.as_deref(), Some("mission-9"));
         assert_eq!(resumed.base, house.base);
         assert_eq!(resolve(&resumed.path, "HEAD").unwrap(), saved.commit);
@@ -1225,7 +1284,7 @@ mod tests {
             isolate: false,
             ..temp.spec(&repo, "mission-10", "{id}")
         };
-        let house = Worktree::open(&spec).unwrap();
+        let house = open(&spec).unwrap();
         assert!(house.checkpoint(&checkpoint_spec(&temp.0)).is_err());
     }
 
@@ -1234,6 +1293,6 @@ mod tests {
         let temp = Temp::new();
         let plain = temp.0.join("plain");
         fs::create_dir_all(&plain).unwrap();
-        assert!(Worktree::open(&temp.spec(&plain, "mission-7", "{id}")).is_err());
+        assert!(open(&temp.spec(&plain, "mission-7", "{id}")).is_err());
     }
 }
