@@ -235,6 +235,7 @@ pub(crate) async fn operation_timeline(
                                 person: person.clone(),
                                 action: "audit.read".to_owned(),
                                 resource: resource.clone(),
+                                ancestors: Vec::new(),
                             })
                             .map_err(|_| ApiError::internal())?
                             .allowed;

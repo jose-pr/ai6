@@ -393,16 +393,21 @@ impl AccountPool {
         &self.login_command
     }
 
-    /// Whether the globs admit `operation`; a Mission outside any Operation is admitted only
-    /// by a pool open to every Operation.
-    pub fn admits(&self, operation: Option<&str>) -> bool {
+    /// Whether the globs admit `operation`, by its ID or the ID of any Operation it is
+    /// subordinate to (`ancestors`); a Mission outside any Operation is admitted only by a
+    /// pool open to every Operation.
+    pub fn admits(&self, operation: Option<&str>, ancestors: &[String]) -> bool {
         if self.operations.is_empty() {
             return true;
         }
         operation.is_some_and(|operation| {
             self.operations.iter().any(|pattern| {
-                globset::Glob::new(pattern)
-                    .is_ok_and(|glob| glob.compile_matcher().is_match(operation))
+                globset::Glob::new(pattern).is_ok_and(|glob| {
+                    let matcher = glob.compile_matcher();
+                    std::iter::once(operation)
+                        .chain(ancestors.iter().map(String::as_str))
+                        .any(|id| matcher.is_match(id))
+                })
             })
         })
     }
@@ -497,12 +502,14 @@ pub enum PoolChoice<'a> {
 }
 
 /// Applies the three-way rule to `pools`: a pool is usable when it serves `handler`, its
-/// globs admit `operation`, and `allowed` (the Operation's `pools`; `None` is every pool)
-/// names it. `pinned` (the Agent's `pool`) narrows the choice to one pool.
+/// globs admit `operation` or one of its `ancestors` (nearest first), and `allowed` (the
+/// Operation's `pools`; `None` is every pool) names it. `pinned` (the Agent's `pool`) narrows
+/// the choice to one pool.
 pub fn choose_pools<'a>(
     pools: impl IntoIterator<Item = &'a AccountPool>,
     handler: Option<&str>,
     operation: Option<&str>,
+    ancestors: &[String],
     allowed: Option<&[String]>,
     pinned: Option<&str>,
 ) -> PoolChoice<'a> {
@@ -522,7 +529,7 @@ pub fn choose_pools<'a>(
                 handler.unwrap_or_default()
             ));
         }
-        return match refusal(pool, operation, allowed) {
+        return match refusal(pool, operation, ancestors, allowed) {
             Some(reason) => {
                 PoolChoice::Refused(format!("pinned pool {pinned:?} {reason} {where_}"))
             }
@@ -542,7 +549,7 @@ pub fn choose_pools<'a>(
     let mut reasons = Vec::new();
     let mut usable = Vec::new();
     for pool in serving {
-        match refusal(pool, operation, allowed) {
+        match refusal(pool, operation, ancestors, allowed) {
             Some(reason) => reasons.push(format!("pool {:?} {reason}", pool.id)),
             None => usable.push(pool),
         }
@@ -561,9 +568,10 @@ pub fn choose_pools<'a>(
 fn refusal(
     pool: &AccountPool,
     operation: Option<&str>,
+    ancestors: &[String],
     allowed: Option<&[String]>,
 ) -> Option<String> {
-    if !pool.admits(operation) {
+    if !pool.admits(operation, ancestors) {
         return Some(format!(
             "admits only Operations matching {}",
             pool.operations.join(", ")
@@ -855,6 +863,7 @@ mod tests {
                 &pools,
                 Some("claude"),
                 Some("ai6-web"),
+                &[],
                 None,
                 None
             )),
@@ -865,6 +874,7 @@ mod tests {
                 &pools,
                 Some("claude"),
                 Some("other"),
+                &[],
                 None,
                 None
             )),
@@ -875,18 +885,19 @@ mod tests {
                 &pools,
                 Some("codex"),
                 Some("other"),
+                &[],
                 None,
                 None
             )),
             ["codex-team"]
         );
         assert_eq!(
-            choose_pools(&pools, Some("gemini"), Some("other"), None, None),
+            choose_pools(&pools, Some("gemini"), Some("other"), &[], None, None),
             PoolChoice::Unpooled,
             "a handler no pool serves keeps its loadout path"
         );
         assert_eq!(
-            choose_pools(&pools, None, Some("other"), None, None),
+            choose_pools(&pools, None, Some("other"), &[], None, None),
             PoolChoice::Unpooled
         );
 
@@ -895,6 +906,7 @@ mod tests {
             &pools,
             Some("claude"),
             Some("other"),
+            &[],
             Some(&only_team),
             None,
         ) else {
@@ -903,11 +915,26 @@ mod tests {
         assert!(reason.contains("pool \"claude-team\" admits only Operations matching ai6-*"));
         assert!(reason.contains("pool \"claude-all\" is not in the Operation's `pools`"));
         let PoolChoice::Refused(reason) =
-            choose_pools(&pools, Some("claude"), None, Some(&[]), None)
+            choose_pools(&pools, Some("claude"), None, &[], Some(&[]), None)
         else {
             panic!("refused");
         };
         assert!(reason.contains("outside any Operation"), "{reason}");
+    }
+
+    #[test]
+    fn a_pool_admits_a_subordinate_operation_through_its_parent() {
+        let pools = [pool("lcs", "claude").operations(["BODYGUARD"])];
+        let lineage = ["FORTITUDE".to_owned(), "BODYGUARD".to_owned()];
+        assert!(pools[0].admits(Some("SOUTH"), &lineage));
+        assert!(!pools[0].admits(Some("SOUTH"), &[]));
+        assert!(!pools[0].admits(None, &lineage));
+        let PoolChoice::Pools(chosen) =
+            choose_pools(&pools, Some("claude"), Some("SOUTH"), &lineage, None, None)
+        else {
+            panic!("admitted through BODYGUARD");
+        };
+        assert_eq!(chosen[0].id(), "lcs");
     }
 
     #[test]
@@ -920,6 +947,7 @@ mod tests {
             &pools,
             Some("claude"),
             Some("ai6-web"),
+            &[],
             None,
             Some("claude-all"),
         ) else {
@@ -942,9 +970,14 @@ mod tests {
                 "admits only Operations matching",
             ),
         ] {
-            let PoolChoice::Refused(reason) =
-                choose_pools(&pools, Some(handler), Some(operation), None, Some(pinned))
-            else {
+            let PoolChoice::Refused(reason) = choose_pools(
+                &pools,
+                Some(handler),
+                Some(operation),
+                &[],
+                None,
+                Some(pinned),
+            ) else {
                 panic!("{pinned} refused");
             };
             assert!(reason.contains(expected), "{reason}");

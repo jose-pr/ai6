@@ -1338,6 +1338,7 @@ mod tests {
                 },
                 action: "mission.read".to_owned(),
                 resource: "operation:G".to_owned(),
+                ancestors: Vec::new(),
             })
             .unwrap();
         assert!(decision.allowed);

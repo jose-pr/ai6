@@ -157,10 +157,12 @@ fn pools_for<'a>(
     let allowed = operation
         .and_then(|id| state.roster.operation(id).ok())
         .and_then(|operation| operation.pools.clone());
+    let ancestors = lineage(state, operation);
     choose_pools(
         catalog.pools(),
         agent.handler.as_deref(),
         operation,
+        &ancestors,
         allowed.as_deref(),
         agent.pool.as_deref(),
     )
@@ -600,6 +602,20 @@ fn sweep_homes(state: &DaemonState, claimed: &[String]) {
     }
 }
 
+/// The Operations `operation` is subordinate to, nearest first.
+fn lineage(state: &DaemonState, operation: Option<&str>) -> Vec<String> {
+    operation
+        .map(|operation| {
+            state
+                .roster
+                .lineage(operation)
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Records this Station's view of each configured account in the Registry, with the
 /// Operations of its roster that may draw from the pool, so the board can show it before any
 /// Session claims it, and withdraws its profile of every account its configuration no longer
@@ -612,7 +628,7 @@ pub(super) fn declare(state: &DaemonState) {
             .roster
             .operations()
             .filter(|operation| {
-                pool.admits(Some(&operation.id))
+                pool.admits(Some(&operation.id), &lineage(state, Some(&operation.id)))
                     && operation
                         .pools
                         .as_ref()

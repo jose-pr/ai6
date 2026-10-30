@@ -433,11 +433,24 @@ impl CablePolicy {
         Ok(Self { grants, inbound })
     }
 
-    fn allows(&self, agent: &str, action: CableAction, target: &CableTarget) -> bool {
+    /// Whether a grant lets `agent` take `action` on `target`. A grant on an Operation also
+    /// covers each Operation under it, named by `ancestors` (the target's, nearest first).
+    fn allows(
+        &self,
+        agent: &str,
+        action: CableAction,
+        target: &CableTarget,
+        ancestors: &[String],
+    ) -> bool {
         self.grants.iter().any(|grant| {
-            grant.action == action
-                && grant.target == *target
-                && (grant.agent == "*" || grant.agent == agent)
+            let covers = grant.target == *target
+                || (target.scope() == CableScope::Operation
+                    && grant.target.scope() == CableScope::Operation
+                    && grant
+                        .target
+                        .name()
+                        .is_some_and(|name| ancestors.iter().any(|ancestor| ancestor == name)));
+            grant.action == action && covers && (grant.agent == "*" || grant.agent == agent)
         })
     }
 
@@ -643,6 +656,7 @@ impl CableSendRequest {
 }
 
 type EndpointSource = dyn Fn() -> Vec<CableEndpoint> + Send + Sync;
+type LineageSource = dyn Fn(&str) -> Vec<String> + Send + Sync;
 type AuditSink = dyn Fn(&CableAuditRecord) + Send + Sync;
 type PersonAudit = dyn Fn(&CableAuditRecord) -> Result<(), String> + Send + Sync;
 type EndpointKey = (String, String, Option<String>, Option<String>);
@@ -652,6 +666,7 @@ pub struct CableRelay {
     registry: Arc<dyn RegistryBackend>,
     policy: RwLock<CablePolicy>,
     endpoints: Arc<EndpointSource>,
+    lineage: Arc<LineageSource>,
     channels: BTreeMap<String, BTreeSet<String>>,
     max_fanout: usize,
     sender_rate: f64,
@@ -676,6 +691,7 @@ impl CableRelay {
             registry,
             policy: RwLock::new(policy),
             endpoints: Arc::new(endpoints),
+            lineage: Arc::new(|_: &str| Vec::new()),
             channels,
             max_fanout: MAX_CABLE_FANOUT,
             sender_rate: DEFAULT_SENDER_RATE,
@@ -716,6 +732,34 @@ impl CableRelay {
         self.scope_rate = scope_rate;
         self.scope_burst = scope_burst;
         Ok(self)
+    }
+
+    /// Sets where the tree of Operations comes from: `lineage` names the Operations one is
+    /// subordinate to, nearest first. Without it, an `operation` audience is that Operation's
+    /// Agents alone and a grant covers only the Operation it names.
+    #[must_use]
+    pub fn with_lineage(
+        mut self,
+        lineage: impl Fn(&str) -> Vec<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.lineage = Arc::new(lineage);
+        self
+    }
+
+    /// Whether `policy` lets `agent` take `action` on `target`, a grant on an Operation
+    /// covering the Operations under it.
+    fn allows(
+        &self,
+        policy: &CablePolicy,
+        agent: &str,
+        action: CableAction,
+        target: &CableTarget,
+    ) -> bool {
+        let ancestors = match (target.scope(), target.name()) {
+            (CableScope::Operation, Some(operation)) => (self.lineage)(operation),
+            _ => Vec::new(),
+        };
+        policy.allows(agent, action, target, &ancestors)
     }
 
     /// Sets the relay clock, primarily for deterministic operation and tests.
@@ -783,7 +827,7 @@ impl CableRelay {
             .policy
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
-        if !policy.allows(&principal.agent, CableAction::Discover, &station) {
+        if !self.allows(&policy, &principal.agent, CableAction::Discover, &station) {
             return Ok(Vec::new());
         }
         let mut visible = self
@@ -793,7 +837,7 @@ impl CableRelay {
                 endpoint.agent != principal.agent
                     && !endpoint.conversation_only
                     && endpoint.station == principal.station
-                    && policy.allows(&endpoint.agent, CableAction::Receive, &station)
+                    && self.allows(&policy, &endpoint.agent, CableAction::Receive, &station)
             })
             .collect::<Vec<_>>();
         visible.sort_by(|left, right| {
@@ -867,7 +911,12 @@ impl CableRelay {
             };
             if recipient.state() == CableState::Queued {
                 let receiver_target = receiver_target(&cable, principal)?;
-                if !policy.allows(&principal.agent, CableAction::Receive, &receiver_target) {
+                if !self.allows(
+                    &policy,
+                    &principal.agent,
+                    CableAction::Receive,
+                    &receiver_target,
+                ) {
                     self.set_delivery_state(&cable, recipient, CableState::Refused, now)?;
                     self.record_event(
                         "cable_delivery",
@@ -937,7 +986,12 @@ impl CableRelay {
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let mut held = Vec::new();
         for cable in cables {
-            if !policy.allows(&principal.agent, CableAction::Release, cable.target()) {
+            if !self.allows(
+                &policy,
+                &principal.agent,
+                CableAction::Release,
+                cable.target(),
+            ) {
                 continue;
             }
             let recipients = cable
@@ -980,7 +1034,12 @@ impl CableRelay {
             .policy
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
-        if !policy.allows(&principal.agent, CableAction::Release, cable.target()) {
+        if !self.allows(
+            &policy,
+            &principal.agent,
+            CableAction::Release,
+            cable.target(),
+        ) {
             return Err(CableRelayError::Unavailable);
         }
         let now = (self.now)();
@@ -1017,7 +1076,7 @@ impl CableRelay {
             let receive_target =
                 endpoint.and_then(|endpoint| receiver_target_for_endpoint(&cable, endpoint).ok());
             let next_state = if receive_target.is_some_and(|target| {
-                policy.allows(recipient.agent(), CableAction::Receive, &target)
+                self.allows(&policy, recipient.agent(), CableAction::Receive, &target)
             }) {
                 CableState::Delivered
             } else {
@@ -1337,6 +1396,18 @@ impl CableRelay {
                 .filter(|endpoint| endpoint.theater.as_deref() == target.name())
                 .collect(),
             CableScope::Global => endpoints,
+            CableScope::Operation => {
+                let operation = target.name().unwrap_or("");
+                endpoints
+                    .into_iter()
+                    .filter(|endpoint| {
+                        endpoint.operation == operation
+                            || (self.lineage)(&endpoint.operation)
+                                .iter()
+                                .any(|ancestor| ancestor == operation)
+                    })
+                    .collect()
+            }
             CableScope::Channel => {
                 let members = self.channels.get(target.name().unwrap_or(""));
                 endpoints
@@ -1373,7 +1444,7 @@ impl CableRelay {
         candidates: Vec<CableEndpoint>,
     ) -> Result<Vec<CableRecipient>, CableRelayError> {
         if target.scope() != CableScope::Agent
-            && !policy.allows(&sender.agent, CableAction::Send, target)
+            && !self.allows(policy, &sender.agent, CableAction::Send, target)
         {
             return Err(CableRelayError::Unavailable);
         }
@@ -1402,8 +1473,13 @@ impl CableRelay {
                 } else {
                     (target.clone(), target.clone())
                 };
-            if !policy.allows(&sender.agent, CableAction::Send, &sender_target)
-                || !policy.allows(&endpoint.agent, CableAction::Receive, &receiver_target)
+            if !self.allows(policy, &sender.agent, CableAction::Send, &sender_target)
+                || !self.allows(
+                    policy,
+                    &endpoint.agent,
+                    CableAction::Receive,
+                    &receiver_target,
+                )
             {
                 continue;
             }
@@ -1569,6 +1645,7 @@ fn scope_name(scope: CableScope) -> &'static str {
         CableScope::Theater => "theater",
         CableScope::Global => "global",
         CableScope::Channel => "channel",
+        CableScope::Operation => "operation",
     }
 }
 
@@ -1646,6 +1723,71 @@ mod tests {
 
     fn request(target: CableTarget, key: &str) -> CableSendRequest {
         CableSendRequest::new(target, "Review this change".into(), key.into())
+    }
+
+    #[test]
+    fn an_operation_cable_reaches_the_subtree_only_with_grants_an_ancestor_may_hold() {
+        let root = tempfile::tempdir().unwrap();
+        let lineage = |operation: &str| -> Vec<String> {
+            match operation {
+                "NORTH" | "SOUTH" => vec!["FORTITUDE".into(), "BODYGUARD".into()],
+                "FORTITUDE" | "ZEPPELIN" => vec!["BODYGUARD".into()],
+                _ => Vec::new(),
+            }
+        };
+        let endpoints = vec![
+            endpoint("008", "SOUTH", Some("session-008")),
+            endpoint("009", "FORTITUDE", Some("session-009")),
+            endpoint("010", "ZEPPELIN", Some("session-010")),
+            endpoint("011", "OTHER", Some("session-011")),
+        ];
+        let fortitude = target(CableScope::Operation, Some("FORTITUDE"));
+        let registry: Arc<dyn RegistryBackend> = Arc::new(FileRegistry::open(root.path()));
+        let sender = principal("007", "NORTH");
+
+        let ungranted = relay(registry.clone(), CablePolicy::default(), endpoints.clone())
+            .with_lineage(lineage);
+        assert_eq!(
+            ungranted
+                .send(&sender, request(fortitude.clone(), "none"))
+                .unwrap_err(),
+            CableRelayError::Unavailable,
+            "no grant, no Cable"
+        );
+
+        let bodyguard = target(CableScope::Operation, Some("BODYGUARD"));
+        let policy = CablePolicy::try_new(
+            vec![
+                grant("007", CableAction::Send, bodyguard.clone()),
+                grant("*", CableAction::Receive, bodyguard),
+            ],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let granted = relay(registry, policy, endpoints).with_lineage(lineage);
+        let sent = granted
+            .send(&sender, request(fortitude, "subtree"))
+            .unwrap();
+        let mut reached: Vec<&str> = sent
+            .recipients()
+            .iter()
+            .map(|recipient| recipient.agent())
+            .collect();
+        reached.sort_unstable();
+        assert_eq!(
+            reached,
+            ["008", "009"],
+            "FORTITUDE and SOUTH, not ZEPPELIN or OTHER"
+        );
+        assert!(
+            granted
+                .send(
+                    &sender,
+                    request(target(CableScope::Operation, Some("OTHER")), "outside")
+                )
+                .is_err(),
+            "a grant on BODYGUARD does not cover an Operation outside it"
+        );
     }
 
     #[test]

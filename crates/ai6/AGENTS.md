@@ -78,10 +78,15 @@ pub fn load_role_authorizer(path: impl AsRef<Path>) -> Result<RoleAuthorizer, Ac
 ```
 
 `role_authorizer_from_toml` reads the `access.toml` format: `[role.<name>]` tables with
-`actions`, then `[[rule]]` entries (`subject`, `scope`, `role`) tried in order. A subject is
-`account:<name>`, `person:<id>` or `group:<name>`; a scope is `*` or one of `SCOPE_KINDS`
-followed by `:<id>`. No matching rule is deny, and the first matching rule is decisive even
-when its role lacks the action. The file is read up to 1 MiB. The Universal Exports gateway
+`actions`, then `[[rule]]` entries (`subject`, `scope`, `role`, `propagate`) tried in order.
+A subject is `account:<name>`, `person:<id>` or `group:<name>`; a scope is `*` or one of
+`SCOPE_KINDS` followed by `:<id>`. No matching rule is deny, and the first matching rule is
+decisive even when its role lacks the action. A request names the resource's ancestors
+(`AuthorizationRequest::ancestors`, nearest first: Universal Exports fills them for an
+Operation from the Stations' `operation_lineage`), and a rule whose scope is among them
+matches too unless it sets `propagate = false`; a child Operation is narrowed by a rule placed
+before its parent's. `[limits] ancestors` (a number or `"none"`, default 64) bounds how many
+a request names; more is an error, never a denial. The file is read up to 1 MiB. The Universal Exports gateway
 loads and enforces this policy for user requests.
 
 `station::plugins::Plugins` scans the plugin paths for libraries that declare an AI6 kind or
@@ -1706,7 +1711,9 @@ one-minute load average except on Windows, total and available memory; in this c
 tests every check-in repeats the process's first sample), its `resource_limits` (Registry
 settings, else the defaults), each Theater's running `sessions`,
 local Operation paths, available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
-placement policy (`operation_policies`, omitted with a log line when over 512 KiB), the
+placement policy (`operation_policies`, omitted with a log line when over 512 KiB), every
+roster Operation's ancestors nearest first (`operation_lineage`: `{"G": ["P", "ROOT"],
+"ROOT": []}`, omitted with a log line when over 512 KiB), the
 Agents whose retirement is near or due (`retirements`: `{agent, retire_on, on_retire,
 status}`, also logged at start and on a roster reload), the configuration it runs (`config`, a
 `ConfigStatus`) and the latest report in its logbook (`head_of_station`, a `StationReport`,
@@ -2716,14 +2723,16 @@ impl AccountPool { pub fn id(&self) -> &str; pub fn handler(&self) -> &str;
     pub fn operation_globs(&self) -> &[String]; pub fn balancing(&self) -> PoolStrategy;
     pub fn accounts(&self) -> impl Iterator<Item = &Account>; pub fn get(&self, name: &str) -> Option<&Account>;
     pub fn login(&self) -> &[String];                  // default ["codex"]
-    pub fn admits(&self, operation: Option<&str>) -> bool;
+    pub fn admits(&self, operation: Option<&str>, ancestors: &[String]) -> bool;   // a glob matching its ID or an ancestor's
     pub fn validate(&self) -> Result<(), String> }   // the catalog also refuses an account whose secret is green ink
 pub enum PoolChoice<'a> { Unpooled, Pools(Vec<&'a AccountPool>), Refused(String) }
 /// The three-way rule: a pool is usable when it serves `handler`, its globs admit
-/// `operation`, and `allowed` (the Operation's `pools`; None = every pool) names it;
-/// `pinned` (the Agent's `pool`) narrows to one. Refused names each pool and why.
+/// `operation` or one of its `ancestors` (nearest first), and `allowed` (the Operation's
+/// `pools`; None = every pool) names it; `pinned` (the Agent's `pool`) narrows to one.
+/// Refused names each pool and why.
 pub fn choose_pools<'a>(pools: impl IntoIterator<Item = &'a AccountPool>, handler: Option<&str>,
-    operation: Option<&str>, allowed: Option<&[String]>, pinned: Option<&str>) -> PoolChoice<'a>;
+    operation: Option<&str>, ancestors: &[String], allowed: Option<&[String]>,
+    pinned: Option<&str>) -> PoolChoice<'a>;
 pub trait AccountLogin: Send + Sync {
     fn login(&self, pool: &AccountPool, account: &Account, home: &Path, credential: &str) -> Result<(), String>;
 }
@@ -2899,8 +2908,9 @@ apply this vector to AgentHandler startup.
 
 ## Cables (`ai6::directorates::registry::cables`)
 
-`CableScope` defines Agent unicast and Station, Theater, global or named-channel
-broadcast. `CableTarget::try_new(scope, name)` requires a name except for global.
+`CableScope` defines Agent unicast and Station, Theater, global, named-channel or Operation
+(serde `operation`: that Operation's Agents and those of every Operation under it) broadcast.
+`CableTarget::try_new(scope, name)` requires a name except for global.
 `CableRecipient::try_new(agent, session_id, state)` validates the relay-resolved
 recipient. `CableDraft::new(sender_agent, sender_operation, sender_station, target, body,
 recipients, idempotency_key, id, created_at, expires_at)` creates the required fields;
@@ -2925,7 +2935,11 @@ token buckets. `send(principal, CableSendRequest)` checks sender and every recei
 deduplicates the audience, snapshots recipient Sessions, applies deliver/hold/refuse and
 stores an idempotent Cable. Same-Station unicast uses Station grants; cross-Station
 unicast uses explicit Agent grants. Theater, global and channel broadcasts require exact
-scope grants. `discover` exposes only same-Station peers allowed by both sides' grants.
+scope grants; an Operation broadcast needs a Send grant and each receiver a Receive grant on
+that Operation or on one it is subordinate to. `CableRelay::with_lineage(impl Fn(&str) ->
+Vec<String>)` gives the relay the tree (an Operation's ancestors, nearest first; the daemon
+reads its live roster); without it an Operation audience is that Operation alone. No grant is
+implied. An assistant acting for a person still reaches its own Operation only. `discover` exposes only same-Station peers allowed by both sides' grants.
 `inbox` rechecks current receive permissions on queued deliveries, marks delivered records,
 and returns a `CableDelivery` without the audience list or idempotency key.
 `held(principal, limit)` lists held Cable metadata only under matching Release grants and

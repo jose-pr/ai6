@@ -1470,7 +1470,7 @@ impl ServerHandler for CableTools {
 
 #[derive(Deserialize, JsonSchema)]
 struct SendArgs {
-    /// Audience scope: agent, station, theater, global, or channel.
+    /// Audience scope: agent, station, theater, global, channel, or operation (that Operation and those under it).
     scope: String,
     /// Agent, Station, Theater, or channel name; omit only for global.
     target: Option<String>,
@@ -2601,7 +2601,7 @@ struct AssistantOperationArgs {
 struct AssistantSendArgs {
     /// The Operation to send in; the person needs cable.send there.
     operation: String,
-    /// Audience scope: agent, station, theater, global, or channel.
+    /// Audience scope: agent, station, theater, global, channel, or operation (that Operation and those under it).
     scope: String,
     /// Agent, Station, Theater, or channel name; omit only for global.
     target: Option<String>,

@@ -75,6 +75,17 @@ struct PolicyDocument {
     roles: std::collections::BTreeMap<String, RoleDefinition>,
     #[serde(default, rename = "rule")]
     rules: Vec<RuleDefinition>,
+    #[serde(default)]
+    limits: LimitsDefinition,
+}
+
+/// The `[limits]` table: bounds a caller may change or lift.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LimitsDefinition {
+    /// How many Operations above a resource one request may name: a number, or `"none"`.
+    #[serde(default)]
+    ancestors: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,12 +100,22 @@ struct RuleDefinition {
     subject: String,
     scope: String,
     role: String,
+    #[serde(default = "propagates")]
+    propagate: bool,
+}
+
+/// A rule reaches the Operations under its scope unless it says otherwise.
+const fn propagates() -> bool {
+    true
 }
 
 const MAX_POLICY_BYTES: usize = 1024 * 1024;
 
 /// Reads an `access.toml` policy: `[role.<name>]` tables with `actions`, then `[[rule]]`
-/// entries binding a `subject` to a `role` at a `scope`, tried in order.
+/// entries binding a `subject` to a `role` at a `scope`, tried in order. A rule on an
+/// Operation also reaches every Operation under it unless it sets `propagate = false`;
+/// `[limits] ancestors` bounds the Operations above a resource one request may name (64 by
+/// default, `"none"` for no bound), and a request past it is an error, never a denial.
 ///
 /// # Errors
 ///
@@ -113,7 +134,22 @@ pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessP
         builder = builder.role(name, definition.actions);
     }
     for rule in document.rules {
-        builder = builder.rule(Rule::new(rule.subject, rule.scope, rule.role));
+        builder =
+            builder.rule(Rule::new(rule.subject, rule.scope, rule.role).propagate(rule.propagate));
+    }
+    if let Some(ancestors) = document.limits.ancestors {
+        let limit = match ancestors {
+            toml::Value::String(text) if text == "none" => coqui_access::Limit::UNBOUNDED,
+            toml::Value::Integer(count) => u32::try_from(count)
+                .map(coqui_access::Limit::at)
+                .map_err(|_| AccessPolicyError("limits.ancestors is out of range".into()))?,
+            _ => {
+                return Err(AccessPolicyError(
+                    "limits.ancestors must be a whole number or \"none\"".into(),
+                ));
+            }
+        };
+        builder = builder.limits(coqui_roles::RoleLimits::default().ancestors(limit));
     }
     builder
         .build()
@@ -161,6 +197,7 @@ mod tests {
             person,
             action: action.to_owned(),
             resource: resource.to_owned(),
+            ancestors: Vec::new(),
         }
     }
 
@@ -207,6 +244,45 @@ mod tests {
             "mission.read",
             "operation:G"
         ));
+    }
+
+    #[test]
+    fn a_rule_on_a_parent_operation_reaches_its_children_unless_it_does_not_propagate() {
+        let policy = role_authorizer_from_toml(
+            r#"
+                [role.viewer]
+                actions = ["mission.read"]
+
+                [[rule]]
+                subject = "account:viewer"
+                scope = "operation:P"
+                role = "viewer"
+
+                [[rule]]
+                subject = "account:guest"
+                scope = "operation:P"
+                role = "viewer"
+                propagate = false
+
+                [limits]
+                ancestors = 1
+            "#,
+        )
+        .unwrap();
+        let under = |name: &str, ancestors: &[&str]| {
+            policy.authorize(AuthorizationRequest {
+                ancestors: ancestors.iter().map(|scope| (*scope).to_owned()).collect(),
+                ..request(person(name, name, &[]), "mission.read", "operation:G")
+            })
+        };
+        assert!(under("viewer", &["operation:P"]).unwrap().allowed);
+        assert!(!under("guest", &["operation:P"]).unwrap().allowed);
+        assert!(
+            under("viewer", &["operation:P", "operation:ROOT"]).is_err(),
+            "past [limits] ancestors is an error"
+        );
+        assert!(role_authorizer_from_toml("[limits]\nancestors = \"many\"").is_err());
+        assert!(role_authorizer_from_toml("[limits]\nancestors = \"none\"").is_ok());
     }
 
     #[test]

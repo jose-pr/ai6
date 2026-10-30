@@ -64,6 +64,7 @@ pub(super) async fn grants(gateway: &Gateway, person: &ai6::Person) -> Vec<Assis
                         person: person.clone(),
                         action: action.to_owned(),
                         resource: format!("operation:{operation}"),
+                        ancestors: Vec::new(),
                     })
                     .is_ok_and(|decision| decision.allowed)
             };
@@ -354,6 +355,7 @@ impl Assistant {
                         person: person.clone(),
                         action: action.to_owned(),
                         resource: format!("operation:{operation}"),
+                        ancestors: Vec::new(),
                     })
                     .is_ok_and(|decision| decision.allowed)
             };

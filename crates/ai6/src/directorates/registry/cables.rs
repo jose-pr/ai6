@@ -53,6 +53,9 @@ pub enum CableScope {
     Global,
     /// Broadcast to eligible subscribers of one custom channel.
     Channel,
+    /// Broadcast to eligible Agents of one Operation and of every Operation subordinate to
+    /// it.
+    Operation,
 }
 
 /// A typed unicast Agent or broadcast audience.

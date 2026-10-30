@@ -1368,6 +1368,7 @@ async fn stations(
                         person: person.clone(),
                         action: "mission.read".to_owned(),
                         resource: format!("operation:{operation_id}"),
+                        ancestors: Vec::new(),
                     })
                     .map_err(|_| ApiError::internal())?
                     .allowed;
@@ -1388,6 +1389,7 @@ async fn stations(
                         person: person.clone(),
                         action: "station.read".to_owned(),
                         resource: format!("station:{}", station.station()),
+                        ancestors: Vec::new(),
                     })
                     .map_err(|_| ApiError::internal())?
                     .allowed
@@ -1585,6 +1587,7 @@ async fn create_user_mission(
             person: person.clone(),
             action: "mission.create".to_owned(),
             resource,
+            ancestors: Vec::new(),
         })
     })
     .await
@@ -1951,6 +1954,7 @@ async fn authorized_board_sessions(
                     person: person.clone(),
                     action: "mission.read".to_owned(),
                     resource: format!("operation:{}", session.operation_id),
+                    ancestors: Vec::new(),
                 })
                 .map_err(|_| ())?;
             if decision.allowed {
@@ -2290,6 +2294,7 @@ async fn issue_user_attach_token(
             person,
             action: action.to_owned(),
             resource,
+            ancestors: Vec::new(),
         })
     })
     .await
@@ -2359,6 +2364,7 @@ async fn user_profile(
                         person: authorization_person.clone(),
                         action: action.to_owned(),
                         resource: format!("station:{station_id}"),
+                        ancestors: Vec::new(),
                     })
                     .map_err(|_| ApiError::internal())?
                     .allowed;
@@ -2411,6 +2417,7 @@ async fn user_profile(
                         person: authorization_person.clone(),
                         action: action.to_owned(),
                         resource: format!("operation:{operation_id}"),
+                        ancestors: Vec::new(),
                     })
                     .map_err(|_| ApiError::internal())?
                     .allowed;
@@ -2433,6 +2440,7 @@ async fn user_profile(
                     person: authorization_person.clone(),
                     action: action.to_owned(),
                     resource: roster::ROSTER_RESOURCE.to_owned(),
+                    ancestors: Vec::new(),
                 })
                 .map_err(|_| ApiError::internal())?
                 .allowed;
@@ -2482,6 +2490,7 @@ async fn authorize_resource_action(
             person,
             action: action.to_owned(),
             resource,
+            ancestors: Vec::new(),
         })
     })
     .await
@@ -2974,6 +2983,7 @@ async fn user_audit(
                 person: scoped_person,
                 action: "audit.read".to_owned(),
                 resource,
+                ancestors: Vec::new(),
             })
         })
         .await
@@ -2994,6 +3004,7 @@ async fn user_audit(
                 person: scoped_person,
                 action: "audit.read".to_owned(),
                 resource,
+                ancestors: Vec::new(),
             })
         })
         .await
@@ -3029,6 +3040,7 @@ async fn user_audit(
                     person: person.clone(),
                     action: "audit.read".to_owned(),
                     resource,
+                    ancestors: Vec::new(),
                 })
                 .map_err(|_| ApiError::internal())?
                 .allowed;

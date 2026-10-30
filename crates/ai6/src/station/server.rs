@@ -859,6 +859,7 @@ where
     let sessions = Arc::new(Mutex::new(BTreeMap::new()));
     let cable_live = live_config.clone();
     let cable_roster = roster.clone();
+    let (lineage_live, lineage_roster) = (live_config.clone(), roster.clone());
     let cable_missions = missions.clone();
     let cable_sessions = sessions.clone();
     let cable_site = station_id.clone();
@@ -876,6 +877,16 @@ where
         },
         cable_config.channels().clone(),
     )
+    .with_lineage(move |operation| {
+        let roster = lineage_live
+            .roster()
+            .unwrap_or_else(|| lineage_roster.clone());
+        roster
+            .lineage(operation)
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    })
     .with_audit_sink(move |record| {
         audit_refused_cable_for_person(audit_registry.as_ref(), &audit_station, record);
     })
@@ -2114,6 +2125,24 @@ fn publish_station_check_in(state: &DaemonState) {
         serde_json::json!(state.resource_limits()),
     );
     info.insert("operations".to_owned(), serde_json::json!(operations));
+    // Every roster Operation's ancestors, nearest first, so Universal Exports can authorize
+    // down the tree of Operations without a roster of its own.
+    let lineage: BTreeMap<&str, Vec<&str>> = state
+        .roster
+        .operations()
+        .map(|operation| (operation.id.as_str(), state.roster.lineage(&operation.id)))
+        .collect();
+    match serde_json::to_vec(&lineage) {
+        Ok(encoded) if encoded.len() <= MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES => {
+            info.insert("operation_lineage".to_owned(), serde_json::json!(lineage));
+        }
+        Ok(_) => eprintln!(
+            "ai6: the Operation tree exceeds the {} KiB check-in budget; Universal Exports will \
+             authorize each Operation by its own rules and `*` alone",
+            MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES / 1024
+        ),
+        Err(error) => eprintln!("ai6: could not encode the Operation tree: {error}"),
+    }
     info.insert(
         "retirements".to_owned(),
         serde_json::json!(agents::retirements(&state.roster, state.clock.now())),

@@ -424,6 +424,22 @@ mod tests {
     }
 
     #[test]
+    fn a_check_in_carries_every_operations_lineage() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "parent = \"P\"\n[operation.P]\nparent = \"ROOT\"\n[operation.ROOT]\n",
+            RETIRING,
+        );
+        super::super::publish_station_check_in(&state);
+        let stations = state.intake.stations(std::time::Duration::MAX).unwrap();
+        assert_eq!(
+            stations[0].info()["operation_lineage"],
+            serde_json::json!({"G": ["P", "ROOT"], "P": ["ROOT"], "ROOT": []})
+        );
+    }
+
+    #[test]
     fn retired_agents_pass_their_work_to_the_backup_and_desk_duty_caps_clearance() {
         let root = tempfile::tempdir().unwrap();
         let mut state = test_state(root.path(), "clearance = \"00\"\n", RETIRING);
