@@ -230,3 +230,41 @@ fn a_missing_repository_is_reported_without_the_response_body() {
         .to_string();
     assert!(error.contains("repository"), "{error}");
 }
+
+#[test]
+fn the_page_size_and_page_count_are_settings() {
+    let fake = serve(|base| {
+        vec![Canned {
+            status: 200,
+            headers: vec![(
+                "link",
+                format!("<{base}/repos/o/r/issues?page=2>; rel=\"next\""),
+            )],
+            body: PAGE1.to_owned(),
+        }]
+    });
+    provider(
+        &fake.base,
+        "page_size = 7\nmax_pages = 1\nrequest_timeout_secs = 5",
+    )
+    .poll(SourcePoll { cursor: None })
+    .unwrap();
+    let requests = fake.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "one page only, though a next one is offered"
+    );
+    assert!(
+        requests[0].target.contains("per_page=7"),
+        "{}",
+        requests[0].target
+    );
+    for zero in ["page_size = 0", "max_pages = 0", "request_timeout_secs = 0"] {
+        init();
+        assert!(
+            Github::from_settings(&format!("repo = \"o/r\"\n{zero}")).is_err(),
+            "{zero}"
+        );
+    }
+}

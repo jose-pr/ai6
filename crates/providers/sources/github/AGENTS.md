@@ -38,14 +38,17 @@ Provider ID `github`, kind `ai6_source`. The host passes the Operation's
 | `token_env` | `GITHUB_TOKEN` | environment variable holding the token |
 | `api_url` | `https://api.github.com` | REST root; `https`, or `http` on loopback only |
 | `done_label` / `failed_label` | none | label added when the Mission ends in that state |
+| `request_timeout_secs` | 30 | seconds one request may take; 0 is refused |
+| `page_size` | 100 | issues asked for per page; 0 is refused |
+| `max_pages` | 5 | pages one poll reads at most; 0 is refused |
 
 Unknown keys are refused. `interval_secs` is read by the Station and never reaches the
 provider.
 
 ## Behaviour
 
-- **Poll** lists `GET /repos/{repo}/issues` (open, oldest change first, 100 per page,
-  at most 5 pages) and maps each issue or pull request to a `SourceItem` with ID
+- **Poll** lists `GET /repos/{repo}/issues` (open, oldest change first, `page_size` (100) per page,
+  at most `max_pages` (5) pages) and maps each issue or pull request to a `SourceItem` with ID
   `owner/name#number`. The returned cursor is the newest `updated_at`; the next poll sends
   it as `since`, which GitHub treats as inclusive, so the newest item repeats and the
   Registry sees it as unchanged. A `Link: rel="next"` that leaves the API origin is not
@@ -57,5 +60,5 @@ provider.
   body.
 - **Rate limits**: a 429, or a 403 with `x-ratelimit-remaining: 0`, is an error naming
   the reset time; the cursor does not move and the Station polls again at its next interval.
-- Every request has a 30 s timeout and follows no redirects.
+- Every request has a `request_timeout_secs` (30 s) timeout and follows no redirects.
 - Review comments on a pull request are not forwarded to the Mission's Session.

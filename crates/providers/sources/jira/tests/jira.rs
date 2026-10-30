@@ -243,3 +243,39 @@ fn a_missing_credential_fails_before_any_request() {
     assert!(error.contains("AI6_TEST_JIRA_UNSET"), "{error}");
     assert!(fake.requests.lock().unwrap().is_empty());
 }
+
+#[test]
+fn the_page_size_and_page_count_are_settings() {
+    let fake = serve(|_| {
+        vec![canned(
+            200,
+            r#"{"issues": [], "nextPageToken": "more", "isLast": false}"#,
+        )]
+    });
+    cloud(
+        &fake.base,
+        "page_size = 7\nmax_pages = 1\nrequest_timeout_secs = 5",
+    )
+    .poll(SourcePoll { cursor: None })
+    .unwrap();
+    let requests = fake.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "one page only, though a next one is offered"
+    );
+    assert_eq!(
+        param(&requests[0].target, "maxResults").as_deref(),
+        Some("7")
+    );
+    for zero in ["page_size = 0", "max_pages = 0", "request_timeout_secs = 0"] {
+        init();
+        assert!(
+            Jira::from_settings(&format!(
+                "site = \"https://x.example\"\nproject = \"GUA\"\nemail_env = \"E\"\n{zero}"
+            ))
+            .is_err(),
+            "{zero}"
+        );
+    }
+}

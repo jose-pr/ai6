@@ -26,9 +26,6 @@ use url::Url;
 /// The provider ID an Operation names under `sources`.
 pub const PROVIDER_ID: &str = "jira";
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const PAGE_SIZE: u32 = 50;
-const MAX_PAGES: usize = 5;
 const FIELDS: &str = "summary,description,labels,reporter,updated";
 
 /// Which Jira API the site speaks.
@@ -78,6 +75,27 @@ struct Settings {
     done_transition: Option<String>,
     /// Workflow transition applied when the Mission fails.
     failed_transition: Option<String>,
+    /// Seconds one request may take. Default 30; 0 is refused.
+    #[serde(default = "default_request_timeout_secs")]
+    request_timeout_secs: u64,
+    /// Issues asked for per page. Default 50; 0 is refused.
+    #[serde(default = "default_page_size")]
+    page_size: u32,
+    /// Pages one poll reads at most. Default 5; 0 is refused.
+    #[serde(default = "default_max_pages")]
+    max_pages: usize,
+}
+
+fn default_request_timeout_secs() -> u64 {
+    30
+}
+
+fn default_page_size() -> u32 {
+    50
+}
+
+fn default_max_pages() -> usize {
+    5
 }
 
 fn default_labels() -> Vec<String> {
@@ -143,8 +161,17 @@ impl Jira {
         if site.scheme() != "https" && !(site.scheme() == "http" && loopback) {
             return Err("site must be https (http only on a loopback address)".to_owned());
         }
+        for (name, zero) in [
+            ("request_timeout_secs", settings.request_timeout_secs == 0),
+            ("page_size", settings.page_size == 0),
+            ("max_pages", settings.max_pages == 0),
+        ] {
+            if zero {
+                return Err(format!("{name} must be at least 1"));
+            }
+        }
         let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(REQUEST_TIMEOUT))
+            .timeout_global(Some(Duration::from_secs(settings.request_timeout_secs)))
             .max_redirects(0)
             .http_status_as_error(false)
             .build()
@@ -305,13 +332,13 @@ impl Source for Jira {
         let query: Vec<(&str, String)> = vec![
             ("jql", jql),
             ("fields", FIELDS.to_owned()),
-            ("maxResults", PAGE_SIZE.to_string()),
+            ("maxResults", self.settings.page_size.to_string()),
         ];
 
         let mut items = Vec::new();
         let mut page_token: Option<String> = None;
         let mut start_at = 0_u64;
-        for _ in 0..MAX_PAGES {
+        for _ in 0..self.settings.max_pages {
             let mut page_query = query.clone();
             match self.settings.deployment {
                 Deployment::Cloud => {

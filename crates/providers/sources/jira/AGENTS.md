@@ -41,6 +41,9 @@ serialized as TOML, in `SourceConfig::settings_toml`.
 | `email_env` | none | environment variable holding the email; required for `basic` |
 | `token_env` | `JIRA_API_TOKEN` | environment variable holding the token |
 | `done_transition` / `failed_transition` | none | transition name or ID applied when the Mission ends in that state |
+| `request_timeout_secs` | 30 | seconds one request may take; 0 is refused |
+| `page_size` | 50 | issues asked for per page; 0 is refused |
+| `max_pages` | 5 | pages one poll reads at most; 0 is refused |
 
 Unknown keys are refused. `interval_secs` is read by the Station and never reaches the
 provider.
@@ -50,7 +53,7 @@ provider.
 - **Poll** searches `project = "KEY" AND labels = "..." AND (jql) AND statusCategory != Done
   AND updated >= "<cursor minute>" ORDER BY updated ASC`. Cloud uses
   `GET /rest/api/3/search/jql` with `nextPageToken`; Server uses `GET /rest/api/2/search`
-  with `startAt`. At most 5 pages of 50. Each issue becomes a `SourceItem` whose ID is the
+  with `startAt`. At most `max_pages` (5) pages of `page_size` (50). Each issue becomes a `SourceItem` whose ID is the
   issue key; Cloud descriptions in Atlassian Document Format are flattened to plain text.
 - **Cursor** is the newest `updated` timestamp. JQL compares at minute precision in the
   account's time zone, so the next search starts at that minute (`updated >= "YYYY-MM-DD
@@ -62,5 +65,5 @@ provider.
 - **Credentials** are read from the named variables on each call; a missing one is an
   error that names the variable. Errors never carry the credential or a response body.
 - **Rate limits**: a 429 is an error naming `Retry-After`; the cursor does not move.
-- Every request has a 30 s timeout and follows no redirects.
+- Every request has a `request_timeout_secs` (30 s) timeout and follows no redirects.
 - Moving an issue when its Mission starts is not implemented.

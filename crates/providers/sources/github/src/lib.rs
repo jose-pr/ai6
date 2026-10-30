@@ -24,10 +24,6 @@ use url::Url;
 /// The provider ID an Operation names under `sources`.
 pub const PROVIDER_ID: &str = "github";
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const PAGE_SIZE: &str = "100";
-const MAX_PAGES: usize = 5;
-
 /// One Operation's settings, from `[operation.<id>.sources.github]`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +46,27 @@ struct Settings {
     done_label: Option<String>,
     /// Label added to the issue when its Mission fails.
     failed_label: Option<String>,
+    /// Seconds one request may take. Default 30; 0 is refused.
+    #[serde(default = "default_request_timeout_secs")]
+    request_timeout_secs: u64,
+    /// Issues asked for per page. Default 100; 0 is refused.
+    #[serde(default = "default_page_size")]
+    page_size: u32,
+    /// Pages one poll reads at most. Default 5; 0 is refused.
+    #[serde(default = "default_max_pages")]
+    max_pages: usize,
+}
+
+fn default_request_timeout_secs() -> u64 {
+    30
+}
+
+fn default_page_size() -> u32 {
+    100
+}
+
+fn default_max_pages() -> usize {
+    5
 }
 
 fn default_labels() -> Vec<String> {
@@ -107,8 +124,17 @@ impl Github {
         if api.scheme() != "https" && !(api.scheme() == "http" && loopback) {
             return Err("api_url must be https (http only on a loopback address)".to_owned());
         }
+        for (name, zero) in [
+            ("request_timeout_secs", settings.request_timeout_secs == 0),
+            ("page_size", settings.page_size == 0),
+            ("max_pages", settings.max_pages == 0),
+        ] {
+            if zero {
+                return Err(format!("{name} must be at least 1"));
+            }
+        }
         let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(REQUEST_TIMEOUT))
+            .timeout_global(Some(Duration::from_secs(settings.request_timeout_secs)))
             .max_redirects(0)
             .http_status_as_error(false)
             .build()
@@ -222,7 +248,7 @@ impl Source for Github {
             ("state", "open".to_owned()),
             ("sort", "updated".to_owned()),
             ("direction", "asc".to_owned()),
-            ("per_page", PAGE_SIZE.to_owned()),
+            ("per_page", self.settings.page_size.to_string()),
         ];
         if !self.settings.labels.is_empty() {
             query.push(("labels", self.settings.labels.join(",")));
@@ -237,7 +263,7 @@ impl Source for Github {
         let mut items = Vec::new();
         let mut url = self.issues_url();
         let mut first = true;
-        for _ in 0..MAX_PAGES {
+        for _ in 0..self.settings.max_pages {
             let mut response = self.get(&url, if first { &query } else { &[] })?;
             first = false;
             let next = next_link(response.headers().get("link").and_then(|v| v.to_str().ok()))
