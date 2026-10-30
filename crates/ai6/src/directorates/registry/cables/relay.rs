@@ -1377,7 +1377,7 @@ impl CableRelay {
             .collect::<Vec<_>>();
         if !self
             .registry
-            .take_cable_quotas(&borrowed, now)
+            .take_quotas(&borrowed, now)
             .map_err(|_| CableRelayError::RegistryUnavailable)?
         {
             self.record_event(

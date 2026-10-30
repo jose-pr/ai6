@@ -476,7 +476,7 @@ impl CableStore for SqlRegistry {
         })
     }
 
-    fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
+    fn take_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
         check_quota_buckets(buckets, now)?;
         self.write(|tx, revision| {
             let balances = quota_balances(buckets, now, |key| {

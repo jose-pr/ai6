@@ -1964,7 +1964,7 @@ pub trait CableStore {
     ///
     /// Keys are SHA-256 hashed before being written to `cable-quotas.json`, matching I
     /// Registry while keeping caller-provided keys out of the file.
-    fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool>;
+    fn take_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool>;
 }
 
 impl CableStore for FileRegistry {
@@ -2129,7 +2129,7 @@ impl CableStore for FileRegistry {
         Ok(Some(updated))
     }
 
-    fn take_cable_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
+    fn take_quotas(&self, buckets: &[(&str, f64, u32)], now: f64) -> io::Result<bool> {
         check_quota_buckets(buckets, now)?;
         let _registry_lock = self.lock()?;
         let path = self.root.join("cable-quotas.json");
@@ -3887,23 +3887,23 @@ mod tests {
         let registry = store.handle();
         let buckets = [("sender:007", 1.0, 2), ("scope:operation:G", 1.0, 1)];
 
-        assert!(registry.take_cable_quotas(&buckets, 100.0).unwrap());
-        assert!(!registry.take_cable_quotas(&buckets, 100.0).unwrap());
+        assert!(registry.take_quotas(&buckets, 100.0).unwrap());
+        assert!(!registry.take_quotas(&buckets, 100.0).unwrap());
         assert!(
             registry
-                .take_cable_quotas(&[("sender:007", 1.0, 2)], 100.0)
+                .take_quotas(&[("sender:007", 1.0, 2)], 100.0)
                 .unwrap()
         );
         assert!(
             !registry
-                .take_cable_quotas(&[("sender:007", 1.0, 2)], 100.0)
+                .take_quotas(&[("sender:007", 1.0, 2)], 100.0)
                 .unwrap()
         );
-        assert!(registry.take_cable_quotas(&buckets, 101.0).unwrap());
-        assert!(!store.handle().take_cable_quotas(&buckets, 101.0).unwrap());
+        assert!(registry.take_quotas(&buckets, 101.0).unwrap());
+        assert!(!store.handle().take_quotas(&buckets, 101.0).unwrap());
         assert_eq!(
             registry
-                .take_cable_quotas(&[("a", 1.0, 1), ("a", 1.0, 1)], 1.0)
+                .take_quotas(&[("a", 1.0, 1), ("a", 1.0, 1)], 1.0)
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::InvalidInput
@@ -4122,7 +4122,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(root.path());
         let buckets = [("sender:007", 1.0, 2), ("scope:operation:G", 1.0, 1)];
-        assert!(registry.take_cable_quotas(&buckets, 100.0).unwrap());
+        assert!(registry.take_quotas(&buckets, 100.0).unwrap());
 
         let saved: serde_json::Value =
             serde_json::from_slice(&fs::read(root.path().join("cable-quotas.json")).unwrap())
