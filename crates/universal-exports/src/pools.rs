@@ -335,13 +335,16 @@ mod tests {
         assert_eq!(alpha["windows"][0]["used_permille"], 640);
         assert_eq!(alpha["limited_until"], now + 600.0);
         assert_eq!(alpha["tokens_today"], 1_234);
+        // Sorted: the ACP crates turn on serde_json's `preserve_order`.
+        let mut keys = alpha
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        keys.sort();
         assert_eq!(
-            alpha
-                .as_object()
-                .unwrap()
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>(),
+            keys,
             [
                 "account",
                 "active",
