@@ -479,8 +479,7 @@ provider; it is empty for the Claude and Codex handlers. The `acp` handler's key
 `close_grace_ms` 2000) are in [the Agent Client Protocol](acp.md#settings). A Theater's `runner`
 table bounds a Station's connection to its field runner with `connect_timeout_ms` 30000,
 `initialize_timeout_ms` 20000 and `request_timeout_ms` 30000
-([Theaters](theaters.md)); `ai6 runner serve` takes `--pump-poll-ms` 250, `--feed-poll-ms` 50 and
-`--replay-batch` 256.
+([Theaters](theaters.md)).
 
 ## Configuration providers
 
@@ -793,17 +792,17 @@ provider applied before it was a key; the provider's API header lists them with 
 
 | Key | Default | What |
 | --- | --- | --- |
-| `page` | 256 | Events one read of a runner returns |
-| `max_wait` | 30 | The longest a read of a runner waits for a new event, in seconds |
+| `pump_poll` | 0.25 | Seconds a runner waits for a harness's next event before it checks whether to stop |
+| `feed_poll` | 0.05 | Seconds between a runner connection's looks for spooled events to send |
+| `replay_batch` | 256 | Spooled events a runner connection takes from the spool at once |
 | `keep_ended` | 604,800 (a week) | Seconds an ended Session is kept by its runner |
-| `refused_body_drain_bytes` | 64 KiB | Bytes of a refused request's body a runner, or the Station's own API, reads before it answers |
+| `refused_body_drain_bytes` | 64 KiB | Bytes of a refused request's body the Station's own API reads before it answers |
 | `cable_request_bytes` | 4 MiB | Bytes of one request through a runner's Cable relay |
 | `cable_connect_timeout` | 10 | Seconds a runner's Cable relay may take to reach the Station |
-| `read_wait` | 1 | Seconds the Station's read of a runner waits for an event |
-| `call_output_bytes` | 32 MiB | Bytes of output an `ai6 runner call` over a transport may return |
-| `connect_timeout` | 5 | Seconds connecting to a runner may take |
-| `call_margin` | 30 | Seconds a request to a runner may take past `max_wait`, and starting one over a transport past `start_wait` |
+| `read_wait` | 1 | Seconds one read by the Station of a runner's Session waits for an event |
+| `connect_timeout` | 5 | Seconds `ai6 runner connect` may take to reach the runner's loopback port |
 | `start_wait` | 30 | Seconds a started runner has to answer |
+| `start_margin` | 30 | Seconds starting a runner over a transport may take past `start_wait` |
 
 `[audit]`
 

@@ -91,7 +91,7 @@ impl StationLimits {
                 "recovery.give_up_tries",
                 u64::from(self.recovery.give_up_tries),
             ),
-            ("runner.page", self.runner.page as u64),
+            ("runner.replay_batch", self.runner.replay_batch as u64),
         ] {
             if value == 0 {
                 return Err(format!("station.{key}: at least 1"));
@@ -509,44 +509,46 @@ impl Default for DetachedLimits {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RunnerLimits {
-    /// Events one read of a runner returns. Default 256.
-    pub page: usize,
-    /// The longest a read of a runner waits for a new event, in seconds. Default 30.
-    pub max_wait: Seconds,
+    /// Seconds a runner waits for a harness's next event before it checks whether to stop.
+    /// Default 0.25.
+    pub pump_poll: Seconds,
+    /// Seconds between a runner connection's looks for spooled events to send. Default 0.05.
+    pub feed_poll: Seconds,
+    /// Spooled events a runner connection takes from the spool at once. Default 256.
+    pub replay_batch: usize,
     /// Seconds an ended Session is kept by its runner. Default 604,800 (a week).
     pub keep_ended: Seconds,
-    /// Bytes of a refused request's body a runner reads before it answers. Default 64 KiB.
+    /// Bytes of a refused request's body the Station's own API reads before it answers.
+    /// Default 64 KiB.
     pub refused_body_drain_bytes: Limit,
     /// Bytes of one request through a runner's Cable relay. Default 4 MiB.
     pub cable_request_bytes: Limit,
     /// Seconds a runner's Cable relay may take to reach the Station. Default 10.
     pub cable_connect_timeout: Seconds,
-    /// Seconds the Station's read of a runner waits for an event. Default 1.
+    /// Seconds one read by the Station of a runner's Session waits for an event. Default 1.
     pub read_wait: Seconds,
-    /// Bytes of output an `ai6 runner call` over a transport may return. Default 32 MiB.
-    pub call_output_bytes: Limit,
-    /// Seconds connecting to a runner may take. Default 5.
+    /// Seconds `ai6 runner connect` may take to reach the runner's loopback port. Default 5.
     pub connect_timeout: Seconds,
-    /// Seconds a request to a runner may take past the longest read. Default 30.
-    pub call_margin: Seconds,
     /// Seconds a started runner has to answer. Default 30.
     pub start_wait: Seconds,
+    /// Seconds starting a runner over a transport may take past `start_wait`. Default 30.
+    pub start_margin: Seconds,
 }
 
 impl Default for RunnerLimits {
     fn default() -> Self {
         Self {
-            page: 256,
-            max_wait: Seconds::new(30),
+            pump_poll: Seconds(std::time::Duration::from_millis(250)),
+            feed_poll: Seconds(std::time::Duration::from_millis(50)),
+            replay_batch: 256,
             keep_ended: Seconds::new(7 * DAY),
             refused_body_drain_bytes: Limit::at(64 * KIB),
             cable_request_bytes: Limit::at(4 * MIB),
             cable_connect_timeout: Seconds::new(10),
             read_wait: Seconds::new(1),
-            call_output_bytes: Limit::at(32 * MIB),
             connect_timeout: Seconds::new(5),
-            call_margin: Seconds::new(30),
             start_wait: Seconds::new(30),
+            start_margin: Seconds::new(30),
         }
     }
 }
@@ -665,5 +667,7 @@ mod tests {
         assert!(toml::from_str::<StationLimits>("[scheduler]\nunknown = 1\n").is_err());
         let zero: StationLimits = toml::from_str("[publisher]\nqueue = 0\n").unwrap();
         assert!(zero.validate().unwrap_err().contains("publisher.queue"));
+        let zero: StationLimits = toml::from_str("[runner]\nreplay_batch = 0\n").unwrap();
+        assert!(zero.validate().unwrap_err().contains("runner.replay_batch"));
     }
 }

@@ -241,18 +241,16 @@ struct PinArgs {
 enum RunnerCommand {
     /// Serve the runner until interrupted; the harnesses it supervises end with it.
     Serve(RunnerServeArgs),
-    /// Send one request to the runner on this host and print its status and JSON answer.
+    /// Relay this process's standard input and output to the runner on this host over ACP,
+    /// authenticated with the runner's token.
     ///
-    /// A Station that reaches this host through a transport talks to the runner this way. A
-    /// request body is read from standard input. Exits 3 when no runner answers.
-    Call {
+    /// A Station that reaches this host through a transport speaks ACP to the runner this way.
+    /// A terminal is put in raw mode and `ai6-runner-connect-ready` is printed first. Exits 3
+    /// when no runner answers.
+    Connect {
         /// The runner's state directory (default: `runner` in AI6's state directory).
         #[arg(long)]
         state_dir: Option<PathBuf>,
-        /// HTTP method.
-        method: String,
-        /// Request path, such as `/v1/sessions`.
-        path: String,
     },
 }
 
@@ -277,7 +275,7 @@ struct RunnerServeArgs {
     /// The settings a Station hands its runners, as JSON: the `[runner]` table and the
     /// `[providers.<id>]` tables of its `station` record; `-` reads them from standard input
     /// (default: every key at its default). They are recorded in the state directory, where
-    /// `runner call` reads them.
+    /// `runner connect` reads them.
     #[arg(long, value_name = "PATH")]
     settings: Option<PathBuf>,
     /// Start in the background, detached from this terminal, and print where it listens.
@@ -948,7 +946,7 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                     Ok(info) => {
                         println!(
                             "{}",
-                            serde_json::to_string(&info).unwrap_or_else(|_| info.url.clone())
+                            serde_json::to_string(&info).unwrap_or_else(|_| info.address.clone())
                         );
                         ExitCode::SUCCESS
                     }
@@ -992,22 +990,11 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                 }
             }
         }
-        RunnerCommand::Call {
-            state_dir,
-            method,
-            path,
-        } => {
+        RunnerCommand::Connect { state_dir } => {
             let state_dir = match resolve(state_dir) {
                 Ok(dir) => dir,
                 Err(error) => {
                     eprintln!("ai6: runner state directory: {error}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            let body = match runner_request_body() {
-                Ok(body) => body,
-                Err(error) => {
-                    eprintln!("ai6: runner request body: {error}");
                     return ExitCode::FAILURE;
                 }
             };
@@ -1018,27 +1005,18 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let answered = tokio::task::spawn_blocking(move || {
-                ai6::station::runner::call(
-                    &state_dir,
-                    &method,
-                    &path,
-                    body.as_ref(),
-                    &settings.runner,
-                )
+            let relayed = tokio::task::spawn_blocking(move || {
+                ai6::station::runner::connect_stdio(&state_dir, &settings.runner)
             })
             .await;
-            match answered {
-                Ok(Ok((status, body))) => {
-                    println!("{}", serde_json::json!({ "status": status, "body": body }));
-                    ExitCode::SUCCESS
-                }
+            match relayed {
+                Ok(Ok(())) => ExitCode::SUCCESS,
                 Ok(Err(error)) => {
                     eprintln!("ai6: {error}");
-                    ExitCode::from(ai6::station::runner::CALL_NOT_RUNNING)
+                    ExitCode::from(ai6::station::runner::CONNECT_NOT_RUNNING)
                 }
                 Err(error) => {
-                    eprintln!("ai6: runner request failed: {error}");
+                    eprintln!("ai6: runner connect failed: {error}");
                     ExitCode::FAILURE
                 }
             }
@@ -1122,25 +1100,6 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
-}
-
-/// The JSON body on standard input, if any. An interactive terminal is never read.
-fn runner_request_body() -> Result<Option<serde_json::Value>, String> {
-    use std::io::{IsTerminal, Read};
-    let mut stdin = std::io::stdin();
-    if stdin.is_terminal() {
-        return Ok(None);
-    }
-    let mut text = String::new();
-    stdin
-        .read_to_string(&mut text)
-        .map_err(|error| error.to_string())?;
-    if text.trim().is_empty() {
-        return Ok(None);
-    }
-    serde_json::from_str(&text)
-        .map(Some)
-        .map_err(|error| format!("not JSON: {error}"))
 }
 
 /// Resolves on Ctrl-C, and on SIGTERM where there is one, so a service manager's stop is a
