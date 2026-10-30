@@ -193,7 +193,7 @@ pub(crate) async fn effective(
     Path(id): Path<String>,
 ) -> Result<Json<EffectiveOperation>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
-    checked_key(&id)?;
+    checked_key(&id, gateway.config.unex().text.roster_key_bytes)?;
     authorize_resource_action(&gateway, person, ROSTER_RESOURCE.to_owned(), "roster.read").await?;
     let source = source(&gateway)?;
     let snapshot = tokio::task::spawn_blocking(move || source.load(""))

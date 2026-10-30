@@ -382,6 +382,8 @@ fn view_limits(record: &ai6::AssistantViewLimits) -> Result<ViewLimits, String> 
             "navigate_label_bytes",
             record.navigate_label_bytes,
             &mut limits.navigate_label_bytes,
+        ),
+        (
             "svg_id_bytes",
             record.svg_id_bytes,
             &mut limits.svg_id_bytes,

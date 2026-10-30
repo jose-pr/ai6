@@ -1753,8 +1753,10 @@ impl Assistant {
             },
             max_entries,
         );
-        desk.store
-            .trim_person(&granted.person_id, self.config.person_bytes);
+        desk.store.trim_person(
+            &granted.person_id,
+            self.config.gateway.person_bytes.or_max(),
+        );
         tools::Outcome {
             text: format!("Offered to the person as {id}; the page opens when they choose it."),
             is_error: false,

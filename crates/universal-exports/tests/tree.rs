@@ -91,6 +91,7 @@ async fn serve() -> (String, oneshot::Sender<()>, tempfile::TempDir) {
             scope = "*"
             role = "admin"
         "#,
+        ai6::Limit::UNBOUNDED,
     )
     .unwrap();
     let gateway = Gateway::with_access(

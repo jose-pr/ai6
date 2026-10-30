@@ -274,6 +274,7 @@ mod tests {
                 [limits]
                 ancestors = 1
             "#,
+            crate::Limit::UNBOUNDED,
         )
         .unwrap();
         let under = |name: &str, ancestors: &[&str]| {
@@ -288,8 +289,9 @@ mod tests {
             under("viewer", &["operation:P", "operation:ROOT"]).is_err(),
             "past [limits] ancestors is an error"
         );
-        assert!(role_authorizer_from_toml("[limits]\nancestors = \"many\"").is_err());
-        assert!(role_authorizer_from_toml("[limits]\nancestors = \"none\"").is_ok());
+        let unbounded = crate::Limit::UNBOUNDED;
+        assert!(role_authorizer_from_toml("[limits]\nancestors = \"many\"", unbounded).is_err());
+        assert!(role_authorizer_from_toml("[limits]\nancestors = \"none\"", unbounded).is_ok());
     }
 
     #[test]

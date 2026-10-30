@@ -2108,13 +2108,13 @@ fn publish_station_check_in(state: &DaemonState) {
         .map(|operation| (operation.id.as_str(), state.roster.lineage(&operation.id)))
         .collect();
     match serde_json::to_vec(&lineage) {
-        Ok(encoded) if encoded.len() <= MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES => {
+        Ok(encoded) if catalog_bytes.allows(encoded.len()) => {
             info.insert("operation_lineage".to_owned(), serde_json::json!(lineage));
         }
         Ok(_) => eprintln!(
-            "ai6: the Operation tree exceeds the {} KiB check-in budget; Universal Exports will \
-             authorize each Operation by its own rules and `*` alone",
-            MAX_PUBLISHED_AGENT_ROLE_CATALOG_BYTES / 1024
+            "ai6: the Operation tree exceeds the {catalog_bytes}-byte check-in budget \
+             ([scheduler] role_catalog_bytes); Universal Exports will authorize each Operation \
+             by its own rules and `*` alone"
         ),
         Err(error) => eprintln!("ai6: could not encode the Operation tree: {error}"),
     }
