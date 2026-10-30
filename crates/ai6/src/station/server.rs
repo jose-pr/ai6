@@ -181,6 +181,7 @@ impl StationConfig {
         self
     }
 
+    #[cfg_attr(not(feature = "publisher"), allow(dead_code))]
     pub(crate) fn protected_paths(&self) -> &[PathBuf] {
         &self.protected_paths
     }
