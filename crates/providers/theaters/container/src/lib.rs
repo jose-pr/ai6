@@ -33,9 +33,6 @@ pub const MISSION_LABEL: &str = "ai6.mission";
 /// The label that holds when a container was made, as Unix seconds.
 pub const CREATED_LABEL: &str = "ai6.created";
 
-/// How long one engine command may run; pulling an image can take a while.
-const ENGINE_TIMEOUT_MS: u64 = 600_000;
-
 /// Runs the engine's command line. The real one starts the executable; a test stands in for
 /// the engine with its own.
 pub trait Engine: Send + Sync {
@@ -45,6 +42,11 @@ pub trait Engine: Send + Sync {
 
 struct Process {
     executable: String,
+    /// How long one engine command may run, how much of its output is kept and how long the
+    /// output readers get once it has ended.
+    timeout_ms: u64,
+    max_output: u64,
+    reader_grace: std::time::Duration,
 }
 
 impl Engine for Process {
@@ -53,9 +55,10 @@ impl Engine for Process {
             Command::new(&self.executable).args(args),
             &ProcessInput {
                 stdin: None,
-                timeout_ms: ENGINE_TIMEOUT_MS,
-                max_output: 1024 * 1024,
+                timeout_ms: self.timeout_ms,
+                max_output: self.max_output,
             },
+            self.reader_grace,
         )
     }
 }
@@ -83,6 +86,9 @@ impl TryFrom<TheaterProviderConfig> for ContainerTheaters {
         Ok(Self {
             engine: Arc::new(Process {
                 executable: settings.engine(),
+                timeout_ms: settings.engine_timeout_ms(),
+                max_output: settings.engine_output_bytes(),
+                reader_grace: settings.reader_grace(),
             }),
             settings,
         })

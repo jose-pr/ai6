@@ -18,6 +18,16 @@ pub(crate) struct Settings {
     /// More options for the engine's `run`, such as `["--network", "none"]` or a volume.
     #[serde(default)]
     pub run_args: Vec<String>,
+    /// Milliseconds one engine command may run; pulling an image can take a while. Default
+    /// 600000. `0` waits for the command.
+    #[serde(default)]
+    pub engine_timeout_ms: Option<u64>,
+    /// Bytes of an engine command's output kept. Default 1048576 (1 MiB).
+    #[serde(default)]
+    pub engine_output_bytes: Option<u64>,
+    /// Milliseconds the output readers get to finish once a command has ended. Default 1000.
+    #[serde(default)]
+    pub reader_grace_ms: Option<u64>,
 }
 
 impl Settings {
@@ -53,6 +63,21 @@ impl Settings {
         Ok(settings)
     }
 
+    pub(crate) fn engine_timeout_ms(&self) -> u64 {
+        self.engine_timeout_ms.unwrap_or(600_000)
+    }
+
+    pub(crate) fn engine_output_bytes(&self) -> u64 {
+        self.engine_output_bytes.unwrap_or(1024 * 1024)
+    }
+
+    pub(crate) fn reader_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(
+            self.reader_grace_ms
+                .unwrap_or(ai6::directorates::q::transport::kit::DEFAULT_READER_GRACE_MS),
+        )
+    }
+
     pub(crate) fn engine(&self) -> String {
         self.engine.clone().unwrap_or_else(|| "docker".to_owned())
     }
@@ -83,5 +108,20 @@ mod tests {
         ] {
             assert!(Settings::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_engine_bounds_are_settings_with_defaults() {
+        let settings = Settings::parse("image = \"i\"\n").unwrap();
+        assert_eq!(settings.engine_timeout_ms(), 600_000);
+        assert_eq!(settings.engine_output_bytes(), 1024 * 1024);
+        assert_eq!(settings.reader_grace(), std::time::Duration::from_secs(1));
+        let settings = Settings::parse(
+            "image = \"i\"\nengine_timeout_ms = 5\nengine_output_bytes = 7\nreader_grace_ms = 9\n",
+        )
+        .unwrap();
+        assert_eq!(settings.engine_timeout_ms(), 5);
+        assert_eq!(settings.engine_output_bytes(), 7);
+        assert_eq!(settings.reader_grace(), std::time::Duration::from_millis(9));
     }
 }

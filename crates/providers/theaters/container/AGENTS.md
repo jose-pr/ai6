@@ -26,6 +26,9 @@ unknown keys are refused.
 | `user` | the image's | The user the `container` transport runs commands as. |
 | `command` | `["sleep", "infinity"]` | What the container runs to stay up. |
 | `run_args` | none | More options for `run`, such as `["--network", "none"]` or a volume. |
+| `engine_timeout_ms` | 600000 | How long one engine command may run (pulling an image can take a while); `0` waits for it. |
+| `engine_output_bytes` | 1048576 | Bytes of an engine command's output kept. |
+| `reader_grace_ms` | 1000 | How long the output readers get to finish once a command has ended. |
 
 ## Behaviour
 
