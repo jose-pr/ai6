@@ -75,6 +75,7 @@ use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
+use crate::station::issues;
 use crate::station::limits::StationLimits;
 use crate::station::plugins;
 #[cfg(feature = "publisher")]
@@ -882,6 +883,7 @@ where
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
     vetting::log_weakenings(&roster);
+    issues::log_weakenings(&roster);
     for weakened in roster.settings().weakenings() {
         eprintln!("ai6: {weakened}");
     }
@@ -2171,6 +2173,13 @@ fn publish_station_check_in(state: &DaemonState) {
             serde_json::json!(state.station.bootstrap_weakened),
         );
     }
+    let issues_weakened = issues::weakenings(&state.roster);
+    if !issues_weakened.is_empty() {
+        info.insert(
+            "issues_weakened".to_owned(),
+            serde_json::json!(issues_weakened),
+        );
+    }
     let plugins_weakened = &state.plugins.scan_summary().weakened;
     if !plugins_weakened.is_empty() {
         info.insert(
@@ -2937,7 +2946,7 @@ fn place_brief(
         .find(|choice| has_assignment_capacity(state, operation_id, &choice.agent))
 }
 
-fn mission_id_for_brief(brief: &Brief) -> Result<MissionId, String> {
+pub(crate) fn mission_id_for_brief(brief: &Brief) -> Result<MissionId, String> {
     let key = brief.key();
     let candidate = if key.len() <= MAX_ID_BYTES {
         key
@@ -5709,7 +5718,28 @@ fn apply_event_state(
     Some(target)
 }
 
+/// Queues the status a Mission's new state owes its linked issues (the outbox is sent by the
+/// Headquarters Station).
+fn queue_issue_status(state: &DaemonState, mission_id: &str, mission_state: MissionState) {
+    let reason = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id)?.blocked_reason.clone());
+    let Some(phase) = issues::phase_of(mission_state, reason.as_deref()) else {
+        return;
+    };
+    issues::queue_status(
+        state.intake.as_ref(),
+        &state.roster,
+        mission_id,
+        phase,
+        state.clock.now() as f64,
+    );
+}
+
 fn publish_lifecycle(state: &DaemonState, mission_id: &str, mission_state: MissionState) {
+    queue_issue_status(state, mission_id, mission_state);
     #[cfg(feature = "publisher")]
     if let Some(state_name) = lifecycle_name(mission_state) {
         let telemetry = state

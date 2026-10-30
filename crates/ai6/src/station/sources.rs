@@ -17,11 +17,13 @@ use crate::directorates::m::cover::Disclosure;
 use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::roster::{Operation, Roster};
 use crate::directorates::registry::backend::*;
+use crate::directorates::registry::mission_issues::{IssueLink, LinkRelation, LinkState};
 use crate::directorates::registry::sleepers::{Fire, Sleeper};
 use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
-use crate::directorates::registry::tracker::{Tracker, TrackerPost, TrackerUpdate};
+use crate::directorates::registry::tracker::Tracker;
+use crate::station::issues::{DrainState, TrackerBuilder, drain_outbox, queue_report};
 
 use crate::station::limits::SourceLimits;
 use crate::station::plugins::Plugins;
@@ -29,12 +31,6 @@ use guatiao::ToValue;
 
 /// Constructs the provider for a provider ID and an Operation's settings.
 type SourceBuilder<'a> = dyn Fn(&str, &toml::Table) -> Result<Box<dyn Source>, String> + 'a;
-
-/// Constructs the Tracker for a provider ID and an instance's settings.
-type TrackerBuilder<'a> = dyn Fn(&str, &toml::Table) -> Result<Box<dyn Tracker>, String> + 'a;
-
-/// Trackers already built during one report pass, by (Operation, instance).
-type TrackerCache = BTreeMap<(String, String), Result<Box<dyn Tracker>, String>>;
 
 /// The words a Mission's progress is written in on an instance: a label or a workflow
 /// transition per milestone. Unset milestones write nothing.
@@ -54,13 +50,29 @@ pub(crate) struct StatusWords {
 }
 
 impl StatusWords {
-    /// The word for a Mission outcome: `done` for a successful one, `failed` otherwise.
-    pub(crate) fn for_outcome(&self, outcome: &str) -> Option<&str> {
-        if outcome == "done" {
-            self.done.as_deref()
-        } else {
-            self.failed.as_deref()
+    /// The word for a phase: `working`, `waiting`, `paused`, `done`; any other is `failed`.
+    pub(crate) fn for_phase(&self, phase: &str) -> Option<&str> {
+        match phase {
+            "working" => self.working.as_deref(),
+            "waiting" => self.waiting.as_deref(),
+            "paused" => self.paused.as_deref(),
+            "done" => self.done.as_deref(),
+            _ => self.failed.as_deref(),
         }
+    }
+
+    /// Every word set, whichever phase it is for.
+    pub(crate) fn all(&self) -> Vec<&str> {
+        [
+            &self.working,
+            &self.waiting,
+            &self.paused,
+            &self.done,
+            &self.failed,
+        ]
+        .into_iter()
+        .filter_map(|word| word.as_deref())
+        .collect()
     }
 }
 
@@ -223,9 +235,18 @@ pub(crate) fn poll_source(
     let mut summary = PollSummary::default();
     for item in &batch.items {
         match registry.ingest_source_item(operation, provider, item, station) {
-            Ok(Ingest::Queued) => summary.queued += 1,
-            Ok(Ingest::Updated) => summary.updated += 1,
-            Ok(Ingest::Unchanged) => summary.unchanged += 1,
+            Ok(Ingest::Queued) => {
+                summary.queued += 1;
+                link_source(registry, operation, provider, item);
+            }
+            Ok(Ingest::Updated) => {
+                summary.updated += 1;
+                link_source(registry, operation, provider, item);
+            }
+            Ok(Ingest::Unchanged) => {
+                summary.unchanged += 1;
+                link_source(registry, operation, provider, item);
+            }
             Ok(Ingest::InFlight | Ingest::Finished) => summary.skipped += 1,
             Err(error) => eprintln!(
                 "ai6: source {provider}: item {:?} not queued: {error}",
@@ -254,6 +275,49 @@ pub(crate) struct CxReport {
     pub body: String,
     /// The Git branch holding the work, when the Mission kept a safe house.
     pub branch: Option<String>,
+}
+
+/// Ties the issue an item came from to the Mission its brief becomes, so the Mission's page
+/// can show it before placement. A link already there (even an unlinked one) is left alone.
+fn link_source(
+    registry: &dyn RegistryBackend,
+    operation: &str,
+    provider: &str,
+    item: &crate::directorates::registry::sources::SourceItem,
+) {
+    let brief = crate::directorates::registry::sources::source_brief(
+        operation,
+        provider,
+        item,
+        &crate::directorates::registry::limits::SourceLimits::default(),
+    );
+    let Ok(mission) = crate::station::server::mission_id_for_brief(&brief) else {
+        return;
+    };
+    let mission = mission.to_string();
+    match registry.issue_links(&mission) {
+        Ok(links)
+            if links
+                .iter()
+                .any(|link| link.tracker == provider && link.item == item.id) => {}
+        Ok(_) => {
+            let now = unix_seconds() as f64;
+            if let Err(error) = registry.link_issue(&source_link(
+                operation,
+                &mission,
+                provider,
+                &item.id,
+                item.url.clone(),
+                now,
+            )) {
+                eprintln!(
+                    "ai6: source {provider}: item {:?} not linked: {error}",
+                    item.id
+                );
+            }
+        }
+        Err(error) => eprintln!("ai6: source {provider}: links unreadable: {error}"),
+    }
 }
 
 /// Words the report for the Operation's cover policy.
@@ -327,46 +391,44 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
     }
 }
 
-/// Posts the outcome of each finished source Mission back to its item.
+/// Queues the report of each finished source Mission as an outbox entry on its source issue.
 ///
-/// `build` constructs the Tracker for an instance's settings. A report that fails is
-/// retried on later passes, up to the Registry's attempt limit.
+/// A report that cannot be queued is retried on later passes, up to the Registry's attempt
+/// limit; the Headquarters Station sends what is queued.
 pub(crate) fn report_finished(
     registry: &dyn RegistryBackend,
     roster: &Roster,
-    build: &TrackerBuilder<'_>,
     limits: &SourceLimits,
+    now: f64,
 ) -> usize {
     let Ok(finished) = registry.unreported_source_briefs() else {
         return 0;
     };
-    let mut trackers = TrackerCache::new();
-    let mut reported = 0;
+    let mut queued = 0;
     for entry in finished {
-        let result = report_one(roster, build, limits, &mut trackers, &entry);
-        match result {
+        match queue_one(registry, roster, limits, &entry, now) {
             Ok(()) => {
-                reported += 1;
+                queued += 1;
                 let _ = registry.mark_source_reported(&entry, true);
             }
             Err(error) => {
                 eprintln!(
-                    "ai6: CX report for {} not posted: {error}",
+                    "ai6: CX report for {} not queued: {error}",
                     entry.brief.key()
                 );
                 let _ = registry.mark_source_reported(&entry, false);
             }
         }
     }
-    reported
+    queued
 }
 
-fn report_one(
+fn queue_one(
+    registry: &dyn RegistryBackend,
     roster: &Roster,
-    build: &TrackerBuilder<'_>,
     limits: &SourceLimits,
-    trackers: &mut TrackerCache,
     entry: &FinishedSourceBrief,
+    now: f64,
 ) -> Result<(), String> {
     let instance = entry
         .brief
@@ -379,7 +441,7 @@ fn report_one(
         .ok_or("the brief names no Operation")?;
     let operation = roster.operation(operation_key).map_err(|e| e.to_string())?;
     let cover = roster.cover(&operation.cover).map_err(|e| e.to_string())?;
-    let setup = source_setups(operation, limits)
+    source_setups(operation, limits)
         .into_iter()
         .filter_map(Result::ok)
         .find(|setup| setup.name == instance)
@@ -394,37 +456,52 @@ fn report_one(
             "the brief has no provenance from source {instance}, so nothing is posted for it"
         ));
     }
-    let tracker = trackers
-        .entry((operation.id.clone(), instance.to_owned()))
-        .or_insert_with(|| build(&setup.provider, &setup.settings));
-    let tracker = tracker.as_ref().map_err(Clone::clone)?;
     let report = compose_report(cover.disclosure(), entry);
-    tracker
-        .post(TrackerPost {
-            item: report.item_id.clone(),
-            body: report.body.clone(),
-            edit: None,
-            marker: None,
-        })
-        .map_err(|error| error.to_string())?;
-    let update = TrackerUpdate {
-        item: report.item_id.clone(),
-        add_labels: setup
-            .status_labels
-            .for_outcome(&report.outcome)
-            .map(str::to_owned)
-            .into_iter()
-            .collect(),
-        transition: setup
-            .status_transitions
-            .for_outcome(&report.outcome)
-            .map(str::to_owned),
-        ..TrackerUpdate::default()
+    let mission_id = crate::station::server::mission_id_for_brief(&entry.brief)?.to_string();
+    let link = match registry
+        .issue_links(&mission_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|link| link.tracker == instance && link.item == report.item_id)
+    {
+        Some(link) if link.state == LinkState::Active => link,
+        Some(_) => return Ok(()),
+        None => registry
+            .link_issue(&source_link(
+                operation_key,
+                &mission_id,
+                instance,
+                &report.item_id,
+                entry.brief.url.clone(),
+                now,
+            ))
+            .map_err(|e| e.to_string())?,
     };
-    if update.add_labels.is_empty() && update.transition.is_none() {
-        return Ok(());
+    queue_report(registry, &link, report.body, &report.outcome, now)
+}
+
+/// The link from a Mission to the issue it started from.
+pub(crate) fn source_link(
+    operation: &str,
+    mission_id: &str,
+    tracker: &str,
+    item: &str,
+    url: Option<String>,
+    now: f64,
+) -> IssueLink {
+    IssueLink {
+        operation: operation.to_owned(),
+        mission_id: mission_id.to_owned(),
+        tracker: tracker.to_owned(),
+        item: item.to_owned(),
+        url,
+        relation: LinkRelation::Source,
+        state: LinkState::Active,
+        linked_by: "m".to_owned(),
+        linked_at: now,
+        status_comment: None,
+        phase: None,
     }
-    tracker.update(update).map_err(|error| error.to_string())
 }
 
 /// Queues the brief of every authorized sleeper whose latest window has not fired.
@@ -565,6 +642,8 @@ pub(crate) struct SourceDesk {
     busy: AtomicBool,
     due: Mutex<BTreeMap<(String, String), Instant>>,
     next_report: Mutex<Instant>,
+    next_drain: Mutex<Instant>,
+    drained: DrainState,
     next_sleepers: Mutex<Instant>,
     warned: Mutex<BTreeSet<String>>,
     /// This Station: the provenance of the briefs it queues names it.
@@ -581,6 +660,8 @@ impl SourceDesk {
             busy: AtomicBool::new(false),
             due: Mutex::new(BTreeMap::new()),
             next_report: Mutex::new(Instant::now()),
+            next_drain: Mutex::new(Instant::now()),
+            drained: DrainState::new(),
             next_sleepers: Mutex::new(Instant::now()),
             warned: Mutex::new(BTreeSet::new()),
         }
@@ -678,7 +759,29 @@ impl SourceDesk {
             })
             .unwrap_or(false);
         if report_due {
-            report_finished(registry, roster, build_tracker, &self.limits);
+            report_finished(registry, roster, &self.limits, unix_seconds() as f64);
+        }
+        let drain_due = self
+            .next_drain
+            .lock()
+            .map(|mut next| {
+                let due = *next <= now;
+                if due {
+                    *next = now + self.limits.outbox_every.0;
+                }
+                due
+            })
+            .unwrap_or(false);
+        if drain_due {
+            drain_outbox(
+                registry,
+                roster,
+                build_tracker,
+                &self.station,
+                &self.limits,
+                &self.drained,
+                unix_seconds() as f64,
+            );
         }
         let sleepers_due = self
             .next_sleepers
@@ -706,11 +809,16 @@ mod tests {
     use guatiao::{Provider, Status};
 
     use super::*;
+    use crate::directorates::registry::mission_issues::{OutboxEntry, OutboxKind, OutboxState};
     use crate::directorates::registry::sources::{SourceBatch, SourceItem};
     use crate::directorates::registry::store::FileRegistry;
+    use crate::{TrackerPost, TrackerUpdate};
 
     /// Every comment the fake tracker was asked to post, as (item, body).
-    static POSTED: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+    static POSTED: Mutex<Vec<(String, String, Option<String>)>> = Mutex::new(Vec::new());
+    /// Comments the fake tracker lists as written by AI6's own identity, for the failover check.
+    static OWN_REPLIES: Mutex<Vec<crate::Reply>> = Mutex::new(Vec::new());
+    static COMMENT_IDS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
     /// Every update the fake tracker was asked to make.
     static UPDATED: Mutex<Vec<TrackerUpdate>> = Mutex::new(Vec::new());
 
@@ -781,6 +889,8 @@ mod tests {
         ) -> Result<crate::TrackerCapabilities, ProviderError> {
             Ok(crate::TrackerCapabilities {
                 comment: true,
+                edit_comment: true,
+                transitions: vec!["Done".to_owned()],
                 ..Default::default()
             })
         }
@@ -789,16 +899,31 @@ mod tests {
             Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "fake"))
         }
 
-        fn replies(&self, _request: crate::ReplyPoll) -> Result<crate::ReplyBatch, ProviderError> {
-            Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "fake"))
+        fn replies(&self, request: crate::ReplyPoll) -> Result<crate::ReplyBatch, ProviderError> {
+            Ok(crate::ReplyBatch {
+                replies: OWN_REPLIES
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|reply| request.items.contains(&reply.item))
+                    .cloned()
+                    .collect(),
+                cursor: None,
+            })
         }
 
         fn post(&self, post: TrackerPost) -> Result<crate::PostedComment, ProviderError> {
-            POSTED.lock().unwrap().push((post.item, post.body));
-            Ok(crate::PostedComment {
-                id: "1".to_owned(),
-                url: None,
-            })
+            POSTED
+                .lock()
+                .unwrap()
+                .push((post.item, post.body, post.edit.clone()));
+            let id = post.edit.unwrap_or_else(|| {
+                format!(
+                    "c{}",
+                    COMMENT_IDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                )
+            });
+            Ok(crate::PostedComment { id, url: None })
         }
 
         fn update(&self, update: TrackerUpdate) -> Result<(), ProviderError> {
@@ -935,6 +1060,7 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
         let desk = SourceDesk::new("station-a", SourceLimits::default());
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
         desk.run(&plugins, &roster, &registry);
         finish_all(
             &registry,
@@ -949,15 +1075,17 @@ mod tests {
         );
         desk.due.lock().unwrap().clear();
         *desk.next_report.lock().unwrap() = Instant::now();
+        *desk.next_drain.lock().unwrap() = Instant::now();
         desk.run(&plugins, &roster, &registry);
         desk.due.lock().unwrap().clear();
         *desk.next_report.lock().unwrap() = Instant::now();
+        *desk.next_drain.lock().unwrap() = Instant::now();
         desk.run(&plugins, &roster, &registry);
 
         let posted = POSTED.lock().unwrap();
         let mine: Vec<_> = posted
             .iter()
-            .filter(|(item, _)| item == "report-me")
+            .filter(|(item, _, _)| item == "report-me")
             .collect();
         assert_eq!(mine.len(), 1);
         assert!(mine[0].1.contains("ended: done"));
@@ -976,6 +1104,7 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
         let desk = SourceDesk::new("station-a", SourceLimits::default());
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
         desk.run(&plugins, &roster, &registry);
         finish_all(
             &registry,
@@ -984,6 +1113,7 @@ mod tests {
         );
         desk.due.lock().unwrap().clear();
         *desk.next_report.lock().unwrap() = Instant::now();
+        *desk.next_drain.lock().unwrap() = Instant::now();
         desk.run(&plugins, &roster, &registry);
         let updated = UPDATED.lock().unwrap();
         let update = updated
@@ -1271,5 +1401,381 @@ mod tests {
         assert!(assisted.body.contains("m-9"));
         let full = compose_report(Disclosure::Full, &finished(true));
         assert!(full.body.contains("sess-9") && full.body.contains("007"));
+    }
+
+    fn roster_issues(sources: &str, issues: &str) -> (tempfile::TempDir, Roster) {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("operations.toml"),
+            format!(
+                "[operation.G]\nclearance = \"field\"\ncover = \"overt\"\nsources = {sources}\n\
+                 [operation.G.issues]\n{issues}\n"
+            ),
+        )
+        .unwrap();
+        let roster = Roster::load(dir.path()).unwrap();
+        (dir, roster)
+    }
+
+    /// One desk pass with the poll, report and drain timers all due.
+    fn pass(desk: &SourceDesk, plugins: &Plugins, roster: &Roster, registry: &FileRegistry) {
+        desk.due.lock().unwrap().clear();
+        *desk.next_report.lock().unwrap() = Instant::now();
+        *desk.next_drain.lock().unwrap() = Instant::now();
+        desk.drained.last_status.lock().unwrap().clear();
+        desk.run(plugins, roster, registry);
+    }
+
+    fn posts_to(item: &str) -> Vec<(String, Option<String>)> {
+        POSTED
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(posted, _, _)| posted == item)
+            .map(|(_, body, edit)| (body.clone(), edit.clone()))
+            .collect()
+    }
+
+    fn updates_to(item: &str) -> Vec<TrackerUpdate> {
+        UPDATED
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|update| update.item == item)
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn polling_links_the_source_issue_to_the_mission_its_brief_will_get() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_with("covert", "{ fake = { ids = [\"lk-1\"] } }");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        let links = registry.issue_links("source_fake--lk-1").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].relation, LinkRelation::Source);
+        assert_eq!(
+            (links[0].tracker.as_str(), links[0].item.as_str()),
+            ("fake", "lk-1")
+        );
+        assert_eq!(links[0].linked_by, "m");
+        // A person's unlink holds: the next poll does not link it again.
+        registry
+            .unlink_issue("source_fake--lk-1", "fake", "lk-1")
+            .unwrap();
+        pass(&desk, &plugins, &roster, &registry);
+        assert!(registry.active_issue_links().unwrap().is_empty());
+    }
+
+    #[test]
+    fn one_status_comment_is_posted_then_edited_through_working_waiting_working() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_issues(
+            "{ fake = { ids = [\"st-1\"], status_labels = { working = \"ai6:working\", waiting = \"ai6:waiting\" } } }",
+            "",
+        );
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        let mission = "source_fake--st-1";
+
+        for phase in ["working", "waiting", "working"] {
+            assert_eq!(
+                crate::station::issues::queue_status(&registry, &roster, mission, phase, 1.0),
+                1
+            );
+            pass(&desk, &plugins, &roster, &registry);
+        }
+        let posts = posts_to("st-1");
+        assert_eq!(posts.len(), 3, "{posts:?}");
+        assert_eq!(posts[0].1, None, "the first status is a new comment");
+        let comment = registry.issue_links(mission).unwrap()[0]
+            .status_comment
+            .clone()
+            .unwrap();
+        assert_eq!(
+            posts[1].1.as_deref(),
+            Some(comment.as_str()),
+            "later ones edit it"
+        );
+        assert_eq!(posts[2].1.as_deref(), Some(comment.as_str()));
+        assert!(posts[1].0.contains("waiting"), "{}", posts[1].0);
+        let updates = updates_to("st-1");
+        assert_eq!(updates.len(), 3);
+        assert_eq!(updates[0].add_labels, ["ai6:working"]);
+        assert_eq!(updates[0].remove_labels, ["ai6:waiting"]);
+        assert_eq!(updates[1].add_labels, ["ai6:waiting"]);
+        assert_eq!(updates[1].remove_labels, ["ai6:working"]);
+        assert_eq!(updates[2].add_labels, ["ai6:working"]);
+        assert_eq!(
+            registry.issue_links(mission).unwrap()[0].phase.as_deref(),
+            Some("working")
+        );
+        let entries = registry.outbox_entries(Some(mission)).unwrap();
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.state == OutboxState::Posted)
+        );
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
+    fn status_writes_to_one_issue_are_spaced_by_the_policy() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_issues("{ fake = { ids = [\"sp-1\"] } }", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        let mission = "source_fake--sp-1";
+        crate::station::issues::queue_status(&registry, &roster, mission, "working", 1.0);
+        pass(&desk, &plugins, &roster, &registry);
+        crate::station::issues::queue_status(&registry, &roster, mission, "paused", 2.0);
+        // Not cleared this time: the issue was written a moment ago.
+        desk.due.lock().unwrap().clear();
+        *desk.next_drain.lock().unwrap() = Instant::now();
+        desk.run(&plugins, &roster, &registry);
+        assert_eq!(posts_to("sp-1").len(), 1, "the second status waits");
+        assert_eq!(
+            registry
+                .outbox_entries(Some(mission))
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.state == OutboxState::Pending)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn updates_outcome_writes_no_status_and_all_writes_every_link() {
+        let (_dir, roster) =
+            roster_issues("{ fake = { ids = [\"oc-1\"] } }", "updates = \"outcome\"");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry
+            .link_issue(&source_link("G", "m-oc", "fake", "oc-1", None, 1.0))
+            .unwrap();
+        assert_eq!(
+            crate::station::issues::queue_status(&registry, &roster, "m-oc", "working", 1.0),
+            0
+        );
+        let (_dir, roster) = roster_issues("{ fake = { ids = [\"al-1\"] } }", "updates = \"all\"");
+        let mut child = source_link("G", "m-al", "fake", "al-2", None, 1.0);
+        child.relation = LinkRelation::Child;
+        registry
+            .link_issue(&source_link("G", "m-al", "fake", "al-1", None, 1.0))
+            .unwrap();
+        registry.link_issue(&child).unwrap();
+        assert_eq!(
+            crate::station::issues::queue_status(&registry, &roster, "m-al", "working", 1.0),
+            2
+        );
+        assert_eq!(
+            crate::station::issues::queue_status(&registry, &roster, "m-al", "done", 2.0),
+            1,
+            "the report covers the source's end; the child gets a status"
+        );
+        // Milestones (the default) writes the source only, and not its end.
+        let (_dir, roster) = roster_issues("{ fake = { ids = [\"ms-1\"] } }", "");
+        registry
+            .link_issue(&source_link("G", "m-ms", "fake", "ms-1", None, 1.0))
+            .unwrap();
+        assert_eq!(
+            crate::station::issues::queue_status(&registry, &roster, "m-ms", "waiting", 1.0),
+            1
+        );
+        assert_eq!(
+            crate::station::issues::queue_status(&registry, &roster, "m-ms", "done", 2.0),
+            0
+        );
+    }
+
+    #[test]
+    fn the_report_is_a_new_comment_and_is_sent_once_across_a_headquarters_change() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_with("overt", "{ fake = { ids = [\"fo-1\"] } }");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        finish_all(
+            &registry,
+            true,
+            serde_json::json!({ "state": "done", "mission_id": "source_fake--fo-1" }),
+        );
+        // The old Headquarters Station queued the report, began sending it, and its comment
+        // reached the issue; it died before it recorded that.
+        *desk.next_report.lock().unwrap() = Instant::now();
+        report_finished(&registry, &roster, &SourceLimits::default(), 5.0);
+        let entry = registry.outbox_entries(None).unwrap().remove(0);
+        assert_eq!(entry.kind, OutboxKind::Report);
+        registry
+            .begin_outbox_send(&entry.id, 99, 6.0)
+            .unwrap()
+            .unwrap();
+        OWN_REPLIES.lock().unwrap().push(crate::Reply {
+            id: "c-old".to_owned(),
+            item: "fo-1".to_owned(),
+            own: true,
+            body: format!("done <!-- ai6:{} -->", entry.id),
+            ..crate::Reply::default()
+        });
+        pass(&desk, &plugins, &roster, &registry);
+        let settled = registry.outbox_entry(&entry.id).unwrap().unwrap();
+        assert_eq!(settled.state, OutboxState::Posted);
+        assert_eq!(
+            settled.result.unwrap().comment_id.as_deref(),
+            Some("c-old"),
+            "recorded, not reposted"
+        );
+        assert!(posts_to("fo-1").is_empty(), "nothing was posted again");
+    }
+
+    #[test]
+    fn a_send_the_old_term_left_that_never_arrived_is_sent_again_and_a_create_is_refused() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_with("overt", "{ fake = { ids = [\"fo-2\"] } }");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        let mission = "source_fake--fo-2";
+        let mut comment =
+            OutboxEntry::new("G", mission, "fake", "fo-2", OutboxKind::Comment, "m", 1.0);
+        comment.body = "A question.".to_owned();
+        let comment = registry.queue_outbox(&comment).unwrap();
+        let mut create = OutboxEntry::new("G", mission, "fake", "", OutboxKind::Create, "m", 1.0);
+        create.payload = serde_json::json!({ "title": "x" });
+        let create = registry.queue_outbox(&create).unwrap();
+        for entry in [&comment, &create] {
+            registry
+                .begin_outbox_send(&entry.id, 99, 2.0)
+                .unwrap()
+                .unwrap();
+        }
+        pass(&desk, &plugins, &roster, &registry);
+        assert_eq!(
+            registry.outbox_entry(&comment.id).unwrap().unwrap().state,
+            OutboxState::Posted
+        );
+        assert_eq!(posts_to("fo-2").len(), 1, "sent again");
+        let create = registry.outbox_entry(&create.id).unwrap().unwrap();
+        assert_eq!(create.state, OutboxState::Refused);
+        assert!(create.error.unwrap().contains("check the tracker"));
+    }
+
+    #[test]
+    fn only_the_headquarters_station_sends() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_with("overt", "{ fake = { ids = [\"hq-1\"] } }");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry.elect("station-b", crate::DEFAULT_LEASE).unwrap();
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        let mut entry = OutboxEntry::new(
+            "G",
+            "source_fake--hq-1",
+            "fake",
+            "hq-1",
+            OutboxKind::Comment,
+            "m",
+            1.0,
+        );
+        entry.body = "x".to_owned();
+        registry.queue_outbox(&entry).unwrap();
+        pass(&desk, &plugins, &roster, &registry);
+        assert!(posts_to("hq-1").is_empty());
+        assert_eq!(registry.due_outbox(f64::MAX, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_failing_send_backs_off_and_a_refused_one_is_never_retried() {
+        let (_dir, roster) = roster_with("overt", "{ fake = { ids = [\"bo-1\"] } }");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
+        registry
+            .link_issue(&source_link("G", "m-bo", "fake", "bo-1", None, 1.0))
+            .unwrap();
+        let mut entry =
+            OutboxEntry::new("G", "m-bo", "fake", "bo-1", OutboxKind::Comment, "m", 1.0);
+        entry.body = "x".to_owned();
+        let queued = registry.queue_outbox(&entry).unwrap();
+        let memory = crate::station::issues::DrainState::new();
+        let limits = SourceLimits::default();
+        let now = unix_seconds() as f64;
+        let down = |_: &str, _: &toml::Table| -> Result<Box<dyn Tracker>, String> {
+            Err("the tracker is unreachable".to_owned())
+        };
+        drain_outbox(
+            &registry,
+            &roster,
+            &down,
+            "station-a",
+            &limits,
+            &memory,
+            now,
+        );
+        let after = registry.outbox_entry(&queued.id).unwrap().unwrap();
+        assert_eq!(after.state, OutboxState::Pending);
+        assert_eq!(after.attempts, 1);
+        assert!(after.not_before >= now + limits.retry_backoff.0.as_secs_f64());
+        assert_eq!(
+            drain_outbox(
+                &registry,
+                &roster,
+                &down,
+                "station-a",
+                &limits,
+                &memory,
+                now
+            ),
+            0,
+            "not due yet"
+        );
+        // An unknown tracker instance is refused outright.
+        let mut stray =
+            OutboxEntry::new("G", "m-bo", "nowhere", "z", OutboxKind::Comment, "m", 1.0);
+        stray.body = "x".to_owned();
+        registry
+            .link_issue(&source_link("G", "m-bo", "nowhere", "z", None, 1.0))
+            .unwrap();
+        let stray = registry.queue_outbox(&stray).unwrap();
+        drain_outbox(
+            &registry,
+            &roster,
+            &down,
+            "station-a",
+            &limits,
+            &memory,
+            now,
+        );
+        let refused = registry.outbox_entry(&stray.id).unwrap().unwrap();
+        assert_eq!(refused.state, OutboxState::Refused);
+        assert!(refused.error.unwrap().contains("configures no tracker"));
+    }
+
+    #[test]
+    fn a_looser_issues_setting_is_a_start_up_weakening() {
+        let (_dir, roster) = roster_issues(
+            "{ fake = { ids = [] } }",
+            "posts_per_hour = 600\ncreate = \"direct\"",
+        );
+        let lines = crate::station::issues::weakenings(&roster);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].contains("Operation \"G\" issues is weakened"));
+        let (_dir, strict) = roster_issues("{ fake = { ids = [] } }", "");
+        assert!(crate::station::issues::weakenings(&strict).is_empty());
     }
 }
