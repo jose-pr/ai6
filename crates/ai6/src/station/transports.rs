@@ -939,7 +939,7 @@ pub(crate) mod testing {
 
     /// A POSIX host reached through a link that a test can drop: commands run in `sh` with a
     /// home directory, files are local, a forward is a local TCP relay, and
-    /// `ai6 runner call` reaches the runner serving `runner_dir` as the command would.
+    /// `ai6 runner connect` reaches the runner serving `runner_dir` as the command would.
     #[cfg(unix)]
     pub(crate) struct ShellTransport {
         home: PathBuf,
@@ -984,39 +984,74 @@ pub(crate) mod testing {
                 self.home.join(path)
             }
         }
+    }
 
-        fn runner_call(&self, spec: &RunSpec) -> Output {
-            let mut words = spec.argv[3..].iter();
-            let mut state_dir = self.runner_dir.clone().unwrap_or_default();
-            let mut rest = Vec::new();
-            while let Some(word) = words.next() {
-                if word == "--state-dir" {
-                    state_dir = PathBuf::from(words.next().cloned().unwrap_or_default());
-                } else {
-                    rest.push(word.clone());
+    /// What `ai6 runner connect` leaves a Station holding: the runner's stream, behind the
+    /// link a test can drop.
+    #[cfg(unix)]
+    struct ConnectSession {
+        writer: std::net::TcpStream,
+        reader: std::sync::Mutex<std::io::BufReader<std::net::TcpStream>>,
+        ready: std::sync::Mutex<Option<Vec<u8>>>,
+        down: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[cfg(unix)]
+    impl crate::directorates::q::terminal::TerminalSession for ConnectSession {
+        fn pid(&self) -> i64 {
+            0
+        }
+
+        fn read(&self, dst: &mut [u8], timeout_ms: i64) -> Result<i64, ProviderError> {
+            use std::io::Read;
+            if self.down.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(internal("the link is down"));
+            }
+            if let Some(ready) = self.ready.lock().unwrap().take() {
+                dst[..ready.len()].copy_from_slice(&ready);
+                return Ok(ready.len() as i64);
+            }
+            let mut reader = self.reader.lock().unwrap();
+            let _ = reader
+                .get_ref()
+                .set_read_timeout(Some(std::time::Duration::from_millis(
+                    timeout_ms.max(1) as u64
+                )));
+            match reader.read(dst) {
+                Ok(count) => Ok(count as i64),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    Ok(crate::directorates::q::terminal::READ_TIMED_OUT)
                 }
+                Err(error) => Err(io(&error)),
             }
-            let body = spec
-                .stdin
-                .as_ref()
-                .filter(|stdin| !stdin.0.is_empty())
-                .map(|stdin| serde_json::from_slice::<serde_json::Value>(&stdin.0).unwrap());
-            match crate::station::runner::call(&state_dir, &rest[0], &rest[1], body.as_ref()) {
-                Ok((status, body)) => Output {
-                    code: Some(0),
-                    stdout: Bytes(
-                        serde_json::json!({ "status": status, "body": body })
-                            .to_string()
-                            .into_bytes(),
-                    ),
-                    ..Output::default()
-                },
-                Err(error) => Output {
-                    code: Some(i64::from(crate::station::runner::CALL_NOT_RUNNING)),
-                    stderr: Bytes(error.into_bytes()),
-                    ..Output::default()
-                },
+        }
+
+        fn write(&self, data: &[u8]) -> Result<(), ProviderError> {
+            use std::io::Write;
+            if self.down.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(internal("the link is down"));
             }
+            (&self.writer).write_all(data).map_err(|error| io(&error))
+        }
+
+        fn resize(&self, _rows: i64, _cols: i64) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn kill(&self) -> Result<(), ProviderError> {
+            let _ = self.writer.shutdown(std::net::Shutdown::Both);
+            Ok(())
+        }
+
+        fn exit_status(&self, _timeout_ms: i64) -> Result<Value, ProviderError> {
+            crate::directorates::q::terminal::ExitInfo::default()
+                .to_value()
+                .map_err(internal)
         }
     }
 
@@ -1024,6 +1059,7 @@ pub(crate) mod testing {
     impl Transport for ShellTransport {
         fn capabilities(&self) -> Result<Value, ProviderError> {
             Capabilities {
+                terminal: true,
                 run: true,
                 files: true,
                 forward: true,
@@ -1034,16 +1070,46 @@ pub(crate) mod testing {
             .map_err(internal)
         }
 
+        /// `ai6 runner connect` on this host, as the command would relay it: only that program.
+        fn open_terminal(
+            &self,
+            spec: &Value,
+        ) -> Result<
+            guatiao::library::Object<dyn crate::directorates::q::terminal::TerminalSession>,
+            ProviderError,
+        > {
+            use crate::directorates::q::terminal::TerminalSession as _;
+            self.check()?;
+            let spec =
+                crate::directorates::q::terminal::Spec::from_value(spec).map_err(internal)?;
+            if spec.argv.get(..3)
+                != Some(&["ai6".to_owned(), "runner".to_owned(), "connect".to_owned()])
+            {
+                return Err(internal("this test host opens only `ai6 runner connect`"));
+            }
+            let mut state_dir = self.runner_dir.clone().unwrap_or_default();
+            let mut words = spec.argv[3..].iter();
+            while let Some(word) = words.next() {
+                if word == "--state-dir" {
+                    state_dir = PathBuf::from(words.next().cloned().unwrap_or_default());
+                }
+            }
+            let (stream, reader) = crate::station::runner::client::authenticated_stream(&state_dir)
+                .map_err(internal)?;
+            Ok(ConnectSession {
+                writer: stream,
+                reader: std::sync::Mutex::new(reader),
+                ready: std::sync::Mutex::new(Some(
+                    format!("{}\n", crate::station::runner::client::READY_LINE).into_bytes(),
+                )),
+                down: self.down.clone(),
+            }
+            .into_object())
+        }
+
         fn run(&self, spec: &Value) -> Result<Value, ProviderError> {
             self.check()?;
             let spec = RunSpec::from_value(spec).map_err(internal)?;
-            if spec
-                .argv
-                .get(..3)
-                .is_some_and(|words| words == ["ai6", "runner", "call"])
-            {
-                return self.runner_call(&spec).to_value().map_err(internal);
-            }
             let line = crate::directorates::q::transport::kit::command_line(
                 &spec.argv,
                 spec.cwd.as_deref(),

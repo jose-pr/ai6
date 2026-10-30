@@ -100,7 +100,7 @@ zeroize.workspace = true
 # a link or waiting on a pipe.
 libc = "0.2.170"
 # The effective user, to tell a Station running as root; already built for tempfile.
-rustix = { version = "1.1.5", features = ["process"], optional = true }
+rustix = { version = "1.1.5", features = ["process", "termios"], optional = true }
 
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }

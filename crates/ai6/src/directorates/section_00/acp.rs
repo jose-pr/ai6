@@ -26,12 +26,12 @@ mod meta;
 
 pub use client::{
     AcpOptions, AcpSession, Authenticate, PermissionDecider, PermissionDecision, PermissionOption,
-    PermissionRequest, RefuseAll,
+    PermissionRequest, RefuseAll, RpcFailure, exchange,
 };
 pub use facade::{AcpFacade, Credential, FacadeAuth, TerminalFactory};
 #[cfg(feature = "gate")]
 pub use gate_decider::GateDecider;
-pub use lines::{TerminalIo, lines_over_io};
+pub use lines::{IoLines, TerminalIo, lines_over_io};
 pub use meta::{HandlerSpec, LaunchMeta, ResumeMeta};
 
 /// The `_meta` key of `session/new`, `session/load` and `session/resume` that carries

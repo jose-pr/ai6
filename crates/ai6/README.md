@@ -64,7 +64,7 @@ ai6 serve [--config PATH] [--provider LOCATION] [--registry LOCATION] [--state-d
           [--plugin-profile strict|report|off]
 ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH]
           [--plugin-profile strict|report|off] [--terminal ID] [--detach]
-ai6 runner call [--state-dir PATH] METHOD PATH
+ai6 runner connect [--state-dir PATH]
 ai6 plugins pin PATH...
 ai6 harness pin DIR
 ai6 identity [--config PATH]
@@ -141,9 +141,9 @@ token = { file = "unex-token" }  # the Station publishes only with a token
 - `ai6 runner serve` runs the field runner on a Theater: it supervises harnesses there for
   Stations, spooling their events under its state directory (default `runner` in AI6's state
   directory) and serving them on a token-protected loopback port. `--detach` starts it in
-  the background. `ai6 runner call` relays one request to it (a body on standard input) and
-  prints the status and answer; a Station that reaches the host through a transport talks to
-  the runner this way. It exits `3` when no runner answers.
+  the background. `ai6 runner connect` relays standard input and output to it over the Agent Client
+  Protocol, authenticated; a Station that reaches the host through a transport talks to the
+  runner this way. It exits `3` when no runner answers.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists certificates a peer-trust listener rejected; `ai6 peer accept`
   pins one of them.

@@ -114,6 +114,9 @@ pub struct AcpOptions {
     pub prompt: Option<String>,
     /// A session to resume (`session/resume`, else `session/load`) instead of a new one.
     pub resume: Option<String>,
+    /// Reattach to a live session by `session/load`, whatever else the agent offers, asking
+    /// it to replay what follows this event sequence number (`0` for all it kept).
+    pub reattach: Option<u64>,
     /// Whether the Session only reads and answers: every permission request for a tool that
     /// edits, deletes, moves or executes is refused, and a tool of those kinds that runs
     /// without asking ends the Session.
@@ -131,6 +134,12 @@ pub struct AcpOptions {
     pub close_grace_ms: u64,
     /// Answers permission requests.
     pub decider: Arc<dyn PermissionDecider>,
+    /// Whether dropping the session without closing it closes the agent's session. A Station
+    /// reattaching to a runner's Session sets it off, so a lost connection ends nothing.
+    pub close_on_drop: bool,
+    /// Whether a connection that ends without being closed is a `failed` event. A runner's
+    /// Session is not failed by its link dropping: the Station attaches again.
+    pub fail_on_disconnect: bool,
 }
 
 impl Default for AcpOptions {
@@ -145,6 +154,7 @@ impl Default for AcpOptions {
             effort_option: None,
             prompt: None,
             resume: None,
+            reattach: None,
             restricted: false,
             authenticate: None,
             initialize_timeout_ms: 20_000,
@@ -152,12 +162,15 @@ impl Default for AcpOptions {
             start_timeout_ms: 60_000,
             close_grace_ms: 2_000,
             decider: Arc::new(RefuseAll),
+            close_on_drop: true,
+            fail_on_disconnect: true,
         }
     }
 }
 
 enum Command {
     Prompt(String),
+    Ack(u64),
     Cancel,
     Close(mpsc::Sender<()>),
     Abort,
@@ -169,12 +182,18 @@ enum Lifecycle {
 }
 
 /// What the notification handlers share with the connection's main task.
+/// An event with the sequence number its agent spooled it under, when it has one.
+type Queued = (Option<u64>, AgentEvent);
+
 struct Shared {
-    events: mpsc::Sender<AgentEvent>,
+    events: mpsc::Sender<Queued>,
+    lost: AtomicBool,
     commands: async_mpsc::UnboundedSender<Command>,
     lifecycle: async_mpsc::UnboundedSender<Lifecycle>,
     decider: Arc<dyn PermissionDecider>,
     restricted: bool,
+    close_on_drop: bool,
+    fail_on_disconnect: bool,
     closing: AtomicBool,
     inner: Mutex<Inner>,
 }
@@ -188,6 +207,13 @@ struct Inner {
     events_capability: bool,
     /// Replayed history of `session/load` is dropped.
     suppress: bool,
+    /// The parameters of the notification that said the operation started.
+    start_info: Option<Value>,
+    /// The newest runner sequence number handed out by `next_event`.
+    delivered: u64,
+    /// The one handed out and not yet acknowledged: the caller acknowledges it by asking for
+    /// the next, once it has dealt with it.
+    unacked: Option<u64>,
     /// A completed, failed or limit event ended the current turn.
     finished: bool,
     text: String,
@@ -219,13 +245,24 @@ impl Shared {
             }
             self.flush_locked(&mut inner);
         }
-        let _ = self.events.send(event);
+        let _ = self.events.send((None, event));
+    }
+
+    /// An event a runner spooled under `seq`: delivered with it, so taking it can be acknowledged.
+    fn emit_seq(&self, seq: u64, event: AgentEvent) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if is_terminal(&event.kind) {
+                inner.finished = true;
+            }
+            self.flush_locked(&mut inner);
+        }
+        let _ = self.events.send((Some(seq), event));
     }
 
     fn flush_locked(&self, inner: &mut Inner) {
         if !inner.text.is_empty() {
             let text = std::mem::take(&mut inner.text);
-            let _ = self.events.send(event("text", Some(text)));
+            let _ = self.events.send((None, event("text", Some(text))));
         }
     }
 
@@ -259,6 +296,14 @@ impl Shared {
     /// not send [`EVENT_NOTIFICATION`].
     fn turn_ended(&self, result: Result<Value, Error>) {
         self.flush();
+        // A turn cut off by the connection ending is the connection's to report (lost, or
+        // failed when the caller asked for that), not the turn's.
+        if let Err(error) = &result
+            && (agent_client_protocol::is_incoming_transport_closed(error)
+                || agent_client_protocol::is_connection_terminated(error))
+        {
+            return;
+        }
         if self.events_capability() {
             if let Err(error) = result {
                 let _ = self
@@ -396,24 +441,18 @@ impl Shared {
     fn event_only(&self, params: &Value) {
         match params.get("event") {
             Some(Value::Null) | None => {
+                if let Ok(mut inner) = self.inner.lock() {
+                    inner.start_info = Some(params.clone());
+                }
                 let _ = self.lifecycle.unbounded_send(Lifecycle::Started);
             }
-            Some(raw) => {
-                let suppressed = self
-                    .inner
-                    .lock()
-                    .map(|inner| inner.suppress)
-                    .unwrap_or(false);
-                if suppressed {
-                    return;
-                }
-                match serde_json::from_value::<AgentEvent>(raw.clone()) {
-                    Ok(event) => self.emit(event),
-                    Err(error) => {
-                        self.emit(event_text("notice", format!("unreadable event: {error}")))
-                    }
-                }
-            }
+            Some(raw) => match serde_json::from_value::<AgentEvent>(raw.clone()) {
+                Ok(event) => match params.get("seq").and_then(Value::as_u64) {
+                    Some(seq) => self.emit_seq(seq, event),
+                    None => self.emit(event),
+                },
+                Err(error) => self.emit(event_text("notice", format!("unreadable event: {error}"))),
+            },
         }
     }
 }
@@ -814,6 +853,22 @@ async fn open(
         }
     };
     let (session, config) = match &options.resume {
+        Some(id) if options.reattach.is_some() => {
+            if !capabilities.load_session {
+                return Err("the agent cannot load a session".to_owned());
+            }
+            let mut params = session_params(options, Some(id));
+            let after = options.reattach.unwrap_or_default();
+            // `u64::MAX` asks the agent to continue from where it last heard from this side.
+            if after != u64::MAX {
+                params["_meta"]["dev.coqui.ai6/after"] = json!(after);
+            }
+            let answer = call(cx, "session/load", params, options.request_timeout_ms)
+                .await
+                .map_err(described)?;
+            let _ = answer;
+            (id.clone(), Vec::new())
+        }
         None => {
             let answer = call(
                 cx,
@@ -852,13 +907,18 @@ async fn open(
                 inner.suppress = false;
             }
             let answer = answer.map_err(described)?;
+            // A field runner names the Session by its key, which is not the provider's ID.
+            let named = answer
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             let config = answer
                 .get("configOptions")
                 .and_then(|value| {
                     serde_json::from_value::<Vec<SessionConfigOption>>(value.clone()).ok()
                 })
                 .unwrap_or_default();
-            (id.clone(), config)
+            (named.unwrap_or_else(|| id.clone()), config)
         }
     };
     if let Ok(mut inner) = shared.inner.lock() {
@@ -965,6 +1025,14 @@ async fn main_task(
             }
         }
     }
+    if options.prompt.is_none()
+        && options.resume.is_some()
+        && options.reattach.is_none()
+        && shared.events_capability()
+    {
+        // A resumed operation says it is running before the session is handed out.
+        let _ = within(options.start_timeout_ms, lifecycle.next()).await;
+    }
     let _ = ready.send(Ok(()));
     let closed = cx.incoming_closed();
     let mut closed = std::pin::pin!(closed);
@@ -974,8 +1042,9 @@ async fn main_task(
             Either::Left((command, _)) => command,
             Either::Right(_) => {
                 if !shared.closing.load(Ordering::SeqCst) {
+                    shared.lost.store(true, Ordering::SeqCst);
                     shared.flush();
-                    if !shared.finished() {
+                    if shared.fail_on_disconnect && !shared.finished() {
                         shared.emit(event_text(
                             "failed",
                             "the agent closed its connection".to_owned(),
@@ -989,6 +1058,13 @@ async fn main_task(
             Some(Command::Prompt(text)) => {
                 if let Err(error) = send_prompt(&cx, &shared, &session, text) {
                     shared.emit(event_text("failed", error_text(&error)));
+                }
+            }
+            Some(Command::Ack(seq)) => {
+                if let Ok(message) =
+                    UntypedMessage::new("_ai6/ack", json!({"sessionId": session, "seq": seq}))
+                {
+                    let _ = cx.send_notification(message);
                 }
             }
             Some(Command::Cancel) => {
@@ -1024,10 +1100,95 @@ async fn main_task(
     Ok(())
 }
 
+/// A JSON-RPC error an agent answered a call with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RpcFailure {
+    /// The JSON-RPC error code (`-32002` is a resource that was not found).
+    pub code: i32,
+    /// The agent's message, with its detail.
+    pub message: String,
+}
+
+/// Connects over `transport`, initializes, authenticates when asked, and makes each of `calls`
+/// in turn: what a Station does to ask a field runner a question or give it an order that is no
+/// session. The outer error is why the exchange could not take place; each call has its own.
+///
+/// # Errors
+///
+/// The connection, `initialize` or `authenticate` failed, in a sentence.
+pub fn exchange(
+    transport: impl ConnectTo<Client> + 'static,
+    authenticate: Option<Authenticate>,
+    initialize_timeout_ms: u64,
+    request_timeout_ms: u64,
+    calls: Vec<(String, Value)>,
+) -> Result<Vec<Result<Value, RpcFailure>>, String> {
+    let worker = std::thread::Builder::new()
+        .name("ai6-acp-exchange".to_owned())
+        .spawn(move || {
+            futures::executor::block_on(Client.builder().name("ai6").connect_with(
+                transport,
+                async move |cx| {
+                    let started = call(
+                        &cx,
+                        "initialize",
+                        json!({
+                            "protocolVersion": 1,
+                            "clientCapabilities": {
+                                "fs": {"readTextFile": false, "writeTextFile": false},
+                                "terminal": false
+                            },
+                            "clientInfo": {"name": "ai6", "version": env!("CARGO_PKG_VERSION")},
+                        }),
+                        initialize_timeout_ms,
+                    )
+                    .await;
+                    if let Err(error) = started {
+                        return Ok(Err(error));
+                    }
+                    if let Some(auth) = authenticate {
+                        let mut params = json!({"methodId": auth.method});
+                        params["_meta"] = Value::Object(auth.meta);
+                        if let Err(error) =
+                            call(&cx, "authenticate", params, request_timeout_ms).await
+                        {
+                            return Ok(Err(error));
+                        }
+                    }
+                    let mut results = Vec::new();
+                    for (method, params) in calls {
+                        let message = UntypedMessage::new(&method, params)?;
+                        results.push(
+                            match within(request_timeout_ms, cx.send_request(message).block_task())
+                                .await
+                            {
+                                Ok(Ok(value)) => Ok(value),
+                                Ok(Err(error)) => Err(RpcFailure {
+                                    code: i32::from(error.code),
+                                    message: error_text(&error),
+                                }),
+                                Err(()) => Err(RpcFailure {
+                                    code: -1,
+                                    message: format!("no answer within {request_timeout_ms} ms"),
+                                }),
+                            },
+                        );
+                    }
+                    Ok(Ok(results))
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    worker
+        .join()
+        .map_err(|_| "the ACP exchange panicked".to_owned())?
+        .map_err(|error| format!("the ACP connection failed: {}", error_text(&error)))?
+}
+
 /// One ACP connection to an agent, driven as an [`AgentSession`].
 pub struct AcpSession {
     shared: Arc<Shared>,
-    events: Mutex<mpsc::Receiver<AgentEvent>>,
+    events: Mutex<mpsc::Receiver<Queued>>,
     commands: async_mpsc::UnboundedSender<Command>,
     on_close: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     close_grace_ms: u64,
@@ -1057,10 +1218,13 @@ impl AcpSession {
         let (ready_tx, ready_rx) = mpsc::channel();
         let shared = Arc::new(Shared {
             events: events_tx,
+            lost: AtomicBool::new(false),
             commands: commands_tx.clone(),
             lifecycle: lifecycle_tx,
             decider: options.decider.clone(),
             restricted: options.restricted,
+            close_on_drop: options.close_on_drop,
+            fail_on_disconnect: options.fail_on_disconnect,
             closing: AtomicBool::new(false),
             inner: Mutex::new(Inner::default()),
         });
@@ -1072,6 +1236,7 @@ impl AcpSession {
                 let for_requests = worker.clone();
                 let for_notifications = worker.clone();
                 let failed = ready_tx.clone();
+                let after = worker.clone();
                 let result = futures::executor::block_on(
                     Client
                         .builder()
@@ -1101,6 +1266,17 @@ impl AcpSession {
                         "the ACP connection failed: {}",
                         error_text(&error)
                     )));
+                    // A connection that breaks is lost, as one that closes is.
+                    if !after.closing.load(Ordering::SeqCst) {
+                        after.lost.store(true, Ordering::SeqCst);
+                        after.flush();
+                        if after.fail_on_disconnect && !after.finished() {
+                            after.emit(event_text(
+                                "failed",
+                                format!("the agent's connection failed: {}", error_text(&error)),
+                            ));
+                        }
+                    }
                 }
             })
             .map_err(|error| provider_error(error.to_string()))?;
@@ -1125,7 +1301,7 @@ impl AcpSession {
     }
 
     fn release(&self) {
-        if !self.shared.closing.swap(true, Ordering::SeqCst) {
+        if !self.shared.closing.swap(true, Ordering::SeqCst) && self.shared.close_on_drop {
             // Never closed: say so to the agent, which may hold a harness.
             let (ack, _) = mpsc::channel();
             let _ = self.commands.unbounded_send(Command::Close(ack));
@@ -1163,8 +1339,17 @@ impl AgentSession for AcpSession {
             .events
             .lock()
             .map_err(|_| provider_error("ACP event lock was poisoned"))?;
+        self.acknowledge_taken();
         match events.recv_timeout(Duration::from_millis(timeout_ms.max(0).unsigned_abs())) {
-            Ok(event) => Ok(Some(event)),
+            Ok((seq, event)) => {
+                if let Some(seq) = seq
+                    && let Ok(mut inner) = self.shared.inner.lock()
+                {
+                    inner.delivered = inner.delivered.max(seq);
+                    inner.unacked = Some(seq);
+                }
+                Ok(Some(event))
+            }
             Err(_) => Ok(None),
         }
     }
@@ -1176,6 +1361,8 @@ impl AgentSession for AcpSession {
     }
 
     fn close(&self) -> Result<(), ProviderError> {
+        // What was taken is acknowledged, so nothing is left to replay.
+        self.acknowledge_taken();
         let (ack, acked) = mpsc::channel();
         self.shared.closing.store(true, Ordering::SeqCst);
         if self.commands.unbounded_send(Command::Close(ack)).is_ok() {
@@ -1201,6 +1388,45 @@ impl Drop for AcpSession {
 }
 
 impl AcpSession {
+    /// The parameters of the notification that said the operation started: the provider
+    /// Session ID and whatever else the agent told (a runner names the terminal it chose).
+    pub fn start_info(&self) -> Option<Value> {
+        self.shared
+            .inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.start_info.clone())
+    }
+
+    /// Acknowledges the event last handed out, if it has not been: asking for another says
+    /// the caller is done with it.
+    fn acknowledge_taken(&self) {
+        let taken = self
+            .shared
+            .inner
+            .lock()
+            .ok()
+            .and_then(|mut inner| inner.unacked.take());
+        if let Some(seq) = taken {
+            let _ = self.commands.unbounded_send(Command::Ack(seq));
+        }
+    }
+
+    /// The newest runner sequence number `next_event` has handed out; `0` before any.
+    pub fn last_seq(&self) -> u64 {
+        self.shared
+            .inner
+            .lock()
+            .map(|inner| inner.delivered)
+            .unwrap_or_default()
+    }
+
+    /// Whether the connection ended without this side closing it: the agent, or the link to
+    /// it, is gone.
+    pub fn connection_lost(&self) -> bool {
+        self.shared.lost.load(Ordering::SeqCst)
+    }
+
     /// This session as the object handle a Station holds.
     pub fn into_handle(self) -> Object<dyn AgentSession> {
         self.into_object()

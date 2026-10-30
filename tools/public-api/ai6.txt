@@ -1113,7 +1113,10 @@ pub fn ai6::directorates::m::theaters::EphemeralAccess::settings_toml(&self) -> 
 pub fn ai6::directorates::m::theaters::EphemeralAccess::with_setting(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<serde_json::value::Value>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::RunnerSettings
 pub ai6::directorates::m::theaters::RunnerSettings::command: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::theaters::RunnerSettings::connect_timeout_ms: core::option::Option<u64>
+pub ai6::directorates::m::theaters::RunnerSettings::initialize_timeout_ms: core::option::Option<u64>
 pub ai6::directorates::m::theaters::RunnerSettings::plugin_paths: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::theaters::RunnerSettings::request_timeout_ms: core::option::Option<u64>
 pub ai6::directorates::m::theaters::RunnerSettings::state_dir: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::theaters::RunnerSettings::terminal: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::RunnerSettings
@@ -4090,16 +4093,19 @@ pub fn ai6::directorates::section_00::acp::AcpFacade::with_auth(self, ai6::direc
 pub struct ai6::directorates::section_00::acp::AcpOptions
 pub ai6::directorates::section_00::acp::AcpOptions::authenticate: core::option::Option<ai6::directorates::section_00::acp::Authenticate>
 pub ai6::directorates::section_00::acp::AcpOptions::close_grace_ms: u64
+pub ai6::directorates::section_00::acp::AcpOptions::close_on_drop: bool
 pub ai6::directorates::section_00::acp::AcpOptions::cwd: alloc::string::String
 pub ai6::directorates::section_00::acp::AcpOptions::decider: alloc::sync::Arc<dyn ai6::directorates::section_00::acp::PermissionDecider>
 pub ai6::directorates::section_00::acp::AcpOptions::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::effort_option: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::fail_on_disconnect: bool
 pub ai6::directorates::section_00::acp::AcpOptions::initialize_timeout_ms: u64
 pub ai6::directorates::section_00::acp::AcpOptions::mcp_servers: alloc::vec::Vec<serde_json::value::Value>
 pub ai6::directorates::section_00::acp::AcpOptions::meta: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::directorates::section_00::acp::AcpOptions::model: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::model_option: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::prompt: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::reattach: core::option::Option<u64>
 pub ai6::directorates::section_00::acp::AcpOptions::request_timeout_ms: u64
 pub ai6::directorates::section_00::acp::AcpOptions::restricted: bool
 pub ai6::directorates::section_00::acp::AcpOptions::resume: core::option::Option<alloc::string::String>
@@ -4110,7 +4116,10 @@ pub struct ai6::directorates::section_00::acp::AcpSession
 impl ai6::directorates::section_00::acp::AcpSession
 pub fn ai6::directorates::section_00::acp::AcpSession::connect(impl agent_client_protocol::component::ConnectTo<agent_client_protocol::role::acp::Client> + 'static, ai6::directorates::section_00::acp::AcpOptions, core::option::Option<alloc::boxed::Box<(dyn core::ops::function::FnOnce() + core::marker::Send)>>) -> core::result::Result<Self, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::acp::AcpSession
+pub fn ai6::directorates::section_00::acp::AcpSession::connection_lost(&self) -> bool
 pub fn ai6::directorates::section_00::acp::AcpSession::into_handle(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>
+pub fn ai6::directorates::section_00::acp::AcpSession::last_seq(&self) -> u64
+pub fn ai6::directorates::section_00::acp::AcpSession::start_info(&self) -> core::option::Option<serde_json::value::Value>
 impl ai6::directorates::section_00::agent::AgentSession for ai6::directorates::section_00::acp::AcpSession
 pub fn ai6::directorates::section_00::acp::AcpSession::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::acp::AcpSession::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
@@ -4146,6 +4155,7 @@ pub ai6::directorates::section_00::acp::LaunchMeta::effort: core::option::Option
 pub ai6::directorates::section_00::acp::LaunchMeta::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::section_00::acp::LaunchMeta::handler: core::option::Option<ai6::directorates::section_00::acp::HandlerSpec>
 pub ai6::directorates::section_00::acp::LaunchMeta::initial_context: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::acp::LaunchMeta::key: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::LaunchMeta::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::directorates::section_00::acp::LaunchMeta::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::section_00::acp::LaunchMeta::model: core::option::Option<alloc::string::String>
@@ -4157,6 +4167,7 @@ pub fn ai6::directorates::section_00::acp::LaunchMeta::from_start(&ai6::director
 pub fn ai6::directorates::section_00::acp::LaunchMeta::into_start(self, alloc::string::String, alloc::string::String) -> ai6::directorates::section_00::agent::AgentStart
 pub fn ai6::directorates::section_00::acp::LaunchMeta::to_value(&self) -> serde_json::value::Value
 pub fn ai6::directorates::section_00::acp::LaunchMeta::with_handler(self, ai6::directorates::section_00::acp::HandlerSpec) -> Self
+pub fn ai6::directorates::section_00::acp::LaunchMeta::with_key(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::section_00::acp::LaunchMeta::with_terminal(self, core::option::Option<alloc::string::String>) -> Self
 impl core::fmt::Debug for ai6::directorates::section_00::acp::LaunchMeta
 pub fn ai6::directorates::section_00::acp::LaunchMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -4180,6 +4191,7 @@ pub ai6::directorates::section_00::acp::ResumeMeta::effort: core::option::Option
 pub ai6::directorates::section_00::acp::ResumeMeta::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::section_00::acp::ResumeMeta::handler: core::option::Option<ai6::directorates::section_00::acp::HandlerSpec>
 pub ai6::directorates::section_00::acp::ResumeMeta::initial_context: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::acp::ResumeMeta::key: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::ResumeMeta::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::directorates::section_00::acp::ResumeMeta::message: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::ResumeMeta::mission_id: ai6::directorates::m::identity::MissionId
@@ -4193,9 +4205,13 @@ pub fn ai6::directorates::section_00::acp::ResumeMeta::from_resume(&ai6::directo
 pub fn ai6::directorates::section_00::acp::ResumeMeta::into_resume(self, alloc::string::String) -> ai6::directorates::section_00::agent::AgentResume
 pub fn ai6::directorates::section_00::acp::ResumeMeta::to_value(&self) -> serde_json::value::Value
 pub fn ai6::directorates::section_00::acp::ResumeMeta::with_handler(self, ai6::directorates::section_00::acp::HandlerSpec) -> Self
+pub fn ai6::directorates::section_00::acp::ResumeMeta::with_key(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::section_00::acp::ResumeMeta::with_terminal(self, core::option::Option<alloc::string::String>) -> Self
 impl core::fmt::Debug for ai6::directorates::section_00::acp::ResumeMeta
 pub fn ai6::directorates::section_00::acp::ResumeMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::section_00::acp::RpcFailure
+pub ai6::directorates::section_00::acp::RpcFailure::code: i32
+pub ai6::directorates::section_00::acp::RpcFailure::message: alloc::string::String
 pub struct ai6::directorates::section_00::acp::TerminalIo
 impl ai6::directorates::section_00::acp::TerminalIo
 pub fn ai6::directorates::section_00::acp::TerminalIo::new(alloc::sync::Arc<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>>, i64) -> Self
@@ -4217,8 +4233,10 @@ pub fn ai6::directorates::section_00::acp::GateDecider::decide(&self, &ai6::dire
 impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::RefuseAll
 pub fn ai6::directorates::section_00::acp::RefuseAll::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
 pub fn ai6::directorates::section_00::acp::duplex() -> (agent_client_protocol::jsonrpc::Channel, agent_client_protocol::jsonrpc::Channel)
-pub fn ai6::directorates::section_00::acp::lines_over_io(impl alloc::io::read::Read + core::marker::Send + 'static, impl core::io::write::Write + core::marker::Send + 'static, usize) -> (agent_client_protocol::jsonrpc::Lines<futures_util::sink::map_err::SinkMapErr<futures_channel::mpsc::UnboundedSender<alloc::string::String>, fn(futures_channel::mpsc::SendError) -> core::io::error::Error>, futures_channel::mpsc::UnboundedReceiver<core::io::error::Result<alloc::string::String>>>, alloc::sync::Arc<std::sync::poison::mutex::Mutex<alloc::collections::vec_deque::VecDeque<alloc::string::String>>>)
+pub fn ai6::directorates::section_00::acp::exchange(impl agent_client_protocol::component::ConnectTo<agent_client_protocol::role::acp::Client> + 'static, core::option::Option<ai6::directorates::section_00::acp::Authenticate>, u64, u64, alloc::vec::Vec<(alloc::string::String, serde_json::value::Value)>) -> core::result::Result<alloc::vec::Vec<core::result::Result<serde_json::value::Value, ai6::directorates::section_00::acp::RpcFailure>>, alloc::string::String>
+pub fn ai6::directorates::section_00::acp::lines_over_io(impl alloc::io::read::Read + core::marker::Send + 'static, impl core::io::write::Write + core::marker::Send + 'static, usize) -> (ai6::directorates::section_00::acp::IoLines, alloc::sync::Arc<std::sync::poison::mutex::Mutex<alloc::collections::vec_deque::VecDeque<alloc::string::String>>>)
 pub type ai6::directorates::section_00::acp::Credential = (dyn core::ops::function::Fn(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> bool + core::marker::Send + core::marker::Sync)
+pub type ai6::directorates::section_00::acp::IoLines = agent_client_protocol::jsonrpc::Lines<futures_util::sink::map_err::SinkMapErr<futures_channel::mpsc::UnboundedSender<alloc::string::String>, fn(futures_channel::mpsc::SendError) -> core::io::error::Error>, futures_channel::mpsc::UnboundedReceiver<core::io::error::Result<alloc::string::String>>>
 pub type ai6::directorates::section_00::acp::TerminalFactory = alloc::sync::Arc<(dyn core::ops::function::Fn() -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>, guatiao::library::kind::ProviderError> + core::marker::Send + core::marker::Sync)>
 pub mod ai6::directorates::section_00::agent
 pub struct ai6::directorates::section_00::agent::AgentEvent
@@ -4718,18 +4736,25 @@ pub mod ai6::station::runner
 #[non_exhaustive] pub struct ai6::station::runner::RunnerConfig
 impl ai6::station::runner::RunnerConfig
 pub fn ai6::station::runner::RunnerConfig::new(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn ai6::station::runner::RunnerConfig::with_limits(self, ai6::station::runner::RunnerLimits) -> Self
 pub fn ai6::station::runner::RunnerConfig::with_listen(self, core::net::socket_addr::SocketAddr) -> Self
 pub fn ai6::station::runner::RunnerConfig::with_plugin_paths(self, impl core::iter::traits::collect::IntoIterator<Item = std::path::PathBuf>) -> Self
 pub fn ai6::station::runner::RunnerConfig::with_plugin_policy(self, ai6::station::plugins::PluginPolicy) -> Self
 pub fn ai6::station::runner::RunnerConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::station::runner::RunnerInfo
+pub ai6::station::runner::RunnerInfo::address: alloc::string::String
 pub ai6::station::runner::RunnerInfo::pid: u32
-pub ai6::station::runner::RunnerInfo::url: alloc::string::String
 pub ai6::station::runner::RunnerInfo::version: alloc::string::String
 impl ai6::station::runner::RunnerInfo
 pub fn ai6::station::runner::RunnerInfo::read(&std::path::Path) -> core::io::error::Result<Self>
-pub const ai6::station::runner::CALL_NOT_RUNNING: u8
-pub fn ai6::station::runner::call(&std::path::Path, &str, &str, core::option::Option<&serde_json::value::Value>) -> core::result::Result<(u16, serde_json::value::Value), alloc::string::String>
+pub struct ai6::station::runner::RunnerLimits
+pub ai6::station::runner::RunnerLimits::feed_poll_ms: u64
+pub ai6::station::runner::RunnerLimits::pump_poll_ms: i64
+pub ai6::station::runner::RunnerLimits::replay_batch: usize
+impl core::default::Default for ai6::station::runner::RunnerLimits
+pub fn ai6::station::runner::RunnerLimits::default() -> Self
+pub const ai6::station::runner::CONNECT_NOT_RUNNING: u8
+pub fn ai6::station::runner::connect_stdio(&std::path::Path) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::station::runner::default_state_dir() -> core::io::error::Result<std::path::PathBuf>
 pub async fn ai6::station::runner::serve<F>(ai6::station::runner::RunnerConfig, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub fn ai6::station::runner::spawn_detached(&std::path::Path, &[std::ffi::os_str::OsString], &std::path::Path) -> core::io::error::Result<ai6::station::runner::RunnerInfo>
@@ -6882,7 +6907,10 @@ impl core::default::Default for ai6::directorates::q::transport::RunSpec
 pub fn ai6::directorates::q::transport::RunSpec::default() -> Self
 #[non_exhaustive] pub struct ai6::RunnerSettings
 pub ai6::RunnerSettings::command: core::option::Option<alloc::string::String>
+pub ai6::RunnerSettings::connect_timeout_ms: core::option::Option<u64>
+pub ai6::RunnerSettings::initialize_timeout_ms: core::option::Option<u64>
 pub ai6::RunnerSettings::plugin_paths: alloc::vec::Vec<alloc::string::String>
+pub ai6::RunnerSettings::request_timeout_ms: core::option::Option<u64>
 pub ai6::RunnerSettings::state_dir: core::option::Option<alloc::string::String>
 pub ai6::RunnerSettings::terminal: core::option::Option<alloc::string::String>
 impl ai6::directorates::m::theaters::RunnerSettings

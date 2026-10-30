@@ -371,8 +371,8 @@ location = \"registry\"
 }
 
 #[test]
-fn a_detached_runner_answers_calls_until_it_stops() {
-    use std::io::Write;
+fn a_detached_runner_relays_acp_until_it_stops() {
+    use std::io::{BufRead, Write};
     use std::process::Stdio;
 
     let state = tempfile::tempdir().unwrap();
@@ -395,49 +395,49 @@ fn a_detached_runner_answers_calls_until_it_stops() {
     let info: serde_json::Value = serde_json::from_str(&line).unwrap();
     let pid = info["pid"].as_u64().unwrap();
     assert!(
-        info["url"]
-            .as_str()
-            .unwrap()
-            .starts_with("http://127.0.0.1:")
+        info["address"].as_str().unwrap().starts_with("127.0.0.1:"),
+        "{info}"
     );
 
-    let call = |method: &str, path: &str, body: Option<&str>| {
-        let mut child = ai6()
-            .args(["runner", "call", "--state-dir"])
+    // `ai6 runner connect` authenticates for its caller, says it is ready, then relays ACP.
+    let connect = || {
+        ai6()
+            .args(["runner", "connect", "--state-dir"])
             .arg(state.path())
-            .args([method, path])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .unwrap();
-        let mut stdin = child.stdin.take().unwrap();
-        if let Some(body) = body {
-            stdin.write_all(body.as_bytes()).unwrap();
-        }
-        drop(stdin);
-        let output = child.wait_with_output().unwrap();
-        let answer = serde_json::from_slice::<serde_json::Value>(&output.stdout)
-            .unwrap_or(serde_json::Value::Null);
-        (output.status.code(), answer)
+            .unwrap()
     };
-
-    let (code, health) = call("GET", "/v1/health", None);
-    assert_eq!(code, Some(0));
-    assert_eq!(health["status"], 200);
-    assert_eq!(health["body"]["pid"], pid);
-
-    // A request body comes on standard input; the runner's refusal is relayed, not hidden.
-    let (code, refused) = call(
-        "POST",
-        "/v1/sessions",
-        Some(
-            r#"{"key":"k1","handler":"absent","launch":{"start":{"mission_id":"m-1","agent_id":"007","prompt":"p","initial_context":[],"working_directory":".","clearance":"field","environment":{},"model":null,"effort":null,"max_cost_micro_usd":null}}}"#,
-        ),
+    let mut child = connect();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut ready = String::new();
+    stdout.read_line(&mut ready).unwrap();
+    assert_eq!(ready.trim(), "ai6-runner-connect-ready");
+    let mut ask = |id: u32, method: &str, params: serde_json::Value| {
+        let request =
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        writeln!(stdin, "{request}").unwrap();
+        stdin.flush().unwrap();
+        let mut answer = String::new();
+        stdout.read_line(&mut answer).unwrap();
+        serde_json::from_str::<serde_json::Value>(&answer).unwrap()
+    };
+    let init = ask(1, "initialize", serde_json::json!({"protocolVersion": 1}));
+    assert_eq!(init["result"]["agentInfo"]["name"], "ai6-runner", "{init}");
+    assert_eq!(init["result"]["authMethods"][0]["id"], "ai6-runner-token");
+    // The runner's refusal is relayed, not hidden: it has no such Session.
+    let missing = ask(
+        2,
+        "_ai6/session_status",
+        serde_json::json!({"key": "nothing"}),
     );
-    assert_eq!(code, Some(0));
-    assert_eq!(refused["status"], 409, "{refused}");
-    assert!(refused["body"]["error"].as_str().is_some());
+    assert_eq!(missing["error"]["code"], -32002, "{missing}");
+    drop(stdin);
+    drop(stdout);
+    let _ = child.wait();
 
     let stopped = if cfg!(windows) {
         Command::new("taskkill")
@@ -452,13 +452,15 @@ fn a_detached_runner_answers_calls_until_it_stops() {
     assert!(stopped.status.success());
     let mut code = Some(0);
     for _ in 0..200 {
-        code = call("GET", "/v1/health", None).0;
+        let mut again = connect();
+        drop(again.stdin.take());
+        code = again.wait().unwrap().code();
         if code != Some(0) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
-    assert_eq!(code, Some(3), "a call with no runner to answer exits 3");
+    assert_eq!(code, Some(3), "a connect with no runner to answer exits 3");
 }
 
 /// Runs `ai6 green-ink gate` as Claude Code runs a `PreToolUse` hook: the hook's JSON on

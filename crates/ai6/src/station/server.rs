@@ -71,6 +71,7 @@ use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionStatus, SessionUpdate,
 };
 use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, GONE_DARK_AFTER, Lease};
+use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
@@ -82,7 +83,7 @@ use crate::station::publisher::{self, Config as PublisherConfig, Publisher, Sess
 use crate::station::reach::ReachWatch;
 #[cfg(feature = "cables-mcp")]
 use crate::station::runner::Upstream;
-use crate::station::runner::client::{RunnerLink, RunnerSession};
+use crate::station::runner::client::{RemoteSession, RunnerLink};
 use crate::station::runner::{Launch, SessionReport};
 use crate::station::safehouse::SafeHouse;
 use crate::station::sources::SourceDesk;
@@ -2517,13 +2518,15 @@ fn runner_session(
     link: Arc<RunnerLink>,
     key: &str,
     session_id: Option<SessionId>,
+    session: Option<AcpSession>,
     attachment: &RunnerAttachment,
     reach: ReachWatch,
     #[cfg(feature = "cables-mcp")] route: Option<&CableRoute>,
 ) -> guatiao::library::Object<dyn AgentSession> {
-    let session = RunnerSession::attach(
+    let session = RemoteSession::drive(
         link.clone(),
         key,
+        session,
         session_id,
         attachment.detached.clone(),
         reach,
@@ -3898,6 +3901,7 @@ async fn start_mission(
         .handler
         .clone()
         .ok_or_else(|| configuration_error(format!("Agent {agent_id:?} has no handler")))?;
+    let handler_settings = agent.handler_settings.clone();
     let model = agent.model.clone();
     let effort = agent.effort.clone();
     // The Station loads the harness's providers only when it supervises the harness itself.
@@ -4293,7 +4297,13 @@ async fn start_mission(
             .await
         }
         (None, Some(link), Some(attachment)) => {
-            let (link, handler) = (link.clone(), handler_provider.clone());
+            let (link, handler) = (
+                link.clone(),
+                HandlerSpec::new(
+                    handler_provider.clone(),
+                    serde_json::Value::Object(handler_settings.clone()),
+                ),
+            );
             let key = attachment.key.clone();
             let session_attachment = RunnerAttachment {
                 key: key.clone(),
@@ -4307,14 +4317,16 @@ async fn start_mission(
             tokio::task::spawn_blocking(move || {
                 link.ensure()?;
                 if let Some(stale) = stale_runner_session {
-                    let _ = link.call("POST", &format!("/v1/sessions/{stale}/close"), None);
+                    let _ = link.close_session(&stale);
                 }
-                let report = link.launch(&key, &handler, Launch::Start(start_request))?;
+                let (report, started) =
+                    link.launch(&key, &handler, Launch::Start(start_request))?;
                 record_runner_session(&worker_state, &worker_mission, &report);
                 Ok(runner_session(
                     link,
                     &key,
                     report.session_id,
+                    Some(started),
                     &session_attachment,
                     worker_reach,
                     #[cfg(feature = "cables-mcp")]
@@ -5005,7 +5017,13 @@ async fn resume_mission(
             .await
         }
         (None, Some(link), Some(attachment)) => {
-            let (link, handler) = (link.clone(), handler_provider.clone());
+            let (link, handler) = (
+                link.clone(),
+                HandlerSpec::new(
+                    handler_provider.clone(),
+                    serde_json::Value::Object(resume_agent.handler_settings.clone()),
+                ),
+            );
             let key = attachment.key.clone();
             let session_attachment = RunnerAttachment {
                 key: key.clone(),
@@ -5015,6 +5033,7 @@ async fn resume_mission(
             #[cfg(feature = "cables-mcp")]
             let route = cable;
             let reattaching = reattach.is_some();
+            let mut resumed_over: Option<AcpSession> = None;
             let (worker_state, worker_mission) = (state.clone(), mission_id.clone());
             let worker_reach = reach.clone();
             tokio::task::spawn_blocking(move || {
@@ -5028,19 +5047,22 @@ async fn resume_mission(
                     }
                 } else {
                     link.ensure()?;
-                    let report = link.launch(&key, &handler, Launch::Resume(resume_request))?;
+                    let (report, started) =
+                        link.launch(&key, &handler, Launch::Resume(resume_request))?;
                     record_runner_session(&worker_state, &worker_mission, &report);
                     if report.session_id.as_ref() != Some(&expected_session_id) {
-                        let _ = link.call("POST", &format!("/v1/sessions/{key}/close"), None);
+                        let _ = link.close_session(&key);
                         return Err(
                             "AgentHandler resume did not retain the provider Session ID".to_owned()
                         );
                     }
+                    resumed_over = Some(started);
                 }
                 let resumed = runner_session(
                     link,
                     &key,
                     Some(expected_session_id),
+                    resumed_over,
                     &session_attachment,
                     worker_reach,
                     #[cfg(feature = "cables-mcp")]

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A field runner speaks the Agent Client Protocol instead of its HTTP API: a Station connects
+  over the loopback port, or through `ai6 runner connect` on a terminal its transport opens,
+  attaches to a Session with `session/load` (the runner replays what the Station missed), and a
+  newer connection takes a Session over from an older one. `ai6 runner call` and the HTTP
+  routes are gone; the runner's `url` in `runner.json` is now `address`. The Theater `runner`
+  settings gain `connect_timeout_ms`, `initialize_timeout_ms` and `request_timeout_ms`, and
+  `ai6 runner serve` gains `--pump-poll-ms`, `--feed-poll-ms` and `--replay-batch`.
 - The `acp` handler (`ai6-agent-acp`): any Agent Client Protocol agent (the Claude and Codex
   adapters, `gemini --acp`) is an Agent's handler, started with the Session's full
   environment and judged by the green-ink gate. Configured by the Agent's `handler_settings`

@@ -987,8 +987,10 @@ mod tests {
             .unwrap()
             .port();
         let mut info: serde_json::Value = serde_json::from_slice(&saved).unwrap();
-        info["url"] = serde_json::json!(format!("http://127.0.0.1:{port}"));
+        info["address"] = serde_json::json!(format!("127.0.0.1:{port}"));
         fs::write(&path, serde_json::to_vec(&info).unwrap()).unwrap();
+        // The connections a Station already holds die with a host that dies.
+        crate::station::runner::sever_connections(runner_dir);
         saved
     }
 
@@ -1129,9 +1131,11 @@ mod tests {
         assert_eq!(after, (after[0]..=DRIP_TICKS).collect::<Vec<_>>());
 
         // One harness ran from start to end: nothing was launched again.
-        let (status, sessions) = link.call("GET", "/v1/sessions", None).unwrap();
-        assert_eq!(status, 200);
-        assert_eq!(sessions.as_array().map(Vec::len), Some(1), "{sessions}");
+        let launched = std::fs::read_dir(runner_dir.join("sessions"))
+            .unwrap()
+            .count();
+        assert_eq!(launched, 1, "the runner kept one Session");
+        assert!(link.status(&key).unwrap().unwrap().ended);
         let record = b.intake.session(&first.id).unwrap().unwrap();
         assert_eq!(record.station, "station-b");
         assert_eq!(record.status, SessionStatus::Ended);

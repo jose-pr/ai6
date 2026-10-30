@@ -377,6 +377,16 @@ pub struct RunnerSettings {
     /// handler (`pipe` for a JSON harness, else `pty`, preferred).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
+    /// How long, in milliseconds, a Station waits to connect to the runner (and, through a
+    /// transport, for `ai6 runner connect` to be ready); 30000 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_timeout_ms: Option<u64>,
+    /// How long the runner may take to answer `initialize`; 20000 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initialize_timeout_ms: Option<u64>,
+    /// How long the runner may take to answer any other request; 30000 when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_timeout_ms: Option<u64>,
 }
 
 impl RunnerSettings {

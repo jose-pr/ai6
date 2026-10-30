@@ -3,15 +3,19 @@
 //! A runner supervises agent harnesses on the Theater they run on, so a Session outlives the
 //! Station that started it. It loads the same AgentHandler and Terminal providers a Station
 //! does and has no scheduler, Registry or roster: a Station starts Sessions on it, reads their
-//! events and sends them messages over an HTTP API on a loopback port, protected by a bearer
-//! token kept in the state directory. A Station that reaches the Theater through a transport
-//! runs `ai6 runner call` there, which relays one request.
+//! events and sends them messages over the Agent Client Protocol (ACP) on a loopback port. A
+//! connection authenticates with the `ai6-runner-token` method, the bearer token kept in the
+//! state directory. A Station that reaches the Theater through a transport opens `ai6 runner
+//! connect` on a terminal there, which authenticates for it and relays the stream.
 //!
 //! Every event a harness emits is written to disk with a sequence number before any Station
-//! can read it. A Station acknowledges what it has read by asking for the events after it, so
-//! a Station that comes back, or another one, asks from the last acknowledgement and replays
-//! what it missed. A runner that restarts has lost the harnesses it supervised; it ends their
-//! Sessions with a `lost` event, which a Station takes as the Session lost.
+//! can read it. A Station attaches to a Session by key with `session/load`, and the runner
+//! replays the events after the one the Station last took, as `_ai6/event` notifications that
+//! carry their sequence number; the Station acknowledges what it took with `_ai6/ack`. A
+//! Station that comes back, or another one, loads again and replays what it missed; a newer
+//! connection to a Session closes the older. A runner that restarts has lost the harnesses it
+//! supervised; it ends their Sessions with a `lost` event, which a Station takes as the
+//! Session lost.
 //!
 //! The state directory holds `runner.json` (where the runner listens, while it runs),
 //! `token`, `runner.lock` and `sessions/<key>/` with `events.jsonl`, `cursor` and
@@ -20,6 +24,7 @@
 mod cable;
 pub(crate) mod client;
 mod spool;
+mod wire;
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -31,45 +36,53 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Path as UrlPath, Query, Request, State};
-use axum::http::{StatusCode, header::AUTHORIZATION};
-use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
-use axum::{Json, Router};
 use guatiao::library::Object;
 use serde::{Deserialize, Serialize};
-use subtle::ConstantTimeEq;
-use tokio::sync::Notify;
 
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::q::terminal::{HarnessStdio, TerminalBridge};
+use crate::directorates::section_00::acp::HandlerSpec;
 use crate::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
+    AgentEvent, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
 use crate::station::plugins::Plugins;
 
 #[cfg(feature = "cables-mcp")]
 pub(crate) use cable::URL_KEY as CABLE_URL_KEY;
 pub(crate) use cable::Upstream;
-pub(crate) use spool::Spooled;
 
 const INFO_FILE: &str = "runner.json";
 const TOKEN_FILE: &str = "token";
 const LOCK_FILE: &str = "runner.lock";
 const SESSIONS_DIR: &str = "sessions";
 const SESSION_FILE: &str = "session.json";
-/// Most events one read returns.
-const PAGE: usize = 256;
-/// The longest a read waits for a new event.
-const MAX_WAIT: Duration = Duration::from_secs(30);
-/// How long the pump waits for one event before it checks whether to stop.
-const POLL_MS: i64 = 250;
 /// Ended Sessions older than this are removed when a runner starts.
 const KEEP_ENDED: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-/// The exit status of `ai6 runner call` when no runner answers it.
-pub const CALL_NOT_RUNNING: u8 = 3;
+/// The kind of the event that tells a connection another one took its Session over.
+pub(crate) const DETACHED_EVENT: &str = "detached";
+/// The exit status of `ai6 runner connect` when no runner answers it.
+pub const CONNECT_NOT_RUNNING: u8 = 3;
+
+pub use client::connect_stdio;
+
+/// Puts this process's standard input in raw mode when it is a terminal, so ACP lines are not
+/// echoed or rewritten on their way through it.
+#[cfg(unix)]
+fn raw_terminal() {
+    use rustix::termios::{OptionalActions, isatty, tcgetattr, tcsetattr};
+    let stdin = std::io::stdin();
+    if isatty(&stdin)
+        && let Ok(mut settings) = tcgetattr(&stdin)
+    {
+        settings.make_raw();
+        let _ = tcsetattr(&stdin, OptionalActions::Now, &settings);
+    }
+}
+
+#[cfg(not(unix))]
+fn raw_terminal() {}
+
 /// The kind of the event a restarted runner ends a Session it lost with: the harness is gone,
 /// so the Station treats the Session as lost rather than failed.
 pub(crate) const LOST_EVENT: &str = "lost";
@@ -78,8 +91,8 @@ pub(crate) const LOST_EVENT: &str = "lost";
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunnerInfo {
-    /// The base URL of the runner's API, on a loopback address.
-    pub url: String,
+    /// The loopback address the runner serves ACP on, `host:port`.
+    pub address: String,
     /// The runner's process ID.
     pub pid: u32,
     /// The AI6 version of the runner.
@@ -104,6 +117,30 @@ pub struct RunnerConfig {
     plugin_paths: Vec<PathBuf>,
     plugin_policy: crate::station::plugins::PluginPolicy,
     terminal: Option<String>,
+    limits: RunnerLimits,
+}
+
+/// How often a runner looks, and how much it sends at once. Each is a setting with the value
+/// the runner has always used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerLimits {
+    /// How long, in milliseconds, the pump waits for a harness's next event before it checks
+    /// whether to stop.
+    pub pump_poll_ms: i64,
+    /// How often, in milliseconds, a connection looks for spooled events to send.
+    pub feed_poll_ms: u64,
+    /// Most spooled events one read of the spool returns.
+    pub replay_batch: usize,
+}
+
+impl Default for RunnerLimits {
+    fn default() -> Self {
+        Self {
+            pump_poll_ms: 250,
+            feed_poll_ms: 50,
+            replay_batch: 256,
+        }
+    }
 }
 
 impl RunnerConfig {
@@ -115,7 +152,15 @@ impl RunnerConfig {
             plugin_paths: Vec::new(),
             plugin_policy: crate::station::plugins::PluginPolicy::default(),
             terminal: None,
+            limits: RunnerLimits::default(),
         }
+    }
+
+    /// Sets how often the runner looks and how much it sends at once.
+    #[must_use]
+    pub fn with_limits(mut self, limits: RunnerLimits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// Listens on `address`, which must be a loopback address.
@@ -201,13 +246,16 @@ where
             plugins,
             terminal: config.terminal,
             sessions: Mutex::new(load_sessions(&config.state_dir)?),
+            bindings: Mutex::new(BTreeMap::new()),
+            streams: Mutex::new(Vec::new()),
+            limits: config.limits.clone(),
             stopping: AtomicBool::new(false),
             _lock: lock,
         }),
     };
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     let info = RunnerInfo {
-        url: format!("http://{}", listener.local_addr()?),
+        address: listener.local_addr()?.to_string(),
         pid: std::process::id(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
     };
@@ -215,20 +263,31 @@ where
         &config.state_dir.join(INFO_FILE),
         &serde_json::to_vec_pretty(&info).map_err(io::Error::other)?,
     )?;
-    let app = Router::new()
-        .route("/v1/health", get(health))
-        .route("/v1/sessions", get(list_sessions).post(start_session))
-        .route("/v1/sessions/{key}", get(session_status))
-        .route("/v1/sessions/{key}/events", get(read_events))
-        .route("/v1/sessions/{key}/messages", post(send_message))
-        .route("/v1/sessions/{key}/interrupt", post(interrupt))
-        .route("/v1/sessions/{key}/close", post(close))
-        .route("/v1/sessions/{key}/cable", put(set_cable))
-        .layer(middleware::from_fn_with_state(token, authorize))
-        .with_state(runner.clone());
-    let served = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
-        .await;
+    #[cfg(test)]
+    live::register(&config.state_dir, &runner.inner);
+    let handle = tokio::runtime::Handle::current();
+    let _closing = CloseConnections(runner.clone());
+    let accepting = async {
+        loop {
+            let (stream, _) = listener.accept().await?;
+            let stream = stream.into_std()?;
+            stream.set_nonblocking(false)?;
+            if let Ok(kept) = stream.try_clone() {
+                lock_of(&runner.inner.streams).push(kept);
+            }
+            let (runner, token, handle) = (runner.clone(), token.clone(), handle.clone());
+            std::thread::spawn(move || wire::serve_connection(runner, token, handle, stream));
+        }
+        #[allow(unreachable_code)]
+        Ok::<(), io::Error>(())
+    };
+    tokio::pin!(accepting);
+    let shutdown = shutdown;
+    tokio::pin!(shutdown);
+    let served = tokio::select! {
+        () = &mut shutdown => Ok(()),
+        failed = &mut accepting => failed,
+    };
     runner.inner.stopping.store(true, Ordering::Release);
     let sessions: Vec<_> = lock_of(&runner.inner.sessions).values().cloned().collect();
     for hosted in sessions {
@@ -238,58 +297,6 @@ where
         let _ = fs::remove_file(config.state_dir.join(INFO_FILE));
     }
     served
-}
-
-/// Sends one request to the runner serving `state_dir` and answers its status and JSON body.
-///
-/// This is what `ai6 runner call` does for a Station that reaches the Theater through a
-/// transport, and what a Station on the same host does itself.
-pub fn call(
-    state_dir: &Path,
-    method: &str,
-    path: &str,
-    body: Option<&serde_json::Value>,
-) -> Result<(u16, serde_json::Value), String> {
-    let not_running = |why: String| format!("no runner serves {} ({why})", state_dir.display());
-    let info = RunnerInfo::read(state_dir).map_err(|error| not_running(error.to_string()))?;
-    let token = fs::read_to_string(state_dir.join(TOKEN_FILE))
-        .map_err(|error| not_running(error.to_string()))?;
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .max_redirects(0)
-        .timeout_connect(Some(Duration::from_secs(5)))
-        .timeout_global(Some(MAX_WAIT + Duration::from_secs(30)))
-        .build()
-        .into();
-    let request = ureq::http::Request::builder()
-        .method(method)
-        .uri(format!("{}{path}", info.url))
-        .header("Authorization", format!("Bearer {}", token.trim()));
-    let response = match body {
-        Some(body) => {
-            let bytes = serde_json::to_vec(body).map_err(|error| error.to_string())?;
-            request
-                .header("Content-Type", "application/json")
-                .body(bytes)
-                .map(|request| agent.run(request))
-        }
-        None => request.body(()).map(|request| agent.run(request)),
-    };
-    let mut response = response
-        .map_err(|error| format!("invalid runner request: {error}"))?
-        .map_err(|error| not_running(error.to_string()))?;
-    let status = response.status().as_u16();
-    let text = response
-        .body_mut()
-        .read_to_string()
-        .map_err(|error| format!("the runner's answer could not be read: {error}"))?;
-    let body = if text.trim().is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::from_str(&text)
-            .map_err(|error| format!("the runner answered something other than JSON: {error}"))?
-    };
-    Ok((status, body))
 }
 
 /// Starts `program runner serve <arguments>` in the background, detached from the caller's
@@ -361,16 +368,6 @@ pub(crate) enum Launch {
     Resume(AgentResume),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct StartRequest {
-    /// The Station's name for the Session on this runner; letters, digits, `.`, `_`, `-`.
-    pub(crate) key: String,
-    pub(crate) handler: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) terminal: Option<String>,
-    pub(crate) launch: Launch,
-}
-
 /// A Session as a runner reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SessionReport {
@@ -384,31 +381,6 @@ pub(crate) struct SessionReport {
     pub(crate) last: u64,
     /// The last sequence number a Station acknowledged.
     pub(crate) cursor: u64,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub(crate) struct EventsQuery {
-    /// Acknowledges every event up to this one and reads those after it; the last
-    /// acknowledged one when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) after: Option<u64>,
-    /// Waits this long for an event when there is none; `0` answers at once.
-    #[serde(default)]
-    pub(crate) timeout_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct EventsPage {
-    pub(crate) events: Vec<Spooled>,
-    pub(crate) session_id: Option<SessionId>,
-    /// The Session has ended and the page holds its last event, or it had none left.
-    pub(crate) complete: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Health {
-    version: String,
-    pid: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -430,6 +402,11 @@ struct Inner {
     plugins: Arc<Plugins>,
     terminal: Option<String>,
     sessions: Mutex<BTreeMap<String, Arc<Hosted>>>,
+    /// The connection each Session is bound to.
+    bindings: Mutex<BTreeMap<String, Arc<wire::Binding>>>,
+    /// The connections being served, closed when the runner stops.
+    streams: Mutex<Vec<std::net::TcpStream>>,
+    limits: RunnerLimits,
     stopping: AtomicBool,
     _lock: File,
 }
@@ -451,7 +428,6 @@ struct Hosted {
     ended: AtomicBool,
     session_id: Mutex<Option<SessionId>>,
     spool: Mutex<spool::Spool>,
-    changed: Notify,
     cable: Mutex<Option<cable::CableProxy>>,
 }
 
@@ -550,7 +526,6 @@ fn load_sessions(state_dir: &Path) -> io::Result<BTreeMap<String, Arc<Hosted>>> 
             ended: AtomicBool::new(true),
             session_id: Mutex::new(file.session_id),
             spool: Mutex::new(spool::Spool::open(&dir)?),
-            changed: Notify::new(),
             cable: Mutex::new(None),
         };
         if !file.ended {
@@ -635,14 +610,12 @@ impl Hosted {
                 self.key
             );
         }
-        self.changed.notify_waiters();
     }
 
     fn end(&self) {
         if !self.ended.swap(true, Ordering::AcqRel) {
             self.persist();
         }
-        self.changed.notify_waiters();
     }
 
     /// Stops the harness, if it still runs, and ends the Session.
@@ -661,7 +634,7 @@ impl Hosted {
     }
 
     /// Moves the harness's events to the spool until it ends or the Session is closed.
-    fn pump(self: Arc<Self>, harness: Harness) {
+    fn pump(self: Arc<Self>, harness: Harness, poll_ms: i64) {
         loop {
             if self.closing.load(Ordering::Acquire) {
                 break;
@@ -674,7 +647,7 @@ impl Hosted {
                     self.append(event("failed", "the harness lock was poisoned"));
                     break;
                 };
-                let polled = guard.next_event(POLL_MS);
+                let polled = guard.next_event(poll_ms);
                 let session_id = guard.session_id().ok().flatten();
                 (polled, session_id)
             };
@@ -716,36 +689,21 @@ impl Hosted {
     }
 }
 
-#[derive(Serialize)]
-struct ApiError {
-    error: String,
-}
-
-/// A refusal: its status and `{"error": "..."}`.
-struct Failure(StatusCode, String);
-
-impl IntoResponse for Failure {
-    fn into_response(self) -> Response {
-        (self.0, Json(ApiError { error: self.1 })).into_response()
-    }
-}
-
-fn failure(status: StatusCode, message: impl Into<String>) -> Failure {
-    Failure(status, message.into())
-}
-
 /// The most of a refused request's body read before the 401, in bytes.
 const REFUSED_BODY_DRAIN: usize = 64 * 1024;
 
-/// Lets a request through only with `Authorization: Bearer TOKEN`, compared in constant time.
+/// Lets an HTTP request through only with `Authorization: Bearer TOKEN`, compared in constant
+/// time. The Station's own HTTP service uses it; a runner authenticates ACP connections itself.
 pub(crate) async fn authorize(
-    State(token): State<String>,
-    request: Request,
-    next: Next,
-) -> Response {
+    axum::extract::State(token): axum::extract::State<String>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    use subtle::ConstantTimeEq as _;
     let supplied = request
         .headers()
-        .get(AUTHORIZATION)
+        .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or_default();
@@ -753,25 +711,57 @@ pub(crate) async fn authorize(
         // Read a small body before answering: a socket closed with unread data is reset, and
         // a Windows client then sees an aborted connection instead of the 401.
         let _ = axum::body::to_bytes(request.into_body(), REFUSED_BODY_DRAIN).await;
-        return failure(StatusCode::UNAUTHORIZED, "a valid bearer token is required")
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"error": "a valid bearer token is required"})),
+        )
             .into_response();
     }
     next.run(request).await
 }
 
-async fn health() -> Json<Health> {
-    Json(Health {
-        version: env!("CARGO_PKG_VERSION").to_owned(),
-        pid: std::process::id(),
-    })
+/// The runners serving in this process, so a test can cut their connections as a dead host does.
+#[cfg(test)]
+mod live {
+    use super::*;
+
+    static RUNNERS: Mutex<Vec<(PathBuf, std::sync::Weak<Inner>)>> = Mutex::new(Vec::new());
+
+    pub(super) fn register(state_dir: &Path, inner: &Arc<Inner>) {
+        lock_of(&RUNNERS).push((state_dir.to_path_buf(), Arc::downgrade(inner)));
+    }
+
+    /// Closes every connection to the runner serving `state_dir`; it still listens.
+    pub(crate) fn sever_connections(state_dir: &Path) {
+        for (dir, inner) in lock_of(&RUNNERS).iter() {
+            if dir == state_dir
+                && let Some(inner) = inner.upgrade()
+            {
+                for stream in lock_of(&inner.streams).drain(..) {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) use live::sever_connections;
+
+/// Closes every connection when the runner stops serving, however it stops.
+struct CloseConnections(Runner);
+
+impl Drop for CloseConnections {
+    fn drop(&mut self) {
+        for stream in lock_of(&self.0.inner.streams).drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
 }
 
 impl Runner {
-    fn hosted(&self, key: &str) -> Result<Arc<Hosted>, Failure> {
-        lock_of(&self.inner.sessions)
-            .get(key)
-            .cloned()
-            .ok_or_else(|| failure(StatusCode::NOT_FOUND, format!("no Session {key:?}")))
+    fn hosted(&self, key: &str) -> Option<Arc<Hosted>> {
+        lock_of(&self.inner.sessions).get(key).cloned()
     }
 
     /// The terminal provider for a harness that talks over `stdio`: the Station's request or
@@ -783,269 +773,123 @@ impl Runner {
             .choose_terminal(stdio, requested.or(self.inner.terminal.as_deref()))
             .map_err(|refusal| format!("this runner cannot start the harness: {refusal}"))
     }
-}
 
-async fn list_sessions(State(runner): State<Runner>) -> Json<Vec<SessionReport>> {
-    let sessions: Vec<_> = lock_of(&runner.inner.sessions).values().cloned().collect();
-    Json(sessions.iter().map(|hosted| hosted.report()).collect())
-}
-
-async fn session_status(
-    State(runner): State<Runner>,
-    UrlPath(key): UrlPath<String>,
-) -> Result<Json<SessionReport>, Failure> {
-    Ok(Json(runner.hosted(&key)?.report()))
-}
-
-async fn start_session(
-    State(runner): State<Runner>,
-    Json(request): Json<StartRequest>,
-) -> Result<(StatusCode, Json<SessionReport>), Failure> {
-    if runner.inner.stopping.load(Ordering::Acquire) {
-        return Err(failure(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "the runner is stopping",
-        ));
-    }
-    if !valid_key(&request.key) {
-        return Err(failure(
-            StatusCode::BAD_REQUEST,
-            "a Session key uses 1 to 128 letters, digits, '.', '_' or '-'",
-        ));
-    }
-    let handler = runner
-        .inner
-        .plugins
-        .handler(&request.handler, None)
-        .map_err(|error| failure(StatusCode::CONFLICT, error.to_string()))?;
-    let stdio = handler.stdio().map_err(|error| {
-        failure(
-            StatusCode::BAD_GATEWAY,
+    /// Starts or resumes the harness of Session `key` on `handler`, supervised from now on.
+    /// The Session exists, with its failure in its spool, even when the harness does not start.
+    async fn launch(
+        &self,
+        key: &str,
+        handler: &HandlerSpec,
+        pinned: Option<&str>,
+        mut launch: Launch,
+    ) -> Result<Arc<Hosted>, String> {
+        if self.inner.stopping.load(Ordering::Acquire) {
+            return Err("the runner is stopping".to_owned());
+        }
+        if !valid_key(key) {
+            return Err("a Session key uses 1 to 128 letters, digits, '.', '_' or '-'".to_owned());
+        }
+        let settings = match &handler.config {
+            serde_json::Value::Object(settings) => settings.clone(),
+            _ => serde_json::Map::new(),
+        };
+        let built = self
+            .inner
+            .plugins
+            .handler_with(&handler.id, &settings)
+            .map_err(|error| error.to_string())?;
+        let stdio = built.stdio().map_err(|error| {
             format!(
                 "handler `{}` did not declare its harness's stdio: {error}",
-                request.handler
-            ),
-        )
-    })?;
-    let terminal = runner
-        .terminal(request.terminal.as_deref(), stdio)
-        .map_err(|error| failure(StatusCode::CONFLICT, error))?;
-    let provider = runner
-        .inner
-        .plugins
-        .terminal(&terminal, None)
-        .map_err(|error| failure(StatusCode::CONFLICT, error.to_string()))?;
-    let dir = runner.inner.state_dir.join(SESSIONS_DIR).join(&request.key);
-    let hosted = {
-        let mut sessions = lock_of(&runner.inner.sessions);
-        if sessions.contains_key(&request.key) || dir.exists() {
-            return Err(failure(
-                StatusCode::CONFLICT,
-                format!("Session {:?} exists", request.key),
-            ));
-        }
-        let spool = spool::Spool::open(&dir)
-            .map_err(|error| failure(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-        let hosted = Arc::new(Hosted {
-            key: request.key.clone(),
-            dir,
-            handler: request.handler.clone(),
-            terminal,
-            created_at: unix_seconds(),
-            harness: Mutex::new(None),
-            waiting: AtomicUsize::new(0),
-            closing: AtomicBool::new(false),
-            ended: AtomicBool::new(false),
-            session_id: Mutex::new(None),
-            spool: Mutex::new(spool),
-            changed: Notify::new(),
-            cable: Mutex::new(None),
-        });
-        sessions.insert(request.key.clone(), hosted.clone());
-        hosted
-    };
-    hosted.persist();
-
-    let mut launch = request.launch;
-    let environment = match &mut launch {
-        Launch::Start(start) => &mut start.environment,
-        Launch::Resume(resume) => &mut resume.environment,
-    };
-    // The harness talks to the runner's relay, which a re-attaching Station repoints.
-    if let Some(upstream) = Upstream::from_environment(environment) {
-        match cable::CableProxy::start(Some(upstream)).await {
-            Ok(proxy) => {
-                proxy.add_environment(environment);
-                *lock_of(&hosted.cable) = Some(proxy);
-            }
-            Err(error) => {
-                hosted.append(event("failed", &format!("Cable relay failed: {error}")));
-                hosted.end();
-                return Err(failure(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    error.to_string(),
-                ));
-            }
-        }
-    }
-    let terminal_handle = TerminalBridge::agent_terminal(provider);
-    let started = tokio::task::spawn_blocking(move || match launch {
-        Launch::Start(start) => handler.start(start, terminal_handle),
-        Launch::Resume(resume) => handler.resume(resume, terminal_handle),
-    })
-    .await;
-    let harness = match started {
-        Ok(Ok(harness)) => harness,
-        Ok(Err(error)) => {
-            let reason = crate::directorates::q::transport::describe(&error);
-            hosted.append(event("failed", &reason));
-            hosted.close();
-            return Err(failure(StatusCode::BAD_GATEWAY, reason));
-        }
-        Err(error) => {
-            hosted.append(event("failed", &error.to_string()));
-            hosted.close();
-            return Err(failure(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                error.to_string(),
-            ));
-        }
-    };
-    if let Ok(Some(session_id)) = harness.session_id() {
-        *lock_of(&hosted.session_id) = Some(session_id);
-        hosted.persist();
-    }
-    let harness = Arc::new(Mutex::new(harness));
-    *lock_of(&hosted.harness) = Some(harness.clone());
-    let pump = hosted.clone();
-    std::thread::Builder::new()
-        .name(format!("ai6-runner-{}", hosted.key))
-        .spawn(move || pump.pump(harness))
-        .map_err(|error| {
-            hosted.close();
-            failure(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+                handler.id
+            )
         })?;
-    Ok((StatusCode::CREATED, Json(hosted.report())))
-}
-
-async fn read_events(
-    State(runner): State<Runner>,
-    UrlPath(key): UrlPath<String>,
-    Query(query): Query<EventsQuery>,
-) -> Result<Json<EventsPage>, Failure> {
-    let hosted = runner.hosted(&key)?;
-    let page = |after: Option<u64>| {
-        let mut spool = lock_of(&hosted.spool);
-        let after = after.unwrap_or_else(|| spool.cursor()).min(spool.last());
-        if let Err(error) = spool.acknowledge(after) {
-            eprintln!("ai6 runner: Session {key:?} cursor not written: {error}");
-        }
-        let events = spool.after(after, PAGE);
-        let through = events.last().map_or(after, |spooled| spooled.seq);
-        let complete = hosted.ended.load(Ordering::Acquire) && through >= spool.last();
-        (after, events, complete)
-    };
-    let (after, mut events, mut complete) = page(query.after);
-    let wait = Duration::from_millis(query.timeout_ms).min(MAX_WAIT);
-    if events.is_empty() && !complete && !wait.is_zero() {
-        let _ = tokio::time::timeout(wait, async {
-            loop {
-                let notified = hosted.changed.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                let (_, now, done) = page(Some(after));
-                if !now.is_empty() || done {
-                    return;
-                }
-                notified.await;
+        let terminal = self.terminal(pinned, stdio)?;
+        let provider = self
+            .inner
+            .plugins
+            .terminal(&terminal, None)
+            .map_err(|error| error.to_string())?;
+        let dir = self.inner.state_dir.join(SESSIONS_DIR).join(key);
+        let hosted = {
+            let mut sessions = lock_of(&self.inner.sessions);
+            if sessions.contains_key(key) || dir.exists() {
+                return Err(format!("Session {key:?} exists"));
             }
+            let spool = spool::Spool::open(&dir).map_err(|error| error.to_string())?;
+            let hosted = Arc::new(Hosted {
+                key: key.to_owned(),
+                dir,
+                handler: handler.id.clone(),
+                terminal,
+                created_at: unix_seconds(),
+                harness: Mutex::new(None),
+                waiting: AtomicUsize::new(0),
+                closing: AtomicBool::new(false),
+                ended: AtomicBool::new(false),
+                session_id: Mutex::new(None),
+                spool: Mutex::new(spool),
+                cable: Mutex::new(None),
+            });
+            sessions.insert(key.to_owned(), hosted.clone());
+            hosted
+        };
+        hosted.persist();
+
+        let environment = match &mut launch {
+            Launch::Start(start) => &mut start.environment,
+            Launch::Resume(resume) => &mut resume.environment,
+        };
+        // The harness talks to the runner's relay, which a re-attaching Station repoints.
+        if let Some(upstream) = Upstream::from_environment(environment) {
+            match cable::CableProxy::start(Some(upstream)).await {
+                Ok(proxy) => {
+                    proxy.add_environment(environment);
+                    *lock_of(&hosted.cable) = Some(proxy);
+                }
+                Err(error) => {
+                    hosted.append(event("failed", &format!("Cable relay failed: {error}")));
+                    hosted.end();
+                    return Err(error.to_string());
+                }
+            }
+        }
+        let terminal_handle = TerminalBridge::agent_terminal(provider);
+        let started = tokio::task::spawn_blocking(move || match launch {
+            Launch::Start(start) => built.start(start, terminal_handle),
+            Launch::Resume(resume) => built.resume(resume, terminal_handle),
         })
         .await;
-        (_, events, complete) = page(Some(after));
-    }
-    Ok(Json(EventsPage {
-        events,
-        session_id: lock_of(&hosted.session_id).clone(),
-        complete,
-    }))
-}
-
-async fn send_message(
-    State(runner): State<Runner>,
-    UrlPath(key): UrlPath<String>,
-    Json(message): Json<AgentMessage>,
-) -> Result<StatusCode, Failure> {
-    let hosted = runner.hosted(&key)?;
-    tokio::task::spawn_blocking(move || {
-        hosted.with_harness(|harness| {
-            harness
-                .send_message(message)
-                .map_err(|error| crate::directorates::q::transport::describe(&error))
-        })
-    })
-    .await
-    .map_err(|error| failure(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-    .map_err(|error| failure(StatusCode::CONFLICT, error))?;
-    Ok(StatusCode::ACCEPTED)
-}
-
-async fn interrupt(
-    State(runner): State<Runner>,
-    UrlPath(key): UrlPath<String>,
-) -> Result<StatusCode, Failure> {
-    let hosted = runner.hosted(&key)?;
-    tokio::task::spawn_blocking(move || {
-        hosted.with_harness(|harness| {
-            harness
-                .interrupt()
-                .map_err(|error| crate::directorates::q::transport::describe(&error))
-        })
-    })
-    .await
-    .map_err(|error| failure(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-    .map_err(|error| failure(StatusCode::CONFLICT, error))?;
-    Ok(StatusCode::ACCEPTED)
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CloseQuery {
-    /// The last event the Station took, acknowledged before the Session closes.
-    after: Option<u64>,
-}
-
-async fn close(
-    State(runner): State<Runner>,
-    UrlPath(key): UrlPath<String>,
-    Query(query): Query<CloseQuery>,
-) -> Result<Json<SessionReport>, Failure> {
-    let hosted = runner.hosted(&key)?;
-    if let Some(after) = query.after
-        && let Err(error) = lock_of(&hosted.spool).acknowledge(after)
-    {
-        eprintln!("ai6 runner: Session {key:?} cursor not written: {error}");
-    }
-    let closed = hosted.clone();
-    tokio::task::spawn_blocking(move || closed.close())
-        .await
-        .map_err(|error| failure(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    Ok(Json(hosted.report()))
-}
-
-async fn set_cable(
-    State(runner): State<Runner>,
-    UrlPath(key): UrlPath<String>,
-    Json(upstream): Json<Upstream>,
-) -> Result<StatusCode, Failure> {
-    let hosted = runner.hosted(&key)?;
-    match lock_of(&hosted.cable).as_ref() {
-        Some(proxy) => {
-            proxy.set_upstream(upstream);
-            Ok(StatusCode::NO_CONTENT)
+        let harness = match started {
+            Ok(Ok(harness)) => harness,
+            Ok(Err(error)) => {
+                let reason = crate::directorates::q::transport::describe(&error);
+                hosted.append(event("failed", &reason));
+                hosted.close();
+                return Err(reason);
+            }
+            Err(error) => {
+                hosted.append(event("failed", &error.to_string()));
+                hosted.close();
+                return Err(error.to_string());
+            }
+        };
+        if let Ok(Some(session_id)) = harness.session_id() {
+            *lock_of(&hosted.session_id) = Some(session_id);
+            hosted.persist();
         }
-        None => Err(failure(
-            StatusCode::CONFLICT,
-            "the Session has no Cable endpoint",
-        )),
+        let harness = Arc::new(Mutex::new(harness));
+        *lock_of(&hosted.harness) = Some(harness.clone());
+        let pump = hosted.clone();
+        let poll_ms = self.inner.limits.pump_poll_ms;
+        std::thread::Builder::new()
+            .name(format!("ai6-runner-{}", hosted.key))
+            .spawn(move || pump.pump(harness, poll_ms))
+            .map_err(|error| {
+                hosted.close();
+                error.to_string()
+            })?;
+        Ok(hosted)
     }
 }
 
@@ -1108,37 +952,43 @@ mod tests {
                 plugins: Arc::new(crate::station::plugins::testing::terminal_choice(with_pipe)),
                 terminal: pinned.map(str::to_owned),
                 sessions: Mutex::new(BTreeMap::new()),
+                bindings: Mutex::new(BTreeMap::new()),
+                streams: Mutex::new(Vec::new()),
+                limits: RunnerLimits::default(),
                 stopping: AtomicBool::new(false),
                 _lock: File::create(state_dir.join(LOCK_FILE)).unwrap(),
             }),
         }
     }
 
-    async fn start(runner: &Runner, key: &str, handler: &str) -> Result<SessionReport, Failure> {
-        let request = StartRequest {
-            key: key.to_owned(),
-            handler: handler.to_owned(),
-            terminal: None,
-            launch: Launch::Start(AgentStart {
-                mission_id: crate::MissionId::try_new(key).unwrap(),
-                agent_id: "007".to_owned(),
-                prompt: "work".to_owned(),
-                initial_context: Vec::new(),
-                working_directory: ".".to_owned(),
-                clearance: "standard".to_owned(),
-                environment: BTreeMap::new(),
-                model: None,
-                effort: None,
-                max_cost_micro_usd: None,
-                project_settings: false,
-                project_mcp: false,
-                answer_only: false,
-                assistant: None,
-            }),
-        };
-        start_session(State(runner.clone()), Json(request))
+    fn start_request(key: &str) -> AgentStart {
+        AgentStart {
+            mission_id: crate::MissionId::try_new(key).unwrap(),
+            agent_id: "007".to_owned(),
+            prompt: "work".to_owned(),
+            initial_context: Vec::new(),
+            working_directory: ".".to_owned(),
+            clearance: "standard".to_owned(),
+            environment: BTreeMap::new(),
+            model: None,
+            effort: None,
+            max_cost_micro_usd: None,
+            project_settings: false,
+            project_mcp: false,
+            answer_only: false,
+            assistant: None,
+        }
+    }
+
+    async fn start(runner: &Runner, key: &str, handler: &str) -> Result<Arc<Hosted>, String> {
+        runner
+            .launch(
+                key,
+                &HandlerSpec::new(handler, serde_json::Value::Null),
+                None,
+                Launch::Start(start_request(key)),
+            )
             .await
-            .map(|(_, Json(report))| report)
     }
 
     /// A runner chooses the terminal as a Station does, from what the handler declares: the
@@ -1150,8 +1000,7 @@ mod tests {
         for (key, handler, terminal) in
             [("json", "json-agent", "pipe"), ("tty", "tty-agent", "pty")]
         {
-            let Failure(status, reason) = start(&runner, key, handler).await.unwrap_err();
-            assert_eq!(status, StatusCode::BAD_GATEWAY, "{reason}");
+            let reason = start(&runner, key, handler).await.err().unwrap();
             assert!(reason.contains(crate::station::plugins::testing::REFUSED_START));
             let recorded = lock_of(&runner.inner.sessions)[key].report().terminal;
             assert_eq!(recorded, terminal);
@@ -1159,17 +1008,15 @@ mod tests {
 
         let pty_only = tempfile::tempdir().unwrap();
         let runner = choice_runner(pty_only.path(), false, None);
-        let Failure(status, reason) = start(&runner, "json", "json-agent").await.unwrap_err();
-        assert_eq!(status, StatusCode::CONFLICT);
+        let reason = start(&runner, "json", "json-agent").await.err().unwrap();
         assert!(reason.contains("without a terminal (`pipe`)"), "{reason}");
-        assert!(runner.hosted("json").is_err(), "nothing was started");
+        assert!(runner.hosted("json").is_none(), "nothing was started");
 
         let pinned = tempfile::tempdir().unwrap();
         let runner = choice_runner(pinned.path(), true, Some("pty"));
-        let Failure(status, reason) = start(&runner, "json", "json-agent").await.unwrap_err();
-        assert_eq!(status, StatusCode::CONFLICT);
+        let reason = start(&runner, "json", "json-agent").await.err().unwrap();
         assert!(reason.contains("`pty` is pinned"), "{reason}");
-        let Failure(_, reason) = start(&runner, "tty", "tty-agent").await.unwrap_err();
+        let reason = start(&runner, "tty", "tty-agent").await.err().unwrap();
         assert!(reason.contains(crate::station::plugins::testing::REFUSED_START));
     }
 
@@ -1183,6 +1030,275 @@ mod tests {
         }
     }
 
+    use crate::directorates::section_00::acp::{
+        AcpOptions, AcpSession, Authenticate, LAUNCH_META_KEY, LaunchMeta, RUNNER_TOKEN_METHOD,
+        exchange, lines_over_io,
+    };
+
+    /// A runner serving a directory on a loopback port, stopped when `stop` is dropped.
+    struct Serving {
+        dir: tempfile::TempDir,
+        stop: Option<tokio::sync::oneshot::Sender<()>>,
+        task: Option<tokio::task::JoinHandle<io::Result<()>>>,
+    }
+
+    impl Serving {
+        async fn start() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+            let task = tokio::spawn(serve_with_plugins(
+                RunnerConfig::new(dir.path()),
+                Arc::new(crate::station::plugins::testing::terminal_choice(true)),
+                async move {
+                    let _ = stopped.await;
+                },
+            ));
+            let path = dir.path().to_path_buf();
+            tokio::task::spawn_blocking(move || {
+                for _ in 0..500 {
+                    if RunnerInfo::read(&path).is_ok() {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                panic!("the runner did not start");
+            })
+            .await
+            .unwrap();
+            Self {
+                dir,
+                stop: Some(stop),
+                task: Some(task),
+            }
+        }
+
+        fn address(&self) -> String {
+            RunnerInfo::read(self.dir.path()).unwrap().address
+        }
+
+        fn token(&self) -> String {
+            fs::read_to_string(self.dir.path().join(TOKEN_FILE))
+                .unwrap()
+                .trim()
+                .to_owned()
+        }
+
+        fn transport(&self) -> crate::directorates::section_00::acp::IoLines {
+            let stream = std::net::TcpStream::connect(self.address()).unwrap();
+            lines_over_io(stream.try_clone().unwrap(), stream, 0).0
+        }
+
+        fn authenticate(&self, token: &str) -> Authenticate {
+            Authenticate {
+                method: RUNNER_TOKEN_METHOD.to_owned(),
+                meta: serde_json::Map::from_iter([("token".to_owned(), token.into())]),
+            }
+        }
+
+        fn options(&self, key: &str) -> AcpOptions {
+            let launch = LaunchMeta::from_start(&start_request(key))
+                .with_handler(HandlerSpec::new("stream-agent", serde_json::Value::Null))
+                .with_key(key);
+            let mut options = AcpOptions {
+                cwd: ".".to_owned(),
+                prompt: Some("work".to_owned()),
+                authenticate: Some(self.authenticate(&self.token())),
+                close_on_drop: false,
+                ..AcpOptions::default()
+            };
+            options
+                .meta
+                .insert(LAUNCH_META_KEY.to_owned(), launch.to_value());
+            options
+        }
+
+        fn attach_options(&self, key: &str, after: u64) -> AcpOptions {
+            AcpOptions {
+                cwd: ".".to_owned(),
+                resume: Some(key.to_owned()),
+                reattach: Some(after),
+                authenticate: Some(self.authenticate(&self.token())),
+                close_on_drop: false,
+                ..AcpOptions::default()
+            }
+        }
+
+        async fn stop(mut self) {
+            drop(self.stop.take());
+            self.task.take().unwrap().await.unwrap().unwrap();
+        }
+    }
+
+    fn events_until(
+        session: &AcpSession,
+        wanted: usize,
+    ) -> Vec<crate::directorates::section_00::agent::AgentEvent> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let mut seen = Vec::new();
+        while seen.len() < wanted && std::time::Instant::now() < deadline {
+            if let Some(event) = session.next_event(100).unwrap() {
+                seen.push(event);
+            }
+        }
+        seen
+    }
+
+    fn texts(events: &[crate::directorates::section_00::agent::AgentEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| event.text.clone())
+            .collect()
+    }
+
+    use crate::directorates::section_00::agent::AgentMessage;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_session_runs_over_acp_and_a_dropped_connection_replays_the_spool_once() {
+        let serving = Serving::start().await;
+        let (options, attach_first, attach_second, transport, t2, t3) = (
+            serving.options("k1"),
+            serving.attach_options("k1", 1),
+            serving.attach_options("k1", 3),
+            serving.transport(),
+            serving.transport(),
+            serving.transport(),
+        );
+        tokio::task::spawn_blocking(move || {
+            let session = AcpSession::connect(transport, options, None).unwrap();
+            assert_eq!(texts(&events_until(&session, 1)), ["hello work"]);
+            assert_eq!(
+                session.session_id().unwrap().unwrap().as_str(),
+                "stream-session-1"
+            );
+            session
+                .send_message(AgentMessage {
+                    text: "a".to_owned(),
+                })
+                .unwrap();
+            assert_eq!(texts(&events_until(&session, 1)), ["echo:a"]);
+            // The connection drops in the middle of the turn.
+            drop(session);
+
+            // Another connection takes the Session by key from what it had taken (1 event):
+            // the spool replays what followed, once, and the Session goes on live.
+            let again = AcpSession::connect(t2, attach_first, None).unwrap();
+            assert_eq!(texts(&events_until(&again, 1)), ["echo:a"]);
+            again
+                .send_message(AgentMessage {
+                    text: "b".to_owned(),
+                })
+                .unwrap();
+            assert_eq!(texts(&events_until(&again, 1)), ["echo:b"]);
+            assert!(again.next_event(300).unwrap().is_none(), "no repeats");
+            drop(again);
+
+            // Asked from the end, nothing is replayed.
+            let last = AcpSession::connect(t3, attach_second, None).unwrap();
+            assert!(last.next_event(300).unwrap().is_none());
+            last.send_message(AgentMessage {
+                text: "finish".to_owned(),
+            })
+            .unwrap();
+            let done = events_until(&last, 1);
+            assert_eq!(done[0].kind, "completed");
+            last.close().unwrap();
+        })
+        .await
+        .unwrap();
+        serving.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_wrong_token_is_refused_before_any_session() {
+        let serving = Serving::start().await;
+        let (mut options, transport) = (serving.options("k2"), serving.transport());
+        options.authenticate = Some(serving.authenticate("wrong"));
+        let (refused, probe) = (serving.transport(), serving.token());
+        let outcome = tokio::task::spawn_blocking(move || {
+            let error = AcpSession::connect(transport, options, None).err().unwrap();
+            // Without authenticating at all, a session request is refused too.
+            let mut bare = AcpOptions {
+                cwd: ".".to_owned(),
+                prompt: Some("work".to_owned()),
+                ..AcpOptions::default()
+            };
+            bare.meta.insert(
+                LAUNCH_META_KEY.to_owned(),
+                LaunchMeta::from_start(&start_request("k2"))
+                    .with_handler(HandlerSpec::new("stream-agent", serde_json::Value::Null))
+                    .with_key("k2")
+                    .to_value(),
+            );
+            let bare_error = AcpSession::connect(refused, bare, None).err().unwrap();
+            (error.to_string(), bare_error.to_string(), probe)
+        })
+        .await
+        .unwrap();
+        assert!(
+            outcome.0.contains("authentication") || outcome.0.contains("token"),
+            "{}",
+            outcome.0
+        );
+        assert!(!outcome.1.is_empty());
+        assert!(
+            lock_of(&serving_runner_sessions(&serving)).is_empty(),
+            "no Session was made"
+        );
+        serving.stop().await;
+    }
+
+    fn serving_runner_sessions(serving: &Serving) -> Mutex<Vec<String>> {
+        // Sessions live on disk: a Session made would have a directory.
+        let dir = serving.dir.path().join(SESSIONS_DIR);
+        Mutex::new(
+            fs::read_dir(dir)
+                .map(|entries| {
+                    entries
+                        .filter_map(|entry| entry.ok())
+                        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default(),
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_second_connection_supersedes_the_first() {
+        let serving = Serving::start().await;
+        let (options, attach, first, second) = (
+            serving.options("k3"),
+            serving.attach_options("k3", 0),
+            serving.transport(),
+            serving.transport(),
+        );
+        tokio::task::spawn_blocking(move || {
+            let older = AcpSession::connect(first, options, None).unwrap();
+            assert_eq!(texts(&events_until(&older, 1)), ["hello work"]);
+            let newer = AcpSession::connect(second, attach, None).unwrap();
+            // The newer one gets the Session (and what the older took, replayed from its cursor).
+            newer
+                .send_message(AgentMessage {
+                    text: "x".to_owned(),
+                })
+                .unwrap();
+            assert!(texts(&events_until(&newer, 2)).contains(&"echo:x".to_owned()));
+            // The older is told why it ends, then loses its connection.
+            let told = events_until(&older, 1);
+            assert_eq!(told[0].kind, "detached");
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !older.connection_lost() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the older stays connected"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        })
+        .await
+        .unwrap();
+        serving.stop().await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runner_listens_on_loopback_only_and_one_serves_a_directory() {
         let state_dir = tempfile::tempdir().unwrap();
@@ -1190,67 +1306,58 @@ mod tests {
         let refused = serve_with_plugins(open, Arc::new(Plugins::scan(&[])), async {}).await;
         assert_eq!(refused.unwrap_err().kind(), io::ErrorKind::InvalidInput);
 
-        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-        let first = tokio::spawn(serve_with_plugins(
-            RunnerConfig::new(state_dir.path()),
-            Arc::new(Plugins::scan(&[])),
-            async move {
-                let _ = stopped.await;
-            },
-        ));
-        let dir = state_dir.path().to_path_buf();
-        let health = tokio::task::spawn_blocking(move || {
-            for _ in 0..500 {
-                if let Ok(answer) = call(&dir, "GET", "/v1/health", None) {
-                    return answer;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            panic!("the runner did not answer");
-        })
-        .await
-        .unwrap();
-        assert_eq!(health.0, 200);
-        assert_eq!(health.1["pid"], std::process::id());
-
+        let serving = Serving::start().await;
         let second = serve_with_plugins(
-            RunnerConfig::new(state_dir.path()),
+            RunnerConfig::new(serving.dir.path()),
             Arc::new(Plugins::scan(&[])),
             async {},
         )
         .await;
         assert_eq!(second.unwrap_err().kind(), io::ErrorKind::AddrInUse);
 
-        // A wrong token is refused; the right one is in the state directory, not elsewhere.
-        let info = RunnerInfo::read(state_dir.path()).unwrap();
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .build()
-            .into();
-        let url = format!("{}/v1/sessions", info.url);
-        let status = tokio::task::spawn_blocking(move || {
-            agent
-                .get(&url)
-                .header("Authorization", "Bearer wrong")
-                .call()
-                .unwrap()
-                .status()
-                .as_u16()
+        // With the right token the runner answers, and says it has no such Session.
+        let (transport, auth) = (serving.transport(), serving.authenticate(&serving.token()));
+        let answered = tokio::task::spawn_blocking(move || {
+            exchange(
+                transport,
+                Some(auth),
+                20_000,
+                30_000,
+                vec![(
+                    "_ai6/session_status".to_owned(),
+                    serde_json::json!({"key": "none"}),
+                )],
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(answered.len(), 1);
+        assert_eq!(answered[0].as_ref().unwrap_err().code, -32002);
+
+        // A wrong token is refused.
+        let (transport, auth) = (serving.transport(), serving.authenticate("wrong"));
+        let refused = tokio::task::spawn_blocking(move || {
+            exchange(
+                transport,
+                Some(auth),
+                20_000,
+                30_000,
+                vec![(
+                    "_ai6/session_status".to_owned(),
+                    serde_json::json!({"key": "none"}),
+                )],
+            )
         })
         .await
         .unwrap();
-        assert_eq!(status, 401);
+        assert!(refused.is_err(), "{refused:?}");
 
-        drop(stop);
-        first.await.unwrap().unwrap();
+        let path = serving.dir.path().to_path_buf();
+        serving.stop().await;
         assert!(
-            RunnerInfo::read(state_dir.path()).is_err(),
+            RunnerInfo::read(&path).is_err(),
             "a runner that stops says so by removing runner.json"
         );
-        let dir = state_dir.path().to_path_buf();
-        let gone = tokio::task::spawn_blocking(move || call(&dir, "GET", "/v1/health", None))
-            .await
-            .unwrap();
-        assert!(gone.unwrap_err().contains("no runner serves"));
     }
 }

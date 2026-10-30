@@ -282,6 +282,9 @@ runner = { command = "/opt/ai6/bin/ai6", plugin_paths = ["/opt/ai6/lib"] }
 | `state_dir` | `runner` in AI6's state directory on the Theater. |
 | `plugin_paths` | None: give the directories or libraries that hold the harness's handler and a terminal provider on the Theater. |
 | `terminal` | An available terminal provider on the Theater that suits the handler: `pipe` preferred for a JSON harness, `pty` otherwise. A pin that gives a JSON harness a terminal is refused. |
+| `connect_timeout_ms` | 30000: how long a Station waits to connect to the runner, and for `ai6 runner connect` to be ready through a transport. |
+| `initialize_timeout_ms` | 20000: how long the runner may take to answer `initialize`. |
+| `request_timeout_ms` | 30000: how long it may take to answer any other request. |
 
 A Station starts the runner when none answers, then starts each Session's harness on it. A
 Station that is shut down, killed or fenced out leaves the harness running, and its Mission
@@ -295,9 +298,13 @@ resumes in a new harness instead, as before.
 
 The runner listens on a loopback port only, behind a bearer token kept in its state
 directory (`token`, readable only by its user). On the Station's own host the Station talks
-to it directly. On another host it runs `ai6 runner call` there through the Theater's
-transport for each request, and `ai6 runner serve --detach` when no runner answers; a link
-that drops costs only time, since the runner keeps every event until a read gets through.
+to it directly. On another host it opens `ai6 runner connect` there on a terminal through the
+Theater's transport and speaks the Agent Client Protocol (ACP) over it, and runs `ai6 runner
+serve --detach` when no runner answers; a link that drops costs only time, since the runner
+keeps every event and the Station attaches again with `session/load`, which replays what it
+missed. A second Station's connection to a Session takes it over from the first. The
+Theater's `runner` settings `connect_timeout_ms`, `initialize_timeout_ms` and
+`request_timeout_ms` bound the connection steps.
 A runner out of reach for longer than the Operation's `lost_after_secs` is probed once more
 and, if it is gone, its Session is lost and the Mission tried again
 ([Runner loss](missions.md#runner-loss-the-station-lives)).
@@ -307,8 +314,8 @@ reverse forward over the transport) and repoints when it re-attaches or the link
 while no Station is attached the relay answers that none is.
 
 Run one by hand with `ai6 runner serve [--state-dir PATH] [--plugin-path PATH]...` (or
-`--detach` to start it in the background); `ai6 runner call METHOD PATH` sends it one
-request. Stopping the runner stops the harnesses it supervises, and a runner that restarts
+`--detach` to start it in the background); `ai6 runner connect` relays standard input
+and output to it over ACP. Stopping the runner stops the harnesses it supervises, and a runner that restarts
 ends the Sessions it lost with a `lost` event saying why, which their Station takes as the
 Session lost. Its events are in
 `sessions/<key>/events.jsonl`; ended Sessions are removed a week after they started, the

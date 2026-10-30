@@ -1530,13 +1530,121 @@ pub(crate) mod testing {
         }
     }
 
+    /// A handler whose Session says `hello`, answers each message with `echo:MESSAGE` and
+    /// completes when told `finish`.
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "stream-agent", name = "Mock streaming handler", crate = crate::guatiao)]
+    pub(crate) struct MockStreamHandler;
+
+    pub(crate) struct StreamSession {
+        id: crate::SessionId,
+        events: std::sync::Mutex<
+            std::collections::VecDeque<crate::directorates::section_00::agent::AgentEvent>,
+        >,
+    }
+
+    fn said(kind: &str, text: String) -> crate::directorates::section_00::agent::AgentEvent {
+        crate::directorates::section_00::agent::AgentEvent {
+            kind: kind.to_owned(),
+            text: Some(text),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+            quota: Vec::new(),
+        }
+    }
+
+    impl StreamSession {
+        fn new(id: &str, first: String) -> Self {
+            Self {
+                id: crate::SessionId::try_new(id).unwrap(),
+                events: std::sync::Mutex::new(std::collections::VecDeque::from([said(
+                    "text", first,
+                )])),
+            }
+        }
+    }
+
+    impl AgentHandler for MockStreamHandler {
+        fn start(
+            &self,
+            request: AgentStart,
+            _terminal: Object<dyn AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(
+                StreamSession::new("stream-session-1", format!("hello {}", request.prompt))
+                    .into_object(),
+            )
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(StreamSession::new(request.session_id.as_str(), "resumed".to_owned()).into_object())
+        }
+
+        fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
+            Ok(HarnessStdio::Json)
+        }
+    }
+
+    impl AgentSession for StreamSession {
+        fn session_id(&self) -> Result<Option<crate::SessionId>, ProviderError> {
+            Ok(Some(self.id.clone()))
+        }
+
+        fn send_message(
+            &self,
+            message: crate::directorates::section_00::agent::AgentMessage,
+        ) -> Result<(), ProviderError> {
+            let event = if message.text == "finish" {
+                said("completed", "finished".to_owned())
+            } else {
+                said("text", format!("echo:{}", message.text))
+            };
+            self.events.lock().unwrap().push_back(event);
+            Ok(())
+        }
+
+        fn next_event(
+            &self,
+            timeout_ms: i64,
+        ) -> Result<Option<crate::directorates::section_00::agent::AgentEvent>, ProviderError>
+        {
+            let next = self.events.lock().unwrap().pop_front();
+            if next.is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(
+                    timeout_ms.clamp(0, 10) as u64
+                ));
+            }
+            Ok(next)
+        }
+
+        fn interrupt(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn close(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
     mod both {
         use super::*;
 
         crate::guatiao::local_providers!(
             id = "ai6-terminal-choice-both",
             version = "0.0.0",
-            providers = [MockPty, MockPipe, MockJsonHandler, MockTtyHandler]
+            providers = [
+                MockPty,
+                MockPipe,
+                MockJsonHandler,
+                MockTtyHandler,
+                MockStreamHandler
+            ]
         );
     }
 

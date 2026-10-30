@@ -36,7 +36,7 @@ node that runs them: `station::server` (daemon service and `serve*`), `station::
 (provider host), `station::safehouse` (opens a Mission's safe house through a provider),
 `station::runner` (the field runner), `station::publisher` (`publisher` feature) and
 `station::identity` (`station-tls` feature). The command exposes `ai6 serve`,
-`ai6 runner serve|call`, `ai6 identity`, `ai6 peer waiting|accept` and `ai6 config path`.
+`ai6 runner serve|connect`, `ai6 identity`, `ai6 peer waiting|accept` and `ai6 config path`.
 Each reads the bootstrap file `ai6.cfg` (`ai6::bootstrap`, below; `--config PATH`). `ai6
 serve --provider LOCATION` and `--registry LOCATION` take a directory, `sqlite:PATH` or a
 `postgres://` URL over its `[provider]` and `[registry] location`; `[registry]
@@ -953,6 +953,9 @@ pub struct RunnerSettings {                  // how to reach the `ai6 runner` on
     pub state_dir: Option<String>,           // default: the runner's (`<AI6 state>/runner`)
     pub plugin_paths: Vec<String>,           // providers the runner loads, on the Theater
     pub terminal: Option<String>,            // default: the runner picks one that suits the handler (`pipe` for JSON, else `pty`)
+    pub connect_timeout_ms: Option<u64>,     // default 30000
+    pub initialize_timeout_ms: Option<u64>,  // default 20000
+    pub request_timeout_ms: Option<u64>,     // default 30000
 }
 impl RunnerSettings {
     pub fn with_command(self, command: impl Into<String>) -> Self;
@@ -3845,71 +3848,94 @@ run on, so a Session outlives its Station. It loads AgentHandler and Terminal pr
 Station and has no scheduler, Registry or roster.
 
 ```rust
-pub const CALL_NOT_RUNNING: u8 = 3;            // exit status of `ai6 runner call` with no runner
+pub const CONNECT_NOT_RUNNING: u8 = 3;         // exit status of `ai6 runner connect` with no runner
 #[non_exhaustive]
-pub struct RunnerInfo { pub url: String, pub pid: u32, pub version: String }   // runner.json
+pub struct RunnerInfo { pub address: String, pub pid: u32, pub version: String }   // runner.json
 impl RunnerInfo { pub fn read(state_dir: &Path) -> io::Result<Self>; }       // absent while none serves
 #[non_exhaustive]
-pub struct RunnerConfig { /* state_dir, listen (default 127.0.0.1:0), plugin_paths, terminal */ }
+pub struct RunnerConfig { /* state_dir, listen (default 127.0.0.1:0), plugin_paths, terminal, limits */ }
+pub struct RunnerLimits { pub pump_poll_ms: i64 /* 250 */, pub feed_poll_ms: u64 /* 50 */, pub replay_batch: usize /* 256 */ }
 impl RunnerConfig {
     pub fn new(state_dir: impl Into<PathBuf>) -> Self;
     pub fn with_listen(self, address: SocketAddr) -> Self;   // loopback only: serve refuses any other
     pub fn with_plugin_paths(self, paths: impl IntoIterator<Item = PathBuf>) -> Self;
     pub fn with_terminal(self, terminal: impl Into<String>) -> Self;
+    pub fn with_limits(self, limits: RunnerLimits) -> Self;
 }
 pub fn default_state_dir() -> io::Result<PathBuf>;           // `<AI6 state>/runner`
 pub async fn serve<F>(config: RunnerConfig, shutdown: F) -> io::Result<()>;  // F: Future<Output = ()> + Send + 'static
-pub fn call(state_dir: &Path, method: &str, path: &str, body: Option<&serde_json::Value>)
-    -> Result<(u16, serde_json::Value), String>;             // Err: no runner answers
+pub fn connect_stdio(state_dir: &Path) -> Result<(), String>;  // `ai6 runner connect`
 pub fn spawn_detached(program: &Path, arguments: &[OsString], state_dir: &Path) -> io::Result<RunnerInfo>;
 ```
 
 `serve` takes `runner.lock` (a second runner on the same directory gets `AddrInUse`), creates
-`token` once (mode `0600` on Unix), writes `runner.json` once it listens and removes it on a
-clean stop. Its API needs `Authorization: Bearer <token>` and speaks JSON: `GET /v1/health`,
-`GET|POST /v1/sessions`, `GET /v1/sessions/{key}` (handler, terminal, `session_id`, `ended`,
-`last`, `cursor`), `GET .../events?after=N&timeout_ms=T` (waits up to 30 s; answers
-`{events: [{seq, event}], session_id, complete}`), `POST .../messages`, `POST .../interrupt`,
-`POST .../close?after=N` and `PUT .../cable` (`{url, token}`). A start names a key (letters,
-digits, `.`, `_`, `-`), the handler, an optional terminal and `{"start": AgentStart}` or
-`{"resume": AgentResume}`.
+`token` once (mode `0600` on Unix), writes `runner.json` (`address` is `host:port`) once it
+listens and removes it on a clean stop. It speaks the Agent Client Protocol, one JSON-RPC
+message per line, on that port; a connection serves any number of Sessions and several
+connections may be open. `initialize` advertises `authMethods: [{id: "ai6-runner-token"}]`,
+`loadSession`, `sessionCapabilities.resume|close` and `_meta["dev.coqui.ai6/events"]`.
+`authenticate` with `_meta.token` (compared in constant time) must come before any
+`session/*` or `_ai6/*` call, and may come before `initialize`. Then:
+
+- `session/new` with `_meta["dev.coqui.ai6/launch"]` (`LaunchMeta` with `handler`
+  (`HandlerSpec`: id and the Agent's `handler_settings`), `terminal` and `key`) names a Session
+  (letters, digits, `.`, `_`, `-`; the ACP session ID is the key); the first `session/prompt`
+  starts the harness with that text as the task. `session/resume` with `ResumeMeta` (also
+  `key`, `handler`) resumes a provider Session under a new key. Later prompts are messages.
+- `session/load {sessionId: key, _meta: {"dev.coqui.ai6/after": N}}` attaches to a Session the
+  runner still holds and replays the events after `N` (the cursor the Station last
+  acknowledged when absent), then follows it live. A newer connection to a Session takes it
+  over: the older gets an `_ai6/event` of kind `detached` and is closed.
+- Every event is sent as `_ai6/event {sessionId, providerSessionId, seq, replay, event}`; the
+  start marker (no `event`) carries `terminal`, `handler` and `last`. `_ai6/ack {sessionId,
+  seq}` stores the cursor. `session/cancel` interrupts, `session/close` ends the Session and
+  its harness, `_ai6/session_status {key}` answers handler, terminal, `session_id`, `ended`,
+  `last`, `cursor` (`-32002` when unknown) and `_ai6/cable {key, upstream}` points the Cable
+  relay at the Station's endpoint. A `completed` event answers the waiting prompt `end_turn`,
+  a `failed` or `limit` one an error.
 
 Every event is appended to `sessions/<key>/events.jsonl` with its sequence number (from 1)
-before any Station can read it. `after` acknowledges everything up to `N` and is stored in
-`cursor`; a read without it starts from the cursor, so a Station that comes back replays what
-it missed (at least once: the last event it took may come again). A `completed`, `failed`
-or `limit` event ends the Session and stops the harness. A runner that restarts ends every
-Session it had running with a `lost` event saying so (a Station gives such a Session up as
-lost); ended Sessions older than seven days
-are removed when a runner starts. When the start environment carries `AI6_CABLE_MCP_URL` and
-`_TOKEN`, the runner starts a loopback relay with its own URL and token, gives the harness
-those, and relays to the Station's endpoint, which `PUT .../cable` replaces; with none set it
-answers 503. Stopping the runner stops its harnesses.
+before any Station can read it, and the cursor is kept in `cursor`, so a Station that comes
+back replays what it missed (at least once: the last event it took may come again). A
+`completed`, `failed` or `limit` event ends the Session and stops the harness. A runner that
+restarts ends every Session it had running with a `lost` event saying so (a Station gives
+such a Session up as lost); ended Sessions older than seven days are removed when a runner
+starts. When the start environment carries `AI6_CABLE_MCP_URL` and `_TOKEN`, the runner starts
+a loopback relay with its own URL and token, gives the harness those, and relays to the
+Station's endpoint, which `_ai6/cable` replaces. Stopping the runner stops its harnesses and
+closes its connections. `ai6 runner serve --pump-poll-ms --feed-poll-ms --replay-batch` set
+`RunnerLimits`.
 
-`call` reads `runner.json` and `token` and sends one request (`ai6 runner call METHOD PATH`
-prints `{"status": N, "body": …}`, takes a body on standard input and exits
-`CALL_NOT_RUNNING` when no runner answers). `spawn_detached` starts
+`ai6 runner connect [--state-dir D]` connects to the loopback port, authenticates with the
+token it reads from the state directory, prints `ai6-runner-connect-ready` (after putting a
+terminal on its standard input in raw mode on Unix) and relays standard input and output
+both ways; it exits `CONNECT_NOT_RUNNING` (3) when no runner answers. `spawn_detached` starts
 `program runner serve <arguments>` in its own process group (Unix) or detached (Windows),
 with output in `runner.log`, and answers once that process serves; on Windows it inherits
 the caller's inheritable handles, such as an output pipe.
 
 A Station uses the runner of the Theater a Session runs on when the Theater declares one
-(`Theater::runner`). On its own host it reads `runner.json` and the token and calls the API
-directly, starting the runner with `spawn_detached` (its own binary unless `command` is set)
-when none answers. On another host it runs `<command> runner call [--state-dir D] METHOD
-PATH` through the Theater's transport for every request (`command` defaults to `ai6`), and
-`<command> runner serve --detach` with the settings' plugin paths and terminal when none
-answers. A read that cannot reach the runner answers "no event yet", so a dropped link costs
-only time; the Station re-opens its Cable forward and repoints the relay once a read gets
-through again. Past the Operation's `lost_after_secs` out of reach it probes once more and,
-if the runner is gone (or answers 404 for the Session), gives the Session up as lost (see
-Recovery). The start records the runner Session's key in the launch record before the
-harness starts. Shutdown and losing the Session lease let go without stopping the harness;
-the Mission stays Working, so a restarted Station re-attaches to the same runner Session (a
-parked Mission is resumed instead) and repoints the Cable relay at its own endpoint.
-Closing the Session acknowledges what the Station took, so nothing is replayed after it.
-Watchdog terminal-output checks (blocked prompt, loops) do not see a harness on a runner;
-its events still count as activity.
+(`Theater::runner`). On its own host it connects to the port directly, authenticating with
+the token file, and starts the runner with `spawn_detached` (its own binary unless `command`
+is set) when none answers. On another host it opens `<command> runner connect [--state-dir D]`
+on a terminal through the Theater's transport (`command` defaults to `ai6`), waits for the
+ready line, and speaks ACP over it; `<command> runner serve --detach` with the settings' plugin
+paths and terminal starts the runner when none answers. The Theater's `runner` settings
+`connect_timeout_ms` (30000), `initialize_timeout_ms` (20000) and `request_timeout_ms` (30000)
+bound those steps. A launch is an `AcpSession` with `close_on_drop` and `fail_on_disconnect`
+off; `RemoteSession` wraps it: a dropped connection costs only time, the next `next_event`
+attaches again with `session/load` after the last event taken, and the Station re-opens its
+Cable forward and repoints the relay once it is through again. Past the Operation's
+`lost_after_secs` out of reach it probes once more and, if the runner is gone (or answers
+not found for the Session), gives the Session up as lost (see Recovery). A Session another
+connection took over stops reading (`detached`). The start records the runner Session's key
+in the launch record before the harness starts. Shutdown and losing the Session lease let go
+without stopping the harness; the Mission stays Working, so a restarted Station re-attaches to
+the same runner Session (a parked Mission is resumed instead) and repoints the Cable relay at
+its own endpoint. Events are acknowledged when the Station asks for the next one, and closing
+the Session acknowledges what it took, so nothing is replayed after it. Watchdog
+terminal-output checks (blocked prompt, loops) do not see a harness on a runner; its events
+still count as activity.
 
 ## Universal Exports publication (`ai6::station::publisher`)
 
@@ -4329,12 +4355,11 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
   into a writable provider with `ConfigProvider::put_all` (checked whole, one transaction on
   SQL); `ai6 config export DIR` writes every family of every scope as TOML family files
   (`config::export`, owner-only on Unix).
-- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH] [--plugin-profile P] [--terminal ID] [--detach]`:
+- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH] [--plugin-profile P] [--terminal ID] [--pump-poll-ms N] [--feed-poll-ms N] [--replay-batch N] [--detach]`:
   run the field runner on this host until Ctrl-C or SIGTERM (provider libraries checked as
   the Station's, verified copies under its state directory); `--detach` starts it in the
-  background and prints its `runner.json`. `ai6 runner call [--state-dir PATH] METHOD PATH`
-  sends one request with a body from standard input and prints `{"status", "body"}`; exit 3
-  means no runner answered.
+  background and prints its `runner.json`. `ai6 runner connect [--state-dir PATH]` relays
+  standard input and output to it over ACP, authenticated; exit 3 means no runner answered.
 - `ai6 green-ink gate`: Claude Code's `PreToolUse` hook for shell commands (see Harness
   gate); the Claude handler passes it through `--settings`. Always exits 0.
 - `ai6 plugins pin PATH...` prints the `plugins.toml` entries that pin AI6 provider

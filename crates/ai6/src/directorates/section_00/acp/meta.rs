@@ -70,6 +70,9 @@ pub struct LaunchMeta {
     /// The terminal provider the Station pinned.
     #[serde(default)]
     pub terminal: Option<String>,
+    /// The name the Station gave the Session on a field runner; it is the ACP session ID there.
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 impl LaunchMeta {
@@ -90,6 +93,7 @@ impl LaunchMeta {
             assistant: start.assistant.clone(),
             handler: None,
             terminal: None,
+            key: None,
         }
     }
 
@@ -104,6 +108,13 @@ impl LaunchMeta {
     #[must_use]
     pub fn with_terminal(mut self, terminal: Option<String>) -> Self {
         self.terminal = terminal;
+        self
+    }
+
+    /// Names the Session on a field runner.
+    #[must_use]
+    pub fn with_key(mut self, key: impl Into<String>) -> Self {
+        self.key = Some(key.into());
         self
     }
 
@@ -192,6 +203,9 @@ pub struct ResumeMeta {
     /// The terminal provider the Station pinned.
     #[serde(default)]
     pub terminal: Option<String>,
+    /// The name the Station gave the Session on a field runner.
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 impl ResumeMeta {
@@ -212,6 +226,7 @@ impl ResumeMeta {
             initial_context: resume.initial_context.clone(),
             handler: None,
             terminal: None,
+            key: None,
         }
     }
 
@@ -226,6 +241,13 @@ impl ResumeMeta {
     #[must_use]
     pub fn with_terminal(mut self, terminal: Option<String>) -> Self {
         self.terminal = terminal;
+        self
+    }
+
+    /// Names the Session on a field runner.
+    #[must_use]
+    pub fn with_key(mut self, key: impl Into<String>) -> Self {
+        self.key = Some(key.into());
         self
     }
 

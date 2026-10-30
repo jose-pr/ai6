@@ -244,6 +244,7 @@ impl AcpHandler {
             effort_option: settings.effort_option.clone(),
             prompt: launch.prompt,
             resume: launch.resume,
+            reattach: None,
             restricted: launch.restricted,
             authenticate: None,
             initialize_timeout_ms: settings.initialize_timeout_ms,
@@ -254,6 +255,8 @@ impl AcpHandler {
                 launch.environment,
                 launch.working_directory,
             )),
+            close_on_drop: true,
+            fail_on_disconnect: true,
         };
         let ended = process.clone();
         let stopper = io.clone();
