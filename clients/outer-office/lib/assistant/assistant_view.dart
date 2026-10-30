@@ -8,6 +8,7 @@ import '../routes/oo_route.dart';
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_tokens.dart';
 import 'charts.dart';
+import 'entry_kind.dart';
 
 /// The view schema version this app renders. Universal Exports refuses any other view
 /// before it reaches the app; the app checks again and shows a refusal, never a guess.
@@ -1068,14 +1069,26 @@ class AssistantViewCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (exposed) const OutsideTextStrip(),
-            if (view.title != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  revealInvisible(view.title!),
-                  style: theme.textTheme.titleMedium,
-                ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                spacing: 8,
+                children: [
+                  const EntryKindIcon(EntryKind.view),
+                  Expanded(
+                    child: view.title == null
+                        ? Text(
+                            EntryKind.view.label,
+                            style: theme.textTheme.bodySmall,
+                          )
+                        : Text(
+                            revealInvisible(view.title!),
+                            style: theme.textTheme.titleMedium,
+                          ),
+                  ),
+                ],
               ),
+            ),
             for (final block in view.blocks)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -1102,7 +1115,11 @@ class AssistantViewCard extends StatelessWidget {
 
 /// The strip over a view she built after reading text from outside AI6.
 class OutsideTextStrip extends StatelessWidget {
-  const OutsideTextStrip({super.key});
+  const OutsideTextStrip({this.sources = const [], super.key});
+
+  /// What exposed the conversation, when it is known: `tool:missions`, or the source a Station
+  /// reported.
+  final List<String> sources;
 
   /// What the strip says.
   static const message =
@@ -1127,7 +1144,17 @@ class OutsideTextStrip extends StatelessWidget {
         children: [
           Icon(Icons.warning_amber_rounded, color: tokens.warning, size: 18),
           Expanded(
-            child: Text(message, style: TextStyle(color: tokens.text)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(message, style: TextStyle(color: tokens.text)),
+                if (sources.isNotEmpty)
+                  Text(
+                    revealInvisible('Read from: ${sources.join(', ')}'),
+                    style: TextStyle(color: tokens.muted, fontSize: 12),
+                  ),
+              ],
+            ),
           ),
         ],
       ),

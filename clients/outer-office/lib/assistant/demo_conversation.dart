@@ -111,6 +111,14 @@ class DemoAssistantChannel implements AssistantChannel {
             'body': {'capacity': 6},
           },
           'needs': {'action': 'station.configure', 'on': 'station-control-01'},
+          'read': [
+            {'tool': 'board', 'ids': <String, Object?>{}},
+            {
+              'tool': 'station_settings',
+              'ids': {'station_id': 'station-control-01'},
+            },
+          ],
+          'opens': 'app:/stations?station_id=station-control-01&tab=settings',
         }),
       ];
     }

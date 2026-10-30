@@ -3,9 +3,9 @@ import 'package:material_ui/material_ui.dart';
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
-import '../theme/oo_theme.dart';
 import 'assistant_panel.dart' show MoneypennyAvatar;
 import 'assistant_view.dart' show OutsideTextStrip, RefusedView;
+import 'entry_kind.dart';
 
 /// The route a navigation entry offers (its `data`), or why it is not one.
 OoRoute navigationRoute(Map<String, Object?>? data) =>
@@ -32,7 +32,6 @@ class NavigationCard extends StatelessWidget {
       return RefusedView(reason: error.message);
     }
     final theme = Theme.of(context);
-    final tokens = OoTokens.of(context);
     final label = data?['label'];
     final open = onOpen;
     return Card(
@@ -48,7 +47,7 @@ class NavigationCard extends StatelessWidget {
             Row(
               spacing: 8,
               children: [
-                Icon(Icons.open_in_new, size: 20, color: tokens.accent),
+                const EntryKindIcon(EntryKind.navigation),
                 Expanded(
                   child: Text(
                     route.page.label,

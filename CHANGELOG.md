@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Moneypenny's proposals show what they rest on and what they touch. A proposal records the
+  read tools she called since the person's last message (each with its identifier arguments
+  only), the conversation's exposure and what exposed it (`exposed_by`, `tool:NAME` or the
+  Station's source as given), and the link of the page it changes (`opens`). The card reads
+  "Proposal · needs ACTION on SCOPE", lists "Based on" her reads, offers an "Affects" chip
+  that only opens the page, says how it stands in words with icons, answers Confirm once,
+  and reads "Outcome unknown, check the page" after thirty seconds of applying. Every kind of
+  chat entry has an icon and a semantics label from one table
+  ([Moneypenny](https://jose-pr.github.io/ai6/assistant/)).
 - Outer Office says how current and how complete what it shows is. Each source of the board
   (Stations, Sessions, Missions, held briefs, green ink, Mission proposals, timeline) settles
   on its own: a failed read keeps the last data and says "Last updated", a 403 hides it, a

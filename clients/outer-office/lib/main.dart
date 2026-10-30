@@ -142,6 +142,9 @@ void _startDesktop() {
 
 /// The person's appearance choices on this device: `oo.theme` holds a theme id or
 /// `system`, `oo.backdrop` whether the wallpaper is painted.
+/// Now in Unix seconds, from which the sample data's times are measured.
+double _demoNow() => ooClock().millisecondsSinceEpoch / 1000;
+
 class AppearancePreferences {
   AppearancePreferences(this._preferences);
 
@@ -255,14 +258,14 @@ class MissionBoard extends ChangeNotifier {
           ),
         ],
       };
-      auditEntries = const [
+      auditEntries = [
         AuditEntrySummary(
           id: 'preview-audit-001',
           actor: 'operator-007',
           action: 'mission.create.requested',
           operation: 'G',
           target: 'oo--mission-007',
-          at: 1_798_000_000,
+          at: _demoNow() - 600,
         ),
       ];
       userSession = const UserSessionSummary(
@@ -290,20 +293,20 @@ class MissionBoard extends ChangeNotifier {
           ),
         ],
       );
-      stationBoard = const StationBoardSummary(
+      stationBoard = StationBoardSummary(
         headquartersStation: 'station-control-01',
         stations: [
           StationSummary(
             stationId: 'station-control-01',
             healthy: true,
             headquarters: true,
-            seen: 1_798_000_000,
+            seen: _demoNow() - 2,
             roles: ['control', 'execution'],
             running: 2,
             capacity: 4,
             operations: ['G'],
             resources: HostResources(
-              sampledAt: 1_798_000_000,
+              sampledAt: _demoNow().round() - 8,
               cpus: 8,
               cpuPercent: 20,
               load1m: 1.2,
@@ -324,7 +327,7 @@ class MissionBoard extends ChangeNotifier {
             stationId: 'station-remote-02',
             healthy: false,
             headquarters: false,
-            seen: 1_798_000_000,
+            seen: _demoNow() - 2,
             roles: ['execution'],
             running: 0,
             capacity: 4,
@@ -768,7 +771,7 @@ class MissionBoard extends ChangeNotifier {
                 .toList(growable: false) ??
             const [];
 
-  static const _demoMissionProposals = [
+  static List<MissionProposalSummary> get _demoMissionProposals => [
     MissionProposalSummary(
       id: 'proposal-preview-001',
       operationId: 'G',
@@ -780,8 +783,8 @@ class MissionBoard extends ChangeNotifier {
       role: 'analyst',
       tags: ['configuration', 'review'],
       priority: 2,
-      createdAt: 1_798_000_000,
-      vetting: [],
+      createdAt: _demoNow() - 1200,
+      vetting: const [],
     ),
   ];
 
@@ -925,7 +928,7 @@ class MissionBoard extends ChangeNotifier {
           related: 'mission-007',
         ),
       ],
-      heldAt: 1_798_000_000,
+      heldAt: _demoNow() - 3000,
     ),
   ];
 
@@ -982,7 +985,7 @@ class MissionBoard extends ChangeNotifier {
             [
                   TimelineItemSummary(
                     id: 'event:preview-2',
-                    at: 1_798_000_120,
+                    at: _demoNow() - 90,
                     kind: 'control',
                     action: 'resume.applied',
                     operationId: operationId,
@@ -993,7 +996,7 @@ class MissionBoard extends ChangeNotifier {
                   ),
                   TimelineItemSummary(
                     id: 'event:preview-1',
-                    at: 1_798_000_060,
+                    at: _demoNow() - 150,
                     kind: 'lifecycle',
                     action: 'blocked',
                     operationId: operationId,
@@ -1378,8 +1381,8 @@ class MissionBoard extends ChangeNotifier {
       kind: 'push',
       target: 'origin:refs/heads/main',
       reason: 'The release branch passed review; push it to main.',
-      requestedAt: 1_798_000_000,
-      expiresAt: 1_798_086_400,
+      requestedAt: _demoNow() - 420,
+      expiresAt: _demoNow() + 82_800,
     ),
   ];
 
@@ -1450,7 +1453,7 @@ class MissionBoard extends ChangeNotifier {
           clearanceMin: 'field',
           maxUses: 10,
           uses: 3,
-          expiresAt: 1_798_086_400,
+          expiresAt: _demoNow() + 82_800,
           signer: 'operator-007',
         ),
       ];

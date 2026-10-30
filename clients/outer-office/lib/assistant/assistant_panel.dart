@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -5,9 +6,11 @@ import 'package:material_ui/material_ui.dart';
 
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_route.dart';
+import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_view.dart';
+import 'entry_kind.dart';
 import 'navigation_card.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
@@ -414,6 +417,7 @@ class _EntryView extends StatelessWidget {
         proposal: entry.data ?? const {},
         onConfirm: controller.confirm,
         onCancel: controller.cancel,
+        onOpen: onOpen,
       ),
       'navigation' => NavigationCard(data: entry.data, onOpen: onOpen),
       'view' => AssistantViewCard(
@@ -474,7 +478,7 @@ class MoneypennyAvatar extends StatelessWidget {
       width: size,
       height: size,
       filterQuality: FilterQuality.medium,
-      semanticLabel: 'Moneypenny',
+      semanticLabel: EntryKind.answer.label,
     ),
   );
 }
@@ -494,13 +498,64 @@ Object? revealStrings(Object? value) => switch (value) {
 /// `mcp__moneypenny__board` as `board`.
 String _toolName(String tool) => tool.split('__').last;
 
-/// A change Moneypenny proposed: what it is, the exact request, the permission it needs,
-/// and, while it waits, Confirm and Cancel.
-class ProposalCard extends StatelessWidget {
+/// How a proposal stands, in the words the person reads: an icon and a word, never colour
+/// alone. A proposal left applying past [ProposalCard.confirmingAfter] reads as an outcome
+/// unknown.
+({IconData icon, String word}) proposalStatus(
+  String status, {
+  bool overdue = false,
+}) => switch (status) {
+  'confirming' when overdue => (
+    icon: Icons.help_outline,
+    word: 'Outcome unknown, check the page',
+  ),
+  'confirming' => (icon: Icons.sync, word: 'Applying'),
+  'done' => (icon: Icons.check_circle_outline, word: 'Applied'),
+  'failed' => (icon: Icons.error_outline, word: 'Refused'),
+  'cancelled' => (icon: Icons.cancel_outlined, word: 'Cancelled'),
+  'expired' => (
+    icon: Icons.timer_off_outlined,
+    word: 'Expired, nothing changed',
+  ),
+  _ => (icon: Icons.hourglass_empty, word: 'Waiting for you'),
+};
+
+/// `missions (G), mission (G/m-12)`: what she read this turn, each tool with the identifiers
+/// it was given.
+String proposalReads(Object? read) {
+  if (read is! List) return '';
+  return [
+    for (final call in read)
+      if (call is Map && call['tool'] is String)
+        switch (call['ids']) {
+          final Map ids when ids.isNotEmpty =>
+            '${call['tool']} (${ids.values.join('/')})',
+          _ => '${call['tool']}',
+        },
+  ].join(', ');
+}
+
+/// The page a proposal changes as the person reads it: `Roster › agent 009`; the fields of
+/// its route in order after the page.
+String proposalAffects(OoRoute route) {
+  final values = [for (final key in route.keys) route[key]!];
+  return route.page == OoPage.roster
+      ? '${route.page.label} › ${values.join(' ')}'
+      : [route.page.label, ...values].join(' › ');
+}
+
+/// A change Moneypenny proposed: what it is and what it needs, what she had read, the exact
+/// request, the page it affects (a link that only opens the page), how it stands and, while
+/// it waits, Confirm and Cancel. Confirm answers once: after the first press it is disabled,
+/// and a proposal still applying after [confirmingAfter] says its outcome is unknown rather
+/// than offering another.
+class ProposalCard extends StatefulWidget {
   const ProposalCard({
     required this.proposal,
     required this.onConfirm,
     required this.onCancel,
+    this.onOpen,
+    this.confirmingAfter = const Duration(seconds: 30),
     super.key,
   });
 
@@ -508,16 +563,75 @@ class ProposalCard extends StatelessWidget {
   final void Function(String id) onConfirm;
   final void Function(String id) onCancel;
 
+  /// Opens the page the proposal affects, as a link (`app:/<page>?...`).
+  final void Function(String link)? onOpen;
+
+  /// How long a proposal may stay applying before the card says the outcome is unknown.
+  final Duration confirmingAfter;
+
+  @override
+  State<ProposalCard> createState() => _ProposalCardState();
+}
+
+class _ProposalCardState extends State<ProposalCard> {
+  bool _pressed = false;
+  bool _overdue = false;
+  Timer? _timer;
+
+  String get _status => widget.proposal['status'] as String? ?? 'pending';
+
+  @override
+  void initState() {
+    super.initState();
+    _watch();
+  }
+
+  @override
+  void didUpdateWidget(ProposalCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.proposal['status'] != widget.proposal['status']) _watch();
+  }
+
+  /// Starts the clock when the proposal is applying and stops it when it is not.
+  void _watch() {
+    _timer?.cancel();
+    if (_status == 'confirming') {
+      _timer = Timer(widget.confirmingAfter, () {
+        if (mounted) setState(() => _overdue = true);
+      });
+    } else {
+      _overdue = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final proposal = widget.proposal;
     final id = proposal['id'] as String? ?? '';
-    final status = proposal['status'] as String? ?? 'pending';
+    final status = _status;
     final request =
         (proposal['request'] as Map?)?.cast<String, Object?>() ?? {};
     final needs = (proposal['needs'] as Map?)?.cast<String, Object?>() ?? {};
     final body = request['body'];
     final result = proposal['result'] as String?;
+    final reads = proposalReads(proposal['read']);
+    final shown = proposalStatus(status, overdue: _overdue);
+    OoRoute? opens;
+    if (proposal['opens'] case final String link) {
+      try {
+        opens = OoRoute.parseUri(link);
+      } on FormatException {
+        opens = null;
+      }
+    }
+    final open = widget.onOpen;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -526,19 +640,48 @@ class ProposalCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           spacing: 6,
           children: [
+            if (proposal['exposed'] == true)
+              OutsideTextStrip(
+                sources: [
+                  for (final source
+                      in (proposal['exposed_by'] as List?) ?? const [])
+                    '$source',
+                ],
+              ),
+            Row(
+              spacing: 8,
+              children: [
+                const EntryKindIcon(EntryKind.proposal),
+                Expanded(
+                  child: Text(
+                    'Proposal · needs ${needs['action']} on ${needs['on']}',
+                    style: theme.textTheme.labelLarge,
+                  ),
+                ),
+              ],
+            ),
             Row(
               children: [
-                const Icon(Icons.edit_note),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     revealInvisible(proposal['summary'] as String? ?? ''),
                     style: theme.textTheme.titleSmall,
                   ),
                 ),
-                Chip(label: Text(status)),
+                const SizedBox(width: 8),
+                Chip(
+                  key: const ValueKey('proposal-status'),
+                  avatar: Icon(shown.icon, size: 16),
+                  label: Text(shown.word),
+                  visualDensity: VisualDensity.compact,
+                ),
               ],
             ),
+            if (reads.isNotEmpty)
+              Text(
+                revealInvisible('Based on: $reads'),
+                style: theme.textTheme.bodySmall,
+              ),
             SelectableText(
               revealInvisible('${request['method']} ${request['path']}') +
                   (body == null
@@ -546,10 +689,28 @@ class ProposalCard extends StatelessWidget {
                       : '\n${const JsonEncoder.withIndent('  ').convert(revealStrings(body))}'),
               style: const TextStyle(fontFamily: 'monospace'),
             ),
-            Text(
-              'Needs ${needs['action']} on ${needs['on']}. Nothing changes until you confirm.',
-              style: theme.textTheme.bodySmall,
-            ),
+            if (status == 'pending')
+              Text(
+                'Nothing changes until you confirm.',
+                style: theme.textTheme.bodySmall,
+              ),
+            if (opens != null && open != null)
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: ActionChip(
+                  key: const ValueKey('proposal-opens'),
+                  avatar: const Icon(Icons.open_in_new, size: 16),
+                  label: Text(
+                    status == 'done'
+                        ? 'Open'
+                        : 'Affects: ${revealInvisible(proposalAffects(opens))}',
+                  ),
+                  tooltip:
+                      'Opens ${proposalAffects(opens)}; it changes nothing',
+                  onPressed: () => open(opens!.toUri()),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
             if (result != null) Text(revealInvisible(result)),
             if (status == 'pending')
               Row(
@@ -557,11 +718,16 @@ class ProposalCard extends StatelessWidget {
                 spacing: 8,
                 children: [
                   TextButton(
-                    onPressed: () => onCancel(id),
+                    onPressed: () => widget.onCancel(id),
                     child: const Text('Cancel'),
                   ),
                   FilledButton(
-                    onPressed: () => onConfirm(id),
+                    onPressed: _pressed
+                        ? null
+                        : () {
+                            setState(() => _pressed = true);
+                            widget.onConfirm(id);
+                          },
                     child: const Text('Confirm'),
                   ),
                 ],

@@ -113,7 +113,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   permissions, shows tables, charts, cards, timelines and diffs rendered by the app, offers
   pages as cards (the page and its filters as chips, and **Open**, which only reads and
   shows **Opened by Moneypenny** on the page), and
-  proposes changes the operator confirms or cancels (the exact request is shown); **Stop**
+  proposes changes the operator confirms or cancels (the exact request is shown, with what
+  she had read, the page it affects as a chip that only opens it, and how it stands:
+  Waiting for you, Applying, Applied, Refused with the reason, Cancelled, Expired, or an
+  outcome unknown when it has been applying for thirty seconds); **Stop**
   ends an answer she is still giving. Her menu opens **Her memory of you**, the files of
   `memory/` in the operator's personal repository: open, edit and save, add, or forget one
   (after a confirmation), each a commit by the operator. See the

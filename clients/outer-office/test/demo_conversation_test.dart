@@ -102,7 +102,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(ProposalCard),
-        matching: find.text('pending'),
+        matching: find.text('Waiting for you'),
       ),
       findsOneWidget,
       reason: 'Confirm is inert',

@@ -531,7 +531,10 @@ void main() {
       find.textContaining('PUT /v1/user/stations/worker/settings'),
       findsOneWidget,
     );
-    expect(find.textContaining('Needs station.configure'), findsOneWidget);
+    expect(
+      find.textContaining('needs station.configure on station:worker'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Confirm'));
     await tester.pump();
     expect(channel.sent.last, {'type': 'confirm', 'proposal': 'proposal-1'});
@@ -541,7 +544,7 @@ void main() {
       'proposal': {...proposal, 'status': 'done', 'result': 'AI6 answered 200'},
     });
     await tester.pumpAndSettle();
-    expect(find.text('done'), findsOneWidget);
+    expect(find.text('Applied'), findsOneWidget);
     expect(find.text('Confirm'), findsNothing);
     expect(find.text('AI6 answered 200'), findsOneWidget);
 
