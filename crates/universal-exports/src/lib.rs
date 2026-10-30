@@ -58,7 +58,7 @@ pub use controls::ControlStatus;
 pub use held::{HeldBriefDecision, HeldBriefEntry};
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
-pub use moneypenny::{AssistantConfig, ViewLimits};
+pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{TimelineItem, TimelinePage};
@@ -499,6 +499,8 @@ pub struct Gateway {
     controls: Arc<std::sync::Mutex<ControlBook>>,
     control_ready: Arc<tokio::sync::Notify>,
     assistant: Option<Arc<moneypenny::Assistant>>,
+    pages: Option<Arc<moneypenny::pages::PageStore>>,
+    pages_config: Option<PagesConfig>,
 }
 
 impl fmt::Debug for Gateway {
@@ -571,6 +573,8 @@ impl Gateway {
             controls: Arc::new(std::sync::Mutex::new(controls)),
             control_ready: Arc::default(),
             assistant: None,
+            pages: None,
+            pages_config: None,
         }
     }
 
@@ -608,6 +612,76 @@ impl Gateway {
     pub fn with_assistant(mut self, config: AssistantConfig) -> Self {
         self.assistant = Some(Arc::new(moneypenny::Assistant::new(config)));
         self
+    }
+
+    /// Keeps the pages Moneypenny publishes in `config.dir` and serves them: under `/pages/` on
+    /// the API's own origin, or, with `config.origin`, only on the pages' own listener
+    /// ([`Gateway::pages_router`]). Needs [`Gateway::with_assistant`] to publish anything.
+    ///
+    /// # Errors
+    ///
+    /// The directory cannot be made or read, or the origin is not an origin.
+    pub fn with_pages(mut self, config: PagesConfig) -> Result<Self, GatewayError> {
+        if let Some(origin) = &config.origin {
+            let plain = origin.trim_end_matches('/');
+            if !(plain.starts_with("https://") || plain.starts_with("http://"))
+                || plain.contains(['?', '#'])
+                || plain.matches('/').count() != 2
+            {
+                return Err(GatewayError::InvalidConfiguration);
+            }
+        }
+        let store = moneypenny::pages::PageStore::open(config.dir.clone())
+            .map_err(|_| GatewayError::InvalidConfiguration)?;
+        self.pages = Some(Arc::new(store));
+        self.pages_config = Some(config);
+        Ok(self)
+    }
+
+    /// The router of the pages' own listener: page routes only, no `/v1`. `None` unless
+    /// [`Gateway::with_pages`] gave an origin.
+    pub fn pages_router(&self) -> Option<Router> {
+        self.pages_config.as_ref()?.origin.as_ref()?;
+        self.start_sweeper();
+        Some(
+            moneypenny::pages::pages_router()
+                .layer(axum::extract::DefaultBodyLimit::max(0))
+                .with_state(self.clone()),
+        )
+    }
+
+    /// Serves the pages' own listener on `address` until `shutdown`.
+    ///
+    /// # Errors
+    ///
+    /// The address cannot be bound, or there is no pages origin.
+    pub async fn serve_pages<F>(
+        self,
+        address: SocketAddr,
+        shutdown: F,
+    ) -> Result<(), std::io::Error>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let router = self
+            .pages_router()
+            .ok_or_else(|| std::io::Error::other("pages have no origin of their own"))?;
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        axum::serve(listener, router.into_make_service())
+            .with_graceful_shutdown(shutdown)
+            .await
+    }
+
+    /// Starts the page sweeper once, when a runtime runs.
+    fn start_sweeper(&self) {
+        let Some(store) = &self.pages else {
+            return;
+        };
+        if store.start_sweeper()
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            runtime.spawn(moneypenny::page_tools::sweeper(self.clone()));
+        }
     }
 
     /// Checks whether a presented secret is the configured Station channel credential.
@@ -1180,7 +1254,37 @@ impl Gateway {
     /// Returns the Axum service for the Station channel, browser attach and terminal sockets.
     pub fn router(self) -> Router {
         let max_frame_bytes = self.config.limits.max_frame_bytes;
-        Router::new()
+        self.start_sweeper();
+        let own_origin = self
+            .pages_config
+            .as_ref()
+            .is_some_and(|config| config.origin.is_some());
+        let pages = (self.pages.is_some() && !own_origin)
+            .then(|| Router::new().nest("/pages", moneypenny::pages::pages_router()));
+        let base = Router::new()
+            .route(
+                "/v1/station/assistant/pages/{digest}/{*path}",
+                axum::routing::put(moneypenny::page_tools::upload)
+                    .layer(axum::extract::DefaultBodyLimit::disable()),
+            )
+            .route(
+                "/v1/station/assistant/pages/{digest}/done",
+                post(moneypenny::page_tools::done),
+            )
+            .route("/v1/user/pages", get(moneypenny::page_tools::list))
+            .route(
+                "/v1/user/pages/{id}",
+                axum::routing::delete(moneypenny::page_tools::delete),
+            )
+            .route(
+                "/v1/user/pages/{id}/open",
+                post(moneypenny::page_tools::open),
+            )
+            .route(
+                "/v1/user/pages/{id}/remember",
+                post(moneypenny::page_tools::remember),
+            );
+        let router = Router::new()
             .route("/health", get(health))
             .route("/v1/board", get(board))
             .route("/v1/stations", get(stations))
@@ -1358,7 +1462,12 @@ impl Gateway {
             .route("/v1/attach", post(exchange_attach_token))
             .route("/v1/socket/{session_id}", get(websocket_attach))
             .layer(axum::extract::DefaultBodyLimit::max(max_frame_bytes))
-            .with_state(self)
+            .merge(base)
+            .with_state(self.clone());
+        match pages {
+            Some(pages) => router.merge(pages.with_state(self)),
+            None => router,
+        }
     }
 
     /// Serves the gateway on loopback so browsers reach it only through the
@@ -3952,6 +4061,14 @@ struct ApiError {
 }
 
 impl ApiError {
+    fn payload_too_large() -> Self {
+        Self {
+            status: StatusCode::PAYLOAD_TOO_LARGE,
+            message: "request body is too large",
+            retry_after_seconds: None,
+        }
+    }
+
     fn not_found() -> Self {
         Self {
             status: StatusCode::NOT_FOUND,

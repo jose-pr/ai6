@@ -175,6 +175,7 @@ pub async fn universal_exports::Gateway::ingest(&self, &str, &ai6_diptel::Sessio
 pub async fn universal_exports::Gateway::issue_attach_token(&self, &str, universal_exports::AttachGrant) -> core::result::Result<alloc::string::String, universal_exports::GatewayError>
 pub fn universal_exports::Gateway::new(universal_exports::GatewayConfig) -> Self
 pub async fn universal_exports::Gateway::next_sequence(&self, &str, &ai6_diptel::SessionId) -> core::result::Result<u64, universal_exports::GatewayError>
+pub fn universal_exports::Gateway::pages_router(&self) -> core::option::Option<axum::routing::Router>
 pub fn universal_exports::Gateway::public_origin(&self) -> &str
 pub async fn universal_exports::Gateway::publish_lifecycle(&self, &str, ai6_diptel::LifecycleEvent) -> core::result::Result<(), universal_exports::GatewayError>
 pub async fn universal_exports::Gateway::publish_terminal_output(&self, &str, ai6_diptel::SessionId, u64, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
@@ -182,9 +183,11 @@ pub async fn universal_exports::Gateway::receive_agent_input(&self) -> core::opt
 pub async fn universal_exports::Gateway::register_session(&self, &str, ai6_diptel::OperationId, ai6_diptel::MissionId, ai6_diptel::SessionId) -> core::result::Result<(), universal_exports::GatewayError>
 pub fn universal_exports::Gateway::router(self) -> axum::routing::Router
 pub async fn universal_exports::Gateway::serve_loopback<F>(self, u16, F) -> core::result::Result<(), core::io::error::Error> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub async fn universal_exports::Gateway::serve_pages<F>(self, core::net::socket_addr::SocketAddr, F) -> core::result::Result<(), core::io::error::Error> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn universal_exports::Gateway::submit_input(&self, &ai6_diptel::SessionId, &str, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, universal_exports::AccessProviders) -> Self
 pub fn universal_exports::Gateway::with_assistant(self, universal_exports::AssistantConfig) -> Self
+pub fn universal_exports::Gateway::with_pages(self, universal_exports::PagesConfig) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
 pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>) -> Self
 impl core::fmt::Debug for universal_exports::Gateway
@@ -254,6 +257,13 @@ pub universal_exports::MissionAttempt::session_id: alloc::string::String
 pub universal_exports::MissionAttempt::station: alloc::string::String
 pub universal_exports::MissionAttempt::status: alloc::string::String
 pub universal_exports::MissionAttempt::theater: core::option::Option<alloc::string::String>
+pub struct universal_exports::PagesConfig
+pub universal_exports::PagesConfig::dir: std::path::PathBuf
+pub universal_exports::PagesConfig::listen: core::option::Option<core::net::socket_addr::SocketAddr>
+pub universal_exports::PagesConfig::origin: core::option::Option<alloc::string::String>
+impl universal_exports::PagesConfig
+pub fn universal_exports::PagesConfig::new(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn universal_exports::PagesConfig::with_origin(self, impl core::convert::Into<alloc::string::String>, core::net::socket_addr::SocketAddr) -> Self
 #[non_exhaustive] pub struct universal_exports::PlacementPreview
 pub universal_exports::PlacementPreview::choices: alloc::vec::Vec<ai6::directorates::m::placement::PlacementChoice>
 pub universal_exports::PlacementPreview::operation_id: alloc::string::String

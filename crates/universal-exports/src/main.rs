@@ -215,13 +215,13 @@ async fn run(cli: Cli) -> Result<(), String> {
     };
     gateway = gateway.with_roster(provider.clone());
     if record.assistant {
-        let settings = snapshot.roster.assistant();
+        let assistant_record = snapshot.roster.assistant();
         let (body_bytes, _, default_ttl) = snapshot.settings.cables.message_limits();
         let mut assistant = AssistantConfig::new(record.assistant_agent.clone())
             .map_err(|error| format!("the assistant Agent is not valid: {error}"))?
-            .with_view_limits(view_limits(settings.views())?)
-            .with_limits(settings.limits().clone())
-            .and_then(|assistant| assistant.with_gateway_limits(settings.gateway().clone()))
+            .with_view_limits(view_limits(assistant_record.views())?)
+            .with_limits(assistant_record.limits().clone())
+            .and_then(|assistant| assistant.with_gateway_limits(assistant_record.gateway().clone()))
             .map_err(|error| format!("assistant: {error}"))?
             .with_cable_limits(body_bytes, default_ttl);
         if let Some(bytes) = record.route_text_bytes {
@@ -229,6 +229,31 @@ async fn run(cli: Cli) -> Result<(), String> {
                 assistant.with_route_text_bytes(usize::try_from(bytes).unwrap_or(usize::MAX));
         }
         gateway = gateway.with_assistant(assistant);
+        let pages = &settings.located.value.pages;
+        let mut config = universal_exports::PagesConfig::new(settings.located.pages_dir());
+        if let Some(origin) = &pages.origin {
+            let listen = settings.located.pages_listen();
+            if listen.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
+                return Err(format!(
+                    "pages listen must be a 127.0.0.1 address behind the reverse proxy, not \
+                     {listen}"
+                ));
+            }
+            config = config.with_origin(origin.clone(), listen);
+        }
+        gateway = gateway
+            .with_pages(config)
+            .map_err(|error| format!("pages: {error}"))?;
+        if let Some(origin) = &pages.origin {
+            let listen = settings.located.pages_listen();
+            let own = gateway.clone();
+            eprintln!("universal-exports: pages are served at {origin} (listening on {listen})");
+            tokio::spawn(async move {
+                if let Err(error) = own.serve_pages(listen, shutdown_signal()).await {
+                    eprintln!("universal-exports: the pages listener failed: {error}");
+                }
+            });
+        }
     }
     let poll = settings.located.value.provider.poll();
     if !poll.is_zero() {

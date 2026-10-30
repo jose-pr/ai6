@@ -715,21 +715,48 @@ fn refusal_quotes(status: StatusCode) -> bool {
     )
 }
 
-/// Runs the read tool `name` with `input` as the holder of `bearer`; also answers whether its
-/// text quotes what a route answered, as a result or in a refusal, which [`exposes`] then
-/// judges whatever the outcome.
-pub(crate) async fn run(
+/// What a read tool gave.
+pub(crate) enum Fetched {
+    /// Standing text, not a route's answer.
+    Guide(&'static str),
+    /// What its routes answered, joined: the one answer, or one key to each.
+    Value(Value),
+}
+
+/// Why a read tool gave nothing: what to tell Moneypenny, whether it quotes what a route
+/// answered, and the status a route refused with.
+pub(crate) struct Failed {
+    pub(crate) outcome: Outcome,
+    pub(crate) quoted: bool,
+    pub(crate) status: Option<StatusCode>,
+}
+
+impl Failed {
+    fn invalid(problem: String) -> Self {
+        Self {
+            outcome: Outcome::error(format!("INVALID_INPUT: {problem}")),
+            quoted: false,
+            status: None,
+        }
+    }
+}
+
+/// Reads with the read tool `name` and `input` as the holder of `bearer`: the schema is
+/// checked first and the routes are the person's own.
+pub(crate) async fn read(
     gateway: &Gateway,
     bearer: &str,
     name: &str,
     input: &Value,
-) -> (Outcome, bool) {
+) -> Result<Fetched, Failed> {
     let Some(tool) = read_tools().iter().find(|tool| tool.name == name) else {
-        return (Outcome::error(format!("There is no tool {name:?}.")), false);
+        return Err(Failed {
+            outcome: Outcome::error(format!("There is no tool {name:?}.")),
+            quoted: false,
+            status: None,
+        });
     };
-    if let Err(problem) = check(&tool.schema(), input, "input") {
-        return (Outcome::error(format!("INVALID_INPUT: {problem}")), false);
-    }
+    check(&tool.schema(), input, "input").map_err(Failed::invalid)?;
     let empty = Map::new();
     let input = input.as_object().unwrap_or(&empty);
     let limits = gateway
@@ -737,18 +764,8 @@ pub(crate) async fn run(
         .as_ref()
         .map(|assistant| assistant.config().route_limits())
         .unwrap_or_default();
-    let plan = match (tool.plan)(input, limits) {
-        Ok(plan) => plan,
-        Err(problem) => return (Outcome::error(format!("INVALID_INPUT: {problem}")), false),
-    };
-    let calls = match plan {
-        Plan::Guide(text) => {
-            let guide = Outcome {
-                text: text.to_owned(),
-                is_error: false,
-            };
-            return (guide, false);
-        }
+    let calls = match (tool.plan)(input, limits).map_err(Failed::invalid)? {
+        Plan::Guide(text) => return Ok(Fetched::Guide(text)),
         Plan::Read(calls) => calls,
     };
     let chars = super::gateway_limits(gateway).result_chars;
@@ -763,29 +780,57 @@ pub(crate) async fn run(
                 results.insert((*key).to_owned(), value);
             }
             Ok((status, value)) => {
-                return (
-                    Outcome::error(refusal(status, &value, chars)),
-                    refusal_quotes(status),
-                );
+                return Err(Failed {
+                    outcome: Outcome::error(refusal(status, &value, chars)),
+                    quoted: refusal_quotes(status),
+                    status: Some(status),
+                });
             }
             Err(error) => {
-                return (
-                    Outcome::error(format!("The request failed: {error}")),
-                    false,
-                );
+                return Err(Failed {
+                    outcome: Outcome::error(format!("The request failed: {error}")),
+                    quoted: false,
+                    status: None,
+                });
             }
         }
     }
-    let value = if calls.len() == 1 {
+    Ok(Fetched::Value(if calls.len() == 1 {
         results.remove("result").unwrap_or(Value::Null)
     } else {
         Value::Object(results)
-    };
-    let read = Outcome {
-        text: wrap(name, &value, chars),
-        is_error: false,
-    };
-    (read, true)
+    }))
+}
+
+/// Runs the read tool `name` with `input` as the holder of `bearer`; also answers whether its
+/// text quotes what a route answered, as a result or in a refusal, which [`exposes`] then
+/// judges whatever the outcome.
+pub(crate) async fn run(
+    gateway: &Gateway,
+    bearer: &str,
+    name: &str,
+    input: &Value,
+) -> (Outcome, bool) {
+    match read(gateway, bearer, name, input).await {
+        Ok(Fetched::Guide(text)) => (
+            Outcome {
+                text: text.to_owned(),
+                is_error: false,
+            },
+            false,
+        ),
+        Ok(Fetched::Value(value)) => {
+            let chars = super::gateway_limits(gateway).result_chars;
+            (
+                Outcome {
+                    text: wrap(name, &value, chars),
+                    is_error: false,
+                },
+                true,
+            )
+        }
+        Err(failed) => (failed.outcome, failed.quoted),
+    }
 }
 
 #[cfg(test)]

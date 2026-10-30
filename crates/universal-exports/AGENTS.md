@@ -664,6 +664,29 @@ opens when they choose it." It is allowed in an exposed conversation, stamped as
 never raises exposure and is not audited. The `audit` tool's `operation_id` and `station_id`
 are an Audit route's (not both).
 
+### Pages she publishes
+
+`Gateway::with_pages(PagesConfig { dir, origin, listen })` keeps pages (`{dir}/{id}/meta.json`
+and `files/`) and serves them; `Gateway::pages_router()` is the router of the pages' own
+listener (page routes only, `None` without an `origin`) and `serve_pages(address, shutdown)`
+runs it. Without an origin the routes are `/pages/v/{token}/…` on the API router. Quotas and
+options are the roster's `[assistant.pages]`, read at each use. Tools (listed by `tools/list`):
+`publish_page {kind: dashboard|report|file, title, path | content+format, entry?, replace?,
+feeds?}`, `unpublish_page {id}`, `pages`. A `path` is uploaded by the Station
+(`PUT /v1/station/assistant/pages/{digest}/{path}?station=&conversation=`, then `POST …/{digest}/done`
+with `{files: [AssistantPageFile]}` or `{refused}`; `digest` is `page_call_digest(path)`); the
+call waits `upload_wait` for it and checks the manifest. Audit (`config:assistant` scope) comes
+before the page exists. The person's routes: `GET /v1/user/pages`, `POST /v1/user/pages/{id}/open
+{network?}` → `{url, expires_at}`, `POST …/remember {remember}`, `DELETE …`; any other person
+gets 404. Page routes: `GET /v/{token}/` (the frame: the bar and an `<iframe>`), `/v/{token}/f/{path}`
+(a file; a top-level request redirects to the frame), `/v/{token}/data/{feed}` (`{data, at}`;
+403 when feeds or the network are off or the viewer may not read it, 429 past
+`feed_reads_per_minute`). A link stands only while its page, its time and its viewer's
+sign-in do. Every page response carries the sandbox CSP (no `allow-same-origin`), `nosniff`,
+`no-referrer`, `no-store`, CORP `cross-origin` and `Access-Control-Allow-Origin: *`; no `/v1`
+route ever answers CORS. Her conversation lists `exposed_by`; a page keeps the list as it was
+at publish (plus `file:PATH` for outside-text files) for the bar.
+
 ## Gateway state
 
 ```rust
@@ -955,6 +978,7 @@ last two are printed as a warning at start.
 | `[provider] location`, `password`, `poll` | The configuration provider Stations read; its roster is served under `/v1/user/roster` (a directory read-only, SQL editable); `--provider`. | The file's directory |
 | `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `state_dir` |
 | `[plugins] paths`, `profile` | Provider libraries and how they are checked; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without |
+| `[pages] dir`, `origin`, `listen` | Where pages are kept, their own origin (a second listener with page routes only), and its loopback address. | `pages` beside the file; the API's origin; `127.0.0.1:7083` |
 
 ## Environment variables
 

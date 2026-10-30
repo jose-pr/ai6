@@ -786,6 +786,49 @@ or while a dialog covers the page.
 
 Her `audit` tool takes an Operation or a Station, not both, as the Audit page does.
 
+## Pages she publishes
+
+`publish_page` makes a page you open in a browser tab outside the app, never inside it. It is
+a **dashboard** (reads live data through `feeds`), a **report** (a snapshot of data she put in
+the files, made when you ask for one) or a **file** (one log, CSV, Markdown or image). She gives
+a `path` (a file or directory under `personal/` or `scratch/`, which the Station uploads; a
+bundle's entry is `index.html`) or inline `content` of a `format` (html, markdown, text, csv,
+json, svg, up to 192 KiB). Markdown is rendered; text, CSV and JSON are shown as text; scripts,
+styles and images of a bundle load as they are; anything else (a PDF included) downloads.
+`replace` keeps a page's id. `unpublish_page` deletes one; `pages` lists yours (and, when one
+was made after outside text, marks her conversation exposed).
+
+A page is kept for a day unless you **Remember** it, counts toward quotas
+(`[assistant.pages]`, [Moneypenny's limits](configuration.md#moneypennys-limits)) and is audited
+(`moneypenny.page.published`, `.opened`, `.remembered`, `.forgotten`, `.deleted`, `.expired`).
+Only you can open it: another person, an administrator included, gets 404. The link is a
+capability, `{pages base}/v/{token}/`, valid for an hour, bound to your sign-in (signing out
+ends it) and to a network profile; the app mints it when you click. Opening shows the gateway's
+**classification bar** over the page: "Made by Moneypenny for you, not part of Outer Office",
+the title, kind and expiry, and, after she read text from outside AI6, an amber warning naming
+what she read (up to five sources, then a count). The close control hides the bar for that
+view; a reload shows it again.
+
+Pages are open by default: scripts run and they may fetch from anywhere, because a dashboard
+may need a chart library or an API. What they cannot do is act as the app. Every response
+carries `Content-Security-Policy: sandbox ...` without `allow-same-origin`, so the page is an
+opaque origin with no cookie, storage or sign-in of its host, `/v1` answers it no CORS header,
+and it cannot navigate the top window. Dashboards read **live** data: each feed is a read tool
+with input fixed at publish, run when the page asks for `data/NAME` as whoever holds the link,
+so a viewer sees only what their own permissions allow and a revoked grant applies at once.
+Feeds read; they never propose or send. Options, set by an administrator for everyone:
+`scripts = false`, `network = "own"` (its own files and feeds) or `"none"` (its own files), `feeds
+= false`, and a separate origin for pages (`unex.cfg` `[pages] origin`). You may also open one
+page with the network off.
+
+The remaining risk, plainly: a dashboard made after she read outside text can be steered to
+read, through its declared feeds, whatever its viewer may read, and send it anywhere for as
+long as the link lives. Feeds are read-only and fixed at publish, so it can neither change
+anything nor read past them. The bar naming what she read is the mitigation; `network`, `feeds`
+and opening with the network off are the tighter options. On the API's own origin the address
+bar shows the app's host, so a page can draw a faithful sign-in: a separate origin removes that
+and a proxy that strips the sandbox header.
+
 ## In the app
 
 **Ask Moneypenny** (top right on every page, or Ctrl+Alt+I; ⌃⌘I on macOS) opens the chat:

@@ -99,12 +99,39 @@ struct Served {
     operator: String,
     viewer: String,
     server: tokio::task::JoinHandle<()>,
+    /// The pages' own listener, when the gateway was given an origin for them.
+    pages_server: Option<(String, tokio::task::JoinHandle<()>)>,
+    /// Where pages are kept.
+    pages_dir: std::path::PathBuf,
+    /// Actions the policy refuses from now on, whatever the roles say.
+    denied: Arc<std::sync::Mutex<Vec<String>>>,
     _directory: tempfile::TempDir,
 }
 
 impl Drop for Served {
     fn drop(&mut self) {
         self.server.abort();
+        if let Some((_, server)) = &self.pages_server {
+            server.abort();
+        }
+    }
+}
+
+/// The role policy, but for the actions the test has since denied.
+struct Revocable {
+    inner: Arc<dyn ai6::Authorizer>,
+    denied: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl ai6::Authorizer for Revocable {
+    fn authorize(
+        &self,
+        request: ai6::AuthorizationRequest,
+    ) -> Result<ai6::AuthorizationDecision, ProviderError> {
+        if self.denied.lock().unwrap().contains(&request.action) {
+            return Ok(ai6::AuthorizationDecision::default());
+        }
+        self.inner.authorize(request)
     }
 }
 
@@ -125,7 +152,19 @@ async fn served_with(
     config: AssistantConfig,
     roster: Option<Arc<dyn ai6::ConfigProvider>>,
 ) -> Served {
+    served_full(config, roster, false).await
+}
+
+/// As [`served_with`]; with `own_origin` pages are served by a second listener at their own
+/// origin and never by the API's.
+async fn served_full(
+    config: AssistantConfig,
+    roster: Option<Arc<dyn ai6::ConfigProvider>>,
+    own_origin: bool,
+) -> Served {
     let directory = tempfile::tempdir().unwrap();
+    let pages_dir = directory.path().join("pages");
+    let denied = Arc::new(std::sync::Mutex::new(Vec::new()));
     let registry = FileRegistry::open(directory.path());
     for (station, running) in [("hq", 0), ("worker", 4)] {
         registry
@@ -155,10 +194,22 @@ async fn served_with(
         AccessProviders::new(
             Arc::new(People),
             Arc::new(People),
-            Arc::new(role_authorizer_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
+            Arc::new(Revocable {
+                inner: Arc::new(role_authorizer_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
+                denied: denied.clone(),
+            }),
         ),
     )
     .with_assistant(config);
+    let pages_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let pages_origin = format!("http://{}", pages_listener.local_addr().unwrap());
+    let pages = if own_origin {
+        crate::PagesConfig::new(&pages_dir)
+            .with_origin(&pages_origin, pages_listener.local_addr().unwrap())
+    } else {
+        crate::PagesConfig::new(&pages_dir)
+    };
+    let gateway = gateway.with_pages(pages).unwrap();
     let gateway = match roster {
         Some(roster) => gateway.with_roster(roster),
         None => gateway,
@@ -214,6 +265,14 @@ async fn served_with(
     let viewer = token("viewer-007").await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
+    let pages_server = gateway.pages_router().map(|router| {
+        (
+            pages_origin.clone(),
+            tokio::spawn(async move {
+                let _ = axum::serve(pages_listener, router.into_make_service()).await;
+            }),
+        )
+    });
     let router = gateway.router();
     let server = tokio::spawn(async move {
         let _ = axum::serve(
@@ -228,6 +287,9 @@ async fn served_with(
         operator,
         viewer,
         server,
+        pages_server,
+        pages_dir,
+        denied,
         _directory: directory,
     }
 }
@@ -3924,4 +3986,1636 @@ async fn the_persons_changes_are_audited_commits_by_them_and_refusals_keep_their
         nothing_for(&served, "hq").await,
         "the request was withdrawn"
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// Pages
+// ---------------------------------------------------------------------------------------
+
+/// A roster whose `[assistant.pages]` is `pages`.
+fn pages_roster(pages: Value) -> Arc<dyn ai6::ConfigProvider> {
+    let limits: ai6::AssistantPageLimits = serde_json::from_value(pages).unwrap();
+    let settings = ai6::AssistantSettings::new().with_pages(limits);
+    Arc::new(ai6::MemoryProvider::new(
+        ai6::Roster::builder().assistant(settings).build().unwrap(),
+    ))
+}
+
+async fn publish(served: &Served, token: &str, input: Value) -> Value {
+    call_tool(served, token, "publish_page", input).await
+}
+
+fn said(result: &Value) -> String {
+    result["content"][0]["text"].as_str().unwrap().to_owned()
+}
+
+/// The ID in "Published as page-…: title."
+fn published_id(result: &Value) -> String {
+    assert_eq!(result["isError"], false, "{result}");
+    said(result)
+        .split("Published as ")
+        .nth(1)
+        .and_then(|rest| rest.split(':').next())
+        .unwrap()
+        .to_owned()
+}
+
+/// The link to page `id` as `bearer`, asking for `network` when given, as the response.
+async fn open_page(
+    served: &Served,
+    bearer: &str,
+    id: &str,
+    network: Option<&str>,
+) -> reqwest::Response {
+    let request = reqwest::Client::new()
+        .post(format!("{}/v1/user/pages/{id}/open", served.base))
+        .bearer_auth(bearer);
+    match network {
+        Some(network) => request.json(&json!({"network": network})),
+        None => request.json(&json!({})),
+    }
+    .send()
+    .await
+    .unwrap()
+}
+
+/// The URL of a page link on the test listener it is served from.
+async fn page_url(served: &Served, bearer: &str, id: &str, network: Option<&str>) -> String {
+    let response = open_page(served, bearer, id, network).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let url = response.json::<Value>().await.unwrap()["url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    match &served.pages_server {
+        Some(_) => url,
+        None => url.replacen(
+            "https://localhost/pages",
+            &format!("{}/pages", served.base),
+            1,
+        ),
+    }
+}
+
+fn plain() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+}
+
+async fn upload_file(
+    served: &Served,
+    conversation: &str,
+    digest: &str,
+    path: &str,
+    bytes: Vec<u8>,
+) -> StatusCode {
+    reqwest::Client::new()
+        .put(format!(
+            "{}/v1/station/assistant/pages/{digest}/{path}",
+            served.base
+        ))
+        .query(&[("station", "hq"), ("conversation", conversation)])
+        .bearer_auth(STATION_TOKEN)
+        .body(bytes)
+        .send()
+        .await
+        .unwrap()
+        .status()
+}
+
+async fn finish_upload(
+    served: &Served,
+    conversation: &str,
+    digest: &str,
+    body: Value,
+) -> StatusCode {
+    reqwest::Client::new()
+        .post(format!(
+            "{}/v1/station/assistant/pages/{digest}/done",
+            served.base
+        ))
+        .query(&[("station", "hq"), ("conversation", conversation)])
+        .bearer_auth(STATION_TOKEN)
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+        .status()
+}
+
+fn manifest(files: &[(&str, &[u8], bool)]) -> Value {
+    json!({"files": files.iter().map(|(path, bytes, outside)| json!({
+        "path": path,
+        "bytes": bytes.len(),
+        "sha256": crate::moneypenny::pages::sha256_hex(bytes),
+        "outside_text": outside,
+    })).collect::<Vec<_>>()})
+}
+
+/// What the Station sends for a bundle named by `path`: the files, then its manifest.
+async fn station_bundle(
+    served: &Served,
+    conversation: &str,
+    path: &str,
+    files: &[(&str, &[u8], bool)],
+) {
+    let digest = ai6::page_call_digest(path);
+    for (name, bytes, _) in files {
+        assert_eq!(
+            upload_file(served, conversation, &digest, name, bytes.to_vec()).await,
+            StatusCode::NO_CONTENT,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        finish_upload(served, conversation, &digest, manifest(files)).await,
+        StatusCode::NO_CONTENT
+    );
+}
+
+fn page_dirs(served: &Served) -> Vec<String> {
+    std::fs::read_dir(&served.pages_dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn pages_each_inline_format_and_kind_is_published_and_served() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Make me pages.").await;
+    let token = &job.mcp_token;
+    let listed = mcp(&served, token, "tools/list", json!({}))
+        .await
+        .json::<Value>()
+        .await
+        .unwrap();
+    let names: Vec<&str> = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    for tool in ["publish_page", "unpublish_page", "pages"] {
+        assert!(names.contains(&tool), "{tool}");
+    }
+
+    let cases = [
+        (
+            "file",
+            "html",
+            "<h1>Hello</h1>",
+            "text/html; charset=utf-8",
+            "<h1>Hello</h1>",
+        ),
+        (
+            "report",
+            "markdown",
+            "# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n~~gone~~",
+            "text/html; charset=utf-8",
+            "<table>",
+        ),
+        (
+            "file",
+            "text",
+            "plain words",
+            "text/plain; charset=utf-8",
+            "plain words",
+        ),
+        (
+            "file",
+            "csv",
+            "a,b\n1,2\n",
+            "text/csv; charset=utf-8",
+            "a,b",
+        ),
+        (
+            "file",
+            "json",
+            "{\"a\":1}",
+            "application/json; charset=utf-8",
+            "{\"a\":1}",
+        ),
+        (
+            "file",
+            "svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+            "image/svg+xml",
+            "<svg",
+        ),
+    ];
+    for (kind, format, content, content_type, needle) in cases {
+        let result = publish(
+            &served,
+            token,
+            json!({"kind": kind, "title": format!("A {format}"), "content": content, "format": format}),
+        )
+        .await;
+        let id = published_id(&result);
+        let url = page_url(&served, &served.operator, &id, None).await;
+        let entry = match format {
+            "html" => "index.html",
+            "markdown" => "index.md",
+            "text" => "page.txt",
+            "csv" => "page.csv",
+            "json" => "page.json",
+            _ => "page.svg",
+        };
+        let response = plain()
+            .get(format!("{url}f/{entry}"))
+            .header("sec-fetch-dest", "iframe")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{format}");
+        assert_eq!(response.headers()["content-type"], content_type, "{format}");
+        let body = response.text().await.unwrap();
+        assert!(body.contains(needle), "{format}: {body}");
+    }
+    // A dashboard stores at once: no proposal, a card for the person.
+    let dashboard = publish(
+        &served,
+        token,
+        json!({"kind": "dashboard", "title": "Stations", "content": "<p>x</p>", "format": "html",
+               "feeds": [{"name": "stations", "tool": "board", "input": {}}]}),
+    )
+    .await;
+    let id = published_id(&dashboard);
+    let frames = finish(&served, &mut app, &job).await;
+    assert!(frames.iter().all(|frame| frame["type"] != "proposal"));
+    let cards: Vec<&Value> = frames
+        .iter()
+        .filter(|frame| frame["type"] == "entry" && frame["entry"]["role"] == "page")
+        .map(|frame| &frame["entry"]["data"])
+        .collect();
+    assert!(!cards.is_empty());
+    let card = cards.iter().find(|card| card["id"] == id.as_str()).unwrap();
+    assert_eq!(card["kind"], "dashboard");
+    assert_eq!(card["feeds"], json!(["stations"]));
+    assert!(card["expires_at"].is_number());
+    assert!(!audits(&served, "moneypenny.page.published").is_empty());
+}
+
+#[tokio::test]
+async fn pages_a_bundle_comes_from_the_stations_upload_in_either_order() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Bundle.").await;
+    let conversation = job.conversation_id.clone();
+    let token = job.mcp_token.clone();
+    let files: [(&str, &[u8], bool); 3] = [
+        ("index.html", b"<script src=app.js></script>", false),
+        ("app.js", b"document.title = 'x'", false),
+        ("img/a.png", &[1, 2, 3], false),
+    ];
+    // The files arrive before the call.
+    station_bundle(&served, &conversation, "personal/site", &files).await;
+    let first = publish(
+        &served,
+        &token,
+        json!({"kind": "dashboard", "title": "Site", "path": "personal/site"}),
+    )
+    .await;
+    let id = published_id(&first);
+    let url = page_url(&served, &served.operator, &id, None).await;
+    for (name, bytes, _) in files {
+        let response = plain()
+            .get(format!("{url}f/{name}"))
+            .header("sec-fetch-dest", "script")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{name}");
+        assert_eq!(response.bytes().await.unwrap().as_ref(), bytes, "{name}");
+    }
+    // The call waits for files that arrive after it.
+    let waiting = {
+        let (served_base, token) = (served.base.clone(), token.clone());
+        let replaced = id.clone();
+        tokio::spawn(async move {
+            let response = reqwest::Client::new()
+                .post(format!("{served_base}/v1/moneypenny/mcp"))
+                .bearer_auth(token)
+                .header("accept", "application/json, text/event-stream")
+                .json(
+                    &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                    "name": "publish_page",
+                    "arguments": {"kind": "report", "title": "Late", "path": "scratch/late",
+                                  "replace": replaced}}}),
+                )
+                .send()
+                .await
+                .unwrap();
+            response.json::<Value>().await.unwrap()["result"].clone()
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    station_bundle(
+        &served,
+        &conversation,
+        "scratch/late",
+        &[("index.html", b"<p>late</p>", false)],
+    )
+    .await;
+    let late = waiting.await.unwrap();
+    // `replace` keeps the page's id.
+    assert_eq!(published_id(&late), id);
+    let again = plain()
+        .get(format!("{url}f/index.html"))
+        .header("sec-fetch-dest", "iframe")
+        .send()
+        .await
+        .unwrap();
+    assert!(again.text().await.unwrap().contains("late"));
+    assert_eq!(page_dirs(&served).len(), 1);
+}
+
+#[tokio::test]
+async fn pages_publishing_refuses_what_the_quotas_and_rules_forbid() {
+    let roster = pages_roster(json!({"max_pages": 3, "max_file_bytes": 4096, "upload_wait": 0.4}));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    let (_app, job) = accepted(&served, &served.operator, "Refusals.").await;
+    let conversation = job.conversation_id.clone();
+    let token = &job.mcp_token;
+    let refused = |result: &Value, needle: &str| {
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(said(result).contains(needle), "{}", said(result));
+    };
+    // feeds only on a dashboard
+    refused(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "report", "title": "r", "content": "x", "format": "text",
+                   "feeds": [{"name": "a", "tool": "board", "input": {}}]}),
+        )
+        .await,
+        "no feeds",
+    );
+    refused(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "file", "title": "r", "content": "x", "format": "text",
+                   "feeds": [{"name": "a", "tool": "board", "input": {}}]}),
+        )
+        .await,
+        "no feeds",
+    );
+    // a file over the quota, inline and uploaded
+    refused(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "file", "title": "big", "format": "text", "content": "x".repeat(5000)}),
+        )
+        .await,
+        "Nothing was published",
+    );
+    let digest = ai6::page_call_digest("personal/big");
+    assert_eq!(
+        upload_file(&served, &conversation, &digest, "big.txt", vec![0; 5000]).await,
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    // paths a page may not hold
+    for path in [".git/config", "a//b", "a%5Cb"] {
+        assert_eq!(
+            upload_file(&served, &conversation, &digest, path, vec![1]).await,
+            StatusCode::BAD_REQUEST,
+            "{path}"
+        );
+    }
+    // a wrong input digest never reaches the call: it waits, then gives up
+    station_bundle(
+        &served,
+        &conversation,
+        "personal/other",
+        &[("index.html", b"<p>x</p>", false)],
+    )
+    .await;
+    let silent = publish(
+        &served,
+        token,
+        json!({"kind": "dashboard", "title": "t", "path": "personal/site"}),
+    )
+    .await;
+    refused(&silent, "sent no files within");
+    // a manifest that does not match what was sent
+    let digest = ai6::page_call_digest("personal/forged");
+    upload_file(
+        &served,
+        &conversation,
+        &digest,
+        "index.html",
+        b"<p>real</p>".to_vec(),
+    )
+    .await;
+    finish_upload(
+        &served,
+        &conversation,
+        &digest,
+        json!({"files": [{"path": "index.html", "bytes": 11, "sha256": "00", "outside_text": false}]}),
+    )
+    .await;
+    refused(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "report", "title": "t", "path": "personal/forged"}),
+        )
+        .await,
+        "does not match",
+    );
+    // the Station's own refusal is hers
+    let digest = ai6::page_call_digest("personal/linked");
+    finish_upload(
+        &served,
+        &conversation,
+        &digest,
+        json!({"refused": "it is a link"}),
+    )
+    .await;
+    refused(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "report", "title": "t", "path": "personal/linked"}),
+        )
+        .await,
+        "it is a link",
+    );
+    // a call naming both, or neither
+    refused(
+        &publish(&served, token, json!({"kind": "file", "title": "t"})).await,
+        "path or content",
+    );
+    // the fourth page is over `max_pages`; nothing is evicted
+    for index in 0..3 {
+        published_id(
+            &publish(
+                &served,
+                token,
+                json!({"kind": "file", "title": format!("p{index}"), "content": "x", "format": "text"}),
+            )
+            .await,
+        );
+    }
+    refused(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "file", "title": "p3", "content": "x", "format": "text"}),
+        )
+        .await,
+        "3 pages",
+    );
+    assert_eq!(page_dirs(&served).len(), 3);
+}
+
+#[tokio::test]
+async fn pages_the_default_page_quota_is_fifty() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Many pages.").await;
+    let token = &job.mcp_token;
+    for index in 0..50 {
+        published_id(
+            &publish(
+                &served,
+                token,
+                json!({"kind": "file", "title": format!("p{index}"), "content": "x", "format": "text"}),
+            )
+            .await,
+        );
+    }
+    let over = publish(
+        &served,
+        token,
+        json!({"kind": "file", "title": "p50", "content": "x", "format": "text"}),
+    )
+    .await;
+    assert_eq!(over["isError"], true);
+    assert!(said(&over).contains("50 pages"), "{}", said(&over));
+}
+
+#[tokio::test]
+async fn pages_a_quota_raised_in_the_assistant_record_applies_to_the_next_publish() {
+    use ai6::{ConfigProvider, ConfigRecord, SqlProvider};
+    let directory = tempfile::tempdir().unwrap();
+    let location = format!("sqlite:{}", directory.path().join("roster.db").display());
+    let source = Arc::new(SqlProvider::open(&location).unwrap());
+    let put = |pages: Value| {
+        source
+            .put(
+                ConfigRecord::Assistant,
+                &ai6::ConfigScope::Global,
+                "settings",
+                &json!({"pages": pages}),
+            )
+            .unwrap();
+    };
+    put(json!({"max_pages": 1}));
+    let served = served_with(AssistantConfig::default(), Some(source.clone())).await;
+    let (_app, job) = accepted(&served, &served.operator, "Quota.").await;
+    let make = |title: &str| {
+        publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": title, "content": "x", "format": "text"}),
+        )
+    };
+    published_id(&make("one").await);
+    assert_eq!(make("two").await["isError"], true);
+    put(json!({"max_pages": 2}));
+    published_id(&make("two").await);
+}
+
+#[tokio::test]
+async fn pages_expire_and_the_sweeper_deletes_them_and_audits() {
+    let roster = pages_roster(json!({"default_ttl": 0.6, "sweep_every": 0.2}));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    let (_app, job) = accepted(&served, &served.operator, "Short lived.").await;
+    let kept = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": "kept", "content": "x", "format": "text"}),
+        )
+        .await,
+    );
+    let lost = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": "lost", "content": "y", "format": "text"}),
+        )
+        .await,
+    );
+    // The person remembers one.
+    let remembered = reqwest::Client::new()
+        .post(format!("{}/v1/user/pages/{kept}/remember", served.base))
+        .bearer_auth(&served.operator)
+        .json(&json!({"remember": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(remembered.status(), StatusCode::OK);
+    assert!(remembered.json::<Value>().await.unwrap()["expires_at"].is_null());
+    for _ in 0..40 {
+        if !page_dirs(&served).contains(&lost) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        !page_dirs(&served).contains(&lost),
+        "the sweeper deleted it"
+    );
+    assert!(
+        page_dirs(&served).contains(&kept),
+        "a remembered page stays"
+    );
+    for _ in 0..40 {
+        if !audits(&served, "moneypenny.page.expired").is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let expired = audits(&served, "moneypenny.page.expired");
+    assert!(
+        expired.iter().any(|record| record.target == lost),
+        "{expired:?}"
+    );
+    assert!(!expired.iter().any(|record| record.target == kept));
+    assert_eq!(audits(&served, "moneypenny.page.remembered").len(), 1);
+    // Forgetting lets it expire again.
+    let forgotten = reqwest::Client::new()
+        .post(format!("{}/v1/user/pages/{kept}/remember", served.base))
+        .bearer_auth(&served.operator)
+        .json(&json!({"remember": false}))
+        .send()
+        .await
+        .unwrap();
+    assert!(forgotten.json::<Value>().await.unwrap()["expires_at"].is_number());
+    assert_eq!(audits(&served, "moneypenny.page.forgotten").len(), 1);
+}
+
+#[tokio::test]
+async fn pages_only_the_person_opens_a_page_and_deleting_it_ends_its_links() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Mine.").await;
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": "mine", "content": "secret", "format": "text"}),
+        )
+        .await,
+    );
+    // A stranger gets 404, as does an unknown page.
+    for bearer in [&served.viewer] {
+        assert_eq!(
+            open_page(&served, bearer, &id, None).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    assert_eq!(
+        open_page(&served, &served.operator, "page-nope", None)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        open_page(&served, "not-a-token", &id, None).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    // Another person can neither list, remember nor delete it.
+    let list = reqwest::Client::new()
+        .get(format!("{}/v1/user/pages", served.base))
+        .bearer_auth(&served.viewer)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(list.json::<Value>().await.unwrap(), json!([]));
+    let stranger_delete = reqwest::Client::new()
+        .delete(format!("{}/v1/user/pages/{id}", served.base))
+        .bearer_auth(&served.viewer)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stranger_delete.status(), StatusCode::NOT_FOUND);
+    // The person lists and deletes their own.
+    let own = reqwest::Client::new()
+        .get(format!("{}/v1/user/pages", served.base))
+        .bearer_auth(&served.operator)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(own.json::<Value>().await.unwrap()[0]["id"], id.as_str());
+    let url = page_url(&served, &served.operator, &id, None).await;
+    assert_eq!(
+        plain()
+            .get(format!("{url}f/page.txt"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let deleted = reqwest::Client::new()
+        .delete(format!("{}/v1/user/pages/{id}", served.base))
+        .bearer_auth(&served.operator)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        plain()
+            .get(format!("{url}f/page.txt"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND,
+        "the link died with the page"
+    );
+    assert!(page_dirs(&served).is_empty());
+    assert_eq!(audits(&served, "moneypenny.page.deleted").len(), 1);
+    // She can unpublish her own too.
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": "again", "content": "x", "format": "text"}),
+        )
+        .await,
+    );
+    let gone = call_tool(&served, &job.mcp_token, "unpublish_page", json!({"id": id})).await;
+    assert_eq!(gone["isError"], false, "{gone}");
+    assert_eq!(
+        call_tool(&served, &job.mcp_token, "unpublish_page", json!({"id": id})).await["isError"],
+        true
+    );
+}
+
+#[tokio::test]
+async fn pages_a_link_fails_after_its_ttl_and_after_sign_out() {
+    let roster = pages_roster(json!({"open_ttl": 0.5}));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    let (_app, job) = accepted(&served, &served.operator, "Links.").await;
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": "t", "content": "x", "format": "text"}),
+        )
+        .await,
+    );
+    let url = page_url(&served, &served.operator, &id, None).await;
+    let get = |url: String| async move { plain().get(url).send().await.unwrap().status() };
+    assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::NOT_FOUND);
+    // Sign-out ends a link made before it.
+    let second = issue_access_token_record(
+        Arc::new(served.registry.clone()),
+        "operator-007".into(),
+        600,
+    )
+    .await
+    .ok()
+    .unwrap()
+    .token;
+    let url = page_url(&served, &second, &id, None).await;
+    assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::OK);
+    let out = reqwest::Client::new()
+        .post(format!("{}/v1/auth/logout", served.base))
+        .bearer_auth(&second)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(out.status(), StatusCode::NO_CONTENT);
+    assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::NOT_FOUND);
+    // An unknown token is no link at all.
+    assert_eq!(
+        get(format!("{}/pages/v/AAAA/f/page.txt", served.base)).await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+/// The headers every page response carries, whatever the profile.
+fn assert_page_headers(response: &reqwest::Response, csp_starts: &str) {
+    let headers = response.headers();
+    let csp = headers["content-security-policy"].to_str().unwrap();
+    assert!(csp.starts_with(csp_starts), "{csp}");
+    assert!(!csp.contains("allow-same-origin"), "{csp}");
+    assert!(!csp.contains("allow-top-navigation"), "{csp}");
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(headers["referrer-policy"], "no-referrer");
+    assert_eq!(headers["cache-control"], "no-store, private");
+    assert_eq!(headers["cross-origin-resource-policy"], "cross-origin");
+}
+
+#[tokio::test]
+async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Frame.").await;
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "dashboard", "title": "<b>Board</b>", "content": "<p>hi</p>", "format": "html"}),
+        )
+        .await,
+    );
+    let url = page_url(&served, &served.operator, &id, None).await;
+    let base = "https://localhost/pages".to_owned();
+    // The page file: the sandbox, never allow-same-origin, open to its own fetches.
+    let file = plain()
+        .get(format!("{url}f/index.html"))
+        .header("sec-fetch-dest", "iframe")
+        .send()
+        .await
+        .unwrap();
+    assert_page_headers(
+        &file,
+        "sandbox allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-scripts; frame-ancestors https://localhost/pages",
+    );
+    assert_eq!(file.headers()["access-control-allow-origin"], "*");
+    assert!(
+        !file.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("default-src")
+    );
+    // The frame: the bar names the person, kind, title (escaped) and expiry; no script runs.
+    let frame = plain().get(&url).send().await.unwrap();
+    assert_eq!(frame.status(), StatusCode::OK);
+    let csp = frame.headers()["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        csp,
+        format!(
+            "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-src {base}/; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
+        )
+    );
+    assert!(frame.headers().get("access-control-allow-origin").is_none());
+    let html = frame.text().await.unwrap();
+    assert!(
+        html.contains("Made by Moneypenny for operator-007, not part of Outer Office"),
+        "{html}"
+    );
+    assert!(html.contains("dashboard"));
+    assert!(
+        html.contains("&lt;b&gt;Board&lt;/b&gt;"),
+        "the title is escaped: {html}"
+    );
+    assert!(!html.contains("<b>Board</b>"));
+    assert!(html.contains("Expires "));
+    assert!(html.contains("<iframe src=\"f/index.html\""));
+    assert!(html.contains("sandbox=\"allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-scripts\""));
+    assert!(!html.contains("allow-same-origin"));
+    assert!(!html.contains("<script"));
+    assert!(
+        html.contains("class=\"bar\""),
+        "an unexposed page's bar has no warning: {html}"
+    );
+    assert!(!html.contains("Made after she read"));
+    // A top-level request for a file goes to the frame.
+    let top = plain()
+        .get(format!("{url}f/index.html"))
+        .header("sec-fetch-dest", "document")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(top.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        top.headers()["location"].to_str().unwrap(),
+        url.replacen(&format!("{}/pages", served.base), &base, 1)
+    );
+    // The link and the bar both say "Remembered" once the person keeps it.
+    reqwest::Client::new()
+        .post(format!("{}/v1/user/pages/{id}/remember", served.base))
+        .bearer_auth(&served.operator)
+        .json(&json!({"remember": true}))
+        .send()
+        .await
+        .unwrap();
+    let html = plain()
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("Remembered."));
+    assert!(!html.contains("Expires "));
+}
+
+#[tokio::test]
+async fn pages_the_network_profiles_and_the_options_change_the_csp() {
+    let roster = pages_roster(json!({"scripts": false, "network": "own"}));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    let (_app, job) = accepted(&served, &served.operator, "Profiles.").await;
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": "t", "content": "<p>x</p>", "format": "html"}),
+        )
+        .await,
+    );
+    let url = page_url(&served, &served.operator, &id, None).await;
+    let file = plain()
+        .get(format!("{url}f/index.html"))
+        .header("sec-fetch-dest", "iframe")
+        .send()
+        .await
+        .unwrap();
+    let csp = file.headers()["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(!csp.contains("allow-scripts"), "{csp}");
+    assert!(csp.contains("default-src 'self' data: blob:"), "{csp}");
+    assert!(csp.contains("connect-src 'self' data: blob:"), "{csp}");
+    // The viewer may only tighten it.
+    let loosened = page_url(&served, &served.operator, &id, Some("open")).await;
+    let again = plain()
+        .get(format!("{loosened}f/index.html"))
+        .header("sec-fetch-dest", "iframe")
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        again.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("default-src 'self'")
+    );
+    assert_eq!(
+        open_page(&served, &served.operator, &id, Some("everything"))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    // The frame's iframe has the same tokens.
+    let html = plain()
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(!html.contains("allow-scripts"));
+}
+
+#[test]
+fn pages_csp_per_profile_is_exact() {
+    use crate::moneypenny::pages::{frame_csp, page_csp};
+    let base = "https://pages.example.net";
+    let sandbox = "sandbox allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals";
+    assert_eq!(
+        page_csp(base, ai6::PageNetwork::Open, true),
+        format!("{sandbox} allow-scripts; frame-ancestors {base}")
+    );
+    assert_eq!(
+        page_csp(base, ai6::PageNetwork::Open, false),
+        format!("{sandbox}; frame-ancestors {base}")
+    );
+    for network in [ai6::PageNetwork::Own, ai6::PageNetwork::None] {
+        assert_eq!(
+            page_csp(base, network, true),
+            format!(
+                "{sandbox} allow-scripts; frame-ancestors {base}; default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' data: blob:"
+            )
+        );
+    }
+    assert!(frame_csp(base).starts_with("default-src 'none'"));
+    assert!(frame_csp(base).ends_with("frame-ancestors 'none'"));
+}
+
+#[tokio::test]
+async fn pages_on_their_own_origin_the_api_listener_serves_none_and_the_pages_listener_no_api() {
+    let served = served_full(AssistantConfig::default(), None, true).await;
+    let pages_base = served.pages_server.as_ref().unwrap().0.clone();
+    let (_app, job) = accepted(&served, &served.operator, "Own origin.").await;
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": "t", "content": "hello", "format": "text"}),
+        )
+        .await,
+    );
+    let url = page_url(&served, &served.operator, &id, None).await;
+    assert!(url.starts_with(&format!("{pages_base}/v/")), "{url}");
+    let file = plain()
+        .get(format!("{url}f/page.txt"))
+        .header("sec-fetch-dest", "iframe")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(file.status(), StatusCode::OK);
+    assert!(
+        file.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains(&format!("frame-ancestors {pages_base}"))
+    );
+    // The API listener answers 404 for the same path, and the pages listener for the API.
+    let token = url.split("/v/").nth(1).unwrap().trim_end_matches('/');
+    assert_eq!(
+        plain()
+            .get(format!("{}/pages/v/{token}/f/page.txt", served.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    for path in ["/v1/user/profile", "/v1/user/pages", "/v1/board", "/health"] {
+        assert_eq!(
+            plain()
+                .get(format!("{pages_base}{path}"))
+                .bearer_auth(&served.operator)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn pages_no_api_route_answers_a_cross_origin_request_and_the_origin_check_refuses_null() {
+    let served = served(AssistantConfig::default()).await;
+    for origin in ["null", "https://pages.example.net", "https://localhost"] {
+        for path in [
+            "/v1/user/profile",
+            "/v1/user/pages",
+            "/v1/board",
+            "/v1/auth/session",
+        ] {
+            let response = reqwest::Client::new()
+                .get(format!("{}{path}", served.base))
+                .header("origin", origin)
+                .bearer_auth(&served.operator)
+                .send()
+                .await
+                .unwrap();
+            assert!(
+                response
+                    .headers()
+                    .get("access-control-allow-origin")
+                    .is_none(),
+                "{path} for {origin}"
+            );
+            assert!(
+                response
+                    .headers()
+                    .get("access-control-allow-credentials")
+                    .is_none()
+            );
+        }
+        let preflight = reqwest::Client::new()
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("{}/v1/user/profile", served.base),
+            )
+            .header("origin", origin)
+            .header("access-control-request-method", "GET")
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            preflight
+                .headers()
+                .get("access-control-allow-origin")
+                .is_none()
+        );
+    }
+    // A request that needs the app's own origin refuses `null` and the pages origin.
+    for origin in ["null", "https://pages.example.net"] {
+        let response = reqwest::Client::new()
+            .post(format!("{}/v1/attach", served.base))
+            .header("origin", origin)
+            .header("x-forwarded-proto", "https")
+            .json(&json!({"token": "x"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{origin}");
+    }
+}
+
+#[tokio::test]
+async fn pages_markdown_renders_with_its_source_and_an_unknown_extension_downloads() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Formats.").await;
+    let token = &job.mcp_token;
+    let conversation = job.conversation_id.clone();
+    station_bundle(
+        &served,
+        &conversation,
+        "personal/docs",
+        &[
+            ("index.md", b"# Heading\n\n- [x] done\n", false),
+            ("report.pdf", b"%PDF-1.4", false),
+        ],
+    )
+    .await;
+    let id = published_id(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "report", "title": "Docs", "path": "personal/docs", "entry": "index.md"}),
+        )
+        .await,
+    );
+    let url = page_url(&served, &served.operator, &id, None).await;
+    let get = |suffix: &'static str| {
+        let url = url.clone();
+        async move {
+            plain()
+                .get(format!("{url}f/{suffix}"))
+                .header("sec-fetch-dest", "iframe")
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let rendered = get("index.md").await;
+    assert_eq!(
+        rendered.headers()["content-type"],
+        "text/html; charset=utf-8"
+    );
+    let body = rendered.text().await.unwrap();
+    assert!(
+        body.contains("<h1>Heading</h1>") && body.contains("checkbox"),
+        "{body}"
+    );
+    let source = get("index.md?source").await;
+    assert_eq!(
+        source.headers()["content-type"],
+        "text/plain; charset=utf-8"
+    );
+    assert!(source.text().await.unwrap().starts_with("# Heading"));
+    let pdf = get("report.pdf").await;
+    assert_eq!(pdf.headers()["content-type"], "application/octet-stream");
+    assert!(
+        pdf.headers()["content-disposition"]
+            .to_str()
+            .unwrap()
+            .starts_with("attachment")
+    );
+    // A file that is not listed is not served, whatever its path.
+    assert_eq!(get("missing.html").await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(get("..%2Findex.md").await.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn pages_after_outside_text_the_bar_warns_with_its_sources_and_frame_false_keeps_it() {
+    let roster = pages_roster(json!({"frame": false}));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    let (_app, job) = accepted(&served, &served.operator, "Exposed.").await;
+    let token = &job.mcp_token;
+    // A clean page first: with `frame = false` a top-level request is served without the bar.
+    let clean = published_id(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "file", "title": "clean", "content": "<p>clean</p>", "format": "html"}),
+        )
+        .await,
+    );
+    let clean_url = page_url(&served, &served.operator, &clean, None).await;
+    let direct = plain()
+        .get(format!("{clean_url}f/index.html"))
+        .header("sec-fetch-dest", "document")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(direct.status(), StatusCode::OK, "no frame was asked for");
+    // She reads a Mission's brief (exposed by `tool:missions`), then a Station reports a web
+    // tool; the page keeps both, in order, whatever `frame` says.
+    call_tool(&served, token, "missions", json!({})).await;
+    let marked = reqwest::Client::new()
+        .post(format!("{}/v1/station/assistant/exposure", served.base))
+        .bearer_auth(STATION_TOKEN)
+        .json(
+            &json!({"station": "hq", "conversation": job.conversation_id,
+                      "source": "tool:WebFetch docs.example"}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(marked.status(), StatusCode::NO_CONTENT);
+    let id = published_id(
+        &publish(
+            &served,
+            token,
+            json!({"kind": "file", "title": "exposed", "content": "<p>x</p>", "format": "html"}),
+        )
+        .await,
+    );
+    let url = page_url(&served, &served.operator, &id, None).await;
+    let top = plain()
+        .get(format!("{url}f/index.html"))
+        .header("sec-fetch-dest", "document")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        top.status(),
+        StatusCode::SEE_OTHER,
+        "an exposed page keeps the frame"
+    );
+    let html = plain()
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("class=\"bar warn\""), "{html}");
+    let heading = html
+        .find("Made after she read text from outside AI6:")
+        .unwrap();
+    let (missions, fetch) = (
+        html.find("tool:missions").unwrap(),
+        html.find("tool:WebFetch docs.example").unwrap(),
+    );
+    assert!(heading < missions && missions < fetch, "in order: {html}");
+    // `pages` on an exposed page marks a conversation that did not know yet.
+    let (_app2, other) = accepted(&served, &served.operator, "Another conversation.").await;
+    let listed = call_tool(&served, &other.mcp_token, "pages", json!({})).await;
+    assert_eq!(listed["isError"], false, "{listed}");
+    assert!(
+        said(&listed).contains("\"exposed\": true"),
+        "{}",
+        said(&listed)
+    );
+    let after = publish(
+        &served,
+        &other.mcp_token,
+        json!({"kind": "file", "title": "later", "content": "x", "format": "text"}),
+    )
+    .await;
+    let later = published_id(&after);
+    let later_url = page_url(&served, &served.operator, &later, None).await;
+    let later_html = plain()
+        .get(&later_url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(later_html.contains(&format!("page:{id}")), "{later_html}");
+}
+
+#[tokio::test]
+async fn pages_a_bar_lists_at_most_five_sources_then_counts_the_rest() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Many sources.").await;
+    for index in 0..7 {
+        reqwest::Client::new()
+            .post(format!("{}/v1/station/assistant/exposure", served.base))
+            .bearer_auth(STATION_TOKEN)
+            .json(
+                &json!({"station": "hq", "conversation": job.conversation_id,
+                          "source": format!("personal:note-{index}.md")}),
+            )
+            .send()
+            .await
+            .unwrap();
+    }
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "file", "title": "t", "content": "x", "format": "text"}),
+        )
+        .await,
+    );
+    let url = page_url(&served, &served.operator, &id, None).await;
+    let html = plain()
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("personal:note-4.md"));
+    assert!(!html.contains("personal:note-5.md"));
+    assert!(html.contains("and 2 more"), "{html}");
+}
+
+#[tokio::test]
+async fn pages_an_outside_text_file_exposes_the_page_with_its_path() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Outside file.").await;
+    station_bundle(
+        &served,
+        &job.conversation_id,
+        "personal/site",
+        &[("index.html", b"<p>from the web</p>", true)],
+    )
+    .await;
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "report", "title": "t", "path": "personal/site"}),
+        )
+        .await,
+    );
+    let url = page_url(&served, &served.operator, &id, None).await;
+    let html = plain()
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        html.contains("bar warn") && html.contains("file:index.html"),
+        "{html}"
+    );
+}
+
+/// A dashboard of `viewer`'s with one feed, its link, and the feed's URL.
+async fn dashboard(
+    served: &Served,
+    owner: &str,
+    tool: &str,
+    input: Value,
+    network: Option<&str>,
+) -> (String, Value) {
+    let (_app, job) = accepted(served, owner, "Dashboard.").await;
+    let result = publish(
+        served,
+        &job.mcp_token,
+        json!({"kind": "dashboard", "title": "d", "content": "<p>x</p>", "format": "html",
+               "feeds": [{"name": "data", "tool": tool, "input": input}]}),
+    )
+    .await;
+    if result["isError"] == true {
+        return (String::new(), result);
+    }
+    let id = published_id(&result);
+    (page_url(served, owner, &id, network).await, result)
+}
+
+#[tokio::test]
+async fn pages_feeds_read_live_as_the_viewer_and_the_gateway_enforces_every_bound() {
+    let roster = pages_roster(json!({"feed_reads_per_minute": 3}));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    // A feed may only be a read tool with input its schema accepts.
+    let (_app, job) = accepted(&served, &served.operator, "Feeds.").await;
+    for (tool, input) in [
+        (
+            "propose_mission",
+            json!({"operation_id": "G", "title": "t", "prompt": "p"}),
+        ),
+        ("propose_roster_edit", json!({})),
+        ("send_cable", json!({})),
+        ("show", json!({})),
+        ("publish_page", json!({})),
+        ("field_guide", json!({})),
+        ("missions", json!({"nonsense": 1})),
+    ] {
+        let refused = publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "dashboard", "title": "d", "content": "x", "format": "html",
+                   "feeds": [{"name": "a", "tool": tool, "input": input}]}),
+        )
+        .await;
+        assert_eq!(refused["isError"], true, "{tool}: {refused}");
+    }
+    assert!(page_dirs(&served).is_empty());
+    // A good dashboard reads live: the same page shows the Station board as it is now.
+    let (url, _) = dashboard(&served, &served.operator, "board", json!({}), None).await;
+    let data = plain()
+        .get(format!("{url}data/data"))
+        .header("sec-fetch-dest", "empty")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(data.status(), StatusCode::OK);
+    assert_eq!(data.headers()["access-control-allow-origin"], "*");
+    let body = data.json::<Value>().await.unwrap();
+    assert!(body["at"].is_number() && !body["data"].is_null(), "{body}");
+    // The fourth read in the minute is refused (the limit here is three).
+    for _ in 0..2 {
+        assert_eq!(
+            plain()
+                .get(format!("{url}data/data"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+    }
+    assert_eq!(
+        plain()
+            .get(format!("{url}data/data"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    // An unknown feed is 404.
+    assert_eq!(
+        plain()
+            .get(format!("{url}data/other"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn pages_a_feed_runs_with_the_viewers_permissions_and_a_revoked_grant_applies_at_once() {
+    let served = served(AssistantConfig::default()).await;
+    // The viewer person holds only mission.read: a Station's settings need station.read.
+    let (url, made) = dashboard(
+        &served,
+        &served.viewer,
+        "station_settings",
+        json!({"station_id": "hq"}),
+        None,
+    )
+    .await;
+    assert!(!url.is_empty(), "{made}");
+    assert_eq!(
+        plain()
+            .get(format!("{url}data/data"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    // The operator may read the timeline; once the grant is withdrawn the next read is 403.
+    let (url, _) = dashboard(
+        &served,
+        &served.operator,
+        "timeline",
+        json!({"operation_id": "G"}),
+        None,
+    )
+    .await;
+    assert_eq!(
+        plain()
+            .get(format!("{url}data/data"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    served.denied.lock().unwrap().push("audit.read".to_owned());
+    assert_eq!(
+        plain()
+            .get(format!("{url}data/data"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn pages_with_the_network_off_or_feeds_off_the_feed_route_answers_403() {
+    let served = served(AssistantConfig::default()).await;
+    let (url, _) = dashboard(&served, &served.operator, "board", json!({}), Some("none")).await;
+    assert_eq!(
+        plain()
+            .get(format!("{url}data/data"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let file = plain()
+        .get(format!("{url}f/index.html"))
+        .header("sec-fetch-dest", "iframe")
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        file.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("connect-src 'self'")
+    );
+    let roster = pages_roster(json!({"feeds": false}));
+    let off = served_with(AssistantConfig::default(), Some(roster)).await;
+    let (_app, job) = accepted(&off, &off.operator, "No feeds.").await;
+    let refused = publish(
+        &off,
+        &job.mcp_token,
+        json!({"kind": "dashboard", "title": "d", "content": "x", "format": "html",
+               "feeds": [{"name": "a", "tool": "board", "input": {}}]}),
+    )
+    .await;
+    assert_eq!(refused["isError"], true);
+    assert!(said(&refused).contains("feeds off"), "{}", said(&refused));
+}
+
+/// The probe page: records what a sandboxed page can reach, in its `<title>`.
+fn probe_page(api: &str, outside: &str) -> String {
+    format!(
+        "<!doctype html><title>pending</title><body>probe</body><script>
+const out = {{}};
+(async () => {{
+  try {{ localStorage.setItem('a', 'b'); out.localStorage = 'worked'; }}
+  catch (e) {{ out.localStorage = 'threw ' + e.name; }}
+  try {{ out.cookie = JSON.stringify(document.cookie); }}
+  catch (e) {{ out.cookie = 'threw ' + e.name; }}
+  try {{
+    const r = await fetch('{api}/v1/user/profile', {{credentials: 'include'}});
+    out.api = 'status ' + r.status;
+  }} catch (e) {{ out.api = 'blocked ' + e.name; }}
+  try {{
+    const r = await fetch('own.json');
+    out.own = 'status ' + r.status + ' ' + (await r.text());
+  }} catch (e) {{ out.own = 'blocked ' + e.name; }}
+  try {{
+    const r = await fetch('{outside}/');
+    out.outside = 'status ' + r.status + ' ' + (await r.text());
+  }} catch (e) {{ out.outside = 'blocked ' + e.name; }}
+  document.title = 'PROBE ' + JSON.stringify(out);
+  document.body.textContent = 'Probe page: ' + JSON.stringify(out, null, 1);
+}})();
+</script>"
+    )
+}
+
+/// Loads `url` in the browser and answers the probe's record.
+async fn probe(browser: &str, url: String) -> Value {
+    let profile = tempfile::tempdir().unwrap();
+    let browser = browser.to_owned();
+    let dom = tokio::task::spawn_blocking(move || {
+        let output = std::process::Command::new(browser)
+            .args([
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--no-first-run",
+                "--virtual-time-budget=10000",
+                "--dump-dom",
+            ])
+            .arg(format!("--user-data-dir={}", profile.path().display()))
+            .arg(url)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    })
+    .await
+    .unwrap();
+    let record = dom
+        .split("PROBE ")
+        .nth(1)
+        .and_then(|rest| rest.split("</title>").next())
+        .unwrap_or_else(|| panic!("the probe did not finish: {dom}"));
+    serde_json::from_str(&record.replace("&quot;", "\"").replace("&amp;", "&"))
+        .unwrap_or_else(|error| panic!("{error}: {record}"))
+}
+
+/// Loads a probe page in a real browser, as `AI6_TEST_BROWSER` names it (a Chromium), and
+/// records what the page can reach. Skipped, and ignored by default, without it.
+#[tokio::test]
+#[ignore = "needs AI6_TEST_BROWSER to name a Chromium binary"]
+async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_the_profiles_hold() {
+    let Ok(browser) = std::env::var("AI6_TEST_BROWSER") else {
+        eprintln!("skipped: AI6_TEST_BROWSER names no browser");
+        return;
+    };
+    // Somewhere outside that answers anyone: a page may fetch it under `open` only.
+    let outside = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let outside_url = format!("http://{}", outside.local_addr().unwrap());
+    tokio::spawn(async move {
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::get(|| async {
+                ([("access-control-allow-origin", "*")], "from outside")
+            }),
+        );
+        let _ = axum::serve(outside, app).await;
+    });
+    // `frame = false`: the page is served top-level, without the bar, so the browser loads it
+    // as the page itself.
+    let roster = pages_roster(json!({"frame": false}));
+    let served = served_full(AssistantConfig::default(), Some(roster), true).await;
+    let (_app, job) = accepted(&served, &served.operator, "Probe.").await;
+    station_bundle(
+        &served,
+        &job.conversation_id,
+        "scratch/probe",
+        &[
+            (
+                "index.html",
+                probe_page(&served.base, &outside_url).as_bytes(),
+                false,
+            ),
+            ("own.json", b"{\"own\":true}", false),
+        ],
+    )
+    .await;
+    let id = published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "dashboard", "title": "probe", "path": "scratch/probe"}),
+        )
+        .await,
+    );
+    for (profile, network) in [("open", None), ("none", Some("none"))] {
+        let url = page_url(&served, &served.operator, &id, network).await;
+        let record = probe(&browser, format!("{url}f/index.html")).await;
+        eprintln!("{profile}: {record}");
+        assert_eq!(record["localStorage"], "threw SecurityError", "{profile}");
+        let cookie = record["cookie"].as_str().unwrap();
+        assert!(
+            cookie == "\"\"" || cookie.starts_with("threw"),
+            "{profile}: no cookie of the host: {cookie}"
+        );
+        let api = record["api"].as_str().unwrap();
+        assert!(
+            api.starts_with("blocked") || api == "status 401",
+            "{profile}: {api}"
+        );
+        assert_eq!(record["own"], "status 200 {\"own\":true}", "{profile}");
+        match profile {
+            "open" => assert_eq!(record["outside"], "status 200 from outside"),
+            _ => assert!(
+                record["outside"].as_str().unwrap().starts_with("blocked"),
+                "{profile}: {}",
+                record["outside"]
+            ),
+        }
+    }
 }

@@ -35,12 +35,15 @@ mod checks;
 mod guide;
 pub(crate) mod mcp;
 pub(crate) mod memory;
+pub(crate) mod page_tools;
+pub(crate) mod pages;
 pub(crate) mod routes;
 mod store;
 mod svg;
 pub(crate) mod tools;
 pub(crate) mod views;
 
+pub use pages::PagesConfig;
 pub use views::ViewLimits;
 
 use std::collections::HashMap;

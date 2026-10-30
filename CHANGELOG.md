@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Moneypenny publishes pages: `publish_page` (a dashboard that reads live data through
+  feeds, a report, or one file; from `personal/` or `scratch/` through the Station, or inline
+  text), `unpublish_page` and `pages`. Universal Exports keeps them (`unex.cfg` `[pages]`,
+  quotas and options in the roster's `[assistant.pages]`), expires them after a day unless
+  the person remembers one, and serves each through a capability link under a CSP `sandbox`
+  (an opaque origin: no cookie, storage or `/v1` of its host), optionally on an origin of its
+  own, in a frame under a classification bar naming what she read. Only the person opens a
+  page; feeds run with the viewer's own permissions. Her conversation now lists what exposed
+  it, and the Station names the web tool and host instead of `tool:outside-text`. Outer
+  Office shows each page as a card (kind, size, expiry or Remembered, what she read, its
+  feeds) whose Open launches it outside the app, with a menu to open it with the network
+  off, remember or forget it and delete it; `ai6ctl pages list | open | remember | forget |
+  rm` does the same. Sharing a page waits for compartments
+  ([Moneypenny](https://jose-pr.github.io/ai6/assistant/)).
 - Moneypenny's proposals show what they rest on and what they touch. A proposal records the
   read tools she called since the person's last message (each with its identifier arguments
   only), the conversation's exposure and what exposed it (`exposed_by`, `tool:NAME` or the

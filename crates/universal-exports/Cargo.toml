@@ -34,6 +34,7 @@ governor = { workspace = true }
 guatiao = { workspace = true }
 ai6-diptel = { path = "../ai6-diptel" }
 roxmltree = { workspace = true }
+pulldown-cmark = { workspace = true }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true, features = ["alloc"] }

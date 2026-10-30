@@ -35,6 +35,9 @@ pub(crate) enum Role {
     /// A page Moneypenny offered to open; `data` is `{id, route, label}`, the route in its
     /// JSON form. The person opens it; following it only reads.
     Navigation,
+    /// A page Moneypenny published; `data` is its summary (`id`, `kind`, `title`, `bytes`,
+    /// `expires_at`, `exposed`, `exposed_by`, `feeds`). The person opens it in a browser tab.
+    Page,
     /// What happened to the conversation itself, such as an answer the person stopped.
     Notice,
 }

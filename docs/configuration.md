@@ -127,7 +127,20 @@ state_dir = "/var/lib/unex"           # verified provider libraries, and a defau
 [provider]                            # as in ai6.cfg: the same provider the Stations read
 [registry]                            # as in ai6.cfg
 [plugins]                             # as in ai6.cfg
+
+[pages]                               # the pages Moneypenny publishes
+dir = "pages"                         # where they are kept (default: pages beside unex.cfg)
+origin = "https://pages.example.net"  # their own origin; omit to serve them under /pages/ here
+listen = "127.0.0.1:7083"             # the loopback listener of that origin
 ```
+
+`[pages] origin` names a second listener that holds only page routes (no `/v1`); the API
+listener then serves none. Pages on the API's own origin are by design and log nothing. A
+page is sandboxed either way (a CSP `sandbox` without `allow-same-origin`, so it is an opaque
+origin that cannot read the app's token or storage), but on the API's origin the address bar
+shows the app's host, so a page can draw a faithful Outer Office sign-in; a separate origin
+shows another host. Quotas and options are the roster's `[assistant.pages]`
+([Moneypenny's limits](#moneypennys-limits)).
 
 `universal-exports` takes `--config`, `--provider`, `--registry`, `--listen`,
 `--public-origin`, `--plugin-path` and `--plugin-profile` over the file.
@@ -941,6 +954,39 @@ report; `unlocked_stale` when the desk starts.
 | `source_bytes` | 200 | Bytes of one such source |
 | `proposal_reads` | 16 | Read tool calls of one turn a proposal lists as what she had read |
 | `audit_target_bytes` | 512 | Bytes of the target of an audit record of her actions |
+
+`[assistant.pages]`: the pages she publishes and how they are served, read at each use, so a
+change applies to the next publish. A quota changed in either direction is a plain change,
+never a weakening, and nothing is evicted when one is lowered. Pages are open by default
+(scripts, network, feeds and the frame); each restriction is an option.
+
+| Key | Default | What it bounds |
+| --- | --- | --- |
+| `max_file_bytes` | 8 MiB | Bytes of one file of a page |
+| `max_page_bytes` | 16 MiB | Bytes of one page |
+| `max_page_files` | 200 | Files of one page |
+| `max_pages` | 50 | Pages one person keeps |
+| `max_person_bytes` | 64 MiB | Bytes of all one person's pages |
+| `max_total_bytes` | 2 GiB | Bytes of all pages on the gateway |
+| `inline_bytes` | 192 KiB | Bytes of an inline page's content |
+| `title_chars` | 120 | Characters of a title |
+| `max_feeds` | 8 | Feeds one dashboard declares |
+| `feed_reads_per_minute` | 60 | Feed reads one link makes in a minute |
+| `staged_uploads` | 64 | Uploads from Stations waiting for their call |
+| `default_ttl` | 86,400 | Seconds a page lives unless remembered |
+| `open_ttl` | 3,600 | Seconds a link to a page is valid |
+| `upload_wait` | 30 | Seconds a publish waits for the Station's files |
+| `stage_ttl` | 300 | Seconds an upload no call claims is kept |
+| `sweep_every` | 60 | Seconds between sweeps of expired pages, links and uploads |
+| `scripts` | true | Whether a page's scripts run |
+| `network` | `"open"` | `open`, `own` (its own files and feeds) or `none` (its own files) |
+| `feeds` | true | Whether dashboards may read live feeds |
+| `frame` | true | Whether pages show in the gateway's frame with the bar (a page made after outside text always does) |
+| `sharing` | true | Whether a person may share a page |
+
+A Station reads `[assistant.limits]` `page_file_bytes` (8 MiB), `page_files` (200) and
+`page_bytes` (16 MiB) when it reads a page from her workspace; the gateway's quotas above
+decide what is kept.
 
 `[assistant.views]` bounds the views she shows ([Moneypenny](assistant.md#views-she-shows)).
 

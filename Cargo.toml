@@ -69,6 +69,7 @@ globset = "0.4"
 similar = { version = "2.7", default-features = false, features = ["text"] }
 # Parses the SVG Moneypenny draws in a view, for Universal Exports' allow-list.
 roxmltree = { version = "0.21.2", default-features = false, features = ["std"] }
+pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }
 data-encoding = { version = "2", default-features = false }
 # Validates gateway origins and encodes Session IDs as URL path segments.
 url = { version = "2", default-features = false, features = ["std"] }
