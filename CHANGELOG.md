@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office's Missions page is a queue and its Mission, Station and Operation routes open
+  detail views over what the board already holds. Rows say state, place and age (relative
+  times with the exact local time on hover), sorted newest update first by default with ties
+  in Operation and Mission order; the `queued` filter counts held briefs and Mission proposals
+  with links to Briefings; **Mission details** shows every attempt with Station and Theater
+  links and, for a queued Mission, where its Operation's placement stands; a Station shows
+  Online or Dark, its last check-in, resources as sampled (or **Not reported**) and the
+  Sessions running there; an Operation shows its access, Missions by state and recent
+  activity ([Outer Office](https://github.com/jose-pr/ai6/blob/main/clients/outer-office/README.md)).
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a

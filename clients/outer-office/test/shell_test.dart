@@ -9,6 +9,7 @@ import 'package:material_ui/material_ui.dart'
         NavigationRail,
         NavigationRailLabelType;
 import 'package:outer_office/main.dart';
+import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/theme/oo_backdrop.dart';
 import 'package:outer_office/theme/oo_decor.dart';

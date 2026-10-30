@@ -18,6 +18,19 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Stations: health, roles, capacity and the elected Headquarters Station (HQS).
 - Operations → Missions → Sessions, with state filters; queue a Mission on an Operation
   you hold `mission.create` for, and review Agent-proposed Missions.
+- The Missions page is the queue: one row per Mission with its state as a word and icon
+  (and why, when the Station says), its Operation and Mission, the Station and Theater of its
+  current attempt, when the board last heard of it (relative, the exact local time and zone
+  on hover) and the Agent and role its brief names, newest update first unless the route
+  sorts, ties in Operation and Mission order so rows stay put between refreshes. With the
+  `queued` state a strip counts the briefs vetting holds and the Mission proposals waiting,
+  each linking to Briefings; neither is ever a row. **Mission details** (route
+  `missions?operation_id=…&mission_id=…`) opens a read-only detail beside the queue, or in
+  place of it in a narrow window: the state and the Session that sets it, every attempt (its
+  Station and Theater as links, why it was lost, its checkpoint branch, the Sessions on it
+  to open), the brief and the Timeline, the actions the person has and, for a queued
+  Mission, the Operation's placement now (what it rules out; hidden when the gateway refuses
+  the preview). Closing it returns focus to the row.
 - Mission brief view: the exact prompt and a sanitized launch manifest (environment
   variable names only, never values).
 - Live terminals: read-only by default; **Request input lease** takes a write lease.
@@ -37,6 +50,14 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   codename, the clearance it works at, a coming retirement and a promotion waiting for green
   ink; with `agent.configure`, lower its clearance there or restore the configured one.
   Its Roles tab holds the Operation-scoped Agent roles (purpose and policy).
+- A Station (route `stations?station_id=…`) is a watch: Online or Dark, the last check-in,
+  its roles, running Sessions of its capacity, resources as last sampled (**Not reported**
+  when it sends none), and **Sessions here**, each Mission with an active attempt there as a
+  link to its detail.
+- An Operation (route `operations?operation_id=…`) opens a summary: what the person may do
+  there, its Missions counted by state (each count links to the Missions in that state), the
+  share done, the held briefs and Mission proposals waiting, and its newest activity with
+  **View all** (`audit.read`).
 - Stations, with tabs for every Station's Theaters, each Station's settings (its Mission
   capacity and resource limits: the free memory and CPU past which it takes no new
   Missions; 0 MiB and 100% turn them off) and a placement preview.

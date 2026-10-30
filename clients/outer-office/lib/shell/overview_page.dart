@@ -13,6 +13,7 @@ import '../theme/oo_decor.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
 import '../timeline/timeline_page.dart';
+import 'missions_board.dart';
 import 'oo_shell.dart';
 import 'top_bar.dart';
 
@@ -604,13 +605,16 @@ class _RecentActivityState extends State<_RecentActivity> {
                       style: text.labelMedium?.copyWith(color: tokens.muted),
                     ),
                   ),
-                  OoDuotone(_kindIcon(item.kind), size: 26),
+                  OoDuotone(timelineKindIcon(item.kind), size: 26),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(_sentence(item.action), style: text.bodyMedium),
+                        Text(
+                          timelineSentence(item.action),
+                          style: text.bodyMedium,
+                        ),
                         Text(
                           [
                             'Operation ${item.operationId}',
@@ -639,7 +643,8 @@ class _RecentActivityState extends State<_RecentActivity> {
   }
 }
 
-OoIconName _kindIcon(String kind) => switch (kind) {
+/// The icon of a timeline item of [kind].
+OoIconName timelineKindIcon(String kind) => switch (kind) {
   'lifecycle' => OoIconName.missions,
   'control' => OoIconName.resume,
   'cable' => OoIconName.cable,
@@ -648,7 +653,7 @@ OoIconName _kindIcon(String kind) => switch (kind) {
 };
 
 /// `resume.applied` as "Resume applied".
-String _sentence(String action) {
+String timelineSentence(String action) {
   final words = action.replaceAll(RegExp(r'[._-]+'), ' ').trim();
   return words.isEmpty
       ? action
@@ -718,6 +723,7 @@ class _Upcoming extends StatelessWidget {
     final rows = <Widget>[
       for (final mission in queued)
         _UpcomingRow(
+          kind: 'Queued Mission',
           at: queuedAt(mission),
           color: tokens.accent,
           title: 'Mission ${mission.missionId}',
@@ -732,6 +738,7 @@ class _Upcoming extends StatelessWidget {
         ),
       for (final brief in board.heldBriefs)
         _UpcomingRow(
+          kind: 'Held brief',
           at: brief.heldAt,
           color: tokens.warning,
           title: revealInvisible(brief.title),
@@ -759,11 +766,15 @@ class _Upcoming extends StatelessWidget {
 
 class _UpcomingRow extends StatelessWidget {
   const _UpcomingRow({
+    required this.kind,
     required this.at,
     required this.color,
     required this.title,
     required this.detail,
   });
+
+  /// What the row is: `Queued Mission` or `Held brief`.
+  final String kind;
 
   /// When it was queued or held, as Unix seconds, when the data says.
   final double? at;
@@ -823,6 +834,10 @@ class _UpcomingRow extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(
+                    kind,
+                    style: text.labelSmall?.copyWith(color: tokens.muted),
+                  ),
                   Text(
                     title,
                     maxLines: 1,

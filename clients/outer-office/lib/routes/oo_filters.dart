@@ -72,7 +72,15 @@ class OoFilterBar extends StatelessWidget {
 
 /// The sort and order of a Missions or Sessions route, as a menu.
 class OoSortMenu extends StatelessWidget {
-  const OoSortMenu({required this.route, required this.onRoute, super.key});
+  const OoSortMenu({
+    required this.route,
+    required this.onRoute,
+    this.defaultLabel = 'Board order',
+    super.key,
+  });
+
+  /// What the route without a sort is called in the menu.
+  final String defaultLabel;
 
   final OoRoute route;
   final ValueChanged<OoRoute> onRoute;
@@ -94,7 +102,7 @@ class OoSortMenu extends StatelessWidget {
       route.withField('sort', choice.$1).withField('order', choice.$2),
     ),
     itemBuilder: (context) => [
-      const PopupMenuItem(value: (null, null), child: Text('Board order')),
+      PopupMenuItem(value: (null, null), child: Text(defaultLabel)),
       for (final sort in routeWords(route.page, 'sort')) ...[
         PopupMenuItem(
           value: (sort, 'asc'),

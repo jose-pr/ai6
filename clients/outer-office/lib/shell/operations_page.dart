@@ -5,6 +5,8 @@ import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_backdrop.dart';
+import 'missions_board.dart';
+import 'operation_summary.dart';
 import 'oo_shell.dart' show OoPage;
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
@@ -19,12 +21,16 @@ class OperationsPage extends StatefulWidget {
     required this.board,
     required this.route,
     required this.onRoute,
+    required this.pages,
     super.key,
   });
 
   final MissionBoard board;
   final OoRoute route;
   final ValueChanged<OoRoute> onRoute;
+
+  /// The pages this person may open; the summary links only to these.
+  final List<OoPage> pages;
 
   @override
   State<OperationsPage> createState() => _OperationsPageState();
@@ -71,6 +77,26 @@ class _OperationsPageState extends State<OperationsPage> {
             child: Text('No Operations are open to this account.'),
           ),
         ),
+      );
+    }
+    if (selected != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OoFilterBar(
+            route: route,
+            onRoute: onRoute,
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          ),
+          Expanded(
+            child: OperationSummary(
+              board: board,
+              operation: operations.single,
+              pages: widget.pages,
+              onRoute: onRoute,
+            ),
+          ),
+        ],
       );
     }
     final missions = groupMissions(board.sessions);

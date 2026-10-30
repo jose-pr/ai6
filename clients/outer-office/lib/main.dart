@@ -24,8 +24,6 @@ import 'assistant/navigation_card.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
-import 'terminal/session_connection.dart';
-import 'terminal/session_terminal.dart';
 import 'pools/pools_page.dart';
 import 'roster/roster_page.dart';
 import 'routes/oo_filters.dart';
@@ -38,8 +36,12 @@ import 'shell/app_window.dart';
 import 'shell/oo_shell.dart';
 import 'operations/operation_tree.dart';
 import 'shell/operations_page.dart';
+import 'shell/missions_board.dart';
+import 'shell/missions_page.dart';
+import 'shell/oo_freshness.dart';
 import 'shell/overview_page.dart';
 import 'shell/sessions_page.dart';
+import 'shell/station_watch.dart';
 import 'shell/top_bar.dart';
 import 'theme/oo_appearance.dart';
 import 'theme/oo_backdrop.dart';
@@ -331,12 +333,14 @@ class MissionBoard extends ChangeNotifier {
         ],
       );
       heldBriefs = _demoHeldBriefs('G');
+      missionProposals = _demoMissionProposals;
       loading = false;
       return;
     }
     unawaited(refresh());
-    if (pollInterval != null) {
-      _poll = Timer.periodic(pollInterval, (_) => unawaited(refresh()));
+    final every = pollInterval;
+    if (every != null) {
+      _poll = Timer.periodic(every, (_) => unawaited(refresh()));
     }
   }
 
@@ -363,6 +367,14 @@ class MissionBoard extends ChangeNotifier {
 
   /// The briefs vetting holds, in the Operations whose held briefs this account may review.
   List<HeldBriefSummary> heldBriefs = const [];
+
+  /// The Mission proposals waiting for a decision, in the Operations where this account may
+  /// decide them; read at most every [slowEvery], not with each refresh.
+  List<MissionProposalSummary> missionProposals = const [];
+  DateTime? _proposalsAt;
+
+  /// How often the sources that change slowly are read again.
+  static const slowEvery = Duration(seconds: 15);
   UserSessionSummary? userSession;
   StationBoardSummary stationBoard = const StationBoardSummary(
     headquartersStation: null,
@@ -481,6 +493,7 @@ class MissionBoard extends ChangeNotifier {
       ),
       headers: {'authorization': 'Bearer $token'},
     );
+    if (response.statusCode == 403) throw const PlacementForbidden();
     if (response.statusCode != 200) {
       throw StateError('The gateway refused the placement preview.');
     }
@@ -599,27 +612,27 @@ class MissionBoard extends ChangeNotifier {
                 .toList(growable: false) ??
             const [];
 
+  static const _demoMissionProposals = [
+    MissionProposalSummary(
+      id: 'proposal-preview-001',
+      operationId: 'G',
+      parentMissionId: 'mission-007',
+      proposerAgentId: 'coordinator-007',
+      proposerSessionId: 'preview-session-007',
+      title: 'Review the role catalog',
+      body: 'Report which roles have no qualified Agent.',
+      role: 'analyst',
+      tags: ['configuration', 'review'],
+      priority: 2,
+      createdAt: 1_798_000_000,
+      vetting: [],
+    ),
+  ];
+
   Future<List<MissionProposalSummary>> loadMissionProposals(
     String operationId,
   ) async {
-    if (demo) {
-      return const [
-        MissionProposalSummary(
-          id: 'proposal-preview-001',
-          operationId: 'G',
-          parentMissionId: 'mission-007',
-          proposerAgentId: 'coordinator-007',
-          proposerSessionId: 'preview-session-007',
-          title: 'Review the role catalog',
-          body: 'Report which roles have no qualified Agent.',
-          role: 'analyst',
-          tags: ['configuration', 'review'],
-          priority: 2,
-          createdAt: 1_798_000_000,
-          vetting: [],
-        ),
-      ];
-    }
+    if (demo) return _demoMissionProposals;
     final token = accessToken;
     if (token == null) {
       throw StateError('Sign in before reviewing Mission proposals.');
@@ -697,6 +710,17 @@ class MissionBoard extends ChangeNotifier {
             .catchError((Object _) => const <HeldBriefSummary>[]),
     ]);
     return [for (final briefs in held) ...briefs];
+  }
+
+  /// The Mission proposals in every Operation where this account may decide them; an
+  /// Operation the gateway refuses is left out.
+  Future<List<MissionProposalSummary>> _loadAllProposals() async {
+    final proposals = await Future.wait([
+      for (final operationId in proposalOperations)
+        loadMissionProposals(operationId)
+            .catchError((Object _) => const <MissionProposalSummary>[]),
+    ]);
+    return [for (final list in proposals) ...list];
   }
 
   static List<HeldBriefSummary> _demoHeldBriefs(String operationId) => [
@@ -1509,6 +1533,11 @@ class MissionBoard extends ChangeNotifier {
         jsonDecode(responses[3].body) as Map<String, dynamic>,
       );
       heldBriefs = await _loadAllHeldBriefs();
+      final now = ooClock();
+      if (_proposalsAt == null || now.difference(_proposalsAt!) >= slowEvery) {
+        _proposalsAt = now;
+        missionProposals = await _loadAllProposals();
+      }
       error = null;
     } on Object {
       error = 'Could not load Stations from Universal Exports.';
@@ -1520,6 +1549,16 @@ class MissionBoard extends ChangeNotifier {
 
   List<MissionAttemptSummary> attempts(String operationId, String missionId) =>
       missionAttempts[(operationId, missionId)] ?? const [];
+
+  /// The latest attempt at a Mission, whose Session sets its state; `null` before one is
+  /// recorded.
+  MissionAttemptSummary? currentAttempt(String operationId, String missionId) =>
+      attempts(operationId, missionId).fold<MissionAttemptSummary?>(
+        null,
+        (latest, attempt) => latest == null || attempt.attempt > latest.attempt
+            ? attempt
+            : latest,
+      );
 
   MissionBriefSummary? missionBrief(String operationId, String missionId) =>
       missionBriefs
@@ -1954,6 +1993,15 @@ class HostResources {
       'sampled $sampledTime',
     ].join(' · ');
   }
+}
+
+/// The gateway answered 403 to a placement preview: the person may not see where an
+/// Operation's Missions would run.
+class PlacementForbidden implements Exception {
+  const PlacementForbidden();
+
+  @override
+  String toString() => 'This account may not preview placement here.';
 }
 
 /// A host or sandbox a Station reaches through a transport (`local`, `ssh` or another
@@ -3059,8 +3107,6 @@ class MissionBoardPage extends StatefulWidget {
 }
 
 class _MissionBoardPageState extends State<MissionBoardPage> {
-  SessionSummary? _selectedWebSession;
-
   /// Opens the app page one of her views, links or navigation cards points to
   /// (`app:/missions?operation_id=G`); a link that is not a route is ignored. An expanded chat
   /// docks and one over the page closes, so the page is in view. Opening only reads.
@@ -3111,9 +3157,9 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
 
   void _openSession(BuildContext context, SessionSummary session) {
     if (widget.desktopWindows) {
-      _openSessionWindow(context, session, widget.board);
+      openSessionWindow(context, session, widget.board);
     } else {
-      _openSessionPage(context, session, widget.board);
+      openSessionPage(context, session, widget.board);
     }
   }
 
@@ -3154,8 +3200,15 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               board: board,
               route: route,
               onRoute: onRoute,
+              pages: pages,
             ),
-            OoPage.missions => _missionsBody(context, route),
+            OoPage.missions => MissionsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+              desktopWindows: widget.desktopWindows,
+              pages: pages,
+            ),
             OoPage.sessions => SessionsPage(
               board: board,
               route: route,
@@ -3298,8 +3351,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           onRoute: widget.onRoute,
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
         ),
-        _StationOverview(
-          board: stationId == null
+        StationOverview(
+          board: widget.board,
+          onRoute: widget.onRoute,
+          detailed: stationId != null,
+          stations: stationId == null
               ? stationBoard
               : StationBoardSummary(
                   headquartersStation: stationBoard.headquartersStation,
@@ -3316,114 +3372,12 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           canCreateMission: (operationId) =>
               !widget.board.demo && widget.board.canCreateMission(operationId),
         ),
-        if (widget.board.demo) const _DemoBanner(),
+        if (widget.board.demo) const DemoBanner(),
         if (widget.board.error != null)
-          _ErrorBanner(
+          ErrorBanner(
             apiOrigin: widget.board.apiOrigin,
             onRetry: widget.board.refresh,
           ),
-      ],
-    );
-  }
-
-  // Sized by the width the page has, not the window's: a docked chat takes part of it.
-  Widget _missionsBody(BuildContext context, OoRoute route) => LayoutBuilder(
-    builder: (context, constraints) =>
-        _missionsBoard(context, route, constraints.maxWidth),
-  );
-
-  Widget _missionsBoard(BuildContext context, OoRoute route, double width) {
-    final missions = routeMissions(widget.board, route);
-    // The page's width beside the labelled rail at the wide breakpoint.
-    final showSessionPane =
-        !widget.desktopWindows &&
-        width >= OoBreakpoints.wide - OoRail.width - 1;
-    final missionId = route['mission_id'];
-    final boardView = CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: _BoardHeader(
-            sessions: widget.board.sessions,
-            selectedStates: route.states,
-            onSelectStates: (states) =>
-                widget.onRoute(route.withField('state', states)),
-            sort: OoSortMenu(route: route, onRoute: widget.onRoute),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: OoFilterBar(route: route, onRoute: widget.onRoute),
-        ),
-        if (widget.board.demo) const SliverToBoxAdapter(child: _DemoBanner()),
-        if (widget.board.error != null)
-          SliverToBoxAdapter(
-            child: _ErrorBanner(
-              apiOrigin: widget.board.apiOrigin,
-              onRetry: widget.board.refresh,
-            ),
-          ),
-        if (widget.board.loading && widget.board.sessions.isEmpty)
-          const SliverFillRemaining(
-            hasScrollBody: false,
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (missions.isEmpty && missionId != null)
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: _EmptyFilter(
-              text:
-                  'Mission $missionId of Operation ${route['operation_id']} is not on this '
-                  'board.',
-            ),
-          )
-        else if (missions.isEmpty && route.filtered)
-          const SliverFillRemaining(
-            hasScrollBody: false,
-            child: _EmptyFilter(text: 'No Missions match these filters.'),
-          )
-        else if (missions.isEmpty && widget.board.error == null)
-          const SliverFillRemaining(hasScrollBody: false, child: _EmptyBoard())
-        else if (missions.isEmpty && widget.board.error != null)
-          const SliverFillRemaining(
-            hasScrollBody: false,
-            child: _GatewayUnavailable(),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 36),
-            sliver: SliverList.separated(
-              itemCount: missions.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 12),
-              itemBuilder: (context, index) => _MissionCard(
-                mission: missions[index],
-                board: widget.board,
-                desktopWindows: widget.desktopWindows,
-                onSelectSession: showSessionPane
-                    ? (session) {
-                        setState(() => _selectedWebSession = session);
-                      }
-                    : null,
-              ),
-            ),
-          ),
-      ],
-    );
-    final selectedSession = _selectedWebSession;
-    if (!showSessionPane || selectedSession == null) {
-      return boardView;
-    }
-    return Row(
-      children: [
-        Expanded(child: boardView),
-        const VerticalDivider(width: 1),
-        SizedBox(
-          width: 440,
-          child: _SessionDetailPane(
-            key: ValueKey(selectedSession.sessionId),
-            session: selectedSession,
-            board: widget.board,
-            onClose: () => setState(() => _selectedWebSession = null),
-          ),
-        ),
       ],
     );
   }
@@ -3534,86 +3488,6 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
       ),
     );
   }
-}
-
-/// The Missions a Missions [route] selects from the board, in its order. A state filter keeps
-/// the Sessions in those states (a Mission shows when one of its Sessions does); a Station or
-/// Agent filter keeps the Missions with a Session on that Station or for that Agent.
-List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
-  final states = route.states;
-  final sessions = [
-    for (final session in board.sessions)
-      if (states.isEmpty || states.contains(session.state ?? 'working'))
-        session,
-  ];
-  final text = route['text']?.toLowerCase();
-  // With `subtree`, the Operation and those under it as the person's tree shows them.
-  final subtree = switch (route['operation_id']) {
-    final operation? when route['subtree'] == 'true' => subtreeIds({
-      for (final access in board.userSession?.operations ?? const [])
-        access.operationId: access.parent,
-    }, operation),
-    _ => null,
-  };
-  bool matches(MissionGroup mission) {
-    if (route['operation_id'] case final operation?
-        when subtree != null
-            ? !subtree.contains(mission.operationId)
-            : mission.operationId != operation) {
-      return false;
-    }
-    if (route['mission_id'] case final id? when mission.missionId != id) {
-      return false;
-    }
-    if (route['station_id'] case final station?
-        when !mission.sessions.any((session) => session.stationId == station)) {
-      return false;
-    }
-    if (route['agent'] case final agent?
-        when !mission.sessions.any((session) => session.agent == agent)) {
-      return false;
-    }
-    if (text != null) {
-      final brief = board.missionBrief(mission.operationId, mission.missionId);
-      final haystack = [
-        mission.operationId,
-        mission.missionId,
-        for (final session in mission.sessions) session.sessionId,
-        ?brief?.prompt,
-      ];
-      if (!haystack.any((item) => item.toLowerCase().contains(text))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  double updated(MissionGroup mission) => mission.sessions
-      .map((session) => session.updatedAt ?? 0)
-      .reduce((a, b) => a > b ? a : b);
-  // The board holds no creation time: the earliest update it holds stands in for one.
-  double created(MissionGroup mission) => mission.sessions
-      .map((session) => session.updatedAt ?? 0)
-      .reduce((a, b) => a < b ? a : b);
-  final Comparable<Object> Function(MissionGroup)? key =
-      switch (route['sort']) {
-        'updated' => updated,
-        'created' => created,
-        'state' => (mission) => boardStates.indexOf(mission.state),
-        'operation' => (mission) => mission.operationId,
-        'mission' => (mission) => mission.missionId,
-        _ => null,
-      };
-  // Ties keep the board's order (Operation, then Mission ID); `List.sort` is not stable.
-  final missions = groupMissions(sessions).where(matches).indexed.toList();
-  if (key != null) {
-    missions.sort((a, b) {
-      final order = key(a.$2).compareTo(key(b.$2));
-      return order != 0 ? order : a.$1.compareTo(b.$1);
-    });
-  }
-  final ordered = [for (final (_, mission) in missions) mission];
-  return route['order'] == 'desc' ? ordered.reversed.toList() : ordered;
 }
 
 /// Every Theater each Station reports, with what it can do and why it may not be used.
@@ -4262,7 +4136,7 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
                           label: Text(_saving ? 'Saving…' : 'Save settings'),
                         ),
                       ),
-                    if (widget.board.demo) const _DemoBanner(),
+                    if (widget.board.demo) const DemoBanner(),
                   ],
                 );
               },
@@ -4877,63 +4751,6 @@ class _ThemeChooser extends StatelessWidget {
   );
 }
 
-class _StationOverview extends StatelessWidget {
-  const _StationOverview({
-    required this.board,
-    required this.empty,
-    required this.onCreateMission,
-    required this.canCreateMission,
-  });
-
-  final StationBoardSummary board;
-
-  /// What shows when [board] has no Station.
-  final String empty;
-  final ValueChanged<String> onCreateMission;
-  final bool Function(String operationId) canCreateMission;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'STATIONS',
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-            letterSpacing: 2.4,
-            color: OoTokens.of(context).accent,
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (board.stations.isEmpty)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(empty),
-            ),
-          )
-        else
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final station in board.stations)
-                SizedBox(
-                  width: 300,
-                  child: _StationCard(
-                    station: station,
-                    onCreateMission: onCreateMission,
-                    canCreateMission: canCreateMission,
-                  ),
-                ),
-            ],
-          ),
-      ],
-    ),
-  );
-}
-
 /// Asks the gateway where a Mission for an Operation would run and shows the
 /// reason for every Station, Theater or Agent it would not.
 class _PlacementPanel extends StatefulWidget {
@@ -5179,950 +4996,4 @@ Future<void> _showCreateMission(
     title.dispose();
     prompt.dispose();
   }
-}
-
-class _StationCard extends StatelessWidget {
-  const _StationCard({
-    required this.station,
-    required this.onCreateMission,
-    required this.canCreateMission,
-  });
-
-  final StationSummary station;
-  final ValueChanged<String> onCreateMission;
-  final bool Function(String operationId) canCreateMission;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                station.healthy ? Icons.circle : Icons.circle_outlined,
-                size: 11,
-                color: station.healthy
-                    ? OoTokens.of(context).success
-                    : OoTokens.of(context).warning,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  station.stationId,
-                  style: Theme.of(context).textTheme.titleMedium,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (station.headquarters)
-                const Chip(
-                  avatar: Icon(Icons.account_balance, size: 15),
-                  label: Text('HQS'),
-                  visualDensity: VisualDensity.compact,
-                ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${station.healthy ? 'Healthy' : 'Not reporting'} · '
-            '${station.running}/${station.capacity} sessions',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 2),
-          Text(
-            station.resources?.description ?? 'Resources unknown',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          if (station.theaters.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                for (final theater in station.theaters)
-                  Tooltip(
-                    message: theater.description,
-                    child: Chip(
-                      avatar: Icon(
-                        theater.unavailable != null
-                            ? Icons.link_off
-                            : theater.unfit
-                            ? Icons.build_outlined
-                            : theater.access == 'local'
-                            ? Icons.computer
-                            : Icons.cloud_outlined,
-                        size: 15,
-                      ),
-                      label: Text('Theater ${theater.id}'),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-              ],
-            ),
-          ],
-          if (station.headOfStation case final report?) ...[
-            const SizedBox(height: 10),
-            Text(report.heading, style: Theme.of(context).textTheme.labelSmall),
-            const SizedBox(height: 2),
-            Text(
-              report.summary,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            for (final finding in report.findings)
-              Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      switch (finding.severity) {
-                        'critical' => Icons.error_outline,
-                        'warning' => Icons.warning_amber,
-                        _ => Icons.info_outline,
-                      },
-                      size: 14,
-                      color: switch (finding.severity) {
-                        'critical' => OoTokens.of(context).danger,
-                        'warning' => OoTokens.of(context).warning,
-                        _ => OoTokens.of(context).muted,
-                      },
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        '${finding.kind}: ${finding.text}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-          if (station.operations.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                for (final operation in station.operations)
-                  ActionChip(
-                    label: Text(operation),
-                    avatar: const Icon(Icons.add, size: 16),
-                    tooltip: canCreateMission(operation)
-                        ? 'Start a Mission in $operation'
-                        : 'You do not have mission.create access to $operation',
-                    onPressed: canCreateMission(operation)
-                        ? () => onCreateMission(operation)
-                        : null,
-                    visualDensity: VisualDensity.compact,
-                  ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    ),
-  );
-}
-
-class _BoardHeader extends StatelessWidget {
-  const _BoardHeader({
-    required this.sessions,
-    required this.selectedStates,
-    required this.onSelectStates,
-    required this.sort,
-  });
-
-  final List<SessionSummary> sessions;
-
-  /// The states shown; none means every state.
-  final List<String> selectedStates;
-  final ValueChanged<List<String>> onSelectStates;
-
-  /// The sort control beside the heading.
-  final Widget sort;
-
-  @override
-  Widget build(BuildContext context) {
-    final counts = <String, int>{};
-    for (final session in sessions) {
-      final state = session.state ?? 'working';
-      counts.update(state, (value) => value + 1, ifAbsent: () => 1);
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'MISSIONS',
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              letterSpacing: 2.4,
-              color: OoTokens.of(context).accent,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Mission board',
-                  style: Theme.of(context).textTheme.headlineMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
-              sort,
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _CountChip(
-                label: 'Sessions',
-                count: sessions.length,
-                selected: selectedStates.isEmpty,
-                onPressed: () => onSelectStates(const []),
-              ),
-              for (final state in boardStates)
-                _CountChip(
-                  label: state,
-                  count: counts[state] ?? 0,
-                  state: state,
-                  selected: selectedStates.contains(state),
-                  // One state at a time from the chips; a link may name several.
-                  onPressed: () => onSelectStates(
-                    selectedStates.length == 1 && selectedStates.single == state
-                        ? const []
-                        : [state],
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CountChip extends StatelessWidget {
-  const _CountChip({
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.onPressed,
-    this.state,
-  });
-
-  final String label;
-  final int count;
-
-  /// The state this chip filters by; none for all Sessions.
-  final String? state;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => ChoiceChip(
-    avatar: switch (state) {
-      final state? => OoStateMark(state),
-      null => null,
-    },
-    label: Text('$label  $count'),
-    selected: selected,
-    onSelected: (_) => onPressed(),
-    visualDensity: VisualDensity.compact,
-    tooltip: label == 'Sessions' ? 'Show all Sessions' : 'Filter by $label',
-  );
-}
-
-class _EmptyFilter extends StatelessWidget {
-  const _EmptyFilter({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Center(child: Text(text));
-}
-
-/// One Mission on the board and its Sessions.
-class MissionGroup {
-  const MissionGroup({
-    required this.operationId,
-    required this.missionId,
-    required this.sessions,
-  });
-
-  final String operationId;
-  final String missionId;
-  final List<SessionSummary> sessions;
-
-  /// The state of its latest Session; a Session not yet reporting one is working.
-  String get state =>
-      sessions
-          .reduce(
-            (left, right) => right.sequence > left.sequence ? right : left,
-          )
-          .state ??
-      'working';
-
-  /// Whether it has stopped for good: done, failed or abandoned.
-  bool get finished => const {'done', 'failed', 'abandoned'}.contains(state);
-}
-
-/// The board's Sessions grouped by Mission, by Operation then Mission ID.
-List<MissionGroup> groupMissions(List<SessionSummary> sessions) {
-  final groups = <(String, String), List<SessionSummary>>{};
-  for (final session in sessions) {
-    groups
-        .putIfAbsent((session.operationId, session.missionId), () => [])
-        .add(session);
-  }
-  final result = groups.entries
-      .map(
-        (entry) => MissionGroup(
-          operationId: entry.key.$1,
-          missionId: entry.key.$2,
-          sessions: List.unmodifiable(entry.value),
-        ),
-      )
-      .toList();
-  result.sort((left, right) {
-    final station = left.operationId.compareTo(right.operationId);
-    return station != 0 ? station : left.missionId.compareTo(right.missionId);
-  });
-  return result;
-}
-
-class _MissionCard extends StatelessWidget {
-  const _MissionCard({
-    required this.mission,
-    required this.board,
-    required this.desktopWindows,
-    required this.onSelectSession,
-  });
-
-  final MissionGroup mission;
-  final MissionBoard board;
-  final bool desktopWindows;
-  final ValueChanged<SessionSummary>? onSelectSession;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              IconTheme.merge(
-                data: IconThemeData(
-                  color: OoTokens.of(context).accent,
-                  size: 19,
-                ),
-                child: const OoIcon(OoIconName.missions),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  mission.operationId,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              Text(
-                '${mission.sessions.length} session${mission.sessions.length == 1 ? '' : 's'}',
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-              if (board.missionBrief(mission.operationId, mission.missionId)
-                  case final brief?)
-                IconButton(
-                  tooltip: 'View Mission brief and launch context',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => _MissionBriefPage(brief: brief),
-                    ),
-                  ),
-                  icon: const Icon(Icons.description_outlined),
-                ),
-              MissionActionsMenu(
-                board: board,
-                operationId: mission.operationId,
-                missionId: mission.missionId,
-                sessions: mission.sessions,
-              ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.only(left: 27, top: 4, bottom: 12),
-            child: Text(
-              'Mission ${mission.missionId}',
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: OoTokens.of(context).muted),
-            ),
-          ),
-          if (board.attempts(mission.operationId, mission.missionId)
-              case final attempts
-              when attempts.length > 1 ||
-                  attempts.any((attempt) => attempt.status == 'lost'))
-            _AttemptHistory(attempts: attempts),
-          if (board.controls[(mission.operationId, mission.missionId)]
-              case final control?)
-            Padding(
-              padding: const EdgeInsets.only(left: 27, bottom: 12),
-              child: Text(
-                control.describe(),
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-            ),
-          for (final session in mission.sessions)
-            _SessionRow(
-              session: session,
-              board: board,
-              desktopWindows: desktopWindows,
-              onSelectSession: onSelectSession,
-            ),
-        ],
-      ),
-    ),
-  );
-}
-
-/// Every attempt at a Mission, first first, with why a lost one was lost.
-class _AttemptHistory extends StatelessWidget {
-  const _AttemptHistory({required this.attempts});
-
-  final List<MissionAttemptSummary> attempts;
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = Theme.of(context).textTheme.bodySmall
-        ?.copyWith(color: OoTokens.of(context).muted);
-    return Padding(
-      padding: const EdgeInsets.only(left: 27, bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final attempt in attempts) ...[
-            Text(
-              attempt.describe(),
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
-            if (attempt.lost case final lost?) Text(lost, style: muted),
-            if (attempt.checkpointBranch case final branch?)
-              Text('Checkpointed to branch $branch', style: muted),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MissionBriefPage extends StatelessWidget {
-  const _MissionBriefPage({required this.brief});
-
-  final MissionBriefSummary brief;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text('Mission ${brief.missionId}')),
-    body: ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Text(brief.operationId, style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 20),
-        Text('Brief', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        SelectableText(brief.prompt),
-        const SizedBox(height: 24),
-        Text('Launch context', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        _manifestRow('Origin', brief.origin?.describe() ?? 'Not recorded'),
-        if (brief.origin?.itemUrl case final url?) _manifestRow('Item', url),
-        _manifestRow('Agent', brief.agentId ?? 'Unassigned'),
-        _manifestRow('Role', brief.roleId ?? 'Unspecified'),
-        _manifestRow('Station', brief.stationId ?? 'Not recorded'),
-        _manifestRow('Theater', brief.theaterId ?? 'Not recorded'),
-        if (brief.mode != null) _manifestRow('Mode', brief.mode!),
-        _manifestRow('Handler', brief.handlerProvider),
-        _manifestRow('Terminal', brief.terminalProvider),
-        _manifestRow('Working directory', brief.workingDirectory),
-        _manifestRow('Model', brief.model ?? 'Configured by handler'),
-        _manifestRow('Effort', brief.effort ?? 'Configured by handler'),
-        _manifestRow(
-          'Environment names',
-          brief.environmentKeys.isEmpty
-              ? 'None'
-              : brief.environmentKeys.join(', '),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Environment values are withheld.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    ),
-  );
-
-  Widget _manifestRow(String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 5),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(width: 160, child: Text(label)),
-        Expanded(child: SelectableText(value)),
-      ],
-    ),
-  );
-}
-
-class _SessionRow extends StatelessWidget {
-  const _SessionRow({
-    required this.session,
-    required this.board,
-    required this.desktopWindows,
-    required this.onSelectSession,
-  });
-
-  final SessionSummary session;
-  final MissionBoard board;
-  final bool desktopWindows;
-  final ValueChanged<SessionSummary>? onSelectSession;
-
-  void _open(BuildContext context) {
-    if (onSelectSession case final select?) {
-      select(session);
-    } else if (desktopWindows) {
-      _openSessionWindow(context, session, board);
-    } else {
-      _openSessionPage(context, session, board);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final state = session.state ?? 'working';
-    final tokens = OoTokens.of(context);
-    return Container(
-      margin: const EdgeInsets.only(top: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: tokens.raised,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: tokens.border),
-      ),
-      child: InkWell(
-        onTap: () => _open(context),
-        borderRadius: BorderRadius.circular(8),
-        child: Row(
-          children: [
-            OoStateMark(state, reason: session.reason),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    session.sessionId,
-                    style: const TextStyle(fontFamily: 'monospace'),
-                  ),
-                  Text(
-                    'Updated at event ${session.sequence}',
-                    style: Theme.of(context).textTheme.labelSmall
-                        ?.copyWith(color: tokens.muted),
-                  ),
-                ],
-              ),
-            ),
-            if (session.exposure.isNotEmpty) ...[
-              Tooltip(
-                message: 'Read untrusted input: ${session.exposure.join(', ')}',
-                child: const Chip(
-                  label: Text('EXPOSED'),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-              const SizedBox(width: 6),
-            ],
-            Chip(
-              label: Text(
-                [
-                  state,
-                  ?session.reason?.replaceAll('-', ' '),
-                ].join(' · ').toUpperCase(),
-              ),
-              visualDensity: VisualDensity.compact,
-            ),
-            if (desktopWindows) ...[
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: 'Open Session window',
-                onPressed: () => _open(context),
-                icon: const Icon(Icons.open_in_new),
-              ),
-            ] else ...[
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: 'View Session details',
-                onPressed: () => _open(context),
-                icon: const Icon(Icons.chevron_right),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-void _openSessionPage(
-  BuildContext context,
-  SessionSummary session,
-  MissionBoard board,
-) {
-  Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => SessionWindow(session: session, board: board),
-    ),
-  );
-}
-
-void _openSessionWindow(
-  BuildContext context,
-  SessionSummary session,
-  MissionBoard board,
-) => openAppWindow(
-  context,
-  size: const Size(900, 680),
-  title: 'Session ${session.sessionId} | Outer Office',
-  builder: (_) => boardThemedApp(
-    board,
-    title: 'Session ${session.sessionId}',
-    home: SessionWindow(session: session, board: board),
-  ),
-);
-
-class SessionWindow extends StatelessWidget {
-  const SessionWindow({required this.session, required this.board, super.key});
-
-  final SessionSummary session;
-  final MissionBoard board;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text('Session ${session.sessionId}')),
-    body: _SessionDetailContent(session: session, board: board),
-  );
-}
-
-class _SessionDetailPane extends StatelessWidget {
-  const _SessionDetailPane({
-    required this.session,
-    required this.board,
-    required this.onClose,
-    super.key,
-  });
-
-  final SessionSummary session;
-  final MissionBoard board;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      ListTile(
-        title: Text(
-          'Session ${session.sessionId}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: IconButton(
-          tooltip: 'Close Session details',
-          onPressed: onClose,
-          icon: const Icon(Icons.close),
-        ),
-      ),
-      const Divider(height: 1),
-      Expanded(
-        child: _SessionDetailContent(session: session, board: board),
-      ),
-    ],
-  );
-}
-
-class _SessionDetailContent extends StatelessWidget {
-  const _SessionDetailContent({required this.session, required this.board});
-
-  final SessionSummary session;
-  final MissionBoard board;
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: board,
-    builder: (context, _) {
-      final current =
-          board.sessions
-              .where((item) => item.sessionId == session.sessionId)
-              .firstOrNull ??
-          session;
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              current.operationId,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Mission ${current.missionId} · ${current.state ?? 'awaiting lifecycle'}',
-            ),
-            const SizedBox(height: 24),
-            Expanded(
-              child: board.demo
-                  ? const _SessionPreviewPanel(
-                      message: 'Demo Sessions are sample data. No terminal connection is available.',
-                    )
-                  : board.accessToken == null
-                  ? const _SessionPreviewPanel(
-                      message: 'Sign in to Universal Exports to attach to this Session.',
-                    )
-                  : _LiveSessionTerminal(session: current, board: board),
-            ),
-          ],
-        ),
-      );
-    },
-  );
-}
-
-class _SessionPreviewPanel extends StatelessWidget {
-  const _SessionPreviewPanel({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    child: Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.terminal, size: 36, color: OoTokens.of(context).accent),
-            const SizedBox(height: 12),
-            const Text('Session preview'),
-            const SizedBox(height: 8),
-            Text(message, textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _LiveSessionTerminal extends StatefulWidget {
-  const _LiveSessionTerminal({required this.session, required this.board});
-
-  final SessionSummary session;
-  final MissionBoard board;
-
-  @override
-  State<_LiveSessionTerminal> createState() => _LiveSessionTerminalState();
-}
-
-class _LiveSessionTerminalState extends State<_LiveSessionTerminal> {
-  late final SessionConnection _connection;
-
-  @override
-  void initState() {
-    super.initState();
-    _connection = SessionConnection(
-      board: widget.board,
-      session: widget.session,
-    )..addListener(_changed);
-    _connection.start();
-  }
-
-  @override
-  void didUpdateWidget(_LiveSessionTerminal oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.session.sequence != widget.session.sequence) {
-      _connection.advanceCursor(widget.session.sequence);
-    }
-  }
-
-  @override
-  void dispose() {
-    _connection.removeListener(_changed);
-    _connection.dispose();
-    super.dispose();
-  }
-
-  void _changed() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) => Card(
-    clipBehavior: Clip.antiAlias,
-    child: Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Row(
-            children: [
-              Expanded(child: Text(_connection.status)),
-              TextButton.icon(
-                onPressed: _connection.isConnected
-                    ? () => _connection.setWriteLease(
-                        !_connection.writeLeaseRequested,
-                      )
-                    : null,
-                icon: Icon(
-                  _connection.writeLeaseRequested
-                      ? Icons.lock_open
-                      : Icons.lock_outline,
-                ),
-                label: Text(
-                  _connection.writeLeaseRequested
-                      ? 'Release input lease'
-                      : 'Request input lease',
-                ),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: _connection.runtimeError == null
-              ? SessionTerminal(
-                  output: _connection.output,
-                  onInput: _connection.sendInput,
-                  onResize: _connection.sendResize,
-                  writeLeaseHeld: _connection.writeLeaseHeld,
-                  maxLines: widget.board.limits.terminal.scrollbackLines,
-                )
-              : Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(_connection.runtimeError!),
-                  ),
-                ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _EmptyBoard extends StatelessWidget {
-  const _EmptyBoard();
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: OoBackdrop(
-      alignment: Alignment.center,
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconTheme.merge(
-              data: IconThemeData(size: 42, color: OoTokens.of(context).muted),
-              child: const OoIcon(OoIconName.missions),
-            ),
-            const SizedBox(height: 12),
-            const Text('No active Missions'),
-            const SizedBox(height: 4),
-            const Text('Registered agent Sessions will appear here.'),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _DemoBanner extends StatelessWidget {
-  const _DemoBanner();
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        color: OoTokens.of(context).raised,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: OoTokens.of(context).accent),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Icon(
-              Icons.visibility,
-              color: OoTokens.of(context).accent,
-              size: 18,
-            ),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Text(
-                'Demo preview · sign-in is unavailable. Open the authenticated Outer Office site.',
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _GatewayUnavailable extends StatelessWidget {
-  const _GatewayUnavailable();
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: OoBackdrop(
-      alignment: Alignment.center,
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off, size: 42, color: OoTokens.of(context).muted),
-            const SizedBox(height: 12),
-            const Text('Universal Exports is offline'),
-            const SizedBox(height: 4),
-            const Text(
-              'Start the gateway, or launch with OO_DEMO=true to preview.',
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.apiOrigin, required this.onRetry});
-
-  final Uri apiOrigin;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-    child: MaterialBanner(
-      content: Text(
-        'Could not reach Universal Exports at ${apiOrigin.host}:${apiOrigin.port}.',
-      ),
-      leading: const Icon(Icons.cloud_off),
-      actions: [TextButton(onPressed: onRetry, child: const Text('Retry'))],
-    ),
-  );
 }

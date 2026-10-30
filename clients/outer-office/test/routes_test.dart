@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart' show ValueKey;
 import 'package:outer_office/main.dart';
+import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/routes/oo_router.dart';
 import 'package:outer_office/shell/oo_shell.dart';

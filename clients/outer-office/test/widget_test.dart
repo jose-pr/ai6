@@ -500,6 +500,7 @@ void main() {
         '/v1/stations',
         '/v1/user/profile',
         '/v1/user/operations/operation-alpha/held-briefs',
+        '/v1/user/operations/operation-alpha/mission-proposals',
       ]);
     },
   );
@@ -592,6 +593,7 @@ void main() {
         '/v1/stations',
         '/v1/user/profile',
         '/v1/user/operations/operation-alpha/held-briefs',
+        '/v1/user/operations/operation-alpha/mission-proposals',
       ]);
     },
   );
@@ -1571,6 +1573,7 @@ void main() {
       '/v1/stations',
       '/v1/user/profile',
       '/v1/user/operations/operation-alpha/held-briefs',
+      '/v1/user/operations/operation-alpha/mission-proposals',
     ]);
   });
 

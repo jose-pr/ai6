@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
     show Card, DropdownButton, DropdownMenuItem, Key, MaterialApp, Scaffold;
 import 'package:outer_office/main.dart';
+import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/operations/operation_tree.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/shell/oo_shell.dart' show OoPage;

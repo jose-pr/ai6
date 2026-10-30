@@ -4,6 +4,7 @@ import '../held/held_briefs_page.dart' show revealInvisible;
 import '../main.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
+import 'missions_board.dart';
 import 'oo_shell.dart';
 
 /// One thing that needs the person: a blocked Session, a held brief or a dark Station,
