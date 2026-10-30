@@ -74,6 +74,7 @@ A Session is **exposed** once it has read input someone else could have written:
 | `brief:registry_drop` | Its brief was found in the queue with no [provenance](missions.md#provenance) |
 | `tool:NAME` | It called a tool the Operation lists (default `WebFetch` and `WebSearch`) |
 | `cable:SENDER` | It read a Cable from another Operation or from an exposed Session |
+| `issue:TRACKER` | It was given a reply from a linked issue of that tracker instance, or read an issue's text with `issue_read` |
 | `review` | It read review text written by someone else |
 
 Exposure is recorded in the Session's Registry record, never goes away, and is inherited by
@@ -94,8 +95,9 @@ tools = ["WebFetch", "WebSearch", "Browse"]
 | `cables` | It may send a Cable only as a reply inside an existing conversation (`send_cable` is refused, naming the exposure) |
 | `approvals` | Its requests for authorization always go to a human, never to a class authorization |
 | `secrets` | It is given no new secret leases |
+| `issues` | It posts directly only on the issue whose text exposed it (the source) and the children it created; any other post waits for a person's green ink (`issue-comment`) |
 
-`strict` applies all four; `restrict` replaces that set. The Station enforces `proposals`,
+`strict` applies all five; `restrict` replaces that set. The Station enforces `proposals`,
 `cables` and `approvals` (a [green ink](missions.md#green-ink) request from an exposed
 Session waits for a person even when a class authorisation would cover it) itself;
 `secrets` is carried by `ExposureGate::restricts` for the part of AI6 that issues leases to
