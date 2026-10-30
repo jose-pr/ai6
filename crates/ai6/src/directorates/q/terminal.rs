@@ -538,6 +538,10 @@ pub struct TerminalBridge {
     watchdog: Option<crate::directorates::medical::watchdog::Watchdog>,
     #[cfg(feature = "publisher")]
     telemetry: Option<std::sync::Arc<crate::station::publisher::SessionTelemetry>>,
+    /// Whether operator input is written to the program as typed. Off for a harness that
+    /// speaks JSON on its pipes, which takes messages instead.
+    #[cfg(feature = "publisher")]
+    raw_input: bool,
 }
 
 #[cfg(feature = "publisher")]
@@ -554,6 +558,8 @@ impl TerminalBridge {
             watchdog: None,
             #[cfg(feature = "publisher")]
             telemetry: None,
+            #[cfg(feature = "publisher")]
+            raw_input: true,
         }
         .into_object()
     }
@@ -571,6 +577,8 @@ impl TerminalBridge {
             watchdog: Some(watchdog),
             #[cfg(feature = "publisher")]
             telemetry: None,
+            #[cfg(feature = "publisher")]
+            raw_input: true,
         }
         .into_object()
     }
@@ -580,11 +588,13 @@ impl TerminalBridge {
         provider: Box<dyn Terminal>,
         telemetry: std::sync::Arc<crate::station::publisher::SessionTelemetry>,
         watchdog: crate::directorates::medical::watchdog::Watchdog,
+        raw_input: bool,
     ) -> Object<dyn AgentTerminal> {
         Self {
             provider,
             watchdog: Some(watchdog),
             telemetry: Some(telemetry),
+            raw_input,
         }
         .into_object()
     }
@@ -595,9 +605,11 @@ impl AgentTerminal for TerminalBridge {
         let session = Arc::new(self.provider.spawn(spec)?);
         #[cfg(feature = "publisher")]
         if let Some(telemetry) = &self.telemetry {
-            telemetry.attach_terminal_target(Arc::new(TerminalInputBridge {
-                session: session.clone(),
-            }));
+            if self.raw_input {
+                telemetry.attach_terminal_target(Arc::new(TerminalInputBridge {
+                    session: session.clone(),
+                }));
+            }
             return Ok(TerminalSessionBridge {
                 session,
                 watchdog: self.watchdog.clone(),

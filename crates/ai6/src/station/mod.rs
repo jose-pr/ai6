@@ -3,6 +3,8 @@
 //! publication to Universal Exports.
 
 #[cfg(feature = "daemon")]
+pub(crate) mod acp;
+#[cfg(feature = "daemon")]
 pub(crate) mod detached;
 #[cfg(feature = "daemon")]
 pub mod elevation;

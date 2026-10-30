@@ -921,6 +921,7 @@ pub ai6::directorates::m::roster::Agent::description: alloc::string::String
 pub ai6::directorates::m::roster::Agent::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Agent::env: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::m::roster::Agent::handler: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::handler_settings: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::directorates::m::roster::Agent::id: alloc::string::String
 pub ai6::directorates::m::roster::Agent::limits: ai6::directorates::medical::watchdog::WatchdogOverrides
 pub ai6::directorates::m::roster::Agent::max_concurrent: core::option::Option<usize>
@@ -4102,6 +4103,7 @@ pub ai6::directorates::section_00::acp::AcpOptions::prompt: core::option::Option
 pub ai6::directorates::section_00::acp::AcpOptions::request_timeout_ms: u64
 pub ai6::directorates::section_00::acp::AcpOptions::restricted: bool
 pub ai6::directorates::section_00::acp::AcpOptions::resume: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::start_timeout_ms: u64
 impl core::default::Default for ai6::directorates::section_00::acp::AcpOptions
 pub fn ai6::directorates::section_00::acp::AcpOptions::default() -> Self
 pub struct ai6::directorates::section_00::acp::AcpSession
@@ -4125,6 +4127,11 @@ pub struct ai6::directorates::section_00::acp::FacadeAuth
 pub ai6::directorates::section_00::acp::FacadeAuth::check: alloc::sync::Arc<ai6::directorates::section_00::acp::Credential>
 pub ai6::directorates::section_00::acp::FacadeAuth::method: alloc::string::String
 pub ai6::directorates::section_00::acp::FacadeAuth::name: alloc::string::String
+pub struct ai6::directorates::section_00::acp::GateDecider
+impl ai6::directorates::section_00::acp::GateDecider
+pub fn ai6::directorates::section_00::acp::GateDecider::from_environment(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, impl core::convert::Into<std::path::PathBuf>) -> Self
+impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::GateDecider
+pub fn ai6::directorates::section_00::acp::GateDecider::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
 #[non_exhaustive] pub struct ai6::directorates::section_00::acp::HandlerSpec
 pub ai6::directorates::section_00::acp::HandlerSpec::config: serde_json::value::Value
 pub ai6::directorates::section_00::acp::HandlerSpec::id: alloc::string::String
@@ -4202,8 +4209,11 @@ pub const ai6::directorates::section_00::acp::EVENTS_CAPABILITY: &str
 pub const ai6::directorates::section_00::acp::EVENT_NOTIFICATION: &str
 pub const ai6::directorates::section_00::acp::LAUNCH_META_KEY: &str
 pub const ai6::directorates::section_00::acp::RUNNER_TOKEN_METHOD: &str
+pub const ai6::directorates::section_00::acp::UNBOUNDED_MS: u64
 pub trait ai6::directorates::section_00::acp::PermissionDecider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::section_00::acp::PermissionDecider::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
+impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::GateDecider
+pub fn ai6::directorates::section_00::acp::GateDecider::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
 impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::RefuseAll
 pub fn ai6::directorates::section_00::acp::RefuseAll::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
 pub fn ai6::directorates::section_00::acp::duplex() -> (agent_client_protocol::jsonrpc::Channel, agent_client_protocol::jsonrpc::Channel)
@@ -4275,6 +4285,8 @@ pub fn ai6::directorates::section_00::agent::AssistantNetwork::open(&self) -> bo
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::reaches_nothing(&self) -> bool
 impl core::default::Default for ai6::directorates::section_00::agent::AssistantNetwork
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::default() -> Self
+pub struct ai6::directorates::section_00::agent::HandlerConfig
+pub ai6::directorates::section_00::agent::HandlerConfig::settings_toml: alloc::string::String
 pub struct ai6::directorates::section_00::agent::McpServerRef
 pub ai6::directorates::section_00::agent::McpServerRef::env_prefix: alloc::string::String
 pub ai6::directorates::section_00::agent::McpServerRef::name: alloc::string::String
@@ -4667,6 +4679,7 @@ pub fn ai6::station::plugins::Plugins::choose_terminal(&self, ai6::directorates:
 pub fn ai6::station::plugins::Plugins::directories(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::directory(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn coqui_access::kind::Directory>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::handler(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::handler_with(&self, &str, &serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::handlers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::safehouse(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::safehouse::SafeHouseProvider>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::safehouses(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
@@ -5349,6 +5362,7 @@ pub ai6::Agent::description: alloc::string::String
 pub ai6::Agent::effort: core::option::Option<alloc::string::String>
 pub ai6::Agent::env: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::Agent::handler: core::option::Option<alloc::string::String>
+pub ai6::Agent::handler_settings: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::Agent::id: alloc::string::String
 pub ai6::Agent::limits: ai6::directorates::medical::watchdog::WatchdogOverrides
 pub ai6::Agent::max_concurrent: core::option::Option<usize>

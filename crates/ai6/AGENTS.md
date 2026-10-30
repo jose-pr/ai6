@@ -232,6 +232,7 @@ pub struct Agent {
     pub description: String,
     pub aliases: Vec<String>,
     pub handler: Option<String>,
+    pub handler_settings: serde_json::Map<String, serde_json::Value>, // `handler_settings` in the roster; {} = provider defaults
     pub model: Option<String>,
     pub effort: Option<String>,
     pub roles: Vec<String>,
@@ -2716,6 +2717,18 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
   event answers waiting prompts `end_turn`, `limit` `refusal`, `failed` a JSON-RPC error. It
   advertises `loadSession`, `sessionCapabilities.resume|close` and no MCP (the environment
   carries the native handlers' MCP servers).
+
+Station use: every Session a Station supervises itself (local, detached wrapper, Moneypenny's
+desk) is an `AcpSession` over an in-process `AcpFacade` of its handler (`station::acp`), with no
+start, resume or close limit (`UNBOUNDED_MS`, as before). `Plugins::handler_with(provider,
+&agent.handler_settings)` builds a handler with an Agent's settings as `HandlerConfig {
+settings_toml }` (the provider refuses unknown keys); empty settings build it with defaults.
+`GateDecider::from_environment(&environment, cwd)` (feature `gate`) is a `PermissionDecider` that
+asks the Session's Cable endpoint, through the same `gate()` a Claude `PreToolUse` hook calls,
+whether an `execute` request's command may run; other tool kinds are allowed. Each answer is a
+`permission` event. Operator terminal input for a handler that declares `HarnessStdio::Json` is
+not written to its pipes: typed lines become messages, Ctrl-C interrupts, other control bytes
+are refused with a reason.
 
 ## Identity and handler API
 

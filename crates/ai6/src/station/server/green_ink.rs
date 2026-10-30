@@ -1125,6 +1125,148 @@ mod tests {
         state.stopping.store(true, Ordering::Release);
     }
 
+    /// Runs one turn of a fake external ACP agent that asks leave to run `command`, with the
+    /// gate as its decider, and answers the events the Session produced and the option the
+    /// agent was answered with.
+    async fn external_turn(
+        environment: &std::collections::BTreeMap<String, String>,
+        cwd: &FsPath,
+        command: &'static str,
+    ) -> (Vec<AgentEvent>, String) {
+        use crate::directorates::section_00::acp::{AcpOptions, AcpSession, GateDecider};
+        use crate::directorates::section_00::agent::AgentSession as _;
+        let outcome = Arc::new(std::sync::Mutex::new(None));
+        let channel = crate::station::acp::testing::command_agent(command, outcome.clone());
+        let options = AcpOptions {
+            cwd: cwd.to_string_lossy().into_owned(),
+            prompt: Some("go".to_owned()),
+            decider: Arc::new(GateDecider::from_environment(environment, cwd)),
+            ..AcpOptions::default()
+        };
+        tokio::task::spawn_blocking(move || {
+            let session = AcpSession::connect(channel, options, None).unwrap();
+            let mut events = Vec::new();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while std::time::Instant::now() < deadline {
+                if let Some(event) = session.next_event(100).unwrap() {
+                    let done = event.kind == "completed";
+                    events.push(event);
+                    if done {
+                        break;
+                    }
+                }
+            }
+            let answered = outcome
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("the agent was answered");
+            let chosen = answered["outcome"]["optionId"].as_str().unwrap().to_owned();
+            (events, chosen)
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_external_agents_permission_request_is_judged_by_the_same_gate() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
+                      [agent.007.limits]\nstall_timeout = 300\n";
+        let state = test_state(root.path(), "", agents);
+        let mission_id = format!("green-ink-acp-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "push the release".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let environment = state.sessions.lock().unwrap()[&mission_id]
+            .environment
+            .clone();
+        let checkout = tempfile::tempdir().unwrap();
+        let path = checkout.path().to_string_lossy().into_owned();
+        for args in [
+            &["init", "-q", "-b", "main"][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "first",
+            ],
+        ] {
+            let mut full = vec!["-C".to_owned(), path.clone()];
+            full.extend(args.iter().map(|arg| (*arg).to_owned()));
+            assert!(
+                crate::directorates::section_00::gate::local_git(&full)
+                    .unwrap()
+                    .0,
+                "git {full:?}"
+            );
+        }
+        let cwd = checkout.path();
+
+        // A protected push is refused, and the refusal is in the Session's events.
+        let (events, chosen) = external_turn(&environment, cwd, "git push origin main").await;
+        assert_eq!(chosen, "no");
+        let refusal = events
+            .iter()
+            .find(|event| event.kind == "permission")
+            .and_then(|event| event.text.as_deref())
+            .expect("the refusal is an event");
+        assert!(
+            refusal.contains("refused") && refusal.contains("request_approval"),
+            "{refusal}"
+        );
+        // A command that takes no governed step goes ahead.
+        let (events, chosen) = external_turn(&environment, cwd, "cargo test").await;
+        assert_eq!(chosen, "yes");
+        assert!(events.iter().any(|event| {
+            event.kind == "permission" && event.text.as_deref().unwrap().contains("granted")
+        }));
+
+        // Once green ink covers the push, the same request is allowed.
+        let answer: serde_json::Value = serde_json::from_str(
+            &call_tool(
+                &state,
+                &mission_id,
+                serde_json::json!({
+                    "kind": "push",
+                    "target": "origin:main",
+                    "reason": "release 2.0 is tagged",
+                    "idempotency_key": "acp-push",
+                }),
+            )
+            .await,
+        )
+        .unwrap();
+        let request_id = answer["request_id"].as_str().unwrap().to_owned();
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request_id,
+                &Ruling::approve("operator-m", now(&state), now(&state) + 600.0),
+            )
+            .unwrap();
+        let (_, chosen) = external_turn(&environment, cwd, "git push origin main").await;
+        assert_eq!(chosen, "yes");
+        state.stopping.store(true, Ordering::Release);
+    }
+
     #[tokio::test]
     async fn an_expired_request_is_told_and_audited_without_its_reason() {
         let root = tempfile::tempdir().unwrap();

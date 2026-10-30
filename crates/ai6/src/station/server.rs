@@ -3906,7 +3906,7 @@ async fn start_mission(
         None => Some(
             state
                 .plugins
-                .handler(&handler_provider, None)
+                .handler_with(&handler_provider, &agent.handler_settings)
                 .map_err(provider_error)?,
         ),
     };
@@ -4260,6 +4260,10 @@ async fn start_mission(
             record.status == SessionStatus::Lost && record.theater.as_deref() == Some(&theater_id)
         })
         .and_then(|record| record.launch.as_ref()?.runner.clone());
+    #[cfg(feature = "publisher")]
+    let raw_input = !in_process
+        .as_ref()
+        .is_some_and(|(_, handler)| matches!(handler.stdio(), Ok(HarnessStdio::Json)));
     let started = match (in_process, &runner, &attachment) {
         (Some((terminal, handler)), _, _) => {
             let terminal = terminal.build(
@@ -4275,6 +4279,7 @@ async fn start_mission(
                     terminal,
                     telemetry.clone(),
                     watchdog.clone(),
+                    raw_input,
                 ),
                 None => TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone()),
             };
@@ -4282,8 +4287,7 @@ async fn start_mission(
             let terminal_handle =
                 TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
             tokio::task::spawn_blocking(move || {
-                handler
-                    .start(start_request, terminal_handle)
+                crate::station::acp::start(handler, terminal_handle, start_request)
                     .map_err(|error| error.to_string())
             })
             .await
@@ -4482,6 +4486,12 @@ async fn start_mission(
         }
     };
     let session = Arc::new(Mutex::new(session));
+    #[cfg(feature = "publisher")]
+    if !raw_input && let Some(telemetry) = &telemetry {
+        telemetry.attach_terminal_target(Arc::new(crate::station::acp::MessageInput::new(
+            session.clone(),
+        )));
+    }
     state.sessions.lock().map_err(|_| internal_error())?.insert(
         mission_id.clone(),
         AgentOperation {
@@ -4782,7 +4792,7 @@ async fn resume_mission(
             harness_terminal(&state, &resume_theater, resume_wrapped, &terminal_provider)?,
             state
                 .plugins
-                .handler(&handler_provider, None)
+                .handler_with(&handler_provider, &resume_agent.handler_settings)
                 .map_err(provider_error)?,
         )),
     };
@@ -4952,6 +4962,10 @@ async fn resume_mission(
         forward: forward.clone(),
     });
     let reach = recovery::reach_watch(&state, mission.operation_id.as_deref());
+    #[cfg(feature = "publisher")]
+    let raw_input = !in_process
+        .as_ref()
+        .is_some_and(|(_, handler)| matches!(handler.stdio(), Ok(HarnessStdio::Json)));
     let resumed = match (in_process, &runner, &attachment) {
         (Some((terminal, handler)), _, _) => {
             let terminal = terminal.build(
@@ -4967,6 +4981,7 @@ async fn resume_mission(
                     terminal,
                     telemetry.clone(),
                     watchdog.clone(),
+                    raw_input,
                 ),
                 None => TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone()),
             };
@@ -4975,8 +4990,7 @@ async fn resume_mission(
                 TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
             tokio::task::spawn_blocking(move || {
                 let expected_session_id = resume_request.session_id.clone();
-                let resumed = handler
-                    .resume(resume_request, terminal_handle)
+                let resumed = crate::station::acp::resume(handler, terminal_handle, resume_request)
                     .map_err(|error| error.to_string())?;
                 let resumed_session_id = resumed.session_id().map_err(|error| error.to_string())?;
                 if resumed_session_id.as_ref() != Some(&expected_session_id) {
@@ -5066,6 +5080,12 @@ async fn resume_mission(
         );
     }
     let resumed = Arc::new(Mutex::new(resumed));
+    #[cfg(feature = "publisher")]
+    if !raw_input && let Some(telemetry) = &telemetry {
+        telemetry.attach_terminal_target(Arc::new(crate::station::acp::MessageInput::new(
+            resumed.clone(),
+        )));
+    }
     state.sessions.lock().map_err(|_| internal_error())?.insert(
         mission_id.clone(),
         AgentOperation {

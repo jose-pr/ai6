@@ -8,6 +8,15 @@ use std::collections::BTreeMap;
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::q::terminal::{AgentTerminal, HarnessStdio};
 
+/// The settings an `AgentHandler` provider is built with: an Agent's `handler_settings` as TOML
+/// text. The provider validates them and refuses unknown keys. Crosses as a value.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct HandlerConfig {
+    /// The settings table as TOML.
+    pub settings_toml: String,
+}
+
 /// The first instruction for one agent operation in a Mission.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]

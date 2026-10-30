@@ -464,11 +464,17 @@ fn log_start(session: &MissionId, how: &str, handler: &str, terminal: &str) {
 
 impl StationHarness {
     /// `handler`, and a terminal that suits what it declares.
-    fn handler(&self, handler: &str) -> Result<Launch, String> {
+    fn handler(&self, handler: &str, agent: Option<&str>) -> Result<Launch, String> {
+        // A handler that needs settings (the `acp` one) gets its Agent's; a resume knows no
+        // Agent and builds the handler with its defaults.
+        let settings = agent
+            .and_then(|agent| super::agents::effective(&self.0, None, agent).ok())
+            .map(|agent| agent.handler_settings)
+            .unwrap_or_default();
         let handler = self
             .0
             .plugins
-            .handler(handler, None)
+            .handler_with(handler, &settings)
             .map_err(|error| error.to_string())?;
         let stdio = handler.stdio().map_err(|error| error.to_string())?;
         let provider = station_terminal(&self.0, stdio)?;
@@ -493,10 +499,9 @@ impl Harness for StationHarness {
         handler: &str,
         request: AgentStart,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let (launch, terminal, provider) = self.handler(handler)?;
+        let (launch, terminal, provider) = self.handler(handler, Some(&request.agent_id))?;
         let session = request.mission_id.clone();
-        let started = launch
-            .start(request, terminal)
+        let started = crate::station::acp::start(launch, terminal, request)
             .map_err(|error| error.to_string())?;
         log_start(&session, "started", handler, &provider);
         Ok(started)
@@ -507,10 +512,9 @@ impl Harness for StationHarness {
         handler: &str,
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let (launch, terminal, provider) = self.handler(handler)?;
+        let (launch, terminal, provider) = self.handler(handler, None)?;
         let session = request.mission_id.clone();
-        let resumed = launch
-            .resume(request, terminal)
+        let resumed = crate::station::acp::resume(launch, terminal, request)
             .map_err(|error| error.to_string())?;
         log_start(&session, "resumed", handler, &provider);
         Ok(resumed)

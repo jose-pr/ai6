@@ -23,7 +23,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::{EVENT_NOTIFICATION, EVENTS_CAPABILITY, RESTRICTED_KINDS};
+use super::{EVENT_NOTIFICATION, EVENTS_CAPABILITY, RESTRICTED_KINDS, UNBOUNDED_MS};
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentSession, LIMIT_EVENT, TokenUsage,
@@ -124,6 +124,9 @@ pub struct AcpOptions {
     pub initialize_timeout_ms: u64,
     /// How long a request other than `session/prompt` may take.
     pub request_timeout_ms: u64,
+    /// How long the operation of a façade may take to start, after the first prompt; a
+    /// start that fails is reported as soon as it does.
+    pub start_timeout_ms: u64,
     /// How long `close` waits for the agent before ending its process.
     pub close_grace_ms: u64,
     /// Answers permission requests.
@@ -146,6 +149,7 @@ impl Default for AcpOptions {
             authenticate: None,
             initialize_timeout_ms: 20_000,
             request_timeout_ms: 30_000,
+            start_timeout_ms: 60_000,
             close_grace_ms: 2_000,
             decider: Arc::new(RefuseAll),
         }
@@ -525,15 +529,14 @@ async fn permission(shared: &Arc<Shared>, params: Value) -> Result<Value, Error>
                 option.option_id.clone(),
             ))
         });
-    if let PermissionDecision::Deny(reason) = &decision {
-        shared.emit(event_text(
-            "notice",
-            format!(
-                "permission refused for {}: {reason}",
-                asked.title.as_deref().unwrap_or("a tool")
-            ),
-        ));
-    }
+    let tool = asked.title.as_deref().unwrap_or("a tool");
+    shared.emit(event_text(
+        "permission",
+        match &decision {
+            PermissionDecision::Allow => format!("permission granted for {tool}"),
+            PermissionDecision::Deny(reason) => format!("permission refused for {tool}: {reason}"),
+        },
+    ));
     let outcome = match outcome {
         Some(outcome) => outcome,
         None => {
@@ -593,6 +596,9 @@ fn notification(shared: &Arc<Shared>, message: &UntypedMessage) {
 /// Runs `future`, or gives up after `ms` milliseconds. The timer thread ends as soon as the
 /// future does.
 async fn within<T>(ms: u64, future: impl Future<Output = T>) -> Result<T, ()> {
+    if ms == UNBOUNDED_MS {
+        return Ok(future.await);
+    }
     let (stop, stopped) = mpsc::channel::<()>();
     let (fire, fired) = oneshot::channel::<()>();
     std::thread::Builder::new()
@@ -942,7 +948,7 @@ async fn main_task(
         if shared.events_capability() {
             // A façade starts the operation on the first prompt; its failure to start is the
             // start's failure.
-            let started = within(options.request_timeout_ms, lifecycle.next()).await;
+            let started = within(options.start_timeout_ms, lifecycle.next()).await;
             match started {
                 Ok(Some(Lifecycle::PromptFailed(error))) => {
                     let _ = ready.send(Err(error));
@@ -952,7 +958,7 @@ async fn main_task(
                 Err(()) => {
                     let _ = ready.send(Err(format!(
                         "the operation did not start within {} ms",
-                        options.request_timeout_ms
+                        options.start_timeout_ms
                     )));
                     return Ok(());
                 }
@@ -1119,7 +1125,11 @@ impl AcpSession {
     }
 
     fn release(&self) {
-        self.shared.closing.store(true, Ordering::SeqCst);
+        if !self.shared.closing.swap(true, Ordering::SeqCst) {
+            // Never closed: say so to the agent, which may hold a harness.
+            let (ack, _) = mpsc::channel();
+            let _ = self.commands.unbounded_send(Command::Close(ack));
+        }
         let _ = self.commands.unbounded_send(Command::Abort);
         if let Ok(mut on_close) = self.on_close.lock()
             && let Some(on_close) = on_close.take()

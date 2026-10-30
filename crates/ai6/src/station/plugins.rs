@@ -13,7 +13,7 @@ use guatiao::library::{
     Declared, Instance, Kind, KindMismatch, Order, Registry, SearchPath, bundle_binary, probe,
     scan_path_with,
 };
-use guatiao::{Status, Value};
+use guatiao::{Status, ToValue as _, Value};
 use serde::Serialize;
 use sha2::Digest as _;
 
@@ -374,6 +374,28 @@ impl Plugins {
         config: Option<&Value>,
     ) -> Result<Box<dyn AgentHandler>, PluginBuildError> {
         build::<dyn AgentHandler>(&self.registry, provider, config)
+    }
+
+    /// Constructs an AgentHandler from its provider ID and an Agent's `handler_settings`;
+    /// empty settings build it with its defaults.
+    pub fn handler_with(
+        &self,
+        provider: &str,
+        settings: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Box<dyn AgentHandler>, PluginBuildError> {
+        if settings.is_empty() {
+            return self.handler(provider, None);
+        }
+        let invalid = |reason: String| PluginBuildError::InvalidConfiguration {
+            provider: provider.to_owned(),
+            reason,
+        };
+        let settings_toml = toml::to_string(settings)
+            .map_err(|error| invalid(format!("handler_settings: {error}")))?;
+        let config = crate::directorates::section_00::agent::HandlerConfig { settings_toml }
+            .to_value()
+            .map_err(|error| invalid(error.to_string()))?;
+        self.handler(provider, Some(&config))
     }
 
     /// The available terminal providers that build with their defaults, each with whether it
