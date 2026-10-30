@@ -73,6 +73,42 @@ class FakeChannel implements AssistantChannel {
 }
 
 void main() {
+  testWidgets(
+    'a reset password reaches the person once and no entry holds it',
+    (tester) async {
+      final channel = FakeChannel();
+      final controller = AssistantController(
+        token: 'user-token',
+        connect: () => channel,
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: AssistantPanel(controller: controller)),
+        ),
+      );
+      channel.answer({'type': 'ready', 'conversation': 'c-1', 'entries': []});
+      await tester.pumpAndSettle();
+      channel.answer({
+        'type': 'reveal',
+        'proposal': 'p-1',
+        'secret': 'n3w-s3cret',
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('n3w-s3cret'), findsOneWidget);
+      expect(controller.hasReveal, isFalse, reason: 'taken by the dialog');
+      expect(
+        controller.entries.any(
+          (entry) => '${entry.data}'.contains('n3w-s3cret'),
+        ),
+        isFalse,
+      );
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(find.text('n3w-s3cret'), findsNothing);
+    },
+  );
+
   testWidgets('every kind of view renders natively from the fixture', (
     tester,
   ) async {
