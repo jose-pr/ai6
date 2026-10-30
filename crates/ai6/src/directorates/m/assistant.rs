@@ -58,7 +58,9 @@ use crate::station::limits::HarnessLimits;
 
 mod limits;
 
-pub use limits::{AssistantDeskLimits, AssistantGatewayLimits, AssistantLimits};
+pub use limits::{
+    AssistantDeskLimits, AssistantGatewayLimits, AssistantLimits, AssistantPageLimits, PageNetwork,
+};
 
 /// The name a person's identifier takes in `personal_repo`.
 pub const PERSON_PLACEHOLDER: &str = "{person}";
@@ -96,6 +98,8 @@ pub struct AssistantSettings {
     desk: AssistantDeskLimits,
     #[serde(skip_serializing_if = "is_default")]
     gateway: AssistantGatewayLimits,
+    #[serde(skip_serializing_if = "is_default")]
+    pages: AssistantPageLimits,
 }
 
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
@@ -123,6 +127,7 @@ impl Default for AssistantSettings {
             limits: AssistantLimits::default(),
             desk: AssistantDeskLimits::default(),
             gateway: AssistantGatewayLimits::default(),
+            pages: AssistantPageLimits::default(),
         }
     }
 }
@@ -918,6 +923,18 @@ impl AssistantSettings {
         self
     }
 
+    /// The pages she publishes and how they are served, `[assistant.pages]`.
+    pub fn pages(&self) -> &AssistantPageLimits {
+        &self.pages
+    }
+
+    /// Sets the pages' quotas and options.
+    #[must_use]
+    pub fn with_pages(mut self, pages: AssistantPageLimits) -> Self {
+        self.pages = pages;
+        self
+    }
+
     /// Whether her scripts may run unsandboxed where the harness has no sandbox.
     pub fn unsandboxed_scripts(&self) -> bool {
         self.unsandboxed_scripts
@@ -1092,6 +1109,7 @@ impl AssistantSettings {
         self.limits.validate()?;
         self.desk.validate()?;
         self.gateway.validate()?;
+        self.pages.validate()?;
         if let Some(template) = &self.personal_repo {
             RepoKind::of(template)
                 .map_err(|reason| format!("assistant.personal_repo: {reason}"))?;

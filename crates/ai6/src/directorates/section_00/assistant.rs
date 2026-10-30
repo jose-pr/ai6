@@ -388,6 +388,37 @@ pub const COMMIT_SHARED: &str = "shared";
 /// serves it; Claude Code calls it `mcp__moneypenny__propose_shared_change`.
 pub const ASSISTANT_SHARED_CHANGE_TOOL: &str = "propose_shared_change";
 
+/// The write tool whose call a Station answers by uploading the page's files.
+pub const ASSISTANT_PUBLISH_PAGE_TOOL: &str = "publish_page";
+
+/// One file of a page a Station read from the assistant's workspace, as its manifest lists
+/// it: the path under the page, its size, SHA-256 and whether it was written while the
+/// conversation was exposed to outside text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantPageFile {
+    /// The path relative to the page's directory, `/`-separated.
+    pub path: String,
+    /// The file's size in bytes.
+    pub bytes: u64,
+    /// Its SHA-256, lower-case hex.
+    pub sha256: String,
+    /// Whether the record of outside text lists it.
+    #[serde(default)]
+    pub outside_text: bool,
+}
+
+/// The digest by which a Station and Universal Exports match an upload to a `publish_page`
+/// call: the SHA-256 of the call's `path`, lower-case hex.
+#[must_use]
+pub fn page_call_digest(path: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(path.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// Where a person's conversation with the assistant keeps its work, sent with each message
 /// when the deployment gives people personal repositories (`[assistant] personal_repo`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
