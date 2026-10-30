@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   rate limited, retried with a doubling delay, and settled once across a Headquarters change.
   `[operation.ID.issues]` sets how much is written and its bounds; looser values are reported
   at start and at check-in. `CableStore::take_cable_quotas` is renamed `take_quotas`.
+- Agents work their issues. A Mission linked to issues gives its Agent `issues`, `issue_read`,
+  `issue_comment`, `issue_request_info`, `issue_update` and `issue_link` on its Session endpoint:
+  comment on the source, a related issue a person accepted and the children it created, ask a
+  question (the Mission blocks with reason `issue` until a permitted reply, an expiry that resumes,
+  fails or keeps waiting, or a withdrawal), and change labels within the instance's `agent_labels`.
+  Closing, reopening, assigning and an unlisted transition wait for green ink (`issue-close`,
+  `issue-assign`); an exposed Session's post outside its own issue waits too (`issue-comment`,
+  exposure restriction `issues`). Everything an Agent writes is checked first for secret values,
+  credential shapes, invisible characters and links to other hosts. The Headquarters Station reads
+  comments; replies from the issue's author or reporter, a maintainer or a listed login reach the
+  Session as fenced untrusted text and mark it exposed (`issue:TRACKER`).
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a

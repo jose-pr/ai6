@@ -2618,63 +2618,7 @@ Plugins::trackers() -> Vec<ProviderInfo>;  Plugins::tracker(provider, config: Op
 author or reporter, a repository owner, member or collaborator, a Jira assignee, or someone the
 instance's `reply_authors` names); `own` marks the identity AI6 posts as. Settings both kinds
 read: the Source's, plus `status_labels` and `status_transitions` (`working`, `waiting`,
-`paused`, `done`, `failed`), `agent_labels`, `reply_authors`, `reply_associations` (GitHub),
-`issue_type`, `subtask_type` and `priority_map`.
-
-## Trackers (`ai6::directorates::registry::tracker`)
-
-A Tracker is the second Guatiao kind (`ai6_tracker`) the tracker providers (`github`, `jira`)
-serve, built from the same `SourceConfig` as their Source. Every method is blocking and names
-an issue by its item ID (`owner/repo#12`, `GUA-12`). An item outside the instance's
-repository or project fails `GUATIAO_ERR_BAD_VALUE` (`foreign item ...`); a call the
-instance cannot make fails `GUATIAO_ERR_UNSUPPORTED` naming what it can do.
-
-```rust
-pub struct TrackerCapabilities {
-    pub comment: bool, pub edit_comment: bool,
-    pub labels: Vec<String>, pub free_labels: bool,   // the tracker's labels; free_labels: any is accepted
-    pub transitions: Vec<String>,                     // per item (Jira)
-    pub assign: bool, pub close: bool, pub create: bool,
-    pub issue_types: Vec<String>, pub priorities: Vec<String>,
-    pub children: String,        // "none" | "sub_issues" | "subtasks" | "parent"
-    pub links: Vec<String>,      // "issue_links", "remote_links"; empty: only text links
-    pub replies: bool,
-    pub visibility: String,      // "public" | "private" | "unknown"
-    pub markers: bool,
-}
-pub struct TrackerIssue { pub id, native_id, title, body, state /* open|closed */: String,
-    pub labels: Vec<String>, pub assignees: Vec<String>, pub url: Option<String>,
-    pub updated: String, pub parent: Option<String>, pub author_id: Option<String> }
-pub struct ReplyPoll { pub items: Vec<String>, pub since: Option<String> }
-pub struct Reply { pub id, item, author_id, author: String, pub permitted: bool,
-    pub own: bool, pub body: String, pub created: String }   // body untrusted
-pub struct ReplyBatch { pub replies: Vec<Reply>, pub cursor: Option<String> }
-pub struct TrackerPost { pub item: String, pub body: String, pub edit: Option<String>, pub marker: Option<String> }
-pub struct PostedComment { pub id: String, pub url: Option<String> }
-pub struct TrackerUpdate { pub item: String, pub add_labels: Vec<String>, pub remove_labels: Vec<String>,
-    pub transition: Option<String>, pub add_assignees: Vec<String>, pub remove_assignees: Vec<String>,
-    pub state: Option<String> /* open|closed */ }
-pub struct IssueSpec { pub title: String, pub body: String, pub labels: Vec<String>,
-    pub issue_type: Option<String>, pub priority: Option<String>, pub parent: Option<String> }
-pub struct TrackerLink { pub from: String, pub to: Option<String>, pub relation: String, pub url: Option<String> }
-#[guatiao::kind(name = "ai6_tracker")]
-pub trait Tracker: Send + Sync {
-    fn capabilities(&self, item: Option<String>) -> Result<TrackerCapabilities, ProviderError>;
-    fn issue(&self, item: String) -> Result<TrackerIssue, ProviderError>;
-    fn replies(&self, request: ReplyPoll) -> Result<ReplyBatch, ProviderError>;
-    fn post(&self, post: TrackerPost) -> Result<PostedComment, ProviderError>;
-    fn update(&self, update: TrackerUpdate) -> Result<(), ProviderError>;
-    fn create(&self, spec: IssueSpec) -> Result<TrackerIssue, ProviderError>;
-    fn link(&self, link: TrackerLink) -> Result<(), ProviderError>;
-}
-Plugins::trackers() -> Vec<ProviderInfo>;  Plugins::tracker(provider, config: Option<&Value>) -> Result<Box<dyn Tracker>, PluginBuildError>
-```
-
-`Reply::permitted` is the provider's judgement that the author may answer for the issue (its
-author or reporter, a repository owner, member or collaborator, a Jira assignee, or someone the
-instance's `reply_authors` names); `own` marks the identity AI6 posts as. Settings both kinds
-read: the Source's, plus `status_labels` and `status_transitions` (`working`, `waiting`,
-`paused`, `done`, `failed`), `agent_labels`, `reply_authors`, `reply_associations` (GitHub),
+`paused`, `done`, `failed`), `agent_labels`, `agent_transitions`, `reply_authors`, `reply_associations` (GitHub),
 `issue_type`, `subtask_type` and `priority_map`.
 
 ## Linked issues and the outbox (`ai6::directorates::registry::mission_issues`)
@@ -2691,6 +2635,10 @@ pub struct OutboxEntry { pub id: String, operation, mission_id, tracker, item: S
     actor: String, body: String, payload: serde_json::Value, coalesce: Option<String>, state: OutboxState,
     attempts: u32, result: Option<OutboxResult>, error: Option<String>, at: f64, not_before: f64,
     sent_at: Option<f64>, fence: Option<u64> }       // OutboxEntry::new(operation, mission, tracker, item, kind, actor, at)
+pub enum QuestionState { Open, Answered, Expired, Withdrawn }
+pub struct IssueQuestion { pub id: String /* q-… when empty */, mission_id, tracker, item, entry: String, asked_at: f64, expires_at: f64, state: QuestionState }
+pub enum ReplyState { Pending, Delivered, Ignored }
+pub struct IssueReply { pub id /* the tracker's comment ID */, mission_id, tracker, item, author_id, author, body /* untrusted */, created: String, state: ReplyState }
 pub struct OutboxResult { pub comment_id: Option<String>, url: Option<String>, created_item: Option<String> }
 pub enum OutboxSettle { Posted(OutboxResult), Refused(String), Retry { error: String, not_before: f64, max_attempts: u32 } }
 pub trait MissionIssueStore {   // on FileRegistry and SqlRegistry; part of RegistryBackend
@@ -2707,6 +2655,17 @@ pub trait MissionIssueStore {   // on FileRegistry and SqlRegistry; part of Regi
     fn sending_outbox(&self) -> io::Result<Vec<OutboxEntry>>;
     fn adopt_outbox_send(&self, id: &str, term: u64) -> io::Result<Option<OutboxEntry>>;   // a new term takes a send the old one left
     fn settle_outbox(&self, id: &str, term: u64, settle: OutboxSettle) -> io::Result<OutboxEntry>;   // PermissionDenied unless sending under `term`
+    fn resolve_held_outbox(&self, id: &str, approved: bool, reason: &str) -> io::Result<Option<OutboxEntry>>;   // held -> pending, or refused
+    fn ask_issue_question(&self, question: &IssueQuestion) -> io::Result<IssueQuestion>;   // AlreadyExists while one on the item is open
+    fn issue_questions(&self, mission_id: &str) -> io::Result<Vec<IssueQuestion>>;
+    fn open_issue_questions(&self) -> io::Result<Vec<IssueQuestion>>;
+    fn settle_issue_question(&self, mission_id: &str, id: &str, state: QuestionState) -> io::Result<bool>;
+    fn store_issue_reply(&self, reply: &IssueReply) -> io::Result<bool>;   // false for one already stored; cut to reply_bytes
+    fn issue_replies(&self, mission_id: &str) -> io::Result<Vec<IssueReply>>;
+    fn pending_issue_replies(&self) -> io::Result<Vec<IssueReply>>;
+    fn mark_issue_reply(&self, mission_id, tracker, item, id: &str, state: ReplyState) -> io::Result<bool>;
+    fn issue_cursor(&self, operation: &str, tracker: &str) -> io::Result<Option<String>>;
+    fn set_issue_cursor(&self, operation: &str, tracker: &str, cursor: &str) -> io::Result<()>;
 }
 ```
 
@@ -2726,6 +2685,35 @@ dropped oldest first), `entry_bytes` 128 KiB. Station `[sources]` gains `outbox_
 `max_created_per_day` 50, `max_split_depth` 2; counts are `Limit`s. `weakenings()` lists each
 value looser than `strict`, printed at start and published at check-in as `issues_weakened`;
 `compose_status(disclosure, phase)` words a status for the cover policy.
+
+`IssueLink` also carries `title: Option<String>` (untrusted). `[registry.limits.issues]` adds
+`replies_per_mission` 200 and `reply_bytes` 64 KiB; `[sources]` adds `reply_every` 60 s.
+`OnTimeout` is `resume`, `fail` or `wait`. New green ink kinds `issue-close`, `issue-assign` and
+`issue-comment` (`ISSUE_CLOSE`, `ISSUE_ASSIGN`, `ISSUE_COMMENT`; `licensed` adds `issue-close` to
+`00`'s unattended kinds); new exposure source `issue:TRACKER` (`issue_source`) and restriction
+`Restriction::Issues` (`"issues"`, in `strict`).
+
+`ai6::directorates::q::outbound` is the check Agent text passes before it is queued:
+`check(text, &SecretSet, &LinkRule, max_bytes: Limit, on_secret: OnSecret) -> Result<String, Refusal>`
+refuses (in order) empty text, text past the limit, invisible characters (direction controls,
+zero-width, tag characters, control characters but newline, tab and carriage return), a link or
+image to a host the `LinkRule` does not name (`LinkRule::hosts`, `LinkRule::any`; any scheme but
+`http(s)` and every `data:` address is refused), a held secret's exact value (`SecretSet`; values under
+six bytes are not matched) and credential shapes (`ghp_`/`gho_`/`ghs_`, `github_pat_`, `ATATT`, `xox?-`,
+`AKIA`, PEM private key headers, JWTs, `sk-ant-`); under `OnSecret::Redact` the last two are replaced with
+`[redacted]` instead. `Refusal::rule()` names the rule, never a value. Mentions come back in backticks.
+
+On the Station, the issue tools live on the Session's Cable MCP endpoint (`issues`, `issue_read`,
+`issue_comment`, `issue_request_info`, `issue_update`, `issue_link`; `station::server::issues`):
+tools write outbox entries (comments and questions `agent:CODENAME`, `held` with the approval IDs
+in `payload.approvals` until green ink is decided; `payload.retry_key` returns the first answer),
+Mission and Operation post buckets `issue:mission:ID` / `issue:operation:ID` and `posts_per_mission`
+bound them. The Headquarters Station reads comments (`poll_replies`, every `reply_every`), stores
+permitted ones and records the rest as ignored without their text; the Station holding the
+Mission delivers them (`deliver_replies`, each scheduler pass, beside green ink decisions),
+resumes or fails on an expired question, and withdraws a question whose Mission stopped waiting.
+`blocked_reason = "issue"` (`ISSUE_REASON`) is like green ink: a message or output does not end
+the wait.
 
 On the Station, a Mission state change queues one `status` entry per active link
 (`coalesce = status:MISSION:TRACKER:ITEM`); the source's ending is the `report` entry the

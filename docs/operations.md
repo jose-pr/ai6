@@ -188,6 +188,13 @@ intake = false                                              # never polled for w
 status_transitions = { done = "In Review" }
 ```
 
+Keys a tracker instance takes besides its provider's own (see each provider's page): `status_labels` and
+`status_transitions` (`working`, `waiting`, `paused`, `done`, `failed`: the label or workflow transition a
+Mission's progress writes), `agent_labels` (the only labels an Agent may add or remove; none by default),
+`agent_transitions` (the workflow transitions an Agent may make without green ink; none by default),
+`reply_authors` (logins or account IDs besides the issue's author whose comments may answer a question),
+`issue_type`, `subtask_type` and `priority_map`.
+
 Credentials are never configured: a source names the environment variable that holds its
 token (`token_env`), and the Station reads it when it polls. A bare string is shorthand for
 the provider's main target, as in `sources = { jira = "GUA" }`.
@@ -215,7 +222,7 @@ posts_per_hour = 6
 | `tracker_posts_per_hour` | 300 | Writes per hour to one tracker instance, every kind counted; a refusal only delays the write |
 | `status_interval_secs` | 60 | Seconds at least between two status writes to one issue |
 | `reply_ttl_secs` | 259200 | Seconds a question waits for an answer (3 days) |
-| `on_timeout` | `resume` | `resume` tells the Agent nobody answered; `fail` fails the Mission |
+| `on_timeout` | `resume` | `resume` tells the Agent nobody answered; `fail` fails the Mission; `wait` keeps waiting |
 | `on_secret` | `refuse` | A post holding a secret is refused; `redact` replaces it and posts the rest |
 | `links` | `tracker` | Links and images in Agent text only to the tracker's host and the Operation's git remote host; `any` allows every host |
 | `create` | `proposal` | A person approves each creation; `direct` lets the Agent create |
@@ -233,7 +240,7 @@ merge without asking. Every key overrides the preset:
 ```toml
 [operation.G.green_ink]
 preset = "licensed"
-kinds = ["deploy"]                       # added to push, merge, release, delete, clearance, safe-house-delete
+kinds = ["deploy"]                       # added to push, merge, release, delete, clearance, safe-house-delete, issue-close, issue-assign, issue-comment
 requesters = ["field", "00"]             # clearances that may ask
 unattended = { "00" = ["push", "merge"], field = [] }   # per clearance named
 protected = ["refs/heads/main", "refs/heads/release/*", "refs/tags/*"]
@@ -245,7 +252,7 @@ request_ttl_secs = 86400                 # an undecided request then expires as 
 | `preset` | `strict` | Starting point for the keys left out |
 | `kinds` | none | Step kinds the Operation governs besides the built-ins; an Agent may not ask for an ungoverned kind |
 | `requesters` | `["field", "00"]` | Clearances whose Agents may ask |
-| `unattended` | none (`licensed`: `00 = ["push", "merge"]`) | Kinds a clearance takes without asking; each clearance named replaces its list |
+| `unattended` | none (`licensed`: `00 = ["push", "merge", "issue-close"]`) | Kinds a clearance takes without asking; each clearance named replaces its list |
 | `protected` | `refs/heads/main`, `refs/heads/master`, `refs/heads/release/*`, `refs/tags/*` | Ref globs a `push` needs green ink for; a push elsewhere does not |
 | `request_ttl_secs` | `86400` | How long a request waits for a decision |
 

@@ -332,6 +332,8 @@ it.
 | `links_per_mission` | 32 | Linked issues one Mission holds at once (unlinked ones do not count) |
 | `outbox_records` | 1,000 | Outbox entries kept; settled ones are dropped oldest first |
 | `entry_bytes` | 128 KiB | Bytes of one outbox entry's text and payload |
+| `replies_per_mission` | 200 | Replies from a linked issue one Mission stores; delivered ones make room first |
+| `reply_bytes` | 64 KiB | Bytes of one stored reply, cut past it |
 
 `[registry.limits.sources]`
 
@@ -674,6 +676,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `report_every` | 15 | Seconds between rounds reporting finished briefs to their Sources |
 | `sleeper_every` | 20 | Seconds between rounds firing Sleepers |
 | `outbox_every` | 5 | Seconds between rounds sending the outbox of tracker writes |
+| `reply_every` | 60 | Seconds between rounds reading new comments on the issues Missions are linked to |
 | `outbox_batch` | 20 | Outbox entries sent in one round |
 | `send_attempts` | 5 | Sends tried before an outbox entry fails |
 | `retry_backoff` | 30 | Seconds before a failed send is tried again; each attempt doubles it |

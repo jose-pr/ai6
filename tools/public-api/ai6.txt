@@ -273,11 +273,14 @@ impl core::cmp::PartialEq for ai6::directorates::m::approvals::GreenInkPolicy
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::eq(&self, &Self) -> bool
 impl core::default::Default for ai6::directorates::m::approvals::GreenInkPolicy
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::default() -> Self
-pub const ai6::directorates::m::approvals::BUILTIN_KINDS: [&str; 6]
+pub const ai6::directorates::m::approvals::BUILTIN_KINDS: [&str; 9]
 pub const ai6::directorates::m::approvals::DEFAULT_APPROVAL_TTL: core::time::Duration
 pub const ai6::directorates::m::approvals::DEFAULT_PROTECTED: [&str; 4]
 pub const ai6::directorates::m::approvals::DEFAULT_REQUEST_TTL: core::time::Duration
 pub const ai6::directorates::m::approvals::GREEN_INK_REASON: &str
+pub const ai6::directorates::m::approvals::ISSUE_ASSIGN: &str
+pub const ai6::directorates::m::approvals::ISSUE_CLOSE: &str
+pub const ai6::directorates::m::approvals::ISSUE_COMMENT: &str
 pub const ai6::directorates::m::approvals::SAFE_HOUSE_DELETE: &str
 pub trait ai6::directorates::m::approvals::Repository
 pub fn ai6::directorates::m::approvals::Repository::config(&self, &ai6::directorates::m::approvals::GitContext, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, alloc::string::String>
@@ -892,6 +895,7 @@ pub ai6::directorates::m::issues::OnSecret::Refuse
 pub enum ai6::directorates::m::issues::OnTimeout
 pub ai6::directorates::m::issues::OnTimeout::Fail
 pub ai6::directorates::m::issues::OnTimeout::Resume
+pub ai6::directorates::m::issues::OnTimeout::Wait
 pub struct ai6::directorates::m::issues::IssuePolicy
 pub ai6::directorates::m::issues::IssuePolicy::create: ai6::directorates::m::issues::IssueCreate
 pub ai6::directorates::m::issues::IssuePolicy::links: ai6::directorates::m::issues::LinkHosts
@@ -1603,10 +1607,11 @@ pub ai6::directorates::medical::exposure::ExposurePreset::Strict
 #[non_exhaustive] pub enum ai6::directorates::medical::exposure::Restriction
 pub ai6::directorates::medical::exposure::Restriction::Approvals
 pub ai6::directorates::medical::exposure::Restriction::Cables
+pub ai6::directorates::medical::exposure::Restriction::Issues
 pub ai6::directorates::medical::exposure::Restriction::Proposals
 pub ai6::directorates::medical::exposure::Restriction::Secrets
 impl ai6::directorates::medical::exposure::Restriction
-pub const ai6::directorates::medical::exposure::Restriction::ALL: [Self; 4]
+pub const ai6::directorates::medical::exposure::Restriction::ALL: [Self; 5]
 pub fn ai6::directorates::medical::exposure::Restriction::as_str(self) -> &'static str
 pub struct ai6::directorates::medical::exposure::Exposure
 pub ai6::directorates::medical::exposure::Exposure::at: f64
@@ -1640,6 +1645,7 @@ pub const ai6::directorates::medical::exposure::REVIEW: &str
 pub const ai6::directorates::medical::exposure::STATION_LOGBOOK: &str
 pub const ai6::directorates::medical::exposure::STATION_REPORT: &str
 pub fn ai6::directorates::medical::exposure::cable_source(&str, ai6::bounds::Limit) -> alloc::string::String
+pub fn ai6::directorates::medical::exposure::issue_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::medical::exposure::tool_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub mod ai6::directorates::medical::quarantine
 #[non_exhaustive] pub enum ai6::directorates::medical::quarantine::IncidentKind
@@ -1823,6 +1829,26 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::destroy(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::list(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::list_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub mod ai6::directorates::q::outbound
+pub enum ai6::directorates::q::outbound::Refusal
+pub ai6::directorates::q::outbound::Refusal::CredentialPattern
+pub ai6::directorates::q::outbound::Refusal::Empty
+pub ai6::directorates::q::outbound::Refusal::InvisibleCharacters
+pub ai6::directorates::q::outbound::Refusal::LinkHost
+pub ai6::directorates::q::outbound::Refusal::Secret
+pub ai6::directorates::q::outbound::Refusal::TooLong
+impl ai6::directorates::q::outbound::Refusal
+pub fn ai6::directorates::q::outbound::Refusal::rule(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::q::outbound::Refusal
+pub fn ai6::directorates::q::outbound::Refusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::outbound::LinkRule
+impl ai6::directorates::q::outbound::LinkRule
+pub fn ai6::directorates::q::outbound::LinkRule::any() -> Self
+pub fn ai6::directorates::q::outbound::LinkRule::hosts(impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
+pub struct ai6::directorates::q::outbound::SecretSet(_)
+impl ai6::directorates::q::outbound::SecretSet
+pub fn ai6::directorates::q::outbound::SecretSet::new(impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
+pub fn ai6::directorates::q::outbound::check(&str, &ai6::directorates::q::outbound::SecretSet, &ai6::directorates::q::outbound::LinkRule, ai6::bounds::Limit, ai6::directorates::m::issues::OnSecret) -> core::result::Result<alloc::string::String, ai6::directorates::q::outbound::Refusal>
 pub mod ai6::directorates::q::provision
 #[non_exhaustive] pub enum ai6::directorates::q::provision::StepStatus
 pub ai6::directorates::q::provision::StepStatus::Changed
@@ -3002,44 +3028,77 @@ pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) ->
 pub trait ai6::directorates::registry::backend::MissionIssueStore
 pub fn ai6::directorates::registry::backend::MissionIssueStore::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::backend::MissionIssueStore::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::sql::SqlRegistry::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::store::FileRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::store::FileRegistry::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::store::FileRegistry::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::store::FileRegistry::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::store::FileRegistry::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 pub trait ai6::directorates::registry::backend::QuarantineStore
 pub fn ai6::directorates::registry::backend::QuarantineStore::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
@@ -3614,6 +3673,8 @@ pub fn ai6::directorates::registry::limits::HeldLimits::default() -> Self
 pub ai6::directorates::registry::limits::IssueLimits::entry_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::IssueLimits::links_per_mission: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::IssueLimits::outbox_records: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::IssueLimits::replies_per_mission: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::IssueLimits::reply_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::IssueLimits
 pub fn ai6::directorates::registry::limits::IssueLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::LogbookLimits
@@ -3803,6 +3864,15 @@ pub ai6::directorates::registry::mission_issues::OutboxState::Pending
 pub ai6::directorates::registry::mission_issues::OutboxState::Posted
 pub ai6::directorates::registry::mission_issues::OutboxState::Refused
 pub ai6::directorates::registry::mission_issues::OutboxState::Sending
+pub enum ai6::directorates::registry::mission_issues::QuestionState
+pub ai6::directorates::registry::mission_issues::QuestionState::Answered
+pub ai6::directorates::registry::mission_issues::QuestionState::Expired
+pub ai6::directorates::registry::mission_issues::QuestionState::Open
+pub ai6::directorates::registry::mission_issues::QuestionState::Withdrawn
+pub enum ai6::directorates::registry::mission_issues::ReplyState
+pub ai6::directorates::registry::mission_issues::ReplyState::Delivered
+pub ai6::directorates::registry::mission_issues::ReplyState::Ignored
+pub ai6::directorates::registry::mission_issues::ReplyState::Pending
 pub struct ai6::directorates::registry::mission_issues::IssueLink
 pub ai6::directorates::registry::mission_issues::IssueLink::item: alloc::string::String
 pub ai6::directorates::registry::mission_issues::IssueLink::linked_at: f64
@@ -3813,10 +3883,30 @@ pub ai6::directorates::registry::mission_issues::IssueLink::phase: core::option:
 pub ai6::directorates::registry::mission_issues::IssueLink::relation: ai6::directorates::registry::mission_issues::LinkRelation
 pub ai6::directorates::registry::mission_issues::IssueLink::state: ai6::directorates::registry::mission_issues::LinkState
 pub ai6::directorates::registry::mission_issues::IssueLink::status_comment: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::mission_issues::IssueLink::title: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::mission_issues::IssueLink::tracker: alloc::string::String
 pub ai6::directorates::registry::mission_issues::IssueLink::url: core::option::Option<alloc::string::String>
 impl ai6::directorates::registry::mission_issues::IssueLink
 pub fn ai6::directorates::registry::mission_issues::IssueLink::name(&self) -> alloc::string::String
+pub struct ai6::directorates::registry::mission_issues::IssueQuestion
+pub ai6::directorates::registry::mission_issues::IssueQuestion::asked_at: f64
+pub ai6::directorates::registry::mission_issues::IssueQuestion::entry: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueQuestion::expires_at: f64
+pub ai6::directorates::registry::mission_issues::IssueQuestion::id: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueQuestion::item: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueQuestion::mission_id: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueQuestion::state: ai6::directorates::registry::mission_issues::QuestionState
+pub ai6::directorates::registry::mission_issues::IssueQuestion::tracker: alloc::string::String
+pub struct ai6::directorates::registry::mission_issues::IssueReply
+pub ai6::directorates::registry::mission_issues::IssueReply::author: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueReply::author_id: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueReply::body: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueReply::created: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueReply::id: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueReply::item: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueReply::mission_id: alloc::string::String
+pub ai6::directorates::registry::mission_issues::IssueReply::state: ai6::directorates::registry::mission_issues::ReplyState
+pub ai6::directorates::registry::mission_issues::IssueReply::tracker: alloc::string::String
 pub struct ai6::directorates::registry::mission_issues::OutboxEntry
 pub ai6::directorates::registry::mission_issues::OutboxEntry::actor: alloc::string::String
 pub ai6::directorates::registry::mission_issues::OutboxEntry::at: f64
@@ -3846,44 +3936,77 @@ pub ai6::directorates::registry::mission_issues::OutboxResult::url: core::option
 pub trait ai6::directorates::registry::mission_issues::MissionIssueStore
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::mission_issues::MissionIssueStore::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::sql::SqlRegistry::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::store::FileRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::store::FileRegistry::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::store::FileRegistry::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::store::FileRegistry::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::store::FileRegistry::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::mission_issues::outbox_counts(&[ai6::directorates::registry::mission_issues::OutboxEntry]) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, usize>
 pub mod ai6::directorates::registry::quarantine
@@ -4180,16 +4303,27 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> co
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::sql::SqlRegistry::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
@@ -4362,16 +4496,27 @@ pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) ->
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::store::FileRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::store::FileRegistry::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::store::FileRegistry::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::store::FileRegistry::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::store::FileRegistry::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
@@ -5307,6 +5452,7 @@ pub ai6::station::limits::SourceLimits::min_poll: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::outbox_batch: ai6::bounds::Limit
 pub ai6::station::limits::SourceLimits::outbox_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::poll: ai6::bounds::Seconds
+pub ai6::station::limits::SourceLimits::reply_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::report_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::retry_backoff: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::send_attempts: ai6::bounds::Limit
@@ -5863,10 +6009,11 @@ pub ai6::Requirement::Refused
 #[non_exhaustive] pub enum ai6::Restriction
 pub ai6::Restriction::Approvals
 pub ai6::Restriction::Cables
+pub ai6::Restriction::Issues
 pub ai6::Restriction::Proposals
 pub ai6::Restriction::Secrets
 impl ai6::directorates::medical::exposure::Restriction
-pub const ai6::directorates::medical::exposure::Restriction::ALL: [Self; 4]
+pub const ai6::directorates::medical::exposure::Restriction::ALL: [Self; 5]
 pub fn ai6::directorates::medical::exposure::Restriction::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::Retirement
 pub ai6::Retirement::DeskDuty
@@ -7137,16 +7284,27 @@ pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) ->
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::store::FileRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::store::FileRegistry::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::store::FileRegistry::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::store::FileRegistry::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::store::FileRegistry::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::store::FileRegistry::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
@@ -8310,16 +8468,27 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> co
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ask_issue_question(&self, &ai6::directorates::registry::mission_issues::IssueQuestion) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueQuestion>
 pub fn ai6::directorates::registry::sql::SqlRegistry::begin_outbox_send(&self, &str, u64, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::due_outbox(&self, f64, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::issue_links(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_questions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::issue_replies(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::link_issue(&self, &ai6::directorates::registry::mission_issues::IssueLink) -> core::io::error::Result<ai6::directorates::registry::mission_issues::IssueLink>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_issue_reply(&self, &str, &str, &str, &str, ai6::directorates::registry::mission_issues::ReplyState) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::open_issue_questions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueQuestion>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::outbox_entries(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::outbox_entry(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::pending_issue_replies(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueReply>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::queue_outbox(&self, &ai6::directorates::registry::mission_issues::OutboxEntry) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_held_outbox(&self, &str, bool, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sending_outbox(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::OutboxEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_issue_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_issue_status(&self, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_issue_question(&self, &str, &str, ai6::directorates::registry::mission_issues::QuestionState) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
@@ -8957,7 +9126,7 @@ pub const ai6::ASSISTANT_SHARED_CHANGE_TOOL: &str
 pub const ai6::BRIEF_EXPOSURE_KEY: &str
 pub const ai6::BRIEF_REGISTRY_DROP: &str
 pub const ai6::BRIEF_SOURCE: &str
-pub const ai6::BUILTIN_KINDS: [&str; 6]
+pub const ai6::BUILTIN_KINDS: [&str; 9]
 pub const ai6::CHIEF_OF_STAFF_ROLE: &str
 pub const ai6::CLEARANCE_KIND: &str
 pub const ai6::COMMIT_MEMORY: &str

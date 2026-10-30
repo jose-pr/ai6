@@ -578,6 +578,26 @@ refusal (a call the tracker cannot make, a bad value, an unlinked issue) is neve
 Each queue and settle is audited and appears on the timeline as an `issue` event, never with
 the text.
 
+**Waiting on the issue.** An Agent that needs more data asks with `issue_request_info`: the
+question is an outbox entry like any other, the Mission becomes `blocked` with reason `issue`,
+and its Watchdog pauses. The Headquarters Station reads new comments on the source, related and
+child issues of unfinished Missions every `reply_every` (60 s), cursor per tracker instance in
+the Registry. A comment is delivered only from someone allowed to answer for the issue: the
+issue's author or reporter, a GitHub owner, member or collaborator, a Jira assignee, or a
+login in the instance's `reply_authors`; AI6's own comments are skipped and any other author is
+a timeline event naming them, never their text. The Station that holds the Mission delivers a
+permitted reply as untrusted text in the same fence as an issue's body: a message to a live
+Session, a resume of one that ended its turn while it waited, nothing to a Mission that is not
+running. The Session is marked exposed (`issue:TRACKER`), which a later attempt inherits. One
+question per issue may be open. Nobody answering within `reply_ttl_secs` (3 days) resumes the
+Agent told so (`on_timeout = "resume"`), fails the Mission (`"fail"`) or keeps waiting
+(`"wait"`); an operator who resumes or stops the Mission withdraws the question.
+
+An Agent's close, reopen or assignee change, and a transition the instance does not list, wait
+for [green ink](#green-ink) (kinds `issue-close` and `issue-assign`, governed under `strict`;
+`licensed` lets `00` Agents close without asking). The entry waits `held` until its approval is
+decided: approved, it is sent; refused or expired, it is refused.
+
 What the Station writes by itself follows the Operation's [`updates`](operations.md#issues):
 by default one **status comment** on the source issue, posted when the Mission starts working
 and edited in place as it waits for input or is paused, at most once a minute, with the
