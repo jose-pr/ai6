@@ -78,6 +78,8 @@ struct Settings {
     _status_labels: IgnoredAny,
     #[serde(default, rename = "agent_labels")]
     _agent_labels: IgnoredAny,
+    #[serde(default, rename = "agent_transitions")]
+    _agent_transitions: IgnoredAny,
     #[serde(default, rename = "issue_type")]
     _issue_type: IgnoredAny,
     #[serde(default, rename = "subtask_type")]

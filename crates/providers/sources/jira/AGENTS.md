@@ -59,7 +59,7 @@ as TOML, in `SourceConfig::settings_toml`.
 | `capability_ttl_secs` | 600 | how long the project's issue types and priorities are remembered |
 
 Unknown keys are refused. `provider`, `intake` and `interval_secs` are read by the Station and
-never reach the provider. `status_labels`, `status_transitions`, `agent_labels`,
+never reach the provider. `status_labels`, `status_transitions`, `agent_labels`, `agent_transitions`,
 `priority_map` and `reply_associations` are applied by the Station (or are GitHub's) and are
 accepted and ignored here, so one table serves every tracker.
 

@@ -13,10 +13,11 @@ use crate::directorates::m::cover::Disclosure;
 use crate::directorates::m::issues::{IssuePolicy, IssueUpdates, compose_status};
 use crate::directorates::m::mission::MissionState;
 use crate::directorates::m::roster::Roster;
+use crate::directorates::registry::approvals::{ApprovalStatus, Decision};
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::mission_issues::{
-    IssueLink, LinkRelation, LinkState, OutboxEntry, OutboxKind, OutboxResult, OutboxSettle,
-    OutboxState,
+    IssueLink, IssueReply, LinkRelation, LinkState, OutboxEntry, OutboxKind, OutboxResult,
+    OutboxSettle, OutboxState, ReplyState,
 };
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
@@ -230,6 +231,138 @@ impl DrainState {
     }
 }
 
+/// Reads the new comments on the issues unfinished Missions are linked to, and stores those
+/// from people allowed to answer for the issue. Only the Headquarters Station does; returns how
+/// many replies it stored.
+///
+/// Comments by AI6's own identity are skipped. A comment from anyone else is recorded as
+/// ignored (the author's name on the timeline, never the text), so a poll that sees it again
+/// does nothing.
+pub(crate) fn poll_replies(
+    registry: &dyn RegistryBackend,
+    roster: &Roster,
+    build: &TrackerBuilder<'_>,
+    station: &str,
+    now: f64,
+) -> usize {
+    let Ok(Some(lease)) = registry.headquarters() else {
+        return 0;
+    };
+    if lease.station() != station {
+        return 0;
+    }
+    let Ok(links) = registry.active_issue_links() else {
+        return 0;
+    };
+    let mut stored = 0;
+    for operation in roster.operations() {
+        let Ok(setups) = setups_of(operation) else {
+            continue;
+        };
+        for setup in setups {
+            let watched: Vec<&IssueLink> = links
+                .iter()
+                .filter(|link| {
+                    link.operation == operation.id
+                        && link.tracker == setup.name
+                        && matches!(
+                            link.relation,
+                            LinkRelation::Source | LinkRelation::Related | LinkRelation::Child
+                        )
+                        && !matches!(link.phase.as_deref(), Some("done" | "failed"))
+                })
+                .collect();
+            if watched.is_empty() {
+                continue;
+            }
+            let mut items: Vec<String> = watched.iter().map(|link| link.item.clone()).collect();
+            items.sort();
+            items.dedup();
+            let cursor = registry
+                .issue_cursor(&operation.id, &setup.name)
+                .unwrap_or_default();
+            let tracker = match build(&setup.provider, &setup.settings) {
+                Ok(tracker) => tracker,
+                Err(error) => {
+                    eprintln!(
+                        "ai6: tracker {} for Operation {}: {error}",
+                        setup.name, operation.id
+                    );
+                    continue;
+                }
+            };
+            let batch = match tracker.replies(crate::ReplyPoll {
+                items,
+                since: cursor.clone(),
+            }) {
+                Ok(batch) => batch,
+                Err(error) => {
+                    eprintln!(
+                        "ai6: replies of {} for Operation {}: {error}",
+                        setup.name, operation.id
+                    );
+                    continue;
+                }
+            };
+            for reply in batch.replies.into_iter().filter(|reply| !reply.own) {
+                for link in watched.iter().filter(|link| link.item == reply.item) {
+                    let mut record = IssueReply {
+                        id: reply.id.clone(),
+                        mission_id: link.mission_id.clone(),
+                        tracker: setup.name.clone(),
+                        item: reply.item.clone(),
+                        author_id: reply.author_id.clone(),
+                        author: reply.author.clone(),
+                        body: reply.body.clone(),
+                        created: reply.created.clone(),
+                        state: ReplyState::Pending,
+                    };
+                    if !reply.permitted {
+                        record.state = ReplyState::Ignored;
+                        record.body = String::new();
+                    }
+                    match registry.store_issue_reply(&record) {
+                        Ok(true) if reply.permitted => stored += 1,
+                        Ok(true) => {
+                            let event = TimelineEvent::new(
+                                TIMELINE_KIND,
+                                "reply_ignored",
+                                &operation.id,
+                                now,
+                            )
+                            .mission(link.mission_id.clone())
+                            .detail("tracker", setup.name.clone())
+                            .detail("item", reply.item.clone())
+                            .detail("author", reply.author.clone());
+                            let _ = registry.record_event(&event);
+                        }
+                        Ok(false) => {}
+                        Err(error) => eprintln!(
+                            "ai6: reply on {}:{} not stored: {error}",
+                            setup.name, reply.item
+                        ),
+                    }
+                }
+            }
+            if let Some(next) = batch.cursor
+                && cursor.as_deref() != Some(next.as_str())
+            {
+                let _ = registry.set_issue_cursor(&operation.id, &setup.name, &next);
+            }
+        }
+    }
+    stored
+}
+
+fn setups_of(
+    operation: &crate::directorates::m::roster::Operation,
+) -> Result<Vec<SourceSetup>, ()> {
+    Ok(source_setups(operation, &SourceLimits::default())
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect())
+}
+
 /// Sends the entries that are due. Only the Headquarters Station of the current term does;
 /// returns how many were settled.
 pub(crate) fn drain_outbox(
@@ -248,6 +381,7 @@ pub(crate) fn drain_outbox(
         return 0;
     }
     let term = lease.term();
+    release_held(registry, now);
     let mut trackers = TrackerCache::new();
     let mut settled = recover_sending(registry, roster, build, &mut trackers, term, now);
     let Ok(due) = registry.due_outbox(now, limits.outbox_batch.or_max()) else {
@@ -536,6 +670,58 @@ pub(crate) fn update_of(entry: &OutboxEntry) -> TrackerUpdate {
         add_assignees: strings(&payload["add_assignees"]),
         remove_assignees: strings(&payload["remove_assignees"]),
         state: text(&payload["state"]),
+    }
+}
+
+/// The payload of an `update` entry for `update`.
+pub(crate) fn update_payload(update: &TrackerUpdate) -> serde_json::Value {
+    serde_json::json!({
+        "add_labels": update.add_labels,
+        "remove_labels": update.remove_labels,
+        "transition": update.transition,
+        "add_assignees": update.add_assignees,
+        "remove_assignees": update.remove_assignees,
+        "state": update.state,
+    })
+}
+
+/// Settles the held entries whose green ink is decided: every approval given and the entry is
+/// pending, any refused or expired and it is refused.
+pub(crate) fn release_held(registry: &dyn RegistryBackend, now: f64) {
+    let Ok(entries) = registry.outbox_entries(None) else {
+        return;
+    };
+    for entry in entries
+        .into_iter()
+        .filter(|entry| entry.state == OutboxState::Held)
+    {
+        let Some(ids) = entry.payload["approvals"].as_array() else {
+            continue;
+        };
+        let mut waiting = false;
+        let mut refusal = None;
+        for id in ids.iter().filter_map(|id| id.as_str()) {
+            match registry.approval(&entry.operation, id, now) {
+                Ok(Some(ApprovalStatus::Decided(approval))) => match approval.decision {
+                    Decision::Approved => {}
+                    Decision::Rejected => refusal = Some("green ink was refused"),
+                    Decision::Expired => refusal = Some("green ink expired"),
+                },
+                _ => waiting = true,
+            }
+        }
+        let settled = if let Some(reason) = refusal {
+            registry.resolve_held_outbox(&entry.id, false, reason)
+        } else if !waiting {
+            registry.resolve_held_outbox(&entry.id, true, "")
+        } else {
+            continue;
+        };
+        if let Ok(Some(done)) = settled
+            && done.state == OutboxState::Refused
+        {
+            audit(registry, "refused", &done, now);
+        }
     }
 }
 

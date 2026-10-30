@@ -106,6 +106,8 @@ struct Settings {
     _status_transitions: IgnoredAny,
     #[serde(default, rename = "agent_labels")]
     _agent_labels: IgnoredAny,
+    #[serde(default, rename = "agent_transitions")]
+    _agent_transitions: IgnoredAny,
     #[serde(default, rename = "priority_map")]
     _priority_map: IgnoredAny,
     #[serde(default, rename = "reply_associations")]

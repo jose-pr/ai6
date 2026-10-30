@@ -51,7 +51,7 @@ pub(super) struct Asked {
 #[derive(Debug, Serialize)]
 pub(super) struct Answer {
     #[serde(skip_serializing_if = "Option::is_none")]
-    request_id: Option<String>,
+    pub(super) request_id: Option<String>,
     /// `approved`, `pending`, `rejected`, `expired` or `not_required`.
     pub(super) status: &'static str,
     /// When an approval stops covering the step, or when a pending request expires.
@@ -390,7 +390,18 @@ pub(super) fn end_turn_waiting(
                 .iter()
                 .any(|status| matches!(status, ApprovalStatus::Pending(_)))
         });
-    if !waits(&mission) || !pending {
+    let asked = mission.state == MissionState::Blocked
+        && mission.blocked_reason.as_deref() == Some(crate::station::issues::ISSUE_REASON)
+        && state
+            .intake
+            .issue_questions(mission_id)
+            .is_ok_and(|questions| {
+                questions.iter().any(|question| {
+                    question.state
+                        == crate::directorates::registry::mission_issues::QuestionState::Open
+                })
+            });
+    if !(waits(&mission) && pending) && !asked {
         return false;
     }
     let operation = state.sessions.lock().ok().and_then(|mut sessions| {

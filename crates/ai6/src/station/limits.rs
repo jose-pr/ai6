@@ -211,6 +211,9 @@ pub struct SourceLimits {
     pub sleeper_every: Seconds,
     /// Seconds between rounds sending the outbox of tracker writes. Default 5.
     pub outbox_every: Seconds,
+    /// Seconds between rounds reading new comments on the issues Missions are linked to.
+    /// Default 60.
+    pub reply_every: Seconds,
     /// Outbox entries sent in one round. Default 20.
     pub outbox_batch: Limit,
     /// Sends tried before an outbox entry fails. Default 5.
@@ -227,6 +230,7 @@ impl Default for SourceLimits {
             report_every: Seconds::new(15),
             sleeper_every: Seconds::new(20),
             outbox_every: Seconds::new(5),
+            reply_every: Seconds::new(60),
             outbox_batch: Limit::at(20),
             send_attempts: Limit::at(5),
             retry_backoff: Seconds::new(30),
