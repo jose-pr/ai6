@@ -447,3 +447,38 @@ fn a_policy_file_with_a_chief_and_a_cap_reads() {
     assert!(access_from_toml("delegable = ['nothing.such']").is_err());
     assert!(access_from_toml("[role.v]\nactions = []").is_err());
 }
+
+#[test]
+fn a_rule_that_reaches_down_needs_the_action_held_down_there_too() {
+    let mut before = seeded_with(&[], &["account:boss"]);
+    before
+        .roles
+        .insert("gm".into(), RoleDef::new(["access.manage"]));
+    before.roles.insert(
+        "lead".into(),
+        RoleDef::new(["mission.control", "access.read"]),
+    );
+    before
+        .rules
+        .push(RuleDef::new("account:lite", "config:access", "gm"));
+    let mut here = RuleDef::new("account:lite", "operation:P", "lead");
+    here.propagate = false;
+    before.rules.push(here);
+    let access = compile(&before, &[]).unwrap();
+    let lineage = Lineage::new([("P", vec![]), ("X", vec!["P"])]);
+    let lite = editor(&access, &person("lite", &[]));
+
+    let mut after = before.clone();
+    after
+        .rules
+        .push(RuleDef::new("group:g", "operation:P", "lead"));
+    let refused = check_change(&before, &after, &lite, &access, &lineage).unwrap_err();
+    assert!(refused.reason.contains("operation:X"), "{refused}");
+
+    let mut narrow = before.clone();
+    let mut rule = RuleDef::new("group:g", "operation:P", "lead");
+    rule.propagate = false;
+    narrow.rules.push(rule);
+    check_change(&before, &narrow, &lite, &access, &lineage)
+        .expect("held at P, and the rule stays at P");
+}

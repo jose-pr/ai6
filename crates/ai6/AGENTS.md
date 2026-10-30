@@ -126,7 +126,8 @@ pub struct Lineage;   // each Operation's ancestors, nearest first (from_roster,
   decides.
 - `check_change` refuses: an editor without `access.manage` at `config:access`; a changed
   `chief` list by a non-chief; a result with no chief (stored plus host); an action added to
-  a role or by a rule the editor does not hold at that rule's scope (at `*` for a role no rule
+  a role or by a rule the editor does not hold at that rule's scope and, when the rule propagates,
+  at every Operation under it (at `*` for a role no rule
   binds; chiefs hold everything; compartments never count); a `delegable` entry that is not
   an Operation action or that the editor does not hold at `*`. Removals and reorders that add
   nothing pass.
@@ -142,6 +143,44 @@ before its parent's. `[limits] ancestors` (a number or `"none"`, default 64) bou
 a request names; more is an error, never a denial. The file is read up to 1 MiB. The Universal
 Exports gateway loads and enforces this policy for user requests.
 
+### Operation policies
+
+`OperationAccess { roles: BTreeMap<String, RoleDef>, rules: Vec<RuleDef> }` is the record
+`operation_access` of one Operation (a keyed family, global only, live in the gateway; the
+file `operation_access` holds `[operation_access.<id>]` tables). Its tier only adds to the
+global one: a request on `operation:Y` is allowed when the global tier, Y's tier or any
+ancestor's allows it, whatever order the rules are in elsewhere.
+
+```rust
+pub struct AccessSet<'a> { global: &'a AccessPolicy, operations: &'a BTreeMap<String, OperationAccess>,
+    lineage: &'a Lineage }
+pub fn validate_operation_access(operation: &str, record: &OperationAccess, set: &AccessSet)
+    -> Result<(), Refusal>;
+pub fn check_operation_change(operation: &str, before: &OperationAccess, after: &OperationAccess,
+    editor: &Editor, effective: &EffectiveAccess, set: &AccessSet) -> Result<(), Refusal>;
+pub fn compile_with_operations(policy: &AccessPolicy, chief_from_host: &[String],
+    operations: &BTreeMap<String, OperationAccess>, lineage: &Lineage)
+    -> Result<EffectiveAccess, AccessPolicyError>;
+impl EffectiveAccess { pub fn orphaned(&self) -> &BTreeMap<String, Vec<Orphan>>; }
+pub struct Orphan { pub item: String, pub reason: String }   // "rule 2", "role x", "record"
+pub const RESERVED_ROLES: [&str; 4];   // chief, controller, operator, auditor
+```
+
+- A record's roles hold only Operation actions within the global cap (`delegable`, default
+  `default_delegable()`), and may not be named `chief`, `controller`, `operator` or `auditor`.
+  A rule's scope is `operation:<id>` for the Operation or one under it (never `*`, `station:`
+  or `config:`). A rule's role resolves nearest first: the record's own roles, then each
+  ancestor's, then the global roles through their Operation actions, which must all be within
+  the cap: the seeded `controller` (it holds `access.manage` and `approval.class`) cannot be
+  bound from an Operation record under the default cap.
+- `compile_with_operations` skips what no longer validates (the tree moved, a role or the cap
+  changed) and lists it in `orphaned`; the rest of the record stays in force. A record for an
+  Operation the `Lineage` does not name is ignored and listed as `record`.
+- `check_operation_change` needs `access.manage` at `operation:<id>` through the chief and
+  access tiers, a valid `after`, every action added to a role held at that Operation, and every
+  grant a rule adds (here, or through a role of this record in the records of Operations under
+  it) held at its scope and, when it propagates, at every Operation under it. Removals and
+  reorders that add nothing pass; compartments never count.
 `station::plugins::Plugins` scans the plugin paths for libraries that declare an AI6 kind or
 any kind beginning with `KIND_PREFIX`, and lists and constructs `Authenticator`,
 `Directory`, `Authorizer` and `Accounts` providers by id (`authenticators()`,
@@ -790,6 +829,7 @@ pub struct Settings {
     pub station: StationRuntime,             // station record
     pub tls: Option<serde_json::Value>,      // tls record, a coqui-peer-tls Policy document
     pub access: Option<serde_json::Value>,   // access record, an AccessPolicy document
+    pub operation_access: BTreeMap<String, OperationAccess>,   // operation_access records, by Operation ID
     pub unex: UnexRecord,                    // unex record
 }
 impl Settings {
@@ -903,7 +943,7 @@ holds: `operations` (`[operation.<id>]`), `agents` (`[agent.<codename>]`, `[role
 `[assistant]`), `covers` (`[cover.<name>]`), `theaters` (`[theater.<id>]`), `loadouts`
 (`[loadout.*]`, `[sandbox.*]`, `[mcp.*]`, `[secret.*]`, `[pool.*]`); `plugins` is `[[library]]`
 entries keyed by `file`; `cables`, `station`, `tls`, `access` and `unex` are each one record,
-the whole file. Anything else is `Invalid`, naming the table, and two files for one family
+the whole file; `operation_access` (`[operation_access.<id>]`) is one record per Operation. Anything else is `Invalid`, naming the table, and two files for one family
 are `Invalid`, naming both. `ai6.cfg` and `unex.cfg` are never family files. A
 relative skill path in `[assistant]` is relative to the directory. Its revision is a digest of
 every family file of the view (global and the Station's own) with their relative paths, taken

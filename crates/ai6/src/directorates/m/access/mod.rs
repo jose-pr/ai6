@@ -14,6 +14,8 @@ mod policy;
 
 #[cfg(test)]
 mod builtin_tests;
+#[cfg(test)]
+mod operation_access_tests;
 
 use core::fmt;
 use std::path::Path;
@@ -29,7 +31,10 @@ pub use coqui_roles::{
 pub use effective::{CHIEF_ROLE, EffectiveAccess, Explanation, TierKind, compile};
 pub use guard::{Editor, Refusal, check_change};
 pub use lineage::Lineage;
-pub use operation::Orphan;
+pub use operation::{
+    AccessSet, OperationAccess, Orphan, RESERVED_ROLES, check_operation_change,
+    compile_with_operations, validate_operation_access,
+};
 pub use policy::{
     AccessPolicy, LimitsDef, NOT_DELEGABLE, RoleDef, RuleDef, default_delegable, load_policy,
     seeded_policy,

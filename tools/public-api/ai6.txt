@@ -198,6 +198,10 @@ pub fn ai6::AccessPolicy::to_json(&self) -> serde_json::value::Value
 impl core::error::Error for ai6::directorates::m::access::AccessPolicyError
 impl core::fmt::Display for ai6::directorates::m::access::AccessPolicyError
 pub fn ai6::directorates::m::access::AccessPolicyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::m::access::AccessSet<'a>
+pub ai6::directorates::m::access::AccessSet::global: &'a ai6::AccessPolicy
+pub ai6::directorates::m::access::AccessSet::lineage: &'a ai6::Lineage
+pub ai6::directorates::m::access::AccessSet::operations: &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
 #[non_exhaustive] pub struct ai6::directorates::m::access::Editor
 pub ai6::directorates::m::access::Editor::chief: bool
 pub ai6::directorates::m::access::Editor::person: coqui_access::model::Person
@@ -231,6 +235,12 @@ pub fn ai6::Lineage::in_subtree(&self, &str, &str) -> bool
 pub fn ai6::Lineage::new<A: core::convert::Into<alloc::string::String>>(impl core::iter::traits::collect::IntoIterator<Item = (impl core::convert::Into<alloc::string::String>, impl core::iter::traits::collect::IntoIterator<Item = A>)>) -> Self
 pub fn ai6::Lineage::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn ai6::Lineage::subtree(&self, &str) -> alloc::vec::Vec<&str>
+pub struct ai6::directorates::m::access::OperationAccess
+pub ai6::directorates::m::access::OperationAccess::roles: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::RoleDef>
+pub ai6::directorates::m::access::OperationAccess::rules: alloc::vec::Vec<ai6::RuleDef>
+impl ai6::OperationAccess
+pub fn ai6::OperationAccess::from_json(&serde_json::value::Value) -> core::result::Result<Self, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::OperationAccess::to_json(&self) -> serde_json::value::Value
 pub struct ai6::directorates::m::access::Orphan
 pub ai6::directorates::m::access::Orphan::item: alloc::string::String
 pub ai6::directorates::m::access::Orphan::reason: alloc::string::String
@@ -259,15 +269,19 @@ pub const ai6::directorates::m::access::CONFIG_ACCESS: &str
 pub const ai6::directorates::m::access::CONFIG_ACCOUNTS: &str
 pub const ai6::directorates::m::access::NOT_DELEGABLE: [&str; 3]
 pub const ai6::directorates::m::access::OPERATION_ACTIONS: &[&str]
+pub const ai6::directorates::m::access::RESERVED_ROLES: [&str; 4]
 pub const ai6::directorates::m::access::SCOPE_KINDS: [&str; 4]
 pub fn ai6::directorates::m::access::access_from_toml(&str) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::directorates::m::access::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &ai6::EffectiveAccess, &ai6::Lineage) -> core::result::Result<(), ai6::Refusal>
+pub fn ai6::directorates::m::access::check_operation_change(&str, &ai6::OperationAccess, &ai6::OperationAccess, &ai6::Editor, &ai6::EffectiveAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::directorates::m::access::compile(&ai6::AccessPolicy, &[alloc::string::String]) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::directorates::m::access::compile_with_operations(&ai6::AccessPolicy, &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>, &ai6::Lineage) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::directorates::m::access::default_delegable() -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::access::load_access(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::directorates::m::access::load_policy(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<ai6::AccessPolicy, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::directorates::m::access::role_authorizer() -> coqui_roles::RoleAuthorizerBuilder
 pub fn ai6::directorates::m::access::seeded_policy() -> ai6::AccessPolicy
+pub fn ai6::directorates::m::access::validate_operation_access(&str, &ai6::OperationAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
 pub mod ai6::directorates::m::approvals
 #[non_exhaustive] pub enum ai6::directorates::m::approvals::GreenInkPreset
 pub ai6::directorates::m::approvals::GreenInkPreset::Licensed
@@ -439,6 +453,7 @@ pub ai6::directorates::m::config::ConfigRecord::Cover
 pub ai6::directorates::m::config::ConfigRecord::Loadout
 pub ai6::directorates::m::config::ConfigRecord::Mcp
 pub ai6::directorates::m::config::ConfigRecord::Operation
+pub ai6::directorates::m::config::ConfigRecord::OperationAccess
 pub ai6::directorates::m::config::ConfigRecord::Plugin
 pub ai6::directorates::m::config::ConfigRecord::Pool
 pub ai6::directorates::m::config::ConfigRecord::Role
@@ -450,7 +465,7 @@ pub ai6::directorates::m::config::ConfigRecord::Theater
 pub ai6::directorates::m::config::ConfigRecord::Tls
 pub ai6::directorates::m::config::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 18]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 19]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -524,6 +539,7 @@ pub fn ai6::directorates::m::config::MemoryProvider::fmt(&self, &mut core::fmt::
 pub ai6::directorates::m::config::Settings::access: core::option::Option<serde_json::value::Value>
 pub ai6::directorates::m::config::Settings::cables: ai6::CableConfig
 pub ai6::directorates::m::config::Settings::loadouts: ai6::directorates::q::LoadoutCatalog
+pub ai6::directorates::m::config::Settings::operation_access: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
 pub ai6::directorates::m::config::Settings::pins: core::option::Option<ai6::directorates::registry::bona_fides::PinSet>
 pub ai6::directorates::m::config::Settings::station: ai6::directorates::m::config::StationRuntime
 pub ai6::directorates::m::config::Settings::theaters: ai6::directorates::m::theaters::Theaters
@@ -587,7 +603,7 @@ impl ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
-pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 18]
+pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 19]
 pub trait ai6::directorates::m::config::ConfigProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::definitions(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope) -> core::result::Result<ai6::directorates::m::config::ConfigDefinitions, ai6::directorates::m::roster::RosterError>
@@ -4847,6 +4863,7 @@ pub ai6::ConfigRecord::Cover
 pub ai6::ConfigRecord::Loadout
 pub ai6::ConfigRecord::Mcp
 pub ai6::ConfigRecord::Operation
+pub ai6::ConfigRecord::OperationAccess
 pub ai6::ConfigRecord::Plugin
 pub ai6::ConfigRecord::Pool
 pub ai6::ConfigRecord::Role
@@ -4858,7 +4875,7 @@ pub ai6::ConfigRecord::Theater
 pub ai6::ConfigRecord::Tls
 pub ai6::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 18]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 19]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -5188,6 +5205,10 @@ pub fn ai6::AccessPolicy::to_json(&self) -> serde_json::value::Value
 impl core::error::Error for ai6::directorates::m::access::AccessPolicyError
 impl core::fmt::Display for ai6::directorates::m::access::AccessPolicyError
 pub fn ai6::directorates::m::access::AccessPolicyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::AccessSet<'a>
+pub ai6::AccessSet::global: &'a ai6::AccessPolicy
+pub ai6::AccessSet::lineage: &'a ai6::Lineage
+pub ai6::AccessSet::operations: &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
 pub struct ai6::AccessTokenRecord
 impl ai6::directorates::m::identity::AccessTokenRecord
 pub fn ai6::directorates::m::identity::AccessTokenRecord::active_at(&self, f64) -> bool
@@ -6535,6 +6556,12 @@ pub fn ai6::directorates::m::roster::Operation::with_parent(self, impl core::con
 impl ai6::directorates::m::roster::Operation
 pub fn ai6::directorates::m::roster::Operation::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::Operation::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub struct ai6::OperationAccess
+pub ai6::OperationAccess::roles: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::RoleDef>
+pub ai6::OperationAccess::rules: alloc::vec::Vec<ai6::RuleDef>
+impl ai6::OperationAccess
+pub fn ai6::OperationAccess::from_json(&serde_json::value::Value) -> core::result::Result<Self, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::OperationAccess::to_json(&self) -> serde_json::value::Value
 #[non_exhaustive] pub struct ai6::OperationPolicy
 pub ai6::OperationPolicy::agents: alloc::vec::Vec<ai6::directorates::m::placement::AgentFacts>
 pub ai6::OperationPolicy::checkout: bool
@@ -7089,6 +7116,7 @@ pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::d
 pub ai6::Settings::access: core::option::Option<serde_json::value::Value>
 pub ai6::Settings::cables: ai6::CableConfig
 pub ai6::Settings::loadouts: ai6::directorates::q::LoadoutCatalog
+pub ai6::Settings::operation_access: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
 pub ai6::Settings::pins: core::option::Option<ai6::directorates::registry::bona_fides::PinSet>
 pub ai6::Settings::station: ai6::directorates::m::config::StationRuntime
 pub ai6::Settings::theaters: ai6::directorates::m::theaters::Theaters
@@ -7788,6 +7816,7 @@ pub const ai6::PROJECT_DIRECTORIES: [&str; 2]
 pub const ai6::PROJECT_FILES: [&str; 1]
 pub const ai6::PROPOSAL_SOURCE: &str
 pub const ai6::READ_TIMED_OUT: i64
+pub const ai6::RESERVED_ROLES: [&str; 4]
 pub const ai6::REVIEW: &str
 pub const ai6::REVIEW_DATA_KEY: &str
 pub const ai6::REVIEW_SOURCE: &str
@@ -8417,6 +8446,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &st
 pub fn ai6::access_from_toml(&str) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::cable_source(&str) -> alloc::string::String
 pub fn ai6::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &ai6::EffectiveAccess, &ai6::Lineage) -> core::result::Result<(), ai6::Refusal>
+pub fn ai6::check_operation_change(&str, &ai6::OperationAccess, &ai6::OperationAccess, &ai6::Editor, &ai6::EffectiveAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
 pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
 pub fn ai6::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6::directorates::q::terminal::TerminalOffer], core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
@@ -8424,6 +8454,7 @@ pub fn ai6::classify(&str, &dyn ai6::directorates::m::approvals::Repository) -> 
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub fn ai6::clearance_at_least(&str, &str) -> bool
 pub fn ai6::compile(&ai6::AccessPolicy, &[alloc::string::String]) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::compile_with_operations(&ai6::AccessPolicy, &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>, &ai6::Lineage) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::content_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
 pub fn ai6::credential_dir_var(&str) -> bool
 pub fn ai6::default_delegable() -> alloc::vec::Vec<alloc::string::String>
@@ -8463,6 +8494,7 @@ pub fn ai6::source_brief(&str, &str, &ai6::directorates::registry::sources::Sour
 pub fn ai6::tool_source(&str) -> alloc::string::String
 pub fn ai6::unsupported(&str) -> guatiao::library::kind::ProviderError
 pub fn ai6::utc_day(i64) -> alloc::string::String
+pub fn ai6::validate_operation_access(&str, &ai6::OperationAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::vet(&ai6::directorates::registry::store::Brief, &ai6::directorates::m::vetting::VettingPolicy, &ai6::directorates::m::vetting::VettingContext) -> ai6::directorates::m::vetting::Vetting
 pub fn ai6::work_title(&ai6::directorates::registry::store::Brief) -> alloc::string::String
 pub type ai6::SignatureCheck<'a> = (dyn core::ops::function::Fn(&ai6::directorates::registry::bona_fides::PublisherKey, &[u8], &[u8]) -> bool + 'a)

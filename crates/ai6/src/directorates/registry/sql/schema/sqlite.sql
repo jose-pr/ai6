@@ -358,6 +358,14 @@ CREATE TABLE ai6_config_access (
     PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE ai6_config_operation_access (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (scope, key)
+);
+
 CREATE TABLE ai6_config_unex (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,

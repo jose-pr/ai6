@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   chief changes the chief list, and the last chief cannot be removed. `ai6::access_from_toml`
   returns an `EffectiveAccess` (the tiers evaluated together, with `explain`), replacing the
   bare `RoleAuthorizer`.
+- Operation roles. An Operation has its own access policy, the `operation_access` record: roles
+  and rules that only add to the global policy, hold only Operation actions within the global
+  `delegable` cap (every Operation action but `access.manage`, `approval.class` and
+  `compartment.cover` by default), and bind only at the Operation or one under it. Whoever
+  holds `access.manage` there manages them and can hand out only what they hold, down the
+  Operations a grant reaches. A rule the tree or the cap leaves without effect is listed as
+  orphaned and the rest of the record stays in force.
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a

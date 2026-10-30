@@ -49,9 +49,28 @@ impl Editor {
     }
 }
 
-/// The `(subject, scope, action)` triples a policy's rules grant: a role bound at an
-/// Operation grants only its Operation actions there.
-pub(super) fn grants(policy: &AccessPolicy) -> BTreeSet<(String, String, String)> {
+/// What a rule grants: `(subject, scope, propagates, action)`.
+pub(super) type Grant = (String, String, bool, String);
+
+/// Where a grant at `scope` takes effect: the scope itself and, when it propagates, every
+/// Operation under it. An editor must hold the action at each.
+pub(super) fn reach(scope: &str, propagate: bool, lineage: &Lineage) -> Vec<String> {
+    let mut at = vec![scope.to_owned()];
+    if propagate && let Some(operation) = scope.strip_prefix("operation:") {
+        at.extend(
+            lineage
+                .subtree(operation)
+                .into_iter()
+                .filter(|id| *id != operation)
+                .map(|id| format!("operation:{id}")),
+        );
+    }
+    at
+}
+
+/// The grants a policy.s rules make: a role bound at an Operation grants only its Operation
+/// actions there.
+pub(super) fn grants(policy: &AccessPolicy) -> BTreeSet<Grant> {
     let mut grants = BTreeSet::new();
     for rule in &policy.rules {
         let Some(role) = policy.roles.get(&rule.role) else {
@@ -60,7 +79,12 @@ pub(super) fn grants(policy: &AccessPolicy) -> BTreeSet<(String, String, String)
         let operation = rule.scope.starts_with("operation:");
         for action in &role.actions {
             if !operation || OPERATION_ACTIONS.contains(&action.as_str()) {
-                grants.insert((rule.subject.clone(), rule.scope.clone(), action.clone()));
+                grants.insert((
+                    rule.subject.clone(),
+                    rule.scope.clone(),
+                    rule.propagate,
+                    action.clone(),
+                ));
             }
         }
     }
@@ -106,10 +130,13 @@ pub fn check_change(
         ));
     }
     let before_grants = grants(before);
-    for (subject, scope, action) in grants(after).difference(&before_grants) {
-        if !held(action, scope) {
+    for (subject, scope, propagate, action) in grants(after).difference(&before_grants) {
+        if let Some(at) = reach(scope, *propagate, lineage)
+            .iter()
+            .find(|at| !held(action, at))
+        {
             return Err(Refusal::new(format!(
-                "{subject} would hold {action} at {scope}, which you do not hold there"
+                "{subject} would hold {action} at {at}, which you do not hold there"
             )));
         }
     }

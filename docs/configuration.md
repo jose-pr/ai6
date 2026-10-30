@@ -202,7 +202,8 @@ refused, and a running Station keeps the last good one.
 | `plugin` | `plugins` | yes | no | restart | `[[library]]` entries, keyed by their `file` |
 | `station` | `station` | yes | yes | restart | the whole file: the Station's runtime settings |
 | `tls` | `tls` | yes | yes | restart | the whole file: the Station TLS policy |
-| `access` | `access` | no | yes | live, in Universal Exports | the whole file: `[role.<name>]` and `[[rule]]` |
+| `access` | `access` | no | yes | live, in Universal Exports | the whole file: `[role.<name>]`, `[[rule]]`, `chief` and `delegable` |
+| `operation_access` | `operation_access` | no | no | live, in Universal Exports | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
 | `unex` | `unex` | no | yes | restart | the whole file: Universal Exports' sign-in, limits and assistant |
 
 A Station polls its provider every `[provider] poll` seconds. A family that applies live

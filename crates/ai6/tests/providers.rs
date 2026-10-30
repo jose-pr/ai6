@@ -146,6 +146,16 @@ fn write_every_family(dir: &Path) {
         ),
         ("tls.toml", "profile = \"intermediate\"\n"),
         (
+            "operation_access.toml",
+            "[operation_access.G.role.reviewer]
+actions = [\"mission.read\", \"approval.decide\"]
+\n             [[operation_access.G.rule]]
+subject = \"group:qa\"
+scope = \"operation:G\"
+role = \"reviewer\"
+",
+        ),
+        (
             "access.toml",
             "[role.viewer]\nactions = [\"mission.read\"]\n\
              [[rule]]\nsubject = \"group:ops\"\nscope = \"operation:G\"\nrole = \"viewer\"\n",
@@ -173,6 +183,12 @@ fn every_family_reads_from_a_directory() {
     assert_eq!(settings.pins.as_ref().unwrap().libraries.len(), 1);
     assert!(settings.tls.is_some() && settings.access.is_some());
     assert!(settings.access_policy().is_ok());
+    let reviewers = &settings.operation_access["G"];
+    assert_eq!(
+        reviewers.roles["reviewer"].actions,
+        ["mission.read", "approval.decide"]
+    );
+    assert_eq!(reviewers.rules[0].subject, "group:qa");
     assert!(!settings.unex.assistant);
     assert_eq!(
         settings.unex.directory.as_deref(),
