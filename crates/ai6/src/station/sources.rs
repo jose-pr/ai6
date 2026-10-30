@@ -23,7 +23,9 @@ use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
 use crate::directorates::registry::tracker::Tracker;
-use crate::station::issues::{DrainState, TrackerBuilder, drain_outbox, queue_report};
+use crate::station::issues::{
+    DrainState, TrackerBuilder, drain_outbox, poll_replies, queue_report,
+};
 
 use crate::station::limits::SourceLimits;
 use crate::station::plugins::Plugins;
@@ -100,6 +102,10 @@ pub(crate) struct SourceSetup {
     pub status_labels: StatusWords,
     /// Workflow transitions the Station makes for Mission milestones.
     pub status_transitions: StatusWords,
+    /// The only labels an Agent may add or remove on a linked issue.
+    pub agent_labels: Vec<String>,
+    /// The workflow transitions an Agent may make without green ink.
+    pub agent_transitions: Vec<String>,
 }
 
 /// Reads an Operation's `sources` table into per-instance settings.
@@ -160,6 +166,18 @@ pub(crate) fn source_setups(
                     },
                 )
             };
+            let names = |key: &str| -> Result<Vec<String>, String> {
+                settings.get(key).map_or_else(
+                    || Ok(Vec::new()),
+                    |value| {
+                        value.clone().try_into().map_err(|error| {
+                            format!("Operation {}: sources.{name}.{key}: {error}", operation.id)
+                        })
+                    },
+                )
+            };
+            let agent_labels = names("agent_labels")?;
+            let agent_transitions = names("agent_transitions")?;
             let status_labels = words("status_labels")?;
             let status_transitions = words("status_transitions")?;
             let interval = match settings.remove("interval_secs") {
@@ -182,6 +200,8 @@ pub(crate) fn source_setups(
                 intake,
                 status_labels,
                 status_transitions,
+                agent_labels,
+                agent_transitions,
             })
         })
         .collect()
@@ -302,14 +322,16 @@ fn link_source(
                 .any(|link| link.tracker == provider && link.item == item.id) => {}
         Ok(_) => {
             let now = unix_seconds() as f64;
-            if let Err(error) = registry.link_issue(&source_link(
+            let mut link = source_link(
                 operation,
                 &mission,
                 provider,
                 &item.id,
                 item.url.clone(),
                 now,
-            )) {
+            );
+            link.title = Some(item.title.clone());
+            if let Err(error) = registry.link_issue(&link) {
                 eprintln!(
                     "ai6: source {provider}: item {:?} not linked: {error}",
                     item.id
@@ -501,6 +523,7 @@ pub(crate) fn source_link(
         linked_at: now,
         status_comment: None,
         phase: None,
+        title: None,
     }
 }
 
@@ -643,6 +666,7 @@ pub(crate) struct SourceDesk {
     due: Mutex<BTreeMap<(String, String), Instant>>,
     next_report: Mutex<Instant>,
     next_drain: Mutex<Instant>,
+    next_replies: Mutex<Instant>,
     drained: DrainState,
     next_sleepers: Mutex<Instant>,
     warned: Mutex<BTreeSet<String>>,
@@ -661,6 +685,7 @@ impl SourceDesk {
             due: Mutex::new(BTreeMap::new()),
             next_report: Mutex::new(Instant::now()),
             next_drain: Mutex::new(Instant::now()),
+            next_replies: Mutex::new(Instant::now()),
             drained: DrainState::new(),
             next_sleepers: Mutex::new(Instant::now()),
             warned: Mutex::new(BTreeSet::new()),
@@ -783,6 +808,26 @@ impl SourceDesk {
                 unix_seconds() as f64,
             );
         }
+        let replies_due = self
+            .next_replies
+            .lock()
+            .map(|mut next| {
+                let due = *next <= now;
+                if due {
+                    *next = now + self.limits.reply_every.0;
+                }
+                due
+            })
+            .unwrap_or(false);
+        if replies_due {
+            poll_replies(
+                registry,
+                roster,
+                build_tracker,
+                &self.station,
+                unix_seconds() as f64,
+            );
+        }
         let sleepers_due = self
             .next_sleepers
             .lock()
@@ -809,7 +854,9 @@ mod tests {
     use guatiao::{Provider, Status};
 
     use super::*;
-    use crate::directorates::registry::mission_issues::{OutboxEntry, OutboxKind, OutboxState};
+    use crate::directorates::registry::mission_issues::{
+        OutboxEntry, OutboxKind, OutboxState, ReplyState,
+    };
     use crate::directorates::registry::sources::{SourceBatch, SourceItem};
     use crate::directorates::registry::store::FileRegistry;
     use crate::{TrackerPost, TrackerUpdate};
@@ -1777,5 +1824,93 @@ mod tests {
         assert!(lines[0].contains("Operation \"G\" issues is weakened"));
         let (_dir, strict) = roster_issues("{ fake = { ids = [] } }", "");
         assert!(crate::station::issues::weakenings(&strict).is_empty());
+    }
+
+    #[test]
+    fn replies_from_permitted_authors_are_stored_once_others_ignored_and_own_skipped() {
+        let plugins = plugins();
+        let (_dir, roster) = roster_with("covert", "{ fake = { ids = [\"rp-1\"] } }");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins, &roster, &registry);
+        let reply = |id: &str, permitted: bool, own: bool| crate::Reply {
+            id: id.to_owned(),
+            item: "rp-1".to_owned(),
+            author_id: format!("who-{id}"),
+            author: format!("Person {id}"),
+            permitted,
+            own,
+            body: format!("text of {id}"),
+            created: "2026-10-05T10:00:00Z".to_owned(),
+        };
+        OWN_REPLIES.lock().unwrap().extend([
+            reply("r1", true, false),
+            reply("r2", false, false),
+            reply("r3", false, true),
+        ]);
+        let build =
+            |provider: &str, settings: &toml::Table| build_tracker(&plugins, provider, settings);
+        assert_eq!(
+            poll_replies(&registry, &roster, &build, "station-b", 5.0),
+            0,
+            "only the Headquarters Station reads replies"
+        );
+        assert_eq!(
+            poll_replies(&registry, &roster, &build, "station-a", 5.0),
+            1
+        );
+        let mission = "source_fake--rp-1";
+        let stored = registry.issue_replies(mission).unwrap();
+        let ids: Vec<&str> = stored.iter().map(|reply| reply.id.as_str()).collect();
+        assert_eq!(ids, ["r1", "r2"], "the token's own comment is skipped");
+        assert_eq!(
+            (stored[0].state, stored[0].body.as_str()),
+            (ReplyState::Pending, "text of r1")
+        );
+        assert_eq!(
+            (stored[1].state, stored[1].body.as_str()),
+            (ReplyState::Ignored, ""),
+            "someone not permitted is recorded without their text"
+        );
+        let events = registry.timeline_events("G").unwrap();
+        let ignored: Vec<_> = events
+            .iter()
+            .filter(|event| event.action == "reply_ignored")
+            .collect();
+        assert_eq!(ignored.len(), 1);
+        assert!(
+            !format!("{:?}", ignored[0]).contains("text of r2"),
+            "never the text"
+        );
+        assert!(format!("{:?}", ignored[0]).contains("Person r2"));
+        // Polled again, the same comments change nothing.
+        assert_eq!(
+            poll_replies(&registry, &roster, &build, "station-a", 6.0),
+            0
+        );
+        assert_eq!(
+            registry
+                .timeline_events("G")
+                .unwrap()
+                .iter()
+                .filter(|event| event.action == "reply_ignored")
+                .count(),
+            1
+        );
+        // A finished Mission's issue is no longer watched.
+        registry
+            .set_issue_status(mission, "fake", "rp-1", None, Some("done"))
+            .unwrap();
+        OWN_REPLIES.lock().unwrap().push(reply("r4", true, false));
+        assert_eq!(
+            poll_replies(&registry, &roster, &build, "station-a", 7.0),
+            0
+        );
+        OWN_REPLIES
+            .lock()
+            .unwrap()
+            .retain(|reply| reply.item != "rp-1");
     }
 }

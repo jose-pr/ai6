@@ -15,6 +15,8 @@ mod ephemeral;
 mod green_ink;
 mod harness;
 mod head_of_station;
+#[cfg(feature = "cables-mcp")]
+mod issues;
 mod medical;
 mod promotion;
 mod recovery;
@@ -75,7 +77,6 @@ use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
-use crate::station::issues;
 use crate::station::limits::StationLimits;
 use crate::station::plugins;
 #[cfg(feature = "publisher")]
@@ -883,7 +884,7 @@ where
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
     vetting::log_weakenings(&roster);
-    issues::log_weakenings(&roster);
+    crate::station::issues::log_weakenings(&roster);
     for weakened in roster.settings().weakenings() {
         eprintln!("ai6: {weakened}");
     }
@@ -1564,7 +1565,10 @@ async fn scheduler_loop(base: DaemonState) {
         })
         .await;
         #[cfg(feature = "cables-mcp")]
-        green_ink::deliver_decisions(&state).await;
+        {
+            green_ink::deliver_decisions(&state).await;
+            issues::deliver_replies(&state).await;
+        }
         let lapsing = state.clone();
         let _ = tokio::task::spawn_blocking(move || credentials::revoke_lapsed(&lapsing)).await;
         schedule_recovered_once(&state).await;
@@ -2173,7 +2177,7 @@ fn publish_station_check_in(state: &DaemonState) {
             serde_json::json!(state.station.bootstrap_weakened),
         );
     }
-    let issues_weakened = issues::weakenings(&state.roster);
+    let issues_weakened = crate::station::issues::weakenings(&state.roster);
     if !issues_weakened.is_empty() {
         info.insert(
             "issues_weakened".to_owned(),
@@ -4114,6 +4118,7 @@ async fn start_mission(
             .await
             .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
             endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
+            endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
             if let Some(role) = mission.role_id.as_deref() {
                 endpoint.set_mission_role(role);
             }
@@ -4857,6 +4862,7 @@ async fn resume_mission(
         .await
         .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
         endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
+        endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
         }
@@ -5230,7 +5236,10 @@ async fn send_message(
             .map(|mission| {
                 (
                     mission.state,
-                    mission.blocked_reason.as_deref() == Some(GREEN_INK_REASON),
+                    matches!(
+                        mission.blocked_reason.as_deref(),
+                        Some(GREEN_INK_REASON | crate::station::issues::ISSUE_REASON)
+                    ),
                 )
             })
             .ok_or_else(|| mission_error(MissionError::NotFound))?;
@@ -5489,7 +5498,10 @@ fn spawn_event_pump_with_monitor(
                 let resumed = state.missions.lock().ok().and_then(|mut missions| {
                     let mission = missions.get(&mission_id)?;
                     (mission.state == MissionState::Blocked
-                        && mission.blocked_reason.as_deref() != Some(GREEN_INK_REASON))
+                        && !matches!(
+                            mission.blocked_reason.as_deref(),
+                            Some(GREEN_INK_REASON | crate::station::issues::ISSUE_REASON)
+                        ))
                     .then(|| missions.transition(&mission_id, MissionState::Working).ok())
                     .flatten()
                 });
@@ -5726,10 +5738,10 @@ fn queue_issue_status(state: &DaemonState, mission_id: &str, mission_state: Miss
         .lock()
         .ok()
         .and_then(|missions| missions.get(mission_id)?.blocked_reason.clone());
-    let Some(phase) = issues::phase_of(mission_state, reason.as_deref()) else {
+    let Some(phase) = crate::station::issues::phase_of(mission_state, reason.as_deref()) else {
         return;
     };
-    issues::queue_status(
+    crate::station::issues::queue_status(
         state.intake.as_ref(),
         &state.roster,
         mission_id,
@@ -5763,9 +5775,13 @@ fn held_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
     if mission.state != MissionState::Blocked {
         return None;
     }
-    [GREEN_INK_REASON, medical::BUDGET_REASON]
-        .into_iter()
-        .find(|reason| mission.blocked_reason.as_deref() == Some(*reason))
+    [
+        GREEN_INK_REASON,
+        crate::station::issues::ISSUE_REASON,
+        medical::BUDGET_REASON,
+    ]
+    .into_iter()
+    .find(|reason| mission.blocked_reason.as_deref() == Some(*reason))
 }
 
 #[cfg(feature = "publisher")]

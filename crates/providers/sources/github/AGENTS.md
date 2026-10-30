@@ -55,7 +55,7 @@ as TOML, in `SourceConfig::settings_toml`.
 | `capability_ttl_secs` | 600 | how long the repository's labels and settings are remembered |
 
 Unknown keys are refused. `provider`, `intake` and `interval_secs` are read by the Station and
-never reach the provider. `status_labels`, `agent_labels`, `status_transitions`,
+never reach the provider. `status_labels`, `agent_labels`, `agent_transitions`, `status_transitions`,
 `issue_type`, `subtask_type` and `priority_map` are applied by the Station and accepted and
 ignored here, so one table serves every tracker.
 
