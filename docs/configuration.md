@@ -325,6 +325,14 @@ it.
 | `prompt_bytes` | 16 KiB | Bytes of a Sleeper's prompt |
 | `lookback_days` | 366 | Days a schedule is searched back for its latest window |
 
+`[registry.limits.issues]`
+
+| Key | Default | What |
+| --- | --- | --- |
+| `links_per_mission` | 32 | Linked issues one Mission holds at once (unlinked ones do not count) |
+| `outbox_records` | 1,000 | Outbox entries kept; settled ones are dropped oldest first |
+| `entry_bytes` | 128 KiB | Bytes of one outbox entry's text and payload |
+
 `[registry.limits.sources]`
 
 | Key | Default | What |
@@ -665,6 +673,10 @@ provider applied before it was a key; the provider's API header lists them with 
 | `min_poll` | 10 | The shortest interval a Source is polled at, in seconds; a smaller `interval_secs` is raised to it, and 0 takes the floor away |
 | `report_every` | 15 | Seconds between rounds reporting finished briefs to their Sources |
 | `sleeper_every` | 20 | Seconds between rounds firing Sleepers |
+| `outbox_every` | 5 | Seconds between rounds sending the outbox of tracker writes |
+| `outbox_batch` | 20 | Outbox entries sent in one round |
+| `send_attempts` | 5 | Sends tried before an outbox entry fails |
+| `retry_backoff` | 30 | Seconds before a failed send is tried again; each attempt doubles it |
 
 `[transports]`
 

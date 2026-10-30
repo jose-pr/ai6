@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   entry for it, replacing `done_label`, `failed_label`, `done_transition` and
   `failed_transition`; `Source::report` and `CxReport` are removed. Jira Cloud text takes
   headings, lists, code blocks and links.
+- Linked issues and the outbox. A Mission that starts from an issue is linked to it (a
+  Registry record on the file and SQL Registries; a link names a tracker instance and an item
+  and how the issue relates to the Mission), and AI6 keeps the issue current: by default one
+  status comment edited in place as the Mission works, waits or pauses, the instance's status
+  labels and transitions, and the report as a new comment. Every write to a tracker is an
+  outbox entry that only the Headquarters Station sends, fenced by the election term, audited,
+  rate limited, retried with a doubling delay, and settled once across a Headquarters change.
+  `[operation.ID.issues]` sets how much is written and its bounds; looser values are reported
+  at start and at check-in. `CableStore::take_cable_quotas` is renamed `take_quotas`.
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a

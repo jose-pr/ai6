@@ -557,6 +557,34 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
 - **Limits.** Review comments on a pull request are not forwarded to the Mission's
   Session. Jira issues are not transitioned when a Mission starts, only when it ends.
 
+## Linked issues
+
+A Mission that started from an issue is **linked** to it, and keeps it current. A link names a
+tracker instance and an item (`github:jose-pr/ai6#12`, `jira:GUA-12`), how the issue relates to
+the Mission (`source`, `related`, `child`, `parent`, `mirror`), who linked it, and whether it
+is in force (`proposed`, `active`, `unlinked`). The source issue is linked when its brief is
+queued, so the Mission's page can show it before it is placed. A Mission holds at most 32
+links; an unlinked one stays as a record and a later poll does not bring it back.
+
+Every write to a tracker is an **outbox** entry first: a Registry record any Station may
+queue, that only the Headquarters Station sends, because only it holds tracker tokens. An
+entry is `pending`, then `sending` under the election term that began it, then `posted`,
+`refused` or `failed`. A Headquarters Station that takes over finds what the last one left
+`sending`: a comment already on the issue (found by the entry's hidden marker, or the same
+text from AI6's own account) is recorded as posted, not posted twice; an entry that was not
+sent goes back to pending; a creation is refused, since sending it again could make a second
+issue. A failed send is retried with a doubling delay and fails after `send_attempts`; a
+refusal (a call the tracker cannot make, a bad value, an unlinked issue) is never retried.
+Each queue and settle is audited and appears on the timeline as an `issue` event, never with
+the text.
+
+What the Station writes by itself follows the Operation's [`updates`](operations.md#issues):
+by default one **status comment** on the source issue, posted when the Mission starts working
+and edited in place as it waits for input or is paused, at most once a minute, with the
+instance's `status_labels` swapped and its `status_transitions` made when the issue offers
+them (one it does not offer is a timeline event). When the Mission ends the report is a new
+comment, so people are notified. Every word follows the Operation's cover policy.
+
 ## Sleepers
 
 A **Sleeper** is a standing order: a brief that queues itself on a schedule, such as a

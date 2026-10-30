@@ -192,6 +192,37 @@ Credentials are never configured: a source names the environment variable that h
 token (`token_env`), and the Station reads it when it polls. A bare string is shorthand for
 the provider's main target, as in `sources = { jira = "GUA" }`.
 
+## Issues
+
+`[operation.ID.issues]` says what AI6 writes on the issues a Mission is linked to, and how
+much ([Linked issues](missions.md#linked-issues)). Strict unless configured; every value looser
+than `strict` is printed when a Station starts.
+
+```toml
+[operation.G.issues]
+updates = "milestones"        # outcome | milestones | all
+posts_per_hour = 6
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `preset` | `strict` | `licensed` lets `00` Agents close and reopen without green ink |
+| `updates` | `milestones` | `outcome`: only the report when the Mission ends; `milestones`: one status comment kept current on the source issue (working, waiting, paused) plus the report; `all`: also on every other linked issue |
+| `max_body_bytes` | 8192 | Bytes of one posted comment |
+| `posts_per_hour`, `post_burst` | 6, 3 | Agent and person posts per Mission: refill per hour and burst |
+| `posts_per_mission` | 40 | Posts one Mission may make in all |
+| `operation_posts_per_hour` | 60 | Agent and person posts per hour for the Operation |
+| `tracker_posts_per_hour` | 300 | Writes per hour to one tracker instance, every kind counted; a refusal only delays the write |
+| `status_interval_secs` | 60 | Seconds at least between two status writes to one issue |
+| `reply_ttl_secs` | 259200 | Seconds a question waits for an answer (3 days) |
+| `on_timeout` | `resume` | `resume` tells the Agent nobody answered; `fail` fails the Mission |
+| `on_secret` | `refuse` | A post holding a secret is refused; `redact` replaces it and posts the rest |
+| `links` | `tracker` | Links and images in Agent text only to the tracker's host and the Operation's git remote host; `any` allows every host |
+| `create` | `proposal` | A person approves each creation; `direct` lets the Agent create |
+| `max_created`, `max_created_per_day`, `max_split_depth` | 10, 50, 2 | Issues one Mission may create, an Operation's Agents per day, and how deep a split may go |
+
+Any count may be `"none"`. `posts_per_hour = 600` or `create = "direct"` is a weakening.
+
 ## Green ink
 
 `green_ink` says which irreversible steps an Agent must ask a person to sign

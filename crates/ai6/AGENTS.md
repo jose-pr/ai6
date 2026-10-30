@@ -2677,6 +2677,64 @@ read: the Source's, plus `status_labels` and `status_transitions` (`working`, `w
 `paused`, `done`, `failed`), `agent_labels`, `reply_authors`, `reply_associations` (GitHub),
 `issue_type`, `subtask_type` and `priority_map`.
 
+## Linked issues and the outbox (`ai6::directorates::registry::mission_issues`)
+
+```rust
+pub enum LinkRelation { Source, Related, Child, Parent, Mirror }   // snake_case in JSON
+pub enum LinkState { Proposed, Active, Unlinked }
+pub struct IssueLink { pub operation, mission_id, tracker, item: String, pub url: Option<String>,
+    pub relation: LinkRelation, pub state: LinkState, pub linked_by: String /* m | agent:CODENAME | person:SUBJECT */,
+    pub linked_at: f64, pub status_comment: Option<String>, pub phase: Option<String> }
+pub enum OutboxKind { Status, Report, Comment, Question, Update, Create, Link }
+pub enum OutboxState { Pending, Held, Sending, Posted, Refused, Failed }
+pub struct OutboxEntry { pub id: String, operation, mission_id, tracker, item: String, kind: OutboxKind,
+    actor: String, body: String, payload: serde_json::Value, coalesce: Option<String>, state: OutboxState,
+    attempts: u32, result: Option<OutboxResult>, error: Option<String>, at: f64, not_before: f64,
+    sent_at: Option<f64>, fence: Option<u64> }       // OutboxEntry::new(operation, mission, tracker, item, kind, actor, at)
+pub struct OutboxResult { pub comment_id: Option<String>, url: Option<String>, created_item: Option<String> }
+pub enum OutboxSettle { Posted(OutboxResult), Refused(String), Retry { error: String, not_before: f64, max_attempts: u32 } }
+pub trait MissionIssueStore {   // on FileRegistry and SqlRegistry; part of RegistryBackend
+    fn link_issue(&self, link: &IssueLink) -> io::Result<IssueLink>;      // upsert by (Mission, tracker, item); at most [registry.limits.issues] links_per_mission live ones
+    fn issue_links(&self, mission_id: &str) -> io::Result<Vec<IssueLink>>;
+    fn active_issue_links(&self) -> io::Result<Vec<IssueLink>>;
+    fn unlink_issue(&self, mission_id: &str, tracker: &str, item: &str) -> io::Result<bool>;   // refuses its pending entries ("unlinked")
+    fn set_issue_status(&self, mission_id, tracker, item: &str, comment: Option<&str>, phase: Option<&str>) -> io::Result<()>;
+    fn queue_outbox(&self, entry: &OutboxEntry) -> io::Result<OutboxEntry>;   // an entry naming an item needs an active link in its Operation; `coalesce` replaces a pending entry
+    fn outbox_entry(&self, id: &str) -> io::Result<Option<OutboxEntry>>;
+    fn outbox_entries(&self, mission_id: Option<&str>) -> io::Result<Vec<OutboxEntry>>;
+    fn due_outbox(&self, now: f64, limit: usize) -> io::Result<Vec<OutboxEntry>>;
+    fn begin_outbox_send(&self, id: &str, term: u64, now: f64) -> io::Result<Option<OutboxEntry>>;   // pending -> sending under the election term
+    fn sending_outbox(&self) -> io::Result<Vec<OutboxEntry>>;
+    fn adopt_outbox_send(&self, id: &str, term: u64) -> io::Result<Option<OutboxEntry>>;   // a new term takes a send the old one left
+    fn settle_outbox(&self, id: &str, term: u64, settle: OutboxSettle) -> io::Result<OutboxEntry>;   // PermissionDenied unless sending under `term`
+}
+```
+
+Files: `mission-issues/<mission>.json` (the Mission's links) and `issue-outbox/<id>.json`; SQL
+tables `ai6_mission_issues` and `ai6_issue_outbox`. `CableStore::take_cable_quotas` is now
+`take_quotas(buckets, now)` (same signature); outbox sends take `issue:tracker:OPERATION:NAME`.
+`[registry.limits.issues]`: `links_per_mission` 32, `outbox_records` 1000 (settled entries are
+dropped oldest first), `entry_bytes` 128 KiB. Station `[sources]` gains `outbox_every` (5 s),
+`outbox_batch` (20), `send_attempts` (5), `retry_backoff` (30 s, doubling).
+
+`ai6::directorates::m::issues::IssuePolicy` is the Operation's `[operation.ID.issues]` table
+(`Operation::issues`): `preset` (`strict`, `licensed`), `updates` (`outcome`, `milestones`,
+`all`), `max_body_bytes` 8192, `posts_per_hour` 6, `post_burst` 3, `posts_per_mission` 40,
+`operation_posts_per_hour` 60, `tracker_posts_per_hour` 300, `status_interval_secs` 60,
+`reply_ttl_secs` 259200, `on_timeout` (`resume`, `fail`), `on_secret` (`refuse`, `redact`),
+`links` (`tracker`, `any`), `create` (`proposal`, `direct`), `max_created` 10,
+`max_created_per_day` 50, `max_split_depth` 2; counts are `Limit`s. `weakenings()` lists each
+value looser than `strict`, printed at start and published at check-in as `issues_weakened`;
+`compose_status(disclosure, phase)` words a status for the cover policy.
+
+On the Station, a Mission state change queues one `status` entry per active link
+(`coalesce = status:MISSION:TRACKER:ITEM`); the source's ending is the `report` entry the
+source desk queues for each finished source brief. The Headquarters Station drains the outbox
+every `outbox_every`: it builds the Tracker of the entry's instance, sends under its term, and
+settles. The first status posts a comment and keeps its ID (`status_comment`); later ones edit
+it (a new comment only for `waiting` where editing is unsupported); `status_labels` are
+swapped and `status_transitions` made when the issue offers them.
+
 ## Sleepers (`ai6::directorates::registry::sleepers`)
 
 An Operation's `sleepers.<name>` tables are standing orders. Names use letters, digits,
@@ -3302,7 +3360,7 @@ unexpired queued/delivered records for an Agent Session, sorted by creation time
 changes under the Registry lock and automatically expires overdue deliveries.
 `held_cables(limit, now)` lists unexpired envelopes containing at least one held recipient
 for the scoped relay to authorize.
-`take_cable_quotas(buckets, now)` atomically consumes sender and scope token buckets from
+`take_quotas(buckets, now)` atomically consumes sender and scope token buckets from
 `cable-quotas.json`; each bucket is `(key, rate_per_second, burst_capacity)`, and its key
 is SHA-256 hashed before it is stored. The file backend bounds scans to 10,000 Cable files
 and records to 2 MiB; `SqlRegistry` keeps Cables in `ai6_cables` and the buckets, keyed the
