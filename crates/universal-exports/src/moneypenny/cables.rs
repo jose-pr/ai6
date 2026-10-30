@@ -225,6 +225,7 @@ fn propose(
         result: None,
         work: None,
         cable: Some(hold),
+        evidence: conversation.evidence(),
     };
     conversation.push(
         Entry {

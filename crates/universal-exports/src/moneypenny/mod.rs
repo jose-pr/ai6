@@ -713,6 +713,8 @@ impl Assistant {
                 groups: Some(person.groups.clone()),
             };
             conversation.workspace = job.workspace.clone();
+            // A new turn: proposals made from here rest on what she reads from here.
+            conversation.turn_reads.clear();
             // Sticky for the conversation: a harness started under a wider reach may still be running
             // its script when a narrower message arrives, so its `Bash` still counts as outside text.
             conversation.scripts_reach_hosts |= job.reach.scripts_reach_hosts();
@@ -1070,7 +1072,7 @@ impl Assistant {
                         &self.config,
                         &mut after,
                     ),
-                    _ => apply(conversation, event, max_entries),
+                    _ => apply(conversation, event, max_entries, &self.config.gateway),
                 }
             }
             for (change, diff) in set_aside {
@@ -1270,6 +1272,7 @@ impl Assistant {
             result: None,
             work: None,
             cable: None,
+            evidence: actions::Evidence::default(),
         };
         let max_entries = self.config.bounds();
         {
@@ -1454,17 +1457,33 @@ impl Assistant {
             .or_else(|| healthy.into_iter().next())
     }
 
-    /// Marks the conversation exposed for good: it read text written outside AI6's own
-    /// records. `Conversation.exposed` is the one record of it; jobs carry it to the Station.
-    pub(crate) fn mark_exposed(&self, conversation_id: &str) {
+    /// Records a read tool call of the turn, and when its answer quoted text written outside
+    /// AI6's own records, marks the conversation exposed for good by `source`.
+    /// `Conversation.exposed` is the one record of it; jobs carry it to the Station.
+    pub(crate) fn note_read(
+        &self,
+        conversation_id: &str,
+        tool: &str,
+        ids: std::collections::BTreeMap<String, String>,
+        source: Option<&str>,
+    ) {
         if let Some(conversation) = self.desk().store.conversations.get_mut(conversation_id) {
-            conversation.exposed = true;
+            conversation.note_read(tool, ids, &self.config.gateway);
+            if let Some(source) = source {
+                conversation.expose_by(source, &self.config.gateway);
+            }
         }
     }
 
-    /// The conversation `station` runs, whether it is exposed after `mark` marks it; `404`
-    /// for one this gateway does not hold, `403` for one another Station runs.
-    fn run_by(&self, station: &str, conversation_id: &str, mark: bool) -> Result<bool, ApiError> {
+    /// The conversation `station` runs, whether it is exposed after `source`, when given,
+    /// exposes it; `404` for one this gateway does not hold, `403` for one another Station
+    /// runs.
+    fn run_by(
+        &self,
+        station: &str,
+        conversation_id: &str,
+        source: Option<&str>,
+    ) -> Result<bool, ApiError> {
         let mut desk = self.desk();
         let conversation = desk
             .store
@@ -1474,7 +1493,9 @@ impl Assistant {
         if conversation.station.as_deref() != Some(station) {
             return Err(ApiError::forbidden());
         }
-        conversation.exposed |= mark;
+        if let Some(source) = source {
+            conversation.expose_by(source, &self.config.gateway);
+        }
         Ok(conversation.exposed)
     }
 
@@ -1956,13 +1977,14 @@ async fn audit(
 /// shows it.
 fn record_proposal(
     conversation: &mut Conversation,
-    proposal: actions::Proposal,
+    mut proposal: actions::Proposal,
     bounds: Bounds,
     limits: &AssistantGatewayLimits,
 ) -> bool {
     if !room_for_proposal(conversation, limits) {
         return false;
     }
+    proposal.evidence = conversation.evidence();
     conversation.push(
         Entry {
             role: Role::Proposal,
@@ -2036,6 +2058,7 @@ fn commit_proposal(
         result: None,
         work: Some(commit),
         cable: None,
+        evidence: actions::Evidence::default(),
     }
 }
 
@@ -2174,7 +2197,12 @@ fn cut(text: &str, limit: usize) -> String {
 }
 
 /// Records one harness event in the conversation.
-fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: Bounds) {
+fn apply(
+    conversation: &mut Conversation,
+    event: &AssistantEvent,
+    max_entries: Bounds,
+    gateway: &AssistantGatewayLimits,
+) {
     let at = now();
     let text = event.text.clone().unwrap_or_default();
     let entry = |role, text: String| Entry {
@@ -2195,7 +2223,7 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: B
             if let Some(tool) = event.tools.iter().find(|tool| outside_tool(tool, reach))
                 && !conversation.exposed
             {
-                conversation.exposed = true;
+                conversation.expose_by(&format!("tool:{tool}"), gateway);
                 conversation.push(
                     entry(
                         Role::Notice,
@@ -2590,7 +2618,7 @@ pub(crate) async fn exposure(
 ) -> Result<Json<Value>, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
     let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
-    let exposed = assistant.run_by(&query.station, &query.conversation, false)?;
+    let exposed = assistant.run_by(&query.station, &query.conversation, None)?;
     let Some(operation) = query.operation else {
         return Ok(Json(json!({"exposed": exposed})));
     };
@@ -2637,8 +2665,12 @@ pub(crate) async fn expose(
         return Err(ApiError::bad_request());
     }
     let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
-    let was = assistant.run_by(&exposed.station, &exposed.conversation, false)?;
-    assistant.run_by(&exposed.station, &exposed.conversation, true)?;
+    let was = assistant.run_by(&exposed.station, &exposed.conversation, None)?;
+    assistant.run_by(
+        &exposed.station,
+        &exposed.conversation,
+        Some(&exposed.source),
+    )?;
     if !was {
         let bounds = assistant.config.bounds();
         if let Some(conversation) = assistant

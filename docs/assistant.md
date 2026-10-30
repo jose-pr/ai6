@@ -148,8 +148,18 @@ Moneypenny changes nothing herself. Her write tools only propose:
 | `propose_class_authorization` | A class authorisation | `approval.class` |
 | `propose_shared_change` | One file of a group's shared repository ([workspace](#her-workspace-and-memory)) | membership of the group |
 
-A proposal shows in the chat with the exact request, a summary and the permission it needs,
-and **Confirm** and **Cancel**. If the person lacks that permission, there is no proposal at
+A proposal shows in the chat with the exact request, a summary and the permission it needs
+("Proposal · needs `mission.control` on `operation:G`"), what she had read since your last
+message ("Based on: missions (G), mission (G/m-12)", the tools with their identifier
+arguments, never free text), the page it changes as a chip ("Affects: Roster › agent 009"
+that only opens the page, and "Open" once it is applied), how it stands (Waiting for you,
+Applying, Applied, Refused with the reason, Cancelled, Expired) and **Confirm** and
+**Cancel**. **Confirm** answers once; a proposal still applying after thirty seconds says
+"Outcome unknown, check the page" instead of offering another. A proposal made in an exposed
+conversation also carries the strip naming what exposed it (`tool:missions`, or the source a
+Station reported). Every kind of entry has an icon and a label for screen readers: her answer,
+a proposal, a view ("Made by Moneypenny"), a link to a page in Outer Office and a page she
+published. If the person lacks that permission, there is no proposal at
 all: she is told she cannot. A proposal whose text holds a character that renders as nothing
 (a direction control, a zero-width or tag character) is refused, and the app shows any such
 character in a request as `<U+XXXX>`, so what is confirmed is what is seen. Only the person, in the app session the proposal was made in,

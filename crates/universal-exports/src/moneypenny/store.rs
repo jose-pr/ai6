@@ -6,7 +6,7 @@
 //! the tools run with it, so they can do no more than the person could, and stop when the
 //! person's sign-in ends.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 
 use ai6::{AssistantJob, AssistantSharedBase, AssistantWorkspace};
@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-use super::actions::Proposal;
+use super::actions::{Evidence, Proposal};
 
 /// Who said an entry, or what it records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -97,6 +97,13 @@ pub(crate) struct Conversation {
     /// A tool answered with text others wrote; for the conversation's life, a memory change
     /// waits for the person.
     pub(crate) exposed: bool,
+    /// What exposed it, in the order it happened: `tool:NAME` for a read tool, or the source a
+    /// Station reported as given. At most `[assistant.gateway] exposed_sources`, each at most
+    /// `source_bytes`; a source is listed once.
+    pub(crate) exposed_by: Vec<String>,
+    /// The read tools called since the person's last message, oldest first, at most
+    /// `[assistant.gateway] proposal_reads`: what a proposal made now is based on.
+    pub(crate) turn_reads: Vec<ReadCall>,
     /// The workspace the last job named, for the commits its reports lead to.
     pub(crate) workspace: Option<AssistantWorkspace>,
     /// Whether any job of the conversation let her scripts reach a host, so a script brings in
@@ -109,6 +116,14 @@ pub(crate) struct Conversation {
     /// harness is cut off from her Cables, and the only reports taken from it are the Cables
     /// it sent meanwhile, for the audit log.
     pub(crate) cut_off: Option<String>,
+}
+
+/// A read tool she called: its name and the identifier arguments it was given, never free
+/// text.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct ReadCall {
+    pub(crate) tool: String,
+    pub(crate) ids: BTreeMap<String, String>,
 }
 
 /// How much one conversation keeps.
@@ -167,10 +182,49 @@ impl Conversation {
             token: None,
             bytes: 0,
             exposed: false,
+            exposed_by: Vec::new(),
+            turn_reads: Vec::new(),
             workspace: None,
             scripts_reach_hosts: false,
             shared_bases: VecDeque::new(),
             cut_off: None,
+        }
+    }
+
+    /// Marks the conversation exposed for good and lists `source` among what exposed it.
+    pub(crate) fn expose_by(&mut self, source: &str, gateway: &ai6::AssistantGatewayLimits) {
+        self.exposed = true;
+        let source = super::cut(source, gateway.source_bytes.or_max());
+        if gateway.exposed_sources.allows(self.exposed_by.len() + 1)
+            && !self.exposed_by.contains(&source)
+        {
+            self.exposed_by.push(source);
+        }
+    }
+
+    /// Remembers that read tool `tool` was called with these identifier arguments, until the
+    /// person's next message.
+    pub(crate) fn note_read(
+        &mut self,
+        tool: &str,
+        ids: BTreeMap<String, String>,
+        gateway: &ai6::AssistantGatewayLimits,
+    ) {
+        if gateway.proposal_reads.allows(self.turn_reads.len() + 1) {
+            self.turn_reads.push(ReadCall {
+                tool: tool.to_owned(),
+                ids,
+            });
+        }
+    }
+
+    /// What a proposal made now rests on: the reads of this turn and whether, and by what,
+    /// the conversation is exposed.
+    pub(crate) fn evidence(&self) -> Evidence {
+        Evidence {
+            read: self.turn_reads.clone(),
+            exposed: self.exposed,
+            exposed_by: self.exposed_by.clone(),
         }
     }
 

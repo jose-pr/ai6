@@ -21,6 +21,28 @@ use crate::Gateway;
 /// numeric limits. Every other read tool exposes the conversation, including any added later.
 pub(crate) const QUIET_TOOLS: [&str; 3] = ["field_guide", "profile", "station_settings"];
 
+/// The arguments of a read tool call that are identifiers, by name: only these are kept of
+/// what she read, never free text (`text`, `reason` and the like).
+pub(crate) fn identifiers(input: &Value) -> std::collections::BTreeMap<String, String> {
+    const NAMES: [&str; 6] = [
+        "operation_id",
+        "mission_id",
+        "station_id",
+        "agent",
+        "kind",
+        "key",
+    ];
+    NAMES
+        .iter()
+        .filter_map(|name| {
+            let value = input.get(*name)?.as_str()?;
+            super::checks::identifier(name, value)
+                .ok()
+                .map(|()| ((*name).to_owned(), value.to_owned()))
+        })
+        .collect()
+}
+
 /// Whether a call of read tool `name` whose text quotes a route's answer exposes the
 /// conversation.
 pub(crate) fn exposes(name: &str) -> bool {

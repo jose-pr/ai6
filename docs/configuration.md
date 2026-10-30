@@ -933,6 +933,9 @@ report; `unlocked_stale` when the desk starts.
 | `route_bytes` | 4 MiB | Bytes of an AI6 route's answer to one of her tools |
 | `result_chars` | 200,000 | Characters of one tool's answer she is given; longer is cut |
 | `author_chars` | 200 | Characters of a person's name and email on her commits |
+| `exposed_sources` | 16 | Sources a conversation lists as having exposed it (a proposal carries them as `exposed_by`) |
+| `source_bytes` | 200 | Bytes of one such source |
+| `proposal_reads` | 16 | Read tool calls of one turn a proposal lists as what she had read |
 | `audit_target_bytes` | 512 | Bytes of the target of an audit record of her actions |
 
 `[assistant.views]` bounds the views she shows ([Moneypenny](assistant.md#views-she-shows)).

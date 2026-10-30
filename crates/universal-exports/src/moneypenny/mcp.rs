@@ -178,9 +178,13 @@ pub(crate) async fn endpoint(
                 let (outcome, quoted) = tools::run(&gateway, &granted.bearer, name, &input).await;
                 // Marked before she reads the text, so whatever waits on exposure waits; a
                 // refusal quoting the route's answer can carry others' text as well as a result.
-                if quoted && tools::exposes(name) {
-                    assistant.mark_exposed(&granted.conversation_id);
-                }
+                let source = (quoted && tools::exposes(name)).then(|| format!("tool:{name}"));
+                assistant.note_read(
+                    &granted.conversation_id,
+                    name,
+                    tools::identifiers(&input),
+                    source.as_deref(),
+                );
                 outcome
             };
             answer(

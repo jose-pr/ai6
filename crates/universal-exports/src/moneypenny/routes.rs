@@ -8,9 +8,10 @@
 //! pages and fields. The app's `OoRoute` parses the same forms and gives the same reasons;
 //! `clients/outer-office/test/fixtures/assistant_routes.json` holds the cases both test.
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::checks::identifier;
+use super::tools::Call;
 
 /// The longest `text` filter by default, in bytes.
 pub(crate) const DEFAULT_TEXT_BYTES: usize = 128;
@@ -568,6 +569,84 @@ fn encode(text: &str) -> String {
 }
 
 /// Decodes `%XX` sequences; everything else is taken as written. `+` is not a space.
+/// The page a write tool's request changes, as a route: where the person looks to see it.
+/// `None` for a request that changes no page of the app (a shared repository, a Cable, a
+/// memory file) and for one this does not know.
+pub(crate) fn opens(tool: &str, call: &Call) -> Option<Route> {
+    let path = call.path.split('?').next()?;
+    let parts: Vec<String> = path
+        .trim_start_matches('/')
+        .split('/')
+        .map(|part| decode("path", part))
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+    let route = match (tool, parts.as_slice()) {
+        ("propose_roster_edit" | "propose_roster_removal", ["v1", "user", "roster", kind, key]) => {
+            let kind = match *kind {
+                "operations" => "operation",
+                "agents" => "agent",
+                "roles" => "role",
+                "covers" => "cover",
+                "assistant" => "assistant",
+                _ => return None,
+            };
+            json!({"page": "roster", "kind": kind, "key": key})
+        }
+        (
+            "propose_class_authorization",
+            [
+                "v1",
+                "user",
+                "operations",
+                operation,
+                "class-authorizations",
+            ],
+        ) => json!({"page": "green_ink", "tab": "classes", "operation_id": operation}),
+        (
+            "propose_held_brief_decision",
+            ["v1", "user", "operations", operation, "held-briefs", key, _],
+        ) => json!({
+            "page": "briefings", "tab": "held", "operation_id": operation, "item_id": key
+        }),
+        (
+            "propose_mission_proposal_decision",
+            [
+                "v1",
+                "user",
+                "operations",
+                operation,
+                "mission-proposals",
+                proposal,
+                _,
+            ],
+        ) => json!({
+            "page": "briefings", "tab": "proposals", "operation_id": operation,
+            "item_id": proposal
+        }),
+        ("propose_mission", ["v1", "user", "operations", operation, "missions"]) => {
+            json!({"page": "missions", "operation_id": operation, "state": ["queued"]})
+        }
+        (
+            "propose_mission_control",
+            [
+                "v1",
+                "user",
+                "operations",
+                operation,
+                "missions",
+                mission,
+                "actions",
+            ],
+        ) => json!({"page": "missions", "operation_id": operation, "mission_id": mission}),
+        ("propose_station_settings", ["v1", "user", "stations", station, "settings"]) => {
+            json!({"page": "stations", "station_id": station, "tab": "settings"})
+        }
+        _ => return None,
+    };
+    Route::from_json(&route, Limits::default()).ok()
+}
+
 fn decode(name: &str, text: &str) -> Result<String, String> {
     let refused = || format!("{name} is not percent-encoded UTF-8");
     let bytes = text.as_bytes();

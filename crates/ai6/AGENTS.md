@@ -505,7 +505,7 @@ pub struct AssistantGatewayLimits { pub conversations_per_person, conversations,
     tool_calls_per_minute, memory_requests_per_person, memory_requests, proposals,
     message_bytes, memory_message_bytes, change_message_chars, recap_bytes, ready_entries,
     ready_bytes, socket_message_bytes, route_bytes, result_chars, author_chars,
-    audit_target_bytes: Limit, pub conversation_age: TimeLimit, pub event_buffer: u64,
+    audit_target_bytes, exposed_sources, source_bytes, proposal_reads: Limit, pub conversation_age: TimeLimit, pub event_buffer: u64,
     pub token_ttl, token_reuse_margin, answer_timeout, answer_deadline, memory_timeout,
     proposal_ttl, hello_timeout, max_wait, sweep_every, shared_base_wait: Seconds }
 // each: validate() -> Result<(), String> refuses only what cannot work ("assistant.<table>.<key>:

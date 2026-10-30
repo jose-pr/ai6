@@ -550,7 +550,14 @@ groups and their own; `skills`: `AssistantSettings::skills_for(person, groups)`,
 (`[assistant.skills]`) less what the same tables leave out; and `groups` (the person's
 Directory groups), so the Station re-caps both by its own roster's tables rather than trust the
 gateway's narrowing. Every job carries
-`exposed`, the conversation's one record of exposure (`Conversation.exposed`, never cleared):
+`exposed`, the conversation's one record of exposure (`Conversation.exposed`, never cleared;
+`Conversation.exposed_by` lists what raised it, at most 16 sources of 200 bytes, `tool:NAME`
+for a read tool or the Station's source as given, each once, and a proposal made then carries
+both as `exposed` and `exposed_by`; a proposal also carries `read`, the read tools called since
+the person's last message, at most 16, each `{tool, ids}` with only the identifier arguments
+`operation_id`, `mission_id`, `station_id`, `agent`, `kind` and `key`, and `opens`, the link
+of the page it changes (`app:/missions?operation_id=G&mission_id=m-1`, none for a shared
+change, Cable or memory file)):
 set once a read tool other than `field_guide`, `profile` and `station_settings` answers
 with text a route gave (a result, or a refusal quoting the route's answer: any status but
 401, 403, 404 and 503), before she gets the answer, when a Station reports a `tool` event naming

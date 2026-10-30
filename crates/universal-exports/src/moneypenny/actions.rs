@@ -46,6 +46,15 @@ pub(crate) struct Draft {
     pub(crate) summary: String,
 }
 
+/// What a proposal rests on when she makes it: the read tools she called this turn and
+/// whether, and by what, the conversation was exposed to text written outside AI6's records.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Evidence {
+    pub(crate) read: Vec<super::store::ReadCall>,
+    pub(crate) exposed: bool,
+    pub(crate) exposed_by: Vec<String>,
+}
+
 /// A proposal and where it stands.
 #[derive(Debug, Clone)]
 pub(crate) struct Proposal {
@@ -64,6 +73,8 @@ pub(crate) struct Proposal {
     /// For a Cable Moneypenny asked to send after reading outside text: the Station holding
     /// it, which sends it once confirmed. Such a proposal is not a gateway request.
     pub(crate) cable: Option<CableHold>,
+    /// What she had read when she made it.
+    pub(crate) evidence: Evidence,
 }
 
 /// Where a Cable waiting for the person's confirmation is held.
@@ -155,9 +166,11 @@ pub(crate) fn shared_change<'a>(
 }
 
 impl Proposal {
-    /// How the app shows it: the exact request, the summary and the status.
+    /// How the app shows it: the exact request, the summary and the status; with what she
+    /// had read (`read`, when she read anything this turn), `exposed` and `exposed_by` (only
+    /// when the conversation was exposed) and `opens`, the link of the page it changes.
     pub(crate) fn shown(&self) -> Value {
-        json!({
+        let mut shown = json!({
             "id": self.id,
             "tool": self.tool,
             "summary": self.draft.summary,
@@ -169,7 +182,18 @@ impl Proposal {
             "needs": {"action": self.draft.action, "on": self.draft.scope.resource()},
             "status": self.status,
             "result": self.result,
-        })
+        });
+        if !self.evidence.read.is_empty() {
+            shown["read"] = json!(self.evidence.read);
+        }
+        if self.evidence.exposed {
+            shown["exposed"] = Value::Bool(true);
+            shown["exposed_by"] = json!(self.evidence.exposed_by);
+        }
+        if let Some(route) = super::routes::opens(self.tool, &self.draft.call) {
+            shown["opens"] = Value::from(route.to_uri());
+        }
+        shown
     }
 }
 
@@ -761,6 +785,80 @@ mod tests {
             control.call.body,
             Some(json!({"action": "cancel", "idempotency_key": "p-7"}))
         );
+    }
+
+    #[test]
+    fn every_write_tool_opens_the_page_it_changes_through_a_route_that_round_trips() {
+        use super::super::routes::{Limits, Route, opens};
+        let limits = Limits::default();
+        let cases = [
+            (
+                "propose_class_authorization",
+                json!({"operation_id": "G", "kinds": ["push"], "target_pattern": "origin:*",
+                       "expires_in_secs": 60}),
+                Some("app:/green_ink?tab=classes&operation_id=G"),
+            ),
+            (
+                "propose_held_brief_decision",
+                json!({"operation_id": "G", "key": "source/1 x", "decision": "release"}),
+                Some("app:/briefings?tab=held&operation_id=G&item_id=source%2F1%20x"),
+            ),
+            (
+                "propose_mission",
+                json!({"operation_id": "G", "title": "t", "prompt": "p"}),
+                Some("app:/missions?operation_id=G&state=queued"),
+            ),
+            (
+                "propose_mission_control",
+                json!({"operation_id": "G", "mission_id": "m-1", "action": "cancel"}),
+                Some("app:/missions?operation_id=G&mission_id=m-1"),
+            ),
+            (
+                "propose_mission_proposal_decision",
+                json!({"operation_id": "G", "proposal_id": "pr-1", "decision": "approve"}),
+                Some("app:/briefings?tab=proposals&operation_id=G&item_id=pr-1"),
+            ),
+            (
+                "propose_roster_edit",
+                json!({"kind": "agents", "key": "007", "definition": {"handler": "claude"}}),
+                Some("app:/roster?kind=agent&key=007"),
+            ),
+            (
+                "propose_roster_removal",
+                json!({"kind": "covers", "key": "tourist"}),
+                Some("app:/roster?kind=cover&key=tourist"),
+            ),
+            (
+                "propose_station_settings",
+                json!({"station_id": "hq", "max_concurrent_missions": 4}),
+                Some("app:/stations?station_id=hq&tab=settings"),
+            ),
+        ];
+        for tool in write_tools() {
+            assert!(
+                cases.iter().any(|(name, _, _)| *name == tool.name),
+                "{} has a case",
+                tool.name
+            );
+        }
+        for (name, input, expected) in cases {
+            let tool = write_tools().iter().find(|tool| tool.name == name).unwrap();
+            let draft = tool.draft(&input, "p", None).unwrap();
+            let route = opens(name, &draft.call).unwrap_or_else(|| panic!("{name} opens"));
+            assert_eq!(Some(route.to_uri().as_str()), expected, "{name}");
+            assert_eq!(
+                Route::parse_uri(&route.to_uri(), limits),
+                Ok(route),
+                "{name}"
+            );
+        }
+        // A shared repository, a Cable and a memory file have no page.
+        let none = Call {
+            method: Method::POST,
+            path: "shared/ops/runbook.md".to_owned(),
+            body: None,
+        };
+        assert!(opens(SHARED_CHANGE, &none).is_none());
     }
 
     #[test]

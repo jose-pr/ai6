@@ -64,7 +64,7 @@ const ROLES: &str = r#"
     actions = ["mission.read"]
 
     [role.operator]
-    actions = ["mission.read", "audit.read", "cable.send", "cable.read"]
+    actions = ["mission.read", "mission.control", "audit.read", "cable.send", "cable.read"]
 
     [role.roster-reader]
     actions = ["roster.read", "roster.manage"]
@@ -1243,6 +1243,169 @@ async fn a_view_shown_after_reading_outside_text_is_stamped_exposed_and_svg_is_c
     );
     assert_eq!(views[1]["exposed"], true);
     assert_eq!(views[1]["view"], fixture["valid"]["graph"]);
+}
+
+#[tokio::test]
+async fn a_proposal_records_what_she_read_this_turn_and_the_page_it_opens() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Retry mission-g.").await;
+    let token = &job.mcp_token;
+
+    // Quiet reads expose nothing: the card lists them and carries no exposure.
+    call_tool(&served, token, "profile", json!({})).await;
+    call_tool(
+        &served,
+        token,
+        "station_settings",
+        json!({"station_id": "hq"}),
+    )
+    .await;
+    let proposed = call_tool(
+        &served,
+        token,
+        "propose_mission_control",
+        json!({"operation_id": "G", "mission_id": "mission-g", "action": "retry"}),
+    )
+    .await;
+    assert_eq!(proposed["isError"], false, "{proposed}");
+    let frames = finish(&served, &mut app, &job).await;
+    let proposal = proposal_of(&frames);
+    assert_eq!(
+        proposal["read"],
+        json!([
+            {"tool": "profile", "ids": {}},
+            {"tool": "station_settings", "ids": {"station_id": "hq"}},
+        ])
+    );
+    assert_eq!(
+        proposal["opens"],
+        "app:/missions?operation_id=G&mission_id=mission-g"
+    );
+    assert!(proposal.get("exposed").is_none(), "{proposal}");
+    assert!(proposal.get("exposed_by").is_none(), "{proposal}");
+
+    // A new message starts a new turn: she has read nothing yet.
+    say(&mut app, "Now retry it again.", None).await;
+    let job = take(&served, "hq").await;
+    let proposed = call_tool(
+        &served,
+        &job.mcp_token,
+        "propose_mission_control",
+        json!({"operation_id": "G", "mission_id": "mission-g", "action": "cancel"}),
+    )
+    .await;
+    assert_eq!(proposed["isError"], false, "{proposed}");
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "entry" && frame["entry"]["role"] == "proposal"
+    })
+    .await;
+    assert!(proposal_of(&frames).get("read").is_none());
+}
+
+#[tokio::test]
+async fn an_exposed_proposal_names_the_reads_that_exposed_it_and_keeps_identifiers_only() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Retry mission-g.").await;
+    let token = &job.mcp_token;
+    // A Mission's brief is outside text: reading it exposes the conversation.
+    let missions = call_tool(&served, token, "missions", json!({"operation_id": "G"})).await;
+    assert_eq!(missions["isError"], false, "{missions}");
+    let mission = call_tool(
+        &served,
+        token,
+        "mission",
+        json!({"operation_id": "G", "mission_id": "mission-g"}),
+    )
+    .await;
+    assert_eq!(mission["isError"], false, "{mission}");
+    let proposed = call_tool(
+        &served,
+        token,
+        "propose_mission_control",
+        json!({"operation_id": "G", "mission_id": "mission-g", "action": "retry"}),
+    )
+    .await;
+    assert_eq!(proposed["isError"], false, "{proposed}");
+    let frames = finish(&served, &mut app, &job).await;
+    let proposal = proposal_of(&frames);
+    assert_eq!(
+        proposal["read"],
+        json!([
+            {"tool": "missions", "ids": {"operation_id": "G"}},
+            {"tool": "mission", "ids": {"operation_id": "G", "mission_id": "mission-g"}},
+        ])
+    );
+    assert_eq!(proposal["exposed"], true);
+    assert_eq!(
+        proposal["exposed_by"],
+        json!(["tool:missions", "tool:mission"])
+    );
+    assert_eq!(
+        proposal["opens"],
+        "app:/missions?operation_id=G&mission_id=mission-g"
+    );
+}
+
+#[tokio::test]
+async fn a_station_reported_source_is_listed_as_given_and_once() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Look at my notes.").await;
+    for _ in 0..2 {
+        let response = reqwest::Client::new()
+            .post(format!("{}/v1/station/assistant/exposure", served.base))
+            .bearer_auth(STATION_TOKEN)
+            .json(&json!({
+                "station": "hq",
+                "conversation": job.conversation_id,
+                "source": "personal:notes/a.md",
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+    call_tool(
+        &served,
+        &job.mcp_token,
+        "propose_mission_control",
+        json!({"operation_id": "G", "mission_id": "mission-g", "action": "cancel"}),
+    )
+    .await;
+    let frames = finish(&served, &mut app, &job).await;
+    let proposal = proposal_of(&frames);
+    assert_eq!(proposal["exposed"], true);
+    assert_eq!(proposal["exposed_by"], json!(["personal:notes/a.md"]));
+}
+
+#[test]
+fn exposed_by_keeps_sixteen_sources_of_two_hundred_bytes() {
+    let gateway = ai6::AssistantGatewayLimits::default();
+    let mut conversation = Conversation::new("c".into(), "p".into(), "b".into(), 0.0, 8);
+    for index in 0..40 {
+        conversation.expose_by(&format!("tool:{index}-{}", "x".repeat(300)), &gateway);
+    }
+    assert_eq!(conversation.exposed_by.len(), 16);
+    assert!(
+        conversation
+            .exposed_by
+            .iter()
+            .all(|source| source.len() <= 200)
+    );
+    conversation.turn_reads.clear();
+    for _ in 0..40 {
+        conversation.note_read("missions", BTreeMap::new(), &gateway);
+    }
+    assert_eq!(conversation.turn_reads.len(), 16);
+
+    let narrow: ai6::AssistantGatewayLimits =
+        toml::from_str("exposed_sources = 2\nsource_bytes = 8\nproposal_reads = 1").unwrap();
+    let mut conversation = Conversation::new("c".into(), "p".into(), "b".into(), 0.0, 8);
+    for index in 0..5 {
+        conversation.expose_by(&format!("tool:{index}-long"), &narrow);
+        conversation.note_read("missions", BTreeMap::new(), &narrow);
+    }
+    assert_eq!(conversation.exposed_by, ["tool:0-lo", "tool:1-lo"]);
+    assert_eq!(conversation.turn_reads.len(), 1);
 }
 
 #[tokio::test]

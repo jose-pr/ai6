@@ -241,6 +241,13 @@ pub struct AssistantGatewayLimits {
     pub author_chars: Limit,
     /// Bytes of an audit record's target. Default 512.
     pub audit_target_bytes: Limit,
+    /// Sources a conversation lists as having exposed it, and a proposal carries as
+    /// `exposed_by`. Default 16.
+    pub exposed_sources: Limit,
+    /// Bytes of one such source. Default 200.
+    pub source_bytes: Limit,
+    /// Read tool calls of one turn a proposal lists as what she had read. Default 16.
+    pub proposal_reads: Limit,
 }
 
 impl Default for AssistantGatewayLimits {
@@ -279,6 +286,9 @@ impl Default for AssistantGatewayLimits {
             result_chars: Limit::at(200_000),
             author_chars: Limit::at(200),
             audit_target_bytes: Limit::at(512),
+            exposed_sources: Limit::at(16),
+            source_bytes: Limit::at(200),
+            proposal_reads: Limit::at(16),
         }
     }
 }
