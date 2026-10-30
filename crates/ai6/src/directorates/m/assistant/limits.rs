@@ -59,6 +59,12 @@ pub struct AssistantLimits {
     /// How deep `@path` imports from her memory are followed to find outside text; Claude
     /// Code follows five, so a smaller value is looser. Default 5.
     pub memory_import_depth: Limit,
+    /// Bytes of one file the Station reads to publish a page. Default 8 MiB.
+    pub page_file_bytes: Limit,
+    /// Files the Station reads to publish one page. Default 200.
+    pub page_files: Limit,
+    /// Bytes over all the files of one page the Station reads. Default 16 MiB.
+    pub page_bytes: Limit,
 }
 
 impl Default for AssistantLimits {
@@ -82,6 +88,9 @@ impl Default for AssistantLimits {
             memory_bytes: Limit::at(8 * MIB),
             memory_walk: Limit::at(10_000),
             memory_import_depth: Limit::at(5),
+            page_file_bytes: Limit::at(8 * MIB),
+            page_files: Limit::at(200),
+            page_bytes: Limit::at(16 * MIB),
         }
     }
 }
@@ -293,6 +302,165 @@ impl Default for AssistantGatewayLimits {
     }
 }
 
+/// What a page may reach from the browser, `[assistant.pages] network`.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PageNetwork {
+    /// Anything: the page loads and fetches from any host. The default.
+    #[default]
+    Open,
+    /// Only its own files and feeds, `data:` and `blob:`.
+    Own,
+    /// Its own files only: no feeds, no outside request.
+    None,
+}
+
+impl PageNetwork {
+    /// The word as the record and the app spell it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Own => "own",
+            Self::None => "none",
+        }
+    }
+
+    /// The tighter of two profiles.
+    #[must_use]
+    pub fn tighter(self, other: Self) -> Self {
+        if self.rank() >= other.rank() {
+            self
+        } else {
+            other
+        }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Self::Open => 0,
+            Self::Own => 1,
+            Self::None => 2,
+        }
+    }
+}
+
+/// `[assistant.pages]`: the pages she publishes and how Universal Exports serves them. Pages
+/// are open by default (scripts, network, feeds, the frame); an administrator may restrict
+/// any of it, and raise or lower any quota, which is a plain change and never a weakening.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AssistantPageLimits {
+    /// Bytes of one file of a page. Default 8 MiB.
+    pub max_file_bytes: Limit,
+    /// Bytes of one page. Default 16 MiB.
+    pub max_page_bytes: Limit,
+    /// Files of one page. Default 200.
+    pub max_page_files: Limit,
+    /// Pages one person keeps. Default 50.
+    pub max_pages: Limit,
+    /// Bytes of all one person's pages. Default 64 MiB.
+    pub max_person_bytes: Limit,
+    /// Bytes of all pages on one gateway. Default 2 GiB.
+    pub max_total_bytes: Limit,
+    /// Bytes of an inline page's content. Default 192 KiB.
+    pub inline_bytes: Limit,
+    /// Characters of a page's title. Default 120.
+    pub title_chars: Limit,
+    /// Feeds one dashboard declares. Default 8.
+    pub max_feeds: Limit,
+    /// Feed reads one link makes in a minute. Default 60.
+    pub feed_reads_per_minute: Limit,
+    /// Pages Universal Exports keeps staged from Stations at once. Default 64.
+    pub staged_uploads: Limit,
+    /// Seconds a page lives unless remembered. Default 1 day.
+    pub default_ttl: Seconds,
+    /// Seconds a link to a page is valid. Default 1 hour.
+    pub open_ttl: Seconds,
+    /// Seconds a publish waits for the Station's files. Default 30.
+    pub upload_wait: Seconds,
+    /// Seconds a staged upload no call claims is kept. Default 300.
+    pub stage_ttl: Seconds,
+    /// Seconds between sweeps of expired pages, links and staged uploads. Default 60.
+    pub sweep_every: Seconds,
+    /// Whether a page's scripts run. Default true.
+    pub scripts: bool,
+    /// What a page may reach from the browser. Default `open`.
+    pub network: PageNetwork,
+    /// Whether dashboards may read live feeds. Default true.
+    pub feeds: bool,
+    /// Whether a page is shown in the gateway's frame with the classification bar. A page
+    /// made after she read outside text always is. Default true.
+    pub frame: bool,
+    /// Whether a person may share a page. Default true.
+    pub sharing: bool,
+}
+
+impl Default for AssistantPageLimits {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: Limit::at(8 * MIB),
+            max_page_bytes: Limit::at(16 * MIB),
+            max_page_files: Limit::at(200),
+            max_pages: Limit::at(50),
+            max_person_bytes: Limit::at(64 * MIB),
+            max_total_bytes: Limit::at(2 * 1024 * MIB),
+            inline_bytes: Limit::at(192 * KIB),
+            title_chars: Limit::at(120),
+            max_feeds: Limit::at(8),
+            feed_reads_per_minute: Limit::at(60),
+            staged_uploads: Limit::at(64),
+            default_ttl: Seconds::new(24 * 3_600),
+            open_ttl: Seconds::new(3_600),
+            upload_wait: Seconds::new(30),
+            stage_ttl: Seconds::new(300),
+            sweep_every: Seconds::new(60),
+            scripts: true,
+            network: PageNetwork::Open,
+            feeds: true,
+            frame: true,
+            sharing: true,
+        }
+    }
+}
+
+impl AssistantPageLimits {
+    /// Checks what cannot work: a lifetime, a wait or a sweep of zero, a quota of zero.
+    ///
+    /// # Errors
+    ///
+    /// Names the first key that is not acceptable.
+    pub fn validate(&self) -> Result<(), String> {
+        for (key, seconds) in [
+            ("default_ttl", self.default_ttl),
+            ("open_ttl", self.open_ttl),
+            ("upload_wait", self.upload_wait),
+            ("stage_ttl", self.stage_ttl),
+            ("sweep_every", self.sweep_every),
+        ] {
+            if seconds.0.is_zero() {
+                return Err(format!("assistant.pages.{key}: more than 0"));
+            }
+        }
+        at_least_one(
+            "assistant.pages",
+            &[
+                ("max_file_bytes", self.max_file_bytes),
+                ("max_page_bytes", self.max_page_bytes),
+                ("max_page_files", self.max_page_files),
+                ("max_pages", self.max_pages),
+                ("max_person_bytes", self.max_person_bytes),
+                ("max_total_bytes", self.max_total_bytes),
+                ("inline_bytes", self.inline_bytes),
+                ("title_chars", self.title_chars),
+                ("feed_reads_per_minute", self.feed_reads_per_minute),
+                ("staged_uploads", self.staged_uploads),
+            ],
+        )
+    }
+}
+
 /// The keys of each table that pace work rather than bound it: never a weakening.
 const DESK_PACE: &[&str] = &[
     "token_margin",
@@ -413,6 +581,43 @@ impl AssistantGatewayLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_limits_default_open_validate_and_never_weaken() {
+        let pages = AssistantPageLimits::default();
+        assert!(pages.validate().is_ok());
+        assert!(pages.scripts && pages.feeds && pages.frame && pages.sharing);
+        assert_eq!(pages.network, PageNetwork::Open);
+        let set: AssistantPageLimits = serde_json::from_str(
+            r#"{"max_pages": 500, "network": "own", "scripts": false, "default_ttl": 3600}"#,
+        )
+        .unwrap();
+        assert_eq!(set.network, PageNetwork::Own);
+        assert!(!set.scripts);
+        assert_eq!(set.max_pages.get(), Some(500));
+        assert!(
+            serde_json::from_str::<AssistantPageLimits>(r#"{"nonsense": 1}"#).is_err(),
+            "unknown keys are refused"
+        );
+        let zero: AssistantPageLimits = serde_json::from_str(r#"{"max_pages": 0}"#).unwrap();
+        assert_eq!(
+            zero.validate(),
+            Err("assistant.pages.max_pages: at least 1".to_owned())
+        );
+        let ttl: AssistantPageLimits = serde_json::from_str(r#"{"open_ttl": 0}"#).unwrap();
+        assert_eq!(
+            ttl.validate(),
+            Err("assistant.pages.open_ttl: more than 0".to_owned())
+        );
+        assert_eq!(
+            PageNetwork::Open.tighter(PageNetwork::None),
+            PageNetwork::None
+        );
+        assert_eq!(
+            PageNetwork::Own.tighter(PageNetwork::Open),
+            PageNetwork::Own
+        );
+    }
 
     #[test]
     fn defaults_have_no_weakening_and_a_wider_bound_is_one() {

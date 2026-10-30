@@ -415,7 +415,32 @@ pub struct UnexBootstrap {
     /// `[plugins]`, as in `ai6.cfg`.
     #[serde(default)]
     pub plugins: PluginSettings,
+    /// `[pages]`: where the pages Moneypenny publishes are kept and served from.
+    #[serde(default)]
+    pub pages: PagesSettings,
 }
+
+/// `unex.cfg`'s `[pages]`: pages are kept in a directory (so remembered ones outlive a
+/// restart) and served under `/pages/` on the API's origin unless they have an origin of
+/// their own. Quotas and options are the roster's `[assistant.pages]`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PagesSettings {
+    /// Where pages are kept. Default `pages` beside `unex.cfg` (the working directory
+    /// without one).
+    pub dir: Option<PathBuf>,
+    /// The pages' own origin, such as `https://pages.example.net`, served by a second
+    /// listener that holds only page routes. Without one, pages share the API's origin by
+    /// design, and nothing is logged about it.
+    pub origin: Option<String>,
+    /// The loopback address of that second listener. Default 127.0.0.1:7083.
+    pub listen: Option<SocketAddr>,
+}
+
+/// The default address of the pages' own listener.
+pub const DEFAULT_PAGES_LISTEN: SocketAddr =
+    SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 7083);
 
 impl UnexBootstrap {
     /// Finds `unex.cfg` ([`SearchPath`] for [`UNEX_FILE_NAME`] and [`UNEX_CONFIG_ENV`]) and
@@ -448,11 +473,28 @@ impl UnexBootstrap {
         value.provider.resolve(dir);
         value.registry.resolve(dir);
         value.plugins.resolve(dir);
+        value.pages.dir = value.pages.dir.map(|pages| beside(dir, &pages));
         Ok(value)
     }
 }
 
 impl Located<UnexBootstrap> {
+    /// Where pages are kept: `[pages] dir`, else `pages` beside `unex.cfg`, else `pages` in
+    /// the working directory.
+    pub fn pages_dir(&self) -> PathBuf {
+        match &self.value.pages.dir {
+            Some(dir) => dir.clone(),
+            None => self
+                .dir()
+                .map_or_else(|| PathBuf::from("pages"), |dir| dir.join("pages")),
+        }
+    }
+
+    /// The pages' own listener: `[pages] listen`, else [`DEFAULT_PAGES_LISTEN`].
+    pub fn pages_listen(&self) -> SocketAddr {
+        self.value.pages.listen.unwrap_or(DEFAULT_PAGES_LISTEN)
+    }
+
     /// The state directory: the file's `state_dir`, else [`platform_state_dir`].
     ///
     /// # Errors

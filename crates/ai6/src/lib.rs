@@ -30,7 +30,8 @@ pub use directorates::m::approvals::{
 };
 pub use directorates::m::assistant::{
     AssistantDeskLimits, AssistantGatewayLimits, AssistantLimits, AssistantNarrowing,
-    AssistantSettings, AssistantViewLimits, NetworkPolicy, RepoKind, SharedRepo, SkillEntry,
+    AssistantPageLimits, AssistantSettings, AssistantViewLimits, NetworkPolicy, PageNetwork,
+    RepoKind, SharedRepo, SkillEntry,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::m::config::SqlProvider;
@@ -190,14 +191,14 @@ pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_ENV_PREFIX, ASSISTANT_CABLE_MCP_SERVER, ASSISTANT_CABLE_MCP_TOKEN_ENV,
     ASSISTANT_CABLE_MCP_URL_ENV, ASSISTANT_MCP_ENV_PREFIX, ASSISTANT_MCP_PATH,
     ASSISTANT_MCP_SERVER, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV,
-    ASSISTANT_SHARED_CHANGE_TOOL, AssistantCable, AssistantCableDecision, AssistantCableGrant,
-    AssistantChange, AssistantCommit, AssistantEvent, AssistantJob, AssistantReach,
-    AssistantReport, AssistantSharedBase, AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED,
-    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
-    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAction, MemoryAnswer, MemoryCommit, MemoryFile,
-    MemoryOp, SCRIPT_ENVIRONMENT, credential_dir_var, host_pattern, interpreter_name, memory_path,
-    outside_tool,
+    ASSISTANT_PUBLISH_PAGE_TOOL, ASSISTANT_SHARED_CHANGE_TOOL, AssistantCable,
+    AssistantCableDecision, AssistantCableGrant, AssistantChange, AssistantCommit, AssistantEvent,
+    AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantSharedBase,
+    AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL,
+    EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
+    EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAction,
+    MemoryAnswer, MemoryCommit, MemoryFile, MemoryOp, SCRIPT_ENVIRONMENT, credential_dir_var,
+    host_pattern, interpreter_name, memory_path, outside_tool, page_call_digest,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

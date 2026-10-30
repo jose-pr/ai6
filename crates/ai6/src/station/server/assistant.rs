@@ -63,10 +63,11 @@ use crate::directorates::section_00::agent::{
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
-    AssistantJob, AssistantReach, AssistantReport, AssistantSharedBase, COMMIT_MEMORY,
-    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES, EVENT_NOTICE,
-    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
+    AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantSharedBase,
+    COMMIT_MEMORY, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED,
+    EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES,
+    EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
+    page_call_digest,
 };
 use crate::guatiao::library::Object;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
@@ -388,6 +389,26 @@ pub(super) trait Exposure: Send + Sync {
     /// `cable.read` on `operation` now, asked before every Cable call.
     #[cfg(feature = "cables-mcp")]
     fn standing(&self, conversation: &str, operation: &str) -> Result<Standing, String>;
+    /// Uploads one file of the page `publish_page` is publishing for `conversation`, the call
+    /// being named by `digest` ([`page_call_digest`]).
+    fn upload_page_file(
+        &self,
+        _conversation: &str,
+        _digest: &str,
+        _path: &str,
+        _bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        Err("no Universal Exports to upload to".to_owned())
+    }
+    /// Ends that upload with the manifest of what was sent, or the reason nothing was.
+    fn finish_page(
+        &self,
+        _conversation: &str,
+        _digest: &str,
+        _manifest: Result<Vec<AssistantPageFile>, String>,
+    ) -> Result<(), String> {
+        Err("no Universal Exports to upload to".to_owned())
+    }
 }
 
 /// No Universal Exports to ask: every answer is an error, which the desk reads as exposed.
@@ -1782,6 +1803,33 @@ struct Pump {
     reaching: bool,
 }
 
+/// The source reported for a call of the outside tool `tool` (`outside_tool`): its name, and
+/// for `WebFetch` the host it fetches (`tool:WebFetch docs.example`). Only the host, never the
+/// path or query, which may hold what the person typed.
+fn outside_source(tool: &str, data: Option<&[u8]>) -> String {
+    let host = (tool == "WebFetch")
+        .then(|| {
+            let value: serde_json::Value = serde_json::from_slice(data?).ok()?;
+            let url = value
+                .pointer("/message/content")?
+                .as_array()?
+                .iter()
+                .find(|block| {
+                    block.get("type").and_then(serde_json::Value::as_str) == Some("tool_use")
+                        && block.get("name").and_then(serde_json::Value::as_str) == Some(tool)
+                })?
+                .pointer("/input/url")?
+                .as_str()?
+                .to_owned();
+            Url::parse(&url).ok()?.host_str().map(str::to_owned)
+        })
+        .flatten();
+    match host {
+        Some(host) => format!("tool:{tool} {host}"),
+        None => format!("tool:{tool}"),
+    }
+}
+
 /// A fresh start for a conversation whose harness was resumed.
 struct Fallback {
     harness: Arc<dyn Harness>,
@@ -1844,6 +1892,7 @@ impl Pump {
                     if !event.tools.is_empty() {
                         self.note_tools(&event.tools, event.data.as_deref());
                         shared = self.shared_bases(&event);
+                        self.publish_pages(&event);
                     }
                     let ended = matches!(event.kind.as_str(), "failed" | LIMIT_EVENT);
                     let mut stopped = false;
@@ -2018,8 +2067,8 @@ impl Pump {
     /// conversation too. Either way a failure to tell Universal Exports is told again when the
     /// turn ends.
     fn note_tools(&self, tools: &[String], data: Option<&[u8]>) {
-        if tools.iter().any(|tool| outside_tool(tool, self.reaching)) {
-            self.expose("tool:outside-text");
+        if let Some(tool) = tools.iter().find(|tool| outside_tool(tool, self.reaching)) {
+            self.expose(&outside_source(tool, data));
         }
         let Some(workspace) = &self.workspace else {
             return;
@@ -2030,6 +2079,46 @@ impl Pump {
             .and_then(|mut workspace| workspace.note_tools(tools, data))
         {
             self.expose(&source);
+        }
+    }
+
+    /// Uploads the files of each `publish_page` call of `event` that names a `path`, to
+    /// Universal Exports, which holds the page; a call that cannot be read is refused there
+    /// with the reason. The upload runs on its own thread: reading and sending a page does not
+    /// hold up the harness's events.
+    fn publish_pages(&self, event: &AgentEvent) {
+        let Some(workspace) = self.workspace.clone() else {
+            return;
+        };
+        for path in Workspace::page_calls(event.data.as_deref()) {
+            let (workspace, exposure) = (workspace.clone(), self.exposure.clone());
+            let conversation = self.conversation_id.clone();
+            let digest = page_call_digest(&path);
+            let spawned = std::thread::Builder::new()
+                .name("ai6-assistant-page".to_owned())
+                .spawn(move || {
+                    let files = match workspace.lock() {
+                        Ok(workspace) => workspace.page_files(&path),
+                        Err(_) => Err("the workspace is not available".to_owned()),
+                    };
+                    let manifest = files.and_then(|files| {
+                        let mut manifest = Vec::new();
+                        for (file, bytes) in files {
+                            exposure.upload_page_file(&conversation, &digest, &file.path, bytes)?;
+                            manifest.push(file);
+                        }
+                        Ok(manifest)
+                    });
+                    if let Err(reason) = exposure.finish_page(&conversation, &digest, manifest) {
+                        eprintln!(
+                            "ai6: assistant conversation {}: a page was not published: {reason}",
+                            conversation_digest(&conversation)
+                        );
+                    }
+                });
+            if let Err(error) = spawned {
+                eprintln!("ai6: assistant page upload could not start: {error}");
+            }
         }
     }
 
@@ -2557,6 +2646,41 @@ impl Exposure for Link {
             .ok_or_else(|| "Universal Exports did not say".to_owned())
     }
 
+    fn upload_page_file(
+        &self,
+        conversation: &str,
+        digest: &str,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        let endpoint = self.page_endpoint(conversation, digest, Some(path))?;
+        self.agent(Duration::from_secs(60))
+            .put(endpoint.as_str())
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .send(&bytes[..])
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    fn finish_page(
+        &self,
+        conversation: &str,
+        digest: &str,
+        manifest: Result<Vec<AssistantPageFile>, String>,
+    ) -> Result<(), String> {
+        let endpoint = self.page_endpoint(conversation, digest, None)?;
+        let body = match manifest {
+            Ok(files) => serde_json::json!({"files": files}),
+            Err(reason) => serde_json::json!({"refused": reason}),
+        };
+        self.agent(Duration::ZERO)
+            .post(endpoint.as_str())
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .send_json(body)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     #[cfg(feature = "cables-mcp")]
     fn standing(&self, conversation: &str, operation: &str) -> Result<Standing, String> {
         let answer = self.ask(conversation, Some(operation))?;
@@ -2574,6 +2698,34 @@ impl Exposure for Link {
 }
 
 impl Link {
+    /// `{pages endpoint}/{digest}[/{path}]` with the Station and conversation as its query.
+    fn page_endpoint(
+        &self,
+        conversation: &str,
+        digest: &str,
+        path: Option<&str>,
+    ) -> Result<Url, String> {
+        let mut endpoint = self
+            .origin
+            .join("v1/station/assistant/pages/")
+            .map_err(|error| error.to_string())?;
+        {
+            let mut segments = endpoint
+                .path_segments_mut()
+                .map_err(|()| "the origin cannot hold a path".to_owned())?;
+            segments.pop_if_empty().push(digest);
+            match path {
+                Some(path) => segments.extend(path.split('/')),
+                None => segments.push("done"),
+            };
+        }
+        endpoint
+            .query_pairs_mut()
+            .append_pair("station", &self.station)
+            .append_pair("conversation", conversation);
+        Ok(endpoint)
+    }
+
     /// `GET /v1/station/assistant/exposure` about `conversation`, and its person's Cable
     /// permissions on `operation` when one is named.
     fn ask(
@@ -6212,9 +6364,33 @@ event_bytes = 7
             marks
                 .iter()
                 .any(|(conversation, source)| conversation == "c-x"
-                    && source.contains("outside-text")),
+                    && source.starts_with("tool:WebFetch")),
             "{marks:?}"
         );
+    }
+
+    #[test]
+    fn an_outside_call_is_reported_by_tool_and_for_a_fetch_by_host() {
+        let fetch = serde_json::json!({"message": {"content": [
+            {"type": "tool_use", "name": "WebFetch",
+             "input": {"url": "https://docs.example/a/b?q=secret#x"}}]}})
+        .to_string();
+        assert_eq!(
+            outside_source("WebFetch", Some(fetch.as_bytes())),
+            "tool:WebFetch docs.example",
+            "the host only, never the path or query"
+        );
+        assert_eq!(
+            outside_source("WebFetch", Some(b"not json")),
+            "tool:WebFetch"
+        );
+        assert_eq!(outside_source("WebFetch", None), "tool:WebFetch");
+        assert_eq!(
+            outside_source("WebSearch", Some(fetch.as_bytes())),
+            "tool:WebSearch"
+        );
+        assert_eq!(outside_source("Bash", None), "tool:Bash");
+        assert_eq!(outside_source("exec_command", None), "tool:exec_command");
     }
 
     /// A catalog of two skills under `catalog`, each pinned as `ai6 assistant pin-skill`

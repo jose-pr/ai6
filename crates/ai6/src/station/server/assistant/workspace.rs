@@ -39,8 +39,9 @@ use crate::directorates::q::safehouse::{
     SafeHouseSpec,
 };
 use crate::directorates::section_00::assistant::{
-    ASSISTANT_MCP_SERVER, ASSISTANT_SHARED_CHANGE_TOOL, AssistantChange, AssistantCommit,
-    AssistantSharedBase, AssistantWorkspace, COMMIT_MEMORY, repository_path,
+    ASSISTANT_MCP_SERVER, ASSISTANT_PUBLISH_PAGE_TOOL, ASSISTANT_SHARED_CHANGE_TOOL,
+    AssistantChange, AssistantCommit, AssistantPageFile, AssistantSharedBase, AssistantWorkspace,
+    COMMIT_MEMORY, repository_path,
 };
 use crate::station::safehouse::SafeHouse;
 
@@ -302,6 +303,23 @@ impl Workspace {
             })
             .take(self.limits.shared_bases.or_max())
             .collect()
+    }
+
+    /// The files `publish_page` publishes from `path`, a file or a directory under `personal/`
+    /// or `scratch/`, each read to its cap: nothing outside those two, no `..`, no hidden name
+    /// and no link is followed, and a file or a page past the page limits is refused, never
+    /// cut. A file the record of outside text lists comes back `outside_text`.
+    pub(super) fn page_files(
+        &self,
+        path: &str,
+    ) -> Result<Vec<(AssistantPageFile, Vec<u8>)>, String> {
+        read_page(self.area(), path, &self.limits, &self.outside)
+    }
+
+    /// The `path` of each [`ASSISTANT_PUBLISH_PAGE_TOOL`] call in a harness event's raw line
+    /// that names one, in either harness's spelling.
+    pub(super) fn page_calls(data: Option<&[u8]>) -> Vec<String> {
+        publish_page_paths(data)
     }
 
     /// Her working directory, holding `personal/`.
@@ -1233,6 +1251,128 @@ fn shared_change_calls(data: Option<&[u8]>) -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// What [`Workspace::page_files`] reads for `path` under `area`.
+fn read_page(
+    area: &Path,
+    path: &str,
+    limits: &AssistantLimits,
+    outside: &BTreeSet<String>,
+) -> Result<Vec<(AssistantPageFile, Vec<u8>)>, String> {
+    use std::io::Read;
+    let mut parts = path.split('/');
+    let root = parts.next().unwrap_or_default();
+    let rest: Vec<&str> = parts.collect();
+    if (root != PERSONAL && root != SCRATCH)
+        || rest.is_empty()
+        || path.contains('\\')
+        || rest
+            .iter()
+            .any(|part| part.is_empty() || *part == "." || *part == ".." || part.starts_with('.'))
+    {
+        return Err(format!(
+            "{path:?} is not a path under personal/ or scratch/ without hidden names"
+        ));
+    }
+    let target = in_tree(area, path);
+    no_links(area, &target).map_err(|error| error.to_string())?;
+    let mut found: Vec<(String, PathBuf)> = Vec::new();
+    let name = rest.last().copied().unwrap_or(root).to_owned();
+    let single = fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.is_file());
+    walk(&target, &name, &mut |key, file| {
+        found.push((
+            if single {
+                name.clone()
+            } else {
+                key[name.len() + 1..].to_owned()
+            },
+            file.to_path_buf(),
+        ));
+    });
+    if found.is_empty() {
+        return Err(format!("{path} holds no file she may publish"));
+    }
+    if !limits.page_files.allows(found.len()) {
+        return Err(format!("{path} has more than {} files", limits.page_files));
+    }
+    found.sort();
+    let mut total = 0usize;
+    let mut files = Vec::new();
+    for (relative, file) in found {
+        let cap = limits.page_file_bytes.or_max();
+        let mut bytes = Vec::new();
+        open_plain(&file)
+            .ok_or_else(|| format!("{relative} is not a plain file"))?
+            .take(cap.saturating_add(1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("{relative}: {error}"))?;
+        if !limits.page_file_bytes.allows(bytes.len()) {
+            return Err(format!(
+                "{relative} is longer than {} bytes",
+                limits.page_file_bytes
+            ));
+        }
+        total += bytes.len();
+        if !limits.page_bytes.allows(total) {
+            return Err(format!(
+                "{path} is longer than {} bytes in all",
+                limits.page_bytes
+            ));
+        }
+        let under_personal = root == PERSONAL;
+        let key = if single {
+            rest.join("/")
+        } else if rest.is_empty() {
+            relative.clone()
+        } else {
+            format!("{}/{relative}", rest.join("/"))
+        };
+        files.push((
+            AssistantPageFile {
+                path: relative,
+                bytes: bytes.len() as u64,
+                sha256: sha256_hex(&bytes),
+                outside_text: under_personal && outside.contains(&key),
+            },
+            bytes,
+        ));
+    }
+    Ok(files)
+}
+
+/// The `path` of each [`ASSISTANT_PUBLISH_PAGE_TOOL`] call in a harness event's raw line, as
+/// Claude Code's `stream-json` writes it or as Codex's app server announces it; a call with
+/// no `path` (inline content) is not listed.
+fn publish_page_paths(data: Option<&[u8]>) -> Vec<String> {
+    let tool = format!("mcp__{ASSISTANT_MCP_SERVER}__{ASSISTANT_PUBLISH_PAGE_TOOL}");
+    let Some(value) = data.and_then(|data| serde_json::from_slice::<serde_json::Value>(data).ok())
+    else {
+        return Vec::new();
+    };
+    if value.get("method").and_then(serde_json::Value::as_str) == Some("item/started") {
+        let item = value.pointer("/params/item");
+        let text = |pointer: &str| item?.pointer(pointer)?.as_str();
+        if text("/type") == Some("mcpToolCall")
+            && text("/server") == Some(ASSISTANT_MCP_SERVER)
+            && text("/tool") == Some(ASSISTANT_PUBLISH_PAGE_TOOL)
+            && let Some(path) = text("/arguments/path")
+        {
+            return vec![path.to_owned()];
+        }
+        return Vec::new();
+    }
+    value
+        .pointer("/message/content")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|block| {
+            block.get("type").and_then(serde_json::Value::as_str) == Some("tool_use")
+                && block.get("name").and_then(serde_json::Value::as_str) == Some(tool.as_str())
+        })
+        .filter_map(|block| Some(block.pointer("/input/path")?.as_str()?.to_owned()))
+        .collect()
+}
+
 /// The hex SHA-256 of the plain file `path`'s bytes, opened as [`open_plain`] opens it.
 fn file_digest(path: &Path) -> Option<String> {
     use sha2::{Digest, Sha256};
@@ -1406,6 +1546,131 @@ mod tests {
             read_text(&area, &personal.join("notes").join("a.md"), FILE).as_deref(),
             Some("a")
         );
+    }
+
+    fn page_area() -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let area = root.path().join("area");
+        fs::create_dir_all(area.join(PERSONAL).join("site").join("img")).unwrap();
+        fs::create_dir_all(area.join(PERSONAL).join(".git")).unwrap();
+        fs::create_dir_all(area.join(SCRATCH)).unwrap();
+        let site = area.join(PERSONAL).join("site");
+        fs::write(site.join("index.html"), "<h1>hi</h1>").unwrap();
+        fs::write(site.join("app.js"), "1").unwrap();
+        fs::write(site.join("img").join("a.png"), [1u8, 2, 3]).unwrap();
+        fs::write(site.join(".secret"), "no").unwrap();
+        fs::write(area.join(PERSONAL).join(".git").join("config"), "no").unwrap();
+        fs::write(area.join(SCRATCH).join("run.log"), "line\n").unwrap();
+        (root, area)
+    }
+
+    #[test]
+    fn a_page_is_read_from_personal_or_scratch_with_its_manifest() {
+        let (_root, area) = page_area();
+        let outside = BTreeSet::from(["site/index.html".to_owned()]);
+        let files = read_page(&area, "personal/site", &limits(), &outside).unwrap();
+        let listed: Vec<_> = files.iter().map(|(file, _)| file.path.as_str()).collect();
+        assert_eq!(
+            listed,
+            ["app.js", "img/a.png", "index.html"],
+            "hidden names are left"
+        );
+        let index = &files[2];
+        assert_eq!(index.0.bytes, 11);
+        assert_eq!(index.0.sha256, sha256_hex(b"<h1>hi</h1>"));
+        assert!(index.0.outside_text);
+        assert!(!files[0].0.outside_text);
+        assert_eq!(index.1, b"<h1>hi</h1>");
+        // One file, from either root; the log is not under personal, so it is not recorded.
+        let single = read_page(&area, "scratch/run.log", &limits(), &outside).unwrap();
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0].0.path, "run.log");
+        let one = read_page(&area, "personal/site/index.html", &limits(), &outside).unwrap();
+        assert_eq!(
+            (one[0].0.path.as_str(), one[0].0.outside_text),
+            ("index.html", true)
+        );
+    }
+
+    #[test]
+    fn a_page_path_outside_her_roots_or_with_a_hidden_name_is_refused() {
+        let (_root, area) = page_area();
+        let none = BTreeSet::new();
+        for refused in [
+            "../x",
+            "personal/../x",
+            "personal/.git/config",
+            "personal/site/.secret",
+            ".git/config",
+            "shared/org/x",
+            "memory/MEMORY.md",
+            "personal//site",
+            r"personal\site",
+            "personal/missing",
+            "personal",
+        ] {
+            assert!(
+                read_page(&area, refused, &limits(), &none).is_err(),
+                "{refused} was read"
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_is_never_read_through_a_link() {
+        let (root, area) = page_area();
+        let outside = root.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.html"), "secret").unwrap();
+        link_directory(&outside, &area.join(PERSONAL).join("linked"));
+        let none = BTreeSet::new();
+        assert!(read_page(&area, "personal/linked", &limits(), &none).is_err());
+        assert!(read_page(&area, "personal/linked/secret.html", &limits(), &none).is_err());
+        // A link inside a bundle is skipped, not followed.
+        link_directory(&outside, &area.join(PERSONAL).join("site").join("link"));
+        let files = read_page(&area, "personal/site", &limits(), &none).unwrap();
+        assert!(files.iter().all(|(file, _)| !file.path.starts_with("link")));
+    }
+
+    #[test]
+    fn a_page_past_the_limits_is_refused_not_cut() {
+        let (_root, area) = page_area();
+        let none = BTreeSet::new();
+        let small: AssistantLimits = serde_json::from_str(r#"{"page_file_bytes": 10}"#).unwrap();
+        let error = read_page(&area, "personal/site", &small, &none).unwrap_err();
+        assert!(
+            error.contains("index.html") || error.contains("longer"),
+            "{error}"
+        );
+        let few: AssistantLimits = serde_json::from_str(r#"{"page_files": 2}"#).unwrap();
+        assert!(read_page(&area, "personal/site", &few, &none).is_err());
+        let total: AssistantLimits = serde_json::from_str(r#"{"page_bytes": 12}"#).unwrap();
+        assert!(read_page(&area, "personal/site", &total, &none).is_err());
+    }
+
+    #[test]
+    fn a_publish_call_is_read_from_either_harness() {
+        let claude = serde_json::json!({"message": {"content": [
+            {"type": "tool_use", "name": "mcp__moneypenny__publish_page",
+             "input": {"kind": "dashboard", "title": "t", "path": "personal/site"}},
+            {"type": "tool_use", "name": "mcp__moneypenny__publish_page",
+             "input": {"kind": "file", "title": "t", "content": "x", "format": "text"}},
+            {"type": "tool_use", "name": "mcp__other__publish_page",
+             "input": {"path": "personal/x"}}
+        ]}});
+        assert_eq!(
+            publish_page_paths(Some(claude.to_string().as_bytes())),
+            ["personal/site"]
+        );
+        let codex = serde_json::json!({"method": "item/started", "params": {"item": {
+            "type": "mcpToolCall", "server": "moneypenny", "tool": "publish_page",
+            "arguments": {"path": "scratch/run.log"}}}});
+        assert_eq!(
+            publish_page_paths(Some(codex.to_string().as_bytes())),
+            ["scratch/run.log"]
+        );
+        assert!(publish_page_paths(Some(b"not json")).is_empty());
+        assert!(publish_page_paths(None).is_empty());
     }
 
     #[cfg(unix)]

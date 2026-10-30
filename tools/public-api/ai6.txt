@@ -92,6 +92,8 @@ pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::state_dir(&self) -> c
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::listen(&self) -> core::net::socket_addr::SocketAddr
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::pages_dir(&self) -> std::path::PathBuf
+pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::pages_listen(&self) -> core::net::socket_addr::SocketAddr
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::provider_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::proxy_secret_min_bytes(&self) -> u64
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
@@ -100,6 +102,10 @@ pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::state_dir(&self) 
 pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl<T> ai6::bootstrap::Located<T>
 pub fn ai6::bootstrap::Located<T>::dir(&self) -> core::option::Option<&std::path::Path>
+#[non_exhaustive] pub struct ai6::bootstrap::PagesSettings
+pub ai6::bootstrap::PagesSettings::dir: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::PagesSettings::listen: core::option::Option<core::net::socket_addr::SocketAddr>
+pub ai6::bootstrap::PagesSettings::origin: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::bootstrap::PluginSettings
 pub ai6::bootstrap::PluginSettings::paths: alloc::vec::Vec<std::path::PathBuf>
 pub ai6::bootstrap::PluginSettings::profile: core::option::Option<ai6::directorates::registry::bona_fides::PluginProfile>
@@ -135,6 +141,7 @@ pub fn ai6::bootstrap::SearchPath::new(&str, &str, core::option::Option<&std::pa
 pub ai6::bootstrap::SecretSettings::dir: core::option::Option<std::path::PathBuf>
 #[non_exhaustive] pub struct ai6::bootstrap::UnexBootstrap
 pub ai6::bootstrap::UnexBootstrap::listen: core::option::Option<core::net::socket_addr::SocketAddr>
+pub ai6::bootstrap::UnexBootstrap::pages: ai6::bootstrap::PagesSettings
 pub ai6::bootstrap::UnexBootstrap::plugins: ai6::bootstrap::PluginSettings
 pub ai6::bootstrap::UnexBootstrap::provider: ai6::bootstrap::ProviderSettings
 pub ai6::bootstrap::UnexBootstrap::proxy_secret: core::option::Option<ai6::bootstrap::SecretRef>
@@ -151,6 +158,7 @@ pub ai6::bootstrap::UnexSettings::token: core::option::Option<ai6::bootstrap::Se
 pub ai6::bootstrap::UnexSettings::url: alloc::string::String
 pub const ai6::bootstrap::CONFIG_ENV: &str
 pub const ai6::bootstrap::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
+pub const ai6::bootstrap::DEFAULT_PAGES_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::bootstrap::DEFAULT_POLL: core::time::Duration
 pub const ai6::bootstrap::DEFAULT_PROXY_SECRET_MIN_BYTES: u64
 pub const ai6::bootstrap::DEFAULT_UNEX_LISTEN: core::net::socket_addr::SocketAddr
@@ -294,6 +302,13 @@ pub ai6::directorates::m::assistant::NetworkPolicy::Limited
 pub ai6::directorates::m::assistant::NetworkPolicy::Open
 impl ai6::directorates::m::assistant::NetworkPolicy
 pub fn ai6::directorates::m::assistant::NetworkPolicy::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::directorates::m::assistant::PageNetwork
+pub ai6::directorates::m::assistant::PageNetwork::None
+pub ai6::directorates::m::assistant::PageNetwork::Open
+pub ai6::directorates::m::assistant::PageNetwork::Own
+impl ai6::PageNetwork
+pub fn ai6::PageNetwork::as_str(self) -> &'static str
+pub fn ai6::PageNetwork::tighter(self, Self) -> Self
 #[non_exhaustive] pub enum ai6::directorates::m::assistant::RepoKind
 pub ai6::directorates::m::assistant::RepoKind::Local
 pub ai6::directorates::m::assistant::RepoKind::Remote
@@ -384,6 +399,9 @@ pub ai6::directorates::m::assistant::AssistantLimits::memory_list_bytes: ai6::bo
 pub ai6::directorates::m::assistant::AssistantLimits::memory_list_files: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::memory_walk: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::message_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantLimits::page_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantLimits::page_file_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantLimits::page_files: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::shared_bases: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::skills: ai6::bounds::Limit
 impl ai6::AssistantLimits
@@ -401,6 +419,32 @@ pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_interpreters(se
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_network(self, ai6::directorates::m::assistant::NetworkPolicy) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_skills(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantNarrowing::with_unsandboxed_scripts(self, bool) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::assistant::AssistantPageLimits
+pub ai6::directorates::m::assistant::AssistantPageLimits::default_ttl: ai6::bounds::Seconds
+pub ai6::directorates::m::assistant::AssistantPageLimits::feed_reads_per_minute: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::feeds: bool
+pub ai6::directorates::m::assistant::AssistantPageLimits::frame: bool
+pub ai6::directorates::m::assistant::AssistantPageLimits::inline_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::max_feeds: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::max_file_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::max_page_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::max_page_files: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::max_pages: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::max_person_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::max_total_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::network: ai6::PageNetwork
+pub ai6::directorates::m::assistant::AssistantPageLimits::open_ttl: ai6::bounds::Seconds
+pub ai6::directorates::m::assistant::AssistantPageLimits::scripts: bool
+pub ai6::directorates::m::assistant::AssistantPageLimits::sharing: bool
+pub ai6::directorates::m::assistant::AssistantPageLimits::stage_ttl: ai6::bounds::Seconds
+pub ai6::directorates::m::assistant::AssistantPageLimits::staged_uploads: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::sweep_every: ai6::bounds::Seconds
+pub ai6::directorates::m::assistant::AssistantPageLimits::title_chars: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::upload_wait: ai6::bounds::Seconds
+impl ai6::AssistantPageLimits
+pub fn ai6::AssistantPageLimits::validate(&self) -> core::result::Result<(), alloc::string::String>
+impl core::default::Default for ai6::AssistantPageLimits
+pub fn ai6::AssistantPageLimits::default() -> Self
 pub struct ai6::directorates::m::assistant::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
@@ -416,6 +460,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::limits(&self) -> &ai6
 pub fn ai6::directorates::m::assistant::AssistantSettings::network(&self) -> ai6::directorates::m::assistant::NetworkPolicy
 pub fn ai6::directorates::m::assistant::AssistantSettings::new() -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::org(&self) -> core::option::Option<&ai6::directorates::m::assistant::SharedRepo>
+pub fn ai6::directorates::m::assistant::AssistantSettings::pages(&self) -> &ai6::AssistantPageLimits
 pub fn ai6::directorates::m::assistant::AssistantSettings::personal_repo(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::m::assistant::AssistantSettings::personal_repo_for(&self, &str) -> core::result::Result<core::option::Option<alloc::string::String>, alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::reach_for(&self, &str, &[alloc::string::String]) -> ai6::directorates::section_00::assistant::AssistantReach
@@ -439,6 +484,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::with_interpreters(sel
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_limits(self, ai6::AssistantLimits) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_network(self, ai6::directorates::m::assistant::NetworkPolicy, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_org(self, ai6::directorates::m::assistant::SharedRepo) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_pages(self, ai6::AssistantPageLimits) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_person(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_personal_repo(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_shared(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::SharedRepo) -> Self
@@ -4698,6 +4744,11 @@ impl ai6::directorates::section_00::assistant::AssistantJob
 pub fn ai6::directorates::section_00::assistant::AssistantJob::validate(&self, &ai6::AssistantLimits) -> core::result::Result<(), alloc::string::String>
 impl core::fmt::Debug for ai6::directorates::section_00::assistant::AssistantJob
 pub fn ai6::directorates::section_00::assistant::AssistantJob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::section_00::assistant::AssistantPageFile
+pub ai6::directorates::section_00::assistant::AssistantPageFile::bytes: u64
+pub ai6::directorates::section_00::assistant::AssistantPageFile::outside_text: bool
+pub ai6::directorates::section_00::assistant::AssistantPageFile::path: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantPageFile::sha256: alloc::string::String
 pub struct ai6::directorates::section_00::assistant::AssistantReach
 pub ai6::directorates::section_00::assistant::AssistantReach::interpreters: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantReach::network: ai6::directorates::section_00::agent::AssistantNetwork
@@ -4757,6 +4808,7 @@ pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_PATH: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_SERVER: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_TOKEN_ENV: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_MCP_URL_ENV: &str
+pub const ai6::directorates::section_00::assistant::ASSISTANT_PUBLISH_PAGE_TOOL: &str
 pub const ai6::directorates::section_00::assistant::ASSISTANT_SHARED_CHANGE_TOOL: &str
 pub const ai6::directorates::section_00::assistant::COMMIT_MEMORY: &str
 pub const ai6::directorates::section_00::assistant::COMMIT_SHARED: &str
@@ -4779,6 +4831,7 @@ pub fn ai6::directorates::section_00::assistant::host_pattern(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::interpreter_name(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::memory_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::outside_tool(&str, bool) -> bool
+pub fn ai6::directorates::section_00::assistant::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::directorates::section_00::assistant::repository_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::valid_identity(&str) -> bool
 pub mod ai6::directorates::section_00::denied
@@ -5473,6 +5526,13 @@ impl ai6::directorates::registry::bona_fides::Origin
 pub const fn ai6::directorates::registry::bona_fides::Origin::as_str(self) -> &'static str
 impl core::fmt::Display for ai6::directorates::registry::bona_fides::Origin
 pub fn ai6::directorates::registry::bona_fides::Origin::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::PageNetwork
+pub ai6::PageNetwork::None
+pub ai6::PageNetwork::Open
+pub ai6::PageNetwork::Own
+impl ai6::PageNetwork
+pub fn ai6::PageNetwork::as_str(self) -> &'static str
+pub fn ai6::PageNetwork::tighter(self, Self) -> Self
 #[non_exhaustive] pub enum ai6::PinCheck
 pub ai6::PinCheck::Accepted(alloc::string::String)
 pub ai6::PinCheck::Refused(alloc::string::String)
@@ -6132,6 +6192,9 @@ pub ai6::AssistantLimits::memory_list_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::memory_list_files: ai6::bounds::Limit
 pub ai6::AssistantLimits::memory_walk: ai6::bounds::Limit
 pub ai6::AssistantLimits::message_bytes: ai6::bounds::Limit
+pub ai6::AssistantLimits::page_bytes: ai6::bounds::Limit
+pub ai6::AssistantLimits::page_file_bytes: ai6::bounds::Limit
+pub ai6::AssistantLimits::page_files: ai6::bounds::Limit
 pub ai6::AssistantLimits::shared_bases: ai6::bounds::Limit
 pub ai6::AssistantLimits::skills: ai6::bounds::Limit
 impl ai6::AssistantLimits
@@ -6174,6 +6237,37 @@ pub fn ai6::directorates::section_00::agent::AssistantNetwork::open(&self) -> bo
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::reaches_nothing(&self) -> bool
 impl core::default::Default for ai6::directorates::section_00::agent::AssistantNetwork
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::default() -> Self
+pub struct ai6::AssistantPageFile
+pub ai6::AssistantPageFile::bytes: u64
+pub ai6::AssistantPageFile::outside_text: bool
+pub ai6::AssistantPageFile::path: alloc::string::String
+pub ai6::AssistantPageFile::sha256: alloc::string::String
+#[non_exhaustive] pub struct ai6::AssistantPageLimits
+pub ai6::AssistantPageLimits::default_ttl: ai6::bounds::Seconds
+pub ai6::AssistantPageLimits::feed_reads_per_minute: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::feeds: bool
+pub ai6::AssistantPageLimits::frame: bool
+pub ai6::AssistantPageLimits::inline_bytes: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::max_feeds: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::max_file_bytes: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::max_page_bytes: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::max_page_files: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::max_pages: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::max_person_bytes: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::max_total_bytes: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::network: ai6::PageNetwork
+pub ai6::AssistantPageLimits::open_ttl: ai6::bounds::Seconds
+pub ai6::AssistantPageLimits::scripts: bool
+pub ai6::AssistantPageLimits::sharing: bool
+pub ai6::AssistantPageLimits::stage_ttl: ai6::bounds::Seconds
+pub ai6::AssistantPageLimits::staged_uploads: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::sweep_every: ai6::bounds::Seconds
+pub ai6::AssistantPageLimits::title_chars: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::upload_wait: ai6::bounds::Seconds
+impl ai6::AssistantPageLimits
+pub fn ai6::AssistantPageLimits::validate(&self) -> core::result::Result<(), alloc::string::String>
+impl core::default::Default for ai6::AssistantPageLimits
+pub fn ai6::AssistantPageLimits::default() -> Self
 pub struct ai6::AssistantReach
 pub ai6::AssistantReach::interpreters: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantReach::network: ai6::directorates::section_00::agent::AssistantNetwork
@@ -6205,6 +6299,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::limits(&self) -> &ai6
 pub fn ai6::directorates::m::assistant::AssistantSettings::network(&self) -> ai6::directorates::m::assistant::NetworkPolicy
 pub fn ai6::directorates::m::assistant::AssistantSettings::new() -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::org(&self) -> core::option::Option<&ai6::directorates::m::assistant::SharedRepo>
+pub fn ai6::directorates::m::assistant::AssistantSettings::pages(&self) -> &ai6::AssistantPageLimits
 pub fn ai6::directorates::m::assistant::AssistantSettings::personal_repo(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::m::assistant::AssistantSettings::personal_repo_for(&self, &str) -> core::result::Result<core::option::Option<alloc::string::String>, alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::reach_for(&self, &str, &[alloc::string::String]) -> ai6::directorates::section_00::assistant::AssistantReach
@@ -6228,6 +6323,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::with_interpreters(sel
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_limits(self, ai6::AssistantLimits) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_network(self, ai6::directorates::m::assistant::NetworkPolicy, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_org(self, ai6::directorates::m::assistant::SharedRepo) -> Self
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_pages(self, ai6::AssistantPageLimits) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_person(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::AssistantNarrowing) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_personal_repo(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_shared(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::assistant::SharedRepo) -> Self
@@ -8529,6 +8625,7 @@ pub const ai6::ASSISTANT_MCP_PATH: &str
 pub const ai6::ASSISTANT_MCP_SERVER: &str
 pub const ai6::ASSISTANT_MCP_TOKEN_ENV: &str
 pub const ai6::ASSISTANT_MCP_URL_ENV: &str
+pub const ai6::ASSISTANT_PUBLISH_PAGE_TOOL: &str
 pub const ai6::ASSISTANT_SHARED_CHANGE_TOOL: &str
 pub const ai6::BRIEF_EXPOSURE_KEY: &str
 pub const ai6::BRIEF_REGISTRY_DROP: &str
@@ -9256,6 +9353,7 @@ pub fn ai6::load_role_authorizer(impl core::convert::AsRef<std::path::Path>, ai6
 pub fn ai6::memory_path(&str) -> bool
 pub fn ai6::micro_usd(f64) -> u64
 pub fn ai6::outside_tool(&str, bool) -> bool
+pub fn ai6::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities, &ai6::station::limits::ProvisionLimits) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
 pub fn ai6::read_review(&str, &ai6::station::limits::VettingLimits) -> ai6::directorates::m::vetting::Vetting

@@ -508,6 +508,18 @@ pub struct AssistantGatewayLimits { pub conversations_per_person, conversations,
     audit_target_bytes, exposed_sources, source_bytes, proposal_reads: Limit, pub conversation_age: TimeLimit, pub event_buffer: u64,
     pub token_ttl, token_reuse_margin, answer_timeout, answer_deadline, memory_timeout,
     proposal_ttl, hello_timeout, max_wait, sweep_every, shared_base_wait: Seconds }
+pub struct AssistantPageLimits { pub max_file_bytes, max_page_bytes, max_page_files, max_pages,
+    max_person_bytes, max_total_bytes, inline_bytes, title_chars, max_feeds, feed_reads_per_minute,
+    staged_uploads: Limit, pub default_ttl, open_ttl, upload_wait, stage_ttl, sweep_every: Seconds,
+    pub scripts, feeds, frame, sharing: bool, pub network: PageNetwork }   // [assistant.pages]; open by
+    // default; validate() refuses a zero; never a weakening (a quota moves either way)
+#[non_exhaustive] pub enum PageNetwork { Open, Own, None }   // serde lowercase; as_str(), tighter(other)
+impl AssistantSettings { pub fn pages(&self) -> &AssistantPageLimits;
+                         pub fn with_pages(self, pages: AssistantPageLimits) -> Self; }
+// AssistantLimits also page_file_bytes (8 MiB), page_files (200), page_bytes (16 MiB): what a
+// Station reads of a page. AssistantPageFile { path, bytes, sha256, outside_text } is the manifest
+// entry of an upload; page_call_digest(path) -> String matches an upload to its publish_page call;
+// ASSISTANT_PUBLISH_PAGE_TOOL = "publish_page".
 // each: validate() -> Result<(), String> refuses only what cannot work ("assistant.<table>.<key>:
 // at least 1"); weakenings() -> Vec<String>, one line per bound looser than its default
 // (bounds::looser; pace keys left out; memory_import_depth: smaller is looser)
@@ -767,7 +779,9 @@ pub struct SecretSettings { dir: Option<PathBuf> }
 pub struct UnexSettings { url: String, token: Option<SecretRef> }  // a url alone publishes nothing
 pub struct Bootstrap { station, state_dir, listen, provider, registry, identity, plugins, secrets: SecretSettings, unex: Option<UnexSettings> }
 pub struct UnexBootstrap { listen, public_origin: Option<String>, station_token: Option<SecretRef>,
-    proxy_secret: Option<SecretRef>, state_dir, provider, registry, plugins }
+    proxy_secret: Option<SecretRef>, state_dir, provider, registry, plugins, pages: PagesSettings }
+pub struct PagesSettings { dir: Option<PathBuf>, origin: Option<String>, listen: Option<SocketAddr> }
+pub const DEFAULT_PAGES_LISTEN: SocketAddr;                              // 127.0.0.1:7083
 impl ProviderSettings { pub fn poll(&self) -> Duration;                    // DEFAULT_POLL; 0 turns reload off
                         pub fn limits(&self) -> ConfigLimits; }
 impl RegistrySettings { pub fn headquarters_lease(&self) -> Duration;      // DEFAULT_LEASE
@@ -791,7 +805,8 @@ impl Located<Bootstrap> {
     pub fn listen(&self) -> SocketAddr;
     pub fn weakenings(&self) -> Vec<String>;                             // each Env or Inline secret
 }
-// Located<UnexBootstrap>: state_dir, provider_location, registry_location, registry_password, listen, weakenings
+// Located<UnexBootstrap>: state_dir, provider_location, registry_location, registry_password, listen, weakenings,
+//   pages_dir (else pages/ beside unex.cfg), pages_listen
 pub struct SearchPath { pub explicit: Option<PathBuf>, pub variable: Option<(String, PathBuf)>, pub candidates: Vec<PathBuf> }
 impl SearchPath { pub fn new(name: &str, variable: &str, explicit: Option<&Path>) -> Self;
     pub fn locate(&self) -> Result<Option<PathBuf>, BootstrapError>; }   // NotFound for a named file that is missing
