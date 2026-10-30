@@ -170,6 +170,9 @@ pub struct AssistantViewLimits {
     /// How deep an SVG drawing nests its elements (default 16).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub svg_depth: Option<u64>,
+    /// Bytes of the label of a page she offers with `navigate` (default 120).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub navigate_label_bytes: Option<u64>,
 }
 
 impl AssistantViewLimits {
@@ -198,6 +201,7 @@ impl AssistantViewLimits {
             ("svg_bytes", self.svg_bytes),
             ("svg_elements", self.svg_elements),
             ("svg_depth", self.svg_depth),
+            ("navigate_label_bytes", self.navigate_label_bytes),
         ]
         .into_iter()
         .filter_map(|(key, value)| value.map(|value| (key, value)))

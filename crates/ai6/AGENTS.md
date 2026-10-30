@@ -386,7 +386,7 @@ pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, wr
 #[non_exhaustive] #[derive(Default, Serialize, Deserialize)]
 pub struct AssistantViewLimits { pub blocks, view_bytes, text_bytes, short_bytes, columns,
     rows, items, series, points, pie_slices, diff_bytes, fields, schedule_rows, graph_nodes,
-    graph_edges, svg_bytes, svg_elements, svg_depth: Option<u64> }
+    graph_edges, svg_bytes, svg_elements, svg_depth, navigate_label_bytes: Option<u64> }
 impl AssistantViewLimits { pub fn set(&self) -> Vec<(&'static str, u64)>; }  // the ones given
 impl AssistantSettings {
     pub fn new() -> Self;   // keeps nothing, python3 in the sandbox, no host, no skill, refuses elevated Stations

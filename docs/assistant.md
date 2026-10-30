@@ -733,6 +733,7 @@ the `assistant` record), each at least 1; Universal Exports reads them when it s
 | `schedule_rows` | rows of a schedule | 50 |
 | `graph_nodes`, `graph_edges` | nodes and edges of a graph | 60, 120 |
 | `svg_bytes`, `svg_elements`, `svg_depth` | bytes, elements and nesting of a drawing | 32768, 2000, 16 |
+| `navigate_label_bytes` | bytes of the label of a [page she points to](#pages-she-points-to) | 120 |
 
 ```toml
 [assistant.views]
@@ -747,7 +748,7 @@ The app is sent the bounds with each conversation and checks views against the s
 When a page of the app answers better than a table, such as "the failed Missions of G", she
 offers it with her `navigate` tool: `{"to": ROUTE, "label": TEXT}`, the route in its JSON form
 (`{"page": "missions", "operation_id": "G", "state": ["failed"]}`) and a few words on why
-(at most `short_bytes`, 512 by default). Universal Exports checks the route as it checks every
+(at most `navigate_label_bytes`, 120 by default). Universal Exports checks the route as it checks every
 route and refuses one that is not valid with the reason ("Navigation refused: …"), so the
 app never receives it. A valid one is a card in the chat: the page's name and every field of
 the route as chips, which the app builds from the route itself, her label beneath, and

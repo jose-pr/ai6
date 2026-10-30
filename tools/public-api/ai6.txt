@@ -313,6 +313,7 @@ pub ai6::directorates::m::assistant::AssistantViewLimits::fields: core::option::
 pub ai6::directorates::m::assistant::AssistantViewLimits::graph_edges: core::option::Option<u64>
 pub ai6::directorates::m::assistant::AssistantViewLimits::graph_nodes: core::option::Option<u64>
 pub ai6::directorates::m::assistant::AssistantViewLimits::items: core::option::Option<u64>
+pub ai6::directorates::m::assistant::AssistantViewLimits::navigate_label_bytes: core::option::Option<u64>
 pub ai6::directorates::m::assistant::AssistantViewLimits::pie_slices: core::option::Option<u64>
 pub ai6::directorates::m::assistant::AssistantViewLimits::points: core::option::Option<u64>
 pub ai6::directorates::m::assistant::AssistantViewLimits::rows: core::option::Option<u64>
@@ -5516,6 +5517,7 @@ pub ai6::AssistantViewLimits::fields: core::option::Option<u64>
 pub ai6::AssistantViewLimits::graph_edges: core::option::Option<u64>
 pub ai6::AssistantViewLimits::graph_nodes: core::option::Option<u64>
 pub ai6::AssistantViewLimits::items: core::option::Option<u64>
+pub ai6::AssistantViewLimits::navigate_label_bytes: core::option::Option<u64>
 pub ai6::AssistantViewLimits::pie_slices: core::option::Option<u64>
 pub ai6::AssistantViewLimits::points: core::option::Option<u64>
 pub ai6::AssistantViewLimits::rows: core::option::Option<u64>

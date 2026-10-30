@@ -364,6 +364,11 @@ fn view_limits(record: &ai6::AssistantViewLimits) -> Result<ViewLimits, String> 
             &mut limits.svg_elements,
         ),
         ("svg_depth", record.svg_depth, &mut limits.svg_depth),
+        (
+            "navigate_label_bytes",
+            record.navigate_label_bytes,
+            &mut limits.navigate_label_bytes,
+        ),
     ] {
         if let Some(value) = value {
             *limit = usize::try_from(value)
@@ -647,9 +652,19 @@ mod tests {
             view_limits(record(serde_json::json!({})).views()).unwrap(),
             ViewLimits::default()
         );
-        let tuned = record(serde_json::json!({"views": {"svg_bytes": 65536, "graph_nodes": 100}}));
+        let tuned = record(serde_json::json!({"views": {
+            "svg_bytes": 65536, "graph_nodes": 100, "navigate_label_bytes": 200
+        }}));
         let tuned = view_limits(tuned.views()).unwrap();
-        assert_eq!((tuned.svg_bytes, tuned.graph_nodes), (65536, 100));
+        assert_eq!(
+            (
+                tuned.svg_bytes,
+                tuned.graph_nodes,
+                tuned.navigate_label_bytes
+            ),
+            (65536, 100, 200)
+        );
+        assert_eq!(ViewLimits::default().navigate_label_bytes, 120);
         assert_eq!(tuned.blocks, ViewLimits::default().blocks);
         let zero = record(serde_json::json!({"views": {"rows": 0}}));
         assert!(

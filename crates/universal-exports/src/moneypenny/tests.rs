@@ -1376,8 +1376,8 @@ async fn navigate_offers_each_valid_route_and_refuses_each_invalid_one_with_its_
             "the label is empty",
         ),
         (
-            json!({"to": {"page": "overview"}, "label": "x".repeat(513)}),
-            "the label is longer than 512 bytes or has control characters",
+            json!({"to": {"page": "overview"}, "label": "x".repeat(121)}),
+            "the label is longer than 120 bytes or has control characters",
         ),
     ] {
         let refused = call_tool(&served, token, "navigate", input.clone()).await;
@@ -1404,6 +1404,70 @@ async fn navigate_offers_each_valid_route_and_refuses_each_invalid_one_with_its_
     assert!(
         audits(&served, "moneypenny.confirmed").is_empty(),
         "navigation is not audited"
+    );
+}
+
+#[tokio::test]
+async fn a_navigation_label_is_held_to_its_own_setting() {
+    let to = json!({"page": "overview"});
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Where?").await;
+    let at_limit = call_tool(
+        &served,
+        &job.mcp_token,
+        "navigate",
+        json!({"to": to, "label": "é".repeat(60)}),
+    )
+    .await;
+    assert_eq!(at_limit["isError"], false, "120 bytes: {at_limit}");
+    let past = call_tool(
+        &served,
+        &job.mcp_token,
+        "navigate",
+        json!({"to": to, "label": format!("{}x", "é".repeat(60))}),
+    )
+    .await;
+    assert_eq!(
+        past["content"][0]["text"],
+        "Navigation refused: the label is longer than 120 bytes or has control characters"
+    );
+
+    let limits = crate::ViewLimits {
+        navigate_label_bytes: 4,
+        ..Default::default()
+    };
+    let served = served_with(AssistantConfig::default().with_view_limits(limits), None).await;
+    let (_app, job) = accepted(&served, &served.operator, "Where?").await;
+    let four = call_tool(
+        &served,
+        &job.mcp_token,
+        "navigate",
+        json!({"to": to, "label": "abcd"}),
+    )
+    .await;
+    assert_eq!(four["isError"], false, "{four}");
+    let five = call_tool(
+        &served,
+        &job.mcp_token,
+        "navigate",
+        json!({"to": to, "label": "abcde"}),
+    )
+    .await;
+    assert_eq!(five["isError"], true, "{five}");
+    let listed = mcp(&served, &job.mcp_token, "tools/list", json!({}))
+        .await
+        .json::<Value>()
+        .await
+        .unwrap();
+    let navigate = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "navigate")
+        .unwrap();
+    assert_eq!(
+        navigate["inputSchema"]["properties"]["label"]["maxLength"],
+        4
     );
 }
 

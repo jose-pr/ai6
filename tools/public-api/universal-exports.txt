@@ -288,6 +288,7 @@ pub universal_exports::ViewLimits::fields: usize
 pub universal_exports::ViewLimits::graph_edges: usize
 pub universal_exports::ViewLimits::graph_nodes: usize
 pub universal_exports::ViewLimits::items: usize
+pub universal_exports::ViewLimits::navigate_label_bytes: usize
 pub universal_exports::ViewLimits::pie_slices: usize
 pub universal_exports::ViewLimits::points: usize
 pub universal_exports::ViewLimits::rows: usize

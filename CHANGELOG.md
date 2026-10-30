@@ -125,7 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `[assistant.views]` (`AssistantViewLimits`, `AssistantSettings::views`, `ViewLimits`,
   `AssistantConfig::with_view_limits`), sent to the app with each conversation.
 - Moneypenny points to pages: her `navigate` tool (`{"to": ROUTE, "label": TEXT}`) offers an
-  app route, checked as every route is, as a `navigation` entry the app shows as a card with
+  app route, checked as every route is, with a label of at most `[assistant.views]
+  navigate_label_bytes` (120 by default), as a `navigation` entry the app shows as a card with
   the page and its filters as chips and **Open**. Opening only reads and is not audited; it
   is a browser history entry, docks an expanded chat and marks the page **Opened by
   Moneypenny**, as her links do. A per-person choice in her menu, **Open Moneypenny's links

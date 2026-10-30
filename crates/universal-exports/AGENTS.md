@@ -406,6 +406,7 @@ pub struct ViewLimits {   // Default: the value in each comment
     pub schedule_rows: usize /* 50 */, pub graph_nodes: usize /* 60 */,
     pub graph_edges: usize /* 120 */, pub svg_bytes: usize /* 32 KiB */,
     pub svg_elements: usize /* 2000 */, pub svg_depth: usize /* 16 */,
+    pub navigate_label_bytes: usize /* 120 */,
 }
 impl Gateway { pub fn with_assistant(self, config: AssistantConfig) -> Self; }
 ```
@@ -603,7 +604,7 @@ tool would, in the submitting socket's session (`refused` with the tool's answer
 
 The `navigate` tool (`readOnlyHint`) takes exactly `{"to": ROUTE, "label": TEXT}`: `to` an app
 route in its JSON form, checked by `routes.rs` (its schema is flat, `page` plus every field of
-any page; which fields a page takes is the parser's rule), `label` 1 to `short_bytes` bytes
+any page; which fields a page takes is the parser's rule), `label` 1 to `navigate_label_bytes` bytes
 without control characters but newlines. Anything else answers `isError` "Navigation refused:
 REASON" and adds nothing; a valid call adds a `navigation` entry, `data: {"id": "nav-<hex>",
 "route", "label", "exposed"?: true}`, and answers "Offered to the person as nav-…; the page

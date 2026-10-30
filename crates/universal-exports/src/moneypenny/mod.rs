@@ -2138,7 +2138,7 @@ struct Navigate {
 }
 
 /// The route and label of a `navigate` input: exactly `{"to": ROUTE, "label": TEXT}`, the
-/// route valid within `config`'s route limits and the label a short text of the views.
+/// route valid within `config`'s route limits and the label within `navigate_label_bytes`.
 fn navigation(input: &Value, config: &AssistantConfig) -> Result<(routes::Route, String), String> {
     let navigate: Navigate = serde_json::from_value(input.clone())
         .map_err(|_| "navigate takes exactly {\"to\": {\"page\": ...}, \"label\": \"...\"}")?;
@@ -2146,7 +2146,11 @@ fn navigation(input: &Value, config: &AssistantConfig) -> Result<(routes::Route,
     if navigate.label.trim().is_empty() {
         return Err("the label is empty".to_owned());
     }
-    checks::short_within("the label", &navigate.label, config.views.short_bytes)?;
+    checks::short_within(
+        "the label",
+        &navigate.label,
+        config.views.navigate_label_bytes,
+    )?;
     Ok((route, navigate.label))
 }
 

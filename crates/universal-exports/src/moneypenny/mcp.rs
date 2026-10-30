@@ -58,7 +58,7 @@ fn failure(id: &Value, code: i64, message: &str) -> Response {
 /// [`routes::schema`]), and a label.
 fn navigate_schema(limits: &views::ViewLimits) -> Value {
     let mut label = tools::text("Why this page, in a few words; the app titles the card itself.");
-    label["maxLength"] = Value::from(limits.short_bytes);
+    label["maxLength"] = Value::from(limits.navigate_label_bytes);
     tools::object(
         &[("to", routes::schema()), ("label", label)],
         &["to", "label"],
@@ -221,7 +221,7 @@ mod tests {
         let schema = &navigate["inputSchema"];
         assert_eq!(schema["additionalProperties"], false);
         assert_eq!(schema["required"], json!(["to", "label"]));
-        assert_eq!(schema["properties"]["label"]["maxLength"], 512);
+        assert_eq!(schema["properties"]["label"]["maxLength"], 120);
         let to = &schema["properties"]["to"];
         assert_eq!(to["additionalProperties"], false);
         assert_eq!(to["required"], json!(["page"]));
