@@ -79,9 +79,11 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `class-authorizations list\|revoke [<ID>] --operation <ID>` | Standing approvals of a kind of step (`approval.class`) |
 | `held-briefs list\|release\|refuse [<KEY>] --operation <ID> [--reason <TEXT>]` | Briefs vetting held, with what it found; release one to the queue or refuse it (`mission.create`) |
 
-Every command accepts `--server <ORIGIN>`. The control commands need `mission.control`
+Every command accepts `--server <ORIGIN>` and `--timeout <SECONDS>` (default 5, fractions allowed;
+`0` waits without limit), the time one HTTP request may take. The control commands need `mission.control`
 on the Mission's Operation, take `--operation <ID>` (found from the board when omitted),
-`--idempotency-key <KEY>` and `--wait <SECONDS>` (default 10; `0` returns once queued),
+`--idempotency-key <KEY>`, `--wait <SECONDS>` (default 10; `0` returns once queued) and
+`--poll-interval <SECONDS>` (default 0.5, how often they ask for the status while waiting),
 and print the control's `STATUS`, the Mission's `STATE` and any `REASON`.
 
 ## Environment variables

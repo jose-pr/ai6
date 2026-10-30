@@ -13,7 +13,14 @@ const DEFAULT_SERVER: &str = "http://127.0.0.1:7082";
 const SERVER_ENV: &str = "UNEX_URL";
 const ACCESS_TOKEN_ENV: &str = "UNEX_ACCESS_TOKEN";
 const DEFAULT_CONTROL_WAIT_SECS: u64 = 10;
-const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// A number of seconds, whole or fractional, finite and not negative.
+fn seconds(text: &str) -> Result<f64, String> {
+    match text.parse::<f64>() {
+        Ok(value) if value.is_finite() && value >= 0.0 => Ok(value),
+        _ => Err("seconds must be a finite number, 0 or more".to_owned()),
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,6 +37,9 @@ struct Cli {
     /// ai6.cfg in the user's, then the system's configuration directory).
     #[arg(long, value_name = "PATH", global = true)]
     config: Option<std::path::PathBuf>,
+    /// Seconds one HTTP request may take; 0 waits without limit.
+    #[arg(long, value_name = "SECONDS", global = true, default_value_t = 5.0, value_parser = seconds)]
+    timeout: f64,
     #[command(subcommand)]
     command: Command,
 }
@@ -374,6 +384,9 @@ struct ControlOptions {
     /// Seconds to wait for the Station's outcome; 0 returns once the control is queued.
     #[arg(long, default_value_t = DEFAULT_CONTROL_WAIT_SECS)]
     wait: u64,
+    /// Seconds between asks for the control's status while waiting.
+    #[arg(long, value_name = "SECONDS", default_value_t = 0.5, value_parser = seconds)]
+    poll_interval: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -517,9 +530,12 @@ fn origin(server: Option<&str>, config: Option<&std::path::Path>) -> Result<Stri
 async fn run() -> Result<(), String> {
     let cli = Cli::parse();
     let server = server_url(&origin(cli.server.as_deref(), cli.config.as_deref())?)?;
-    let client = Client::builder()
-        .timeout(Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none())
+    let mut builder = Client::builder().redirect(reqwest::redirect::Policy::none());
+    if cli.timeout > 0.0 {
+        builder =
+            builder.timeout(Duration::try_from_secs_f64(cli.timeout).unwrap_or(Duration::MAX));
+    }
+    let client = builder
         .build()
         .map_err(|_| "could not initialize the HTTP client".to_owned())?;
 
@@ -1545,7 +1561,10 @@ async fn control(
     while matches!(status.status.as_str(), "queued" | "delivered")
         && tokio::time::Instant::now() < deadline
     {
-        tokio::time::sleep(CONTROL_POLL_INTERVAL).await;
+        tokio::time::sleep(
+            Duration::try_from_secs_f64(options.poll_interval).unwrap_or(Duration::MAX),
+        )
+        .await;
         let response = control_status_request(client, server, access_token, &status)?
             .send()
             .await
@@ -2069,6 +2088,43 @@ mod tests {
                 .unwrap(),
             "Bearer user-token"
         );
+    }
+
+    #[test]
+    fn the_request_timeout_and_the_poll_interval_are_flags() {
+        use clap::CommandFactory;
+        let cli = Cli::try_parse_from([
+            "ai6ctl",
+            "--timeout",
+            "2.5",
+            "mission",
+            "cancel",
+            "m",
+            "--poll-interval",
+            "0.1",
+        ])
+        .unwrap();
+        assert_eq!(cli.timeout, 2.5);
+        let Command::Mission {
+            control: Some(MissionCommand::Cancel { target, .. }),
+            ..
+        } = cli.command
+        else {
+            panic!("a cancel");
+        };
+        assert_eq!(target.request.poll_interval, 0.1);
+        let defaults = Cli::try_parse_from(["ai6ctl", "health"]).unwrap();
+        assert_eq!(defaults.timeout, 5.0);
+        assert!(Cli::try_parse_from(["ai6ctl", "--timeout", "-1", "health"]).is_err());
+        assert!(Cli::try_parse_from(["ai6ctl", "--timeout", "soon", "health"]).is_err());
+        let mut root = Cli::command();
+        assert!(root.render_long_help().to_string().contains("--timeout"));
+        let help = root
+            .find_subcommand_mut("mission")
+            .and_then(|mission| mission.find_subcommand_mut("cancel"))
+            .map(|cancel| cancel.render_long_help().to_string())
+            .unwrap_or_default();
+        assert!(help.contains("--poll-interval"), "{help}");
     }
 
     #[test]

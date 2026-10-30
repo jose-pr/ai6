@@ -11,7 +11,8 @@ The crate has no library target.
 
 ## Commands
 
-All commands accept `--server <ORIGIN>` (env `UNEX_URL`) and `--config <PATH>`. The origin
+All commands accept `--server <ORIGIN>` (env `UNEX_URL`), `--config <PATH>` and `--timeout <SECONDS>`
+(default 5, fractions allowed, `0` for no limit: the time one HTTP request may take). The origin
 is `--server`, else `UNEX_URL`, else `[unex] url` of the `ai6.cfg` the `ai6` command would read
 (`--config`, `AI6_CONFIG`, the user's then the system's configuration directory; nothing else
 of it is read), else `http://127.0.0.1:7082`. The origin must have no credentials or path; HTTP is accepted
@@ -79,7 +80,7 @@ Mission lists include only Missions with a provider Session registered at the ga
 
 Each control needs `mission.control` on the Mission's Operation. It posts
 `POST /v1/user/operations/{operation}/missions/{mission}/actions`, then polls the
-control's status route every 500 ms until the Station reports or `--wait` runs out.
+control's status route every `--poll-interval` (0.5 s) until the Station reports or `--wait` runs out.
 
 - `ai6ctl mission cancel <MISSION_ID>` stops the live Session, if any, and abandons the
   Mission.
@@ -94,7 +95,7 @@ control's status route every 500 ms until the Station reports or `--wait` runs o
 Shared options: `--operation <ID>` (Mission commands only; found from the board when
 omitted, and required for a Mission with no registered Session), `--idempotency-key
 <KEY>` (default: unique per invocation; repeating a key returns the first request's
-control) and `--wait <SECONDS>` (default `10`; `0` returns once queued).
+control) `--wait <SECONDS>` (default `10`; `0` returns once queued) and `--poll-interval <SECONDS>` (default `0.5`).
 
 Output: a header `CONTROL\tACTION\tMISSION\tSTATION\tSTATUS\tSTATE\tREASON` and one row;
 `STATUS` is `queued`, `delivered`, `applied`, `rejected` or `expired`, `STATE` the
