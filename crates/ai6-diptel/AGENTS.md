@@ -203,7 +203,8 @@ pub const MAX_TERMINAL_BYTES: usize = 1_048_576;
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 16_384;
 ```
 
-These limits apply to the constructors documented above.
+These sizes apply to the constructors documented above. They are widths of the wire contract,
+shared with the Dart client and checked by the vectors, so they are not settings.
 
 ## Errors
 

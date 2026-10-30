@@ -9,6 +9,9 @@ use guatiao::value::convert::{FromValue, ToValue, TryAsRef};
 use guatiao::value::wire::channel::{self, Received, Receiver};
 use guatiao::{Alloc, Bytes, Map, Value};
 
+// The sizes below are widths of the wire contract, shared with the Dart client and checked by
+// `tests/vectors`: they are not settings.
+
 /// The largest accepted identity, in UTF-8 bytes.
 pub const MAX_ID_BYTES: usize = 256;
 /// The largest terminal data frame accepted by this protocol.

@@ -500,8 +500,10 @@ logged and sent at check-in as `tls_weakened`. The `unex` record takes `authenti
 `proxy_user_header`, `proxy_lookup_by`, `login_tries_per_address`, `login_tries_per_name`,
 `client_address_header`, `access_cache_ttl`, `access_cache_negative_ttl`,
 `access_cache_entries`, `assistant` (default `true`), `assistant_agent` (default
-`moneypenny`) and `route_text_bytes` (default 128, the longest `text` filter of an Outer
-Office page link Moneypenny's views and page context may carry). A credential written inline in one of those configurations is reported as a
+`moneypenny`), `route_text_bytes` (default 128, the longest `text` filter of an Outer
+Office page link Moneypenny's views and page context may carry), `provider_config_depth` and the
+tables `[gateway]`, `[controls]`, `[timeline]`, `[login]` and `[text]`
+([Universal Exports limits](#universal-exports-limits)). A credential written inline in one of those configurations is reported as a
 weakening: name a file there instead.
 
 ### Universal Exports limits
@@ -602,14 +604,33 @@ queue = 256                           # more lifecycle events held while Univers
 max_lease_ttl = 900                   # no lease, green ink or not, outlives 15 minutes
 
 [providers.pty]                       # the pty terminal's configuration when nothing else gives one
-scrollback = 2000
+read_chunk_bytes = 16384
 ```
 
 `[providers.<id>]` is the Guatiao configuration a Station hands provider `<id>` when it builds
-it with none of its own: handlers, terminals and safe houses. Transports, Sources and Theater
-providers take theirs from the `theater` and `operation` records. A Station hands its field
-runners the `[runner]` table and the `[providers.<id>]` tables
+it with none of its own: handlers, terminals, safe houses and the `local` transport. The other
+transports take theirs from the Theater's `access` ([Theaters](theaters.md)), Sources from the
+Operation's source settings and the ephemeral Theater provider from the template's `config`. A
+Station hands its field runners the `[runner]` table and the `[providers.<id>]` tables
 ([The field runner](theaters.md#the-field-runner)).
+
+Each provider's bounds and waits are keys of its own, every one defaulting to the value the
+provider applied before it was a key; the provider's API header lists them with their units
+(`_ms` milliseconds, `_secs` seconds, `_bytes` bytes):
+
+| Provider | Keys |
+| --- | --- |
+| `claude` | `json_line_bytes`, `csi_bytes`, `tail_lines`, `tail_line_bytes`, `close_wait_ms`, `exit_wait_ms` |
+| `codex` | those of `claude` and `context_file_bytes`, `start_timeout_ms`, `request_timeout_ms`, `sandbox_probe_timeout_ms`, `sandbox_probe_lifetime_secs`, `sandbox_error_chars`, `tool_check_lifetime_secs`, `tool_command_timeout_ms` |
+| `pipe` | `stderr`, `read_chunk_bytes`, `drain_quiet_ms`, `kill_wait_ms`, `stderr_tail_bytes`, `swept_fds`, `tree_scans` |
+| `pty` | `read_chunk_bytes`, `drain_quiet_ms`, `kill_wait_ms`, `tree_scans` |
+| `git` | `git_timeout_ms`, `measure_every_ms` |
+| `copy` | `name_chars` |
+| `local` (transport) | `reader_grace_ms` |
+| `adb`, `container` (transport settings) | `reader_grace_ms` |
+| `ssh` (transport settings) | `connect_timeout_secs`, `exit_grace_ms`, `keepalive_secs`, `keepalive_max` |
+| `github`, `jira` (Source settings) | `request_timeout_secs`, `page_size`, `max_pages` |
+| `ephemeral-container` (Theater provider `config`) | `engine_timeout_ms`, `engine_output_bytes`, `reader_grace_ms` |
 
 `[scheduler]`
 

@@ -17,6 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   roster. `max_operation_depth` bounds the depth (default 64). Universal Exports lists
   Missions by subtree and serves an Operation's effective policy and where each key comes
   from; `ai6ctl operations` and Outer Office show the tree.
+- Every limit, pace and size the code fixed is a setting, its default the value it had, and
+  a bound can be taken away where a bound makes sense (`null`, or `"none"` in TOML) with the
+  loosened ones reported as weakenings. Bootstrap files hold what starting needs: the
+  Registry's and the configuration provider's limits (`[registry.limits.*]`, `[provider]`) and
+  `unex.cfg`'s `proxy_secret_min_bytes`. The `station` record gains `[scheduler]`, `[publisher]`,
+  `[sources]`, `[transports]`, `[recovery]`, `[vetting]`, `[accounts]`, `[approvals]`,
+  `[harness]`, `[provision]`, `[secrets]`, `[terminal_output]`, `[green_ink]`, `[detached]`,
+  `[runner]`, `[audit]`, `[theaters]`, `[theater_tools]` and `[head_of_station]`, and
+  `[providers.<id>]` tables that configure the handlers, terminals, safe houses and `local`
+  transport it builds; the `assistant` record gains `[limits]`, `[desk]` and `[gateway]`; the
+  `cables` record its body size and lifetimes; the `unex` record `[gateway]`, `[controls]`,
+  `[timeline]`, `[login]`, `[text]` and `provider_config_depth`. Providers take their own
+  bounds as config keys (`claude`, `codex`, `pipe`, `pty`, `git`, `copy`, the transports, the
+  GitHub and Jira Sources and the ephemeral container provider), `OO.cfg` gains `[refresh]`,
+  `[controls]`, `[pages]`, `[terminal]` and `[limits]`, and `ai6ctl` takes `--timeout` and
+  `--poll-interval`. The ceilings and floors that refused a value as too loose or too tight are
+  gone (a minimum clone timeout and secret lease, the secret broker's one-hour ceiling, the
+  Source poll minimum, the gateway's 1 MiB frame and 300 second TTL ceilings, and the like);
+  only nonsense, such as a zero where nothing could pass, is refused. The public constants that
+  became settings are removed (`STDERR_TAIL_BYTES`, `MIN_PROXY_SECRET_LEN`,
+  `DEFAULT_TIMELINE_PAGE`, `MAX_TIMELINE_PAGE` and others), `run_process` takes the reader grace
+  and `with_proxy_secret` the least size. The wire contract's frame sizes (`ai6-diptel`) stay
+  fixed, since the Dart client shares them. See
+  [Configuration](https://jose-pr.github.io/ai6/configuration/).
 - Configuration moved to bootstrap files and a configuration provider
   ([Configuration](https://jose-pr.github.io/ai6/configuration/)). A Station and the `ai6`
   command read `ai6.cfg`, Universal Exports `unex.cfg`, and Outer Office `OO.cfg`, each found

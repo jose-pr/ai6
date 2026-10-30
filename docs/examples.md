@@ -13,6 +13,32 @@ cargo build --workspace --all-features
 cargo run -p ai6 --features cli -- serve --config ./examples/config/ai6.cfg
 ```
 
+### Tune a Station
+
+The Station record takes tables that bound and pace its work, and `[providers.<id>]` tables
+that configure the providers it builds. A `station.toml` beside the files above, in place of
+`station.json`, could say:
+
+```toml
+max_concurrent_missions = 4
+
+[scheduler]
+check_in = 5                          # seconds between check-ins, instead of 15
+
+[secrets]
+max_lease_ttl = "none"                # no ceiling on a secret's lease (a weakening, reported)
+
+[providers.pty]
+read_chunk_bytes = 16384              # the pty terminal's read size
+drain_quiet_ms = 400
+
+[providers.claude]
+tail_lines = 16                       # lines of a failed Session's output quoted
+```
+
+Every key has a default and a table may name only what it changes
+([Station runtime limits](configuration.md#station-runtime-limits)).
+
 ## Queue a Mission
 
 Sign in through Universal Exports and submit a brief to an Operation with
