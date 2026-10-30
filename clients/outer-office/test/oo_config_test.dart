@@ -35,6 +35,30 @@ MissionBoard _board(OoConfig config) => MissionBoard(
 );
 
 void main() {
+  test('the settings of the queue, states and proposal cards default as before', () {
+    const none = OoConfig();
+    expect(none.limits.refresh.slow, const Duration(seconds: 15));
+    expect(none.limits.refresh.silentIntervals, 3);
+    expect(none.limits.controls.confirming, const Duration(seconds: 30));
+    expect(none.limits.pages.summary, 5);
+    final set = OoConfig.parse(
+      '[refresh]\nslow = 0\nsilent_intervals = 5\n[controls]\nconfirming = 12\n'
+      '[pages]\nsummary = 8\n',
+    );
+    expect(set.limits.refresh.slow, isNull);
+    expect(set.limits.refresh.silentIntervals, 5);
+    expect(set.limits.controls.confirming, const Duration(seconds: 12));
+    expect(set.limits.pages.summary, 8);
+    expect(
+      () => OoConfig.parse('[controls]\nconfirming = 0\n'),
+      throwsFormatException,
+    );
+    expect(
+      () => OoConfig.parse('[refresh]\nsilent_intervals = 0\n'),
+      throwsFormatException,
+    );
+  });
+
   test('[chat] sets Moneypenny\'s chat sizes; each defaults on its own', () {
     final config = OoConfig.parse(
       '[chat]\nmin_width = 280\nmax_width = 900\nwidth = 500\nwidth_step = 8\n'

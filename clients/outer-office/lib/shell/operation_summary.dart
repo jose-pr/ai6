@@ -37,7 +37,6 @@ class OperationSummary extends StatefulWidget {
 }
 
 class _OperationSummaryState extends State<OperationSummary> {
-  static const _shown = 5;
   late Future<TimelinePageSummary>? _timeline = _load();
 
   String get _id => widget.operation.operationId;
@@ -45,7 +44,10 @@ class _OperationSummaryState extends State<OperationSummary> {
   /// The newest items of its timeline, only for a person who may read it.
   Future<TimelinePageSummary>? _load() =>
       widget.board.timelineOperations.contains(_id)
-      ? widget.board.loadTimeline(operationId: _id, limit: _shown)
+      ? widget.board.loadTimeline(
+          operationId: _id,
+          limit: widget.board.limits.pages.summary,
+        )
       : null;
 
   @override
@@ -206,7 +208,9 @@ class _OperationSummaryState extends State<OperationSummary> {
               }
               return Column(
                 children: [
-                  for (final item in items.take(_shown))
+                  for (final item in items.take(
+                    widget.board.limits.pages.summary,
+                  ))
                     ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,

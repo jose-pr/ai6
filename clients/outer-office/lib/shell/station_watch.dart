@@ -130,7 +130,7 @@ class StationCard extends StatelessWidget {
   final bool detailed;
 
   /// How many seconds the Station has gone without checking in, once that is more than three
-  /// times the board's own interval; `null` before then, and always when the board does not
+  /// times the board's own interval (`[refresh] silent_intervals`); `null` before then, and always when the board does not
   /// poll.
   int? get _silent {
     final every = board.pollInterval;
@@ -140,7 +140,9 @@ class StationCard extends StatelessWidget {
           DateTime.fromMillisecondsSinceEpoch((station.seen * 1000).round()),
         )
         .inSeconds;
-    return seconds > 3 * every.inSeconds ? seconds : null;
+    return seconds > board.limits.refresh.silentIntervals * every.inSeconds
+        ? seconds
+        : null;
   }
 
   @override

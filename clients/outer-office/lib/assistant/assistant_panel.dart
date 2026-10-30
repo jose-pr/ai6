@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_route.dart';
+import '../settings/oo_config.dart' show ControlSettings;
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
@@ -32,6 +33,7 @@ class AssistantPanel extends StatefulWidget {
     this.composerFocus,
     this.textWidth,
     this.label,
+    this.proposalWait = ControlSettings.defaultConfirming,
     super.key,
   });
 
@@ -67,6 +69,10 @@ class AssistantPanel extends StatefulWidget {
 
   /// A line under the header saying what this conversation is, such as a sample.
   final String? label;
+
+  /// How long a proposal may stay applying before its card says the outcome is unknown
+  /// (`OO.cfg`'s `[controls] confirming`).
+  final Duration proposalWait;
 
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
@@ -254,6 +260,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
                       entry: entry,
                       controller: controller,
                       onOpen: widget.onOpen,
+                      proposalWait: widget.proposalWait,
                     )) {
                       // Views are tables and charts: they take the whole width.
                       final view when entry.role == 'view' => view,
@@ -350,9 +357,11 @@ class _EntryView extends StatelessWidget {
   const _EntryView({
     required this.entry,
     required this.controller,
+    required this.proposalWait,
     this.onOpen,
   });
 
+  final Duration proposalWait;
   final AssistantEntry entry;
   final AssistantController controller;
   final void Function(String link)? onOpen;
@@ -418,6 +427,7 @@ class _EntryView extends StatelessWidget {
         onConfirm: controller.confirm,
         onCancel: controller.cancel,
         onOpen: onOpen,
+        confirmingAfter: proposalWait,
       ),
       'navigation' => NavigationCard(data: entry.data, onOpen: onOpen),
       'view' => AssistantViewCard(
@@ -555,7 +565,7 @@ class ProposalCard extends StatefulWidget {
     required this.onConfirm,
     required this.onCancel,
     this.onOpen,
-    this.confirmingAfter = const Duration(seconds: 30),
+    this.confirmingAfter = ControlSettings.defaultConfirming,
     super.key,
   });
 

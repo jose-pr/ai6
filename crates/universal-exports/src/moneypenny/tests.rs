@@ -1397,14 +1397,16 @@ fn exposed_by_keeps_sixteen_sources_of_two_hundred_bytes() {
     }
     assert_eq!(conversation.turn_reads.len(), 16);
 
-    let narrow: ai6::AssistantGatewayLimits =
-        toml::from_str("exposed_sources = 2\nsource_bytes = 8\nproposal_reads = 1").unwrap();
+    let narrow: ai6::AssistantGatewayLimits = serde_json::from_value(
+        json!({"exposed_sources": 2, "source_bytes": 8, "proposal_reads": 1}),
+    )
+    .unwrap();
     let mut conversation = Conversation::new("c".into(), "p".into(), "b".into(), 0.0, 8);
     for index in 0..5 {
         conversation.expose_by(&format!("tool:{index}-long"), &narrow);
         conversation.note_read("missions", BTreeMap::new(), &narrow);
     }
-    assert_eq!(conversation.exposed_by, ["tool:0-lo", "tool:1-lo"]);
+    assert_eq!(conversation.exposed_by, ["tool:0-l", "tool:1-l"]);
     assert_eq!(conversation.turn_reads.len(), 1);
 }
 

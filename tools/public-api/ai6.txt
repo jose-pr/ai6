@@ -337,6 +337,7 @@ pub ai6::directorates::m::assistant::AssistantGatewayLimits::conversation_entrie
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::conversations: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::conversations_per_person: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::event_buffer: u64
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::exposed_sources: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::hello_timeout: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::live_per_person: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::max_wait: ai6::bounds::Seconds
@@ -346,6 +347,7 @@ pub ai6::directorates::m::assistant::AssistantGatewayLimits::memory_requests_per
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::memory_timeout: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::message_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::person_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::proposal_reads: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::proposal_ttl: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::proposals: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::ready_bytes: ai6::bounds::Limit
@@ -355,6 +357,7 @@ pub ai6::directorates::m::assistant::AssistantGatewayLimits::result_chars: ai6::
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::route_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::shared_base_wait: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::socket_message_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::source_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::sweep_every: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::token_reuse_margin: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::token_ttl: ai6::bounds::Seconds
@@ -6055,6 +6058,7 @@ pub ai6::AssistantGatewayLimits::conversation_entries: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::conversations: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::conversations_per_person: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::event_buffer: u64
+pub ai6::AssistantGatewayLimits::exposed_sources: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::hello_timeout: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::live_per_person: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::max_wait: ai6::bounds::Seconds
@@ -6064,6 +6068,7 @@ pub ai6::AssistantGatewayLimits::memory_requests_per_person: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::memory_timeout: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::message_bytes: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::person_bytes: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::proposal_reads: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::proposal_ttl: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::proposals: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::ready_bytes: ai6::bounds::Limit
@@ -6073,6 +6078,7 @@ pub ai6::AssistantGatewayLimits::result_chars: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::route_bytes: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::shared_base_wait: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::socket_message_bytes: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::source_bytes: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::sweep_every: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::token_reuse_margin: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::token_ttl: ai6::bounds::Seconds

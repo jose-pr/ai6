@@ -362,6 +362,7 @@ class ChatPanel extends StatelessWidget {
             onMemory: chat.onMemory == null
                 ? null
                 : () => chat.onMemory?.call(context),
+            proposalWait: chat.proposalWait,
             followAtOnce: chat.followAtOnce,
             onFollowAtOnce: chat.setFollowAtOnce,
             onClose: placement == ChatPlacement.fullScreen

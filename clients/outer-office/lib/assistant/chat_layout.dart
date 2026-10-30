@@ -161,6 +161,7 @@ class MoneypennyChat extends ChangeNotifier {
     this.openWindow,
     this.settings = const ChatSettings(),
     this.label,
+    this.proposalWait = ControlSettings.defaultConfirming,
   }) : _width = settings.width {
     controller.addListener(_heard);
   }
@@ -170,6 +171,10 @@ class MoneypennyChat extends ChangeNotifier {
 
   /// What this conversation is, shown in the chat, such as the preview's sample.
   final String? label;
+
+  /// How long a proposal may stay applying before its card says the outcome is unknown
+  /// (`OO.cfg`'s `[controls] confirming`).
+  final Duration proposalWait;
 
   final AssistantController controller;
   final ChatPreferences? preferences;

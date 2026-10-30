@@ -408,14 +408,18 @@ sessions = 3                          # the board of Sessions, Stations and Miss
 overview = 10                         # the overview's recent activity
 timeline = 10                         # an Operation's timeline
 pools = 15                            # the account pools
+slow = 15                             # green ink requests and Mission proposals; 0 reads them with every refresh
+silent_intervals = 3                  # a Station silent for this many `sessions` intervals shows as silent
 
 [controls]                            # following a Mission control until the Station reports
 wait = 10                             # seconds; 0 returns once the control is queued
 poll = 0.5                            # seconds between asks for its status
+confirming = 30                       # seconds a proposal of Moneypenny's may stay applying before its outcome reads unknown
 
 [pages]
 timeline = 50                         # items in one page of the timeline
 audit = 100                           # records in the audit log
+summary = 5                           # recent activity items on an Operation's summary
 
 [terminal]                            # the live Session terminal
 scrollback_lines = 10000
@@ -433,8 +437,8 @@ cdn = "none"                          # web only: none, fonts or all (read by th
 ```
 
 Every value of `[refresh]` is a number of seconds, whole or fractional, `0` or more; `[controls]`
-`wait` likewise, and the other seconds are more than 0. The counts of `[pages]` and
-`scrollback_lines` are whole numbers of 1 or more, and `[limits]` takes whole numbers of 0 or
+`wait` likewise, and the other seconds are more than 0. The counts of `[pages]`,
+`silent_intervals` and `scrollback_lines` are whole numbers of 1 or more, and `[limits]` takes whole numbers of 0 or
 more. An unknown table or key, or a value that is not what its key takes, refuses the file. These
 are what Outer Office asks of Universal Exports and how it paces itself; what the gateway allows
 is the `unex` record's ([Universal Exports limits](#universal-exports-limits)), and Moneypenny's

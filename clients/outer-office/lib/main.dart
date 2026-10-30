@@ -380,11 +380,11 @@ class MissionBoard extends ChangeNotifier {
   List<HeldBriefSummary> heldBriefs = const [];
 
   /// The Mission proposals waiting for a decision, in the Operations where this account may
-  /// decide them; read at most every [slowEvery], not with each refresh.
+  /// decide them; read at most every `OO.cfg`'s `[refresh] slow`, not with each refresh.
   List<MissionProposalSummary> missionProposals = const [];
 
   /// The green ink requests waiting for a decision, in the Operations where this account may
-  /// decide them; read at most every [slowEvery].
+  /// decide them; read at most every `[refresh] slow`.
   List<GreenInkRequestSummary> greenInkRequests = const [];
   DateTime? _slowAt;
 
@@ -449,8 +449,6 @@ class MissionBoard extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// How often the sources that change slowly are read again.
-  static const slowEvery = Duration(seconds: 15);
   UserSessionSummary? userSession;
   StationBoardSummary stationBoard = const StationBoardSummary(
     headquartersStation: null,
@@ -1778,7 +1776,8 @@ class MissionBoard extends ChangeNotifier {
         heldBriefs,
       );
       final now = ooClock();
-      if (_slowAt == null || now.difference(_slowAt!) >= slowEvery) {
+      final slow = limits.refresh.slow;
+      if (_slowAt == null || slow == null || now.difference(_slowAt!) >= slow) {
         _slowAt = now;
         missionProposals = _settle(
           BoardSource.proposals,
@@ -3192,6 +3191,7 @@ class _AccessGateState extends State<_AccessGate> {
       label: board.demo ? demoConversationLabel : null,
       preferences: ChatPreferences(SharedPreferences.getInstance()),
       settings: widget.chatSettings,
+      proposalWait: board.limits.controls.confirming,
       openWindow: widget.desktopWindows
           ? (context, chat, onClosed) =>
                 _openChatWindow(context, chat, onClosed, board)

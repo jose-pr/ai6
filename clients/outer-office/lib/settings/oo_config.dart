@@ -190,14 +190,25 @@ class RefreshSettings {
     this.overview = defaultOverview,
     this.timeline = defaultTimeline,
     this.pools = defaultPools,
+    this.slow = defaultSlow,
+    this.silentIntervals = defaultSilentIntervals,
   });
 
   static const defaultSessions = Duration(seconds: 3);
   static const defaultOverview = Duration(seconds: 10);
   static const defaultTimeline = Duration(seconds: 10);
   static const defaultPools = Duration(seconds: 15);
+  static const defaultSlow = Duration(seconds: 15);
+  static const defaultSilentIntervals = 3;
 
-  static const keys = {'sessions', 'overview', 'timeline', 'pools'};
+  static const keys = {
+    'sessions',
+    'overview',
+    'timeline',
+    'pools',
+    'slow',
+    'silent_intervals',
+  };
 
   /// `sessions`: the board of Sessions, Stations and Missions.
   final Duration? sessions;
@@ -210,16 +221,29 @@ class RefreshSettings {
 
   /// `pools`: the account pools.
   final Duration? pools;
+
+  /// `slow`: the green ink requests and Mission proposals the board reads, which change
+  /// slowly; `null` (0) reads them with every refresh.
+  final Duration? slow;
+
+  /// `silent_intervals`: a Station that has not checked in for this many refresh intervals
+  /// (of `sessions`) is shown as silent.
+  final int silentIntervals;
 }
 
 /// How a control is followed, `OO.cfg`'s `[controls]` table, in seconds.
 class ControlSettings {
-  const ControlSettings({this.wait = defaultWait, this.poll = defaultPoll});
+  const ControlSettings({
+    this.wait = defaultWait,
+    this.poll = defaultPoll,
+    this.confirming = defaultConfirming,
+  });
 
   static const defaultWait = Duration(seconds: 10);
   static const defaultPoll = Duration(milliseconds: 500);
+  static const defaultConfirming = Duration(seconds: 30);
 
-  static const keys = {'wait', 'poll'};
+  static const keys = {'wait', 'poll', 'confirming'};
 
   /// `wait`: how long to follow a control for the Station's outcome; `0` returns once it is
   /// queued.
@@ -227,19 +251,26 @@ class ControlSettings {
 
   /// `poll`: how often to ask for its status meanwhile.
   final Duration poll;
+
+  /// `confirming`: how long a proposal of Moneypenny's may stay "applying" before its card
+  /// says the outcome is unknown.
+  final Duration confirming;
 }
 
 /// How much a page asks for, `OO.cfg`'s `[pages]` table.
 class PageSettings {
-  const PageSettings({this.timeline = 50, this.audit = 100});
+  const PageSettings({this.timeline = 50, this.audit = 100, this.summary = 5});
 
-  static const keys = {'timeline', 'audit'};
+  static const keys = {'timeline', 'audit', 'summary'};
 
   /// `timeline`: items in one page of an Operation's timeline.
   final int timeline;
 
   /// `audit`: records in the audit log.
   final int audit;
+
+  /// `summary`: items of recent activity an Operation's summary shows.
+  final int summary;
 }
 
 /// The live terminal's pace, `OO.cfg`'s `[terminal]` table.
@@ -375,6 +406,7 @@ class OoLimits {
     final inputsTable = table('limits', InputSettings.keys);
     final wait = seconds(controlsTable, 'controls', 'wait', zero: true);
     final poll = seconds(controlsTable, 'controls', 'poll');
+    final confirming = seconds(controlsTable, 'controls', 'confirming');
     final connect = seconds(terminalTable, 'terminal', 'connect_timeout');
     final retry = seconds(terminalTable, 'terminal', 'retry_delay');
     final retryMax = seconds(terminalTable, 'terminal', 'retry_max_delay');
@@ -384,15 +416,23 @@ class OoLimits {
         overview: refresh(refreshTable, 'overview', refreshDefaults.overview!),
         timeline: refresh(refreshTable, 'timeline', refreshDefaults.timeline!),
         pools: refresh(refreshTable, 'pools', refreshDefaults.pools!),
+        slow: refresh(refreshTable, 'slow', refreshDefaults.slow!),
+        silentIntervals:
+            whole(refreshTable, 'refresh', 'silent_intervals') ??
+            refreshDefaults.silentIntervals,
       ),
       controls: ControlSettings(
         wait: wait == null ? controlDefaults.wait : _seconds(wait),
         poll: poll == null ? controlDefaults.poll : _seconds(poll),
+        confirming: confirming == null
+            ? controlDefaults.confirming
+            : _seconds(confirming),
       ),
       pages: PageSettings(
         timeline:
             whole(pagesTable, 'pages', 'timeline') ?? pageDefaults.timeline,
         audit: whole(pagesTable, 'pages', 'audit') ?? pageDefaults.audit,
+        summary: whole(pagesTable, 'pages', 'summary') ?? pageDefaults.summary,
       ),
       terminal: TerminalSettings(
         scrollbackLines:
