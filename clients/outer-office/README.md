@@ -167,11 +167,12 @@ default the browser fetches nothing from any origin but the one serving the app.
 builds never use a CDN: the operating system's fonts cover other scripts and emoji there.
 
 The hero art in `assets/heroes/`: `map.jpg` and `skyline.jpg` cut from the AI6 brand
-banners; `paper.jpg`, a 940×278 crop at the left edge, 746 px down, of a 1536×1024
-picture made with a built-in image generation tool on 2026-10-29 from a written prompt and
-no reference images (pale ivory paper, thin taupe coast-like contours and drafting arcs at
-the left and right edges, a blank centre, no text, labels, routes or markers), saved at
-JPEG quality 92. The wallpapers in `assets/backdrops/` come from the AI6 brand pack.
+banners; `paper.jpg`, a 940×278 crop at the left edge, 746 px down, of a 1536×1024 picture
+made with a built-in image generation tool on 2026-10-29 from a written prompt and no
+reference images (pale ivory paper, thin taupe coast-like contours and drafting arcs at the
+left and right edges, a blank centre, no text, labels, routes or markers), mirrored so its
+contours sit on the right, clear of the hero's text panel, and saved at JPEG quality 92.
+The wallpapers in `assets/backdrops/` come from the AI6 brand pack.
 
 The fallback fonts are the 727 Noto files the Flutter web engine can ask for (SIL Open
 Font License 1.1, `assets/fonts/LICENSE-Noto.txt`, on the licence page of the web app):
