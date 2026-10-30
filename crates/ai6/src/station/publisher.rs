@@ -1416,6 +1416,7 @@ mod tests {
             Box::new(RawOutputTerminal),
             telemetry.clone(),
             crate::directorates::medical::watchdog::Watchdog::default(),
+            true,
         );
         let spec = Spec {
             argv: vec!["mock".to_owned()],
@@ -1573,6 +1574,7 @@ mod tests {
             Box::new(RecordingTerminal(sender)),
             telemetry.clone(),
             crate::directorates::medical::watchdog::Watchdog::default(),
+            true,
         );
         let spec = Spec {
             argv: vec!["mock".to_owned()],

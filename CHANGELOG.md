@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Online or Dark, its last check-in, resources as sampled (or **Not reported**) and the
   Sessions running there; an Operation shows its access, Missions by state and recent
   activity ([Outer Office](https://github.com/jose-pr/ai6/blob/main/clients/outer-office/README.md)).
+- An Agent's `handler_settings` table configures its handler provider (the provider validates
+  it). Operator terminal input to a Claude or Codex Session, which speak JSON on plain pipes,
+  is no longer written to the harness's input: typed lines become messages and Ctrl-C
+  interrupts.
 - The Agent Client Protocol (ACP) wire in `ai6` (feature `acp`, part of `daemon`):
   `AcpSession` drives any ACP agent as an `AgentSession`, and `AcpFacade` serves any
   `AgentHandler` as an ACP agent, with AI6's environment, model, effort, policy and events

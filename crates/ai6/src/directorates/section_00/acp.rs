@@ -19,6 +19,8 @@
 
 mod client;
 mod facade;
+#[cfg(feature = "gate")]
+mod gate_decider;
 mod lines;
 mod meta;
 
@@ -27,6 +29,8 @@ pub use client::{
     PermissionRequest, RefuseAll,
 };
 pub use facade::{AcpFacade, Credential, FacadeAuth, TerminalFactory};
+#[cfg(feature = "gate")]
+pub use gate_decider::GateDecider;
 pub use lines::{TerminalIo, lines_over_io};
 pub use meta::{HandlerSpec, LaunchMeta, ResumeMeta};
 
@@ -41,6 +45,9 @@ pub const EVENTS_CAPABILITY: &str = "dev.coqui.ai6/events";
 /// provider Session ID: `{"sessionId", "providerSessionId", "event"}`; no `event` marks the
 /// start of the operation.
 pub const EVENT_NOTIFICATION: &str = "_ai6/event";
+
+/// A timeout that never fires: what a caller sets where a limit would be new behaviour.
+pub const UNBOUNDED_MS: u64 = u64::MAX;
 
 /// The authentication method a field runner advertises: its bearer token, in
 /// `authenticate._meta.token`.

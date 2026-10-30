@@ -49,6 +49,10 @@ pub struct Agent {
     pub aliases: Vec<String>,
     /// Guatiao AgentHandler provider ID.
     pub handler: Option<String>,
+    /// Settings for the handler provider, as its documentation describes them (`handler_settings`
+    /// in the roster); the provider validates them and refuses unknown keys. Empty takes the
+    /// provider's defaults.
+    pub handler_settings: serde_json::Map<String, serde_json::Value>,
     /// Preferred model, when configured.
     pub model: Option<String>,
     /// Preferred reasoning effort, when configured.
@@ -211,6 +215,7 @@ impl Agent {
             description: String::new(),
             aliases: Vec::new(),
             handler: None,
+            handler_settings: serde_json::Map::new(),
             model: None,
             effort: None,
             roles: Vec::new(),
@@ -1628,6 +1633,7 @@ struct AgentDefinition {
     description: String,
     extends: Option<String>,
     handler: Option<String>,
+    handler_settings: serde_json::Map<String, serde_json::Value>,
     model: Option<String>,
     effort: Option<String>,
     roles: Vec<String>,
@@ -1836,6 +1842,13 @@ fn resolve_agent(
             .handler
             .clone()
             .or_else(|| base.as_ref().and_then(|agent| agent.handler.clone())),
+        handler_settings: if definition.handler_settings.is_empty() {
+            base.as_ref()
+                .map(|agent| agent.handler_settings.clone())
+                .unwrap_or_default()
+        } else {
+            definition.handler_settings.clone()
+        },
         model: definition
             .model
             .clone()
