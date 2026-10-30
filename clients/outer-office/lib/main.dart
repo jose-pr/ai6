@@ -22,6 +22,7 @@ import 'assistant/chat_window.dart';
 import 'assistant/demo_conversation.dart';
 import 'assistant/memory_page.dart';
 import 'assistant/navigation_card.dart';
+import 'assistant/pages.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
@@ -172,7 +173,7 @@ class AppearancePreferences {
   }
 }
 
-class MissionBoard extends ChangeNotifier {
+class MissionBoard extends ChangeNotifier implements PageActions {
   MissionBoard({
     required this.apiOrigin,
     this.demo = false,
@@ -862,6 +863,63 @@ class MissionBoard extends ChangeNotifier {
       throw StateError('The gateway refused the Mission proposal decision.');
     }
     await refresh();
+  }
+
+  /// A link to one of the person's pages (`POST /v1/user/pages/{id}/open`): where to open it
+  /// outside the app and when it stops working; with [network] `none`, a link whose page can
+  /// reach nothing but its own files.
+  @override
+  Future<PageLink> open(String id, {String? network}) async {
+    if (demo) throw StateError('Pages are unavailable in preview.');
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/pages/${Uri.encodeComponent(id)}/open',
+      body: {'network': ?network},
+    );
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the page link.',
+      );
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return PageLink(
+      Uri.parse(body['url'] as String),
+      (body['expires_at'] as num).toDouble(),
+    );
+  }
+
+  /// Keeps one of the person's pages with no expiry, or lets it expire in a day.
+  @override
+  Future<void> remember(String id, {required bool remember}) async {
+    if (demo) throw StateError('Pages are unavailable in preview.');
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/pages/${Uri.encodeComponent(id)}/remember',
+      body: {'remember': remember},
+    );
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the page change.',
+      );
+    }
+  }
+
+  /// Deletes one of the person's pages.
+  @override
+  Future<void> delete(String id) async {
+    if (demo) throw StateError('Pages are unavailable in preview.');
+    final response = await _userRequest(
+      'DELETE',
+      '/v1/user/pages/${Uri.encodeComponent(id)}',
+    );
+    if (response.statusCode != 204) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused to delete the page.',
+      );
+    }
   }
 
   /// The briefs vetting holds in an Operation, oldest first.
@@ -3313,6 +3371,7 @@ class _AccessGateState extends State<_AccessGate> {
       preferences: ChatPreferences(SharedPreferences.getInstance()),
       settings: widget.chatSettings,
       proposalWait: board.limits.controls.confirming,
+      pageActions: board.demo ? null : board,
       openWindow: widget.desktopWindows
           ? (context, chat, onClosed) =>
                 _openChatWindow(context, chat, onClosed, board)
