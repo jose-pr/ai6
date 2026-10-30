@@ -73,6 +73,10 @@ data-encoding = { version = "2", default-features = false }
 # Validates gateway origins and encodes Session IDs as URL path segments.
 url = { version = "2", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+# The Agent Client Protocol: the wire between the Station and every agent Session. It is
+# runtime-agnostic; AI6 drives each connection on a thread of its own.
+agent-client-protocol = { version = "3.6", default-features = false }
+futures = { version = "0.3", default-features = false, features = ["std", "async-await", "executor"] }
 # Sends Moneypenny's tool calls through Universal Exports' own router; axum already builds it.
 tower = { version = "0.5", default-features = false, features = ["util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

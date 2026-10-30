@@ -314,7 +314,9 @@ mod tests {
     #[test]
     fn models_keep_their_required_keys() {
         let json = serde_json::to_value(spec()).unwrap();
-        let keys = json.as_object().unwrap().keys().collect::<Vec<_>>();
+        // The ACP crates turn on serde_json's `preserve_order`, so the keys are sorted here.
+        let mut keys = json.as_object().unwrap().keys().collect::<Vec<_>>();
+        keys.sort();
         assert_eq!(
             keys,
             [

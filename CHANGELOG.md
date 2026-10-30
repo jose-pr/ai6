@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The Agent Client Protocol (ACP) wire in `ai6` (feature `acp`, part of `daemon`):
+  `AcpSession` drives any ACP agent as an `AgentSession`, and `AcpFacade` serves any
+  `AgentHandler` as an ACP agent, with AI6's environment, model, effort, policy and events
+  carried in `_meta["dev.coqui.ai6/launch"]` and `_ai6/event`.
 - Operations nest ([Subordinate Operations](https://jose-pr.github.io/ai6/operations/#subordinate-operations)).
   An Operation's `parent` names another Operation; a child layers its keys over its
   ancestors' (tables merge, scalars replace, the nearest wins; `inherit = false` opts out), a

@@ -10,6 +10,7 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | `daemon` | The Station's HTTP service, scheduler and Guatiao provider host, and the field runner. | No |
 | `publisher` | Bounded lifecycle and raw terminal-byte publication to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
+| `acp` | The Agent Client Protocol wire (`section_00::acp`): `AcpSession`, `AcpFacade`; part of `daemon`. Adds `agent-client-protocol` and `futures`; no async runtime. | No |
 | `gate` | The green ink gate's client of a Station (`section_00::gate`), for agent providers; part of `daemon`. | No |
 | `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS (`coqui-peer-tls`). | No |
 | `sqlite` | `SqlRegistry` and `SqlProvider` in a SQLite file. | No |
@@ -2631,6 +2632,90 @@ clearance is kept apart from the brief's own JSON and dropped when the brief fin
 `refuse_held` files it as failed with outcome `{"state": "refused", "mission_id": KEY,
 "reason", "refused_by", "refused_at", "vetting"}`, so a Source still gets its CX report. The
 file Registry writes `held/` before it removes `new/`, and settles a brief found in both.
+
+## Agent Client Protocol wire (`ai6::directorates::section_00::acp`, feature `acp`)
+
+The Station is an ACP client (agentclientprotocol.com, schema v1, newline-delimited JSON-RPC)
+for every Agent Session. One connection per Session; each connection runs on threads of its
+own (a `futures` executor), so it needs no async runtime and works inside or outside Tokio.
+
+```rust
+pub const LAUNCH_META_KEY: &str = "dev.coqui.ai6/launch";   // _meta of session/new|load|resume
+pub const EVENTS_CAPABILITY: &str = "dev.coqui.ai6/events"; // agentCapabilities._meta key
+pub const EVENT_NOTIFICATION: &str = "_ai6/event";          // {sessionId, providerSessionId, event?}
+pub const RUNNER_TOKEN_METHOD: &str = "ai6-runner-token";   // authenticate._meta.token
+pub fn duplex() -> (Channel, Channel);                       // in-memory pair (the SDK's Channel)
+
+#[non_exhaustive] pub struct HandlerSpec { pub id: String, pub config: serde_json::Value }
+// Every AgentStart field ACP has no home for; cwd is ACP's cwd, the prompt is session/prompt.
+// Debug lists environment variable NAMES only. JSON via serde (`to_value()`).
+#[non_exhaustive] pub struct LaunchMeta { pub mission_id, pub agent_id, pub initial_context, pub clearance,
+    pub environment: BTreeMap<String,String>, pub model, pub effort, pub max_cost_micro_usd,
+    pub project_settings, pub project_mcp, pub answer_only, pub assistant, pub handler: Option<HandlerSpec>,
+    pub terminal: Option<String> }
+impl LaunchMeta { pub fn from_start(&AgentStart) -> Self; pub fn into_start(self, prompt: String,
+    working_directory: String) -> AgentStart; pub fn with_handler(self, HandlerSpec) -> Self;
+    pub fn with_terminal(self, Option<String>) -> Self; pub fn to_value(&self) -> Value }
+#[non_exhaustive] pub struct ResumeMeta { /* as AgentResume: session_id, message, environment, ... */ }
+impl ResumeMeta { pub fn from_resume(&AgentResume) -> Self; pub fn into_resume(self, working_directory: String)
+    -> AgentResume; /* with_handler, with_terminal, to_value as LaunchMeta */ }
+
+pub trait PermissionDecider: Send + Sync { fn decide(&self, &PermissionRequest) -> PermissionDecision; }
+pub enum PermissionDecision { Allow, Deny(String) }   // Allow -> the first allow_once option, Deny -> reject_once
+pub struct RefuseAll;                                   // the default decider
+
+pub struct AcpOptions {          // Default: timeouts 20000 / 30000 / 2000 ms, no floors
+    pub cwd: String, pub mcp_servers: Vec<Value>, pub meta: Map<String, Value>,
+    pub model: Option<String>, pub effort: Option<String>,
+    pub model_option: Option<String>, pub effort_option: Option<String>,  // config option ids
+    pub prompt: Option<String>, pub resume: Option<String>, pub restricted: bool,
+    pub authenticate: Option<Authenticate>, pub initialize_timeout_ms: u64,
+    pub request_timeout_ms: u64, pub close_grace_ms: u64, pub decider: Arc<dyn PermissionDecider> }
+pub struct AcpSession;           // implements AgentSession
+impl AcpSession {
+    /// initialize -> (authenticate) -> session/new | session/resume | session/load -> config
+    /// options -> session/prompt. `on_close` ends the agent's process on close or failed open.
+    pub fn connect(transport: impl ConnectTo<Client> + 'static, options: AcpOptions,
+        on_close: Option<Box<dyn FnOnce() + Send>>) -> Result<Self, ProviderError>;
+    pub fn into_handle(self) -> Object<dyn AgentSession>;
+}
+
+pub struct AcpFacade;            // an AgentHandler served as an ACP agent
+impl AcpFacade {
+    pub fn new(handler: Arc<dyn AgentHandler>, terminal: TerminalFactory) -> Self;
+    pub fn with_auth(self, FacadeAuth) -> Self;           // authenticate required before session/*
+    pub fn serve(&self, transport: impl ConnectTo<Agent> + 'static) -> JoinHandle<()>;
+}
+pub fn lines_over_io(reader, writer, diagnostic_lines: usize) -> (IoLines, Diagnostics);  // NDJSON transport
+pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
+```
+
+- **Client behaviour.** Client capabilities: no `fs`, no `terminal`. `session/resume` is used
+  when advertised, else `session/load` (replayed `session/update`s before its answer are dropped),
+  else the connect fails. `authenticate` is sent only when `AcpOptions::authenticate` is set; a
+  session error mentioning auth lists the agent's `authMethods`. MCP servers of `type` `http`/`sse`
+  need `mcpCapabilities`; without them the connect fails with that reason. Model and effort go
+  through the agent's config options (by id, else category `model` / `thought_level`, else the
+  ids `model` / `effort`); an option the agent lacks is reported as a `notice` event, not guessed.
+- **Events.** An agent advertising `EVENTS_CAPABILITY` (the façade) is read through
+  `_ai6/event` alone: every `AgentEvent` verbatim, so `limit` and `quota` survive. Any other agent
+  is read from `session/update` and the stop reason: message chunks coalesce into one `text`
+  event per turn segment, `tool_call` is a `tool` event, `usage_update.cost` (USD) is `usage` with
+  `cost_micro_usd` (token counts are not guessed); `end_turn|max_tokens|max_turn_requests` ->
+  `completed`, `refusal` -> `failed`, `cancelled` -> `blocked`, a JSON-RPC error -> `failed`.
+  No limit or quota detection for external agents.
+- **Permissions.** `session/request_permission` goes to the decider on its own thread. With
+  `restricted`, a request for a tool of kind `edit|delete|move|execute` is refused without asking
+  the decider, and a tool of those kinds that runs without a request ends the Session (`failed`).
+  An answer with no option of the needed kind cancels the request and emits `blocked`.
+- **Façade.** `session/new` needs `_meta[LAUNCH_META_KEY]` (`LaunchMeta`); the operation starts on
+  the first `session/prompt` (`handler.start`), so a start failure is the prompt's error and the
+  client's `connect` fails with it. `session/resume|load` with `ResumeMeta` calls
+  `handler.resume` (a `message` there is submitted by the handler); `session/cancel` ->
+  `interrupt` and answers waiting prompts `cancelled`; `session/close` -> `close`. A `completed`
+  event answers waiting prompts `end_turn`, `limit` `refusal`, `failed` a JSON-RPC error. It
+  advertises `loadSession`, `sessionCapabilities.resume|close` and no MCP (the environment
+  carries the native handlers' MCP servers).
 
 ## Identity and handler API
 

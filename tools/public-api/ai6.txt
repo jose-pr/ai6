@@ -4076,6 +4076,140 @@ pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub mod ai6::directorates::section_00
+pub mod ai6::directorates::section_00::acp
+pub use ai6::directorates::section_00::acp::Channel
+pub enum ai6::directorates::section_00::acp::PermissionDecision
+pub ai6::directorates::section_00::acp::PermissionDecision::Allow
+pub ai6::directorates::section_00::acp::PermissionDecision::Deny(alloc::string::String)
+pub struct ai6::directorates::section_00::acp::AcpFacade
+impl ai6::directorates::section_00::acp::AcpFacade
+pub fn ai6::directorates::section_00::acp::AcpFacade::new(alloc::sync::Arc<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::directorates::section_00::acp::TerminalFactory) -> Self
+pub fn ai6::directorates::section_00::acp::AcpFacade::serve(&self, impl agent_client_protocol::component::ConnectTo<agent_client_protocol::role::acp::Agent> + 'static) -> std::thread::join_handle::JoinHandle<()>
+pub fn ai6::directorates::section_00::acp::AcpFacade::with_auth(self, ai6::directorates::section_00::acp::FacadeAuth) -> Self
+pub struct ai6::directorates::section_00::acp::AcpOptions
+pub ai6::directorates::section_00::acp::AcpOptions::authenticate: core::option::Option<ai6::directorates::section_00::acp::Authenticate>
+pub ai6::directorates::section_00::acp::AcpOptions::close_grace_ms: u64
+pub ai6::directorates::section_00::acp::AcpOptions::cwd: alloc::string::String
+pub ai6::directorates::section_00::acp::AcpOptions::decider: alloc::sync::Arc<dyn ai6::directorates::section_00::acp::PermissionDecider>
+pub ai6::directorates::section_00::acp::AcpOptions::effort: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::effort_option: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::initialize_timeout_ms: u64
+pub ai6::directorates::section_00::acp::AcpOptions::mcp_servers: alloc::vec::Vec<serde_json::value::Value>
+pub ai6::directorates::section_00::acp::AcpOptions::meta: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub ai6::directorates::section_00::acp::AcpOptions::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::model_option: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::prompt: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::request_timeout_ms: u64
+pub ai6::directorates::section_00::acp::AcpOptions::restricted: bool
+pub ai6::directorates::section_00::acp::AcpOptions::resume: core::option::Option<alloc::string::String>
+impl core::default::Default for ai6::directorates::section_00::acp::AcpOptions
+pub fn ai6::directorates::section_00::acp::AcpOptions::default() -> Self
+pub struct ai6::directorates::section_00::acp::AcpSession
+impl ai6::directorates::section_00::acp::AcpSession
+pub fn ai6::directorates::section_00::acp::AcpSession::connect(impl agent_client_protocol::component::ConnectTo<agent_client_protocol::role::acp::Client> + 'static, ai6::directorates::section_00::acp::AcpOptions, core::option::Option<alloc::boxed::Box<(dyn core::ops::function::FnOnce() + core::marker::Send)>>) -> core::result::Result<Self, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::acp::AcpSession
+pub fn ai6::directorates::section_00::acp::AcpSession::into_handle(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>
+impl ai6::directorates::section_00::agent::AgentSession for ai6::directorates::section_00::acp::AcpSession
+pub fn ai6::directorates::section_00::acp::AcpSession::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::section_00::acp::AcpSession::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+impl core::ops::drop::Drop for ai6::directorates::section_00::acp::AcpSession
+pub fn ai6::directorates::section_00::acp::AcpSession::drop(&mut self)
+pub struct ai6::directorates::section_00::acp::Authenticate
+pub ai6::directorates::section_00::acp::Authenticate::meta: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub ai6::directorates::section_00::acp::Authenticate::method: alloc::string::String
+pub struct ai6::directorates::section_00::acp::FacadeAuth
+pub ai6::directorates::section_00::acp::FacadeAuth::check: alloc::sync::Arc<ai6::directorates::section_00::acp::Credential>
+pub ai6::directorates::section_00::acp::FacadeAuth::method: alloc::string::String
+pub ai6::directorates::section_00::acp::FacadeAuth::name: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::section_00::acp::HandlerSpec
+pub ai6::directorates::section_00::acp::HandlerSpec::config: serde_json::value::Value
+pub ai6::directorates::section_00::acp::HandlerSpec::id: alloc::string::String
+impl ai6::directorates::section_00::acp::HandlerSpec
+pub fn ai6::directorates::section_00::acp::HandlerSpec::new(impl core::convert::Into<alloc::string::String>, serde_json::value::Value) -> Self
+#[non_exhaustive] pub struct ai6::directorates::section_00::acp::LaunchMeta
+pub ai6::directorates::section_00::acp::LaunchMeta::agent_id: alloc::string::String
+pub ai6::directorates::section_00::acp::LaunchMeta::answer_only: bool
+pub ai6::directorates::section_00::acp::LaunchMeta::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
+pub ai6::directorates::section_00::acp::LaunchMeta::clearance: alloc::string::String
+pub ai6::directorates::section_00::acp::LaunchMeta::effort: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::LaunchMeta::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::section_00::acp::LaunchMeta::handler: core::option::Option<ai6::directorates::section_00::acp::HandlerSpec>
+pub ai6::directorates::section_00::acp::LaunchMeta::initial_context: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::acp::LaunchMeta::max_cost_micro_usd: core::option::Option<u64>
+pub ai6::directorates::section_00::acp::LaunchMeta::mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::directorates::section_00::acp::LaunchMeta::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::LaunchMeta::project_mcp: bool
+pub ai6::directorates::section_00::acp::LaunchMeta::project_settings: bool
+pub ai6::directorates::section_00::acp::LaunchMeta::terminal: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::acp::LaunchMeta
+pub fn ai6::directorates::section_00::acp::LaunchMeta::from_start(&ai6::directorates::section_00::agent::AgentStart) -> Self
+pub fn ai6::directorates::section_00::acp::LaunchMeta::into_start(self, alloc::string::String, alloc::string::String) -> ai6::directorates::section_00::agent::AgentStart
+pub fn ai6::directorates::section_00::acp::LaunchMeta::to_value(&self) -> serde_json::value::Value
+pub fn ai6::directorates::section_00::acp::LaunchMeta::with_handler(self, ai6::directorates::section_00::acp::HandlerSpec) -> Self
+pub fn ai6::directorates::section_00::acp::LaunchMeta::with_terminal(self, core::option::Option<alloc::string::String>) -> Self
+impl core::fmt::Debug for ai6::directorates::section_00::acp::LaunchMeta
+pub fn ai6::directorates::section_00::acp::LaunchMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::section_00::acp::PermissionOption
+pub ai6::directorates::section_00::acp::PermissionOption::kind: alloc::string::String
+pub ai6::directorates::section_00::acp::PermissionOption::option_id: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::section_00::acp::PermissionRequest
+pub ai6::directorates::section_00::acp::PermissionRequest::kind: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::PermissionRequest::options: alloc::vec::Vec<ai6::directorates::section_00::acp::PermissionOption>
+pub ai6::directorates::section_00::acp::PermissionRequest::raw_input: core::option::Option<serde_json::value::Value>
+pub ai6::directorates::section_00::acp::PermissionRequest::session_id: alloc::string::String
+pub ai6::directorates::section_00::acp::PermissionRequest::title: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::PermissionRequest::tool_call_id: alloc::string::String
+pub struct ai6::directorates::section_00::acp::RefuseAll
+impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::RefuseAll
+pub fn ai6::directorates::section_00::acp::RefuseAll::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
+#[non_exhaustive] pub struct ai6::directorates::section_00::acp::ResumeMeta
+pub ai6::directorates::section_00::acp::ResumeMeta::answer_only: bool
+pub ai6::directorates::section_00::acp::ResumeMeta::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
+pub ai6::directorates::section_00::acp::ResumeMeta::effort: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::ResumeMeta::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::section_00::acp::ResumeMeta::handler: core::option::Option<ai6::directorates::section_00::acp::HandlerSpec>
+pub ai6::directorates::section_00::acp::ResumeMeta::initial_context: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::acp::ResumeMeta::max_cost_micro_usd: core::option::Option<u64>
+pub ai6::directorates::section_00::acp::ResumeMeta::message: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::ResumeMeta::mission_id: ai6::directorates::m::identity::MissionId
+pub ai6::directorates::section_00::acp::ResumeMeta::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::ResumeMeta::project_mcp: bool
+pub ai6::directorates::section_00::acp::ResumeMeta::project_settings: bool
+pub ai6::directorates::section_00::acp::ResumeMeta::session_id: ai6::directorates::m::identity::SessionId
+pub ai6::directorates::section_00::acp::ResumeMeta::terminal: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::acp::ResumeMeta
+pub fn ai6::directorates::section_00::acp::ResumeMeta::from_resume(&ai6::directorates::section_00::agent::AgentResume) -> Self
+pub fn ai6::directorates::section_00::acp::ResumeMeta::into_resume(self, alloc::string::String) -> ai6::directorates::section_00::agent::AgentResume
+pub fn ai6::directorates::section_00::acp::ResumeMeta::to_value(&self) -> serde_json::value::Value
+pub fn ai6::directorates::section_00::acp::ResumeMeta::with_handler(self, ai6::directorates::section_00::acp::HandlerSpec) -> Self
+pub fn ai6::directorates::section_00::acp::ResumeMeta::with_terminal(self, core::option::Option<alloc::string::String>) -> Self
+impl core::fmt::Debug for ai6::directorates::section_00::acp::ResumeMeta
+pub fn ai6::directorates::section_00::acp::ResumeMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::section_00::acp::TerminalIo
+impl ai6::directorates::section_00::acp::TerminalIo
+pub fn ai6::directorates::section_00::acp::TerminalIo::new(alloc::sync::Arc<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>>, i64) -> Self
+pub fn ai6::directorates::section_00::acp::TerminalIo::stop(&self)
+impl alloc::io::read::Read for ai6::directorates::section_00::acp::TerminalIo
+pub fn ai6::directorates::section_00::acp::TerminalIo::read(&mut self, &mut [u8]) -> core::io::error::Result<usize>
+impl core::io::write::Write for ai6::directorates::section_00::acp::TerminalIo
+pub fn ai6::directorates::section_00::acp::TerminalIo::flush(&mut self) -> core::io::error::Result<()>
+pub fn ai6::directorates::section_00::acp::TerminalIo::write(&mut self, &[u8]) -> core::io::error::Result<usize>
+pub const ai6::directorates::section_00::acp::EVENTS_CAPABILITY: &str
+pub const ai6::directorates::section_00::acp::EVENT_NOTIFICATION: &str
+pub const ai6::directorates::section_00::acp::LAUNCH_META_KEY: &str
+pub const ai6::directorates::section_00::acp::RUNNER_TOKEN_METHOD: &str
+pub trait ai6::directorates::section_00::acp::PermissionDecider: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::section_00::acp::PermissionDecider::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
+impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::RefuseAll
+pub fn ai6::directorates::section_00::acp::RefuseAll::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
+pub fn ai6::directorates::section_00::acp::duplex() -> (agent_client_protocol::jsonrpc::Channel, agent_client_protocol::jsonrpc::Channel)
+pub fn ai6::directorates::section_00::acp::lines_over_io(impl alloc::io::read::Read + core::marker::Send + 'static, impl core::io::write::Write + core::marker::Send + 'static, usize) -> (agent_client_protocol::jsonrpc::Lines<futures_util::sink::map_err::SinkMapErr<futures_channel::mpsc::UnboundedSender<alloc::string::String>, fn(futures_channel::mpsc::SendError) -> core::io::error::Error>, futures_channel::mpsc::UnboundedReceiver<core::io::error::Result<alloc::string::String>>>, alloc::sync::Arc<std::sync::poison::mutex::Mutex<alloc::collections::vec_deque::VecDeque<alloc::string::String>>>)
+pub type ai6::directorates::section_00::acp::Credential = (dyn core::ops::function::Fn(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> bool + core::marker::Send + core::marker::Sync)
+pub type ai6::directorates::section_00::acp::TerminalFactory = alloc::sync::Arc<(dyn core::ops::function::Fn() -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>, guatiao::library::kind::ProviderError> + core::marker::Send + core::marker::Sync)>
 pub mod ai6::directorates::section_00::agent
 pub struct ai6::directorates::section_00::agent::AgentEvent
 pub ai6::directorates::section_00::agent::AgentEvent::data: core::option::Option<alloc::vec::Vec<u8>>
@@ -4185,6 +4319,13 @@ pub fn ai6::directorates::section_00::agent::AgentSession::into_object(self) -> 
 pub fn ai6::directorates::section_00::agent::AgentSession::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentSession::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentSession::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::agent::AgentSession for ai6::directorates::section_00::acp::AcpSession
+pub fn ai6::directorates::section_00::acp::AcpSession::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::section_00::acp::AcpSession::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
@@ -7743,6 +7884,13 @@ pub fn ai6::AgentSession::into_object(self) -> guatiao::library::kind::object::O
 pub fn ai6::AgentSession::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentSession::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::AgentSession::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+impl ai6::directorates::section_00::agent::AgentSession for ai6::directorates::section_00::acp::AcpSession
+pub fn ai6::directorates::section_00::acp::AcpSession::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub fn ai6::directorates::section_00::acp::AcpSession::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::acp::AcpSession::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentSession for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::close(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::interrupt(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>

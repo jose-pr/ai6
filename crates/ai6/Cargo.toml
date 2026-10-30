@@ -13,7 +13,10 @@ exclude = [".*", "*.local.*"]
 [features]
 default = []
 # The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
-daemon = ["gate", "dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "guatiao/load"]
+daemon = ["gate", "acp","dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "guatiao/load"]
+# The Agent Client Protocol wire (`ai6::directorates::section_00::acp`): the client a Station
+# and the `acp` handler drive agents with, and the agent side serving any AgentHandler.
+acp = ["dep:agent-client-protocol", "dep:futures"]
 # The harness gate's client of a Station's Cable endpoint (`ai6::directorates::section_00::gate`).
 gate = ["dep:ureq", "dep:url"]
 # Adds bounded background event publication to the Universal Exports gateway.
@@ -32,6 +35,11 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [[test]]
+name = "acp_wire"
+path = "tests/acp_wire.rs"
+required-features = ["acp"]
+
+[[test]]
 name = "cli"
 path = "tests/cli.rs"
 required-features = ["cli"]
@@ -47,6 +55,8 @@ path = "tests/ha.rs"
 required-features = ["cli"]
 
 [dependencies]
+agent-client-protocol = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 coqui-access.workspace = true
