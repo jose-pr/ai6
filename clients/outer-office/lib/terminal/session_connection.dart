@@ -36,7 +36,7 @@ class SessionConnection extends ChangeNotifier {
   StreamSubscription<dynamic>? _subscription;
   wire.Receiver? _receiver;
   Timer? _retry;
-  Duration _retryDelay = const Duration(seconds: 1);
+  late Duration _retryDelay = board.limits.terminal.retryDelay;
   int _cursor;
   int _inputSequence = 0;
   int _generation = 0;
@@ -95,7 +95,7 @@ class SessionConnection extends ChangeNotifier {
         origin: board.apiOrigin.origin,
         cookie: cookie,
       );
-      await channel.ready.timeout(const Duration(seconds: 10));
+      await channel.ready.timeout(board.limits.terminal.connectTimeout);
       if (_disposed || generation != _generation) {
         await channel.sink.close();
         return;
@@ -110,7 +110,7 @@ class SessionConnection extends ChangeNotifier {
       _receiver = receiver;
       _connected = true;
       _error = false;
-      _retryDelay = const Duration(seconds: 1);
+      _retryDelay = board.limits.terminal.retryDelay;
       notifyListeners();
       _subscription = channel.stream.listen(
         (message) => _receive(generation, message),
@@ -228,9 +228,9 @@ class SessionConnection extends ChangeNotifier {
       return;
     }
     final delay = _retryDelay;
-    _retryDelay = Duration(
-      seconds: (_retryDelay.inSeconds * 2).clamp(1, 16).toInt(),
-    );
+    final longest = board.limits.terminal.retryMaxDelay;
+    final doubled = _retryDelay * 2;
+    _retryDelay = doubled > longest ? longest : doubled;
     _retry = Timer(delay, () {
       if (!_disposed && generation == _generation) {
         unawaited(_connect(++_generation));

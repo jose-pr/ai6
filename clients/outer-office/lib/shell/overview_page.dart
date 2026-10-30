@@ -6,6 +6,7 @@ import '../assistant/assistant_controller.dart';
 import '../assistant/assistant_panel.dart'
     show MoneypennyAvatar, moneypennyPrompts;
 import '../held/held_briefs_page.dart' show revealInvisible;
+import '../settings/oo_config.dart';
 import '../main.dart';
 import '../theme/oo_backdrop.dart';
 import '../theme/oo_decor.dart';
@@ -26,7 +27,7 @@ class OverviewPage extends StatelessWidget {
     required this.onOpen,
     this.assistant,
     this.onAsk,
-    this.activityEvery = const Duration(seconds: 10),
+    this.activityEvery = RefreshSettings.defaultOverview,
     super.key,
   });
 

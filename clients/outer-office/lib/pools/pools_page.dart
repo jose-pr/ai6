@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../settings/oo_config.dart';
 
 /// How much of one provider quota window an account has used.
 @immutable
@@ -125,7 +126,7 @@ class AccountPoolsPage extends StatefulWidget {
     required this.board,
     required this.route,
     required this.onRoute,
-    this.refreshEvery = const Duration(seconds: 15),
+    this.refreshEvery = RefreshSettings.defaultPools,
     super.key,
   });
 

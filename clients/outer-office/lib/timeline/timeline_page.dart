@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../settings/oo_config.dart';
 
 /// One entry of an Operation's activity timeline: metadata only.
 @immutable
@@ -111,7 +112,7 @@ class OperationTimelinePage extends StatefulWidget {
     required this.board,
     required this.route,
     required this.onRoute,
-    this.refreshEvery = const Duration(seconds: 10),
+    this.refreshEvery = RefreshSettings.defaultTimeline,
     super.key,
   });
 

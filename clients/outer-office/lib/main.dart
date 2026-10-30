@@ -103,6 +103,8 @@ Future<void> _startWeb() async {
     terminalRuntimeError: terminalRuntimeError,
     onThemeChanged: appearance.saveTheme,
     onBackdropChanged: appearance.saveBackdrop,
+    pollInterval: config.limits.refresh.sessions,
+    limits: config.limits,
   );
   try {
     await appearance.restore(board);
@@ -129,6 +131,8 @@ void _startDesktop() {
     themeId: config.defaultTheme(warn: debugPrint),
     onThemeChanged: appearance.saveTheme,
     onBackdropChanged: appearance.saveBackdrop,
+    pollInterval: config.limits.refresh.sessions,
+    limits: config.limits,
   );
   runWidget(_DesktopWindowHost(board: board, chatSettings: config.chat));
   unawaited(appearance.restore(board).catchError((Object _) {}));
@@ -173,7 +177,8 @@ class MissionBoard extends ChangeNotifier {
     this.onBackdropChanged,
     this.assistantChannel,
     http.Client? client,
-    Duration? pollInterval = const Duration(seconds: 3),
+    Duration? pollInterval = RefreshSettings.defaultSessions,
+    this.limits = const OoLimits(),
   }) : themeId = ooThemePreference(themeId),
        _client = client ?? http.Client() {
     if (demo) {
@@ -337,6 +342,9 @@ class MissionBoard extends ChangeNotifier {
 
   final Uri apiOrigin;
   final bool demo;
+
+  /// `OO.cfg`'s refresh, control, page, terminal and input settings.
+  final OoLimits limits;
   final String? terminalRuntimeError;
   final Future<void> Function(String themeId)? onThemeChanged;
   final Future<void> Function(bool backdrop)? onBackdropChanged;
@@ -518,8 +526,8 @@ class MissionBoard extends ChangeNotifier {
     String? agent,
     String? message,
     String? sessionId,
-    Duration wait = const Duration(seconds: 10),
-    Duration pollEvery = const Duration(milliseconds: 500),
+    Duration? wait,
+    Duration? pollEvery,
   }) async {
     if (demo) {
       throw StateError('Mission controls are unavailable in preview.');
@@ -566,9 +574,9 @@ class MissionBoard extends ChangeNotifier {
       jsonDecode(response.body) as Map<String, dynamic>,
     );
     _recordControl(status);
-    final deadline = DateTime.now().add(wait);
+    final deadline = DateTime.now().add(wait ?? limits.controls.wait);
     while (status.isOpen && DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(pollEvery);
+      await Future<void>.delayed(pollEvery ?? limits.controls.poll);
       final polled = await _client.get(
         apiOrigin.resolve('$path/${Uri.encodeComponent(status.controlId)}'),
         headers: {'authorization': 'Bearer $token'},
@@ -755,7 +763,7 @@ class MissionBoard extends ChangeNotifier {
     required String operationId,
     String? missionId,
     String? cursor,
-    int limit = 50,
+    int? limit,
   }) async {
     if (demo) {
       return TimelinePageSummary(
@@ -798,7 +806,7 @@ class MissionBoard extends ChangeNotifier {
           )
           .replace(
             queryParameters: {
-              'limit': '$limit',
+              'limit': '${limit ?? limits.pages.timeline}',
               'mission': ?missionId,
               'cursor': ?cursor,
             },
@@ -1414,7 +1422,7 @@ class MissionBoard extends ChangeNotifier {
     }
   }
 
-  Future<List<AuditEntrySummary>> loadAudit({int limit = 100}) async {
+  Future<List<AuditEntrySummary>> loadAudit({int? limit}) async {
     if (demo) {
       return auditEntries;
     }
@@ -1425,7 +1433,9 @@ class MissionBoard extends ChangeNotifier {
     final response = await _client.get(
       apiOrigin
           .resolve('/v1/user/audit')
-          .replace(queryParameters: {'limit': '$limit'}),
+          .replace(
+            queryParameters: {'limit': '${limit ?? limits.pages.audit}'},
+          ),
       headers: {'authorization': 'Bearer $token'},
     );
     if (response.statusCode != 200) {
@@ -3130,6 +3140,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               board: board,
               pages: pages,
               onOpen: _open,
+              activityEvery: board.limits.refresh.overview,
               assistant: widget.chat?.controller,
               onAsk: (text) {
                 widget.chat?.open();
@@ -3260,11 +3271,13 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               board: board,
               route: route,
               onRoute: onRoute,
+              refreshEvery: board.limits.refresh.pools,
             ),
             OoPage.timeline => OperationTimelinePage(
               board: board,
               route: route,
               onRoute: onRoute,
+              refreshEvery: board.limits.refresh.timeline,
             ),
             OoPage.audit => AuditLogPage(
               board: board,
@@ -5074,7 +5087,9 @@ Future<void> _showCreateMission(
                 TextField(
                   controller: title,
                   enabled: !submitting,
-                  maxLength: 512,
+                  maxLength: InputSettings.field(
+                    board.limits.inputs.missionTitleChars,
+                  ),
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(labelText: 'Mission title'),
                 ),
@@ -5084,7 +5099,9 @@ Future<void> _showCreateMission(
                   enabled: !submitting,
                   minLines: 5,
                   maxLines: 10,
-                  maxLength: 65536,
+                  maxLength: InputSettings.field(
+                    board.limits.inputs.missionPromptChars,
+                  ),
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
                     labelText: 'Instructions for the agent',
@@ -5990,6 +6007,7 @@ class _LiveSessionTerminalState extends State<_LiveSessionTerminal> {
                   onInput: _connection.sendInput,
                   onResize: _connection.sendResize,
                   writeLeaseHeld: _connection.writeLeaseHeld,
+                  maxLines: widget.board.limits.terminal.scrollbackLines,
                 )
               : Center(
                   child: Padding(

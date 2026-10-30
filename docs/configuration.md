@@ -403,9 +403,42 @@ transition_ms = 200                   # how long the chat takes to move; 0 for n
 [routes]
 text_bytes = 128                      # the longest text filter a page link may carry, in bytes
 
+[refresh]                             # seconds between a page's asks; 0 turns that refresh off
+sessions = 3                          # the board of Sessions, Stations and Missions
+overview = 10                         # the overview's recent activity
+timeline = 10                         # an Operation's timeline
+pools = 15                            # the account pools
+
+[controls]                            # following a Mission control until the Station reports
+wait = 10                             # seconds; 0 returns once the control is queued
+poll = 0.5                            # seconds between asks for its status
+
+[pages]
+timeline = 50                         # items in one page of the timeline
+audit = 100                           # records in the audit log
+
+[terminal]                            # the live Session terminal
+scrollback_lines = 10000
+connect_timeout = 10                  # seconds the socket may take to open
+retry_delay = 1                       # seconds before the first reconnect; each next one doubles
+retry_max_delay = 16                  # seconds, the longest wait between reconnects
+
+[limits]                              # characters a text field takes; 0 takes the bound away
+mission_title_chars = 512
+mission_prompt_chars = 65536
+reason_chars = 512                    # the reason for lowering an Agent's clearance
+
 [assets]
 cdn = "none"                          # web only: none, fonts or all (read by the page's bootstrap)
 ```
+
+Every value of `[refresh]` is a number of seconds, whole or fractional, `0` or more; `[controls]`
+`wait` likewise, and the other seconds are more than 0. The counts of `[pages]` and
+`scrollback_lines` are whole numbers of 1 or more, and `[limits]` takes whole numbers of 0 or
+more. An unknown table or key, or a value that is not what its key takes, refuses the file. These
+are what Outer Office asks of Universal Exports and how it paces itself; what the gateway allows
+is the `unex` record's ([Universal Exports limits](#universal-exports-limits)), and Moneypenny's
+view bounds come from the gateway's `[assistant.views]`.
 
 The build define `OO_API` beats `[unex] url`, which beats the loopback default. A theme the
 person chooses (`oo.theme`, kept on the device or in the browser) beats `[appearance] theme`,

@@ -226,6 +226,11 @@ one view at a time, its pages as rows with icon tiles. Below 600 px (a phone) th
 keeps the page title, search, Moneypenny, the bell and the person's initials; Overview is
 one column, tables are lists, and Moneypenny's chat fills the screen.
 
+How often each page asks again (`[refresh]`), how a Mission control is followed
+(`[controls]`), how much the timeline and audit log ask for (`[pages]`), the live terminal's
+scrollback and reconnects (`[terminal]`) and how much a text field takes (`[limits]`) are `OO.cfg`
+tables too; every key is optional and the example shows the defaults.
+
 Moneypenny's chat is hidden behind the top bar's Moneypenny button until opened; a dot on
 the button says she answered or proposed something meanwhile. Docked, it sits beside the
 page from 1200 px wide (drag the handle, or focus it and use the arrow keys, to make it 320

@@ -25,6 +25,7 @@ class OoConfig {
     this.theme,
     this.chat = const ChatSettings(),
     this.routeTextBytes,
+    this.limits = const OoLimits(),
   });
 
   /// `[unex] url`: Universal Exports' origin.
@@ -40,6 +41,11 @@ class OoConfig {
   /// keeps [OoRouteLimits.defaultTextBytes].
   final int? routeTextBytes;
 
+  /// `[refresh]`, `[controls]`, `[pages]`, `[terminal]` and `[limits]`: how often pages ask
+  /// again, how a control is followed, how much a page asks for, the terminal's pace and how
+  /// much a field takes.
+  final OoLimits limits;
+
   /// The route limits this file sets, over the defaults.
   OoRouteLimits get routeLimits => routeTextBytes == null
       ? const OoRouteLimits()
@@ -53,7 +59,18 @@ class OoConfig {
   /// Throws a [FormatException] naming the format, the table or the key that is wrong.
   factory OoConfig.parse(String text) {
     final document = decodeOoConfig(text);
-    const known = {'unex', 'appearance', 'chat', 'routes', 'assets'};
+    const known = {
+      'unex',
+      'appearance',
+      'chat',
+      'routes',
+      'assets',
+      'refresh',
+      'controls',
+      'pages',
+      'terminal',
+      'limits',
+    };
     for (final key in document.keys) {
       if (!known.contains(key)) {
         throw FormatException('OO.cfg: unknown table [$key]');
@@ -92,6 +109,7 @@ class OoConfig {
       return value.toDouble();
     }
 
+    final limits = OoLimits._read(table);
     final unex = table('unex', {'url'});
     final chatTable = table('chat', ChatSettings.keys);
     const defaults = ChatSettings();
@@ -141,6 +159,7 @@ class OoConfig {
       theme: string(appearance, 'appearance', 'theme'),
       chat: chat,
       routeTextBytes: textBytes as int?,
+      limits: limits,
     );
   }
 
@@ -156,6 +175,251 @@ class OoConfig {
       );
     }
     return valid;
+  }
+}
+
+/// How long an `OO.cfg` value of seconds is, whole or fractional, in a [Duration].
+Duration _seconds(double seconds) =>
+    Duration(microseconds: (seconds * Duration.microsecondsPerSecond).round());
+
+/// How often each page asks again, `OO.cfg`'s `[refresh]` table, in seconds; `0` turns a
+/// page's automatic refresh off.
+class RefreshSettings {
+  const RefreshSettings({
+    this.sessions = defaultSessions,
+    this.overview = defaultOverview,
+    this.timeline = defaultTimeline,
+    this.pools = defaultPools,
+  });
+
+  static const defaultSessions = Duration(seconds: 3);
+  static const defaultOverview = Duration(seconds: 10);
+  static const defaultTimeline = Duration(seconds: 10);
+  static const defaultPools = Duration(seconds: 15);
+
+  static const keys = {'sessions', 'overview', 'timeline', 'pools'};
+
+  /// `sessions`: the board of Sessions, Stations and Missions.
+  final Duration? sessions;
+
+  /// `overview`: the overview's activity.
+  final Duration? overview;
+
+  /// `timeline`: the Operation timeline.
+  final Duration? timeline;
+
+  /// `pools`: the account pools.
+  final Duration? pools;
+}
+
+/// How a control is followed, `OO.cfg`'s `[controls]` table, in seconds.
+class ControlSettings {
+  const ControlSettings({this.wait = defaultWait, this.poll = defaultPoll});
+
+  static const defaultWait = Duration(seconds: 10);
+  static const defaultPoll = Duration(milliseconds: 500);
+
+  static const keys = {'wait', 'poll'};
+
+  /// `wait`: how long to follow a control for the Station's outcome; `0` returns once it is
+  /// queued.
+  final Duration wait;
+
+  /// `poll`: how often to ask for its status meanwhile.
+  final Duration poll;
+}
+
+/// How much a page asks for, `OO.cfg`'s `[pages]` table.
+class PageSettings {
+  const PageSettings({this.timeline = 50, this.audit = 100});
+
+  static const keys = {'timeline', 'audit'};
+
+  /// `timeline`: items in one page of an Operation's timeline.
+  final int timeline;
+
+  /// `audit`: records in the audit log.
+  final int audit;
+}
+
+/// The live terminal's pace, `OO.cfg`'s `[terminal]` table.
+class TerminalSettings {
+  const TerminalSettings({
+    this.scrollbackLines = 10000,
+    this.connectTimeout = const Duration(seconds: 10),
+    this.retryDelay = const Duration(seconds: 1),
+    this.retryMaxDelay = const Duration(seconds: 16),
+  });
+
+  static const keys = {
+    'scrollback_lines',
+    'connect_timeout',
+    'retry_delay',
+    'retry_max_delay',
+  };
+
+  /// `scrollback_lines`: lines the terminal keeps.
+  final int scrollbackLines;
+
+  /// `connect_timeout`: how long the socket may take to open.
+  final Duration connectTimeout;
+
+  /// `retry_delay`: the wait before the first reconnect; each next one doubles, up to
+  /// [retryMaxDelay].
+  final Duration retryDelay;
+
+  /// `retry_max_delay`: the longest wait between reconnects.
+  final Duration retryMaxDelay;
+}
+
+/// How much a text field takes, `OO.cfg`'s `[limits]` table, in characters; `0` takes the
+/// bound away.
+class InputSettings {
+  const InputSettings({
+    this.missionTitleChars = 512,
+    this.missionPromptChars = 65536,
+    this.reasonChars = 512,
+  });
+
+  static const keys = {
+    'mission_title_chars',
+    'mission_prompt_chars',
+    'reason_chars',
+  };
+
+  /// `mission_title_chars`: a new Mission's title.
+  final int missionTitleChars;
+
+  /// `mission_prompt_chars`: a new Mission's instructions.
+  final int missionPromptChars;
+
+  /// `reason_chars`: the reason for lowering an Agent's clearance.
+  final int reasonChars;
+
+  /// A text field's `maxLength` for a bound: none when it is `0`.
+  static int? field(int chars) => chars == 0 ? null : chars;
+}
+
+/// Everything in `OO.cfg` that tunes how Outer Office asks and what it accepts; every value
+/// defaults to the one here.
+class OoLimits {
+  const OoLimits({
+    this.refresh = const RefreshSettings(),
+    this.controls = const ControlSettings(),
+    this.pages = const PageSettings(),
+    this.terminal = const TerminalSettings(),
+    this.inputs = const InputSettings(),
+  });
+
+  final RefreshSettings refresh;
+  final ControlSettings controls;
+  final PageSettings pages;
+  final TerminalSettings terminal;
+  final InputSettings inputs;
+
+  /// The tables of `OO.cfg`, [table] being its table reader.
+  factory OoLimits._read(
+    Map<String, Object?> Function(String name, Set<String> keys) table,
+  ) {
+    double? seconds(
+      Map<String, Object?> entries,
+      String name,
+      String key, {
+      bool zero = false,
+    }) {
+      final value = entries[key];
+      if (value == null) return null;
+      if (value is! num ||
+          !value.isFinite ||
+          value < 0 ||
+          (!zero && value == 0)) {
+        throw FormatException(
+          'OO.cfg: $name.$key is not a number of seconds, '
+          '${zero ? '0' : 'more than 0'} or more',
+        );
+      }
+      return value.toDouble();
+    }
+
+    int? whole(
+      Map<String, Object?> entries,
+      String name,
+      String key, {
+      int least = 1,
+    }) {
+      final value = entries[key];
+      if (value == null) return null;
+      if (value is! int || value < least) {
+        throw FormatException(
+          'OO.cfg: $name.$key is not a whole number of $least or more',
+        );
+      }
+      return value;
+    }
+
+    Duration? refresh(Map<String, Object?> entries, String key, Duration base) {
+      final value = seconds(entries, 'refresh', key, zero: true);
+      if (value == null) return base;
+      return value == 0 ? null : _seconds(value);
+    }
+
+    const refreshDefaults = RefreshSettings();
+    const controlDefaults = ControlSettings();
+    const pageDefaults = PageSettings();
+    const terminalDefaults = TerminalSettings();
+    const inputDefaults = InputSettings();
+    final refreshTable = table('refresh', RefreshSettings.keys);
+    final controlsTable = table('controls', ControlSettings.keys);
+    final pagesTable = table('pages', PageSettings.keys);
+    final terminalTable = table('terminal', TerminalSettings.keys);
+    final inputsTable = table('limits', InputSettings.keys);
+    final wait = seconds(controlsTable, 'controls', 'wait', zero: true);
+    final poll = seconds(controlsTable, 'controls', 'poll');
+    final connect = seconds(terminalTable, 'terminal', 'connect_timeout');
+    final retry = seconds(terminalTable, 'terminal', 'retry_delay');
+    final retryMax = seconds(terminalTable, 'terminal', 'retry_max_delay');
+    return OoLimits(
+      refresh: RefreshSettings(
+        sessions: refresh(refreshTable, 'sessions', refreshDefaults.sessions!),
+        overview: refresh(refreshTable, 'overview', refreshDefaults.overview!),
+        timeline: refresh(refreshTable, 'timeline', refreshDefaults.timeline!),
+        pools: refresh(refreshTable, 'pools', refreshDefaults.pools!),
+      ),
+      controls: ControlSettings(
+        wait: wait == null ? controlDefaults.wait : _seconds(wait),
+        poll: poll == null ? controlDefaults.poll : _seconds(poll),
+      ),
+      pages: PageSettings(
+        timeline:
+            whole(pagesTable, 'pages', 'timeline') ?? pageDefaults.timeline,
+        audit: whole(pagesTable, 'pages', 'audit') ?? pageDefaults.audit,
+      ),
+      terminal: TerminalSettings(
+        scrollbackLines:
+            whole(terminalTable, 'terminal', 'scrollback_lines') ??
+            terminalDefaults.scrollbackLines,
+        connectTimeout: connect == null
+            ? terminalDefaults.connectTimeout
+            : _seconds(connect),
+        retryDelay: retry == null
+            ? terminalDefaults.retryDelay
+            : _seconds(retry),
+        retryMaxDelay: retryMax == null
+            ? terminalDefaults.retryMaxDelay
+            : _seconds(retryMax),
+      ),
+      inputs: InputSettings(
+        missionTitleChars:
+            whole(inputsTable, 'limits', 'mission_title_chars', least: 0) ??
+            inputDefaults.missionTitleChars,
+        missionPromptChars:
+            whole(inputsTable, 'limits', 'mission_prompt_chars', least: 0) ??
+            inputDefaults.missionPromptChars,
+        reasonChars:
+            whole(inputsTable, 'limits', 'reason_chars', least: 0) ??
+            inputDefaults.reasonChars,
+      ),
+    );
   }
 }
 

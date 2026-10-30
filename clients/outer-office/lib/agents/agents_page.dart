@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../settings/oo_config.dart';
 
 /// The clearances, lowest first.
 const clearances = ['desk', 'field', '00'];
@@ -320,7 +321,10 @@ class _AgentsPageState extends State<AgentsPage> {
     if (operation == null) return;
     final lowered = await showDialog<(String, String)>(
       context: context,
-      builder: (_) => _LowerClearanceDialog(agent: agent),
+      builder: (_) => _LowerClearanceDialog(
+        agent: agent,
+        reasonChars: widget.board.limits.inputs.reasonChars,
+      ),
     );
     if (lowered == null || !mounted) return;
     await _change(
@@ -589,9 +593,12 @@ class _AgentTile extends StatelessWidget {
 }
 
 class _LowerClearanceDialog extends StatefulWidget {
-  const _LowerClearanceDialog({required this.agent});
+  const _LowerClearanceDialog({required this.agent, required this.reasonChars});
 
   final AgentSummary agent;
+
+  /// The most characters the reason may hold; `0` for no bound.
+  final int reasonChars;
 
   @override
   State<_LowerClearanceDialog> createState() => _LowerClearanceDialogState();
@@ -627,7 +634,7 @@ class _LowerClearanceDialogState extends State<_LowerClearanceDialog> {
         TextField(
           controller: _reason,
           decoration: const InputDecoration(labelText: 'Reason'),
-          maxLength: 512,
+          maxLength: InputSettings.field(widget.reasonChars),
         ),
       ],
     ),
