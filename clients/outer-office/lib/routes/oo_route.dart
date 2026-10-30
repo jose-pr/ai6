@@ -62,6 +62,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('sort', _Kind.oneOf, _missionSorts),
     _Field('order', _Kind.oneOf, _orders),
     _Field('mission_id', _Kind.identifier),
+    _Field('subtree', _Kind.oneOf, ['true']),
   ],
   OoPage.sessions: [
     _Field('operation_id', _Kind.identifier),
@@ -278,7 +279,9 @@ class OoRoute {
   OoRoute without(String key) {
     final values = {..._values}..remove(key);
     if (key == 'operation_id' && page == OoPage.missions) {
-      values.remove('mission_id');
+      values
+        ..remove('mission_id')
+        ..remove('subtree');
     }
     if (key == 'station_id' && page == OoPage.stations) {
       values.remove('theater_id');
@@ -390,6 +393,9 @@ OoRoute _checked(OoPage page, List<(String, Object)> values) {
   bool has(String key) => values.any((entry) => entry.$1 == key);
   if (page == OoPage.missions && has('mission_id') && !has('operation_id')) {
     throw const FormatException('mission_id needs operation_id');
+  }
+  if (page == OoPage.missions && has('subtree') && !has('operation_id')) {
+    throw const FormatException('subtree needs operation_id');
   }
   if (page == OoPage.stations && has('theater_id') && !has('station_id')) {
     throw const FormatException('theater_id needs station_id');

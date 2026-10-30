@@ -149,6 +149,7 @@ impl Page {
                 ("sort", OneOf(MISSION_SORTS)),
                 ("order", OneOf(ORDERS)),
                 ("mission_id", Identifier),
+                ("subtree", OneOf(&["true"])),
             ],
             Self::Sessions => &[
                 ("operation_id", Identifier),
@@ -448,6 +449,9 @@ impl Route {
             Page::Missions if has("mission_id") && !has("operation_id") => {
                 return Err("mission_id needs operation_id".to_owned());
             }
+            Page::Missions if has("subtree") && !has("operation_id") => {
+                return Err("subtree needs operation_id".to_owned());
+            }
             Page::Stations if has("theater_id") && !has("station_id") => {
                 return Err("theater_id needs station_id".to_owned());
             }
@@ -541,7 +545,8 @@ pub(crate) fn describe() -> String {
         .collect::<Vec<_>>();
     format!(
         "An app page link is app:/<page>?key=value&..., each value percent-encoded, every key \
-         optional: {}. mission_id needs operation_id, theater_id needs station_id, and audit \
+         optional: {}. mission_id and subtree (true: the Operation and every Operation under it) need \
+         operation_id, theater_id needs station_id, and audit \
          takes operation_id or station_id. Board states: {}. Example: \
          [failed Missions of G](app:/missions?operation_id=G&state=failed).",
         pages.join("; "),

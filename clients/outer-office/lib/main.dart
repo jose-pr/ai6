@@ -36,6 +36,7 @@ import 'settings/oo_config.dart';
 import 'settings/oo_config_file.dart';
 import 'shell/app_window.dart';
 import 'shell/oo_shell.dart';
+import 'operations/operation_tree.dart';
 import 'shell/operations_page.dart';
 import 'shell/overview_page.dart';
 import 'shell/sessions_page.dart';
@@ -838,6 +839,26 @@ class MissionBoard extends ChangeNotifier {
       throw StateError('The gateway refused the roster.');
     }
     return RosterRecords.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// One Operation as its Stations resolve it: its definition with its ancestors' keys and
+  /// the Operation that wrote each. Needs `roster.read`.
+  Future<EffectiveOperationSummary> effectiveOperation(
+    String operationId,
+  ) async {
+    if (demo) {
+      throw StateError('The effective policy is unavailable in preview.');
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/roster/operation/${Uri.encodeComponent(operationId)}/effective',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the effective policy.');
+    }
+    return EffectiveOperationSummary.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
   }
@@ -2256,15 +2277,24 @@ class UserSessionSummary {
 }
 
 class UserOperationAccess {
-  const UserOperationAccess({required this.operationId, required this.actions});
+  const UserOperationAccess({
+    required this.operationId,
+    required this.actions,
+    this.parent,
+  });
 
   final String operationId;
   final List<String> actions;
+
+  /// The nearest Operation above it the person may read; `null` for a root, or when every
+  /// ancestor is hidden from the person.
+  final String? parent;
 
   factory UserOperationAccess.fromJson(Map<String, dynamic> json) =>
       UserOperationAccess(
         operationId: json['operation_id'] as String,
         actions: (json['actions'] as List<dynamic>).cast<String>(),
+        parent: json['parent'] as String?,
       );
 }
 
@@ -3504,9 +3534,19 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
         session,
   ];
   final text = route['text']?.toLowerCase();
+  // With `subtree`, the Operation and those under it as the person's tree shows them.
+  final subtree = switch (route['operation_id']) {
+    final operation? when route['subtree'] == 'true' => subtreeIds({
+      for (final access in board.userSession?.operations ?? const [])
+        access.operationId: access.parent,
+    }, operation),
+    _ => null,
+  };
   bool matches(MissionGroup mission) {
     if (route['operation_id'] case final operation?
-        when mission.operationId != operation) {
+        when subtree != null
+            ? !subtree.contains(mission.operationId)
+            : mission.operationId != operation) {
       return false;
     }
     if (route['mission_id'] case final id? when mission.missionId != id) {

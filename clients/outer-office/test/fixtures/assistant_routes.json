@@ -2,6 +2,7 @@
   "valid": [
     {"json": {"page": "overview"}, "uri": "app:/overview"},
     {"json": {"page": "operations", "operation_id": "G"}, "uri": "app:/operations?operation_id=G"},
+    {"json": {"page": "missions", "operation_id": "G", "subtree": "true"}, "uri": "app:/missions?operation_id=G&subtree=true"},
     {
       "json": {"page": "missions", "operation_id": "G", "state": ["failed"]},
       "uri": "app:/missions?operation_id=G&state=failed"
@@ -74,6 +75,8 @@
     {"json": {"page": "missions", "text": "line\nbreak"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
     {"json": {"page": "missions", "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
     {"json": {"page": "missions", "mission_id": "mission-7"}, "reason": "mission_id needs operation_id"},
+    {"json": {"page": "missions", "subtree": "true"}, "reason": "subtree needs operation_id"},
+    {"json": {"page": "missions", "operation_id": "G", "subtree": "yes"}, "reason": "subtree is one of true"},
     {"json": {"page": "stations", "theater_id": "local"}, "reason": "theater_id needs station_id"},
     {"json": {"page": "stations", "tab": "terminals"}, "reason": "tab is one of overview, theaters, settings, placement"},
     {"json": {"page": "roster", "kind": "agents"}, "reason": "kind is one of operation, agent, role, cover, assistant"},

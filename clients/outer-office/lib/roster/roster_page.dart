@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 
@@ -238,6 +239,36 @@ class _RosterPageState extends State<RosterPage> {
     await _load();
   }
 
+  Future<void> _showEffective(String operationId) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Effective policy of $operationId'),
+      content: SizedBox(
+        width: 520,
+        child: FutureBuilder<EffectiveOperationSummary>(
+          future: widget.board.effectiveOperation(operationId),
+          builder: (context, snapshot) => switch (snapshot) {
+            AsyncSnapshot(data: final effective?) => SingleChildScrollView(
+              child: EffectivePolicyView(effective: effective),
+            ),
+            AsyncSnapshot(hasError: true) => Text(
+              snapshot.error is StateError
+                  ? (snapshot.error! as StateError).message
+                  : snapshot.error.toString(),
+            ),
+            _ => const Center(child: CircularProgressIndicator()),
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+
   Future<void> _delete(RosterRecord record) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -372,19 +403,29 @@ class _RosterPageState extends State<RosterPage> {
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: canEdit
+                      trailing: canEdit || _kind == 'operations'
                           ? Wrap(
                               children: [
-                                IconButton(
-                                  tooltip: 'Edit ${record.key}',
-                                  onPressed: () => unawaited(_edit(record)),
-                                  icon: const Icon(Icons.edit_outlined),
-                                ),
-                                IconButton(
-                                  tooltip: 'Remove ${record.key}',
-                                  onPressed: () => unawaited(_delete(record)),
-                                  icon: const Icon(Icons.delete_outline),
-                                ),
+                                if (_kind == 'operations')
+                                  IconButton(
+                                    tooltip:
+                                        'Effective policy of ${record.key}',
+                                    onPressed: () =>
+                                        unawaited(_showEffective(record.key)),
+                                    icon: const Icon(Icons.account_tree),
+                                  ),
+                                if (canEdit) ...[
+                                  IconButton(
+                                    tooltip: 'Edit ${record.key}',
+                                    onPressed: () => unawaited(_edit(record)),
+                                    icon: const Icon(Icons.edit_outlined),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Remove ${record.key}',
+                                    onPressed: () => unawaited(_delete(record)),
+                                    icon: const Icon(Icons.delete_outline),
+                                  ),
+                                ],
                               ],
                             )
                           : null,
@@ -512,6 +553,37 @@ class _RecordEditorState extends State<_RecordEditor> {
   String? _problem;
   bool _saving = false;
 
+  /// The `parent` the definition text names, when it parses.
+  String? get _parent {
+    try {
+      final definition = jsonDecode(_definition.text);
+      return definition is Map<String, dynamic>
+          ? definition['parent'] as String?
+          : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Sets or clears `parent` in the definition text; the gateway still refuses a cycle.
+  void _setParent(String? parent) {
+    try {
+      final definition = jsonDecode(_definition.text);
+      if (definition is! Map<String, dynamic>) return;
+      if (parent == null) {
+        definition.remove('parent');
+      } else {
+        definition['parent'] = parent;
+      }
+      setState(() {
+        _definition.text = const JsonEncoder.withIndent('  ')
+            .convert(definition);
+      });
+    } on FormatException {
+      setState(() => _problem = 'Fix the JSON before choosing a parent.');
+    }
+  }
+
   @override
   void dispose() {
     _key.dispose();
@@ -576,6 +648,18 @@ class _RecordEditorState extends State<_RecordEditor> {
               enabled: widget.record == null && !_saving,
               decoration: const InputDecoration(labelText: 'Key'),
             ),
+          if (widget.kind == 'operations') ...[
+            const SizedBox(height: 12),
+            _ParentPicker(
+              choices: parentChoices({
+                for (final access
+                    in widget.board.userSession?.operations ?? const [])
+                  access.operationId: access.parent,
+              }, _key.text.trim()),
+              parent: _parent,
+              onChanged: _saving ? null : _setParent,
+            ),
+          ],
           const SizedBox(height: 12),
           TextField(
             key: const Key('roster-definition'),
@@ -608,5 +692,31 @@ class _RecordEditorState extends State<_RecordEditor> {
         child: Text(_saving ? 'Saving…' : 'Save'),
       ),
     ],
+  );
+}
+
+/// Chooses the Operation another sits under; the choices leave out its own subtree.
+class _ParentPicker extends StatelessWidget {
+  const _ParentPicker({
+    required this.choices,
+    required this.parent,
+    required this.onChanged,
+  });
+
+  final List<String> choices;
+  final String? parent;
+  final ValueChanged<String?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) => DropdownButtonFormField<String?>(
+    key: const Key('roster-parent'),
+    initialValue: parent,
+    decoration: const InputDecoration(labelText: 'Parent Operation'),
+    items: [
+      const DropdownMenuItem<String?>(child: Text('None (a root Operation)')),
+      for (final id in {...choices, ?parent})
+        DropdownMenuItem<String?>(value: id, child: Text(id)),
+    ],
+    onChanged: onChanged,
   );
 }

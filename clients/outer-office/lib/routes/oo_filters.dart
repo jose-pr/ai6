@@ -20,6 +20,7 @@ const _labels = {
   'kind': 'Kind',
   'key': 'Record',
   'pool': 'Pool',
+  'subtree': 'Subtree',
 };
 
 /// Field [key] of [route] as a chip says it, such as `State: failed, blocked`.
