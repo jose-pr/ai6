@@ -1,0 +1,11 @@
+# An Operation's own access policy (the `operation_access` records). It only adds to the global
+# policy: roles of Operation actions within the global `delegable` cap, bound at the Operation
+# or one under it.
+[operation_access.G.role.reviewer]
+description = "Reads Missions and decides green ink for G"
+actions = ["mission.read", "approval.decide"]
+
+[[operation_access.G.rule]]
+subject = "group:qa"
+scope = "operation:G"
+role = "reviewer"

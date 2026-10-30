@@ -38,10 +38,11 @@ A longer lifetime is reported at start.
 ## The access policy
 
 `access.toml` binds people to roles at a scope. A scope is `*` or `station:<id>`,
-`operation:<id>`, `theater:<id>`, `config:roster` (the roster every Station reads) or
-`config:assistant` (Moneypenny's repositories); the
+`operation:<id>`, `theater:<id>`, `config:roster` (the roster every Station reads),
+`config:assistant` (Moneypenny's repositories), `config:access` (the global policy) or
+`config:accounts` (the accounts); the
 first rule that matches decides, and no match denies. The actions Universal Exports checks
-are `agent.configure`, `agent.read`, `approval.class`, `approval.decide`,
+are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.read`, `approval.class`, `approval.decide`,
 `assistant.memory.admin`, `audit.read`,
 `cable.read`, `cable.send`, `mission.control`, `mission.create`, `mission.read`,
 `pool.manage`, `pool.read`,
@@ -89,6 +90,77 @@ subject = "group:security"
 scope = "config:assistant"
 role = "memory-admin"
 ```
+
+## Roles, the chief and who may change them
+
+The policy has four built-in role names and two places to write more.
+
+| Role | What it holds | Written |
+| --- | --- | --- |
+| `chief` | every action, including any added later; not stored and not editable | only through the chief list (`chief = [...]` in the `access` record, `[access] chief` in `unex.cfg`) |
+| `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `access.manage`, `account.manage`, `audit.read` and `access.read` | seeded; ordinary data you may edit or delete |
+| `operator` | the read actions (`mission.read`, `session.read`, `agent.read`, `roster.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `session.input`, `cable.send`, `approval.decide` | seeded |
+| `auditor` | the read actions, `audit.read` and `access.read` | seeded |
+
+The first start of Universal Exports with user access and no `access` record writes the last
+three (audited `access.seeded`); a record that exists, even without roles, is never seeded
+again, and a read-only configuration directory keeps them in memory. `assistant.memory.admin`
+is in none of them: only the chief holds it until a chief adds it to a role.
+
+The chief is the head of SIS (C): the owner. `chief` is never a stored role and no stored rule
+can bind or shadow it; its rules are evaluated before every other. `unex.cfg [access] chief`
+names subjects that are always chief, so a lost policy cannot lock everyone out; they cannot be
+removed through the API. A change that would leave no chief is refused, and only a chief changes
+the chief list or an account that is a chief.
+
+### Tiers
+
+A request is allowed when any tier allows it; within a tier the first matching rule decides.
+
+| Tier | Who writes it | What it can grant | What it can never do |
+| --- | --- | --- | --- |
+| Chief | `unex.cfg`, the chief list | every action, anywhere | be removed through the API, or shadowed |
+| Global (`access`) | whoever holds `access.manage` at `config:access` | any action at any scope; a role bound at `operation:<id>` grants only its Operation actions there | grant what the writer does not hold |
+| Operation (`operation_access`) | whoever holds `access.manage` at that Operation | Operation roles within the global `delegable` cap, bound at the Operation or one under it | narrow or shadow a global grant, bind at `*`, `station:` or `config:`, or reuse a built-in role name |
+| Compartment | the compartment's managers | need-to-know access across Operations | count towards what an editor may hand out |
+
+An Operation policy therefore only adds. Its administrator is the built-in `controller` bound
+at `operation:X` in the global policy ("Controller for X", as SIS has Controllers by region),
+not a separate role.
+
+### Delegation never escalates
+
+An editor may add an action to a role, or bind a role at a scope, only if they hold that action
+there through the access tiers (a compartment grant does not count). A rule that reaches down
+the tree needs the action held at every Operation it reaches. Removing an action or a rule needs
+only `access.manage`. The global `delegable` cap lists the Operation actions an Operation's own
+roles may hold; by default every one but `access.manage`, `approval.class` and
+`compartment.cover`, so a delegate cannot appoint deputies or give standing green ink. A cap that
+adds one of those three is shown as a weakening. What a changed tree or cap leaves without effect
+is skipped and listed as orphaned; the rest of the record stays in force.
+
+### Changing them: routes
+
+Every write names the revision it read (`If-Match`; `428` without, `409` when stale or the
+provider is read-only), is checked by the guards (`400` with the reason) and audited
+(`access.update`, `access.remove`, `access.refused`, `account.update`, `account.secret`,
+`account.refused`; never a secret). With an authorizer plugin the chief tier still applies and
+the writes answer `409`.
+
+| Route | Needs |
+| --- | --- |
+| `GET /v1/user/access` | `access.read` at `config:access` |
+| `PUT`, `DELETE /v1/user/access/roles/{role}`, `PUT /v1/user/access/{rules,delegable}` | `access.manage` at `config:access` |
+| `PUT /v1/user/access/chief` | the same, and a chief |
+| `GET /v1/user/access/check?subject=&action=&resource=` | `access.read` at the resource |
+| `GET /v1/user/operations/{op}/access`, `PUT`/`DELETE .../access/roles/{role}`, `PUT .../access/rules` | `access.read` / `access.manage` at the Operation |
+| `GET /v1/user/accounts`, `PUT /v1/user/accounts/{name}`, `POST /v1/user/accounts/{name}/secret` | `account.manage` at `config:accounts`; a `groups` change also `access.manage` at `config:access` |
+
+Accounts are made, disabled and reset, never deleted through the API; a new password is
+shown once and is in no audit record or log. `ai6ctl access` and `ai6ctl
+accounts`, the Access page of Outer Office and Moneypenny (`access`, `propose_access_change`,
+`propose_account_change`, always confirmed by the person) reach the same routes with the person's
+own rights.
 
 ## Login limits
 

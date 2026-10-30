@@ -1,0 +1,39 @@
+# The global access policy (the `access` record). A first start seeds these three roles; the
+# built-in `chief` holds every action and is named only in `chief` (and in unex.cfg).
+chief = ["account:root"]
+
+[role.controller]
+description = "Administers: everything an operator does, plus roster, Agents, Stations, pools, green-ink classes, access and accounts"
+actions = [
+  "access.manage", "access.read", "account.manage", "agent.configure", "agent.read",
+  "approval.class", "approval.decide", "audit.read", "cable.read", "cable.send",
+  "mission.control", "mission.create", "mission.read", "pool.manage", "pool.read",
+  "roster.manage", "roster.read", "session.input", "session.read", "station.configure",
+  "station.read",
+]
+
+[role.operator]
+description = "A regular user: reads and runs work"
+actions = [
+  "agent.read", "approval.decide", "cable.read", "cable.send", "mission.control",
+  "mission.create", "mission.read", "pool.read", "roster.read", "session.input",
+  "session.read", "station.read",
+]
+
+[role.auditor]
+description = "Views everything, changes nothing"
+actions = [
+  "access.read", "agent.read", "audit.read", "cable.read", "mission.read", "pool.read",
+  "roster.read", "session.read", "station.read",
+]
+
+# Controller for the Operation G (and the Operations under it).
+[[rule]]
+subject = "group:g-controllers"
+scope = "operation:G"
+role = "controller"
+
+[[rule]]
+subject = "group:staff"
+scope = "*"
+role = "auditor"

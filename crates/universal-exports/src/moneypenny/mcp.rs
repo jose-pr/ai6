@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(to["required"], json!(["page"]));
         assert_eq!(
             to["properties"]["page"]["enum"].as_array().unwrap().len(),
-            13
+            14
         );
         // Every field of every page, and the words of each page's tabs.
         let fixture: Value = serde_json::from_str(include_str!(
