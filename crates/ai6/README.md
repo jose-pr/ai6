@@ -164,7 +164,7 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::limits` | `OnLimit` and the parking rule for provider usage limits |
 | `ai6::directorates::m::identity` | Validated `MissionId`, provider-issued `SessionId` and access-token records |
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
-| `ai6::directorates::m::access` | The shared `coqui-access` kinds and `coqui-roles` authorizer, AI6's scope kinds and actions, and the `access.toml` reader |
+| `ai6::directorates::m::access` | The shared `coqui-access` kinds and `coqui-roles` authorizer, AI6's scope kinds and actions, the access policy (built-in roles, the chief, the guards on changing it) and the `access.toml` reader |
 | `ai6::directorates::m::vetting` | Vetting: deterministic checks on a brief before it is placed, and the Operation's settings for them |
 | `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
 | `ai6::directorates::registry::sessions` | Shared, fenced Session records: lease, fencing token, attempt and predecessor |
@@ -262,8 +262,11 @@ scope = "operation:G"
 role = "viewer"
 ```
 
-`ai6::role_authorizer_from_toml` reads this format into a `coqui-roles` `RoleAuthorizer` that
-accepts only AI6's scope kinds. The same authorizer is the `coqui_roles` Guatiao provider
+`ai6::access_from_toml` reads this format into an `EffectiveAccess` over `coqui-roles`
+authorizers that accept only AI6's scope kinds. The built-in role `chief` holds every action
+and is bound only through the top-level `chief = ["account:…"]` list, which no stored rule
+shadows; `ai6::seeded_policy()` is the `controller`, `operator` and `auditor` roles a first
+start writes. The same first-match authorizer is the `coqui_roles` Guatiao provider
 (configured with `scope_kinds`, `roles` and `rules`). Authentication and directories come from
 the [`coqui-access`](https://github.com/Boriken-Dev/coqui-access) provider libraries
 (`coqui_access_password`, `_key`, `_ldap`, `_proxy` and `_mtls`), which a Station or Universal

@@ -14,11 +14,14 @@ pub mod directorates;
 pub mod station;
 
 pub use directorates::m::access::{
-    ACTIONS, AccessPolicyError, AccountInfo, AccountPut, Accounts, Attempt, Authenticator,
-    AuthorizationDecision, AuthorizationRequest, Authorizer, Description, Directory, KIND_PREFIX,
-    Lookup, Person, PutOutcome, Role, RoleAuthorizer, RoleAuthorizerBuilder, RolePolicy,
-    RolePolicyError, Rule, SCOPE_KINDS, Verdict, Waiting, load_role_authorizer, role_authorizer,
-    role_authorizer_from_toml,
+    ACTIONS, AccessPolicy, AccessPolicyError, AccountInfo, AccountPut, Accounts, Attempt,
+    Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer, CHIEF_ROLE,
+    CONFIG_ACCESS, CONFIG_ACCOUNTS, Description, Directory, Editor, EffectiveAccess, Explanation,
+    KIND_PREFIX, LimitsDef, Lineage, Lookup, NOT_DELEGABLE, OPERATION_ACTIONS, Orphan, Person,
+    PutOutcome, Refusal, Role, RoleAuthorizer, RoleAuthorizerBuilder, RoleDef, RolePolicy,
+    RolePolicyError, Rule, RuleDef, SCOPE_KINDS, TierKind, Verdict, Waiting, access_from_toml,
+    check_change, compile, default_delegable, load_access, load_policy, role_authorizer,
+    seeded_policy,
 };
 pub use directorates::m::approvals::{
     ActionScope, BUILTIN_KINDS, DEFAULT_APPROVAL_TTL, DEFAULT_PROTECTED, DEFAULT_REQUEST_TTL,

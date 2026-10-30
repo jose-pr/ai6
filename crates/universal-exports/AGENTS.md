@@ -900,7 +900,7 @@ The optional `cli` feature builds the service command:
   `access_cache_ttl`, `access_cache_negative_ttl`, `access_cache_entries`, `assistant`
   (default true), `assistant_agent` (default `moneypenny`) and `route_text_bytes` (default
 128, `AssistantConfig::with_route_text_bytes`)) and its `access` record, the
-  role policy (`Settings::access_authorizer`; none denies every action). User access needs
+  role policy (`Settings::access_policy`; none denies every action until it is seeded). User access needs
   `directory` and either `authenticator` or `proxy_user_header`; `access` and `authorizer`
   are exclusive. Provider configurations are limited to 64 nested values and validated by
   Guatiao; an inline credential in one is printed as a weakening. Provider libraries are

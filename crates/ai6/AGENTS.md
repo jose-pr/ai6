@@ -60,34 +60,87 @@ What AI6 adds:
 ```rust
 pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
                               // "config:roster" is the roster every Station reads,
-                              // "config:assistant" Moneypenny's repositories
-pub const ACTIONS: &[&str];   // agent.configure, agent.read, approval.class,
+                              // "config:assistant" Moneypenny's repositories,
+                              // CONFIG_ACCESS ("config:access") the global access policy,
+                              // CONFIG_ACCOUNTS ("config:accounts") the accounts
+pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.manage,
+                              // agent.configure, agent.read, approval.class,
                               // approval.decide, assistant.memory.admin, audit.read,
-                              // cable.read, cable.send,
-                              // mission.control, mission.create, mission.read,
-                              // pool.manage, pool.read, roster.manage, roster.read,
-                              // session.input, session.read, station.configure,
-                              // station.read; cable.* on operation:<id> bound
-                              // assistant.memory.admin on config:assistant reads
-                              // another person's memory
-                              // Moneypenny's Cables for the person
+                              // cable.read, cable.send, mission.control, mission.create,
+                              // mission.read, pool.manage, pool.read, roster.manage,
+                              // roster.read, session.input, session.read,
+                              // station.configure, station.read; cable.* on operation:<id>
+                              // bound Moneypenny's Cables for the person;
+                              // assistant.memory.admin on config:assistant reads another
+                              // person's memory; access.read / access.manage read and change
+                              // a policy at config:access (global) or operation:<id>
+pub const OPERATION_ACTIONS: &[&str];   // the ACTIONS that mean something on an Operation:
+                              // agent.*, approval.*, cable.*, mission.*, pool.*, session.*,
+                              // audit.read, access.read, access.manage. A role bound at an
+                              // `operation:` scope grants only these there
 pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
-pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError>;
-pub fn load_role_authorizer(path: impl AsRef<Path>) -> Result<RoleAuthorizer, AccessPolicyError>;
+pub fn access_from_toml(source: &str) -> Result<EffectiveAccess, AccessPolicyError>;
+pub fn load_access(path: impl AsRef<Path>) -> Result<EffectiveAccess, AccessPolicyError>;
+pub fn load_policy(path: impl AsRef<Path>) -> Result<AccessPolicy, AccessPolicyError>;
 #[non_exhaustive] pub struct AccessPolicyError;   // Display, Error
 ```
 
-`role_authorizer_from_toml` reads the `access.toml` format: `[role.<name>]` tables with
-`actions`, then `[[rule]]` entries (`subject`, `scope`, `role`, `propagate`) tried in order.
-A subject is `account:<name>`, `person:<id>` or `group:<name>`; a scope is `*` or one of
+### The access policy
+
+`AccessPolicy` is the record `access`: `roles: BTreeMap<String, RoleDef { actions,
+description? }>`, `rules: Vec<RuleDef { subject, scope, role, propagate, editor?,
+changed_unix? }>` (order is meaning), `delegable: Option<Vec<String>>` (`None` is
+`default_delegable()`: every Operation action but `access.manage`, `approval.class`,
+`compartment.cover`), `chief: Vec<String>` (subjects) and `limits`. `from_toml`,
+`from_json`, `to_json`; the file form is `[role.<name>]` / `[[rule]]` plus top-level `chief`
+and `delegable`. `seeded_policy()` is what a first start writes: `controller`, `operator`
+and `auditor` (the table is pinned by a test), ordinary data, never written again.
+
+```rust
+pub fn compile(policy: &AccessPolicy, chief_from_host: &[String])
+    -> Result<EffectiveAccess, AccessPolicyError>;
+impl Authorizer for EffectiveAccess;   // allowed when any tier allows
+impl EffectiveAccess {
+    pub fn explain(&self, request: &AuthorizationRequest) -> Result<Explanation, ProviderError>;
+    pub fn holds(&self, person: &Person, action: &str, scope: &str, lineage: &Lineage) -> bool;
+    pub fn is_chief(&self, person: &Person) -> bool;
+    pub fn host_chiefs(&self) -> &[String];
+}
+pub struct Explanation { allowed, tier: Option<TierKind>, rule_index, role }
+pub enum TierKind { Chief, Global, Operation(String) }
+pub fn check_change(before: &AccessPolicy, after: &AccessPolicy, editor: &Editor,
+    effective: &EffectiveAccess, lineage: &Lineage) -> Result<(), Refusal>;
+pub struct Editor { person, chief }   // Editor::new(person, &effective)
+pub struct Refusal { pub reason: String }
+pub struct Lineage;   // each Operation's ancestors, nearest first (from_roster, new)
+```
+
+- Tiers: the chief list and the global policy compile into one first-match tier with the chief
+  rules first; each Operation's own policy is a tier of its own. A request is allowed when
+  any tier allows, so an Operation policy only adds and no stored rule shadows a chief.
+- `chief` is a reserved role of every action in `ACTIONS` (computed when compiled, so a later
+  action is held), bound only at `*` through the chief list (`AccessPolicy::chief` plus the
+  host's subjects). A stored role or rule naming `chief`, and a role name with `@`, are
+  refused. A role bound at an `operation:` scope is compiled to a copy holding only its
+  `OPERATION_ACTIONS`; a copy with none keeps its place in the order, so the first match still
+  decides.
+- `check_change` refuses: an editor without `access.manage` at `config:access`; a changed
+  `chief` list by a non-chief; a result with no chief (stored plus host); an action added to
+  a role or by a rule the editor does not hold at that rule's scope (at `*` for a role no rule
+  binds; chiefs hold everything; compartments never count); a `delegable` entry that is not
+  an Operation action or that the editor does not hold at `*`. Removals and reorders that add
+  nothing pass.
+
+`access_from_toml` reads the file format into an `EffectiveAccess` with no host chief. A
+subject is `account:<name>`, `person:<id>` or `group:<name>`; a scope is `*` or one of
 `SCOPE_KINDS` followed by `:<id>`. No matching rule is deny, and the first matching rule is
 decisive even when its role lacks the action. A request names the resource's ancestors
 (`AuthorizationRequest::ancestors`, nearest first: Universal Exports fills them for an
 Operation from the Stations' `operation_lineage`), and a rule whose scope is among them
 matches too unless it sets `propagate = false`; a child Operation is narrowed by a rule placed
 before its parent's. `[limits] ancestors` (a number or `"none"`, default 64) bounds how many
-a request names; more is an error, never a denial. The file is read up to 1 MiB. The Universal Exports gateway
-loads and enforces this policy for user requests.
+a request names; more is an error, never a denial. The file is read up to 1 MiB. The Universal
+Exports gateway loads and enforces this policy for user requests.
 
 `station::plugins::Plugins` scans the plugin paths for libraries that declare an AI6 kind or
 any kind beginning with `KIND_PREFIX`, and lists and constructs `Authenticator`,
@@ -736,11 +789,11 @@ pub struct Settings {
     pub pins: Option<PinSet>,                // plugin records; None when there are none
     pub station: StationRuntime,             // station record
     pub tls: Option<serde_json::Value>,      // tls record, a coqui-peer-tls Policy document
-    pub access: Option<serde_json::Value>,   // access record, the gateway's role policy
+    pub access: Option<serde_json::Value>,   // access record, an AccessPolicy document
     pub unex: UnexRecord,                    // unex record
 }
 impl Settings {
-    pub fn access_authorizer(&self) -> Result<RoleAuthorizer, String>;   // none: deny all
+    pub fn access_policy(&self) -> Result<Option<AccessPolicy>, String>;   // none: no record
     #[cfg(feature = "station-tls")]
     pub fn tls_policy(&self) -> Result<coqui_peer_tls::Policy, String>;  // over Policy::default()
 }

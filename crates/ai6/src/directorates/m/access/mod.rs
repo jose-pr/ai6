@@ -3,10 +3,19 @@
 //! The kinds, models and the first-match role authorizer belong to the shared `coqui-access`
 //! and `coqui-roles` crates and are re-exported here, so a provider built for any host loads
 //! into AI6. This module adds what is AI6's own: the Station, Operation and Theater scope
-//! kinds, the action names the gateway checks, and the `access.toml` policy file.
+//! kinds, the action names the gateway checks, the access policy (built-in roles, the chief,
+//! Operation roles) and the guards on changing it.
+
+mod effective;
+mod guard;
+mod lineage;
+mod operation;
+mod policy;
+
+#[cfg(test)]
+mod builtin_tests;
 
 use core::fmt;
-use std::io::Read;
 use std::path::Path;
 
 pub use coqui_access::{
@@ -17,18 +26,37 @@ pub use coqui_access::{
 pub use coqui_roles::{
     Role, RoleAuthorizer, RoleAuthorizerBuilder, RolePolicy, RolePolicyError, Rule,
 };
-use serde::Deserialize;
+pub use effective::{CHIEF_ROLE, EffectiveAccess, Explanation, TierKind, compile};
+pub use guard::{Editor, Refusal, check_change};
+pub use lineage::Lineage;
+pub use operation::Orphan;
+pub use policy::{
+    AccessPolicy, LimitsDef, NOT_DELEGABLE, RoleDef, RuleDef, default_delegable, load_policy,
+    seeded_policy,
+};
 
 /// The resource kinds a role rule may be scoped to in AI6: `station:<id>`, `operation:<id>`,
-/// `theater:<id>`, `config:roster` (the roster every Station reads) and `config:assistant`
-/// (Moneypenny's repositories). A rule may also name `*`.
+/// `theater:<id>`, `config:<name>` (the roster every Station reads, the assistant's
+/// repositories, the access policy and the accounts). A rule may also name `*`.
 pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
+
+/// The scope of the global access policy.
+pub const CONFIG_ACCESS: &str = "config:access";
+
+/// The scope of the accounts the gateway manages.
+pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 
 /// The actions the gateway checks, for writing roles. `cable.send` and `cable.read` on
 /// `operation:<id>` bound what Moneypenny may do with Cables on the person's behalf.
 /// `assistant.memory.admin` on `config:assistant` reads another person's memory, audited; a
-/// person's own memory needs no action, and nobody changes another's.
+/// person's own memory needs no action, and nobody changes another's. `access.read` and
+/// `access.manage` read and change a policy, at `config:access` (the global one) or
+/// `operation:<id>` (that Operation's); `account.manage` manages accounts at
+/// `config:accounts`.
 pub const ACTIONS: &[&str] = &[
+    "access.manage",
+    "access.read",
+    "account.manage",
     "agent.configure",
     "agent.read",
     "approval.class",
@@ -50,12 +78,33 @@ pub const ACTIONS: &[&str] = &[
     "station.read",
 ];
 
+/// The actions that mean something on an Operation: a role bound at `operation:<id>` grants
+/// only these there, and an Operation's own roles may hold only these.
+pub const OPERATION_ACTIONS: &[&str] = &[
+    "access.manage",
+    "access.read",
+    "agent.configure",
+    "agent.read",
+    "approval.class",
+    "approval.decide",
+    "audit.read",
+    "cable.read",
+    "cable.send",
+    "mission.control",
+    "mission.create",
+    "mission.read",
+    "pool.manage",
+    "pool.read",
+    "session.input",
+    "session.read",
+];
+
 /// A role authorizer builder that accepts AI6's scope kinds and no others.
 pub fn role_authorizer() -> RoleAuthorizerBuilder {
     RoleAuthorizer::builder().scope_kinds(SCOPE_KINDS)
 }
 
-/// Why an `access.toml` policy could not be read.
+/// Why an access policy could not be read or compiled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AccessPolicyError(String);
@@ -68,114 +117,29 @@ impl fmt::Display for AccessPolicyError {
 
 impl core::error::Error for AccessPolicyError {}
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PolicyDocument {
-    #[serde(default, rename = "role")]
-    roles: std::collections::BTreeMap<String, RoleDefinition>,
-    #[serde(default, rename = "rule")]
-    rules: Vec<RuleDefinition>,
-    #[serde(default)]
-    limits: LimitsDefinition,
-}
-
-/// The `[limits]` table: bounds a caller may change or lift.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LimitsDefinition {
-    /// How many Operations above a resource one request may name: a number, or `"none"`.
-    #[serde(default)]
-    ancestors: Option<toml::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RoleDefinition {
-    actions: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RuleDefinition {
-    subject: String,
-    scope: String,
-    role: String,
-    #[serde(default = "propagates")]
-    propagate: bool,
-}
-
-/// A rule reaches the Operations under its scope unless it says otherwise.
-const fn propagates() -> bool {
-    true
-}
-
-const MAX_POLICY_BYTES: usize = 1024 * 1024;
-
 /// Reads an `access.toml` policy: `[role.<name>]` tables with `actions`, then `[[rule]]`
-/// entries binding a `subject` to a `role` at a `scope`, tried in order. A rule on an
-/// Operation also reaches every Operation under it unless it sets `propagate = false`;
-/// `[limits] ancestors` bounds the Operations above a resource one request may name (64 by
-/// default, `"none"` for no bound), and a request past it is an error, never a denial.
+/// entries binding a `subject` to a `role` at a `scope`, tried in order, and the top-level
+/// `chief` and `delegable` lists. A rule on an Operation also reaches every Operation under
+/// it unless it sets `propagate = false`; `[limits] ancestors` bounds the Operations above a
+/// resource one request may name (64 by default, `"none"` for no bound), and a request past
+/// it is an error, never a denial. The result has no host chief.
 ///
 /// # Errors
 ///
 /// Returns an error when the text is over 1 MiB, is not the policy format, or names a role,
-/// subject or scope the authorizer refuses.
-pub fn role_authorizer_from_toml(source: &str) -> Result<RoleAuthorizer, AccessPolicyError> {
-    if source.len() > MAX_POLICY_BYTES {
-        return Err(AccessPolicyError(
-            "access policy exceeds the 1 MiB limit".into(),
-        ));
-    }
-    let document: PolicyDocument = toml::from_str(source)
-        .map_err(|error| AccessPolicyError(format!("invalid access policy: {error}")))?;
-    let mut builder = role_authorizer();
-    for (name, definition) in document.roles {
-        builder = builder.role(name, definition.actions);
-    }
-    for rule in document.rules {
-        builder =
-            builder.rule(Rule::new(rule.subject, rule.scope, rule.role).propagate(rule.propagate));
-    }
-    if let Some(ancestors) = document.limits.ancestors {
-        let limit = match ancestors {
-            toml::Value::String(text) if text == "none" => coqui_access::Limit::UNBOUNDED,
-            toml::Value::Integer(count) => u32::try_from(count)
-                .map(coqui_access::Limit::at)
-                .map_err(|_| AccessPolicyError("limits.ancestors is out of range".into()))?,
-            _ => {
-                return Err(AccessPolicyError(
-                    "limits.ancestors must be a whole number or \"none\"".into(),
-                ));
-            }
-        };
-        builder = builder.limits(coqui_roles::RoleLimits::default().ancestors(limit));
-    }
-    builder
-        .build()
-        .map_err(|error| AccessPolicyError(format!("invalid access policy: {error}")))
+/// subject or scope the policy refuses ([`compile`]).
+pub fn access_from_toml(source: &str) -> Result<EffectiveAccess, AccessPolicyError> {
+    compile(&AccessPolicy::from_toml(source)?, &[])
 }
 
-/// Reads and validates an `access.toml` policy file.
+/// Reads and compiles an `access.toml` policy file.
 ///
 /// # Errors
 ///
-/// Returns an error when the file cannot be read or [`role_authorizer_from_toml`] refuses it.
-pub fn load_role_authorizer(path: impl AsRef<Path>) -> Result<RoleAuthorizer, AccessPolicyError> {
+/// Returns an error when the file cannot be read or [`access_from_toml`] refuses it.
+pub fn load_access(path: impl AsRef<Path>) -> Result<EffectiveAccess, AccessPolicyError> {
     let path = path.as_ref();
-    let mut source = String::new();
-    std::fs::File::open(path)
-        .and_then(|file| {
-            file.take((MAX_POLICY_BYTES + 1) as u64)
-                .read_to_string(&mut source)
-        })
-        .map_err(|error| {
-            AccessPolicyError(format!(
-                "{}: could not read access policy: {error}",
-                path.display()
-            ))
-        })?;
-    role_authorizer_from_toml(&source)
+    compile(&load_policy(path)?, &[])
         .map_err(|error| AccessPolicyError(format!("{}: {error}", path.display())))
 }
 
@@ -203,7 +167,7 @@ mod tests {
 
     #[test]
     fn role_policy_scopes_roles_and_defaults_to_deny() {
-        let policy = role_authorizer_from_toml(
+        let policy = access_from_toml(
             r#"
                 [role.viewer]
                 actions = ["mission.read", "transcript.read"]
@@ -248,7 +212,7 @@ mod tests {
 
     #[test]
     fn a_rule_on_a_parent_operation_reaches_its_children_unless_it_does_not_propagate() {
-        let policy = role_authorizer_from_toml(
+        let policy = access_from_toml(
             r#"
                 [role.viewer]
                 actions = ["mission.read"]
@@ -281,29 +245,29 @@ mod tests {
             under("viewer", &["operation:P", "operation:ROOT"]).is_err(),
             "past [limits] ancestors is an error"
         );
-        assert!(role_authorizer_from_toml("[limits]\nancestors = \"many\"").is_err());
-        assert!(role_authorizer_from_toml("[limits]\nancestors = \"none\"").is_ok());
+        assert!(access_from_toml("[limits]\nancestors = \"many\"").is_err());
+        assert!(access_from_toml("[limits]\nancestors = \"none\"").is_ok());
     }
 
     #[test]
     fn role_policy_rejects_unknown_roles_and_unrecognized_scopes() {
         assert!(
-            role_authorizer_from_toml(
+            access_from_toml(
                 "[[rule]]\nsubject='account:007'\nscope='operation:G'\nrole='missing'"
             )
             .is_err()
         );
-        assert!(role_authorizer_from_toml(
+        assert!(access_from_toml(
             "[role.viewer]\nactions=['mission.read']\n[[rule]]\nsubject='account:007'\nscope='universe:all'\nrole='viewer'"
         )
         .is_err());
-        assert!(role_authorizer_from_toml("[role.viewer]\nunknown = 1").is_err());
-        assert!(role_authorizer_from_toml(&" ".repeat(MAX_POLICY_BYTES + 1)).is_err());
+        assert!(access_from_toml("[role.viewer]\nunknown = 1").is_err());
+        assert!(access_from_toml(&" ".repeat(policy::MAX_POLICY_BYTES + 1)).is_err());
     }
 
     #[test]
     fn role_policy_can_limit_station_administration_to_one_station() {
-        let policy = role_authorizer_from_toml(
+        let policy = access_from_toml(
             r#"
                 [role.station-admin]
                 actions = ["station.read", "station.configure", "audit.read"]
@@ -333,7 +297,7 @@ mod tests {
             let policy = format!(
                 "[role.r]\nactions=['mission.read']\n[[rule]]\nsubject='account:a'\nscope='{kind}:x'\nrole='r'"
             );
-            assert!(role_authorizer_from_toml(&policy).is_ok(), "{kind}");
+            assert!(access_from_toml(&policy).is_ok(), "{kind}");
         }
     }
 

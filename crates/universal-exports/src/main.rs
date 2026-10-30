@@ -10,7 +10,7 @@ use std::time::Duration;
 use ai6::guatiao::{ToValue, Value};
 use ai6::{
     Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer, ConfigProvider,
-    ConfigRevision, Directory, RoleAuthorizer, UnexRecord,
+    ConfigRevision, Directory, EffectiveAccess, UnexRecord,
 };
 use clap::Parser;
 use coqui_access_kit::CacheOptions;
@@ -197,7 +197,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
     let policy = Arc::new(LivePolicy::new(
         snapshot.revision,
-        snapshot.settings.access_authorizer()?,
+        effective_policy(&snapshot.settings)?,
     ));
     let access = configured_access(&settings, &snapshot, policy.clone())
         .map_err(|error| format!("user access configuration failed: {error}"))?;
@@ -226,14 +226,21 @@ async fn run(cli: Cli) -> Result<(), String> {
         .map_err(|error| format!("gateway listener failed: {error}"))
 }
 
+/// The access policy of the `access` record compiled, or one that denies every action when
+/// there is none.
+fn effective_policy(settings: &ai6::Settings) -> Result<EffectiveAccess, String> {
+    let policy = settings.access_policy()?.unwrap_or_default();
+    ai6::compile(&policy, &[]).map_err(|error| error.to_string())
+}
+
 /// The role policy of the `access` record, replaced while the gateway runs when the record
 /// changes; a policy the provider does not accept is refused and the last good one kept.
 struct LivePolicy {
-    current: RwLock<(ConfigRevision, Arc<RoleAuthorizer>)>,
+    current: RwLock<(ConfigRevision, Arc<EffectiveAccess>)>,
 }
 
 impl LivePolicy {
-    fn new(revision: ConfigRevision, policy: RoleAuthorizer) -> Self {
+    fn new(revision: ConfigRevision, policy: EffectiveAccess) -> Self {
         Self {
             current: RwLock::new((revision, Arc::new(policy))),
         }
@@ -246,7 +253,7 @@ impl LivePolicy {
             .0
     }
 
-    fn replace(&self, revision: ConfigRevision, policy: RoleAuthorizer) {
+    fn replace(&self, revision: ConfigRevision, policy: EffectiveAccess) {
         *self.current.write().unwrap_or_else(PoisonError::into_inner) =
             (revision, Arc::new(policy));
     }
@@ -295,7 +302,7 @@ async fn follow_policy(
                     matches!(record, ai6::ConfigRecord::Unex | ai6::ConfigRecord::Plugin)
                 })
                 .collect();
-            match snapshot.settings.access_authorizer() {
+            match effective_policy(&snapshot.settings) {
                 Ok(authorizer) => {
                     policy.replace(snapshot.revision, authorizer);
                     Ok(Some((snapshot.revision, changed)))
@@ -715,8 +722,11 @@ mod tests {
 
     #[test]
     fn a_changed_access_record_replaces_the_policy_and_a_bad_one_is_kept_out() {
-        let policy = LivePolicy::new(ConfigRevision::new(1), RoleAuthorizer::default());
-        let allowed = ai6::role_authorizer_from_toml(
+        let policy = LivePolicy::new(
+            ConfigRevision::new(1),
+            ai6::compile(&ai6::AccessPolicy::default(), &[]).unwrap(),
+        );
+        let allowed = ai6::access_from_toml(
             "[role.viewer]\nactions = [\"mission.read\"]\n\
              [[rule]]\nsubject = \"group:ops\"\nscope = \"operation:G\"\nrole = \"viewer\"\n",
         )

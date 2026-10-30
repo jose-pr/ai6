@@ -179,15 +179,95 @@ pub use ai6::directorates::m::access::Rule
 pub use ai6::directorates::m::access::Verdict
 pub use ai6::directorates::m::access::Waiting
 pub use ai6::directorates::m::access::takes
+#[non_exhaustive] pub enum ai6::directorates::m::access::TierKind
+pub ai6::directorates::m::access::TierKind::Chief
+pub ai6::directorates::m::access::TierKind::Global
+pub ai6::directorates::m::access::TierKind::Operation(alloc::string::String)
+#[non_exhaustive] pub struct ai6::directorates::m::access::AccessPolicy
+pub ai6::directorates::m::access::AccessPolicy::chief: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::access::AccessPolicy::delegable: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::directorates::m::access::AccessPolicy::limits: core::option::Option<ai6::LimitsDef>
+pub ai6::directorates::m::access::AccessPolicy::roles: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::RoleDef>
+pub ai6::directorates::m::access::AccessPolicy::rules: alloc::vec::Vec<ai6::RuleDef>
+impl ai6::AccessPolicy
+pub fn ai6::AccessPolicy::delegable_set(&self) -> alloc::collections::btree::set::BTreeSet<alloc::string::String>
+pub fn ai6::AccessPolicy::from_json(&serde_json::value::Value) -> core::result::Result<Self, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::AccessPolicy::from_toml(&str) -> core::result::Result<Self, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::AccessPolicy::to_json(&self) -> serde_json::value::Value
 #[non_exhaustive] pub struct ai6::directorates::m::access::AccessPolicyError(_)
 impl core::error::Error for ai6::directorates::m::access::AccessPolicyError
 impl core::fmt::Display for ai6::directorates::m::access::AccessPolicyError
 pub fn ai6::directorates::m::access::AccessPolicyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::access::Editor
+pub ai6::directorates::m::access::Editor::chief: bool
+pub ai6::directorates::m::access::Editor::person: coqui_access::model::Person
+impl ai6::Editor
+pub fn ai6::Editor::new(coqui_access::model::Person, &ai6::EffectiveAccess) -> Self
+pub struct ai6::directorates::m::access::EffectiveAccess
+impl ai6::EffectiveAccess
+pub fn ai6::EffectiveAccess::explain(&self, &coqui_access::model::AuthorizationRequest) -> core::result::Result<ai6::Explanation, guatiao::library::kind::ProviderError>
+pub fn ai6::EffectiveAccess::has_operation_tier(&self, &str) -> bool
+pub fn ai6::EffectiveAccess::holds(&self, &coqui_access::model::Person, &str, &str, &ai6::Lineage) -> bool
+pub fn ai6::EffectiveAccess::host_chiefs(&self) -> &[alloc::string::String]
+pub fn ai6::EffectiveAccess::is_chief(&self, &coqui_access::model::Person) -> bool
+pub fn ai6::EffectiveAccess::orphaned(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<ai6::Orphan>>
+impl coqui_access::kind::Authorizer for ai6::EffectiveAccess
+pub fn ai6::EffectiveAccess::authorize(&self, coqui_access::model::AuthorizationRequest) -> core::result::Result<coqui_access::model::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for ai6::EffectiveAccess
+pub fn ai6::EffectiveAccess::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::access::Explanation
+pub ai6::directorates::m::access::Explanation::allowed: bool
+pub ai6::directorates::m::access::Explanation::role: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::access::Explanation::rule_index: core::option::Option<usize>
+pub ai6::directorates::m::access::Explanation::tier: core::option::Option<ai6::TierKind>
+pub struct ai6::directorates::m::access::LimitsDef
+pub ai6::directorates::m::access::LimitsDef::ancestors: core::option::Option<serde_json::value::Value>
+pub struct ai6::directorates::m::access::Lineage
+impl ai6::Lineage
+pub fn ai6::Lineage::ancestors(&self, &str) -> &[alloc::string::String]
+pub fn ai6::Lineage::contains(&self, &str) -> bool
+pub fn ai6::Lineage::from_roster(&ai6::directorates::m::roster::Roster) -> Self
+pub fn ai6::Lineage::in_subtree(&self, &str, &str) -> bool
+pub fn ai6::Lineage::new<A: core::convert::Into<alloc::string::String>>(impl core::iter::traits::collect::IntoIterator<Item = (impl core::convert::Into<alloc::string::String>, impl core::iter::traits::collect::IntoIterator<Item = A>)>) -> Self
+pub fn ai6::Lineage::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::Lineage::subtree(&self, &str) -> alloc::vec::Vec<&str>
+pub struct ai6::directorates::m::access::Orphan
+pub ai6::directorates::m::access::Orphan::item: alloc::string::String
+pub ai6::directorates::m::access::Orphan::reason: alloc::string::String
+pub struct ai6::directorates::m::access::Refusal
+pub ai6::directorates::m::access::Refusal::reason: alloc::string::String
+impl core::error::Error for ai6::Refusal
+impl core::fmt::Display for ai6::Refusal
+pub fn ai6::Refusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::m::access::RoleDef
+pub ai6::directorates::m::access::RoleDef::actions: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::access::RoleDef::description: core::option::Option<alloc::string::String>
+impl ai6::RoleDef
+pub fn ai6::RoleDef::new(impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub struct ai6::directorates::m::access::RuleDef
+pub ai6::directorates::m::access::RuleDef::changed_unix: core::option::Option<u64>
+pub ai6::directorates::m::access::RuleDef::editor: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::access::RuleDef::propagate: bool
+pub ai6::directorates::m::access::RuleDef::role: alloc::string::String
+pub ai6::directorates::m::access::RuleDef::scope: alloc::string::String
+pub ai6::directorates::m::access::RuleDef::subject: alloc::string::String
+impl ai6::RuleDef
+pub fn ai6::RuleDef::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub const ai6::directorates::m::access::ACTIONS: &[&str]
+pub const ai6::directorates::m::access::CHIEF_ROLE: &str
+pub const ai6::directorates::m::access::CONFIG_ACCESS: &str
+pub const ai6::directorates::m::access::CONFIG_ACCOUNTS: &str
+pub const ai6::directorates::m::access::NOT_DELEGABLE: [&str; 3]
+pub const ai6::directorates::m::access::OPERATION_ACTIONS: &[&str]
 pub const ai6::directorates::m::access::SCOPE_KINDS: [&str; 4]
-pub fn ai6::directorates::m::access::load_role_authorizer(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::directorates::m::access::access_from_toml(&str) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::directorates::m::access::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &ai6::EffectiveAccess, &ai6::Lineage) -> core::result::Result<(), ai6::Refusal>
+pub fn ai6::directorates::m::access::compile(&ai6::AccessPolicy, &[alloc::string::String]) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::directorates::m::access::default_delegable() -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::access::load_access(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::directorates::m::access::load_policy(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<ai6::AccessPolicy, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::directorates::m::access::role_authorizer() -> coqui_roles::RoleAuthorizerBuilder
-pub fn ai6::directorates::m::access::role_authorizer_from_toml(&str) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::directorates::m::access::seeded_policy() -> ai6::AccessPolicy
 pub mod ai6::directorates::m::approvals
 #[non_exhaustive] pub enum ai6::directorates::m::approvals::GreenInkPreset
 pub ai6::directorates::m::approvals::GreenInkPreset::Licensed
@@ -450,7 +530,7 @@ pub ai6::directorates::m::config::Settings::theaters: ai6::directorates::m::thea
 pub ai6::directorates::m::config::Settings::tls: core::option::Option<serde_json::value::Value>
 pub ai6::directorates::m::config::Settings::unex: ai6::directorates::m::config::UnexRecord
 impl ai6::directorates::m::config::Settings
-pub fn ai6::directorates::m::config::Settings::access_authorizer(&self) -> core::result::Result<coqui_roles::RoleAuthorizer, alloc::string::String>
+pub fn ai6::directorates::m::config::Settings::access_policy(&self) -> core::result::Result<core::option::Option<ai6::AccessPolicy>, alloc::string::String>
 pub fn ai6::directorates::m::config::Settings::tls_policy(&self) -> core::result::Result<coqui_peer_tls::policy::Policy, alloc::string::String>
 pub struct ai6::directorates::m::config::SqlProvider
 impl ai6::SqlProvider
@@ -5079,6 +5159,10 @@ pub ai6::TheaterKind::Ssh
 pub ai6::TheaterKind::Transport
 impl ai6::directorates::m::theaters::TheaterKind
 pub fn ai6::directorates::m::theaters::TheaterKind::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::TierKind
+pub ai6::TierKind::Chief
+pub ai6::TierKind::Global
+pub ai6::TierKind::Operation(alloc::string::String)
 #[non_exhaustive] pub enum ai6::VettingScope
 pub ai6::VettingScope::All
 pub ai6::VettingScope::Off
@@ -5089,6 +5173,17 @@ pub fn ai6::directorates::m::vetting::VettingScope::applies(self, bool) -> bool
 pub ai6::VettingVerdict::Hold
 pub ai6::VettingVerdict::Pass
 pub ai6::VettingVerdict::Refuse
+#[non_exhaustive] pub struct ai6::AccessPolicy
+pub ai6::AccessPolicy::chief: alloc::vec::Vec<alloc::string::String>
+pub ai6::AccessPolicy::delegable: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::AccessPolicy::limits: core::option::Option<ai6::LimitsDef>
+pub ai6::AccessPolicy::roles: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::RoleDef>
+pub ai6::AccessPolicy::rules: alloc::vec::Vec<ai6::RuleDef>
+impl ai6::AccessPolicy
+pub fn ai6::AccessPolicy::delegable_set(&self) -> alloc::collections::btree::set::BTreeSet<alloc::string::String>
+pub fn ai6::AccessPolicy::from_json(&serde_json::value::Value) -> core::result::Result<Self, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::AccessPolicy::from_toml(&str) -> core::result::Result<Self, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::AccessPolicy::to_json(&self) -> serde_json::value::Value
 #[non_exhaustive] pub struct ai6::AccessPolicyError(_)
 impl core::error::Error for ai6::directorates::m::access::AccessPolicyError
 impl core::fmt::Display for ai6::directorates::m::access::AccessPolicyError
@@ -5951,6 +6046,23 @@ pub ai6::DirEntry::name: alloc::string::String
 pub ai6::DirEntry::size: u64
 pub struct ai6::DirListing
 pub ai6::DirListing::entries: alloc::vec::Vec<ai6::directorates::q::transport::DirEntry>
+#[non_exhaustive] pub struct ai6::Editor
+pub ai6::Editor::chief: bool
+pub ai6::Editor::person: coqui_access::model::Person
+impl ai6::Editor
+pub fn ai6::Editor::new(coqui_access::model::Person, &ai6::EffectiveAccess) -> Self
+pub struct ai6::EffectiveAccess
+impl ai6::EffectiveAccess
+pub fn ai6::EffectiveAccess::explain(&self, &coqui_access::model::AuthorizationRequest) -> core::result::Result<ai6::Explanation, guatiao::library::kind::ProviderError>
+pub fn ai6::EffectiveAccess::has_operation_tier(&self, &str) -> bool
+pub fn ai6::EffectiveAccess::holds(&self, &coqui_access::model::Person, &str, &str, &ai6::Lineage) -> bool
+pub fn ai6::EffectiveAccess::host_chiefs(&self) -> &[alloc::string::String]
+pub fn ai6::EffectiveAccess::is_chief(&self, &coqui_access::model::Person) -> bool
+pub fn ai6::EffectiveAccess::orphaned(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<ai6::Orphan>>
+impl coqui_access::kind::Authorizer for ai6::EffectiveAccess
+pub fn ai6::EffectiveAccess::authorize(&self, coqui_access::model::AuthorizationRequest) -> core::result::Result<coqui_access::model::AuthorizationDecision, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for ai6::EffectiveAccess
+pub fn ai6::EffectiveAccess::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::EphemeralAccess
 pub ai6::EphemeralAccess::config: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::EphemeralAccess::keep_failed: core::option::Option<usize>
@@ -5965,6 +6077,11 @@ pub struct ai6::ExitInfo
 pub ai6::ExitInfo::code: core::option::Option<i64>
 pub ai6::ExitInfo::running: bool
 pub ai6::ExitInfo::signal: core::option::Option<i64>
+#[non_exhaustive] pub struct ai6::Explanation
+pub ai6::Explanation::allowed: bool
+pub ai6::Explanation::role: core::option::Option<alloc::string::String>
+pub ai6::Explanation::rule_index: core::option::Option<usize>
+pub ai6::Explanation::tier: core::option::Option<ai6::TierKind>
 pub struct ai6::Exposure
 pub ai6::Exposure::at: f64
 pub ai6::Exposure::source: alloc::string::String
@@ -6232,6 +6349,17 @@ pub fn ai6::directorates::registry::bona_fides::LibraryPin::publisher(impl core:
 pub fn ai6::directorates::registry::bona_fides::LibraryPin::requiring_both(self) -> Self
 pub fn ai6::directorates::registry::bona_fides::LibraryPin::with_pin(self, coqui_peer::id::PeerId) -> Self
 pub fn ai6::directorates::registry::bona_fides::LibraryPin::with_publisher(self, ai6::directorates::registry::bona_fides::PublisherKey) -> Self
+pub struct ai6::LimitsDef
+pub ai6::LimitsDef::ancestors: core::option::Option<serde_json::value::Value>
+pub struct ai6::Lineage
+impl ai6::Lineage
+pub fn ai6::Lineage::ancestors(&self, &str) -> &[alloc::string::String]
+pub fn ai6::Lineage::contains(&self, &str) -> bool
+pub fn ai6::Lineage::from_roster(&ai6::directorates::m::roster::Roster) -> Self
+pub fn ai6::Lineage::in_subtree(&self, &str, &str) -> bool
+pub fn ai6::Lineage::new<A: core::convert::Into<alloc::string::String>>(impl core::iter::traits::collect::IntoIterator<Item = (impl core::convert::Into<alloc::string::String>, impl core::iter::traits::collect::IntoIterator<Item = A>)>) -> Self
+pub fn ai6::Lineage::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::Lineage::subtree(&self, &str) -> alloc::vec::Vec<&str>
 pub struct ai6::Loadout
 impl ai6::directorates::q::Loadout
 pub fn ai6::directorates::q::Loadout::agent(&self) -> &str
@@ -6425,6 +6553,9 @@ pub ai6::OperationRecord::model_history: alloc::vec::Vec<ai6::directorates::regi
 pub ai6::OperationRecord::tally: ai6::directorates::registry::agent_records::AgentTally
 impl ai6::directorates::registry::agent_records::OperationRecord
 pub fn ai6::directorates::registry::agent_records::OperationRecord::tally_of_model(&self, core::option::Option<&str>) -> ai6::directorates::registry::agent_records::AgentTally
+pub struct ai6::Orphan
+pub ai6::Orphan::item: alloc::string::String
+pub ai6::Orphan::reason: alloc::string::String
 pub struct ai6::Output
 pub ai6::Output::code: core::option::Option<i64>
 pub ai6::Output::signal: core::option::Option<i64>
@@ -6610,6 +6741,11 @@ pub struct ai6::ReadSpec
 pub ai6::ReadSpec::limit: u64
 pub ai6::ReadSpec::offset: u64
 pub ai6::ReadSpec::path: alloc::string::String
+pub struct ai6::Refusal
+pub ai6::Refusal::reason: alloc::string::String
+impl core::error::Error for ai6::Refusal
+impl core::fmt::Display for ai6::Refusal
+pub fn ai6::Refusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::RequiredProgram
 impl ai6::directorates::q::provision::RequiredProgram
 pub fn ai6::directorates::q::provision::RequiredProgram::at_least(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, alloc::string::String>
@@ -6661,6 +6797,11 @@ impl core::cmp::Eq for ai6::directorates::m::placement::Resources
 pub struct ai6::Revocation
 pub ai6::Revocation::at: f64
 pub ai6::Revocation::by: alloc::string::String
+pub struct ai6::RoleDef
+pub ai6::RoleDef::actions: alloc::vec::Vec<alloc::string::String>
+pub ai6::RoleDef::description: core::option::Option<alloc::string::String>
+impl ai6::RoleDef
+pub fn ai6::RoleDef::new(impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub struct ai6::Roster
 impl ai6::directorates::m::roster::Roster
 pub fn ai6::directorates::m::roster::Roster::agent(&self, core::option::Option<&str>, &str) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
@@ -6706,6 +6847,15 @@ pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc:
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, core::option::Option<usize>) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
+pub struct ai6::RuleDef
+pub ai6::RuleDef::changed_unix: core::option::Option<u64>
+pub ai6::RuleDef::editor: core::option::Option<alloc::string::String>
+pub ai6::RuleDef::propagate: bool
+pub ai6::RuleDef::role: alloc::string::String
+pub ai6::RuleDef::scope: alloc::string::String
+pub ai6::RuleDef::subject: alloc::string::String
+impl ai6::RuleDef
+pub fn ai6::RuleDef::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::Ruling
 pub ai6::Ruling::at: f64
 pub ai6::Ruling::decision: ai6::directorates::registry::approvals::Decision
@@ -6945,7 +7095,7 @@ pub ai6::Settings::theaters: ai6::directorates::m::theaters::Theaters
 pub ai6::Settings::tls: core::option::Option<serde_json::value::Value>
 pub ai6::Settings::unex: ai6::directorates::m::config::UnexRecord
 impl ai6::directorates::m::config::Settings
-pub fn ai6::directorates::m::config::Settings::access_authorizer(&self) -> core::result::Result<coqui_roles::RoleAuthorizer, alloc::string::String>
+pub fn ai6::directorates::m::config::Settings::access_policy(&self) -> core::result::Result<core::option::Option<ai6::AccessPolicy>, alloc::string::String>
 pub fn ai6::directorates::m::config::Settings::tls_policy(&self) -> core::result::Result<coqui_peer_tls::policy::Policy, alloc::string::String>
 pub struct ai6::SharedRepo
 impl ai6::directorates::m::assistant::SharedRepo
@@ -7540,9 +7690,12 @@ pub const ai6::BRIEF_REGISTRY_DROP: &str
 pub const ai6::BRIEF_SOURCE: &str
 pub const ai6::BUILTIN_KINDS: [&str; 6]
 pub const ai6::CHIEF_OF_STAFF_ROLE: &str
+pub const ai6::CHIEF_ROLE: &str
 pub const ai6::CLEARANCE_KIND: &str
 pub const ai6::COMMIT_MEMORY: &str
 pub const ai6::COMMIT_SHARED: &str
+pub const ai6::CONFIG_ACCESS: &str
+pub const ai6::CONFIG_ACCOUNTS: &str
 pub const ai6::CREDENTIAL_VARIABLES: &[&str]
 pub const ai6::DEFAULT_00_MAX_FAILURE_RATE: f64
 pub const ai6::DEFAULT_00_MISSIONS: u64
@@ -7628,7 +7781,9 @@ pub const ai6::MAX_RECENT_EVENT_CHARS: usize
 pub const ai6::MAX_SECRET_LEASE_TTL: core::time::Duration
 pub const ai6::MAX_STATION_MISSION_CAPACITY: usize
 pub const ai6::MAX_TIMELINE_EVENTS: usize
+pub const ai6::NOT_DELEGABLE: [&str; 3]
 pub const ai6::NO_OPERATION: &str
+pub const ai6::OPERATION_ACTIONS: &[&str]
 pub const ai6::PROJECT_DIRECTORIES: [&str; 2]
 pub const ai6::PROJECT_FILES: [&str; 1]
 pub const ai6::PROPOSAL_SOURCE: &str
@@ -8259,15 +8414,19 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_cleared(&self, 
 pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::access_from_toml(&str) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::cable_source(&str) -> alloc::string::String
+pub fn ai6::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &ai6::EffectiveAccess, &ai6::Lineage) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
 pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
 pub fn ai6::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6::directorates::q::terminal::TerminalOffer], core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::classify(&str, &dyn ai6::directorates::m::approvals::Repository) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub fn ai6::clearance_at_least(&str, &str) -> bool
+pub fn ai6::compile(&ai6::AccessPolicy, &[alloc::string::String]) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::content_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
 pub fn ai6::credential_dir_var(&str) -> bool
+pub fn ai6::default_delegable() -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::describe(&guatiao::library::kind::ProviderError) -> alloc::string::String
 pub fn ai6::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
 pub fn ai6::fitness(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<(), alloc::string::String>
@@ -8280,7 +8439,8 @@ pub fn ai6::is_sha256_pin(&str) -> bool
 pub fn ai6::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
 pub fn ai6::is_untrusted(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::library_pin(&[u8]) -> coqui_peer::id::PeerId
-pub fn ai6::load_role_authorizer(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::load_access(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::load_policy(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<ai6::AccessPolicy, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::memory_path(&str) -> bool
 pub fn ai6::micro_usd(f64) -> u64
 pub fn ai6::outside_tool(&str, bool) -> bool
@@ -8291,7 +8451,7 @@ pub fn ai6::record_digest(&ai6::directorates::registry::store::Brief) -> alloc::
 pub fn ai6::review_brief(&ai6::directorates::registry::store::Brief, &ai6::directorates::m::vetting::ReviewTarget, &str, &str, &[ai6::directorates::m::vetting::KnownWork], (&str, i64)) -> ai6::directorates::registry::store::Brief
 pub fn ai6::review_target(&ai6::directorates::registry::store::Brief) -> core::option::Option<ai6::directorates::m::vetting::ReviewTarget>
 pub fn ai6::role_authorizer() -> coqui_roles::RoleAuthorizerBuilder
-pub fn ai6::role_authorizer_from_toml(&str) -> core::result::Result<coqui_roles::RoleAuthorizer, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::seeded_policy() -> ai6::AccessPolicy
 pub async fn ai6::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::serve_with_capacity<F>(core::net::socket_addr::SocketAddr, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::serve_with_config_dir<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], &std::path::Path, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static

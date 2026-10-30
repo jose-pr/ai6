@@ -172,7 +172,7 @@ fn every_family_reads_from_a_directory() {
     assert_eq!(settings.station.max_concurrent_missions, Some(2));
     assert_eq!(settings.pins.as_ref().unwrap().libraries.len(), 1);
     assert!(settings.tls.is_some() && settings.access.is_some());
-    assert!(settings.access_authorizer().is_ok());
+    assert!(settings.access_policy().is_ok());
     assert!(!settings.unex.assistant);
     assert_eq!(
         settings.unex.directory.as_deref(),
