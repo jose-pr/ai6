@@ -39,6 +39,8 @@ pub struct RegistryLimits {
     pub files: FileLimits,
     /// `[registry.limits.held]`: briefs held by vetting.
     pub held: HeldLimits,
+    /// `[registry.limits.issues]`: linked issues and the outbox.
+    pub issues: IssueLimits,
     /// `[registry.limits.logbook]`: Station logbooks.
     pub logbook: LogbookLimits,
     /// `[registry.limits.proposals]`: Mission proposals.
@@ -538,6 +540,29 @@ impl Default for SleeperLimits {
             window_age: TimeLimit::secs(24 * 60 * 60),
             prompt_bytes: Limit::at(16 * KIB),
             lookback_days: 366,
+        }
+    }
+}
+
+/// `[registry.limits.issues]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IssueLimits {
+    /// Linked issues one Mission holds at once. Default 32.
+    pub links_per_mission: Limit,
+    /// Outbox entries kept, settled ones dropped oldest first. Default 1,000.
+    pub outbox_records: Limit,
+    /// Bytes of one outbox entry's text and payload. Default 128 KiB.
+    pub entry_bytes: Limit,
+}
+
+impl Default for IssueLimits {
+    fn default() -> Self {
+        Self {
+            links_per_mission: Limit::at(32),
+            outbox_records: Limit::at(1_000),
+            entry_bytes: Limit::at(128 * KIB),
         }
     }
 }

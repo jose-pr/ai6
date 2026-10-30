@@ -373,3 +373,19 @@ CREATE TABLE ai6_config_roster (
     revision BIGINT NOT NULL,
     PRIMARY KEY (scope, key)
 );
+
+-- The issues a Mission is linked to, as one JSON list per Mission.
+CREATE TABLE ai6_mission_issues (
+    mission_id TEXT PRIMARY KEY,
+    links TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+
+-- Every write to a tracker: state is pending, held, sending, posted, refused or failed.
+CREATE TABLE ai6_issue_outbox (
+    id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+CREATE INDEX ai6_issue_outbox_state ON ai6_issue_outbox (state);

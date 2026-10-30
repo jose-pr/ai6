@@ -27,6 +27,7 @@ mod agents;
 mod approvals;
 mod briefs;
 pub(crate) mod db;
+mod mission_issues;
 #[cfg(feature = "postgres")]
 mod postgres;
 mod records;
