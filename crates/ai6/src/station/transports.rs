@@ -743,7 +743,12 @@ mod tests {
 
         // Checking an unfit Theater says what would change and writes nothing.
         let before = snapshot(home.path());
-        let checked = provision(&client, &theater, true);
+        let checked = provision(
+            &client,
+            &theater,
+            true,
+            &crate::station::limits::ProvisionLimits::default(),
+        );
         assert_eq!(
             statuses(&checked),
             [
@@ -755,7 +760,12 @@ mod tests {
         );
         assert_eq!(snapshot(home.path()), before);
 
-        let first = provision(&client, &theater, false);
+        let first = provision(
+            &client,
+            &theater,
+            false,
+            &crate::station::limits::ProvisionLimits::default(),
+        );
         assert_eq!(
             statuses(&first),
             [
@@ -772,7 +782,12 @@ mod tests {
         );
         assert!(!home.path().join("opt/ai6/bin/ai6.ai6-partial").exists());
 
-        let second = provision(&client, &theater, false);
+        let second = provision(
+            &client,
+            &theater,
+            false,
+            &crate::station::limits::ProvisionLimits::default(),
+        );
         assert!(
             second.iter().all(|step| step.status == StepStatus::Ok),
             "{second:#?}"
@@ -780,7 +795,12 @@ mod tests {
 
         // A fit Theater checks all ok, and the check writes nothing.
         let before = snapshot(home.path());
-        let checked = provision(&client, &theater, true);
+        let checked = provision(
+            &client,
+            &theater,
+            true,
+            &crate::station::limits::ProvisionLimits::default(),
+        );
         assert!(checked.iter().all(|step| step.status == StepStatus::Ok));
         assert_eq!(snapshot(home.path()), before);
 
@@ -788,7 +808,12 @@ mod tests {
         std::fs::write(&build, b"#!/bin/sh\necho ai6 newer build\n").unwrap();
         let mut stricter = theater.clone();
         stricter.requires = Some(Requirements::default().with_tool("ai6-absent".parse().unwrap()));
-        let steps = provision(&client, &stricter, false);
+        let steps = provision(
+            &client,
+            &stricter,
+            false,
+            &crate::station::limits::ProvisionLimits::default(),
+        );
         assert_eq!(
             statuses(&steps),
             [
@@ -1021,7 +1046,13 @@ pub(crate) mod testing {
                 .as_ref()
                 .filter(|stdin| !stdin.0.is_empty())
                 .map(|stdin| serde_json::from_slice::<serde_json::Value>(&stdin.0).unwrap());
-            match crate::station::runner::call(&state_dir, &rest[0], &rest[1], body.as_ref()) {
+            match crate::station::runner::call(
+                &state_dir,
+                &rest[0],
+                &rest[1],
+                body.as_ref(),
+                &crate::station::limits::RunnerLimits::default(),
+            ) {
                 Ok((status, body)) => Output {
                     code: Some(0),
                     stdout: Bytes(
