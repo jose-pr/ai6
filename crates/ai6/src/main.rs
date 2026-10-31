@@ -1357,23 +1357,33 @@ fn peer_command(bootstrap: &BootstrapArg, command: PeerCommand) -> Result<String
     }
 }
 
-/// Publication to Universal Exports: `[unex] url` with its `token`. A `url` alone is
-/// `ai6ctl`'s and publishes nothing.
+/// Publication to Universal Exports: `[unex] url` with its `token`, trusting `ca_file` as well as
+/// the public roots. A `url` alone is `ai6ctl`'s and publishes nothing; a bad `ca_file` is refused
+/// either way.
 fn publisher_config(
     located: &Located<Bootstrap>,
 ) -> Result<Option<ai6::station::publisher::Config>, String> {
     let Some(unex) = &located.value.unex else {
         return Ok(None);
     };
+    let certificates = unex
+        .ca_file
+        .as_deref()
+        .map(ai6::bootstrap::read_ca_file)
+        .transpose()
+        .map_err(|error| format!("[unex] ca_file: {error}"))?;
     let Some(token) = &unex.token else {
         return Ok(None);
     };
     let token = token
         .read()
         .map_err(|error| format!("[unex] token: {error}"))?;
-    ai6::station::publisher::Config::try_new(&unex.url, token.as_str())
-        .map(Some)
-        .map_err(|error| error.to_string())
+    let config = ai6::station::publisher::Config::try_new(&unex.url, token.as_str())
+        .map_err(|error| error.to_string())?;
+    Ok(Some(match certificates {
+        Some(certificates) => config.with_ca_certificates(&certificates),
+        None => config,
+    }))
 }
 
 /// Options for a SQL Registry or configuration provider: timeouts from `[registry]`, and the

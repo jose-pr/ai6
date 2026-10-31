@@ -16,9 +16,9 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | `postgres` | `SqlRegistry` and `SqlProvider` in PostgreSQL, shared by the Stations of an HA deployment. | No |
 | `cli` | The `ai6` command with all of the above and Ctrl-C handling. | No |
 
-MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, `coqui-peer` (digest text for pins), serde, toml, fs2, sha2, lru and zeroize.
+MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, `coqui-peer` (digest text for pins), serde, toml, fs2, sha2, lru, zeroize, and `rustls-pki-types` and `rustls-webpki` (no crypto provider) to read a `ca_file`.
 `daemon` adds Axum, Tokio, Guatiao provider loading, `ureq`, `subtle`, `futures-util` and `ring` (Ed25519 publisher signatures),
-`publisher` adds `url`, and `station-tls` adds `coqui-peer-tls` and rustls.
+`publisher` adds `url` and `webpki-root-certs`, and `station-tls` adds `coqui-peer-tls` and rustls.
 `sqlite` adds `rusqlite` with SQLite compiled in (a C compiler at build time); `postgres`
 adds `tokio-postgres`, Tokio, `tokio-rustls`, rustls (ring) and `rustls-native-certs`. `cli` adds clap and Tokio signal support. The crate builds as a
 Rust library and contains no `unsafe` code. `cables-mcp` adds RMCP's Streamable HTTP
@@ -764,7 +764,7 @@ pub struct RegistrySettings { location: Option<String>, password: Option<SecretR
 pub struct IdentitySettings { dir: Option<PathBuf> }
 pub struct PluginSettings { paths: Vec<PathBuf>, profile: Option<PluginProfile> }
 pub struct SecretSettings { dir: Option<PathBuf> }
-pub struct UnexSettings { url: String, token: Option<SecretRef> }  // a url alone publishes nothing
+pub struct UnexSettings { url: String, token: Option<SecretRef>, ca_file: Option<PathBuf> }  // a url alone publishes nothing; ca_file resolved beside the file
 pub struct Bootstrap { station, state_dir, listen, provider, registry, identity, plugins, secrets: SecretSettings, unex: Option<UnexSettings> }
 pub struct UnexBootstrap { listen, public_origin: Option<String>, station_token: Option<SecretRef>,
     proxy_secret: Option<SecretRef>, state_dir, provider, registry, plugins }
@@ -789,13 +789,14 @@ impl Located<Bootstrap> {
     pub fn identity_dir(&self) -> Result<PathBuf, BootstrapError>;       // [identity] dir, else state_dir
     pub fn secrets_dir(&self) -> Result<PathBuf, BootstrapError>;        // [secrets] dir, else secrets/ beside the file
     pub fn listen(&self) -> SocketAddr;
-    pub fn weakenings(&self) -> Vec<String>;                             // each Env or Inline secret
+    pub fn weakenings(&self) -> Vec<String>;                             // each Env or Inline secret, a set [unex] ca_file
 }
 // Located<UnexBootstrap>: state_dir, provider_location, registry_location, registry_password, listen, weakenings
 pub struct SearchPath { pub explicit: Option<PathBuf>, pub variable: Option<(String, PathBuf)>, pub candidates: Vec<PathBuf> }
 impl SearchPath { pub fn new(name: &str, variable: &str, explicit: Option<&Path>) -> Self;
     pub fn locate(&self) -> Result<Option<PathBuf>, BootstrapError>; }   // NotFound for a named file that is missing
 pub fn read_file<T: DeserializeOwned>(path: &Path) -> Result<T, BootstrapError>;
+pub fn read_ca_file(path: &Path) -> Result<Vec<Vec<u8>>, BootstrapError>;  // the DER of each PEM certificate; refuses, naming path: unreadable, none in it, broken PEM, unparsable certificate
 pub fn is_sql_location(location: &str) -> bool;
 pub fn platform_config_dir() -> Result<PathBuf, BootstrapError>;  // XDG_CONFIG_HOME/ai6, %APPDATA%\ai6, ~/.config/ai6
 pub fn system_config_dir() -> Option<PathBuf>;                     // /etc/ai6, %ProgramData%\ai6
@@ -4021,7 +4022,10 @@ its events still count as activity.
 its `Debug` output redacts the token. `ServeConfig::with_publisher(config)` enables
 publication through `serve_with_options`. The `ai6` command publishes when its bootstrap
 file's `[unex]` has a `token` besides its `url`; a `url` alone (what `ai6ctl` reads)
-publishes nothing. Redirects are disabled. A bounded
+publishes nothing. `Config::with_ca_certificates(&[der])` (`[unex] ca_file`, read by
+`bootstrap::read_ca_file`; a bad file stops `ai6 serve` at start) trusts those authorities
+besides the public roots on every link to the gateway: publishing, input, controls and the
+assistant desk. Without it the built-in public roots alone apply. Redirects are disabled. A bounded
 background thread orders Session registration, lifecycle updates and raw terminal chunks
 on one event cursor. A separate authenticated long-poll receives validated Guatiao input
 and resize frames from `/v1/station/inputs/next`; AI6 dispatches them only to the live terminal

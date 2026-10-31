@@ -9,6 +9,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use ureq::tls::{Certificate, TlsConfig};
 use url::{Host, Url};
 
 use crate::MissionId;
@@ -30,6 +31,7 @@ pub struct Config {
     origin: Url,
     token: String,
     limits: PublisherLimits,
+    tls: TlsConfig,
 }
 
 impl Config {
@@ -62,7 +64,17 @@ impl Config {
             origin,
             token,
             limits: PublisherLimits::default(),
+            tls: TlsConfig::default(),
         })
+    }
+
+    /// Trusts `certificates` (DER, as [`read_ca_file`](crate::bootstrap::read_ca_file) returns
+    /// them) for Universal Exports besides the public roots, on every link of the Station to
+    /// it. Without this call only the public roots are trusted.
+    #[must_use]
+    pub fn with_ca_certificates(mut self, certificates: &[Vec<u8>]) -> Self {
+        self.tls = trusting(certificates);
+        self
     }
 
     /// Publishes within `limits`, the `station` record's `[publisher]` table.
@@ -111,6 +123,31 @@ fn is_loopback(host: Host<&str>) -> bool {
     }
 }
 
+/// The public roots and `certificates` (DER). ureq takes either its built-in roots or a list, so
+/// the list repeats the same roots as certificates.
+pub(crate) fn trusting(certificates: &[Vec<u8>]) -> TlsConfig {
+    let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .map(|root| Certificate::from_der(root.as_ref()))
+        .chain(
+            certificates
+                .iter()
+                .map(|der| Certificate::from_der(der).to_owned()),
+        );
+    TlsConfig::builder().root_certs(roots.into()).build()
+}
+
+/// An agent for one link to Universal Exports: no redirects, the Station's trust, and at most
+/// `timeout` per request.
+pub(crate) fn gateway_agent(tls: &TlsConfig, timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .tls_config(tls.clone())
+        .build()
+        .into()
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct Health {
     pub(crate) enabled: bool,
@@ -144,6 +181,7 @@ pub(crate) struct Publisher {
     origin: Url,
     token: String,
     limits: PublisherLimits,
+    tls: TlsConfig,
     sender: SyncSender<Command>,
     running: Arc<AtomicBool>,
     healthy: Arc<AtomicBool>,
@@ -202,11 +240,8 @@ impl Publisher {
         let input_origin = config.origin.clone();
         let input_token = config.token.clone();
         let limits = config.limits.clone();
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(limits.request_timeout.0))
-            .max_redirects(0)
-            .build()
-            .into();
+        let tls = config.tls.clone();
+        let agent = gateway_agent(&tls, limits.request_timeout.0);
         let (sender, receiver) = mpsc::sync_channel(limits.queue);
         let running = Arc::new(AtomicBool::new(true));
         let healthy = Arc::new(AtomicBool::new(true));
@@ -227,11 +262,7 @@ impl Publisher {
                     worker_error,
                 )
             })?;
-        let input_agent = ureq::Agent::config_builder()
-            .timeout_global(Some(limits.request_timeout.0))
-            .max_redirects(0)
-            .build()
-            .into();
+        let input_agent = gateway_agent(&tls, limits.request_timeout.0);
         let input_running = running.clone();
         let input_targets_for_worker = input_targets.clone();
         let input_limits = limits.clone();
@@ -259,6 +290,7 @@ impl Publisher {
             origin,
             token,
             limits,
+            tls,
             sender,
             running,
             healthy,
@@ -289,13 +321,10 @@ impl Publisher {
             ));
         }
         let (deliveries, receiver) = tokio::sync::mpsc::channel(self.limits.control_queue);
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(
-                self.limits.request_timeout.0 + self.limits.control_wait.0,
-            ))
-            .max_redirects(0)
-            .build()
-            .into();
+        let agent = gateway_agent(
+            &self.tls,
+            self.limits.request_timeout.0 + self.limits.control_wait.0,
+        );
         let link = ControlLink {
             origin: self.origin.clone(),
             token: self.token.clone(),
@@ -387,10 +416,10 @@ impl Publisher {
         }
     }
 
-    /// The origin and Station credential of Universal Exports, for another worker of this
-    /// Station that talks to it on a link of its own (the assistant desk).
-    pub(crate) fn link(&self) -> (Url, String) {
-        (self.origin.clone(), self.token.clone())
+    /// The origin, Station credential and trust of Universal Exports, for another worker of
+    /// this Station that talks to it on a link of its own (the assistant desk).
+    pub(crate) fn link(&self) -> (Url, String, TlsConfig) {
+        (self.origin.clone(), self.token.clone(), self.tls.clone())
     }
 
     pub(crate) fn health(&self) -> Health {
@@ -1273,6 +1302,78 @@ mod tests {
     }
 
     #[test]
+    fn the_public_roots_stay_trusted_beside_a_ca_file() {
+        use ureq::tls::RootCerts;
+
+        let config = Config::try_new("https://gateway.example", "secret").unwrap();
+        assert!(
+            matches!(config.tls.root_certs(), RootCerts::WebPki),
+            "unset, the built-in roots"
+        );
+        let config = config.with_ca_certificates(&[vec![1, 2, 3]]);
+        let RootCerts::Specific(roots) = config.tls.root_certs() else {
+            panic!("a list of roots");
+        };
+        let public = webpki_root_certs::TLS_SERVER_ROOT_CERTS;
+        assert_eq!(roots.len(), public.len() + 1);
+        assert_eq!(roots[0].der(), public[0].as_ref());
+        assert_eq!(roots[public.len()].der(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn an_enterprise_gateway_is_refused_without_its_ca_and_reached_on_every_link_with_it() {
+        let gateway = tls_gateway::start("127.0.0.1");
+        let refused = Publisher::start(Config::try_new(&gateway.origin, "t").unwrap()).unwrap();
+        let _controls = refused.receive_controls("hq").unwrap();
+        refused
+            .session(
+                "operation-a".to_owned(),
+                MissionId::try_new("mission-a").unwrap(),
+            )
+            .bind(SessionId::try_new("session-a").unwrap());
+        assert_eq!(
+            gateway.paths.recv_timeout(Duration::from_secs(2)).ok(),
+            None,
+            "no request crosses a handshake the Station does not trust"
+        );
+        drop(refused);
+
+        let gateway = tls_gateway::start("127.0.0.1");
+        let config = Config::try_new(&gateway.origin, "t").unwrap();
+        let reached = Publisher::start(config.with_ca_certificates(&gateway.ca)).unwrap();
+        let _controls = reached.receive_controls("hq").unwrap();
+        reached
+            .session(
+                "operation-a".to_owned(),
+                MissionId::try_new("mission-a").unwrap(),
+            )
+            .bind(SessionId::try_new("session-a").unwrap());
+        let mut links: Vec<&str> = vec![
+            "/v1/station/sessions",
+            "/v1/station/inputs/next",
+            "/v1/station/controls/next",
+        ];
+        while !links.is_empty() {
+            let path = gateway
+                .paths
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|_| panic!("no request on {links:?}"));
+            links.retain(|link| !path.starts_with(link));
+        }
+    }
+
+    #[test]
+    fn a_ca_does_not_vouch_for_a_gateway_of_another_name() {
+        let gateway = tls_gateway::start("other.example");
+        let config = Config::try_new(&gateway.origin, "t").unwrap();
+        let _publisher = Publisher::start(config.with_ca_certificates(&gateway.ca)).unwrap();
+        assert_eq!(
+            gateway.paths.recv_timeout(Duration::from_secs(2)).ok(),
+            None
+        );
+    }
+
+    #[test]
     fn debug_output_redacts_the_token() {
         let config = Config::try_new("https://gateway.example", "private-token").unwrap();
         let debug = format!("{config:?}");
@@ -1658,5 +1759,106 @@ mod tests {
         assert_eq!(publisher.health().error, Some("publication queue is full"));
         drop(publisher);
         held.join().unwrap();
+    }
+}
+
+/// A TLS listener standing in for a gateway behind an enterprise certificate authority.
+#[cfg(test)]
+pub(crate) mod tls_gateway {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::sync::mpsc::{self, Receiver};
+    use std::thread;
+    use std::time::Duration;
+
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
+    use rustls::pki_types::PrivatePkcs8KeyDer;
+
+    pub(crate) struct TlsGateway {
+        pub(crate) origin: String,
+        /// The throwaway certificate authority, as `read_ca_file` returns it.
+        pub(crate) ca: Vec<Vec<u8>>,
+        /// The path of each request that got past the handshake.
+        pub(crate) paths: Receiver<String>,
+    }
+
+    /// Listens on loopback with a certificate for `name`, from a new certificate authority.
+    /// Each request is answered 503, which leaves a publisher polling.
+    pub(crate) fn start(name: &str) -> TlsGateway {
+        let ca_key = KeyPair::generate().unwrap();
+        let mut ca = CertificateParams::new(Vec::<String>::new()).unwrap();
+        ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca_certificate = ca.self_signed(&ca_key).unwrap();
+        let issuer = Issuer::new(ca, ca_key);
+        let key = KeyPair::generate().unwrap();
+        let leaf = CertificateParams::new(vec![name.to_owned()])
+            .unwrap()
+            .signed_by(&key, &issuer)
+            .unwrap();
+        let config = Arc::new(
+            rustls::ServerConfig::builder_with_provider(Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![leaf.der().clone()],
+                PrivatePkcs8KeyDer::from(key.serialize_der()).into(),
+            )
+            .unwrap(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("https://{}", listener.local_addr().unwrap());
+        let (sender, paths) = mpsc::channel();
+        thread::spawn(move || {
+            for stream in listener.incoming().map_while(Result::ok) {
+                let config = config.clone();
+                let sender = sender.clone();
+                thread::spawn(move || {
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                    let connection = rustls::ServerConnection::new(config).unwrap();
+                    let mut reader = BufReader::new(rustls::StreamOwned::new(connection, stream));
+                    let mut request = String::new();
+                    if reader.read_line(&mut request).is_err() {
+                        return;
+                    }
+                    let mut length = 0;
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).is_err() {
+                            return;
+                        }
+                        if let Some(value) =
+                            line.to_ascii_lowercase().strip_prefix("content-length:")
+                        {
+                            length = value.trim().parse().unwrap_or(0);
+                        }
+                        if line == "\r\n" || line.is_empty() {
+                            break;
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    if reader.read_exact(&mut body).is_err() {
+                        return;
+                    }
+                    let path = request.split_whitespace().nth(1).unwrap_or("").to_owned();
+                    let _ = sender.send(path);
+                    let tls = reader.get_mut();
+                    let _ = tls.write_all(
+                        b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\
+                          Connection: close\r\n\r\n",
+                    );
+                    tls.conn.send_close_notify();
+                    let _ = tls.flush();
+                });
+            }
+        });
+        TlsGateway {
+            origin,
+            ca: vec![ca_certificate.der().to_vec()],
+            paths,
+        }
     }
 }

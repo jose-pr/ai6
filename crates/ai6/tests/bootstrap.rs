@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use ai6::bootstrap::{Bootstrap, SearchPath, SecretRef};
+use ai6::bootstrap::{Bootstrap, SearchPath, SecretRef, read_ca_file};
 
 fn write(dir: &Path, name: &str, text: &str) -> PathBuf {
     let path = dir.join(name);
@@ -273,6 +273,97 @@ fn ai6() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ai6"));
     command.env_remove("AI6_CONFIG");
     command
+}
+
+/// The PEM of a new self-signed certificate authority.
+fn ca_pem() -> String {
+    let key = rcgen::KeyPair::generate().unwrap();
+    let mut parameters = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+    parameters.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    parameters.self_signed(&key).unwrap().pem()
+}
+
+#[test]
+fn a_ca_file_gives_each_certificate_and_is_a_weakening_only_when_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let two = format!("# the chain\n{}{}", ca_pem(), ca_pem());
+    let chain = write(dir.path(), "chain.pem", &two);
+    let certificates = read_ca_file(&chain).unwrap();
+    assert_eq!(certificates.len(), 2);
+    assert_ne!(certificates[0], certificates[1]);
+
+    let path = write(
+        dir.path(),
+        "ai6.cfg",
+        "[unex]\nurl = \"https://unex.example\"\nca_file = \"chain.pem\"\n",
+    );
+    let located = Bootstrap::find(Some(&path)).unwrap();
+    let unex = located.value.unex.as_ref().unwrap();
+    assert_eq!(unex.ca_file.as_deref(), Some(chain.as_path()));
+    assert!(
+        located.weakenings().iter().any(|w| w.contains("ca_file")),
+        "{:?}",
+        located.weakenings()
+    );
+
+    let path = write(
+        dir.path(),
+        "plain.cfg",
+        "[unex]\nurl = \"https://unex.example\"\n",
+    );
+    assert_eq!(
+        Bootstrap::find(Some(&path)).unwrap().weakenings(),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_ca_file_that_trusts_nothing_is_refused_naming_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = rcgen::KeyPair::generate().unwrap().serialize_pem();
+    let not_x509 = "-----BEGIN CERTIFICATE-----\nAQIDBA==\n-----END CERTIFICATE-----\n";
+    let broken = "-----BEGIN CERTIFICATE-----\nAQIDBA==\n";
+    for (name, text, says) in [
+        ("empty.pem", "", "no certificate"),
+        ("words.pem", "not a certificate\n", "no certificate"),
+        ("key.pem", key.as_str(), "no certificate"),
+        ("not-x509.pem", not_x509, "cannot be read"),
+        ("broken.pem", broken, "broken PEM"),
+    ] {
+        let path = write(dir.path(), name, text);
+        let refused = read_ca_file(&path).unwrap_err().to_string();
+        assert!(
+            refused.contains(name) && refused.contains(says),
+            "{name}: {refused}"
+        );
+    }
+    let missing = dir.path().join("missing.pem");
+    let refused = read_ca_file(&missing).unwrap_err();
+    assert_eq!(refused.kind(), std::io::ErrorKind::NotFound);
+    assert!(refused.to_string().contains("missing.pem"), "{refused}");
+}
+
+#[test]
+fn a_station_with_a_bad_ca_file_does_not_start() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "empty.pem", "");
+    for unex in [
+        "url = \"https://unex.example\"\nca_file = \"empty.pem\"\n",
+        "url = \"https://unex.example\"\nca_file = \"missing.pem\"\ntoken = \"t\"\n",
+    ] {
+        let path = write(dir.path(), "ai6.cfg", &format!("[unex]\n{unex}"));
+        let output = ai6()
+            .args(["serve", "--listen", "127.0.0.1:0", "--config"])
+            .arg(&path)
+            .arg("--state-dir")
+            .arg(dir.path().join("state"))
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(!output.status.success(), "{said}");
+        assert!(said.contains("[unex] ca_file"), "{said}");
+        assert!(said.contains(".pem"), "{said}");
+    }
 }
 
 #[test]

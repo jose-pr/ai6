@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 
 const DEFAULT_SERVER: &str = "http://127.0.0.1:7082";
 const SERVER_ENV: &str = "UNEX_URL";
+const CA_FILE_ENV: &str = "UNEX_CA_FILE";
 const ACCESS_TOKEN_ENV: &str = "UNEX_ACCESS_TOKEN";
 const DEFAULT_CONTROL_WAIT_SECS: u64 = 10;
 
@@ -26,7 +27,7 @@ fn seconds(text: &str) -> Result<f64, String> {
 #[command(
     name = "ai6ctl",
     about = "Inspect and control AI6 Stations, Agent roles, Missions and Sessions, and sign green ink, through the Universal Exports API",
-    after_help = "The Universal Exports origin is --server, else UNEX_URL, else [unex] url of the ai6.cfg found as the ai6 command finds it (--config, AI6_CONFIG, the user's then the system's configuration directory), else http://127.0.0.1:7082. Commands other than health require a user bearer token in UNEX_ACCESS_TOKEN. Never use M or terminal-attachment credentials."
+    after_help = "The Universal Exports origin is --server, else UNEX_URL, else [unex] url of the ai6.cfg found as the ai6 command finds it (--config, AI6_CONFIG, the user's then the system's configuration directory), else http://127.0.0.1:7082. Public root certificates are trusted, and those of --ca-file, else UNEX_CA_FILE, else [unex] ca_file of that ai6.cfg. Commands other than health require a user bearer token in UNEX_ACCESS_TOKEN. Never use M or terminal-attachment credentials."
 )]
 struct Cli {
     /// Universal Exports API origin (default: UNEX_URL, else `[unex] url` of ai6.cfg, else
@@ -37,6 +38,10 @@ struct Cli {
     /// ai6.cfg in the user's, then the system's configuration directory).
     #[arg(long, value_name = "PATH", global = true)]
     config: Option<std::path::PathBuf>,
+    /// A PEM file of certificate authorities to trust for Universal Exports besides the public
+    /// roots (default: UNEX_CA_FILE, else `[unex] ca_file` of ai6.cfg).
+    #[arg(long, env = CA_FILE_ENV, value_name = "PATH", global = true)]
+    ca_file: Option<std::path::PathBuf>,
     /// Seconds one HTTP request may take; 0 waits without limit.
     #[arg(long, value_name = "SECONDS", global = true, default_value_t = 5.0, value_parser = seconds)]
     timeout: f64,
@@ -515,7 +520,7 @@ async fn main() -> ExitCode {
 
 /// The origin to use: `server` (the flag or `UNEX_URL`), else `[unex] url` of the bootstrap
 /// file the `ai6` command would read, else the loopback default. Nothing else of that file
-/// is read, its Station token least of all.
+/// but `ca_file` is read, its Station token least of all.
 fn origin(server: Option<&str>, config: Option<&std::path::Path>) -> Result<String, String> {
     if let Some(server) = server {
         return Ok(server.to_owned());
@@ -527,10 +532,42 @@ fn origin(server: Option<&str>, config: Option<&std::path::Path>) -> Result<Stri
         .map_or_else(|| DEFAULT_SERVER.to_owned(), |unex| unex.url))
 }
 
+/// The certificate authorities to trust besides the public roots: `flag` (the flag or
+/// `UNEX_CA_FILE`), else `[unex] ca_file` of the bootstrap file. A bootstrap file that cannot be
+/// read leaves the public roots alone, since `[unex] url` was not needed from it ([`origin`]
+/// refuses otherwise); too little trust refuses the connection, so nothing is weakened.
+fn ca_certificates(
+    flag: Option<&std::path::Path>,
+    config: Option<&std::path::Path>,
+) -> Result<Vec<reqwest::Certificate>, String> {
+    let from_file = match flag {
+        Some(_) => None,
+        None => ai6::bootstrap::Bootstrap::find(config)
+            .ok()
+            .and_then(|located| located.value.unex)
+            .and_then(|unex| unex.ca_file),
+    };
+    let Some(path) = flag.or(from_file.as_deref()) else {
+        return Ok(Vec::new());
+    };
+    let certificates =
+        ai6::bootstrap::read_ca_file(path).map_err(|error| format!("the CA file {error}"))?;
+    certificates
+        .iter()
+        .map(|der| {
+            reqwest::Certificate::from_der(der)
+                .map_err(|error| format!("the CA file {}: {error}", path.display()))
+        })
+        .collect()
+}
+
 async fn run() -> Result<(), String> {
     let cli = Cli::parse();
     let server = server_url(&origin(cli.server.as_deref(), cli.config.as_deref())?)?;
     let mut builder = Client::builder().redirect(reqwest::redirect::Policy::none());
+    for certificate in ca_certificates(cli.ca_file.as_deref(), cli.config.as_deref())? {
+        builder = builder.add_root_certificate(certificate);
+    }
     if cli.timeout > 0.0 {
         builder =
             builder.timeout(Duration::try_from_secs_f64(cli.timeout).unwrap_or(Duration::MAX));

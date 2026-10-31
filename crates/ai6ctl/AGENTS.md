@@ -11,12 +11,17 @@ The crate has no library target.
 
 ## Commands
 
-All commands accept `--server <ORIGIN>` (env `UNEX_URL`), `--config <PATH>` and `--timeout <SECONDS>`
+All commands accept `--server <ORIGIN>` (env `UNEX_URL`), `--config <PATH>`, `--ca-file <PATH>`
+(env `UNEX_CA_FILE`) and `--timeout <SECONDS>`
 (default 5, fractions allowed, `0` for no limit: the time one HTTP request may take). The origin
 is `--server`, else `UNEX_URL`, else `[unex] url` of the `ai6.cfg` the `ai6` command would read
 (`--config`, `AI6_CONFIG`, the user's then the system's configuration directory; nothing else
-of it is read), else `http://127.0.0.1:7082`. The origin must have no credentials or path; HTTP is accepted
-only for loopback, HTTPS is required elsewhere. Redirects are not followed.
+of it but `ca_file` is read), else `http://127.0.0.1:7082`. The origin must have no credentials or path; HTTP is accepted
+only for loopback, HTTPS is required elsewhere. Redirects are not followed. The public roots are
+trusted, and besides them the PEM authorities of `--ca-file`, else `UNEX_CA_FILE`, else `[unex]
+ca_file` of that `ai6.cfg`; a file that cannot be read or holds no usable certificate is refused
+before any request, naming the path. An `ai6.cfg` that cannot be read when `--server` gave the
+origin leaves the public roots alone.
 
 - `ai6ctl health` checks `GET /health` and prints `Universal Exports is healthy`.
 - `ai6ctl stations` lists visible Station health, HQS status, running/capacity, roles,
@@ -140,7 +145,8 @@ signed by the token's person and audited with the step, never the Agent's reason
 | Variable | Effect | Default |
 | --- | --- | --- |
 | `UNEX_URL` | Universal Exports origin; overridden by `--server`. | `[unex] url` of `ai6.cfg`, else `http://127.0.0.1:7082` |
-| `AI6_CONFIG` | The `ai6.cfg` to read `[unex] url` from; must exist when set. | The search of the `ai6` command |
+| `UNEX_CA_FILE` | PEM certificate authorities trusted besides the public roots; overridden by `--ca-file`. | `[unex] ca_file` of `ai6.cfg`, else the public roots alone |
+| `AI6_CONFIG` | The `ai6.cfg` to read `[unex] url` and `ca_file` from; must exist when set. | The search of the `ai6` command |
 | `UNEX_ACCESS_TOKEN` | User bearer; required by every command except `health`. | None |
 
 ## Exit status

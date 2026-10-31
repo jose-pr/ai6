@@ -60,6 +60,11 @@ coqui-peer = "=0.0.0-alpha.1"
 coqui-peer-tls = { version = "=0.0.0-alpha.1", features = ["generate", "ca", "tokio", "serde"] }
 # The configuration types coqui-peer-tls returns; shared with ureq, on the ring provider.
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+# PEM parsing and the trust-anchor check of a `ca_file`, without a crypto provider.
+rustls-pki-types = { version = "1", default-features = false, features = ["std"] }
+rustls-webpki = { version = "0.103", default-features = false }
+# The public roots as certificates: ureq takes extra roots only as a whole list of them.
+webpki-root-certs = "1"
 # Self-signed and CA-issued certificates for the Station TLS tests.
 rcgen = "0.14"
 # CPU and memory of a Station's host for placement; 0.38 is the last line within the 1.89 MSRV.

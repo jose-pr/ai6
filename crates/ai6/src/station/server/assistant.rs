@@ -48,6 +48,7 @@ use std::time::{Duration, Instant};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use ureq::tls::TlsConfig;
 use url::Url;
 
 #[cfg(feature = "cables-mcp")]
@@ -69,6 +70,7 @@ use crate::directorates::section_00::assistant::{
     EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
 };
 use crate::guatiao::library::Object;
+use crate::station::publisher::gateway_agent;
 use workspace::{Houses, PERSONAL, SCRATCH, TurnEnd, Workspace};
 
 /// How long one read of a harness's events waits, so a message never waits long for the lock.
@@ -2417,7 +2419,7 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     if swept > 0 {
         eprintln!("ai6: removed {swept} assistant directories desks that are gone left behind");
     }
-    let (origin, token) = publisher.link();
+    let (origin, token, tls) = publisher.link();
     let mcp_url = origin
         .join(ASSISTANT_MCP_PATH)
         .map_err(|error| std::io::Error::other(format!("assistant endpoint URL: {error}")))?
@@ -2428,6 +2430,7 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     let link = Link {
         origin,
         token,
+        tls,
         station: state.station_id.clone(),
         tables: tables.clone(),
     };
@@ -2527,6 +2530,7 @@ impl Dispatch {
 struct Link {
     origin: Url,
     token: String,
+    tls: TlsConfig,
     station: String,
     /// `[assistant.desk]` paces its polls and retries.
     tables: Tables,
@@ -2606,11 +2610,7 @@ impl Link {
 
     /// An agent whose requests may take `wait` and `[assistant.desk] call_margin` more.
     fn agent(&self, wait: Duration) -> ureq::Agent {
-        ureq::Agent::config_builder()
-            .timeout_global(Some((self.tables)().1.call_margin.0 + wait))
-            .max_redirects(0)
-            .build()
-            .into()
+        gateway_agent(&self.tls, (self.tables)().1.call_margin.0 + wait)
     }
 
     fn take_jobs(&self, stopping: &AtomicBool, jobs: &mpsc::Sender<AssistantJob>) {
@@ -3663,6 +3663,37 @@ event_bytes = 7
     }
 
     #[test]
+    fn the_desk_reaches_an_enterprise_gateway_only_with_its_ca() {
+        use crate::station::publisher::{tls_gateway, trusting};
+
+        let gateway = tls_gateway::start("127.0.0.1");
+        let link = |tls| Link {
+            origin: Url::parse(&gateway.origin).unwrap(),
+            token: "station-token".to_owned(),
+            tls,
+            station: "hq".to_owned(),
+            tables: Arc::new(Default::default),
+        };
+        assert!(link(TlsConfig::default()).exposed("c").is_err());
+        assert_eq!(
+            gateway
+                .paths
+                .recv_timeout(std::time::Duration::from_millis(200))
+                .ok(),
+            None,
+            "no request crosses a handshake the desk does not trust"
+        );
+        assert!(link(trusting(&gateway.ca)).exposed("c").is_err(), "a 503");
+        assert!(
+            gateway
+                .paths
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .starts_with("/v1/station/assistant/")
+        );
+    }
+
+    #[test]
     fn the_link_tells_a_job_answer_whether_the_gateway_refused_it() {
         for (status, delivery) in [
             (409, Delivery::Refused),
@@ -3673,6 +3704,7 @@ event_bytes = 7
             let link = Link {
                 origin,
                 token: "station-token".to_owned(),
+                tls: TlsConfig::default(),
                 station: "hq".to_owned(),
                 tables: Arc::new(Default::default),
             };

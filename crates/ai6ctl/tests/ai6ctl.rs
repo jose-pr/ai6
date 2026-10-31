@@ -1111,3 +1111,135 @@ async fn operations_prints_the_tree_shows_an_effective_policy_and_missions_take_
     assert_eq!(own, ["STATION\tMISSION\tSESSIONS"]);
     let _ = shutdown.send(());
 }
+
+/// A TLS listener that answers every request 204, with a certificate for `name` from a new
+/// certificate authority: its origin and the authority's PEM.
+fn tls_gateway(name: &str) -> (String, String) {
+    use std::io::{Read, Write};
+
+    let ca_key = rcgen::KeyPair::generate().unwrap();
+    let mut ca = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let ca_pem = ca.self_signed(&ca_key).unwrap().pem();
+    let issuer = rcgen::Issuer::new(ca, ca_key);
+    let key = rcgen::KeyPair::generate().unwrap();
+    let leaf = rcgen::CertificateParams::new(vec![name.to_owned()])
+        .unwrap()
+        .signed_by(&key, &issuer)
+        .unwrap();
+    let config = Arc::new(
+        rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![leaf.der().clone()],
+            rustls::pki_types::PrivatePkcs8KeyDer::from(key.serialize_der()).into(),
+        )
+        .unwrap(),
+    );
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("https://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().map_while(Result::ok) {
+            let connection = rustls::ServerConnection::new(config.clone()).unwrap();
+            let mut tls = rustls::StreamOwned::new(connection, stream);
+            let mut request = Vec::new();
+            let mut byte = [0];
+            while !request.ends_with(b"\r\n\r\n") {
+                match tls.read(&mut byte) {
+                    Ok(1) => request.push(byte[0]),
+                    _ => break,
+                }
+            }
+            if request.ends_with(b"\r\n\r\n") {
+                let _ = tls.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+                tls.conn.send_close_notify();
+                let _ = tls.flush();
+            }
+        }
+    });
+    (origin, ca_pem)
+}
+
+/// `ai6ctl health` against `server`, reading no bootstrap file but the one named in `args`.
+fn health(server: &str, args: &[&str]) -> std::process::Output {
+    let empty = tempfile::tempdir().unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ai6ctl"));
+    command
+        .arg("--server")
+        .arg(server)
+        .args(args)
+        .arg("health")
+        .env_remove("UNEX_CA_FILE")
+        .env_remove("AI6_CONFIG")
+        .env("XDG_CONFIG_HOME", empty.path())
+        .env("APPDATA", empty.path())
+        .env("HOME", empty.path());
+    command.output().unwrap()
+}
+
+#[test]
+fn an_enterprise_gateway_is_refused_without_its_ca_and_accepted_with_it() {
+    let (server, ca) = tls_gateway("127.0.0.1");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("ca.pem");
+    std::fs::write(&file, &ca).unwrap();
+    let file = file.to_str().unwrap();
+
+    let refused = health(&server, &[]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("could not contact"),
+        "{refused:?}"
+    );
+
+    let accepted = health(&server, &["--ca-file", file]);
+    assert!(accepted.status.success(), "{accepted:?}");
+    assert!(String::from_utf8_lossy(&accepted.stdout).contains("healthy"));
+
+    // The bootstrap file's, relative to it; and the flag beats it.
+    let config = dir.path().join("ai6.cfg");
+    std::fs::write(
+        &config,
+        format!("[unex]\nurl = \"{server}\"\nca_file = \"ca.pem\"\n"),
+    )
+    .unwrap();
+    let config = config.to_str().unwrap();
+    let from_file = health(&server, &["--config", config]);
+    assert!(from_file.status.success(), "{from_file:?}");
+    let other = dir.path().join("other.pem");
+    let (_, other_ca) = tls_gateway("127.0.0.1");
+    std::fs::write(&other, other_ca).unwrap();
+    let flag_wins = health(
+        &server,
+        &["--config", config, "--ca-file", other.to_str().unwrap()],
+    );
+    assert!(!flag_wins.status.success(), "{flag_wins:?}");
+}
+
+#[test]
+fn a_ca_does_not_vouch_for_a_gateway_of_another_name() {
+    let (server, ca) = tls_gateway("other.example");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("ca.pem");
+    std::fs::write(&file, &ca).unwrap();
+    let refused = health(&server, &["--ca-file", file.to_str().unwrap()]);
+    assert!(!refused.status.success(), "{refused:?}");
+}
+
+#[test]
+fn a_ca_file_that_trusts_nothing_is_refused_naming_it_before_any_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let empty = dir.path().join("empty.pem");
+    std::fs::write(&empty, "").unwrap();
+    for file in [empty, dir.path().join("missing.pem")] {
+        let refused = health("http://127.0.0.1:9", &["--ca-file", file.to_str().unwrap()]);
+        let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+        assert!(!refused.status.success(), "{said}");
+        assert!(said.contains(file.to_str().unwrap()), "{said}");
+        assert!(!said.contains("could not contact"), "{said}");
+    }
+}

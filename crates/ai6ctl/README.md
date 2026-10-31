@@ -79,8 +79,9 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `class-authorizations list\|revoke [<ID>] --operation <ID>` | Standing approvals of a kind of step (`approval.class`) |
 | `held-briefs list\|release\|refuse [<KEY>] --operation <ID> [--reason <TEXT>]` | Briefs vetting held, with what it found; release one to the queue or refuse it (`mission.create`) |
 
-Every command accepts `--server <ORIGIN>` and `--timeout <SECONDS>` (default 5, fractions allowed;
-`0` waits without limit), the time one HTTP request may take. The control commands need `mission.control`
+Every command accepts `--server <ORIGIN>`, `--ca-file <PATH>` and `--timeout <SECONDS>` (default 5,
+fractions allowed; `0` waits without limit), the time one HTTP request may take. `--ca-file` names
+a PEM file of certificate authorities to trust for the gateway besides the public roots. The control commands need `mission.control`
 on the Mission's Operation, take `--operation <ID>` (found from the board when omitted),
 `--idempotency-key <KEY>`, `--wait <SECONDS>` (default 10; `0` returns once queued) and
 `--poll-interval <SECONDS>` (default 0.5, how often they ask for the status while waiting),
@@ -91,7 +92,8 @@ and print the control's `STATUS`, the Mission's `STATE` and any `REASON`.
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `UNEX_URL` | Universal Exports origin; overridden by `--server`. | `[unex] url` of `ai6.cfg`, else `http://127.0.0.1:7082` |
-| `AI6_CONFIG` | The `ai6.cfg` to read `[unex] url` from; must exist when set. | `ai6.cfg` in the user's, then the system's configuration directory |
+| `UNEX_CA_FILE` | PEM file of certificate authorities trusted besides the public roots; overridden by `--ca-file`. | `[unex] ca_file` of `ai6.cfg`, else the public roots alone |
+| `AI6_CONFIG` | The `ai6.cfg` to read `[unex] url` and `ca_file` from; must exist when set. | `ai6.cfg` in the user's, then the system's configuration directory |
 | `UNEX_ACCESS_TOKEN` | User bearer required by every command except `health`. | None |
 
 ## Exit status

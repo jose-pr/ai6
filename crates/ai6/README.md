@@ -112,8 +112,9 @@ profile = "strict"               # strict, report or off
 dir = "secrets"                  # where loadout secret files are read; default: secrets/ beside this file
 
 [unex]
-url = "https://ai6.example"      # Universal Exports; ai6ctl reads only this
+url = "https://ai6.example"      # Universal Exports; ai6ctl reads only this and ca_file
 token = { file = "unex-token" }  # the Station publishes only with a token
+ca_file = "enterprise-ca.pem"    # authorities to trust for it; default: the public roots alone
 ```
 
 - `ai6 serve` runs the Station. Its runtime settings are the provider's `station` record

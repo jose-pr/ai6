@@ -11,7 +11,7 @@ readme = "README.md"
 exclude = [".*", "*.local.*"]
 
 [dependencies]
-# The bootstrap file's [unex] url; no features, so none of the Station comes with it.
+# The bootstrap file's [unex] url and ca_file; no features, so none of the Station comes with it.
 ai6 = { path = "../ai6" }
 clap = { workspace = true, features = ["env", "error-context", "suggestions"] }
 reqwest = { workspace = true }
@@ -21,6 +21,8 @@ tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
 axum = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
 universal-exports = { path = "../universal-exports" }
 ai6-diptel = { path = "../ai6-diptel" }
 tempfile = { workspace = true }

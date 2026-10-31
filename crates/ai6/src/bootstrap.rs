@@ -24,6 +24,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use rustls_pki_types::CertificateDer;
+use rustls_pki_types::pem::PemObject;
 use serde::{Deserialize, Deserializer};
 use zeroize::Zeroizing;
 
@@ -348,6 +350,9 @@ pub struct UnexSettings {
     pub url: String,
     /// The Station's credential for publishing. `ai6ctl` never reads it.
     pub token: Option<SecretRef>,
+    /// A PEM file of certificate authorities to trust for Universal Exports besides the public
+    /// roots; [`read_ca_file`] reads it. Default: the public roots alone.
+    pub ca_file: Option<PathBuf>,
 }
 
 /// `ai6.cfg`: what a Station and the `ai6` command need before they reach the configuration
@@ -656,6 +661,34 @@ pub fn read_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Boots
     format::from_str(format, &text).map_err(|error| BootstrapError::invalid(path, error))
 }
 
+/// Reads a PEM file of certificate authorities (`[unex] ca_file`, `ai6ctl --ca-file`): the DER of
+/// each certificate in it, in file order. Anything else in the file is ignored.
+///
+/// # Errors
+///
+/// The I/O error's kind when the file cannot be read; `InvalidData` when its PEM is broken, it
+/// holds no certificate, or a certificate cannot be parsed. Each message names `path`.
+pub fn read_ca_file(path: &Path) -> Result<Vec<Vec<u8>>, BootstrapError> {
+    let pem = std::fs::read(path).map_err(|error| {
+        BootstrapError::new(error.kind(), format!("{}: {error}", path.display()))
+    })?;
+    let mut certificates = Vec::new();
+    for certificate in CertificateDer::pem_slice_iter(&pem) {
+        let certificate = certificate
+            .map_err(|error| BootstrapError::invalid(path, format!("broken PEM: {error}")))?;
+        // A TLS library would skip a certificate it cannot use as a root, which only shows
+        // later as a refused connection.
+        webpki::anchor_from_trusted_cert(&certificate).map_err(|error| {
+            BootstrapError::invalid(path, format!("a certificate cannot be read: {error}"))
+        })?;
+        certificates.push(certificate.to_vec());
+    }
+    if certificates.is_empty() {
+        return Err(BootstrapError::invalid(path, "holds no certificate"));
+    }
+    Ok(certificates)
+}
+
 /// A path from a file, resolved against the file's directory when relative.
 fn beside(dir: &Path, path: &Path) -> PathBuf {
     if path.is_relative() {
@@ -815,6 +848,7 @@ impl Bootstrap {
                 return Err(BootstrapError::invalid(path, "[unex] url is empty"));
             }
             unex.token = unex.token.take().map(|token| token.relative_to(dir));
+            unex.ca_file = unex.ca_file.take().map(|file| beside(dir, &file));
         }
         Ok(value)
     }
@@ -914,6 +948,18 @@ impl Located<Bootstrap> {
                 .and_then(|unex| unex.token.as_ref()),
         );
         weakened.extend(limit_weakenings(&self.value.registry, &self.value.provider));
+        if self
+            .value
+            .unex
+            .as_ref()
+            .is_some_and(|unex| unex.ca_file.is_some())
+        {
+            weakened.push(
+                "[unex] ca_file trusts its certificates for Universal Exports besides the public \
+                 roots"
+                    .to_owned(),
+            );
+        }
         weakened
     }
 }
