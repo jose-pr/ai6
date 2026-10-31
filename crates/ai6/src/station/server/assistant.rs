@@ -2620,6 +2620,7 @@ impl Link {
         while !stopping.load(Ordering::Acquire) {
             let desk = (self.tables)().1;
             let wait = desk.job_wait.0;
+            let started = Instant::now();
             let mut endpoint = base.clone();
             endpoint
                 .query_pairs_mut()
@@ -2638,7 +2639,13 @@ impl Link {
                     .read_to_vec()
                     .ok()
                     .and_then(|body| serde_json::from_slice::<AssistantJob>(&body).ok()),
-                Ok(response) if response.status().as_u16() == 204 => continue,
+                Ok(response) if response.status().as_u16() == 204 => {
+                    // The gateway may answer before `wait`, which it caps at its own `max_wait`.
+                    // At least `job_retry` passes between polls, and no more, so a new message
+                    // is never left waiting for a poll.
+                    std::thread::sleep(desk.job_retry.0.saturating_sub(started.elapsed()));
+                    continue;
+                }
                 _ => {
                     std::thread::sleep(desk.job_retry.0);
                     continue;
@@ -3547,6 +3554,75 @@ event_bytes = 7
         assert!(texts.iter().all(|text| text.len() <= 7), "{texts:?}");
         drop(reports);
         fixture.desk.close_all();
+    }
+
+    #[test]
+    fn empty_assistant_polls_are_paced_even_when_the_gateway_answers_immediately() {
+        use std::io::{BufRead, BufReader, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let stopping = Arc::new(AtomicBool::new(false));
+        let stop = stopping.clone();
+        let served = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut polls = Vec::new();
+            while polls.len() < 2 && Instant::now() < deadline {
+                let (stream, _) = match listener.accept() {
+                    Ok(pair) => pair,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
+                    Err(error) => panic!("{error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = BufReader::new(stream);
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                polls.push(Instant::now());
+                if polls.len() == 2 {
+                    stop.store(true, Ordering::Release);
+                }
+                write!(
+                    reader.get_mut(),
+                    "HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n"
+                )
+                .unwrap();
+            }
+            stop.store(true, Ordering::Release);
+            polls
+        });
+        let link = Link {
+            origin,
+            token: "station-token".to_owned(),
+            station: "hq".to_owned(),
+            tables: Arc::new(|| {
+                let mut desk = AssistantDeskLimits::default();
+                // Past the server's deadline: pacing by this would lose the second poll.
+                desk.job_wait.0 = Duration::from_secs(30);
+                desk.job_retry.0 = Duration::from_millis(100);
+                (AssistantLimits::default(), desk)
+            }),
+        };
+        let (jobs, _receiver) = mpsc::channel(1);
+        let stop = stopping.clone();
+        let polling = std::thread::spawn(move || link.take_jobs(&stop, &jobs));
+        let polls = served.join();
+        stopping.store(true, Ordering::Release);
+        polling.join().unwrap();
+        let polls = polls.unwrap();
+        assert_eq!(polls.len(), 2);
+        assert!(polls[1].duration_since(polls[0]) >= Duration::from_millis(80));
     }
 
     /// A gateway that answers every report with `status` and counts them.

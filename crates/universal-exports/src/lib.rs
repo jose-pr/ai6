@@ -499,6 +499,7 @@ pub struct Gateway {
     controls: Arc<std::sync::Mutex<ControlBook>>,
     control_ready: Arc<tokio::sync::Notify>,
     assistant: Option<Arc<moneypenny::Assistant>>,
+    job_poll_max_wait: Duration,
 }
 
 impl fmt::Debug for Gateway {
@@ -571,6 +572,7 @@ impl Gateway {
             controls: Arc::new(std::sync::Mutex::new(controls)),
             control_ready: Arc::default(),
             assistant: None,
+            job_poll_max_wait: ai6::AssistantGatewayLimits::default().max_wait.0,
         }
     }
 
@@ -607,6 +609,14 @@ impl Gateway {
     #[must_use]
     pub fn with_assistant(mut self, config: AssistantConfig) -> Self {
         self.assistant = Some(Arc::new(moneypenny::Assistant::new(config)));
+        self
+    }
+
+    /// How long a Station's assistant job poll is held while Moneypenny is not served
+    /// (`[assistant.gateway] max_wait`); once she is, her config decides.
+    #[must_use]
+    pub fn with_job_poll_max_wait(mut self, max_wait: Duration) -> Self {
+        self.job_poll_max_wait = max_wait;
         self
     }
 

@@ -213,7 +213,9 @@ async fn run(cli: Cli) -> Result<(), String> {
         Some(access) => Gateway::with_access(config, registry, access),
         None => Gateway::with_registry(config, registry),
     };
-    gateway = gateway.with_roster(provider.clone());
+    gateway = gateway
+        .with_roster(provider.clone())
+        .with_job_poll_max_wait(snapshot.roster.assistant().gateway().max_wait.0);
     if record.assistant {
         let settings = snapshot.roster.assistant();
         let (body_bytes, _, default_ttl) = snapshot.settings.cables.message_limits();

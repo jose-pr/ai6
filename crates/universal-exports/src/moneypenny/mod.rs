@@ -2568,7 +2568,7 @@ pub(crate) struct NextQuery {
 
 /// `GET /v1/station/assistant/next?station=ID&wait_ms=N`: the next message for the
 /// Station's assistant desk (`200` and an [`AssistantJob`]), or `204` after `wait_ms`
-/// (default 1,000, at most 25,000).
+/// (default 1,000, at most `[assistant.gateway] max_wait`).
 pub(crate) async fn next(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -2578,12 +2578,18 @@ pub(crate) async fn next(
     if !ai6::directorates::section_00::assistant::valid_identity(&query.station) {
         return Err(ApiError::bad_request());
     }
+    // With Moneypenny off the poll is still held, so an idle Station does not ask in a loop.
+    let max_wait = gateway
+        .assistant
+        .as_ref()
+        .map_or(gateway.job_poll_max_wait, |assistant| {
+            assistant.config.gateway.max_wait.0
+        });
+    let wait = Duration::from_millis(query.wait_ms.unwrap_or(1_000)).min(max_wait);
     let Some(assistant) = gateway.assistant.clone() else {
+        tokio::time::sleep(wait).await;
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
-    // A Station that names no wait is held for one second.
-    let wait = Duration::from_millis(query.wait_ms.unwrap_or(1_000))
-        .min(assistant.config.gateway.max_wait.0);
     let deadline = tokio::time::Instant::now() + wait;
     loop {
         let notified = assistant.ready.notified();

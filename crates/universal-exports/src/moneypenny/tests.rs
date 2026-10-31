@@ -31,6 +31,54 @@ fn tuned(change: impl FnOnce(&mut AssistantGatewayLimits)) -> AssistantConfig {
 
 const STATION_TOKEN: &str = "m-token-that-is-long-enough-for-testing";
 
+#[tokio::test]
+async fn disabled_assistant_polls_still_wait_before_returning_no_content() {
+    let directory = tempfile::tempdir().unwrap();
+    let gateway = Gateway::with_access(
+        GatewayConfig::new(
+            "https://localhost",
+            STATION_TOKEN,
+            GatewayLimits::default(),
+            Duration::from_secs(30),
+            Duration::from_secs(30),
+        )
+        .unwrap(),
+        Arc::new(FileRegistry::open(directory.path())),
+        AccessProviders::new(
+            Arc::new(People),
+            Arc::new(People),
+            Arc::new(role_authorizer_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
+        ),
+    );
+    let poll = |gateway: Gateway, wait_ms: u64| async move {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {STATION_TOKEN}").parse().unwrap(),
+        );
+        let started = tokio::time::Instant::now();
+        let response = next(
+            State(gateway),
+            headers,
+            Query(NextQuery {
+                station: "hq".to_owned(),
+                wait_ms: Some(wait_ms),
+            }),
+        )
+        .await
+        .ok()
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        started.elapsed()
+    };
+    assert!(poll(gateway.clone(), 100).await >= Duration::from_millis(100));
+    // `[assistant.gateway] max_wait` bounds what a Station asks for.
+    let bounded = gateway.with_job_poll_max_wait(Duration::from_millis(100));
+    let held = poll(bounded, 60_000).await;
+    assert!(held >= Duration::from_millis(100));
+    assert!(held < Duration::from_secs(30), "held {held:?}");
+}
+
 struct People;
 
 impl Authenticator for People {
