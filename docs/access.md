@@ -90,6 +90,45 @@ scope = "config:assistant"
 role = "memory-admin"
 ```
 
+## Signing in from a browser
+
+Outer Office on the web signs in at its own origin. `GET /v1/auth/methods`, which needs no
+token, says what `POST /v1/auth/login` accepts here: `password` (a name and a secret) or `proxy`
+(an identity the reverse proxy asserts). The sign-in page shows the form, the proxy's button or
+both; when the gateway does not answer it shows the form. A wrong password and an unknown
+account read the same, a `429` counts its `Retry-After` down and holds **Continue** until then,
+and a `403` asks an administrator to check `public_origin` and the proxy. The token stays in the
+tab's memory: a reload or a new tab signs in again, and signing out revokes it.
+
+The gateway serves no web files. A reverse proxy serves the build and passes the API on one
+HTTPS origin, which `public_origin` in `unex.cfg` must name exactly, with its port unless that
+is 443:
+
+| Path | Where it goes |
+| --- | --- |
+| `/v1/` | The gateway: every method, every path under it |
+| `/health` | The gateway (for checks; the app does not call it) |
+| Anything else | The files of `build/web`, with no fallback to `index.html`: the app's routes are in the fragment of its URL, so `/` is the only page |
+
+Two paths under `/v1/` are WebSockets, so the proxy must pass the upgrade: `/v1/socket/{session_id}`
+(a Session's terminal, subprotocol `ai6.guatiao`) and `/v1/user/moneypenny` (her chat). Neither
+sends a ping, so the proxy's idle timeout closes a quiet one; give those two a long one. For
+every request under `/v1/` the proxy must:
+
+- set `X-Forwarded-Proto: https`, replacing what the client sent, and pass `Origin` unchanged:
+  `POST /v1/auth/login`, `POST /v1/attach` and `/v1/socket/` answer `403` otherwise;
+- name the client in the header `client_address_header` names, or all clients share one login
+  count;
+- speak HTTP/1.1 to the gateway, not buffer answers (`/v1/moneypenny/mcp` streams), and accept a
+  body as large as the `unex` record's `frame_bytes` (256 KiB by default).
+
+The app fetches only from its own origin, so its page can carry this policy: `default-src 'self';
+script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;
+connect-src 'self'; frame-ancestors 'none'; base-uri 'self'`. The engine compiles WebAssembly and
+sets inline styles, and a bootstrap's `[assets] cdn` other than `none` needs those hosts added. Run
+`dart run tool/build_guatiao_wasm.dart` before the build, or Session terminals say the protocol
+could not be initialized. Serve `.wasm` as `application/wasm`.
+
 ## Login limits
 
 Universal Exports counts every password or key try against the client address and against

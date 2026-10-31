@@ -102,9 +102,18 @@ profile = "strict"                    # strict, report or off; default strict wi
 dir = "secrets"                       # where loadout secret files are read; default secrets/ beside this file
 
 [unex]
-url = "https://ai6.example"           # Universal Exports; ai6ctl reads this and nothing else here
+url = "https://ai6.example"           # Universal Exports; ai6ctl reads this and ca_file, nothing else here
 token = { file = "unex-token" }       # the Station's credential; without it the Station publishes nothing
+ca_file = "enterprise-ca.pem"         # certificate authorities to trust for Universal Exports; default: the public roots alone
 ```
+
+Universal Exports' certificate must chain to a public root unless `[unex] ca_file` names a PEM
+file of more authorities to trust. They are added to the public roots, for every request of the
+Station and of `ai6ctl` to Universal Exports. A relative path is beside this file. A file that
+cannot be read, holds no certificate or holds a broken one stops `ai6 serve` at start, naming the
+path, with or without a `token`. A set `ca_file` is reported as a weakening: more authorities can
+vouch for the gateway. A harness Moneypenny runs reaches the gateway's MCP endpoint on its own TLS
+stack, which does not read this file.
 
 The provider's location defaults to the directory holding `ai6.cfg`, else the user's
 configuration directory. The platform's state directory is `%LOCALAPPDATA%\AI6` on Windows,
@@ -372,8 +381,10 @@ it.
 limit) bounds each HTTP request and the control commands take `--poll-interval SECONDS` (default
 0.5). Its Universal Exports origin is `--server`, else `UNEX_URL`,
 else `[unex] url` of the `ai6.cfg` found as above (`--config` included), else
-`http://127.0.0.1:7082`. Its user token comes only from `UNEX_ACCESS_TOKEN`; it never reads the
-Station's `[unex] token`.
+`http://127.0.0.1:7082`. Besides the public roots it trusts the authorities of `--ca-file`, else
+`UNEX_CA_FILE`, else `[unex] ca_file` of that `ai6.cfg`; one that cannot be read or holds no
+certificate is refused before any request, naming the path. Its user token comes only from
+`UNEX_ACCESS_TOKEN`; it never reads the Station's `[unex] token`.
 
 ### `OO.cfg`
 

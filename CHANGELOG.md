@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office signs in with a name and password on the web as on desktop, on a page of its own
+  with the wordmark over the theme's wallpaper. A wrong password, the login limit's `429` (its
+  `Retry-After` counts down and holds **Continue**), a refused origin and an unreachable gateway
+  each say what happened. An organization proxy that vouches for the person keeps its button. The
+  token still lives only in memory. The new `GET /v1/auth/methods`, which needs no token, says
+  what `POST /v1/auth/login` accepts ([Access and
+  sign-in](https://jose-pr.github.io/ai6/access/#signing-in-from-a-browser), with what a reverse
+  proxy must pass).
+- `[unex] ca_file` in `ai6.cfg` and `ai6ctl --ca-file` (`UNEX_CA_FILE`): a PEM file of certificate
+  authorities trusted for Universal Exports besides the public roots, on every Station and
+  `ai6ctl` request to it. A file that cannot be read or holds no certificate is refused at start,
+  naming the path; a set `ca_file` is reported as a weakening
+  ([Configuration](https://jose-pr.github.io/ai6/configuration/)).
 - Moneypenny's proposals show what they rest on and what they touch. A proposal records the
   read tools she called since the person's last message (each with its identifier arguments
   only), the conversation's exposure and what exposed it (`exposed_by`, `tool:NAME` or the
