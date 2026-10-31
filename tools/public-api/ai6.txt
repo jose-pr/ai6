@@ -147,6 +147,7 @@ impl ai6::bootstrap::UnexBootstrap
 pub fn ai6::bootstrap::UnexBootstrap::find(core::option::Option<&std::path::Path>) -> core::result::Result<ai6::bootstrap::Located<Self>, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::UnexBootstrap::read(&std::path::Path) -> core::result::Result<Self, ai6::bootstrap::BootstrapError>
 #[non_exhaustive] pub struct ai6::bootstrap::UnexSettings
+pub ai6::bootstrap::UnexSettings::ca_file: core::option::Option<std::path::PathBuf>
 pub ai6::bootstrap::UnexSettings::token: core::option::Option<ai6::bootstrap::SecretRef>
 pub ai6::bootstrap::UnexSettings::url: alloc::string::String
 pub const ai6::bootstrap::CONFIG_ENV: &str
@@ -160,6 +161,7 @@ pub const ai6::bootstrap::UNEX_FILE_NAME: &str
 pub fn ai6::bootstrap::is_sql_location(&str) -> bool
 pub fn ai6::bootstrap::platform_config_dir() -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::platform_state_dir() -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::read_ca_file(&std::path::Path) -> core::result::Result<alloc::vec::Vec<alloc::vec::Vec<u8>>, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::read_file<T: serde_core::de::DeserializeOwned>(&std::path::Path) -> core::result::Result<T, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::system_config_dir() -> core::option::Option<std::path::PathBuf>
 pub mod ai6::bounds
@@ -5132,6 +5134,7 @@ pub fn ai6::station::publisher::PublisherError::fmt(&self, &mut core::fmt::Forma
 pub struct ai6::station::publisher::Config
 impl ai6::station::publisher::Config
 pub fn ai6::station::publisher::Config::try_new(&str, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::station::publisher::PublisherError>
+pub fn ai6::station::publisher::Config::with_ca_certificates(self, &[alloc::vec::Vec<u8>]) -> Self
 impl core::fmt::Debug for ai6::station::publisher::Config
 pub fn ai6::station::publisher::Config::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub mod ai6::station::runner
