@@ -1135,4 +1135,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Station's published capacity and running Sessions count, not the Headquarters Station's
   own.
 
+### Fixed
+
+- Idle Stations no longer poll Universal Exports in a loop while Moneypenny is off. The gateway
+  holds the job poll for its wait (`[assistant.gateway] max_wait` bounds it), and a Station
+  leaves at least `[assistant.desk] job_retry` between polls when the gateway answers early.
+
 [Unreleased]: https://github.com/jose-pr/ai6/commits/main

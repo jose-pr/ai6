@@ -887,7 +887,7 @@ report; `unlocked_stale` when the desk starts.
 | `job_wait` | 1 | Seconds Universal Exports holds a job poll open |
 | `job_bytes` | 256 KiB | Bytes of one job as Universal Exports sends it |
 | `call_margin` | 2 | Seconds a request to Universal Exports may take past what it waits for |
-| `job_retry` | 0.5 | Seconds before a failed job poll is tried again |
+| `job_retry` | 0.5 | Seconds before a failed job poll is tried again, and the least between polls when Universal Exports answers early |
 | `report_queue` | 256 | Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are dropped |
 | `report_attempts` | 3 | Times a report is sent before it counts as lost |
 | `report_retry` | 0.2 | Seconds between tries of a report that did not arrive |
@@ -930,7 +930,7 @@ report; `unlocked_stale` when the desk starts.
 | `ready_bytes` | 512 KiB | Bytes of those entries |
 | `socket_message_bytes` | 64 KiB | Bytes of one message on the app's socket |
 | `hello_timeout` | 10 | Seconds the app's socket has to say hello |
-| `max_wait` | 25 | Seconds a Station's job poll may be held open |
+| `max_wait` | 25 | Seconds a Station's job poll may be held open, also while `assistant = false` |
 | `sweep_every` | 1 | Seconds between an open conversation's looks for jobs no Station took up |
 | `shared_base_wait` | 5 | Seconds a shared change waits for its Station's report of what it was made from |
 | `event_buffer` | 256 | Events queued for a conversation's open sockets; one further behind is closed |

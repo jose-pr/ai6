@@ -683,6 +683,10 @@ impl Gateway {
     /// routes answer 503. The command opens `unex.cfg`'s provider with ai6's config::open_with.
     #[must_use]
     pub fn with_roster(self, source: Arc<dyn ai6::ConfigProvider>) -> Self;
+    /// How long a Station's assistant job poll is held while Moneypenny is not served
+    /// (`[assistant.gateway] max_wait`); once she is, her config decides.
+    #[must_use]
+    pub fn with_job_poll_max_wait(self, max_wait: Duration) -> Self;
     pub fn authenticate_station(&self, presented: &str) -> Result<(), GatewayError>;
     pub async fn register_session(
         &self,
@@ -883,7 +887,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/assistant/memory/{path}[?person=ID]` | User bearer. `{"path","text","digest","commit"}`; `{path}` relative to `memory/`, up to seven names of ASCII letters, digits, `.`, `-` and `_`, none starting with `.` (`400` otherwise); `404` a missing file; `502` a file over 64 KiB or not UTF-8. |
 | `PUT /v1/user/assistant/memory/{path}` | User bearer, own memory only. Body `{"content": ≤ 64 KiB, "message"?: 1-1024 bytes, "base"?: 64 hex}`; commits the file to `main` as the person; `{"path","digest","commit"}`. `409` when `base` is given and the file no longer holds it. |
 | `DELETE /v1/user/assistant/memory/{path}` | User bearer, own memory only. "Forget": a commit by the person removing the file; `{"path","commit"}`, `404` a missing file. |
-| `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most 25,000). |
+| `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most `[assistant.gateway] max_wait`), held the same with Moneypenny off. |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries; `cable_proposal` and `cable_sent` as under Cables in Moneypenny, the assistant. |
 | `GET /v1/station/assistant/exposure?station=ID&conversation=ID[&operation=ID]` | Station bearer. `{"exposed": bool}` for a conversation the Station runs; with `operation` also `"send"` and `"read"`, whether its person holds `cable.send` and `cable.read` there now (both false once the person's sign-in ended); `404` unknown conversation, `403` a Station that does not run it. |
 | `POST /v1/station/assistant/exposure` | Station bearer; body `{"station", "conversation", "source"}` (source 1-256 bytes). Marks the conversation exposed for good, `204`; `404`, `403` as for `GET`. |
