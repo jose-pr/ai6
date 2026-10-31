@@ -412,3 +412,12 @@ CREATE TABLE ai6_issue_cursors (
     revision BIGINT NOT NULL,
     PRIMARY KEY (operation, tracker)
 );
+
+-- Agents' proposals to create issues: state is pending, approved, rejected or created.
+CREATE TABLE ai6_issue_proposals (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);

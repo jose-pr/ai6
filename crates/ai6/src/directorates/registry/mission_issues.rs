@@ -159,6 +159,95 @@ pub struct IssueReply {
     pub state: ReplyState,
 }
 
+/// Where a proposal to create issues is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalState {
+    /// Waiting for a person (or a class authorisation).
+    Pending,
+    /// Approved; its creations are queued.
+    Approved,
+    /// Refused.
+    Rejected,
+    /// Every issue it asked for was created.
+    Created,
+}
+
+/// One issue an Agent proposes to create. The text is the Agent's, already checked.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProposedIssue {
+    /// The tracker instance to create it in.
+    pub tracker: String,
+    /// The title.
+    pub title: String,
+    /// The body as Markdown, with the cover footer.
+    #[serde(default)]
+    pub body: String,
+    /// The labels asked for, intake labels already removed.
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// The issue type, when the Agent asked for one.
+    #[serde(default)]
+    pub issue_type: Option<String>,
+    /// The priority in the target's words, when the Agent asked for one.
+    #[serde(default)]
+    pub priority: Option<String>,
+    /// The linked issue it is a child of, as `TRACKER:ITEM`.
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// The issue it copies, as `TRACKER:ITEM`.
+    #[serde(default)]
+    pub mirror_of: Option<String>,
+    /// How many levels below an issue a person made it sits (a child of such an issue is 1).
+    #[serde(default)]
+    pub depth: u64,
+}
+
+/// An Agent's proposal to create issues, which a person approves unless the Operation lets
+/// Agents create directly.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IssueProposal {
+    /// The proposal's ID; empty on a new one, filled when it is stored.
+    #[serde(default)]
+    pub id: String,
+    /// The Operation the Mission belongs to.
+    pub operation: String,
+    /// The Mission that proposes.
+    pub mission_id: String,
+    /// Who proposes: `agent:<codename>`.
+    pub proposer: String,
+    /// The issues to create.
+    pub specs: Vec<ProposedIssue>,
+    /// The exposure sources of the proposing Session; an exposed one never auto-approves.
+    #[serde(default)]
+    pub exposure: Vec<String>,
+    /// What the vetting found: `duplicate`, or anything that blocks a class authorisation.
+    #[serde(default)]
+    pub findings: Vec<String>,
+    /// The fields the target tracker cannot keep, for a mirror.
+    #[serde(default)]
+    pub dropped: Vec<String>,
+    /// Where it is.
+    pub state: ProposalState,
+    /// Who decided it: a person's subject, or `class:<ID>`.
+    #[serde(default)]
+    pub decided_by: Option<String>,
+    /// Whether the approver asked for the intake labels to be added.
+    #[serde(default)]
+    pub mark_ready: bool,
+    /// The items that were created, as `TRACKER:ITEM`.
+    #[serde(default)]
+    pub created: Vec<String>,
+    /// The caller's retry key; proposing again with it returns the first proposal.
+    #[serde(default)]
+    pub retry_key: Option<String>,
+    /// Whether the Agent was told how it came out.
+    #[serde(default)]
+    pub told: bool,
+    /// When it was proposed, Unix seconds.
+    pub at: f64,
+}
+
 /// What an outbox entry writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -209,6 +298,9 @@ pub struct OutboxResult {
     /// The created issue's item ID.
     #[serde(default)]
     pub created_item: Option<String>,
+    /// The fields a creation could not carry over, such as a mirror's assignees.
+    #[serde(default)]
+    pub dropped: Vec<String>,
 }
 
 /// One write to a tracker.
@@ -521,6 +613,55 @@ pub trait MissionIssueStore {
         reason: &str,
     ) -> io::Result<Option<OutboxEntry>>;
 
+    /// Stores a proposal to create issues and returns it with its ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a proposal with no issues or an invalid one, or I/O failures.
+    fn propose_issues(&self, proposal: &IssueProposal) -> io::Result<IssueProposal>;
+
+    /// Returns one proposal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be read.
+    fn issue_proposal(&self, id: &str) -> io::Result<Option<IssueProposal>>;
+
+    /// Returns the proposals of one Mission, or all of them, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be read.
+    fn issue_proposals(&self, mission_id: Option<&str>) -> io::Result<Vec<IssueProposal>>;
+
+    /// Decides a pending proposal. Returns it, or `None` when it is no longer pending.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be written.
+    fn decide_issue_proposal(
+        &self,
+        id: &str,
+        approved: bool,
+        by: &str,
+        mark_ready: bool,
+    ) -> io::Result<Option<IssueProposal>>;
+
+    /// Records the items an approved proposal made; with every one made it is `created`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the proposal is not approved or the Registry cannot be written.
+    fn record_created_issues(&self, id: &str, items: &[String]) -> io::Result<IssueProposal>;
+
+    /// Records that the Agent was told how its proposal came out. Returns whether it was not
+    /// told before.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be written.
+    fn mark_proposal_told(&self, id: &str) -> io::Result<bool>;
+
     /// Ends a send. Only the term that holds the entry may settle it.
     ///
     /// # Errors
@@ -544,6 +685,101 @@ pub(super) trait IssueTables {
     fn replies(&mut self, mission: &str) -> io::Result<Vec<IssueReply>>;
     fn all_replies(&mut self) -> io::Result<Vec<IssueReply>>;
     fn put_replies(&mut self, mission: &str, replies: &[IssueReply]) -> io::Result<()>;
+    fn proposals(&mut self) -> io::Result<Vec<IssueProposal>>;
+    fn put_proposal(&mut self, proposal: &IssueProposal) -> io::Result<()>;
+}
+
+pub(super) fn propose_in(
+    tables: &mut dyn IssueTables,
+    proposal: &IssueProposal,
+    limits: &IssueLimits,
+) -> io::Result<IssueProposal> {
+    validate_registry_key(&proposal.operation)?;
+    key_ok(&proposal.mission_id, "Mission ID")?;
+    key_ok(&proposal.proposer, "proposer")?;
+    if proposal.specs.is_empty()
+        || proposal
+            .specs
+            .iter()
+            .any(|spec| spec.title.trim().is_empty())
+    {
+        return Err(invalid_data("a proposal names issues, each with a title"));
+    }
+    let bytes = serde_json::to_vec(proposal).map_or(0, |bytes| bytes.len());
+    if !limits.entry_bytes.allows(bytes) {
+        return Err(invalid_data("the proposal exceeds the size limit"));
+    }
+    let mut stored = proposal.clone();
+    stored.id = format!("ip-{}", uuid::Uuid::new_v4().simple());
+    stored.state = ProposalState::Pending;
+    stored.decided_by = None;
+    stored.created.clear();
+    tables.put_proposal(&stored)?;
+    Ok(stored)
+}
+
+pub(super) fn decide_proposal_in(
+    tables: &mut dyn IssueTables,
+    id: &str,
+    approved: bool,
+    by: &str,
+    mark_ready: bool,
+) -> io::Result<Option<IssueProposal>> {
+    let Some(mut proposal) = tables.proposals()?.into_iter().find(|held| held.id == id) else {
+        return Ok(None);
+    };
+    if proposal.state != ProposalState::Pending {
+        return Ok(None);
+    }
+    proposal.state = if approved {
+        ProposalState::Approved
+    } else {
+        ProposalState::Rejected
+    };
+    proposal.decided_by = Some(by.to_owned());
+    proposal.mark_ready = approved && mark_ready;
+    tables.put_proposal(&proposal)?;
+    Ok(Some(proposal))
+}
+
+pub(super) fn mark_told_in(tables: &mut dyn IssueTables, id: &str) -> io::Result<bool> {
+    let Some(mut proposal) = tables.proposals()?.into_iter().find(|held| held.id == id) else {
+        return Ok(false);
+    };
+    if proposal.told {
+        return Ok(false);
+    }
+    proposal.told = true;
+    tables.put_proposal(&proposal)?;
+    Ok(true)
+}
+
+pub(super) fn record_created_in(
+    tables: &mut dyn IssueTables,
+    id: &str,
+    items: &[String],
+) -> io::Result<IssueProposal> {
+    let mut proposal = tables
+        .proposals()?
+        .into_iter()
+        .find(|held| held.id == id)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such proposal"))?;
+    if !matches!(
+        proposal.state,
+        ProposalState::Approved | ProposalState::Created
+    ) {
+        return Err(invalid_data("only an approved proposal creates issues"));
+    }
+    for item in items {
+        if !proposal.created.contains(item) {
+            proposal.created.push(item.clone());
+        }
+    }
+    if proposal.created.len() >= proposal.specs.len() {
+        proposal.state = ProposalState::Created;
+    }
+    tables.put_proposal(&proposal)?;
+    Ok(proposal)
 }
 
 pub(super) fn ask_in(
@@ -1073,6 +1309,33 @@ impl IssueTables for FileTables<'_> {
     fn put_replies(&mut self, mission: &str, replies: &[IssueReply]) -> io::Result<()> {
         self.write_list("issue-replies", mission, replies)
     }
+
+    fn proposals(&mut self) -> io::Result<Vec<IssueProposal>> {
+        let mut all: Vec<IssueProposal> = Vec::new();
+        let directory = self.0.root().join("issue-proposals");
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(all),
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            if let Ok(bytes) = fs::read(entry?.path())
+                && let Ok(proposal) = serde_json::from_slice::<IssueProposal>(&bytes)
+            {
+                all.push(proposal);
+            }
+        }
+        all.sort_by(|a, b| a.at.total_cmp(&b.at).then_with(|| a.id.cmp(&b.id)));
+        Ok(all)
+    }
+
+    fn put_proposal(&mut self, proposal: &IssueProposal) -> io::Result<()> {
+        let directory = self.0.root().join("issue-proposals");
+        fs::create_dir_all(&directory)?;
+        let bytes = serde_json::to_vec_pretty(proposal).map_err(io::Error::other)?;
+        self.0
+            .write_atomic(&directory.join(format!("{}.json", proposal.id)), &bytes)
+    }
 }
 
 impl FileTables<'_> {
@@ -1208,6 +1471,47 @@ impl MissionIssueStore for FileRegistry {
         settle_in(&mut FileTables(self), id, term, settle)
     }
 
+    fn propose_issues(&self, proposal: &IssueProposal) -> io::Result<IssueProposal> {
+        let _lock = self.lock()?;
+        propose_in(&mut FileTables(self), proposal, &self.limits.issues)
+    }
+
+    fn issue_proposal(&self, id: &str) -> io::Result<Option<IssueProposal>> {
+        Ok(FileTables(self)
+            .proposals()?
+            .into_iter()
+            .find(|proposal| proposal.id == id))
+    }
+
+    fn issue_proposals(&self, mission_id: Option<&str>) -> io::Result<Vec<IssueProposal>> {
+        Ok(FileTables(self)
+            .proposals()?
+            .into_iter()
+            .filter(|proposal| mission_id.is_none_or(|mission| proposal.mission_id == mission))
+            .collect())
+    }
+
+    fn decide_issue_proposal(
+        &self,
+        id: &str,
+        approved: bool,
+        by: &str,
+        mark_ready: bool,
+    ) -> io::Result<Option<IssueProposal>> {
+        let _lock = self.lock()?;
+        decide_proposal_in(&mut FileTables(self), id, approved, by, mark_ready)
+    }
+
+    fn record_created_issues(&self, id: &str, items: &[String]) -> io::Result<IssueProposal> {
+        let _lock = self.lock()?;
+        record_created_in(&mut FileTables(self), id, items)
+    }
+
+    fn mark_proposal_told(&self, id: &str) -> io::Result<bool> {
+        let _lock = self.lock()?;
+        mark_told_in(&mut FileTables(self), id)
+    }
+
     fn ask_issue_question(&self, question: &IssueQuestion) -> io::Result<IssueQuestion> {
         let _lock = self.lock()?;
         ask_in(&mut FileTables(self), question)
@@ -1321,6 +1625,7 @@ mod tests {
     use crate::directorates::registry::suite::{Store, backend_tests};
 
     backend_tests!(
+        a_proposal_is_decided_once_and_is_created_when_every_issue_is_made,
         a_question_blocks_one_per_item_and_settles_once,
         replies_are_stored_once_delivered_once_and_bounded_by_the_limit,
         cursors_and_held_entries_follow_their_decisions,
@@ -1353,6 +1658,88 @@ mod tests {
 
     fn entry(mission: &str, item: &str, kind: OutboxKind, at: f64) -> OutboxEntry {
         OutboxEntry::new("G", mission, "github", item, kind, "m", at)
+    }
+
+    fn proposal(mission: &str, titles: &[&str]) -> IssueProposal {
+        IssueProposal {
+            id: String::new(),
+            operation: "G".to_owned(),
+            mission_id: mission.to_owned(),
+            proposer: "agent:007".to_owned(),
+            specs: titles
+                .iter()
+                .map(|title| ProposedIssue {
+                    tracker: "github".to_owned(),
+                    title: (*title).to_owned(),
+                    ..ProposedIssue::default()
+                })
+                .collect(),
+            exposure: Vec::new(),
+            findings: Vec::new(),
+            dropped: Vec::new(),
+            state: ProposalState::Pending,
+            decided_by: None,
+            mark_ready: false,
+            created: Vec::new(),
+            retry_key: None,
+            told: false,
+            at: 1.0,
+        }
+    }
+
+    fn a_proposal_is_decided_once_and_is_created_when_every_issue_is_made(store: &dyn Store) {
+        let registry = store.handle();
+        assert!(registry.propose_issues(&proposal("m1", &[])).is_err());
+        assert!(registry.propose_issues(&proposal("m1", &[" "])).is_err());
+        let first = registry
+            .propose_issues(&proposal("m1", &["a", "b"]))
+            .unwrap();
+        let second = registry.propose_issues(&proposal("m2", &["c"])).unwrap();
+        assert!(first.id.starts_with("ip-"));
+        assert_eq!(registry.issue_proposals(Some("m1")).unwrap().len(), 1);
+        assert_eq!(registry.issue_proposals(None).unwrap().len(), 2);
+        assert!(
+            registry
+                .record_created_issues(&first.id, &["github:o/r#1".to_owned()])
+                .is_err(),
+            "not approved yet"
+        );
+        let approved = registry
+            .decide_issue_proposal(&first.id, true, "person:sam", true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(approved.state, ProposalState::Approved);
+        assert!(approved.mark_ready);
+        assert_eq!(approved.decided_by.as_deref(), Some("person:sam"));
+        assert!(
+            registry
+                .decide_issue_proposal(&first.id, false, "person:kim", false)
+                .unwrap()
+                .is_none(),
+            "decided once"
+        );
+        let rejected = registry
+            .decide_issue_proposal(&second.id, false, "person:sam", true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (rejected.state, rejected.mark_ready),
+            (ProposalState::Rejected, false)
+        );
+        let part = registry
+            .record_created_issues(&first.id, &["github:o/r#1".to_owned()])
+            .unwrap();
+        assert_eq!(part.state, ProposalState::Approved);
+        let done = registry
+            .record_created_issues(
+                &first.id,
+                &["github:o/r#2".to_owned(), "github:o/r#1".to_owned()],
+            )
+            .unwrap();
+        assert_eq!(
+            (done.state, done.created.len()),
+            (ProposalState::Created, 2)
+        );
     }
 
     fn question(mission: &str, item: &str) -> IssueQuestion {
@@ -1810,6 +2197,12 @@ mod tests {
         }
         fn put_replies(&mut self, mission: &str, replies: &[IssueReply]) -> io::Result<()> {
             self.replies.insert(mission.to_owned(), replies.to_vec());
+            Ok(())
+        }
+        fn proposals(&mut self) -> io::Result<Vec<IssueProposal>> {
+            Ok(Vec::new())
+        }
+        fn put_proposal(&mut self, _: &IssueProposal) -> io::Result<()> {
             Ok(())
         }
     }

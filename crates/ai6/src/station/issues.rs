@@ -552,6 +552,7 @@ fn send(
         comment_id: Some(posted.id),
         url: posted.url,
         created_item: None,
+        ..OutboxResult::default()
     };
     match entry.kind {
         OutboxKind::Comment | OutboxKind::Question => {
@@ -635,6 +636,7 @@ fn send(
                 comment_id: None,
                 url: issue.url,
                 created_item: Some(issue.id),
+                ..OutboxResult::default()
             })
         }
         OutboxKind::Link => {
@@ -889,6 +891,7 @@ fn recovered(
             comment_id: Some(reply.id.clone()),
             url: None,
             created_item: None,
+            ..OutboxResult::default()
         }),
         None => again(),
     }

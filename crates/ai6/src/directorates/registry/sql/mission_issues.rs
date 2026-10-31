@@ -6,10 +6,11 @@ use std::io;
 use super::db::Tx;
 use super::{SqlRegistry, from_json, to_json};
 use crate::directorates::registry::mission_issues::{
-    IssueLink, IssueQuestion, IssueReply, IssueTables, LinkState, MissionIssueStore, OutboxEntry,
-    OutboxSettle, OutboxState, QuestionState, ReplyState, adopt_in, ask_in, begin_in, due_in,
-    link_issue_in, mark_reply_in, queue_in, resolve_held_in, set_status_in, settle_in,
-    settle_question_in, store_reply_in, unlink_in,
+    IssueLink, IssueProposal, IssueQuestion, IssueReply, IssueTables, LinkState, MissionIssueStore,
+    OutboxEntry, OutboxSettle, OutboxState, QuestionState, ReplyState, adopt_in, ask_in, begin_in,
+    decide_proposal_in, due_in, link_issue_in, mark_reply_in, mark_told_in, propose_in, queue_in,
+    record_created_in, resolve_held_in, set_status_in, settle_in, settle_question_in,
+    store_reply_in, unlink_in,
 };
 
 /// The two tables, inside one transaction at `revision`.
@@ -114,6 +115,40 @@ impl IssueTables for SqlTables<'_, '_> {
 
     fn put_replies(&mut self, mission: &str, replies: &[IssueReply]) -> io::Result<()> {
         self.put("ai6_issue_replies", "replies", mission, replies)
+    }
+
+    fn proposals(&mut self) -> io::Result<Vec<IssueProposal>> {
+        let rows = self
+            .tx
+            .query("SELECT record FROM ai6_issue_proposals", &[])?;
+        let mut all = Vec::with_capacity(rows.len());
+        for row in rows {
+            if let Ok(proposal) = from_json::<IssueProposal>(&row.text(0)?, "issue proposal") {
+                all.push(proposal);
+            }
+        }
+        all.sort_by(|a, b| a.at.total_cmp(&b.at).then_with(|| a.id.cmp(&b.id)));
+        Ok(all)
+    }
+
+    fn put_proposal(&mut self, proposal: &IssueProposal) -> io::Result<()> {
+        let state = serde_json::to_value(proposal.state)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        self.tx.execute(
+            "INSERT INTO ai6_issue_proposals (id, mission_id, state, record, revision) \
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET state = excluded.state, \
+             record = excluded.record, revision = excluded.revision",
+            &[
+                proposal.id.as_str().into(),
+                proposal.mission_id.as_str().into(),
+                state.into(),
+                to_json(proposal)?.into(),
+                self.revision.into(),
+            ],
+        )?;
+        Ok(())
     }
 }
 
@@ -262,6 +297,61 @@ impl MissionIssueStore for SqlRegistry {
 
     fn settle_outbox(&self, id: &str, term: u64, settle: OutboxSettle) -> io::Result<OutboxEntry> {
         self.write(|tx, revision| settle_in(&mut SqlTables { tx, revision }, id, term, settle))
+    }
+
+    fn propose_issues(&self, proposal: &IssueProposal) -> io::Result<IssueProposal> {
+        self.write(|tx, revision| {
+            propose_in(
+                &mut SqlTables { tx, revision },
+                proposal,
+                &self.limits.issues,
+            )
+        })
+    }
+
+    fn issue_proposal(&self, id: &str) -> io::Result<Option<IssueProposal>> {
+        self.read(|tx| {
+            tx.query_opt(
+                "SELECT record FROM ai6_issue_proposals WHERE id = $1",
+                &[id.into()],
+            )?
+            .map(|row| from_json(&row.text(0)?, "issue proposal"))
+            .transpose()
+        })
+    }
+
+    fn issue_proposals(&self, mission_id: Option<&str>) -> io::Result<Vec<IssueProposal>> {
+        Ok(self
+            .read(|tx| SqlTables { tx, revision: 0 }.proposals())?
+            .into_iter()
+            .filter(|proposal| mission_id.is_none_or(|mission| proposal.mission_id == mission))
+            .collect())
+    }
+
+    fn decide_issue_proposal(
+        &self,
+        id: &str,
+        approved: bool,
+        by: &str,
+        mark_ready: bool,
+    ) -> io::Result<Option<IssueProposal>> {
+        self.write(|tx, revision| {
+            decide_proposal_in(
+                &mut SqlTables { tx, revision },
+                id,
+                approved,
+                by,
+                mark_ready,
+            )
+        })
+    }
+
+    fn mark_proposal_told(&self, id: &str) -> io::Result<bool> {
+        self.write(|tx, revision| mark_told_in(&mut SqlTables { tx, revision }, id))
+    }
+
+    fn record_created_issues(&self, id: &str, items: &[String]) -> io::Result<IssueProposal> {
+        self.write(|tx, revision| record_created_in(&mut SqlTables { tx, revision }, id, items))
     }
 
     fn ask_issue_question(&self, question: &IssueQuestion) -> io::Result<IssueQuestion> {
