@@ -3606,6 +3606,7 @@ event_bytes = 7
             origin,
             token: "station-token".to_owned(),
             station: "hq".to_owned(),
+            tls: TlsConfig::default(),
             tables: Arc::new(|| {
                 let mut desk = AssistantDeskLimits::default();
                 // Past the server's deadline: pacing by this would lose the second poll.
