@@ -1332,6 +1332,7 @@ impl Gateway {
                 "/v1/station/assistant/exposure",
                 get(moneypenny::exposure).post(moneypenny::expose),
             )
+            .route("/v1/auth/methods", get(auth_methods))
             .route("/v1/auth/login", post(login))
             .route("/v1/auth/logout", post(logout))
             .route("/v1/auth/session", get(access_session))
@@ -2234,6 +2235,35 @@ async fn issue_access_token(
     let issued =
         issue_access_token_record(registry, request.person_id, request.ttl_seconds).await?;
     Ok((StatusCode::CREATED, Json(issued)))
+}
+
+/// What `POST /v1/auth/login` accepts here, so a sign-in page asks for nothing it cannot use.
+/// Says nothing about any account, so it needs no token.
+#[derive(Serialize)]
+struct AuthMethods {
+    /// `password`: a name and a secret. `proxy`: an identity the reverse proxy asserts.
+    methods: Vec<&'static str>,
+}
+
+async fn auth_methods(State(gateway): State<Gateway>) -> Result<Json<AuthMethods>, ApiError> {
+    let mut methods = Vec::new();
+    if let Some(providers) = &gateway.access {
+        if let Some(authenticator) = providers.authenticator.clone() {
+            let described = tokio::task::spawn_blocking(move || authenticator.describe())
+                .await
+                .map_err(|_| ApiError::internal())?;
+            // An authenticator that says nothing, or cannot, is still asked for a name and a
+            // secret by `login`.
+            let takes = described.ok().and_then(|description| description.takes);
+            if takes.as_deref() != Some(ai6::directorates::m::access::takes::REQUEST) {
+                methods.push("password");
+            }
+        }
+        if providers.proxy_identity.is_some() {
+            methods.push("proxy");
+        }
+    }
+    Ok(Json(AuthMethods { methods }))
 }
 
 async fn login(
@@ -4948,6 +4978,90 @@ mod tests {
             request = request.header("x-forwarded-for", address);
         }
         request.send().await.unwrap()
+    }
+
+    /// An authenticator that reads the request and takes no name or secret.
+    struct ByRequest;
+
+    impl Authenticator for ByRequest {
+        fn authenticate(&self, _: Attempt) -> Result<Verdict, ProviderError> {
+            Ok(Verdict::Invalid)
+        }
+
+        fn describe(&self) -> Result<ai6::Description, ProviderError> {
+            Ok(ai6::Description {
+                takes: Some(ai6::directorates::m::access::takes::REQUEST.to_owned()),
+                ..ai6::Description::default()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_methods_say_what_login_accepts_and_need_no_token() {
+        let header = || HeaderName::from_static("x-forwarded-user");
+        let provided = |access: AccessProviders| async move {
+            let config = GatewayConfig::new(
+                "https://localhost",
+                "m-token-that-is-long-enough-for-testing",
+                test_limits(),
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .unwrap();
+            let directory = tempfile::tempdir().unwrap();
+            let registry = Arc::new(FileRegistry::open(directory.path()));
+            let gateway = Gateway::with_access(config, registry, access);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let _ = axum::serve(listener, gateway.router()).await;
+            });
+            let answer: serde_json::Value = reqwest::get(format!("{base}/v1/auth/methods"))
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            server.abort();
+            answer["methods"].clone()
+        };
+        let authorizer = || Arc::new(RoleAuthorizer::default());
+        assert_eq!(
+            provided(AccessProviders::new(
+                Arc::new(OneAccount),
+                Arc::new(OneAccount),
+                authorizer(),
+            ))
+            .await,
+            serde_json::json!(["password"])
+        );
+        assert_eq!(
+            provided(
+                AccessProviders::new(Arc::new(OneAccount), Arc::new(OneAccount), authorizer())
+                    .with_proxy_identity(header(), "name")
+            )
+            .await,
+            serde_json::json!(["password", "proxy"])
+        );
+        assert_eq!(
+            provided(AccessProviders::from_reverse_proxy(
+                Arc::new(OneAccount),
+                authorizer(),
+                header(),
+                "name",
+            ))
+            .await,
+            serde_json::json!(["proxy"])
+        );
+        assert_eq!(
+            provided(AccessProviders::new(
+                Arc::new(ByRequest),
+                Arc::new(OneAccount),
+                authorizer(),
+            ))
+            .await,
+            serde_json::json!([])
+        );
     }
 
     #[tokio::test]

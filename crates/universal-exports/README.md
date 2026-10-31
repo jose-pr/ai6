@@ -145,6 +145,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/station/sessions/{session_id}/terminal/{sequence}` | Publish raw terminal bytes; the gateway encodes the guatiao event. |
 | `POST` | `/v1/station/sessions/{session_id}/events/{sequence}` | Ingest one guatiao frame. Schema/close frames use cursor `0`; values use a positive event sequence. |
 | `POST` | `/v1/station/attach-grants` | Issue a read or write token within M's Station grant. |
+| `GET` | `/v1/auth/methods` | Say what `/v1/auth/login` accepts here, with no token: `{"methods": [...]}`, `password` for a name and a secret, `proxy` for an identity the reverse proxy asserts. |
 | `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token. |
 | `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the Registry. |
 | `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `mission.control`, `approval.decide`, `approval.class`, `session.read`, `session.input`, `audit.read`, `agent.read`, `agent.configure`, `pool.read`, `pool.manage`, `cable.send` and `cable.read` actions by authorized Operation. |
