@@ -41,10 +41,10 @@ import 'shell/missions_page.dart';
 import 'shell/oo_freshness.dart';
 import 'shell/overview_page.dart';
 import 'shell/sessions_page.dart';
+import 'shell/sign_in_page.dart';
 import 'shell/station_watch.dart';
 import 'shell/top_bar.dart';
 import 'theme/oo_appearance.dart';
-import 'theme/oo_backdrop.dart';
 import 'theme/oo_icon.dart';
 import 'theme/oo_theme.dart';
 import 'timeline/timeline_page.dart';
@@ -456,6 +456,24 @@ class MissionBoard extends ChangeNotifier {
   );
   String? error;
   String? loginError;
+
+  /// When the login limit lets the next try through, after a `429` that said how long.
+  DateTime? loginRetryAt;
+
+  /// How long the login limit still holds the person off; `null` once it does not.
+  Duration? get loginWait {
+    final at = loginRetryAt;
+    if (at == null) return null;
+    final left = at.difference(ooClock());
+    return left > Duration.zero ? left : null;
+  }
+
+  /// Forgets a refusal whose wait is over.
+  void clearLoginWait() {
+    loginRetryAt = null;
+    notifyListeners();
+  }
+
   String? accessToken;
   bool loading = true;
 
@@ -1890,8 +1908,23 @@ class MissionBoard extends ChangeNotifier {
     await _login(const <String, Object>{});
   }
 
+  /// What `POST /v1/auth/login` accepts here; [SignInMethods.unknown] when the gateway does
+  /// not say, and a try then finds out.
+  Future<SignInMethods> loadSignInMethods() async {
+    try {
+      final response = await _client.get(apiOrigin.resolve('/v1/auth/methods'));
+      if (response.statusCode != 200) return SignInMethods.unknown;
+      return SignInMethods.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    } on Object {
+      return SignInMethods.unknown;
+    }
+  }
+
   Future<void> _login(Map<String, Object> credentials) async {
     loginError = null;
+    loginRetryAt = null;
     notifyListeners();
     try {
       final response = await _client.post(
@@ -1900,9 +1933,7 @@ class MissionBoard extends ChangeNotifier {
         body: jsonEncode(credentials),
       );
       if (response.statusCode != 201) {
-        loginError = credentials.isEmpty
-            ? 'Organization sign-in was rejected. Open Outer Office through your authenticated organization proxy and check its gateway configuration.'
-            : 'Sign-in was rejected. Check the account and gateway.';
+        _loginRefused(response, proxy: credentials.isEmpty);
         notifyListeners();
         return;
       }
@@ -1918,10 +1949,38 @@ class MissionBoard extends ChangeNotifier {
     }
   }
 
+  /// Says why a try was refused. The same words for a wrong password and an unknown account,
+  /// as the gateway answers both the same; a `403` is its `public_origin` or its reverse proxy,
+  /// not the person.
+  void _loginRefused(http.Response response, {required bool proxy}) {
+    switch (response.statusCode) {
+      case 429:
+        final wait = int.tryParse(response.headers['retry-after'] ?? '');
+        if (wait != null && wait > 0) {
+          loginRetryAt = ooClock().add(Duration(seconds: wait));
+        } else {
+          loginError = 'Too many sign-in tries. Wait a while and try again.';
+        }
+      case 403:
+        loginError =
+            'Universal Exports does not accept sign-in from this address. An administrator can '
+            'check its public origin and reverse proxy.';
+      case 401 when !proxy:
+        loginError = 'That account and password did not work.';
+      case >= 500:
+        loginError = 'Universal Exports could not check the sign-in. Try again, or ask an administrator.';
+      default:
+        loginError = proxy
+            ? 'Organization sign-in was rejected. Open Outer Office through your authenticated organization proxy and check its gateway configuration.'
+            : 'Universal Exports refused the sign-in (HTTP ${response.statusCode}).';
+    }
+  }
+
   Future<void> logout() async {
     final token = accessToken;
     _clearBoard();
     loginError = null;
+    loginRetryAt = null;
     notifyListeners();
     if (token != null) {
       try {
@@ -2009,6 +2068,28 @@ class MissionBoard extends ChangeNotifier {
     _poll?.cancel();
     _client.close();
     super.dispose();
+  }
+}
+
+/// What `POST /v1/auth/login` accepts, as `GET /v1/auth/methods` says.
+class SignInMethods {
+  const SignInMethods({required this.password, required this.proxy});
+
+  /// Before the gateway answers, or when it cannot: the form.
+  static const unknown = SignInMethods(password: true, proxy: false);
+
+  /// A name and a secret.
+  final bool password;
+
+  /// An identity the reverse proxy asserts.
+  final bool proxy;
+
+  factory SignInMethods.fromJson(Map<String, dynamic> json) {
+    final methods = json['methods'] as List<dynamic>;
+    return SignInMethods(
+      password: methods.contains('password'),
+      proxy: methods.contains('proxy'),
+    );
   }
 }
 
@@ -3214,7 +3295,7 @@ class _AccessGateState extends State<_AccessGate> {
       final board = widget.board;
       final chat = _chatFor(board);
       if (!board.demo && board.accessToken == null) {
-        return _LoginPage(board: board);
+        return SignInPage(board: board);
       }
       return MissionBoardPage(
         board: board,
@@ -3279,117 +3360,6 @@ class _DemoChip extends StatelessWidget {
             visualDensity: VisualDensity.compact,
           ),
         );
-}
-
-class _LoginPage extends StatefulWidget {
-  const _LoginPage({required this.board});
-
-  final MissionBoard board;
-
-  @override
-  State<_LoginPage> createState() => _LoginPageState();
-}
-
-class _LoginPageState extends State<_LoginPage> {
-  final _name = TextEditingController();
-  final _secret = TextEditingController();
-  bool _submitting = false;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _secret.dispose();
-    super.dispose();
-  }
-
-  Future<void> _signIn() async {
-    if (_submitting ||
-        (!kIsWeb && (_name.text.trim().isEmpty || _secret.text.isEmpty))) {
-      return;
-    }
-    setState(() => _submitting = true);
-    if (kIsWeb) {
-      await widget.board.loginViaProxy();
-    } else {
-      await widget.board.login(_name.text.trim(), _secret.text);
-    }
-    _secret.clear();
-    if (mounted) setState(() => _submitting = false);
-  }
-
-  bool get _canSubmit =>
-      !_submitting &&
-      (kIsWeb || (_name.text.trim().isNotEmpty && _secret.text.isNotEmpty));
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Outer Office')),
-    body: SizedBox.expand(
-      child: OoBackdrop(
-        alignment: Alignment.center,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Sign in',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 20),
-                if (kIsWeb) ...[
-                  const Text(
-                    'Continue with the account authenticated by your organization.',
-                  ),
-                ] else ...[
-                  TextField(
-                    controller: _name,
-                    textInputAction: TextInputAction.next,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(labelText: 'Account'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _secret,
-                    obscureText: true,
-                    onChanged: (_) => setState(() {}),
-                    onSubmitted: (_) => _signIn(),
-                    decoration: const InputDecoration(labelText: 'Password'),
-                  ),
-                ],
-                if (widget.board.loginError != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    widget.board.loginError!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                FilledButton(
-                  onPressed: _canSubmit ? _signIn : null,
-                  child: _submitting
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(
-                          kIsWeb
-                              ? 'Continue with organization sign-in'
-                              : 'Continue',
-                        ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 class MissionBoardPage extends StatefulWidget {

@@ -123,6 +123,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   [assistant guide](https://jose-pr.github.io/ai6/assistant/).
 - Audit log for operators with `audit.read`; operator menu with identity, effective
   permissions per Operation, appearance and sign-out.
+- Sign-in: the wordmark over the theme's wallpaper, the account and password form, and the
+  reason a try was refused; the login limit's wait counts down and holds **Continue**.
 - Six themes from the Outer Office design kit (Night Ops, the default, Black Ops, Dusk,
   Classic, Light and Red File) or the system's light or dark setting, stored per device as
   `oo.theme`. The appearance settings (the top bar's gear and the operator menu) show each
@@ -185,11 +187,14 @@ Open `http://127.0.0.1:7357` for the web build.
 | `OO_API` | Universal Exports origin for desktop builds | `http://127.0.0.1:7082` |
 | `OO_DEMO` | `true` shows sample data and makes no connection | `false` |
 
-Web uses its own origin: serve it from the same HTTPS origin as Universal Exports, behind
-the organization's authenticated reverse proxy. The proxy supplies the signed-in identity
-to `POST /v1/auth/login`, so a live web build opened straight from the Flutter dev server
-cannot sign in. Desktop can sign in with the configured Authenticator. The bearer token is
-kept in memory only, and signing out revokes it.
+Web uses its own origin: a reverse proxy serves the build and passes `/v1/` to Universal
+Exports on one HTTPS origin, which is the gateway's `public_origin`, so a live web build opened
+straight from the Flutter dev server cannot sign in. [Access and
+sign-in](https://jose-pr.github.io/ai6/access/#signing-in-from-a-browser) lists what the proxy must
+pass. The sign-in page asks `GET /v1/auth/methods` what the gateway accepts and shows its name and
+password form, the button of an organization proxy that vouches for the person, or both, on web
+and desktop alike. The bearer token is kept in memory only, so a reload signs in again, and
+signing out revokes it.
 
 The board reads `/v1/stations`, `/v1/board` and `/v1/missions` every three seconds;
 Universal Exports filters them by `mission.read` per Operation. A Session view exchanges a

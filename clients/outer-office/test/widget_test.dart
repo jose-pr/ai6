@@ -1567,6 +1567,7 @@ void main() {
     expect(find.text('station-alpha'), findsOneWidget);
     expect(find.text('claude-session-123'), findsNothing);
     expect(requests.map((request) => request.url.path), [
+      '/v1/auth/methods',
       '/v1/auth/login',
       '/v1/board',
       '/v1/missions',
