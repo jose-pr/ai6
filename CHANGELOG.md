@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Outer Office asks less of a slow link. The board reads what the page shown displays every three
+  seconds, what only the bell and search need every `[refresh] slow`, and the person's profile
+  every `[refresh] profile` (60 s), instead of everything every three seconds; while the tab cannot
+  be seen it reads once every `[refresh] hidden` (60 s; 0 reads nothing), and the pages' own timers
+  wait too.
+- Outer Office says what a person may do in plain words by group (Missions, Sessions, Green ink,
+  Agents, Pools, Cables, Audit, Access), with the action names on hover, on Operations, an
+  Operation's summary and the operator menu.
+
+### Fixed
+
+- With `assistant = false` Outer Office no longer offers Moneypenny. `GET /v1/user/profile` says
+  whether the gateway serves her (`moneypenny`); off, the app shows no card, button or chat, and
+  Settings says so. On, she greets only once her socket is ready, and a socket that fails, closes
+  or stays silent past `[chat] connect_timeout` shows **Try again** instead of an endless
+  "Connecting…" and an uncaught exception.
+
 ### Added
 
 - Outer Office signs in with a name and password on the web as on desktop, on a page of its own

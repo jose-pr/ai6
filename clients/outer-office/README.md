@@ -117,7 +117,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   (`approval.decide`), and the Operation's class authorisations with their uses, revoking
   the live ones (`approval.class`). A Session held for green ink shows `BLOCKED · GREEN INK`.
 - Moneypenny, the assistant: **Ask Moneypenny** on every page opens a chat with her (see
-  Layout for where it goes and its shortcuts). She
+  Layout for where it goes and its shortcuts), where the profile says the gateway serves her;
+  elsewhere the app offers no card, button or chat for her and Settings says she is off and who
+  can change that. She greets the person only once her socket says she is ready; a socket that
+  fails, closes or stays silent past `[chat] connect_timeout` says so with **Try again**. She
   answers from AI6's records, through tools that run with the signed-in operator's own
   permissions, shows tables, charts, cards, timelines and diffs rendered by the app, offers
   pages as cards (the page and its filters as chips, and **Open**, which only reads and
@@ -210,8 +213,12 @@ password form, the button of an organization proxy that vouches for the person, 
 and desktop alike. The bearer token is kept in memory only, so a reload signs in again, and
 signing out revokes it.
 
-The board reads `/v1/stations`, `/v1/board` and `/v1/missions` every three seconds;
-Universal Exports filters them by `mission.read` per Operation. A Session view exchanges a
+The board reads what the page shown displays every three seconds (`[refresh] sessions`), such
+as `/v1/missions` on Missions and nothing on Audit; what only the bell and the search need
+every fifteen (`[refresh] slow`); and the person's profile every minute (`[refresh] profile`).
+While the tab or window cannot be seen it reads everything once a minute (`[refresh] hidden`),
+and it catches up as soon as it can be seen again or another page opens. Universal Exports
+filters them by `mission.read` per Operation. A Session view exchanges a
 Session-scoped grant for a one-use HttpOnly cookie, attaches over the WebSocket, decodes
 DipTel frames with Guatiao's Dart receiver and renders them with `xterm2`, resuming from
 its last event after a disconnect.

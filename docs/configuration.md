@@ -426,16 +426,19 @@ text_width = 960                      # expanded: her text keeps to a column thi
 window_width = 520                    # desktop: her own window's size when popped out
 window_height = 760
 transition_ms = 200                   # how long the chat takes to move; 0 for none
+connect_timeout = 10                  # seconds her socket may take to say it is ready before the chat offers to try again
 
 [routes]
 text_bytes = 128                      # the longest text filter a page link may carry, in bytes
 
 [refresh]                             # seconds between a page's asks; 0 turns that refresh off
-sessions = 3                          # the board of Sessions, Stations and Missions
+sessions = 3                          # what the page shown displays from the board of Sessions, Stations and Missions
 overview = 10                         # the overview's recent activity
 timeline = 10                         # an Operation's timeline
 pools = 15                            # the account pools
-slow = 15                             # green ink requests and Mission proposals; 0 reads them with every refresh
+slow = 15                             # what the bell and search need and the page does not show: Sessions, Stations, held briefs, green ink requests, Mission proposals; 0 reads them with every refresh
+profile = 60                          # who the person is and what they may do; 0 reads it only at sign-in and when the operator menu opens
+hidden = 60                           # everything, while the tab or window cannot be seen; 0 reads nothing until it can
 silent_intervals = 3                  # a Station silent for this many `sessions` intervals shows as silent
 
 [controls]                            # following a Mission control until the Station reports
@@ -474,7 +477,7 @@ view bounds come from the gateway's `[assistant.views]`.
 The build define `OO_API` beats `[unex] url`, which beats the loopback default. A theme the
 person chooses (`oo.theme`, kept on the device or in the browser) beats `[appearance] theme`,
 which beats Night Ops; an unknown theme id is logged and read as the default. In `[chat]`
-each value is a positive number (`transition_ms` a whole one, 0 allowed) and `width` lies
+each value is a positive number (`transition_ms` a whole one, 0 allowed; `connect_timeout` in seconds) and `width` lies
 between `min_width` and `max_width`, or the file is refused; a width the person drags to
 (`oo.chat.<person ID>`) beats `width` and is kept within the limits. The system's reduced
 motion setting turns transitions off whatever `transition_ms` says.
