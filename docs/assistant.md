@@ -833,7 +833,10 @@ and a proxy that strips the sandbox header.
 
 ## In the app
 
-**Ask Moneypenny** (top right on every page, or Ctrl+Alt+I; ⌃⌘I on macOS) opens the chat:
+With `assistant = false` in `unex.cfg` she is not served: the profile says so
+(`moneypenny: false`), the app offers no card, button or chat for her, and its Settings say she is
+off and who can change that. Otherwise **Ask Moneypenny** (top right on every page, or Ctrl+Alt+I;
+⌃⌘I on macOS) opens the chat:
 beside the page in a wide window, over it in a narrower one, full screen on a phone. It can
 be expanded into the centre (Ctrl+Alt+Shift+I) and, on desktop, popped out into its own
 window (Ctrl+Alt+O); every layout shows the same conversation, and the app remembers the

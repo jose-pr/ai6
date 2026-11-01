@@ -88,7 +88,7 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   count of the items above, derived and never stored, with no unread state; its menu opens
   each item's page and, under **Your requests**, lists the controls you asked for that are
   not yet applied or refused, offering **Check again** on an outcome unknown), a **Demo
-  data** chip in the demo, appearance settings, and the person's chip (initials, name and
+  data** chip in the demo, Settings, and the person's chip (initials, name and
   first directory group) opening the operator menu.
 - Freshness: each source (Stations, Sessions, Missions, held briefs, green ink, Mission
   proposals, timeline) is read on its own. A failed read keeps that source's last data and
@@ -151,7 +151,7 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   reason a try was refused; the login limit's wait counts down and holds **Continue**.
 - Six themes from the Outer Office design kit (Night Ops, the default, Black Ops, Dusk,
   Classic, Light and Red File) or the system's light or dark setting, stored per device as
-  `oo.theme`. The appearance settings (the top bar's gear and the operator menu) show each
+  `oo.theme`. Settings (the top bar's gear and the operator menu) show each
   theme as a miniature of its page, panel, selected row and button, with its name, a line
   on its character and a check mark on the chosen one; a choice applies at once. Every
   colour text is drawn in reaches WCAG AA (4.5:1) where it is drawn, panels over art
