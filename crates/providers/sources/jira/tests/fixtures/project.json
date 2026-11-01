@@ -1,0 +1,93 @@
+{
+  "expand": "description,lead,issueTypes,url,projectKeys,permissions,insight",
+  "self": "https://example.atlassian.net/rest/api/3/project/10001",
+  "id": "10001",
+  "key": "AI6",
+  "description": "Throwaway project for AI6's live Source and tracker tests",
+  "lead": {
+    "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+    "accountId": "000000:00000000-0000-0000-0000-000000000000",
+    "avatarUrls": {
+      "48x48": "https://example.invalid/avatar.png",
+      "24x24": "https://example.invalid/avatar.png",
+      "16x16": "https://example.invalid/avatar.png",
+      "32x32": "https://example.invalid/avatar.png"
+    },
+    "displayName": "Sam Reporter",
+    "active": true
+  },
+  "components": [],
+  "issueTypes": [
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10007",
+      "id": "10007",
+      "description": "A small, distinct piece of work.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
+      "name": "Task",
+      "subtask": false,
+      "avatarId": 10318,
+      "hierarchyLevel": 0
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10008",
+      "id": "10008",
+      "description": "A small piece of work that's part of a larger task.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10316?size=medium",
+      "name": "Sub-task",
+      "subtask": true,
+      "avatarId": 10316,
+      "hierarchyLevel": -1
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10009",
+      "id": "10009",
+      "description": "Stories track functionality or features expressed as user goals.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10300?size=medium",
+      "name": "Story",
+      "subtask": false,
+      "avatarId": 10300,
+      "hierarchyLevel": 0
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10010",
+      "id": "10010",
+      "description": "A problem or error.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10303?size=medium",
+      "name": "Bug",
+      "subtask": false,
+      "avatarId": 10303,
+      "hierarchyLevel": 0
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10000",
+      "id": "10000",
+      "description": "A big user story that needs to be broken down. Created by Jira Software - do not edit or delete.",
+      "iconUrl": "https://example.atlassian.net/images/icons/issuetypes/epic.svg",
+      "name": "Epic",
+      "subtask": false,
+      "hierarchyLevel": 1
+    }
+  ],
+  "assigneeType": "PROJECT_LEAD",
+  "versions": [],
+  "name": "AI6 test project",
+  "roles": {
+    "atlassian-addons-project-access": "https://example.atlassian.net/rest/api/3/project/10001/role/10003",
+    "jira-guest-member": "https://example.atlassian.net/rest/api/3/project/10001/role/10009",
+    "Administrators": "https://example.atlassian.net/rest/api/3/project/10001/role/10002"
+  },
+  "avatarUrls": {
+    "48x48": "https://example.invalid/avatar.png",
+    "24x24": "https://example.invalid/avatar.png",
+    "16x16": "https://example.invalid/avatar.png",
+    "32x32": "https://example.invalid/avatar.png"
+  },
+  "projectTypeKey": "software",
+  "simplified": false,
+  "style": "classic",
+  "isPrivate": false,
+  "properties": {},
+  "entityId": "86418f37-ee78-4226-9510-f51186ac180e",
+  "uuid": "86418f37-ee78-4226-9510-f51186ac180e",
+  "isLiveTemplate": false
+}

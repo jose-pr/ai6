@@ -45,7 +45,7 @@ fn the_built_library_loads_as_a_source_and_serves_a_poll() {
         "{:?}",
         plugins.scan_summary()
     );
-    let fake = serve(|_| vec![canned(200, include_str!("fixtures/cloud_page2.json"))]);
+    let fake = serve(|_| vec![canned(200, include_str!("fixtures/cloud_page3.json"))]);
     let source = plugins
         .source(
             "jira",
@@ -57,7 +57,7 @@ fn the_built_library_loads_as_a_source_and_serves_a_poll() {
         )
         .unwrap();
     let batch = source.poll(SourcePoll { cursor: None }).unwrap();
-    assert_eq!(batch.items[0].id, "GUA-14");
+    assert_eq!(batch.items[0].id, "AI6-23");
 }
 
 #[test]

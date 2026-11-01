@@ -219,6 +219,7 @@ impl Jira {
         &self,
         url: &str,
         query: &[(&str, String)],
+        rejected: &str,
     ) -> Result<ureq::http::Response<ureq::Body>, ProviderError> {
         let mut request = self
             .agent
@@ -231,11 +232,16 @@ impl Jira {
         let response = request
             .call()
             .map_err(|e| failure(&format!("request failed: {e}")))?;
-        self.check(&response)?;
+        self.check(&response, rejected)?;
         Ok(response)
     }
 
-    fn post(&self, url: &str, body: &serde_json::Value) -> Result<(), ProviderError> {
+    fn post(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+        rejected: &str,
+    ) -> Result<(), ProviderError> {
         let response = self
             .agent
             .post(url)
@@ -243,10 +249,16 @@ impl Jira {
             .header("Authorization", &self.authorization()?)
             .send_json(body)
             .map_err(|e| failure(&format!("request failed: {e}")))?;
-        self.check(&response)
+        self.check(&response, rejected)
     }
 
-    fn check(&self, response: &ureq::http::Response<ureq::Body>) -> Result<(), ProviderError> {
+    /// `rejected` is the message for a 400, which Jira gives for what was asked, not for who
+    /// asked.
+    fn check(
+        &self,
+        response: &ureq::http::Response<ureq::Body>,
+        rejected: &str,
+    ) -> Result<(), ProviderError> {
         let status = response.status().as_u16();
         match status {
             200..=299 => Ok(()),
@@ -262,12 +274,15 @@ impl Jira {
                 "Jira refused the credential in {}",
                 self.settings.token_env
             ))),
-            404 => Err(failure(
-                "Jira does not show this issue or endpoint to the credential",
+            // Cloud answers a refused credential on an issue with 404, not 401.
+            404 => Err(failure(&format!(
+                "Jira does not show this issue or endpoint to the credential in {}",
+                self.settings.token_env
+            ))),
+            410 => Err(failure(
+                "Jira has removed this API (check `deployment`: Cloud has no REST v2 search)",
             )),
-            400 => Err(failure(
-                "Jira rejected the request (check `jql`, `project` and the labels)",
-            )),
+            400 => Err(failure(rejected)),
             other => Err(failure(&format!("Jira answered status {other}"))),
         }
     }
@@ -293,7 +308,11 @@ impl Jira {
 
     fn transition(&self, key: &str, wanted: &str) -> Result<(), ProviderError> {
         let url = self.api(&format!("/issue/{key}/transitions"));
-        let mut response = self.get(&url, &[])?;
+        let mut response = self.get(
+            &url,
+            &[],
+            &format!("Jira rejected listing the transitions of {key}"),
+        )?;
         let listing: serde_json::Value = response
             .body_mut()
             .read_json()
@@ -309,7 +328,44 @@ impl Jira {
                 })
             })
             .ok_or_else(|| failure(&format!("{key} has no transition named {wanted:?}")))?;
-        self.post(&url, &serde_json::json!({ "transition": { "id": id } }))
+        self.post(
+            &url,
+            &serde_json::json!({ "transition": { "id": id } }),
+            &format!("Jira rejected the transition {wanted:?} on {key}"),
+        )
+    }
+
+    /// Tells an empty search from a search that could see nothing.
+    ///
+    /// Cloud answers a search by a refused credential, or naming a project the credential
+    /// cannot see, with status 200 and no issues, so a revoked token would otherwise look
+    /// like no work for as long as it stays revoked. The project lookup answers 404 to both.
+    fn confirm_empty_search(&self) -> Result<(), ProviderError> {
+        let token_env = &self.settings.token_env;
+        let (url, unseen) = match &self.settings.project {
+            Some(project) => (
+                self.api(&format!("/project/{project}")),
+                format!(
+                    "Jira shows no project {project} to the credential in {token_env}: \
+                     the credential is refused or the key is wrong"
+                ),
+            ),
+            None => (
+                self.api("/myself"),
+                format!("Jira refused the credential in {token_env}"),
+            ),
+        };
+        let response = self
+            .agent
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("Authorization", &self.authorization()?)
+            .call()
+            .map_err(|e| failure(&format!("request failed: {e}")))?;
+        match response.status().as_u16() {
+            404 => Err(failure(&unseen)),
+            _ => self.check(&response, &unseen),
+        }
     }
 }
 
@@ -348,7 +404,11 @@ impl Source for Jira {
                 }
                 Deployment::Server => page_query.push(("startAt", start_at.to_string())),
             }
-            let mut response = self.get(&url, &page_query)?;
+            let mut response = self.get(
+                &url,
+                &page_query,
+                "Jira rejected the search (check `jql`, `project` and the labels)",
+            )?;
             let body: serde_json::Value = response
                 .body_mut()
                 .read_json()
@@ -377,6 +437,9 @@ impl Source for Jira {
                 break;
             }
         }
+        if items.is_empty() && self.settings.deployment == Deployment::Cloud {
+            self.confirm_empty_search()?;
+        }
         let cursor = items
             .iter()
             .map(|item| item.updated.as_str())
@@ -395,6 +458,11 @@ impl Source for Jira {
         {
             return Err(failure("the item ID is not a Jira issue key"));
         }
+        if report.body.trim().is_empty() {
+            return Err(failure(
+                "the report body is empty, and Jira refuses such a comment",
+            ));
+        }
         let body = match self.settings.deployment {
             Deployment::Cloud => adf::document(&report.body),
             Deployment::Server => serde_json::Value::String(report.body.clone()),
@@ -402,6 +470,7 @@ impl Source for Jira {
         self.post(
             &self.api(&format!("/issue/{key}/comment")),
             &serde_json::json!({ "body": body }),
+            &format!("Jira rejected the comment on {key}"),
         )?;
         let transition = if report.outcome == "done" {
             &self.settings.done_transition

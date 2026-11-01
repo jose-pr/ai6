@@ -1,0 +1,64 @@
+{
+  "self": "https://example.atlassian.net/rest/api/3/issue/10018/comment/10005",
+  "id": "10005",
+  "author": {
+    "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+    "accountId": "000000:00000000-0000-0000-0000-000000000000",
+    "emailAddress": "reporter@example.invalid",
+    "avatarUrls": {
+      "48x48": "https://example.invalid/avatar.png",
+      "24x24": "https://example.invalid/avatar.png",
+      "16x16": "https://example.invalid/avatar.png",
+      "32x32": "https://example.invalid/avatar.png"
+    },
+    "displayName": "Sam Reporter",
+    "active": true,
+    "timeZone": "Etc/UTC",
+    "accountType": "atlassian"
+  },
+  "body": {
+    "type": "doc",
+    "version": 1,
+    "content": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "text": "AI6 test data: the report. ñandú 🧪"
+          }
+        ]
+      },
+      {
+        "type": "paragraph"
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "text": "Branch: `agent/live-test`"
+          }
+        ]
+      }
+    ]
+  },
+  "updateAuthor": {
+    "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+    "accountId": "000000:00000000-0000-0000-0000-000000000000",
+    "emailAddress": "reporter@example.invalid",
+    "avatarUrls": {
+      "48x48": "https://example.invalid/avatar.png",
+      "24x24": "https://example.invalid/avatar.png",
+      "16x16": "https://example.invalid/avatar.png",
+      "32x32": "https://example.invalid/avatar.png"
+    },
+    "displayName": "Sam Reporter",
+    "active": true,
+    "timeZone": "Etc/UTC",
+    "accountType": "atlassian"
+  },
+  "created": "2026-11-01T23:12:46.348+0700",
+  "updated": "2026-11-01T23:12:46.348+0700",
+  "jsdPublic": true
+}

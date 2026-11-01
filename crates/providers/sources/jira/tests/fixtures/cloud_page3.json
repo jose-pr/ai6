@@ -1,0 +1,34 @@
+{
+  "issues": [
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10022",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10022",
+      "key": "AI6-23",
+      "fields": {
+        "summary": "AI6 test data: page two (1793549558103)",
+        "description": null,
+        "reporter": {
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+          "accountId": "000000:00000000-0000-0000-0000-000000000000",
+          "emailAddress": "reporter@example.invalid",
+          "avatarUrls": {
+            "48x48": "https://example.invalid/avatar.png",
+            "24x24": "https://example.invalid/avatar.png",
+            "16x16": "https://example.invalid/avatar.png",
+            "32x32": "https://example.invalid/avatar.png"
+          },
+          "displayName": "Sam Reporter",
+          "active": true,
+          "timeZone": "Etc/UTC",
+          "accountType": "atlassian"
+        },
+        "updated": "2026-11-01T23:12:53.426+0700",
+        "labels": [
+          "ai6-ready"
+        ]
+      }
+    }
+  ],
+  "isLast": true
+}

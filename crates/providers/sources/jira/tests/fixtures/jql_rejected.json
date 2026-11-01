@@ -1,0 +1,6 @@
+{
+  "errorMessages": [
+    "Error in the JQL Query: Expecting a field name but got 'AND'. You must surround 'AND' in quotation marks to use it as a field name. (line 1, character 47)"
+  ],
+  "errors": {}
+}
