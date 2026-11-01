@@ -15,10 +15,16 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 
 ## Features
 
+- A name opens what it names: an Operation, Mission, Session, Station, Theater, Agent, role or
+  pool anywhere on a page is a link through the typed routes (keyboard reachable, underlined under
+  the pointer, announced as a link, a full tap target on a phone), and plain text where the person
+  may not open that page. A count on Overview opens its page filtered to what it counted. Each
+  page has one heading and a line on what it is for, and an empty one says what to do first.
 - Stations: health, roles, capacity and the elected Headquarters Station (HQS).
 - Operations → Missions → Sessions, with state filters; queue a Mission on an Operation
   you hold `mission.create` for, and review Agent-proposed Missions.
-- The Missions page is the queue: one row per Mission with its state as a word and icon
+- The Missions page is the queue (with no Mission yet, **New Mission in …** starts the first):
+  one row per Mission with its state as a word and icon
   (and why, when the Station says), its Operation and Mission, the Station and Theater of its
   current attempt, when the board last heard of it (relative, the exact local time and zone
   on hover) and the Agent and role its brief names, newest update first unless the route
@@ -138,7 +144,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   text, and the feeds it reads. **Open** launches it in a new browser tab (the system browser
   on a desktop), never inside the app; the menu opens it with the network off, remembers or
   forgets it and deletes it. Only you can open your pages.
-- Audit log for operators with `audit.read`; operator menu with identity, effective
+- Audit log for operators with `audit.read`, each action in words with its name on hover;
+  operator menu with identity, effective
   permissions per Operation, appearance and sign-out.
 - Sign-in: the wordmark over the theme's wallpaper, the account and password form, and the
   reason a try was refused; the login limit's wait counts down and holds **Continue**.

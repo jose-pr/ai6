@@ -452,7 +452,7 @@ confirming = 30                       # seconds a proposal of Moneypenny's may s
 [pages]
 timeline = 50                         # items in one page of the timeline
 audit = 100                           # records in the audit log
-summary = 5                           # recent activity items on an Operation's summary
+summary = 5                           # recent activity, and Operations and Stations, a summary lists
 search = 24                           # results the top bar's search lists at once
 
 [terminal]                            # the live Session terminal

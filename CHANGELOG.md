@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- In Outer Office a name opens what it names, on every page: Operations, Missions, Sessions,
+  Stations, Theaters, Agents, roles and pools, and Overview's counts open their page filtered to
+  what they counted. Each page has one heading and a line on what it is for; an empty page says
+  what to do first, with a link, and Missions offers **New Mission in …**. Timeline and Audit say
+  actions in words, with the action's name on hover; demo words are the same everywhere; Station
+  cards take a phone's width.
 - Outer Office's wallpapers are one drawing in each theme's colours, exact at any size and under
   a fifth of the bytes, and the hero picks its file by the box's physical size, decoding only what
   the box needs (`[art] max_width` in `OO.cfg`). Light and Classic gain a sharper paper hero. The
