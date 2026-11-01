@@ -5,88 +5,96 @@
 //! prints at start.
 
 use guatiao::{FromValue, Schema, ToValue};
-use serde::{Deserialize, Serialize};
+use guatiao_intake::Form;
 
 use crate::bounds::Limit;
 use crate::directorates::m::cover::Disclosure;
 
 /// A starting point for the keys left out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(rename_all = "snake_case")]
 pub enum IssuePreset {
     /// Closing, reopening and assignee changes need green ink at every clearance.
+    #[schema(label = "Strict: closing and assigning wait for a person")]
     Strict,
     /// As `strict`, except `00` Agents close and reopen without asking.
+    #[schema(label = "Licensed: as strict, but 00 Agents close and reopen without asking")]
     Licensed,
 }
 
 /// How much AI6 writes on a Mission's source issue by itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(rename_all = "snake_case")]
 pub enum IssueUpdates {
     /// Only the report when the Mission ends.
+    #[schema(label = "Only the report when the Mission ends")]
     Outcome,
     /// One status comment kept current (started, waiting for input, paused), the report,
     /// and the configured labels or transitions.
+    #[schema(label = "One status comment kept current, and the report")]
     Milestones,
     /// As `milestones`, on every linked issue and not only the source.
+    #[schema(label = "As that, on every linked issue")]
     All,
 }
 
 /// What happens when nobody answers a question on the issue in time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(rename_all = "snake_case")]
 pub enum OnTimeout {
     /// The Agent is resumed and told nobody answered.
+    #[schema(label = "Resume the Agent, told nobody answered")]
     Resume,
     /// The Mission fails.
+    #[schema(label = "Fail the Mission")]
     Fail,
     /// The Mission keeps waiting.
+    #[schema(label = "Keep waiting")]
     Wait,
 }
 
 /// What happens to a post that holds a secret.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(rename_all = "snake_case")]
 pub enum OnSecret {
     /// The post is refused.
+    #[schema(label = "Refuse the post")]
     Refuse,
     /// The secret is replaced and the rest is posted.
+    #[schema(label = "Replace the secret and post the rest")]
     Redact,
 }
 
 /// Where links and images in an Agent's text may point.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(rename_all = "snake_case")]
 pub enum LinkHosts {
     /// Only the tracker's host and the Operation's git remote host.
+    #[schema(label = "Only the tracker's and the git remote's hosts")]
     Tracker,
     /// Any host.
+    #[schema(label = "Any host")]
     Any,
 }
 
 /// Whether an Agent creates issues itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(rename_all = "snake_case")]
 pub enum IssueCreate {
     /// A person approves each creation, or a class authorisation approves one from an
     /// unexposed Session with no findings.
+    #[schema(label = "A person approves each one")]
     Propose,
     /// The Agent creates the issue at once.
+    #[schema(label = "The Agent creates at once")]
     Direct,
     /// Agents cannot ask for issues.
+    #[schema(label = "Agents cannot ask")]
     Off,
 }
 
 /// An Operation's issue policy, `[operation.ID.issues]`. A key left out takes its default.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 pub struct IssuePolicy {
     /// `strict`, or `licensed`, which lets `00` Agents close and reopen without green ink.
@@ -215,17 +223,66 @@ impl IssuePolicy {
     /// One line per setting looser than the default, for the Station to print and publish.
     pub fn weakenings(&self) -> Vec<String> {
         let strict = Self::default();
-        let mut lines = crate::bounds::looser(
-            "issues",
-            &serde_json::to_value(self).unwrap_or_default(),
-            &serde_json::to_value(&strict).unwrap_or_default(),
-            &[],
-        );
+        let mut lines = Vec::new();
         let mut note = |key: &str, value: &str, default: &str| {
             lines.push(format!(
                 "issues.{key} {value} is looser than the default {default}"
             ));
         };
+        for (key, value, default) in [
+            ("max_body_bytes", self.max_body_bytes, strict.max_body_bytes),
+            ("posts_per_hour", self.posts_per_hour, strict.posts_per_hour),
+            ("post_burst", self.post_burst, strict.post_burst),
+            (
+                "posts_per_mission",
+                self.posts_per_mission,
+                strict.posts_per_mission,
+            ),
+            (
+                "operation_posts_per_hour",
+                self.operation_posts_per_hour,
+                strict.operation_posts_per_hour,
+            ),
+            (
+                "tracker_posts_per_hour",
+                self.tracker_posts_per_hour,
+                strict.tracker_posts_per_hour,
+            ),
+            ("max_created", self.max_created, strict.max_created),
+            (
+                "max_created_per_day",
+                self.max_created_per_day,
+                strict.max_created_per_day,
+            ),
+            (
+                "max_split_depth",
+                self.max_split_depth,
+                strict.max_split_depth,
+            ),
+        ] {
+            let looser = match (value.get(), default.get()) {
+                (None, Some(_)) => true,
+                (Some(value), Some(default)) => value > default,
+                _ => false,
+            };
+            if looser {
+                note(key, &value.to_string(), &default.to_string());
+            }
+        }
+        if self.status_interval_secs < strict.status_interval_secs {
+            note(
+                "status_interval_secs",
+                &self.status_interval_secs.to_string(),
+                &strict.status_interval_secs.to_string(),
+            );
+        }
+        if self.reply_ttl_secs > strict.reply_ttl_secs {
+            note(
+                "reply_ttl_secs",
+                &self.reply_ttl_secs.to_string(),
+                &strict.reply_ttl_secs.to_string(),
+            );
+        }
         if self.preset == IssuePreset::Licensed {
             note("preset", "licensed", "strict");
         }
@@ -379,7 +436,7 @@ mod tests {
     }
 
     fn resolve(text: &str) -> Result<IssuePolicy, String> {
-        let policy: IssuePolicy = toml::from_str(text).map_err(|error| error.to_string())?;
+        let policy: IssuePolicy = crate::directorates::m::records::from_toml(text)?;
         policy.validate()?;
         Ok(policy)
     }
@@ -400,20 +457,13 @@ mod tests {
     }
 
     #[test]
-    fn a_value_reads_the_same_through_guatiao_as_through_toml() {
-        let table: toml::Table =
-            toml::from_str("create = \"off\"\nmax_created = \"none\"\nreply_ttl_secs = 60")
-                .unwrap();
-        let value = guatiao_serde::from_serde(toml::Value::Table(table.clone()))
-            .map_err(|error: toml::de::Error| error)
-            .unwrap();
-        let through_value = IssuePolicy::from_value(&value).unwrap();
-        let through_toml: IssuePolicy = toml::Value::Table(table).try_into().unwrap();
-        assert_eq!(through_value, through_toml);
-        assert_eq!(through_value.create, IssueCreate::Off);
-        assert_eq!(through_value.max_created, Limit::UNBOUNDED);
-        assert_eq!(through_value.reply_ttl_secs, 60);
-        assert_eq!(through_value.posts_per_hour, Limit::at(6), "a default");
+    fn a_table_reads_its_values_and_defaults_the_rest() {
+        let policy =
+            resolve("create = \"off\"\nmax_created = \"none\"\nreply_ttl_secs = 60").unwrap();
+        assert_eq!(policy.create, IssueCreate::Off);
+        assert_eq!(policy.max_created, Limit::UNBOUNDED);
+        assert_eq!(policy.reply_ttl_secs, 60);
+        assert_eq!(policy.posts_per_hour, Limit::at(6), "a default");
     }
 
     #[test]

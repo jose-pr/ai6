@@ -90,6 +90,25 @@ fn full_example(record: ConfigRecord) -> Value {
                 },
                 "00": {"missions": 2}
             },
+            "issues": {
+                "preset": "licensed",
+                "updates": "all",
+                "max_body_bytes": 4096,
+                "posts_per_hour": 3,
+                "post_burst": 2,
+                "posts_per_mission": 10,
+                "operation_posts_per_hour": 30,
+                "tracker_posts_per_hour": 100,
+                "status_interval_secs": 120,
+                "reply_ttl_secs": 3600,
+                "on_timeout": "fail",
+                "on_secret": "redact",
+                "links": "any",
+                "create": "off",
+                "max_created": 5,
+                "max_created_per_day": 20,
+                "max_split_depth": 1
+            },
             "sources": {"tracker": {"kind": "github", "repository": "a/b", "every": 60}},
             "sleepers": {
                 "round": {
