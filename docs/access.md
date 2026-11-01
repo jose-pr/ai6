@@ -102,6 +102,27 @@ account read the same, a `429` counts its `Retry-After` down and holds **Continu
 and a `403` asks an administrator to check `public_origin` and the proxy. The token stays in the
 tab's memory: a reload or a new tab signs in again, and signing out revokes it.
 
+### Staying signed in
+
+A token lasts `[gateway] access_token_ttl` (an hour), and an open app renews it before it ends:
+`POST /v1/auth/renew` with the token moves its expiry on, its value stays the same, and so the
+chat, her tools and a proposal waiting for **Confirm** carry on. The app asks `[refresh]
+renew_before` (ten minutes) ahead, on its own timer, and tries again after a failure until the
+gateway answers; only a `401` ends the sign-in. Renewing stops `[gateway] session_max` (twelve
+hours) after signing in, with `ends_at` in the answer saying when, and `renew_before` ahead of that
+the app says so once. There is no idle sign-out: an open app renews until then.
+
+`session_max` is a choice to weigh. A token copied out of memory stays usable until then rather
+than for an hour, renewing does not ask for the password again, and a directory that does not
+report a disabled account leaves it working until then; a person removed from the directory
+cannot renew. Lower it, or set it to `0` to turn renewal off; one larger than the default, or
+`"none"`, is reported as a weakening at start.
+
+Signing in again finds the conversation that was open: the app keeps its ID per person on the
+device and asks for it in its hello. The gateway checks it is the person's, and opens a new one when
+it is gone. A proposal from the earlier sign-in stays unconfirmable, as only the sign-in it was made
+in may confirm it; the chat shows it as it stands.
+
 The gateway serves no web files. A reverse proxy serves the build and passes the API on one
 HTTPS origin, which `public_origin` in `unex.cfg` must name exactly, with its port unless that
 is 443:
@@ -118,7 +139,8 @@ sends a ping, so the proxy's idle timeout closes a quiet one; give those two a l
 every request under `/v1/` the proxy must:
 
 - set `X-Forwarded-Proto: https`, replacing what the client sent, and pass `Origin` unchanged:
-  `POST /v1/auth/login`, `POST /v1/attach` and `/v1/socket/` answer `403` otherwise;
+  `POST /v1/auth/login`, `POST /v1/auth/renew`, `POST /v1/attach` and `/v1/socket/` answer `403`
+  otherwise, and an app whose renewals are refused that way is signed out when its token ends;
 - name the client in the header `client_address_header` names, or all clients share one login
   count;
 - speak HTTP/1.1 to the gateway, not buffer answers (`/v1/moneypenny/mcp` streams), and accept a

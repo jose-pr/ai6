@@ -240,7 +240,10 @@ sign-in](https://jose-pr.github.io/ai6/access/#signing-in-from-a-browser) lists 
 pass. The sign-in page asks `GET /v1/auth/methods` what the gateway accepts and shows its name and
 password form, the button of an organization proxy that vouches for the person, or both, on web
 and desktop alike. The bearer token is kept in memory only, so a reload signs in again, and
-signing out revokes it.
+signing out revokes it. An open app renews it `[refresh] renew_before` ahead of its end, on its own
+timer, so the person never sees the hour, and says once when the sign-in can be renewed no
+further. Signing in again goes back to the last conversation, kept per person on the device
+([Staying signed in](https://jose-pr.github.io/ai6/access/#staying-signed-in)).
 
 The board reads what the page shown displays every three seconds (`[refresh] sessions`), such
 as `/v1/missions` on Missions and nothing on Audit; what only the bell and the search need

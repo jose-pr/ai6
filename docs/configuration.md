@@ -453,6 +453,8 @@ slow = 15                             # what the bell and search need and the pa
 profile = 60                          # who the person is and what they may do; 0 reads it only at sign-in and when the operator menu opens
 hidden = 60                           # everything, while the tab or window cannot be seen; 0 reads nothing until it can
 silent_intervals = 3                  # a Station silent for this many `sessions` intervals shows as silent
+renew_before = 600                    # how long before the access token ends the app renews it, and before the sign-in ends says so; 0 does neither
+renew_retry = 30                      # how soon a failed renewal is tried again when `sessions` is 0; else at `sessions`
 
 [controls]                            # following a Mission control until the Station reports
 wait = 10                             # seconds; 0 returns once the control is queued
@@ -603,6 +605,9 @@ pending_per_station = 8
 | `write_lease_ttl` | 30 | Seconds a terminal write lease lives, more than 0 |
 | `station_token_min_bytes` | 32 | Characters the Station token holds at least; smaller is looser |
 | `origin_bytes` | 2,048 | Bytes of the public origin |
+| `access_token_ttl` | 3,600 | Seconds a sign-in that names no lifetime gets, and each renewal gives from then; more than 0, within `access_token_max_ttl`; longer is looser |
+| `access_token_max_ttl` | 86,400 | The longest lifetime a request for a token may name, in seconds |
+| `session_max` | 43,200 | How long renewing keeps a sign-in going, in seconds from when it was made; `0` turns renewal off, `"none"` lets it run on |
 
 `[controls]`
 

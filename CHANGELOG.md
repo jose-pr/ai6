@@ -40,6 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A person stays signed in past the access token's hour. `POST /v1/auth/renew` moves the token's
+  expiry on, up to `[gateway] session_max` (twelve hours) from signing in, with the same value, so
+  her chat, her tools and a waiting proposal carry on. Outer Office renews `[refresh] renew_before`
+  (ten minutes) ahead on its own timer, says once when the sign-in is about to end, and goes back
+  to its last conversation after signing in again. `session_max = 0` turns renewal off
+  ([Access and sign-in](docs/access.md#staying-signed-in)).
+- The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
+  access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
 - With `assistant = false` Outer Office no longer offers Moneypenny. `GET /v1/user/profile` says
   whether the gateway serves her (`moneypenny`); off, the app shows no card, button or chat, and
   Settings says so. On, she greets only once her socket is ready, and a socket that fails, closes
