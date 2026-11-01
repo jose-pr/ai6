@@ -35,6 +35,21 @@ MissionBoard _board(OoConfig config) => MissionBoard(
 );
 
 void main() {
+  test('renewing the sign-in has its settings, and 0 turns it off', () {
+    const none = OoConfig();
+    expect(none.limits.refresh.renewBefore, const Duration(seconds: 600));
+    expect(none.limits.refresh.renewRetry, const Duration(seconds: 30));
+    final set = OoConfig.parse(
+      '[refresh]\nrenew_before = 0\nrenew_retry = 7\n',
+    );
+    expect(set.limits.refresh.renewBefore, isNull);
+    expect(set.limits.refresh.renewRetry, const Duration(seconds: 7));
+    expect(
+      () => OoConfig.parse('[refresh]\nrenew_retry = 0\n'),
+      throwsFormatException,
+    );
+  });
+
   test('the settings of the queue, states and proposal cards default as before', () {
     const none = OoConfig();
     expect(none.limits.refresh.slow, const Duration(seconds: 15));

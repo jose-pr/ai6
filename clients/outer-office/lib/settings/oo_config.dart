@@ -212,6 +212,8 @@ class RefreshSettings {
     this.profile = defaultProfile,
     this.hidden = defaultHidden,
     this.silentIntervals = defaultSilentIntervals,
+    this.renewBefore = defaultRenewBefore,
+    this.renewRetry = defaultRenewRetry,
   });
 
   static const defaultSessions = Duration(seconds: 3);
@@ -222,6 +224,8 @@ class RefreshSettings {
   static const defaultProfile = Duration(seconds: 60);
   static const defaultHidden = Duration(seconds: 60);
   static const defaultSilentIntervals = 3;
+  static const defaultRenewBefore = Duration(seconds: 600);
+  static const defaultRenewRetry = Duration(seconds: 30);
 
   static const keys = {
     'sessions',
@@ -232,6 +236,8 @@ class RefreshSettings {
     'profile',
     'hidden',
     'silent_intervals',
+    'renew_before',
+    'renew_retry',
   };
 
   /// `sessions`: what the page shown displays from the board of Sessions, Stations and
@@ -263,6 +269,15 @@ class RefreshSettings {
   /// `silent_intervals`: a Station that has not checked in for this many refresh intervals
   /// (of `sessions`) is shown as silent.
   final int silentIntervals;
+
+  /// `renew_before`: how long before the access token ends the app renews it, and before the
+  /// sign-in itself ends the person is told; `null` (0) does neither, and the sign-in ends with
+  /// the token. A shorter lifetime than this is renewed halfway through.
+  final Duration? renewBefore;
+
+  /// `renew_retry`: how soon a renewal that failed is tried again when [sessions] is off; else
+  /// it is tried again at [sessions].
+  final Duration renewRetry;
 }
 
 /// How a control is followed, `OO.cfg`'s `[controls]` table, in seconds.
@@ -446,6 +461,7 @@ class OoLimits {
     final pagesTable = table('pages', PageSettings.keys);
     final terminalTable = table('terminal', TerminalSettings.keys);
     final inputsTable = table('limits', InputSettings.keys);
+    final renewRetry = seconds(refreshTable, 'refresh', 'renew_retry');
     final wait = seconds(controlsTable, 'controls', 'wait', zero: true);
     final poll = seconds(controlsTable, 'controls', 'poll');
     final confirming = seconds(controlsTable, 'controls', 'confirming');
@@ -464,6 +480,14 @@ class OoLimits {
         silentIntervals:
             whole(refreshTable, 'refresh', 'silent_intervals') ??
             refreshDefaults.silentIntervals,
+        renewBefore: refresh(
+          refreshTable,
+          'renew_before',
+          RefreshSettings.defaultRenewBefore,
+        ),
+        renewRetry: renewRetry == null
+            ? refreshDefaults.renewRetry
+            : _seconds(renewRetry),
       ),
       controls: ControlSettings(
         wait: wait == null ? controlDefaults.wait : _seconds(wait),

@@ -46,6 +46,12 @@ String ooClockTime(DateTime time) {
   return '${_two(local.hour)}:${_two(local.minute)}:${_two(local.second)}';
 }
 
+/// [time] to the minute, as `HH:MM`.
+String ooClockMinute(DateTime time) {
+  final local = time.toLocal();
+  return '${_two(local.hour)}:${_two(local.minute)}';
+}
+
 DateTime _at(double seconds) =>
     DateTime.fromMillisecondsSinceEpoch((seconds * 1000).round()).toLocal();
 
@@ -118,6 +124,37 @@ class OoTime extends StatelessWidget {
   }
 }
 
+/// One line across the shell saying something about the whole app, announced when it appears.
+class _ShellStrip extends StatelessWidget {
+  const _ShellStrip({required this.icon, required this.text, this.action});
+
+  final IconData icon;
+  final String text;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = OoTokens.of(context);
+    return Semantics(
+      liveRegion: true,
+      child: Material(
+        color: tokens.raised,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: tokens.warning),
+              const SizedBox(width: 10),
+              Expanded(child: Text(text)),
+              ?action,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The shell-wide strip shown only while the gateway is unreachable: what is on screen is
 /// the last the gateway said, and the app keeps trying.
 class GatewayStrip extends StatelessWidget {
@@ -129,28 +166,35 @@ class GatewayStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!board.unreachable) return const SizedBox.shrink();
     final at = board.lastUpdated(BoardSource.board);
-    final tokens = OoTokens.of(context);
-    return Semantics(
-      liveRegion: true,
-      child: Material(
-        color: tokens.raised,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Icon(Icons.cloud_off, size: 18, color: tokens.warning),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  at == null
-                      ? 'Universal Exports unreachable. Retrying.'
-                      : 'Universal Exports unreachable, showing data from '
-                            '${ooClockTime(at)}. Retrying.',
-                ),
-              ),
-            ],
-          ),
-        ),
+    return _ShellStrip(
+      icon: Icons.cloud_off,
+      text: at == null
+          ? 'Universal Exports unreachable. Retrying.'
+          : 'Universal Exports unreachable, showing data from '
+                '${ooClockTime(at)}. Retrying.',
+    );
+  }
+}
+
+/// The strip that says the sign-in can be renewed no further and when it ends.
+class SignInEndingStrip extends StatelessWidget {
+  const SignInEndingStrip({required this.board, super.key});
+
+  final MissionBoard board;
+
+  @override
+  Widget build(BuildContext context) {
+    final ends = board.signInEnding;
+    if (ends == null) return const SizedBox.shrink();
+    return _ShellStrip(
+      icon: Icons.schedule,
+      text:
+          'Your sign-in ends at ${ooClockMinute(ends)}. '
+          'Sign in again to keep working.',
+      action: IconButton(
+        tooltip: 'Dismiss',
+        icon: const Icon(Icons.close, size: 18),
+        onPressed: board.dismissSignInEnding,
       ),
     );
   }

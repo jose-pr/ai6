@@ -151,6 +151,20 @@ class ChatPreferences {
   Future<void> writeFollow(String personId, bool follow) async {
     await (await _preferences).setBool(followKey(personId), follow);
   }
+
+  /// Where [personId]'s last conversation on this device is kept, for the next sign-in.
+  static String conversationKey(String personId) =>
+      'oo.chat.$personId.conversation';
+
+  Future<String?> readConversation(String personId) async =>
+      (await _preferences).getString(conversationKey(personId));
+
+  Future<void> writeConversation(String personId, String conversation) async {
+    await (await _preferences).setString(
+      conversationKey(personId),
+      conversation,
+    );
+  }
 }
 
 /// The person's conversation with Moneypenny and where it is shown: one per sign-in,

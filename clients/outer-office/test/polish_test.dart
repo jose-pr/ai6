@@ -14,6 +14,7 @@ import 'package:outer_office/shell/top_bar.dart';
 import 'package:outer_office/theme/oo_decor.dart';
 import 'package:outer_office/theme/oo_icon.dart';
 import 'package:outer_office/theme/oo_theme.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'shell_test.dart' show demoAt;
 
@@ -67,6 +68,9 @@ Future<void> atSize(WidgetTester tester, Size size) async {
 }
 
 void main() {
+  // The chat asks the device for its last conversation before it says hello.
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   testWidgets('a phone shows one page, the menu as icon tiles and tables as '
       'rows', (tester) async {
     await demoAt(tester, const Size(390, 844));

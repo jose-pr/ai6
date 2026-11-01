@@ -500,6 +500,25 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   }
 
   String? accessToken;
+
+  /// When [accessToken] stops being accepted and when renewing it stops, Unix seconds, as the
+  /// gateway last said; with no end, renewing never stops.
+  double? _tokenExpiresAt;
+  double? _tokenEndsAt;
+
+  /// The token's next step: its renewal, or telling the person once nothing can move it. It
+  /// does not rest on the board's poll, which `OO.cfg` may turn off.
+  Timer? _tokenTimer;
+
+  /// When the sign-in ends, from the moment the person is told until they dismiss it.
+  DateTime? signInEnding;
+
+  /// The person has read it; it does not come back in this sign-in.
+  void dismissSignInEnding() {
+    signInEnding = null;
+    notifyListeners();
+  }
+
   bool loading = true;
 
   /// The person's theme: a theme id or `system` ([ooThemePreference]).
@@ -2253,6 +2272,11 @@ class MissionBoard extends ChangeNotifier implements PageActions {
 
   void _clearBoard() {
     accessToken = null;
+    _tokenTimer?.cancel();
+    _tokenTimer = null;
+    _tokenExpiresAt = null;
+    _tokenEndsAt = null;
+    signInEnding = null;
     _cadence?.forget();
     sessions = const [];
     missionBriefs = const [];
@@ -2364,14 +2388,77 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       }
       final body = jsonDecode(response.body) as Map<String, dynamic>;
       accessToken = body['token'] as String;
+      _tokenTimes(body);
       loading = true;
       await refresh();
     } on Object {
+      _tokenTimer?.cancel();
       accessToken = null;
       loginError = 'Could not connect to Universal Exports.';
       loading = false;
       notifyListeners();
     }
+  }
+
+  /// Takes the token's times from a gateway's answer and sets its next step.
+  void _tokenTimes(Map<String, dynamic> body) {
+    _tokenExpiresAt = (body['expires_at'] as num?)?.toDouble();
+    _tokenEndsAt = (body['ends_at'] as num?)?.toDouble();
+    _tokenTimer?.cancel();
+    _tokenTimer = null;
+    final before = limits.refresh.renewBefore;
+    final expiresAt = _tokenExpiresAt;
+    if (before == null || expiresAt == null) return;
+    final ends = DateTime.fromMillisecondsSinceEpoch(
+      (expiresAt * 1000).round(),
+    );
+    final left = ends.difference(ooClock());
+    final wait = left - before;
+    final endsAt = _tokenEndsAt;
+    if (endsAt != null && expiresAt >= endsAt) {
+      _tokenTimer = Timer(wait, () {
+        signInEnding = ends;
+        notifyListeners();
+      });
+      return;
+    }
+    // A lifetime shorter than `renew_before` is renewed halfway through: renewing at once would
+    // ask again as soon as each answer came.
+    _tokenTimer = Timer(wait > Duration.zero ? wait : left ~/ 2, _renewToken);
+  }
+
+  /// Asks for more time on the same token (`POST /v1/auth/renew`). Nothing bound to its value
+  /// changes, so the chat keeps its socket. Only a 401 ends the sign-in; anything else is tried
+  /// again, until the token has ended and the gateway says so.
+  Future<void> _renewToken() async {
+    final token = accessToken;
+    if (token == null) return;
+    http.Response? response;
+    try {
+      response = await _client.post(
+        apiOrigin.resolve('/v1/auth/renew'),
+        headers: {'authorization': 'Bearer $token'},
+      );
+    } on Object {
+      // Tried again below.
+    }
+    if (accessToken != token) return;
+    if (response?.statusCode == 401) {
+      _signedOut('Your sign-in ended. Sign in again.');
+      return;
+    }
+    if (response?.statusCode == 200) {
+      try {
+        _tokenTimes(jsonDecode(response!.body) as Map<String, dynamic>);
+        return;
+      } on Object {
+        // An unreadable answer counts as a failed one.
+      }
+    }
+    _tokenTimer = Timer(
+      limits.refresh.sessions ?? limits.refresh.renewRetry,
+      _renewToken,
+    );
   }
 
   /// Says why a try was refused. The same words for a wrong password and an unknown account,
@@ -2491,6 +2578,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   @override
   void dispose() {
     _poll?.cancel();
+    _tokenTimer?.cancel();
     _client.close();
     super.dispose();
   }
@@ -3731,6 +3819,9 @@ class _AccessGateState extends State<_AccessGate> {
     }
     if (_chat case final chat? when chat.controller.token == token) return chat;
     _drop();
+    final preferences = ChatPreferences(SharedPreferences.getInstance());
+    // The preview's sample conversation is nobody's to go back to.
+    final person = board.demo ? null : board.userSession?.personId;
     return _chat = MoneypennyChat(
       controller: AssistantController(
         token: token,
@@ -3738,9 +3829,19 @@ class _AccessGateState extends State<_AccessGate> {
             ? DemoAssistantChannel.new
             : board.assistantChannel ?? () => connectAssistant(board.apiOrigin),
         connectTimeout: widget.chatSettings.connectTimeout,
+        lastConversation: person == null
+            ? null
+            : preferences.readConversation(person),
+        onConversation: person == null
+            ? null
+            : (id) => unawaited(
+                preferences
+                    .writeConversation(person, id)
+                    .catchError((Object _) {}),
+              ),
       ),
       label: board.demo ? demoConversationLabel : null,
-      preferences: ChatPreferences(SharedPreferences.getInstance()),
+      preferences: preferences,
       settings: widget.chatSettings,
       proposalWait: board.limits.controls.confirming,
       pageActions: board.demo ? null : board,
@@ -4274,6 +4375,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                 builder: (context, _) => Column(
                   children: [
                     GatewayStrip(board: widget.board),
+                    SignInEndingStrip(board: widget.board),
                     FreshnessNote(
                       board: widget.board,
                       sources: _sourcesOf(route.page),

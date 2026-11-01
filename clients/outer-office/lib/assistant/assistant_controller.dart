@@ -91,6 +91,8 @@ class AssistantController extends ChangeNotifier {
     required this.token,
     required AssistantChannel Function() connect,
     this.connectTimeout = ChatSettings.defaultConnectTimeout,
+    this._lastConversation,
+    this.onConversation,
   }) : _openChannel = connect;
 
   /// The person's access token, sent in the socket's first frame only.
@@ -100,6 +102,13 @@ class AssistantController extends ChangeNotifier {
   /// How long the socket may take to say it is ready before the attempt counts as failed.
   final Duration connectTimeout;
   Timer? _connecting;
+
+  /// The conversation a new sign-in goes back to, until the first hello has asked for it.
+  /// Universal Exports checks it is the person's, and opens a new one when it is not or is gone.
+  Future<String?>? _lastConversation;
+
+  /// Told the ID of each conversation Universal Exports opens here.
+  final void Function(String id)? onConversation;
 
   AssistantChannel? _channel;
   StreamSubscription<String>? _subscription;
@@ -164,6 +173,23 @@ class AssistantController extends ChangeNotifier {
       unawaited(channel.close());
       _closed('Moneypenny did not answer.');
     });
+    final last = _lastConversation;
+    if (last == null) {
+      _hello(channel);
+      return;
+    }
+    _lastConversation = null;
+    unawaited(
+      last
+          .then<void>((stored) => conversationId ??= stored)
+          .catchError((Object _) {})
+          .whenComplete(() {
+            if (identical(_channel, channel)) _hello(channel);
+          }),
+    );
+  }
+
+  void _hello(AssistantChannel channel) {
     channel.send(
       jsonEncode({
         'type': 'hello',
@@ -206,6 +232,7 @@ class AssistantController extends ChangeNotifier {
         connected = true;
         problem = null;
         conversationId = message['conversation'] as String?;
+        if (conversationId case final id?) onConversation?.call(id);
         busy = message['busy'] == true;
         stopping = false;
         earlier = (message['earlier'] as num?)?.toInt() ?? 0;
@@ -314,7 +341,9 @@ class AssistantController extends ChangeNotifier {
     _connecting?.cancel();
     _subscription?.cancel();
     unawaited(_arrivals.close());
-    unawaited(_channel?.close());
+    final channel = _channel;
+    _channel = null;
+    unawaited(channel?.close());
     super.dispose();
   }
 }

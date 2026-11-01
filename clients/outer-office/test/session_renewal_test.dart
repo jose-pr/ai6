@@ -1,0 +1,403 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:outer_office/assistant/assistant_controller.dart';
+import 'package:outer_office/main.dart';
+import 'package:outer_office/settings/oo_config.dart';
+import 'package:outer_office/shell/oo_freshness.dart';
+import 'package:outer_office/shell/sign_in_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'moneypenny_off_test.dart' show app, profile;
+
+const _json = {'content-type': 'application/json'};
+const _hour = Duration(hours: 1);
+const _renewBefore = RefreshSettings.defaultRenewBefore;
+
+double _unix(DateTime time) => time.millisecondsSinceEpoch / 1000;
+
+/// Her socket: says nothing until the test does, and keeps what the app sent.
+class FakeChannel implements AssistantChannel {
+  final _incoming = StreamController<String>();
+  final sent = <String>[];
+
+  void ready({String conversation = 'conversation-1'}) => _incoming.add(
+    jsonEncode({'type': 'ready', 'conversation': conversation, 'entries': []}),
+  );
+
+  /// The first frame it was sent.
+  Map<String, Object?> get hello => (jsonDecode(sent.first) as Map).cast();
+
+  @override
+  Stream<String> get incoming => _incoming.stream;
+
+  @override
+  void send(String frame) => sent.add(frame);
+
+  @override
+  Future<void> close() async {
+    if (!_incoming.isClosed) await _incoming.close();
+  }
+}
+
+/// A gateway whose clock is the test's: tokens last an hour from when they are asked for, up to
+/// [session] from sign-in.
+class FakeGateway {
+  FakeGateway({this.session = const Duration(hours: 12)});
+
+  final Duration session;
+  final renewals = <String>[];
+  var person = 'ana';
+  var moneypenny = false;
+  var signIns = 0;
+
+  /// Answers a renewal in place of the gateway's, when set.
+  http.Response Function()? renewAnswer;
+
+  late DateTime _signedInAt;
+
+  Map<String, Object?> _times() {
+    final cap = _signedInAt.add(session);
+    final wanted = ooClock().add(_hour);
+    return {
+      'expires_at': _unix(wanted.isAfter(cap) ? cap : wanted),
+      'ends_at': _unix(cap),
+    };
+  }
+
+  MockClient get client => MockClient((request) async {
+    switch (request.url.path) {
+      case '/v1/auth/login':
+        signIns++;
+        _signedInAt = ooClock();
+        return http.Response(
+          jsonEncode({'token': 'token-$signIns', ..._times()}),
+          201,
+          headers: _json,
+        );
+      case '/v1/auth/renew':
+        renewals.add(request.headers['authorization']!);
+        if (renewAnswer case final answer?) return answer();
+        return http.Response(jsonEncode(_times()), 200, headers: _json);
+      case '/v1/user/profile':
+        return http.Response(
+          jsonEncode({
+            ...profile(moneypenny: moneypenny),
+            'person_id': person,
+            'name': person,
+          }),
+          200,
+          headers: _json,
+        );
+      case '/v1/stations':
+        return http.Response(
+          jsonEncode({'headquarters_station': null, 'stations': []}),
+          200,
+          headers: _json,
+        );
+    }
+    return http.Response('[]', 200, headers: _json);
+  });
+}
+
+/// The app signed in to [gateway] with the board's poll off, on the test's clock.
+Future<MissionBoard> signedIn(
+  WidgetTester tester,
+  FakeGateway gateway, {
+  AssistantChannel Function()? channel,
+  RefreshSettings refresh = const RefreshSettings(),
+}) async {
+  tester.view.physicalSize = const Size(1400, 1000);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  final before = ooClock;
+  ooClock = () => tester.binding.clock.now();
+  addTearDown(() => ooClock = before);
+  SharedPreferences.setMockInitialValues({});
+  final board = MissionBoard(
+    apiOrigin: Uri.parse('https://oo.example'),
+    pollInterval: null,
+    client: gateway.client,
+    limits: OoLimits(refresh: refresh),
+    assistantChannel: channel,
+  );
+  await tester.pumpWidget(app(board));
+  await board.login('ana', 'secret');
+  await tester.pump();
+  await tester.pump();
+  return board;
+}
+
+Future<void> close(WidgetTester tester, MissionBoard board) async {
+  await tester.pumpWidget(const SizedBox());
+  await tester.pump(const Duration(seconds: 1));
+  board.dispose();
+}
+
+/// Lets what an answer started run on.
+Future<void> settle(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump();
+}
+
+void main() {
+  testWidgets('renews before expiry and stays signed in', (tester) async {
+    final channels = <FakeChannel>[];
+    final gateway = FakeGateway()..moneypenny = true;
+    final board = await signedIn(
+      tester,
+      gateway,
+      channel: () {
+        final channel = FakeChannel();
+        channels.add(channel);
+        return channel;
+      },
+    );
+    channels.single.ready();
+    await settle(tester);
+    expect(gateway.renewals, isEmpty);
+
+    await tester.pump(_hour - _renewBefore - const Duration(seconds: 1));
+    expect(gateway.renewals, isEmpty, reason: 'not before it is due');
+
+    await tester.pump(const Duration(seconds: 2));
+    await settle(tester);
+    expect(gateway.renewals, ['Bearer token-1']);
+    expect(board.accessToken, 'token-1');
+    expect(find.byType(SignInPage), findsNothing);
+
+    await tester.pump(_hour - _renewBefore);
+    await settle(tester);
+    expect(gateway.renewals, hasLength(2), reason: 'each answer sets the next');
+    expect(board.accessToken, 'token-1');
+    expect(find.byType(SignInPage), findsNothing);
+    expect(channels, hasLength(1), reason: 'the chat keeps its socket');
+    await close(tester, board);
+  });
+
+  testWidgets('a lifetime shorter than renew_before renews halfway through', (
+    tester,
+  ) async {
+    final gateway = FakeGateway();
+    final board = await signedIn(
+      tester,
+      gateway,
+      refresh: const RefreshSettings(renewBefore: Duration(hours: 2)),
+    );
+    await tester.pump(const Duration(minutes: 29));
+    expect(gateway.renewals, isEmpty, reason: 'no asking at once');
+    await tester.pump(const Duration(minutes: 2));
+    await settle(tester);
+    expect(gateway.renewals, hasLength(1));
+    await close(tester, board);
+  });
+
+  testWidgets('renew_before 0 never renews', (tester) async {
+    final gateway = FakeGateway();
+    final board = await signedIn(
+      tester,
+      gateway,
+      refresh: const RefreshSettings(renewBefore: null),
+    );
+    await tester.pump(_hour * 2);
+    expect(gateway.renewals, isEmpty);
+    await close(tester, board);
+  });
+
+  testWidgets('a refused renewal signs out', (tester) async {
+    final channels = <FakeChannel>[];
+    final gateway = FakeGateway()
+      ..moneypenny = true
+      ..renewAnswer = () => http.Response('', 401);
+    final board = await signedIn(
+      tester,
+      gateway,
+      channel: () {
+        final channel = FakeChannel();
+        channels.add(channel);
+        return channel;
+      },
+    );
+    expect(find.byType(SignInPage), findsNothing);
+    await tester.pump(_hour);
+    await settle(tester);
+    await tester.pump(const Duration(seconds: 1));
+    expect(gateway.renewals, hasLength(1));
+    expect(board.accessToken, isNull);
+    expect(find.byType(SignInPage), findsOneWidget);
+    expect(board.loginError, 'Your sign-in ended. Sign in again.');
+    await tester.pump(_hour);
+    expect(gateway.renewals, hasLength(1), reason: 'nothing asks again');
+    await close(tester, board);
+  });
+
+  testWidgets('a failed renewal tries again and leaves the person signed in', (
+    tester,
+  ) async {
+    final gateway = FakeGateway();
+    final board = await signedIn(tester, gateway);
+    gateway.renewAnswer = () => throw http.ClientException('no route');
+    await tester.pump(_hour - _renewBefore);
+    await settle(tester);
+    expect(gateway.renewals, hasLength(1));
+    expect(board.accessToken, 'token-1');
+
+    await tester.pump(RefreshSettings.defaultSessions);
+    await settle(tester);
+    expect(gateway.renewals, hasLength(2), reason: 'at the board\'s pace');
+
+    gateway.renewAnswer = () => http.Response('busy', 503);
+    await tester.pump(RefreshSettings.defaultSessions);
+    await settle(tester);
+    expect(gateway.renewals, hasLength(3), reason: 'a 503 is no refusal');
+    expect(board.accessToken, 'token-1');
+
+    gateway.renewAnswer = null;
+    await tester.pump(RefreshSettings.defaultSessions);
+    await settle(tester);
+    expect(gateway.renewals, hasLength(4));
+    await tester.pump(const Duration(minutes: 5));
+    expect(gateway.renewals, hasLength(4), reason: 'back to its time');
+    await close(tester, board);
+  });
+
+  testWidgets('with polling off a failed renewal waits renew_retry', (
+    tester,
+  ) async {
+    final gateway = FakeGateway();
+    final board = await signedIn(
+      tester,
+      gateway,
+      refresh: const RefreshSettings(
+        sessions: null,
+        renewRetry: Duration(seconds: 40),
+      ),
+    );
+    gateway.renewAnswer = () => http.Response('busy', 503);
+    await tester.pump(_hour - _renewBefore);
+    await settle(tester);
+    expect(gateway.renewals, hasLength(1));
+    await tester.pump(const Duration(seconds: 39));
+    expect(gateway.renewals, hasLength(1));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(gateway.renewals, hasLength(2));
+    await close(tester, board);
+  });
+
+  testWidgets('warns before the cap, once', (tester) async {
+    final gateway = FakeGateway(session: const Duration(minutes: 90));
+    final signedInAt = tester.binding.clock.now();
+    final board = await signedIn(tester, gateway);
+    final strip = find.textContaining('Your sign-in ends at');
+
+    // The renewal at 50 minutes reaches the cap, at 90.
+    await tester.pump(const Duration(minutes: 51));
+    await settle(tester);
+    expect(gateway.renewals, hasLength(1));
+    expect(strip, findsNothing);
+
+    await tester.pump(const Duration(minutes: 28));
+    expect(strip, findsNothing, reason: 'not until renew_before ahead');
+
+    await tester.pump(const Duration(minutes: 2));
+    await settle(tester);
+    final cap = signedInAt.add(const Duration(minutes: 90));
+    expect(
+      find.text(
+        'Your sign-in ends at ${ooClockMinute(cap)}. '
+        'Sign in again to keep working.',
+      ),
+      findsOneWidget,
+    );
+    expect(gateway.renewals, hasLength(1), reason: 'no further renewal');
+    expect(board.accessToken, 'token-1');
+
+    await tester.tap(find.byTooltip('Dismiss'));
+    await settle(tester);
+    expect(strip, findsNothing);
+    await tester.pump(const Duration(minutes: 5));
+    await settle(tester);
+    expect(strip, findsNothing, reason: 'told once');
+    await close(tester, board);
+  });
+
+  testWidgets('a store that never answers ends in a retry that says hello', (
+    tester,
+  ) async {
+    final channels = <FakeChannel>[];
+    final controller = AssistantController(
+      token: 'token-1',
+      connect: () {
+        final channel = FakeChannel();
+        channels.add(channel);
+        return channel;
+      },
+      lastConversation: Completer<String?>().future,
+    );
+    addTearDown(controller.dispose);
+    controller.open();
+    await tester.pump();
+    expect(channels.single.sent, isEmpty, reason: 'it waits for the store');
+    await tester.pump(ChatSettings.defaultConnectTimeout);
+    expect(controller.problem, 'Moneypenny did not answer.');
+    controller.retry();
+    expect(channels.last.hello['token'], 'token-1');
+    expect(channels.last.hello.containsKey('conversation'), isFalse);
+    await tester.pump(ChatSettings.defaultConnectTimeout);
+  });
+
+  testWidgets('a new sign-in says hello with the stored conversation', (
+    tester,
+  ) async {
+    final channels = <FakeChannel>[];
+    final gateway = FakeGateway()..moneypenny = true;
+    final board = await signedIn(
+      tester,
+      gateway,
+      channel: () {
+        final channel = FakeChannel();
+        channels.add(channel);
+        return channel;
+      },
+    );
+    await settle(tester);
+    expect(channels.last.hello.containsKey('conversation'), isFalse);
+    channels.last.ready();
+    await settle(tester);
+
+    // A real new sign-in: the same person, a new token.
+    await board.logout();
+    await settle(tester);
+    await board.login('ana', 'secret');
+    await settle(tester);
+    await settle(tester);
+    expect(channels, hasLength(2));
+    expect(channels.last.hello['token'], 'token-2');
+    expect(channels.last.hello['conversation'], 'conversation-1');
+
+    // That one is gone: the gateway opened another, and that is the one to come back to.
+    channels.last.ready(conversation: 'conversation-2');
+    await settle(tester);
+    await board.logout();
+    await settle(tester);
+    await board.login('ana', 'secret');
+    await settle(tester);
+    await settle(tester);
+    expect(channels.last.hello['conversation'], 'conversation-2');
+
+    // Someone else on this device has their own.
+    await board.logout();
+    await settle(tester);
+    gateway.person = 'bea';
+    await board.login('bea', 'secret');
+    await settle(tester);
+    await settle(tester);
+    expect(channels.last.hello.containsKey('conversation'), isFalse);
+    await close(tester, board);
+  });
+}
