@@ -414,18 +414,19 @@ void main() {
   }
 
   for (final width in [390.0, 1400.0]) {
-    testWidgets('the chip of a Mission waiting on its issue says so at $width px', (
-      tester,
-    ) async {
-      await openAt(
-        tester,
-        await waitingBoard(),
-        '/missions?operation_id=G',
-        size: Size(width, 1200),
-      );
-      expect(tester.takeException(), isNull);
-      expect(find.textContaining('Waiting on the issue'), findsWidgets);
-    });
+    testWidgets(
+      'the chip of a Mission waiting on its issue says so at $width px',
+      (tester) async {
+        await openAt(
+          tester,
+          await waitingBoard(),
+          '/missions?operation_id=G',
+          size: Size(width, 1200),
+        );
+        expect(tester.takeException(), isNull);
+        expect(find.textContaining('Waiting on the issue'), findsWidgets);
+      },
+    );
   }
 
   testWidgets('a Mission detail opens with its linked issues', (tester) async {

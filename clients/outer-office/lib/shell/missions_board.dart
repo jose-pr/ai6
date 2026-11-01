@@ -435,12 +435,14 @@ class MissionFacts extends StatelessWidget {
           children: [
             OoStateMark(mission.state, reason: mission.reason),
             const SizedBox(width: 6),
-            Text(
-              [
-                mission.state,
-                if (mission.reason case final reason?) reasonWords(reason),
-              ].join(' · '),
-              style: Theme.of(context).textTheme.labelMedium,
+            Flexible(
+              child: Text(
+                [
+                  mission.state,
+                  if (mission.reason case final reason?) reasonWords(reason),
+                ].join(' · '),
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
             ),
           ],
         ),
@@ -606,7 +608,7 @@ class _SessionRow extends StatelessWidget {
           label: Text(
             [
               state,
-              ?session.reason?.replaceAll('-', ' '),
+              if (session.reason case final reason?) reasonWords(reason),
             ].join(' · ').toUpperCase(),
           ),
           visualDensity: VisualDensity.compact,

@@ -106,13 +106,15 @@ class MissionDetail extends StatelessWidget {
                 children: [
                   OoStateMark(mission.state, reason: mission.reason),
                   const SizedBox(width: 6),
-                  Text(
-                    [
-                      mission.state,
-                      if (mission.reason case final reason?)
-                        reasonWords(reason),
-                    ].join(' · '),
-                    style: text.titleSmall,
+                  Flexible(
+                    child: Text(
+                      [
+                        mission.state,
+                        if (mission.reason case final reason?)
+                          reasonWords(reason),
+                      ].join(' · '),
+                      style: text.titleSmall,
+                    ),
                   ),
                 ],
               ),

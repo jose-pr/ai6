@@ -26,6 +26,15 @@ const _areas = <(String, Map<String, String>)>[
   ),
   ('Sessions', {'session.read': 'watch', 'session.input': 'type into'}),
   (
+    'Linked issues',
+    {
+      'issue.link': 'link',
+      'issue.comment': 'comment on',
+      'issue.update': 'change',
+      'issue.create': 'create',
+    },
+  ),
+  (
     'Green ink',
     {
       'approval.decide': 'decide',
