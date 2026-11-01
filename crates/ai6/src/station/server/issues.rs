@@ -86,13 +86,18 @@ const NEVER_MIRRORED: [&str; 7] = [
 #[derive(Clone)]
 pub(super) struct IssueDesk {
     state: DaemonState,
+    /// Where a tracker's credential variables are read from.
+    read_env: fn(&str) -> Option<String>,
 }
 
 type Refusal = String;
 
 impl IssueDesk {
     pub(super) fn new(state: DaemonState) -> Self {
-        Self { state }
+        Self {
+            state,
+            read_env: |name| std::env::var(name).ok(),
+        }
     }
 
     fn now(&self) -> f64 {
@@ -1070,14 +1075,14 @@ impl IssueDesk {
         {
             for key in ["token_env", "email_env"] {
                 if let Some(name) = setup.settings.get(key).and_then(toml::Value::as_str)
-                    && let Ok(value) = std::env::var(name)
+                    && let Some(value) = (self.read_env)(name)
                 {
                     values.push(value);
                 }
             }
             for default in ["GITHUB_TOKEN", "JIRA_API_TOKEN"] {
                 if setup.settings.get("token_env").is_none()
-                    && let Ok(value) = std::env::var(default)
+                    && let Some(value) = (self.read_env)(default)
                 {
                     values.push(value);
                 }
@@ -1282,6 +1287,31 @@ fn proposal_answer(proposal: &IssueProposal) -> serde_json::Value {
     })
 }
 
+/// Whether what a Mission's Agent is owed can reach it, by the state of the Mission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Delivery {
+    /// A Session is working or waiting.
+    Now,
+    /// Stalled, parked or quarantined: it can still go on, so it keeps what it is owed.
+    Later,
+    /// Queued or finished: no Session of it will hear it.
+    Never,
+}
+
+impl Delivery {
+    fn of(state: MissionState) -> Self {
+        match state {
+            MissionState::Working | MissionState::Blocked => Self::Now,
+            MissionState::Stalled | MissionState::Parked | MissionState::Quarantined => Self::Later,
+            MissionState::Queued
+            | MissionState::Done
+            | MissionState::Failed
+            | MissionState::Blown
+            | MissionState::Abandoned => Self::Never,
+        }
+    }
+}
+
 /// Tells the Agents of this Station's Missions how their proposals to create issues came out.
 pub(super) async fn deliver_proposal_outcomes(state: &DaemonState) {
     let registry = state.intake.clone();
@@ -1303,12 +1333,15 @@ pub(super) async fn deliver_proposal_outcomes(state: &DaemonState) {
         else {
             continue;
         };
-        let live = matches!(mission.state, MissionState::Working | MissionState::Blocked);
-        // A person's own creation has nobody to tell.
-        let asked_by_agent = proposal.proposer.starts_with("agent:");
-        let told = !live
-            || !asked_by_agent
-            || tell(state, &proposal.mission_id, outcome_text(&proposal), false).await;
+        let told = match Delivery::of(mission.state) {
+            Delivery::Later => continue,
+            Delivery::Never => true,
+            // A person's own creation has nobody to tell.
+            Delivery::Now if !proposal.proposer.starts_with("agent:") => true,
+            Delivery::Now => {
+                tell(state, &proposal.mission_id, outcome_text(&proposal), false).await
+            }
+        };
         if told {
             let _ = registry.mark_proposal_told(&proposal.id);
         }
@@ -1532,7 +1565,6 @@ pub(super) async fn deliver_replies(state: &DaemonState) {
             // Another Station holds this Mission.
             continue;
         };
-        let live = matches!(mission.state, MissionState::Working | MissionState::Blocked);
         let mark = |to: ReplyState| {
             let _ = registry.mark_issue_reply(
                 &reply.mission_id,
@@ -1542,9 +1574,13 @@ pub(super) async fn deliver_replies(state: &DaemonState) {
                 to,
             );
         };
-        if !live {
-            mark(ReplyState::Ignored);
-            continue;
+        match Delivery::of(mission.state) {
+            Delivery::Now => {}
+            Delivery::Later => continue,
+            Delivery::Never => {
+                mark(ReplyState::Ignored);
+                continue;
+            }
         }
         let question = registry
             .issue_questions(&reply.mission_id)
@@ -1695,7 +1731,7 @@ mod tests {
                           [agent.desk]\nhandler = \"mock-recorder\"\nclearance = \"desk\"\n";
 
     const SOURCES: &str = "sources = { gh = { provider = \"github\", repo = \"o/r\", \
-                           token_env = \"CARGO_MANIFEST_DIR\", agent_labels = [\"needs-info\"], \
+                           token_env = \"AI6_TEST_ISSUE_TOKEN\", agent_labels = [\"needs-info\"], \
                            agent_transitions = [\"In Review\"] } }\n";
 
     /// A Station with one queued Mission of a unique ID, linked to `o/r#1` (its source), and a
@@ -1865,13 +1901,15 @@ mod tests {
     #[test]
     fn a_secret_a_foreign_link_and_an_invisible_character_are_each_refused_naming_the_rule() {
         let root = tempfile::tempdir().unwrap();
-        let (state, mission, desk) = station(root.path(), "outbound", "");
+        let (state, mission, _) = station(root.path(), "outbound", "");
+        const TOKEN: &str = "s3cr3t-token-value";
+        let desk = IssueDesk {
+            state: state.clone(),
+            read_env: |name| (name == "AI6_TEST_ISSUE_TOKEN").then(|| TOKEN.to_owned()),
+        };
         let me = caller(&mission, "007");
         for (body, rule) in [
-            (
-                concat!("the token is ", env!("CARGO_MANIFEST_DIR")),
-                "secret",
-            ),
+            (concat!("the token is ", "s3cr3t-token-value"), "secret"),
             (
                 "a key ghp_abcdefghijklmnopqrstuvwxyz0123456789",
                 "credential-pattern",
@@ -1882,7 +1920,7 @@ mod tests {
         ] {
             let refusal = desk.comment(&me, "gh:o/r#1", body, body).unwrap_err();
             assert!(refusal.contains(rule), "{rule}: {refusal}");
-            assert!(!refusal.contains("ai6"), "never the value: {refusal}");
+            assert!(!refusal.contains(TOKEN), "never the value: {refusal}");
         }
         assert!(entries(&state, &mission).is_empty(), "nothing was queued");
         let audit = state.intake.audit_records().unwrap();
@@ -1893,9 +1931,7 @@ mod tests {
             "{audit:?}"
         );
         assert!(
-            audit
-                .iter()
-                .all(|record| !record.target.contains(env!("CARGO_MANIFEST_DIR"))),
+            audit.iter().all(|record| !record.target.contains(TOKEN)),
             "the audit holds the rule, never the value"
         );
         // The tracker's own host is allowed, and a mention is defused.
@@ -2162,6 +2198,29 @@ mod tests {
             .collect()
     }
 
+    /// What the mock was told about `marker`, once `wanted` messages came or the deadline
+    /// passed: a message reaches the harness on the ACP connection's thread, after
+    /// `send_message` has returned.
+    async fn told_soon(marker: &str, wanted: usize) -> Vec<String> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let messages = told(marker);
+            if messages.len() >= wanted || std::time::Instant::now() >= deadline {
+                return messages;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Returns once everything already sent on the Session has reached the harness: a connection
+    /// keeps its messages in order, so what follows this one has no earlier message still to
+    /// come, and a test may say one never came.
+    async fn arrived(state: &DaemonState, mission: &str) {
+        let marker = uuid::Uuid::new_v4().to_string();
+        assert!(tell(state, mission, marker.clone(), false).await);
+        assert_eq!(told_soon(&marker, 1).await.len(), 1, "the marker arrived");
+    }
+
     fn reply(mission: &str, id: &str, body: &str) -> IssueReply {
         IssueReply {
             id: id.to_owned(),
@@ -2239,7 +2298,7 @@ mod tests {
             ))
             .unwrap();
         deliver_replies(&state).await;
-        let messages = told("MARKER-ANSWER");
+        let messages = told_soon("MARKER-ANSWER", 1).await;
         assert_eq!(messages.len(), 1, "{messages:?}");
         assert!(messages[0].contains("An answer to your question on gh:o/r#1"));
         assert!(messages[0].contains("untrusted data"));
@@ -2264,6 +2323,7 @@ mod tests {
         );
         // Delivering again tells nothing twice.
         deliver_replies(&state).await;
+        arrived(&state, &mission).await;
         assert_eq!(told("MARKER-ANSWER").len(), 1);
         state.stopping.store(true, Ordering::Release);
     }
@@ -2281,8 +2341,9 @@ mod tests {
             ))
             .unwrap();
         deliver_replies(&state).await;
-        assert_eq!(told("MARKER-NOTE").len(), 1);
-        assert!(told("MARKER-NOTE")[0].contains("A new comment on gh:o/r#1"));
+        let note = told_soon("MARKER-NOTE", 1).await;
+        assert_eq!(note.len(), 1, "{note:?}");
+        assert!(note[0].contains("A new comment on gh:o/r#1"));
         state.stopping.store(true, Ordering::Release);
 
         let other = tempfile::tempdir().unwrap();
@@ -2309,7 +2370,7 @@ mod tests {
         open_question(&state, &mission, -1.0);
         block_for_issue(&state, &mission);
         deliver_replies(&state).await;
-        let said = told("No reply on gh:o/r#1");
+        let said = told_soon("No reply on gh:o/r#1", 1).await;
         assert_eq!(said.len(), 1, "{said:?}");
         assert!(said[0].contains("Continue on stated assumptions"));
         assert_eq!(
@@ -2789,8 +2850,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(
             root.path(),
-            "sources = { gh = { provider = \"github\", repo = \"o/r\", token_env = \"CARGO_MANIFEST_DIR\" }, \
-             jira = { site = \"https://x.example\", project = \"AI6\", token_env = \"CARGO_MANIFEST_DIR\", \
+            "sources = { gh = { provider = \"github\", repo = \"o/r\", token_env = \"AI6_TEST_ISSUE_TOKEN\" }, \
+             jira = { site = \"https://x.example\", project = \"AI6\", token_env = \"AI6_TEST_ISSUE_TOKEN\", \
              priority_map = { P1 = \"Highest\" } } }\n",
             AGENTS,
         );
@@ -2868,6 +2929,7 @@ mod tests {
             .unwrap();
         let id = answer["proposal"].as_str().unwrap();
         deliver_proposal_outcomes(&state).await;
+        arrived(&state, &mission).await;
         assert!(told("TOLD-ONE").is_empty(), "nothing before a decision");
         state
             .intake
@@ -2875,6 +2937,7 @@ mod tests {
             .unwrap();
         deliver_proposal_outcomes(&state).await;
         deliver_proposal_outcomes(&state).await;
+        arrived(&state, &mission).await;
         let messages = told("TOLD-ONE");
         assert_eq!(messages.len(), 1, "{messages:?}");
         assert!(messages[0].contains("refused"));
@@ -2892,7 +2955,7 @@ mod tests {
             .record_created_issues(id, &["gh:o/r#77".to_owned()], &[])
             .unwrap();
         deliver_proposal_outcomes(&state).await;
-        let messages = told("gh:o/r#77");
+        let messages = told_soon("gh:o/r#77", 1).await;
         assert_eq!(messages.len(), 1, "{messages:?}");
         state.stopping.store(true, Ordering::Release);
     }
@@ -2911,7 +2974,7 @@ mod tests {
         answer.author = "Sam".to_owned();
         state.intake.store_issue_reply(&answer).unwrap();
         deliver_replies(&state).await;
-        let messages = told("MARKER-OPERATOR");
+        let messages = told_soon("MARKER-OPERATOR", 1).await;
         assert_eq!(messages.len(), 1, "{messages:?}");
         assert!(
             messages[0].contains("from the operator Sam"),
@@ -2945,5 +3008,101 @@ mod tests {
         let listed = desk.issues(&me).unwrap();
         assert_eq!(listed["issues"][0]["title_untrusted"], "Flaky test");
         assert!(me.exposure.is_exposed());
+    }
+
+    /// A live Mission taken to `to`, by way of Working where it has to pass through it.
+    fn move_to(state: &DaemonState, mission: &str, to: MissionState) {
+        let mut missions = state.missions.lock().unwrap();
+        if missions.get(mission).unwrap().state != MissionState::Working {
+            missions.transition(mission, MissionState::Working).unwrap();
+        }
+        if to != MissionState::Working {
+            missions.transition(mission, to).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn an_outcome_waits_for_a_stalled_mission_and_reaches_it_when_it_works_again() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission, desk) = live(root.path(), "stalled-outcome", "").await;
+        let me = caller(&mission, "007");
+        let answer = desk
+            .create(&me, "gh", &new_issue("STALLED-OUTCOME"), "s1")
+            .unwrap();
+        let id = answer["proposal"].as_str().unwrap();
+        state
+            .intake
+            .decide_issue_proposal(id, false, "sam", false)
+            .unwrap();
+        move_to(&state, &mission, MissionState::Stalled);
+        deliver_proposal_outcomes(&state).await;
+        arrived(&state, &mission).await;
+        assert!(told("STALLED-OUTCOME").is_empty());
+        assert!(
+            !state.intake.issue_proposal(id).unwrap().unwrap().told,
+            "a stalled Mission can still go on, so its Agent is still owed the outcome"
+        );
+
+        move_to(&state, &mission, MissionState::Working);
+        deliver_proposal_outcomes(&state).await;
+        assert_eq!(told_soon("STALLED-OUTCOME", 1).await.len(), 1);
+        assert!(state.intake.issue_proposal(id).unwrap().unwrap().told);
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_finished_missions_outcome_is_settled_without_a_message() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission, desk) = live(root.path(), "finished-outcome", "").await;
+        let me = caller(&mission, "007");
+        let answer = desk
+            .create(&me, "gh", &new_issue("FINISHED-OUTCOME"), "f1")
+            .unwrap();
+        let id = answer["proposal"].as_str().unwrap();
+        state
+            .intake
+            .decide_issue_proposal(id, false, "sam", false)
+            .unwrap();
+        move_to(&state, &mission, MissionState::Failed);
+        deliver_proposal_outcomes(&state).await;
+        assert!(state.intake.issue_proposal(id).unwrap().unwrap().told);
+        arrived(&state, &mission).await;
+        assert!(told("FINISHED-OUTCOME").is_empty());
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_reply_waits_for_a_stalled_mission_and_a_finished_one_ignores_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission, _desk) = live(root.path(), "stalled-reply", "").await;
+        state
+            .intake
+            .store_issue_reply(&reply(&mission, "c-stalled", "MARKER-STALLED"))
+            .unwrap();
+        move_to(&state, &mission, MissionState::Stalled);
+        deliver_replies(&state).await;
+        assert_eq!(
+            state.intake.issue_replies(&mission).unwrap()[0].state,
+            ReplyState::Pending,
+            "a stalled Mission can still go on"
+        );
+
+        move_to(&state, &mission, MissionState::Working);
+        deliver_replies(&state).await;
+        assert_eq!(told_soon("MARKER-STALLED", 1).await.len(), 1);
+        assert_eq!(
+            state.intake.issue_replies(&mission).unwrap()[0].state,
+            ReplyState::Delivered
+        );
+
+        state
+            .intake
+            .store_issue_reply(&reply(&mission, "c-after", "MARKER-AFTER"))
+            .unwrap();
+        move_to(&state, &mission, MissionState::Failed);
+        deliver_replies(&state).await;
+        let stored = state.intake.issue_replies(&mission).unwrap();
+        assert_eq!(stored[1].state, ReplyState::Ignored);
+        state.stopping.store(true, Ordering::Release);
     }
 }
