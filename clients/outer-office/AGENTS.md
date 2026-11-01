@@ -8,7 +8,8 @@ Colours come only from `OoTokens` (`lib/theme/`); icons from the design kit's SV
 `OoIcon` (line, small sizes) and `OoDuotone`/`OoTile` (`assets/icons/duotone/`, drawn in the
 sentinel colours `#F6D58E`, `#B9832F`, `#2A1C08` that `OoDuotone` swaps for the theme's);
 Cinzel (`ooDisplayFamily`) only for the wordmark and section labels. The wallpaper
-(`OoBackdrop`) and the hero art (`OoHero`, Overview only) never sit behind tables,
+(`OoBackdrop`, one SVG recoloured from `OoWallpaper`) and the hero art (`OoHero`, Overview only;
+files by width in `OoArt`, each within `ooArtBudget`) never sit behind tables,
 terminals, Session pages, dialogs, green ink, briefings or the chat, and nothing is plotted
 on the hero. Ornament (glows, decorative gradients, art) reads `OoTokens.decorated`, which
 high contrast clears; never infer it from colours. Accent edges and glow belong to the

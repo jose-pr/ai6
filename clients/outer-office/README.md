@@ -238,13 +238,17 @@ and the fonts for characters Roboto lacks from its own `assets/fonts/fallback/`,
 default the browser fetches nothing from any origin but the one serving the app. Desktop
 builds never use a CDN: the operating system's fonts cover other scripts and emoji there.
 
-The hero art in `assets/heroes/`: `map.jpg` and `skyline.jpg` cut from the AI6 brand
-banners; `paper.jpg`, a 940×278 crop at the left edge, 746 px down, of a 1536×1024 picture
-made with a built-in image generation tool on 2026-10-29 from a written prompt and no
+The hero art in `assets/heroes/`, each file named by its width and chosen at run time by the
+box's physical size (`OoArt`; `[art] max_width` in `OO.cfg` caps it): `map-940.jpg` and
+`skyline-774.jpg` cut from the AI6 brand banners; `paper-1536.jpg`, the bottom 454 px of a
+1536×1024 picture, and `paper-940.jpg`, its 940×278 crop at the left edge, 746 px down, made with a built-in image generation tool on 2026-10-29 from a written prompt and no
 reference images (pale ivory paper, thin taupe coast-like contours and drafting arcs at the
 left and right edges, a blank centre, no text, labels, routes or markers), mirrored so its
 contours sit on the right, clear of the hero's text panel, and saved at JPEG quality 92.
-The wallpapers in `assets/backdrops/` come from the AI6 brand pack.
+The wallpaper in `assets/backdrops/` is one drawing, `wallpaper.svg`, painted at the window's size
+in each theme's colours: its graph and circles were measured from the AI6 brand pack's pictures,
+which it replaces, and its label, `wallpaper-label.svg`, is outlined from Roboto, so no font is
+involved. It draws crisp at any size, and the label is left out where it would not fit whole.
 
 The fallback fonts are the 727 Noto files the Flutter web engine can ask for (SIL Open
 Font License 1.1, `assets/fonts/LICENSE-Noto.txt`, on the licence page of the web app):

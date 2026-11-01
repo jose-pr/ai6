@@ -104,6 +104,7 @@ class _SignInPageState extends State<SignInPage> {
       body: SizedBox.expand(
         child: OoBackdrop(
           alignment: Alignment.center,
+          labelClear: SignInPage.panelWidth,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: SignInPage.panelWidth),
             child: SingleChildScrollView(

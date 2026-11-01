@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'oo_art.dart';
+
 /// The preference value that follows the operating system: Light when it is light, Night
 /// Ops when it is dark.
 const ooSystemTheme = 'system';
@@ -152,7 +154,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
 
   /// The theme's wallpaper, painted only by `OoBackdrop`; null when it has none or it is
   /// turned off.
-  final ImageProvider? backdrop;
+  final OoWallpaper? backdrop;
 
   /// Eight categorical colours for charts, in a fixed order, each at least 3:1 on
   /// `surface`. Neighbours, and the first colour beside any other (a pie's last slice
@@ -294,7 +296,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
     Color? warning,
     Color? danger,
     List<Color>? series,
-    ImageProvider? backdrop,
+    OoWallpaper? backdrop,
     bool? decorated,
     bool clearBackdrop = false,
   }) => OoTokens(

@@ -431,6 +431,9 @@ connect_timeout = 10                  # seconds her socket may take to say it is
 [routes]
 text_bytes = 128                      # the longest text filter a page link may carry, in bytes
 
+[art]
+max_width = 3840                      # the widest hero picture fetched, in pixels; a site on slow links sets 1920
+
 [refresh]                             # seconds between a page's asks; 0 turns that refresh off
 sessions = 3                          # what the page shown displays from the board of Sessions, Stations and Missions
 overview = 10                         # the overview's recent activity

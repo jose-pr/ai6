@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Outer Office's wallpapers are one drawing in each theme's colours, exact at any size and under
+  a fifth of the bytes, and the hero picks its file by the box's physical size, decoding only what
+  the box needs (`[art] max_width` in `OO.cfg`). Light and Classic gain a sharper paper hero. The
+  wallpaper's label no longer clips: it is drawn whole beside the sign-in panel, or not at all.
 - Outer Office's rail is organised by what a person is asking: Work, People and policy, Machines
   and Record, each group shown only when the person may see something in it. Narrow windows get
   icons with labels on hover, a phone a bottom bar with **More**. A search result opens what it
