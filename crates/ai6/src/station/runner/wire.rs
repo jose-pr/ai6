@@ -92,6 +92,13 @@ pub(super) fn serve_connection(
     );
     if let Some(binding) = lock_of(&connection.binding).take() {
         binding.stop.store(true, Ordering::SeqCst);
+        let mut bindings = lock_of(&connection.runner.inner.bindings);
+        if bindings
+            .get(&binding.key)
+            .is_some_and(|bound| Arc::ptr_eq(bound, &binding))
+        {
+            bindings.remove(&binding.key);
+        }
     }
 }
 

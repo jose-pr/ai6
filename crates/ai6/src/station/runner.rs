@@ -302,7 +302,7 @@ where
             terminal: config.terminal,
             sessions: Mutex::new(load_sessions(&config.state_dir, &limits)?),
             bindings: Mutex::new(BTreeMap::new()),
-            streams: Mutex::new(Vec::new()),
+            streams: Mutex::new(BTreeMap::new()),
             limits,
             stopping: AtomicBool::new(false),
             _lock: lock,
@@ -323,15 +323,25 @@ where
     let handle = tokio::runtime::Handle::current();
     let _closing = CloseConnections(runner.clone());
     let accepting = async {
+        let mut accepted = 0u64;
         loop {
             let (stream, _) = listener.accept().await?;
             let stream = stream.into_std()?;
             stream.set_nonblocking(false)?;
+            accepted += 1;
+            let id = accepted;
             if let Ok(kept) = stream.try_clone() {
-                lock_of(&runner.inner.streams).push(kept);
+                lock_of(&runner.inner.streams).insert(id, kept);
             }
             let (runner, token, handle) = (runner.clone(), token.clone(), handle.clone());
-            std::thread::spawn(move || wire::serve_connection(runner, token, handle, stream));
+            std::thread::spawn(move || {
+                wire::serve_connection(runner.clone(), token, handle, stream);
+                // Clones of the socket outlive the connection, and a peer that half-closed
+                // waits for this end: only a shutdown tells it the connection is over.
+                if let Some(kept) = lock_of(&runner.inner.streams).remove(&id) {
+                    let _ = kept.shutdown(std::net::Shutdown::Both);
+                }
+            });
         }
         #[allow(unreachable_code)]
         Ok::<(), io::Error>(())
@@ -464,8 +474,8 @@ struct Inner {
     sessions: Mutex<BTreeMap<String, Arc<Hosted>>>,
     /// The connection each Session is bound to.
     bindings: Mutex<BTreeMap<String, Arc<wire::Binding>>>,
-    /// The connections being served, closed when the runner stops.
-    streams: Mutex<Vec<std::net::TcpStream>>,
+    /// The connections being served, by the order they came in, closed when the runner stops.
+    streams: Mutex<BTreeMap<u64, std::net::TcpStream>>,
     limits: RunnerLimits,
     stopping: AtomicBool,
     _lock: File,
@@ -817,9 +827,7 @@ mod live {
             if dir == state_dir
                 && let Some(inner) = inner.upgrade()
             {
-                for stream in lock_of(&inner.streams).drain(..) {
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
-                }
+                inner.close_connections();
             }
         }
     }
@@ -833,7 +841,13 @@ struct CloseConnections(Runner);
 
 impl Drop for CloseConnections {
     fn drop(&mut self) {
-        for stream in lock_of(&self.0.inner.streams).drain(..) {
+        self.0.inner.close_connections();
+    }
+}
+
+impl Inner {
+    fn close_connections(&self) {
+        for stream in std::mem::take(&mut *lock_of(&self.streams)).into_values() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
     }
@@ -1033,7 +1047,7 @@ mod tests {
                 terminal: pinned.map(str::to_owned),
                 sessions: Mutex::new(BTreeMap::new()),
                 bindings: Mutex::new(BTreeMap::new()),
-                streams: Mutex::new(Vec::new()),
+                streams: Mutex::new(BTreeMap::new()),
                 limits: RunnerLimits::default(),
                 stopping: AtomicBool::new(false),
                 _lock: File::create(state_dir.join(LOCK_FILE)).unwrap(),
@@ -1324,6 +1338,24 @@ mod tests {
             lock_of(&serving_runner_sessions(&serving)).is_empty(),
             "no Session was made"
         );
+        serving.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_connection_its_peer_finished_is_closed_while_the_runner_serves_on() {
+        let serving = Serving::start().await;
+        let address = serving.address();
+        tokio::task::spawn_blocking(move || {
+            let mut stream = std::net::TcpStream::connect(address).unwrap();
+            stream.shutdown(std::net::Shutdown::Write).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(20)))
+                .unwrap();
+            // A runner that kept the socket open makes this read time out, which is an error.
+            std::io::Read::read_to_end(&mut stream, &mut Vec::new()).unwrap();
+        })
+        .await
+        .unwrap();
         serving.stop().await;
     }
 
