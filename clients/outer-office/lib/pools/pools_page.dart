@@ -6,6 +6,7 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
+import '../shell/oo_link.dart';
 
 /// How much of one provider quota window an account has used.
 @immutable
@@ -34,11 +35,14 @@ class QuotaWindowSummary {
         status: json['status'] as String?,
       );
 
-  /// `five_hour 42.5%`, or `five_hour ?` when no figure was reported.
-  String get label => switch (usedPermille) {
-    final used? => '$name ${used ~/ 10}.${used % 10}%',
-    null => '$name ${status ?? '?'}',
-  };
+  /// `five hour 42.5%`, or `five hour unknown` when no figure was reported.
+  String get label {
+    final window = name.replaceAll('_', ' ');
+    return switch (usedPermille) {
+      final used? => '$window ${used ~/ 10}.${used % 10}%',
+      null => '$window ${status ?? 'unknown'}',
+    };
+  }
 }
 
 /// One pool account as the board shows it: never a credential.
@@ -269,7 +273,8 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
                       ? const CircularProgressIndicator()
                       : Text(
                           pool == null
-                              ? 'No pool account serves this Operation.'
+                              ? 'No pool account serves this Operation. Without one, Sessions '
+                                    'use the login their Agent is given.'
                               : 'No account pool named $pool in Operation '
                                     '$operation.',
                         ),
@@ -278,7 +283,7 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   children: [
                     for (final account in accounts)
-                      _AccountTile(account: account),
+                      _AccountTile(account: account, operation: operation),
                   ],
                 ),
         ),
@@ -288,9 +293,10 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
 }
 
 class _AccountTile extends StatelessWidget {
-  const _AccountTile({required this.account});
+  const _AccountTile({required this.account, required this.operation});
 
   final PoolAccountSummary account;
+  final String operation;
 
   @override
   Widget build(BuildContext context) {
@@ -332,10 +338,11 @@ class _AccountTile extends StatelessWidget {
               ].join(' · '),
             ),
             if (account.active.isNotEmpty)
-              Text(
-                'Used by ${account.active.join(', ')}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              OoLinkLine([
+                ('Used by', null),
+                for (final mission in account.active)
+                  ('Mission $mission', OoLinkTo.mission(operation, mission)),
+              ]),
           ],
         ),
       ),

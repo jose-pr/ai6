@@ -88,7 +88,7 @@ void main() {
     }
     await openPage(tester, 'Audit');
     expect(
-      find.text('operator-007 · mission.create.requested'),
+      find.text('operator-007 · Mission create requested'),
       findsOneWidget,
     );
   });

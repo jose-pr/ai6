@@ -7,6 +7,7 @@ import '../theme/oo_theme.dart';
 import '../theme/oo_icon.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
+import 'oo_link.dart';
 import 'oo_shell.dart';
 
 /// One Mission, read-only: its state and the Session that sets it, every attempt with its
@@ -84,6 +85,14 @@ class MissionDetail extends StatelessWidget {
                 sessions: mission.sessions,
               ),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 32),
+            child: OoLink(
+              'Operation $operationId',
+              route: OoLinkTo.operation(operationId),
+              style: text.bodySmall,
+            ),
           ),
           const SizedBox(height: 10),
           Wrap(

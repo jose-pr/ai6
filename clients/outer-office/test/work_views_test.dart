@@ -283,11 +283,16 @@ void main() {
         findsOneWidget,
         reason: 'the lost attempt ran elsewhere',
       );
-      expect(find.text('Station station-remote-02'), findsOneWidget);
+      expect(
+        find.widgetWithText(TextButton, 'Station station-remote-02'),
+        findsOneWidget,
+      );
       // The queue stays beside the detail in a window this wide.
       expect(find.byType(MissionCard), findsOneWidget);
 
-      await tester.tap(find.text('Station station-control-01'));
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Station station-control-01'),
+      );
       await tester.pumpAndSettle();
       expect(
         locations(reported).last.$1,
@@ -413,7 +418,7 @@ void main() {
     expect(find.textContaining('8 CPUs'), findsOneWidget);
     expect(find.textContaining('sampled'), findsOneWidget);
     expect(find.text('HQS'), findsOneWidget);
-    expect(find.text('Running 2/4 sessions'), findsOneWidget);
+    expect(find.text('Running 2 of 4 Sessions'), findsOneWidget);
     expect(find.text('Roles: control, execution'), findsOneWidget);
   });
 
@@ -425,7 +430,7 @@ void main() {
         demoBoard(),
         '/operations?operation_id=G',
       );
-      expect(find.text('Operation G'), findsOneWidget);
+      expect(find.text('Operation G'), findsWidgets);
       expect(find.text('0 of 1 Mission done'), findsOneWidget);
       expect(find.textContaining('Missions: '), findsOneWidget);
       expect(find.byTooltip('mission.read, mission.control'), findsOneWidget);

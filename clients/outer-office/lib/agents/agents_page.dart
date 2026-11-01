@@ -6,6 +6,7 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
+import '../shell/oo_link.dart';
 
 /// The clearances, lowest first.
 const clearances = ['desk', 'field', '00'];
@@ -457,7 +458,8 @@ class _AgentsPageState extends State<AgentsPage> {
                       ? const CircularProgressIndicator()
                       : Text(
                           named == null
-                              ? 'No Agent is posted to this Operation.'
+                              ? 'No Agent is posted to this Operation. An Agent is a '
+                                    'codename with a handler and model; the roster names them.'
                               : 'Agent $named is not in Operation $operation.',
                         ),
                 )
@@ -514,7 +516,19 @@ class _AgentTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(agent.agent, style: theme.textTheme.titleMedium),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: OoLink(
+                      agent.agent,
+                      route: OoLinkTo.missions().withField(
+                        'agent',
+                        agent.agent,
+                      ),
+                      semanticLabel:
+                          'Open the Missions of Agent ${agent.agent}',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
                 ),
                 if (clearance != null)
                   Chip(

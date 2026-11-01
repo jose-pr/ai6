@@ -168,7 +168,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('push · origin:refs/heads/main'), findsOneWidget);
-    expect(find.text('Agent 007 · Mission mission-007 · '), findsOneWidget);
+    expect(find.text('Agent 007'), findsOneWidget);
+    expect(find.text('Mission mission-007'), findsOneWidget);
     expect(find.textContaining('expires in '), findsOneWidget);
     expect(find.text('The release branch passed review.'), findsOneWidget);
 
@@ -196,7 +197,10 @@ void main() {
       'note': 'push only the tag',
     });
     expect(find.text('Signed in green ink.'), findsOneWidget);
-    expect(find.text('No steps are waiting for green ink.'), findsOneWidget);
+    expect(
+      find.textContaining('No steps are waiting for green ink.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('an operator rejects a step with a reason', (tester) async {

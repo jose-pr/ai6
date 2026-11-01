@@ -359,7 +359,6 @@ void main() {
       await tester.tap(find.text(OoSearch.hint));
       await tester.pumpAndSettle();
       expect(find.textContaining('First 2 of '), findsOneWidget);
-      expect(find.text('Mission mission-007'), findsOneWidget);
       expect(find.text('Mission mission-021'), findsNothing);
     });
   });

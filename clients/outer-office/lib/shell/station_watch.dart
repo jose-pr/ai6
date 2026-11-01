@@ -5,6 +5,7 @@ import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
+import 'oo_link.dart';
 import 'oo_shell.dart';
 
 /// The Stations as cards. With [detailed], the route named one Station: its card is the
@@ -33,20 +34,16 @@ class StationOverview extends StatelessWidget {
   final ValueChanged<OoRoute> onRoute;
   final bool detailed;
 
+  /// A Station's card on a wide page, in logical pixels; narrower pages give it their width.
+  static const double cardWidth = 300;
+  static const double watchWidth = 720;
+
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+    padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'STATIONS',
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-            letterSpacing: 2.4,
-            color: OoTokens.of(context).accent,
-          ),
-        ),
-        const SizedBox(height: 10),
         if (stations.stations.isEmpty)
           Card(
             child: Padding(
@@ -55,23 +52,29 @@ class StationOverview extends StatelessWidget {
             ),
           )
         else
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final station in stations.stations)
-                SizedBox(
-                  width: detailed ? 720 : 300,
-                  child: StationCard(
-                    station: station,
-                    board: board,
-                    onCreateMission: onCreateMission,
-                    canCreateMission: canCreateMission,
-                    onRoute: onRoute,
-                    detailed: detailed,
+          LayoutBuilder(
+            builder: (context, box) => Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final station in stations.stations)
+                  SizedBox(
+                    width: box.maxWidth < OoBreakpoints.phone
+                        ? box.maxWidth
+                        : detailed
+                        ? watchWidth
+                        : cardWidth,
+                    child: StationCard(
+                      station: station,
+                      board: board,
+                      onCreateMission: onCreateMission,
+                      canCreateMission: canCreateMission,
+                      onRoute: onRoute,
+                      detailed: detailed,
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
       ],
     ),
@@ -134,7 +137,7 @@ class StationCard extends StatelessWidget {
   /// poll.
   int? get _silent {
     final every = board.pollInterval;
-    if (every == null || station.seen <= 0) return null;
+    if (every == null || station.seen <= 0 || board.demo) return null;
     final seconds = ooClock()
         .difference(
           DateTime.fromMillisecondsSinceEpoch((station.seen * 1000).round()),
@@ -158,10 +161,15 @@ class StationCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    station.stationId,
-                    style: text.titleMedium,
-                    overflow: TextOverflow.ellipsis,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: OoLink(
+                      station.stationId,
+                      route: OoLinkTo.station(station.stationId),
+                      semanticLabel: 'Open Station ${station.stationId}',
+                      maxLines: 1,
+                      style: text.titleMedium,
+                    ),
                   ),
                 ),
                 if (station.headquarters)
@@ -206,7 +214,7 @@ class StationCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              'Running ${station.running}/${station.capacity} sessions',
+              'Running ${station.running} of ${station.capacity} Sessions',
               style: text.bodySmall,
             ),
             const SizedBox(height: 2),
@@ -225,7 +233,11 @@ class StationCard extends StatelessWidget {
                   for (final theater in station.theaters)
                     Tooltip(
                       message: theater.description,
-                      child: Chip(
+                      child: ActionChip(
+                        onPressed: OoLinks.opener(
+                          context,
+                          OoLinkTo.theater(station.stationId, theater.id),
+                        ),
                         avatar: Icon(
                           theater.unavailable != null
                               ? Icons.link_off
@@ -289,18 +301,25 @@ class StationCard extends StatelessWidget {
                 spacing: 6,
                 runSpacing: 4,
                 children: [
-                  for (final operation in station.operations)
+                  for (final operation in station.operations) ...[
                     ActionChip(
-                      label: Text(operation),
-                      avatar: const Icon(Icons.add, size: 16),
-                      tooltip: canCreateMission(operation)
-                          ? 'Start a Mission in $operation'
-                          : 'You do not have mission.create access to $operation',
-                      onPressed: canCreateMission(operation)
-                          ? () => onCreateMission(operation)
-                          : null,
+                      label: Text('Operation $operation'),
+                      tooltip: 'Open Operation $operation',
+                      onPressed: OoLinks.opener(
+                        context,
+                        OoLinkTo.operation(operation),
+                      ),
                       visualDensity: VisualDensity.compact,
                     ),
+                    if (canCreateMission(operation))
+                      ActionChip(
+                        label: Text('New Mission in $operation'),
+                        avatar: const Icon(Icons.add, size: 16),
+                        tooltip: 'Start a Mission in $operation',
+                        onPressed: () => onCreateMission(operation),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                  ],
                 ],
               ),
             ],

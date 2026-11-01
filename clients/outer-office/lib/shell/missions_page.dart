@@ -22,8 +22,12 @@ class MissionsPage extends StatefulWidget {
     required this.onRoute,
     required this.desktopWindows,
     required this.pages,
+    this.onCreateMission,
     super.key,
   });
+
+  /// Starts a Mission in an Operation; the empty board offers it.
+  final ValueChanged<String>? onCreateMission;
 
   final MissionBoard board;
   final OoRoute route;
@@ -183,7 +187,21 @@ class _MissionsPageState extends State<MissionsPage> {
             child: EmptyFilter(text: 'No Missions match these filters.'),
           )
         else if (missions.isEmpty && board.error == null)
-          const SliverFillRemaining(hasScrollBody: false, child: EmptyBoard())
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: EmptyBoard(
+              operations: board.demo
+                  ? const []
+                  : [
+                      for (final operation
+                          in board.userSession?.operations ??
+                              const <UserOperationAccess>[])
+                        if (board.canCreateMission(operation.operationId))
+                          operation.operationId,
+                    ],
+              onCreate: widget.onCreateMission,
+            ),
+          )
         else if (missions.isEmpty && board.error != null)
           const SliverFillRemaining(
             hasScrollBody: false,

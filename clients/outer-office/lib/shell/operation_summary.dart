@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../access/access_words.dart';
+import 'oo_link.dart';
 import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_icon.dart';
@@ -9,7 +10,7 @@ import '../timeline/timeline_page.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
 import 'oo_shell.dart';
-import 'overview_page.dart' show timelineKindIcon, timelineSentence;
+import 'overview_page.dart' show timelineKindIcon;
 
 /// One Operation at a glance: what the person may do there, its Missions counted by state
 /// (each count a link to the Missions with that state), the held briefs and Mission proposals
@@ -207,9 +208,7 @@ class _OperationSummaryState extends State<OperationSummary> {
                       contentPadding: EdgeInsets.zero,
                       leading: OoDuotone(timelineKindIcon(item.kind), size: 26),
                       title: Text(timelineSentence(item.action)),
-                      subtitle: item.context.isEmpty
-                          ? null
-                          : Text(item.context),
+                      subtitle: OoLinkLine(item.names),
                       trailing: OoTime(item.at),
                     ),
                 ],

@@ -5,8 +5,9 @@ import '../main.dart';
 import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
-import '../theme/oo_backdrop.dart';
 import 'missions_board.dart';
+import 'oo_empty.dart';
+import 'oo_link.dart';
 import 'operation_summary.dart';
 import 'oo_shell.dart' show OoPage;
 import '../theme/oo_icon.dart';
@@ -71,13 +72,13 @@ class _OperationsPageState extends State<OperationsPage> {
       );
     }
     if (operations.isEmpty) {
-      return const Center(
-        child: OoBackdrop(
-          child: Padding(
-            padding: EdgeInsets.all(20),
-            child: Text('No Operations are open to this account.'),
-          ),
-        ),
+      return const OoEmptyState(
+        icon: OoIconName.operations,
+        backdrop: true,
+        title: 'No Operations are open to this account.',
+        body:
+            'An Operation is a project and its policy, and the Missions run under it. A '
+            'controller grants access to one.',
       );
     }
     if (selected != null) {
@@ -237,9 +238,13 @@ class _OperationCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    'Operation ${operation.operationId}',
-                    style: text.titleMedium,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: OoLink(
+                      'Operation ${operation.operationId}',
+                      route: OoLinkTo.operation(operation.operationId),
+                      style: text.titleMedium,
+                    ),
                   ),
                 ),
                 Text(
@@ -283,10 +288,19 @@ class _OperationCard extends StatelessWidget {
                 children: [
                   for (final state in boardStates)
                     if (counts[state] case final count?)
-                      Chip(
+                      ActionChip(
                         avatar: OoStateMark(state),
                         label: Text('$state $count'),
                         visualDensity: VisualDensity.compact,
+                        tooltip:
+                            'The $state Missions of ${operation.operationId}',
+                        onPressed: OoLinks.opener(
+                          context,
+                          OoLinkTo.missions(
+                            operation: operation.operationId,
+                            states: [state],
+                          ),
+                        ),
                       ),
                 ],
               ),

@@ -192,7 +192,7 @@ void main() {
 
     expect(
       find.text(
-        'Demo preview · sign-in is unavailable. Open the authenticated Outer Office site.',
+        'Demo data: nothing here is connected, and changes are turned off.',
       ),
       findsOneWidget,
     );
@@ -237,7 +237,7 @@ void main() {
       expect(find.textContaining('coordinator-007'), findsOneWidget);
       expect(find.textContaining('mission-007'), findsOneWidget);
       expect(
-        find.textContaining('Preview data — decisions disabled'),
+        find.textContaining('Demo data: decisions are off'),
         findsOneWidget,
       );
       final approve = tester.widget<FilledButton>(
@@ -1057,21 +1057,17 @@ void main() {
     await openPage(tester, 'Missions');
 
     expect(find.text('Missions'), findsOneWidget);
-    expect(find.text('operation-alpha'), findsOneWidget);
+    expect(find.text('Operation operation-alpha'), findsOneWidget);
     expect(find.text('Mission mission-007'), findsOneWidget);
-    expect(
-      find.text('Attempt 1 · lost · Station station-beta · Theater local'),
-      findsOneWidget,
-    );
+    expect(find.text('Attempt 1'), findsOneWidget);
+    expect(find.text('Station station-beta'), findsOneWidget);
     expect(find.text('Station "station-beta" went dark'), findsOneWidget);
     expect(
       find.text('Checkpointed to branch mission-007-review'),
       findsOneWidget,
     );
-    expect(
-      find.text('Attempt 2 · active · Station station-alpha · Theater local'),
-      findsOneWidget,
-    );
+    expect(find.text('Attempt 2'), findsOneWidget);
+    expect(find.text('Station station-alpha'), findsWidgets);
     expect(find.text('claude-session-123'), findsOneWidget);
     expect(find.text('codex-session-456'), findsOneWidget);
     expect(find.text('WORKING'), findsOneWidget);
@@ -1087,7 +1083,7 @@ void main() {
     await openPage(tester, 'Stations');
     expect(find.text('HQS'), findsOneWidget);
     expect(find.text('station-alpha'), findsOneWidget);
-    expect(find.textContaining('2/4 sessions'), findsOneWidget);
+    expect(find.textContaining('2 of 4 Sessions'), findsOneWidget);
     expect(
       find.text(
         '8 CPUs \u00b7 25% busy \u00b7 load 1.50 \u00b7 12.0 GiB free of 16.0 GiB '
@@ -1186,7 +1182,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('operation-alpha'), findsOneWidget);
+    expect(find.text('Operation operation-alpha'), findsOneWidget);
     expect(find.text('claude-session-123'), findsNothing);
     await openPage(tester, 'Missions');
     await tester.pumpAndSettle();
@@ -1209,17 +1205,17 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Filter by blocked'));
+    await tester.tap(find.byTooltip('Sessions that are blocked'));
     await tester.pumpAndSettle();
     expect(find.text('claude-session-123'), findsNothing);
     expect(find.text('codex-session-456'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Filter by parked'));
+    await tester.tap(find.byTooltip('Sessions that are parked'));
     await tester.pumpAndSettle();
     expect(find.text('claude-session-789'), findsOneWidget);
     expect(find.text('codex-session-456'), findsNothing);
 
-    await tester.tap(find.byTooltip('Filter by quarantined'));
+    await tester.tap(find.byTooltip('Sessions that are quarantined'));
     await tester.pumpAndSettle();
     expect(find.text('claude-session-901'), findsOneWidget);
     expect(find.text('claude-session-789'), findsNothing);
@@ -1300,14 +1296,20 @@ void main() {
     await tester.tap(find.text('preview-session-007'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Mission board'), findsOneWidget);
+    expect(
+      find.text('Each Mission is one brief of work under an Operation.'),
+      findsOneWidget,
+    );
     expect(find.text('preview-session-007'), findsOneWidget);
     expect(find.text('Session preview'), findsOneWidget);
     expect(find.byTooltip('Close Session details'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Close Session details'));
     await tester.pumpAndSettle();
-    expect(find.text('Mission board'), findsOneWidget);
+    expect(
+      find.text('Each Mission is one brief of work under an Operation.'),
+      findsOneWidget,
+    );
     expect(find.text('Session preview'), findsNothing);
     expect(find.text('preview-session-007'), findsOneWidget);
   });
@@ -1333,13 +1335,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text('operator-007 · mission.create.requested'),
+      find.text('operator-007 · Mission create requested'),
       findsOneWidget,
     );
-    expect(
-      find.textContaining('Operation G · oo--mission-007'),
-      findsOneWidget,
-    );
+    expect(find.text('oo--mission-007'), findsOneWidget);
     expect(find.textContaining('prompt'), findsNothing);
   });
 
@@ -1462,13 +1461,10 @@ void main() {
 
     expect(find.text('Audit'), findsOneWidget);
     expect(
-      find.text('operator-007 · mission.create.requested'),
+      find.text('operator-007 · Mission create requested'),
       findsOneWidget,
     );
-    expect(
-      find.textContaining('Operation operation-alpha · mission-007'),
-      findsOneWidget,
-    );
+    expect(find.text('mission-007'), findsOneWidget);
     expect(find.textContaining('prompt'), findsNothing);
   });
 

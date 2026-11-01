@@ -6,29 +6,87 @@ import '../theme/oo_theme.dart';
 
 /// The pages of the rail, in its order.
 enum OoPage {
-  overview('overview', 'Overview', OoIconName.overview),
-  operations('operations', 'Operations', OoIconName.operations),
-  missions('missions', 'Missions', OoIconName.missions),
-  sessions('sessions', 'Sessions', OoIconName.sessions),
-  agents('agents', 'Agents', OoIconName.agents),
-  stations('stations', 'Stations', OoIconName.stations),
-  greenInk('green_ink', 'Green Ink', OoIconName.greenInk),
-  briefings('briefings', 'Briefings', OoIconName.briefings),
-  roster('roster', 'Roster', OoIconName.roster),
-  pools('pools', 'Account Pools', OoIconName.pools),
-  timeline('timeline', 'Timeline', OoIconName.timeline),
-  audit('audit', 'Audit', OoIconName.audit),
-  access('access', 'Access', OoIconName.settings),
+  overview('overview', 'Overview', OoIconName.overview, ''),
+  operations(
+    'operations',
+    'Operations',
+    OoIconName.operations,
+    'The projects you can see, their policy and the Missions under each.',
+  ),
+  missions(
+    'missions',
+    'Missions',
+    OoIconName.missions,
+    'Each Mission is one brief of work under an Operation.',
+  ),
+  sessions(
+    'sessions',
+    'Sessions',
+    OoIconName.sessions,
+    'Each Session is one run of an Agent on a Mission.',
+  ),
+  agents(
+    'agents',
+    'Agents',
+    OoIconName.agents,
+    'The codenames that take Missions, with their model, clearance and record.',
+  ),
+  stations(
+    'stations',
+    'Stations',
+    OoIconName.stations,
+    'The machines running AI6 and the Theaters they reach.',
+  ),
+  greenInk(
+    'green_ink',
+    'Green Ink',
+    OoIconName.greenInk,
+    'Irreversible steps that wait for a person to sign.',
+  ),
+  briefings(
+    'briefings',
+    'Briefings',
+    OoIconName.briefings,
+    'Work that waits for your decision before it becomes a Mission.',
+  ),
+  roster(
+    'roster',
+    'Roster',
+    OoIconName.roster,
+    'The records every Station reads.',
+  ),
+  pools(
+    'pools',
+    'Account Pools',
+    OoIconName.pools,
+    'The accounts Sessions draw from, and how much of each is used.',
+  ),
+  timeline(
+    'timeline',
+    'Timeline',
+    OoIconName.timeline,
+    'What happened in an Operation, newest first.',
+  ),
+  audit('audit', 'Audit', OoIconName.audit, 'Who did what, for review.'),
+  access(
+    'access',
+    'Access',
+    OoIconName.settings,
+    'Who may do what, and the accounts.',
+  ),
 
   /// Her memory of the person; opened from her chat, not the rail.
-  memory('memory', "Moneypenny's memory", OoIconName.moneypenny);
+  memory('memory', "Moneypenny's memory", OoIconName.moneypenny, '');
 
-  const OoPage(this.id, this.label, this.iconName);
+  const OoPage(this.id, this.label, this.iconName, this.purpose);
 
   /// The page's name in its route, such as `green_ink`.
   final String id;
   final String label;
   final OoIconName iconName;
+
+  /// One line on what the page is for, under its heading; empty on a page that says so itself.
+  final String purpose;
 
   /// The page's line icon, for small sizes.
   Widget get icon => OoIcon(iconName);
@@ -66,6 +124,46 @@ enum OoRailGroup {
           when pages.isNotEmpty)
         (group, pages),
   ];
+}
+
+/// A page's heading: its name, where the top bar does not already show it, and what it is for.
+class OoPageHeading extends StatelessWidget {
+  const OoPageHeading(this.page, {super.key});
+
+  final OoPage page;
+
+  @override
+  Widget build(BuildContext context) {
+    if (page.purpose.isEmpty) return const SizedBox.shrink();
+    final text = Theme.of(context).textTheme;
+    final tokens = OoTokens.of(context);
+    final titled = MediaQuery.sizeOf(context).width >= OoBreakpoints.wide;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (titled)
+              Semantics(
+                header: true,
+                child: Text(
+                  page.label,
+                  style: text.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            Text(
+              page.purpose,
+              style: text.bodyMedium?.copyWith(color: tokens.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// How many pages a phone's bottom bar holds besides **More**.

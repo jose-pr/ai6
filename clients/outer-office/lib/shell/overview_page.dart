@@ -16,6 +16,7 @@ import '../timeline/timeline_page.dart';
 import '../routes/oo_route.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
+import 'oo_link.dart';
 import 'oo_shell.dart';
 import 'top_bar.dart';
 
@@ -120,6 +121,7 @@ class OverviewPage extends StatelessWidget {
         icon: OoIconName.operations,
         label: 'Operations',
         count: operations.length,
+        route: const OoRoute(OoPage.operations),
         detail: TextSpan(
           text:
               '${operations.where((operation) => busyOperations.contains(operation.operationId)).length} with active Missions',
@@ -131,6 +133,7 @@ class OverviewPage extends StatelessWidget {
         icon: OoIconName.stations,
         label: 'Stations',
         count: stations.length,
+        route: const OoRoute(OoPage.stations),
         detail: TextSpan(
           children: [
             TextSpan(
@@ -152,6 +155,7 @@ class OverviewPage extends StatelessWidget {
         icon: OoIconName.missions,
         label: 'Missions',
         count: active.length,
+        route: OoLinkTo.missions(states: activeMissionStates),
         detail: TextSpan(
           children: [
             TextSpan(
@@ -167,6 +171,7 @@ class OverviewPage extends StatelessWidget {
         icon: OoIconName.sessions,
         label: 'Sessions waiting',
         count: waiting.length,
+        route: OoLinkTo.sessions(state: 'blocked'),
         detail: TextSpan(
           text: 'of ${board.sessions.length} Sessions',
           style: TextStyle(
@@ -316,6 +321,17 @@ class OverviewPage extends StatelessWidget {
   }
 }
 
+/// The states of a Mission that has not stopped, which the Missions tile counts.
+const activeMissionStates = [
+  'queued',
+  'working',
+  'blocked',
+  'stalled',
+  'parked',
+  'quarantined',
+];
+
+/// A count that opens [route], the page filtered to what it counted.
 class _Stat extends StatelessWidget {
   const _Stat({
     required this.compact,
@@ -323,7 +339,10 @@ class _Stat extends StatelessWidget {
     required this.label,
     required this.count,
     required this.detail,
+    required this.route,
   });
+
+  final OoRoute route;
 
   /// A phone-sized page: a smaller tile.
   final bool compact;
@@ -336,38 +355,48 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
+    final open = OoLinks.opener(context, route);
     return Card(
-      child: Padding(
-        padding: EdgeInsets.all(compact ? 12 : 16),
-        child: Row(
-          children: [
-            OoTile(icon, size: compact ? 48 : 60),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: text.labelLarge?.copyWith(color: tokens.muted),
+      clipBehavior: Clip.antiAlias,
+      child: Semantics(
+        link: open != null,
+        label: 'Open $label: $count',
+        child: InkWell(
+          onTap: open,
+          focusColor: tokens.accent.withValues(alpha: 0.2),
+          child: Padding(
+            padding: EdgeInsets.all(compact ? 12 : 16),
+            child: Row(
+              children: [
+                OoTile(icon, size: compact ? 48 : 60),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: text.labelLarge?.copyWith(color: tokens.muted),
+                      ),
+                      Text(
+                        '$count',
+                        style: text.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          height: 1.25,
+                        ),
+                      ),
+                      Text.rich(
+                        detail,
+                        style: text.bodySmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                  Text(
-                    '$count',
-                    style: text.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      height: 1.25,
-                    ),
-                  ),
-                  Text.rich(
-                    detail,
-                    style: text.bodySmall,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -393,7 +422,7 @@ class _ActiveOperations extends StatelessWidget {
     final operations = board.userSession?.operations ?? const [];
     final stations = board.stationBoard.stations;
     return OoPanel(
-      title: 'ACTIVE OPERATIONS',
+      title: 'OPERATIONS',
       trailing: Text('${operations.length}', style: text.titleMedium),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -403,9 +432,9 @@ class _ActiveOperations extends StatelessWidget {
               'No Operations you can see. A controller grants access to Operations.',
               style: TextStyle(color: tokens.muted),
             ),
-          for (final operation in operations.take(4))
+          for (final operation in operations.take(board.limits.pages.summary))
             _operationRow(context, operation.operationId),
-          if (operations.length > 4 && onOpen != null)
+          if (operations.length > board.limits.pages.summary && onOpen != null)
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
@@ -420,7 +449,7 @@ class _ActiveOperations extends StatelessWidget {
               style: ooSectionLabel(context).copyWith(fontSize: 11),
             ),
             const SizedBox(height: 10),
-            for (final station in stations.take(4))
+            for (final station in stations.take(board.limits.pages.summary))
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Row(
@@ -430,11 +459,15 @@ class _ActiveOperations extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        station.stationId,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: text.bodyMedium,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: OoLink(
+                          station.stationId,
+                          route: OoLinkTo.station(station.stationId),
+                          semanticLabel: 'Open Station ${station.stationId}',
+                          maxLines: 1,
+                          style: text.bodyMedium,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -495,9 +528,18 @@ class _ActiveOperations extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Operation $operationId', style: text.titleSmall),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OoLink(
+                    'Operation $operationId',
+                    route: OoLinkTo.operation(operationId),
+                    style: text.titleSmall,
+                  ),
+                ),
                 Text(
-                  '$status · $done of $total Missions done',
+                  total == 0
+                      ? '$status · no Missions yet'
+                      : '$status · $done of $total Missions done',
                   style: text.bodySmall?.copyWith(color: tokens.muted),
                 ),
                 const SizedBox(height: 6),
@@ -538,7 +580,7 @@ class _RecentActivity extends StatefulWidget {
 }
 
 class _RecentActivityState extends State<_RecentActivity> {
-  static const _shown = 5;
+  int get _shown => widget.board.limits.pages.summary;
   List<TimelineItemSummary>? _items;
   bool _failed = false;
   Timer? _timer;
@@ -591,7 +633,7 @@ class _RecentActivityState extends State<_RecentActivity> {
     final Widget body;
     if (widget.board.timelineOperations.isEmpty) {
       body = Text(
-        'No Operation timeline is visible to this account.',
+        'Your account does not read any Operation\'s timeline.',
         style: TextStyle(color: tokens.muted),
       );
     } else if (_failed) {
@@ -603,7 +645,7 @@ class _RecentActivityState extends State<_RecentActivity> {
       body = const LinearProgressIndicator();
     } else if (items.isEmpty) {
       body = Text(
-        'No activity recorded yet.',
+        'No activity yet. It shows here once a Mission runs.',
         style: TextStyle(color: tokens.muted),
       );
     } else {
@@ -633,15 +675,7 @@ class _RecentActivityState extends State<_RecentActivity> {
                           timelineSentence(item.action),
                           style: text.bodyMedium,
                         ),
-                        Text(
-                          [
-                            'Operation ${item.operationId}',
-                            if (item.context.isNotEmpty) item.context,
-                          ].join(' · '),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: text.bodySmall?.copyWith(color: tokens.muted),
-                        ),
+                        OoLinkLine(item.names),
                       ],
                     ),
                   ),
@@ -669,14 +703,6 @@ OoIconName timelineKindIcon(String kind) => switch (kind) {
   'sleeper' => OoIconName.sleeper,
   _ => OoIconName.audit,
 };
-
-/// `resume.applied` as "Resume applied".
-String timelineSentence(String action) {
-  final words = action.replaceAll(RegExp(r'[._-]+'), ' ').trim();
-  return words.isEmpty
-      ? action
-      : '${words[0].toUpperCase()}${words.substring(1)}';
-}
 
 const _months = [
   'Jan',
@@ -734,6 +760,7 @@ class _Upcoming extends StatelessWidget {
           at: queuedAt(mission),
           color: tokens.accent,
           title: 'Mission ${mission.missionId}',
+          route: OoLinkTo.mission(mission.operationId, mission.missionId),
           detail: [
             'Operation ${mission.operationId}',
             'queued',
@@ -749,6 +776,7 @@ class _Upcoming extends StatelessWidget {
           at: brief.heldAt,
           color: tokens.warning,
           title: revealInvisible(brief.title),
+          route: OoLinkTo.heldBrief(brief.operationId, brief.key),
           detail: 'Operation ${brief.operationId} · held for review',
         ),
     ];
@@ -760,7 +788,7 @@ class _Upcoming extends StatelessWidget {
           : null,
       child: rows.isEmpty
           ? Text(
-              'No Mission is waiting to run.',
+              'No Mission is waiting to run. Queued Missions and held briefs show here.',
               style: text.bodyMedium?.copyWith(color: tokens.muted),
             )
           : Column(
@@ -778,7 +806,10 @@ class _UpcomingRow extends StatelessWidget {
     required this.color,
     required this.title,
     required this.detail,
+    required this.route,
   });
+
+  final OoRoute route;
 
   /// What the row is: `Queued Mission` or `Held brief`.
   final String kind;
@@ -845,10 +876,10 @@ class _UpcomingRow extends StatelessWidget {
                     kind,
                     style: text.labelSmall?.copyWith(color: tokens.muted),
                   ),
-                  Text(
+                  OoLink(
                     title,
+                    route: route,
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                     style: text.bodyMedium,
                   ),
                   Text(

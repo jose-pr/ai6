@@ -122,13 +122,14 @@ void main() {
     expect(asked.single.path, '/v1/user/operations/G/pools');
     expect(find.text('team/alpha'), findsOneWidget);
     expect(
-      find.text('2/2 Sessions · five_hour 42.5% · 1200 tokens today'),
+      find.text('2/2 Sessions · five hour 42.5% · 1200 tokens today'),
       findsOneWidget,
     );
-    expect(find.text('Used by mission-1'), findsOneWidget);
+    expect(find.text('Used by'), findsOneWidget);
+    expect(find.text('Mission mission-1'), findsOneWidget);
     expect(
       find.text(
-        '0 Sessions · five_hour 100.0% · 0 tokens today · '
+        '0 Sessions · five hour 100.0% · 0 tokens today · '
         'Limited until 2030-03-17T17:46Z',
       ),
       findsOneWidget,
@@ -140,7 +141,10 @@ void main() {
     await tester.tap(find.text('L').last);
     await tester.pumpAndSettle();
     expect(asked.last.path, '/v1/user/operations/L/pools');
-    expect(find.text('No pool account serves this Operation.'), findsOneWidget);
+    expect(
+      find.textContaining('No pool account serves this Operation.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('account pools need pool.read', (tester) async {

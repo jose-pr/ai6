@@ -151,7 +151,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.text('• duplicate: the same URL as other work (mission-007)'),
+      find.text('• duplicate: the same URL as other work'),
       findsOneWidget,
     );
     expect(find.text(untrustedText), findsNothing);
@@ -172,7 +172,7 @@ void main() {
       '/v1/user/operations/G/held-briefs/$heldKey/release',
     );
     expect(find.text('Brief released to the queue.'), findsOneWidget);
-    expect(find.text('No briefs are held.'), findsOneWidget);
+    expect(find.textContaining('No briefs are held.'), findsOneWidget);
   });
 
   testWidgets('an operator refuses a held brief with a reason', (tester) async {

@@ -3,11 +3,12 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
-import '../theme/oo_backdrop.dart';
 import '../theme/oo_decor.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
+import 'oo_empty.dart';
 import 'oo_freshness.dart';
+import 'oo_link.dart';
 import 'oo_shell.dart';
 
 /// The Sessions a Sessions [route] selects from the board, in its order: by Operation,
@@ -83,13 +84,12 @@ class SessionsPage extends StatelessWidget {
 
   Widget _page(double width) {
     if (board.sessions.isEmpty) {
-      return const Center(
-        child: OoBackdrop(
-          child: Padding(
-            padding: EdgeInsets.all(20),
-            child: Text('No Sessions are on the board.'),
-          ),
-        ),
+      return const OoEmptyState(
+        icon: OoIconName.sessions,
+        backdrop: true,
+        title: 'No Sessions yet',
+        body: 'A Session is one run of an Agent on a Mission. They show here once a Mission starts.',
+        link: ('Go to Missions', OoRoute(OoPage.missions)),
       );
     }
     final sessions = routeSessions(board, route);
@@ -160,6 +160,8 @@ class SessionsPage extends StatelessWidget {
                     label: Text(label),
                     onSort: (_, ascending) => _sort(sort, ascending),
                   ),
+                const DataColumn(label: Text('Station')),
+                const DataColumn(label: Text('Agent')),
               ],
               rows: [
                 for (final session in sessions)
@@ -168,8 +170,24 @@ class SessionsPage extends StatelessWidget {
                     selected: session.sessionId == selectedId,
                     onSelectChanged: (_) => onOpen(session),
                     cells: [
-                      DataCell(Text(session.operationId)),
-                      DataCell(Text(session.missionId)),
+                      DataCell(
+                        OoLink(
+                          session.operationId,
+                          route: OoLinkTo.operation(session.operationId),
+                          semanticLabel:
+                              'Open Operation ${session.operationId}',
+                        ),
+                      ),
+                      DataCell(
+                        OoLink(
+                          session.missionId,
+                          route: OoLinkTo.mission(
+                            session.operationId,
+                            session.missionId,
+                          ),
+                          semanticLabel: 'Open Mission ${session.missionId}',
+                        ),
+                      ),
                       DataCell(
                         Text(
                           session.sessionId,
@@ -195,6 +213,28 @@ class SessionsPage extends StatelessWidget {
                         ),
                       ),
                       DataCell(OoTime(session.updatedAt, style: null)),
+                      DataCell(
+                        session.stationId == null
+                            ? const Text('—')
+                            : OoLink(
+                                session.stationId!,
+                                route: OoLinkTo.station(session.stationId!),
+                                semanticLabel:
+                                    'Open Station ${session.stationId}',
+                              ),
+                      ),
+                      DataCell(
+                        session.agent == null
+                            ? const Text('—')
+                            : OoLink(
+                                session.agent!,
+                                route: OoLinkTo.agent(
+                                  session.agent!,
+                                  operation: session.operationId,
+                                ),
+                                semanticLabel: 'Open Agent ${session.agent}',
+                              ),
+                      ),
                     ],
                   ),
               ],
@@ -232,13 +272,23 @@ class _SessionFacts extends StatelessWidget {
         child: ListTile(
           leading: const OoTile(OoIconName.sessions, size: 44),
           title: Text('Session ${session.sessionId}'),
-          subtitle: Text(
-            [
-              'Operation ${session.operationId} · Mission ${session.missionId}',
-              [state, ?session.reason?.replaceAll('-', ' ')].join(' · '),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              OoLinkLine([
+                (
+                  'Operation ${session.operationId}',
+                  OoLinkTo.operation(session.operationId),
+                ),
+                (
+                  'Mission ${session.missionId}',
+                  OoLinkTo.mission(session.operationId, session.missionId),
+                ),
+              ]),
+              Text([state, ?session.reason?.replaceAll('-', ' ')].join(' · ')),
               if (session.exposure.isNotEmpty)
-                'Has read: ${session.exposure.join(', ')}',
-            ].join('\n'),
+                Text('Has read: ${session.exposure.join(', ')}'),
+            ],
           ),
           isThreeLine: true,
           trailing: TextButton(
@@ -290,13 +340,19 @@ class _SessionList extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: text.titleSmall,
                         ),
-                        Text(
-                          'Operation ${session.operationId} · '
-                          'Mission ${session.missionId}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: text.bodySmall?.copyWith(color: tokens.muted),
-                        ),
+                        OoLinkLine([
+                          (
+                            'Operation ${session.operationId}',
+                            OoLinkTo.operation(session.operationId),
+                          ),
+                          (
+                            'Mission ${session.missionId}',
+                            OoLinkTo.mission(
+                              session.operationId,
+                              session.missionId,
+                            ),
+                          ),
+                        ]),
                       ],
                     ),
                   ),

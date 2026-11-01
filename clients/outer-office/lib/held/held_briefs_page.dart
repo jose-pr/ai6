@@ -4,6 +4,7 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../shell/oo_freshness.dart';
+import '../shell/oo_link.dart';
 
 /// One thing vetting found in a brief.
 @immutable
@@ -292,7 +293,7 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
               ],
             ),
             if (widget.board.demo)
-              const Chip(label: Text('Preview data — decisions disabled')),
+              const Chip(label: Text('Demo data — decisions disabled')),
             const SizedBox(height: 8),
             Expanded(
               child: FutureBuilder<List<HeldBriefSummary>>(
@@ -312,7 +313,8 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
                     return Center(
                       child: Text(
                         itemId == null
-                            ? 'No briefs are held.'
+                            ? 'No briefs are held. Vetting holds a brief here when it finds '
+                                  'something a person should see first.'
                             : 'No brief $itemId is held in Operation $operationId.',
                       ),
                     );
@@ -357,7 +359,15 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
           ),
           if (held.url != null) Text(revealInvisible(held.url!)),
           const SizedBox(height: 8),
-          for (final finding in held.findings) Text('• ${finding.line}'),
+          for (final finding in held.findings)
+            OoLinkLine([
+              ('• ${finding.kind}: ${finding.detail}', null),
+              if (finding.related case final related?)
+                (
+                  'Mission $related',
+                  OoLinkTo.mission(held.operationId, related),
+                ),
+            ], style: DefaultTextStyle.of(context).style),
           // The text may carry the very thing vetting caught: shown on request, as text.
           ExpansionTile(
             tilePadding: EdgeInsets.zero,

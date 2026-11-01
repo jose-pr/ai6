@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show DropdownButton, Text, TextField, TextInputAction;
+    show DropdownButton, ListTile, Text, TextField, TextInputAction, Tooltip;
 import 'package:outer_office/main.dart';
 
 import 'shell_navigation.dart';
@@ -136,14 +136,14 @@ void main() {
     await openPage(tester, 'Timeline');
     await tester.pumpAndSettle();
 
-    expect(find.text('control · resume.applied'), findsOneWidget);
-    expect(find.text('lifecycle · blocked'), findsOneWidget);
+    expect(find.text('Resume applied'), findsOneWidget);
+    expect(find.text('Blocked'), findsOneWidget);
     expect(timeline.asked.single.path, '/v1/user/operations/G/timeline');
 
     await tester.tap(find.text('Load older activity'));
     await tester.pumpAndSettle();
     expect(timeline.asked.last.queryParameters['cursor'], 'after-e4');
-    expect(find.text('lifecycle · working'), findsOneWidget);
+    expect(find.text('Working'), findsOneWidget);
     expect(find.text('Load older activity'), findsNothing);
 
     timeline.newer = true;
@@ -152,16 +152,10 @@ void main() {
     expect(timeline.asked.last.queryParameters.containsKey('cursor'), isFalse);
     // The new item is on top and nothing already loaded is lost or repeated.
     final titles = tester
-        .widgetList<Text>(find.textContaining(' · '))
-        .map((text) => text.data)
-        .where((title) => title!.startsWith(RegExp('(lifecycle|control) ')))
+        .widgetList<ListTile>(find.byType(ListTile))
+        .map((tile) => ((tile.title! as Tooltip).child! as Text).data)
         .toList();
-    expect(titles, [
-      'lifecycle · done',
-      'control · resume.applied',
-      'lifecycle · blocked',
-      'lifecycle · working',
-    ]);
+    expect(titles, ['Done', 'Resume applied', 'Blocked', 'Working']);
   });
 
   testWidgets('the timeline filters by Mission and by Operation', (
@@ -180,8 +174,8 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(timeline.asked.last.queryParameters['mission'], 'mission-1');
-    expect(find.text('lifecycle · blocked'), findsOneWidget);
-    expect(find.text('control · resume.applied'), findsNothing);
+    expect(find.text('Blocked'), findsOneWidget);
+    expect(find.text('Resume applied'), findsNothing);
     expect(find.textContaining('Mission mission-1'), findsOneWidget);
 
     await tester.tap(find.byType(DropdownButton<String>));
@@ -189,7 +183,7 @@ void main() {
     await tester.tap(find.text('L').last);
     await tester.pumpAndSettle();
     expect(timeline.asked.last.path, '/v1/user/operations/L/timeline');
-    expect(find.text('cable · sent'), findsOneWidget);
+    expect(find.text('Sent'), findsOneWidget);
   });
 
   testWidgets('the timeline needs audit.read', (tester) async {

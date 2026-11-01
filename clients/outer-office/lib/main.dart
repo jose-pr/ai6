@@ -42,7 +42,9 @@ import 'operations/operation_tree.dart';
 import 'shell/operations_page.dart';
 import 'shell/missions_board.dart';
 import 'shell/missions_page.dart';
+import 'shell/oo_empty.dart';
 import 'shell/oo_freshness.dart';
+import 'shell/oo_link.dart';
 import 'shell/overview_page.dart';
 import 'shell/sessions_page.dart';
 import 'shell/sign_in_page.dart';
@@ -194,13 +196,14 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   }) : themeId = ooThemePreference(themeId),
        _client = client ?? http.Client() {
     if (demo) {
-      sessions = const [
+      sessions = [
         SessionSummary(
           operationId: 'G',
           missionId: 'mission-007',
           sessionId: 'preview-session-007',
           state: 'working',
           sequence: 18,
+          updatedAt: _demoNow() - 90,
           stationId: 'station-control-01',
           agent: 'technical-officer',
         ),
@@ -210,7 +213,8 @@ class MissionBoard extends ChangeNotifier implements PageActions {
           sessionId: 'preview-session-008',
           state: 'blocked',
           sequence: 7,
-          exposure: ['tool:WebFetch'],
+          updatedAt: _demoNow() - 150,
+          exposure: const ['tool:WebFetch'],
           stationId: 'station-control-01',
           agent: 'technical-officer',
         ),
@@ -220,6 +224,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
           sessionId: 'preview-session-021',
           state: 'done',
           sequence: 32,
+          updatedAt: _demoNow() - 7200,
           stationId: 'station-remote-02',
         ),
       ];
@@ -3745,6 +3750,8 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               onRoute: onRoute,
               desktopWindows: widget.desktopWindows,
               pages: pages,
+              onCreateMission: (operationId) =>
+                  _showCreateMission(context, operationId, board),
             ),
             OoPage.sessions => SessionsPage(
               board: board,
@@ -3907,7 +3914,8 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                   ],
                 ),
           empty: stationId == null
-              ? 'No Station to show: none has checked in, or none is open to this account.'
+              ? 'No Station to show. A Station is a machine running ai6 serve: once one checks '
+                    'in that you may see, it appears here.'
               : 'Station $stationId is not on this board.',
           onCreateMission: (operationId) =>
               _showCreateMission(context, operationId, widget.board),
@@ -4033,7 +4041,14 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                   ],
                 ),
               ),
-              Expanded(child: _pageBody(context, route, pages)),
+              OoPageHeading(route.page),
+              Expanded(
+                child: OoLinks(
+                  pages: pages,
+                  onRoute: _openRoute,
+                  child: _pageBody(context, route, pages),
+                ),
+              ),
             ],
           ),
         ),
@@ -4062,13 +4077,17 @@ class _TheatersTab extends StatelessWidget {
               (station, theater),
     ];
     if (theaters.isEmpty) {
-      return Center(
-        child: Text(switch ((stationId, theaterId)) {
+      return OoEmptyState(
+        icon: OoIconName.theaters,
+        title: switch ((stationId, theaterId)) {
           (final station?, final theater?) =>
             'Station $station reports no Theater $theater.',
           (final station?, null) => 'Station $station reports no Theater.',
           _ => 'No Station reports a Theater.',
-        }),
+        },
+        body:
+            'A Theater is where a Session runs, reached through a Station. Each Station lists '
+            'its own in theaters.toml.',
       );
     }
     final muted = OoTokens.of(context).muted;
@@ -4082,9 +4101,15 @@ class _TheatersTab extends StatelessWidget {
           child: ListTile(
             leading: const OoIcon(OoIconName.theaters),
             title: Text('Theater ${theater.id}'),
-            subtitle: Text(
-              'Station ${station.stationId}\n${theater.description}',
-              style: TextStyle(color: muted),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                OoLink(
+                  'Station ${station.stationId}',
+                  route: OoLinkTo.station(station.stationId),
+                ),
+                Text(theater.description, style: TextStyle(color: muted)),
+              ],
             ),
             isThreeLine: true,
           ),
@@ -4285,7 +4310,7 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                   children: [
                     Expanded(
                       child: Text(
-                        'Pending proposals require an explicit M authorization.',
+                        'An Agent asks to start this work; none of it runs until you approve it.',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
@@ -4305,9 +4330,7 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                 if (widget.board.demo)
                   const Align(
                     alignment: Alignment.centerLeft,
-                    child: Chip(
-                      label: Text('Preview data — decisions disabled'),
-                    ),
+                    child: Chip(label: Text('Demo data: decisions are off')),
                   ),
                 const SizedBox(height: 8),
                 Expanded(
@@ -4328,7 +4351,8 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                         return Center(
                           child: Text(
                             itemId == null
-                                ? 'No pending Mission proposals.'
+                                ? 'No pending Mission proposals. An Agent proposes a Mission '
+                                      'here, and it runs only once you approve it.'
                                 : 'No pending Mission proposal $itemId in Operation '
                                       '$operationId.',
                           ),
@@ -4355,9 +4379,29 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                                   const SizedBox(height: 8),
                                   SelectableText(proposal.body),
                                   const SizedBox(height: 12),
-                                  Text(
-                                    'Proposed by ${proposal.proposerAgentId} · Parent Mission ${proposal.parentMissionId} · Session ${proposal.proposerSessionId}',
-                                  ),
+                                  OoLinkLine([
+                                    (
+                                      'Proposed by ${proposal.proposerAgentId}',
+                                      OoLinkTo.agent(
+                                        proposal.proposerAgentId,
+                                        operation: proposal.operationId,
+                                      ),
+                                    ),
+                                    (
+                                      'Parent Mission ${proposal.parentMissionId}',
+                                      OoLinkTo.mission(
+                                        proposal.operationId,
+                                        proposal.parentMissionId,
+                                      ),
+                                    ),
+                                    (
+                                      'Session ${proposal.proposerSessionId}',
+                                      OoLinkTo.session(
+                                        proposal.operationId,
+                                        proposal.proposerSessionId,
+                                      ),
+                                    ),
+                                  ], style: DefaultTextStyle.of(context).style),
                                   if (proposal.role != null ||
                                       proposal.tags.isNotEmpty)
                                     Padding(
@@ -5053,6 +5097,23 @@ class _AgentRoleEditorDialogState extends State<AgentRoleEditorDialog> {
   );
 }
 
+/// Where an audit record happened, as a name that opens it when it is a Station or Operation.
+(String, OoRoute?) auditPlace(AuditEntrySummary record) {
+  final resource = record.resource;
+  if (resource == null) {
+    return (
+      'Operation ${record.operation}',
+      OoLinkTo.operation(record.operation),
+    );
+  }
+  return resource.startsWith('station:')
+      ? (
+          'Station ${resource.substring('station:'.length)}',
+          OoLinkTo.station(resource.substring('station:'.length)),
+        )
+      : (resource, null);
+}
+
 class AuditLogPage extends StatefulWidget {
   const AuditLogPage({
     required this.board,
@@ -5116,8 +5177,11 @@ class _AuditLogPageState extends State<AuditLogPage> {
           future: _records,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return const Center(
-                child: Text('Audit records are unavailable.'),
+              return OoEmptyState(
+                icon: OoIconName.audit,
+                title: 'Audit records could not be read.',
+                body: '${snapshot.error}',
+                action: ('Try again', _refresh),
               );
             }
             if (!snapshot.hasData) {
@@ -5125,12 +5189,14 @@ class _AuditLogPageState extends State<AuditLogPage> {
             }
             final records = snapshot.requireData.where(_selected).toList();
             if (records.isEmpty) {
-              return Center(
-                child: Text(
-                  widget.route.filtered
-                      ? 'No audit records match these filters.'
-                      : 'No audit records are available.',
-                ),
+              return OoEmptyState(
+                icon: OoIconName.audit,
+                title: widget.route.filtered
+                    ? 'No audit records match these filters.'
+                    : 'No audit records yet.',
+                body: widget.route.filtered
+                    ? 'Remove a filter above to see more.'
+                    : 'Every change a person or Agent makes through AI6 is recorded here.',
               );
             }
             return ListView.separated(
@@ -5141,12 +5207,18 @@ class _AuditLogPageState extends State<AuditLogPage> {
                 final record = records[index];
                 return ListTile(
                   leading: const Icon(Icons.receipt_long_outlined),
-                  title: Text('${record.actor} · ${record.action}'),
+                  title: Text(
+                    '${record.actor} · ${timelineSentence(record.action)}',
+                  ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        '${record.resource ?? 'Operation ${record.operation}'} · ${record.target}',
+                      Tooltip(
+                        message: record.action,
+                        child: OoLinkLine([
+                          auditPlace(record),
+                          (record.target, null),
+                        ]),
                       ),
                       OoTime(record.at),
                     ],
@@ -5180,7 +5252,7 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (board.demo)
-                    const Text('Preview mode · no signed-in operator')
+                    const Text('Demo data · no signed-in operator')
                   else
                     FutureBuilder<UserSessionSummary>(
                       future: identity,
@@ -5445,12 +5517,33 @@ class _PlacementResult extends StatelessWidget {
               : 'Would run on, best first',
           style: Theme.of(context).textTheme.titleSmall,
         ),
-        for (final choice in preview.choices) Text(choice.description),
+        for (final choice in preview.choices)
+          OoLinkLine([
+            (choice.station, OoLinkTo.station(choice.station)),
+            (choice.theater, OoLinkTo.theater(choice.station, choice.theater)),
+            (
+              choice.agent,
+              OoLinkTo.agent(choice.agent, operation: preview.operationId),
+            ),
+            if (choice.mode != 'field') (choice.mode, null),
+            ('score ${choice.score.toStringAsFixed(2)}', null),
+          ], style: Theme.of(context).textTheme.bodyMedium),
         if (preview.rejections.isNotEmpty) ...[
           const SizedBox(height: 8),
           Text('Ruled out', style: Theme.of(context).textTheme.titleSmall),
           for (final rejection in preview.rejections)
-            Text('${rejection.subject}: ${rejection.reason}'),
+            Wrap(
+              children: [
+                if (rejection.station case final station?)
+                  OoLink(
+                    '${rejection.subject}: ',
+                    route: OoLinkTo.station(station),
+                  )
+                else
+                  Text('${rejection.subject}: '),
+                Text(rejection.reason),
+              ],
+            ),
         ],
         const SizedBox(height: 6),
         Text(

@@ -122,7 +122,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DataTable), findsNothing);
     expect(find.text('preview-session-007'), findsOneWidget);
-    expect(find.text('Operation G · Mission mission-007'), findsNWidgets(2));
+    expect(find.text('Operation G'), findsNWidgets(2));
+    expect(find.text('Mission mission-007'), findsNWidgets(2));
   });
 
   testWidgets('the bell counts what needs attention and opens its page', (

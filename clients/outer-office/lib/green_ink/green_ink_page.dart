@@ -6,6 +6,7 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../shell/oo_freshness.dart';
+import '../shell/oo_link.dart';
 
 /// The time in UTC, to the second.
 String utcTime(double at) => DateTime.fromMillisecondsSinceEpoch(
@@ -340,7 +341,7 @@ class _GreenInkPageState extends State<GreenInkPage> {
             ],
           ),
           if (widget.board.demo)
-            const Chip(label: Text('Preview data — decisions disabled')),
+            const Chip(label: Text('Demo data: decisions are off')),
           const SizedBox(height: 8),
           Expanded(
             child: FutureBuilder<List<GreenInkRequestSummary>>(
@@ -360,7 +361,9 @@ class _GreenInkPageState extends State<GreenInkPage> {
                   return Center(
                     child: Text(
                       requestId == null
-                          ? 'No steps are waiting for green ink.'
+                          ? 'No steps are waiting for green ink. An Agent asks here before '
+                                'an irreversible step, such as a push, and waits for your '
+                                'signature.'
                           : 'Request $requestId is not waiting in Operation '
                                 '$operationId.',
                     ),
@@ -386,10 +389,23 @@ class _GreenInkPageState extends State<GreenInkPage> {
                             Wrap(
                               crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
-                                Text(
-                                  'Agent ${request.agent} · '
-                                  'Mission ${request.missionId} · ',
-                                ),
+                                OoLinkLine([
+                                  (
+                                    'Agent ${request.agent}',
+                                    OoLinkTo.agent(
+                                      request.agent,
+                                      operation: request.operationId,
+                                    ),
+                                  ),
+                                  (
+                                    'Mission ${request.missionId}',
+                                    OoLinkTo.mission(
+                                      request.operationId,
+                                      request.missionId,
+                                    ),
+                                  ),
+                                ], style: DefaultTextStyle.of(context).style),
+                                const Text(' · '),
                                 OoTime(
                                   request.expiresAt,
                                   prefix: 'expires ',
@@ -678,7 +694,11 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
                 final records = snapshot.data!;
                 if (records.isEmpty) {
                   return const Center(
-                    child: Text('No class authorisations in this Operation.'),
+                    child: Text(
+                      'No class authorisations in this Operation. A class '
+                      'authorisation signs a kind of step in advance.',
+                      textAlign: TextAlign.center,
+                    ),
                   );
                 }
                 final now = _now();
@@ -699,7 +719,7 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
                             record.maxUses == null
                                 ? '${record.uses} uses'
                                 : '${record.uses}/${record.maxUses} uses',
-                            'expires ${utcTime(record.expiresAt)}',
+                            'expires ${ooRelativeTime(record.expiresAt)}',
                             'signed by ${record.signer}',
                           ].join(' · '),
                         ),

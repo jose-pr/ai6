@@ -4,13 +4,16 @@ import '../controls/mission_actions.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
 import '../routes/oo_route.dart';
+import 'oo_shell.dart' show OoPage;
 import '../terminal/session_connection.dart';
 import '../terminal/session_terminal.dart';
 import '../theme/oo_backdrop.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 import 'app_window.dart';
+import 'oo_empty.dart';
 import 'oo_freshness.dart';
+import 'oo_link.dart';
 
 /// The Missions a Missions [route] selects from the board, in its order. A state filter keeps
 /// the Sessions in those states (a Mission shows when one of its Sessions does); a Station or
@@ -119,54 +122,42 @@ class BoardHeader extends StatelessWidget {
       counts.update(state, (value) => value + 1, ifAbsent: () => 1);
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'MISSIONS',
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              letterSpacing: 2.4,
-              color: OoTokens.of(context).accent,
-            ),
-          ),
-          const SizedBox(height: 4),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  'Mission board',
-                  style: Theme.of(context).textTheme.headlineMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _CountChip(
+                      label: 'All',
+                      count: sessions.length,
+                      selected: selectedStates.isEmpty,
+                      onPressed: () => onSelectStates(const []),
+                    ),
+                    for (final state in boardStates)
+                      _CountChip(
+                        label: state,
+                        count: counts[state] ?? 0,
+                        state: state,
+                        selected: selectedStates.contains(state),
+                        // One state at a time from the chips; a link may name several.
+                        onPressed: () => onSelectStates(
+                          selectedStates.length == 1 &&
+                                  selectedStates.single == state
+                              ? const []
+                              : [state],
+                        ),
+                      ),
+                  ],
                 ),
               ),
               sort,
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _CountChip(
-                label: 'Sessions',
-                count: sessions.length,
-                selected: selectedStates.isEmpty,
-                onPressed: () => onSelectStates(const []),
-              ),
-              for (final state in boardStates)
-                _CountChip(
-                  label: state,
-                  count: counts[state] ?? 0,
-                  state: state,
-                  selected: selectedStates.contains(state),
-                  // One state at a time from the chips; a link may name several.
-                  onPressed: () => onSelectStates(
-                    selectedStates.length == 1 && selectedStates.single == state
-                        ? const []
-                        : [state],
-                  ),
-                ),
             ],
           ),
         ],
@@ -202,7 +193,7 @@ class _CountChip extends StatelessWidget {
     selected: selected,
     onSelected: (_) => onPressed(),
     visualDensity: VisualDensity.compact,
-    tooltip: label == 'Sessions' ? 'Show all Sessions' : 'Filter by $label',
+    tooltip: state == null ? 'Show every Session' : 'Sessions that are $label',
   );
 }
 
@@ -326,9 +317,17 @@ class MissionCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  mission.operationId,
-                  style: Theme.of(context).textTheme.titleMedium,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: OoLink(
+                    'Mission ${mission.missionId}',
+                    route: OoLinkTo.mission(
+                      mission.operationId,
+                      mission.missionId,
+                    ),
+                    onTap: onDetails,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ),
               Text(
@@ -356,10 +355,10 @@ class MissionCard extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.only(left: 27, top: 4, bottom: 8),
-            child: Text(
-              'Mission ${mission.missionId}',
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: OoTokens.of(context).muted),
+            child: OoLink(
+              'Operation ${mission.operationId}',
+              route: OoLinkTo.operation(mission.operationId),
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
           Padding(
@@ -447,22 +446,25 @@ class MissionFacts extends StatelessWidget {
           ],
         ),
         if (station != null)
-          Text(
-            [
-              'Station $station',
-              if (attempt?.theater case final theater?) 'Theater $theater',
-            ].join(' · '),
-            style: muted,
-          ),
+          OoLinkLine([
+            ('Station $station', OoLinkTo.station(station)),
+            if (attempt?.theater case final theater?)
+              ('Theater $theater', OoLinkTo.theater(station, theater)),
+          ], style: muted),
         OoTime(mission.updatedAt, prefix: 'Updated '),
         if (agent != null || role != null)
-          Text(
-            [
-              ?agent == null ? null : 'Agent $agent',
-              ?role == null ? null : 'Role $role',
-            ].join(' · '),
-            style: muted,
-          ),
+          OoLinkLine([
+            if (agent != null)
+              (
+                'Agent $agent',
+                OoLinkTo.agent(agent, operation: mission.operationId),
+              ),
+            if (role != null)
+              (
+                'Role $role',
+                OoLinkTo.role(role, operation: mission.operationId),
+              ),
+          ], style: muted),
       ],
     );
   }
@@ -484,10 +486,16 @@ class _AttemptHistory extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (final attempt in attempts) ...[
-            Text(
-              attempt.describe(),
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
+            OoLinkLine([
+              ('Attempt ${attempt.attempt}', null),
+              (attempt.status, null),
+              ('Station ${attempt.station}', OoLinkTo.station(attempt.station)),
+              if (attempt.theater case final theater?)
+                (
+                  'Theater $theater',
+                  OoLinkTo.theater(attempt.station, theater),
+                ),
+            ], style: Theme.of(context).textTheme.labelMedium),
             if (attempt.lost case final lost?) Text(lost, style: muted),
             if (attempt.checkpointBranch case final branch?)
               Text('Checkpointed to branch $branch', style: muted),
@@ -911,30 +919,31 @@ class _LiveSessionTerminalState extends State<_LiveSessionTerminal> {
   );
 }
 
+/// The board with no Mission on it: what a Mission is, and a way to start the first in each
+/// Operation the person may, or who can if they may not.
 class EmptyBoard extends StatelessWidget {
-  const EmptyBoard({super.key});
+  const EmptyBoard({this.operations = const [], this.onCreate, super.key});
+
+  /// The Operations the person may start a Mission in.
+  final List<String> operations;
+  final ValueChanged<String>? onCreate;
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: OoBackdrop(
-      alignment: Alignment.center,
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconTheme.merge(
-              data: IconThemeData(size: 42, color: OoTokens.of(context).muted),
-              child: const OoIcon(OoIconName.missions),
-            ),
-            const SizedBox(height: 12),
-            const Text('No active Missions'),
-            const SizedBox(height: 4),
-            const Text('Registered agent Sessions will appear here.'),
-          ],
-        ),
-      ),
-    ),
+  Widget build(BuildContext context) => OoEmptyState(
+    icon: OoIconName.missions,
+    backdrop: true,
+    title: 'No Missions yet',
+    body: operations.isEmpty
+        ? 'A Mission is one brief of work under an Operation, and its Sessions show here. Your '
+              'account cannot start one; a controller grants mission.create on an Operation.'
+        : 'A Mission is one brief of work under an Operation. Start the first, and its '
+              'Sessions show here.',
+    actions: [
+      if (onCreate case final onCreate?)
+        for (final operation in operations)
+          ('New Mission in $operation', () => onCreate(operation)),
+    ],
+    link: const ('See Stations', OoRoute(OoPage.stations)),
   );
 }
 
@@ -962,7 +971,7 @@ class DemoBanner extends StatelessWidget {
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
-                'Demo preview · sign-in is unavailable. Open the authenticated Outer Office site.',
+                'Demo data: nothing here is connected, and changes are turned off.',
               ),
             ),
           ],

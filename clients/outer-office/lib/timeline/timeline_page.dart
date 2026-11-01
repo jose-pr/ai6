@@ -6,7 +6,10 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
+import '../shell/oo_empty.dart';
 import '../shell/oo_freshness.dart';
+import '../shell/oo_link.dart';
+import '../theme/oo_icon.dart';
 
 /// One entry of an Operation's activity timeline: metadata only.
 @immutable
@@ -60,6 +63,19 @@ class TimelineItemSummary {
         },
       );
 
+  /// Where it happened and who acted, each thing named as what opens it.
+  List<(String, OoRoute?)> get names => [
+    ('Operation $operationId', OoLinkTo.operation(operationId)),
+    if (missionId case final mission?)
+      ('Mission $mission', OoLinkTo.mission(operationId, mission)),
+    if (sessionId case final session?)
+      ('Session $session', OoLinkTo.session(operationId, session)),
+    if (stationId case final station?)
+      ('Station $station', OoLinkTo.station(station)),
+    if (target case final target? when target != missionId) (target, null),
+    if (actor case final actor?) ('by $actor', null),
+  ];
+
   /// Where it happened and who acted, as one line.
   String get context => [
     if (missionId != null) 'Mission $missionId',
@@ -88,6 +104,14 @@ class TimelinePageSummary {
         ],
         nextCursor: json['next_cursor'] as String?,
       );
+}
+
+/// `resume.applied` as "Resume applied".
+String timelineSentence(String action) {
+  final words = action.replaceAll(RegExp(r'[._-]+'), ' ').trim();
+  return words.isEmpty
+      ? action
+      : '${words[0].toUpperCase()}${words.substring(1)}';
 }
 
 IconData _kindIcon(String kind) => switch (kind) {
@@ -253,8 +277,10 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
   Widget build(BuildContext context) {
     final operations = widget.board.timelineOperations;
     if (operations.isEmpty) {
-      return const Center(
-        child: Text('No Operation timeline is visible to this account.'),
+      return const OoEmptyState(
+        icon: OoIconName.timeline,
+        title: 'Your account does not read any Operation\'s timeline.',
+        body: 'A controller grants audit.read on an Operation.',
       );
     }
     final operation = _operation;
@@ -327,7 +353,7 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
                       ? const CircularProgressIndicator()
                       : Text(
                           _mission == null
-                              ? 'No activity recorded yet.'
+                              ? 'No activity recorded yet. It shows here once a Mission runs.'
                               : 'No activity of Mission $_mission in Operation '
                                     '$operation.',
                         ),
@@ -349,14 +375,21 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
                     }
                     final item = _items[index];
                     return ListTile(
-                      leading: Icon(_kindIcon(item.kind)),
-                      title: Text('${item.kind} · ${item.action}'),
-                      subtitle: Text(
-                        [
-                          if (item.context.isNotEmpty) item.context,
+                      leading: Tooltip(
+                        message: item.kind,
+                        child: Icon(_kindIcon(item.kind)),
+                      ),
+                      title: Tooltip(
+                        message: item.action,
+                        child: Text(timelineSentence(item.action)),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          OoLinkLine(item.names),
                           for (final entry in item.detail.entries)
-                            '${entry.key}: ${entry.value}',
-                        ].join('\n'),
+                            Text('${entry.key}: ${entry.value}'),
+                        ],
                       ),
                       trailing: OoTime(
                         item.at,

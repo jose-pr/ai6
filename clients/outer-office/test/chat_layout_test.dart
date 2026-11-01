@@ -236,7 +236,7 @@ void main() {
     addTearDown(board.dispose);
     final chat = await signIn(tester, board, channel);
     await openPage(tester, 'Missions');
-    await tester.tap(find.byTooltip('Filter by blocked'));
+    await tester.tap(find.byTooltip('Sessions that are blocked'));
     await tester.pumpAndSettle();
     expect(find.text('Mission mission-2'), findsNothing);
     expect(find.text('Mission mission-1'), findsOneWidget);
@@ -244,9 +244,15 @@ void main() {
     await chord(tester, LogicalKeyboardKey.keyI, shift: true);
     await connect(tester, channel);
     expect(chat.layout, ChatLayout.expanded);
-    expect(find.text('Mission board'), findsNothing);
     expect(
-      find.text('Mission board', skipOffstage: false),
+      find.text('Each Mission is one brief of work under an Operation.'),
+      findsNothing,
+    );
+    expect(
+      find.text(
+        'Each Mission is one brief of work under an Operation.',
+        skipOffstage: false,
+      ),
       findsOneWidget,
       reason: 'the board stays mounted',
     );
