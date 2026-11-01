@@ -95,7 +95,7 @@ List<OoAttention> attentionItems(MissionBoard board, OoTokens tokens) {
               text:
                   'Session ${session.sessionId} of Mission '
                   '${session.missionId} is blocked'
-                  '${session.reason == null ? '' : ': ${session.reason!.replaceAll('-', ' ')}'}',
+                  '${session.reason == null ? '' : ': ${reasonWords(session.reason!)}'}',
               route: _route(OoPage.missions, {
                 'operation_id': session.operationId,
                 'mission_id': session.missionId,

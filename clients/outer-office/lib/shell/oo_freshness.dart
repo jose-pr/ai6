@@ -196,3 +196,7 @@ class FreshnessNote extends StatelessWidget {
     );
   }
 }
+
+/// A blocked reason in words: `issue` is a person's to answer, so it says where.
+String reasonWords(String reason) =>
+    reason == 'issue' ? 'Waiting on the issue' : reason.replaceAll('-', ' ');

@@ -438,7 +438,7 @@ class MissionFacts extends StatelessWidget {
             Text(
               [
                 mission.state,
-                ?mission.reason?.replaceAll('-', ' '),
+                if (mission.reason case final reason?) reasonWords(reason),
               ].join(' · '),
               style: Theme.of(context).textTheme.labelMedium,
             ),

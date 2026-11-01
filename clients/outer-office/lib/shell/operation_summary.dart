@@ -43,6 +43,16 @@ class _OperationSummaryState extends State<OperationSummary> {
 
   String get _id => widget.operation.operationId;
 
+  /// What the Stations report as looser than the default for this Operation.
+  List<String> _issuesWeakened(MissionBoard board) {
+    final marker = 'Operation "$_id" issues is weakened: ';
+    return {
+      for (final station in board.stationBoard.stations)
+        for (final line in station.issuesWeakened)
+          if (line.startsWith(marker)) line.substring(marker.length),
+    }.toList(growable: false);
+  }
+
   /// The newest items of its timeline, only for a person who may read it.
   Future<TimelinePageSummary>? _load() =>
       widget.board.timelineOperations.contains(_id)
@@ -105,6 +115,17 @@ class _OperationSummaryState extends State<OperationSummary> {
         Text('YOUR ACCESS', style: ooSectionLabel(context)),
         const SizedBox(height: 6),
         OoAccessSummary(widget.operation.actions),
+        if (_issuesWeakened(board) case final weakened
+            when weakened.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Text(
+            'ISSUE SETTINGS LOOSER THAN THE DEFAULT',
+            style: ooSectionLabel(context),
+          ),
+          const SizedBox(height: 6),
+          for (final line in weakened)
+            Text(line, style: text.bodySmall?.copyWith(color: tokens.warning)),
+        ],
         const SizedBox(height: 20),
         Text('MISSIONS', style: ooSectionLabel(context)),
         const SizedBox(height: 6),

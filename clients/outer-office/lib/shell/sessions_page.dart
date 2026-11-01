@@ -212,7 +212,8 @@ class SessionsPage extends StatelessWidget {
                             Text(
                               [
                                 session.state ?? 'working',
-                                ?session.reason?.replaceAll('-', ' '),
+                                if (session.reason case final reason?)
+                                  reasonWords(reason),
                               ].join(' · '),
                             ),
                           ],
@@ -291,7 +292,12 @@ class _SessionFacts extends StatelessWidget {
                   OoLinkTo.mission(session.operationId, session.missionId),
                 ),
               ]),
-              Text([state, ?session.reason?.replaceAll('-', ' ')].join(' · ')),
+              Text(
+                [
+                  state,
+                  if (session.reason case final reason?) reasonWords(reason),
+                ].join(' · '),
+              ),
               if (session.exposure.isNotEmpty)
                 Text('Has read: ${session.exposure.join(', ')}'),
             ],
@@ -366,7 +372,11 @@ class _SessionList extends StatelessWidget {
                   OoStatusDot(tokens.stateColor(state)),
                   const SizedBox(width: 6),
                   Text(
-                    [state, ?session.reason?.replaceAll('-', ' ')].join(' · '),
+                    [
+                      state,
+                      if (session.reason case final reason?)
+                        reasonWords(reason),
+                    ].join(' · '),
                     style: text.labelMedium,
                   ),
                 ],

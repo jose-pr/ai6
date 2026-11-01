@@ -773,6 +773,11 @@ class _Upcoming extends StatelessWidget {
                 .missionBrief(mission.operationId, mission.missionId)
                 ?.agentId,
             ?board.missionBrief(mission.operationId, mission.missionId)?.roleId,
+            if (board
+                    .missionBrief(mission.operationId, mission.missionId)
+                    ?.sourceIssue
+                case final issue?)
+              'from $issue',
           ].join(' · '),
         ),
       for (final brief in board.heldBriefs)

@@ -27,6 +27,7 @@ import 'assistant/pages.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
+import 'issues/linked_issues.dart';
 import 'pools/pools_page.dart';
 import 'roster/record_editor.dart';
 import 'roster/roster_page.dart';
@@ -618,6 +619,24 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     );
   }
 
+  /// Whether this account holds [action] on the Operation.
+  bool hasOperationAction(String operationId, String action) =>
+      userSession?.operations.any(
+        (operation) =>
+            operation.operationId == operationId &&
+            operation.actions.contains(action),
+      ) ??
+      false;
+
+  /// How long ago a Unix time was, in words.
+  String describeAge(double at) {
+    final seconds = (DateTime.now().millisecondsSinceEpoch / 1000 - at).round();
+    if (seconds < 90) return 'just now';
+    if (seconds < 5400) return '${(seconds / 60).round()} minutes ago';
+    if (seconds < 129600) return '${(seconds / 3600).round()} hours ago';
+    return '${(seconds / 86400).round()} days ago';
+  }
+
   bool canCreateMission(String operationId) =>
       userSession?.operations.any(
         (operation) =>
@@ -886,6 +905,159 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     }
     await refresh();
   }
+
+  static const _demoMissionIssues = MissionIssuesSummary(
+    issues: [
+      LinkedIssueSummary(
+        issue: 'github:jose-pr/demo#12',
+        relation: 'source',
+        state: 'active',
+        url: 'https://github.com/jose-pr/demo/issues/12',
+        title: 'Flaky test on Tuesdays',
+        issueState: 'open',
+        labels: ['ai6:ready'],
+        phase: 'working',
+      ),
+    ],
+    entries: [
+      IssueEntrySummary(
+        id: 'preview-entry',
+        kind: 'status',
+        issue: 'github:jose-pr/demo#12',
+        state: 'posted',
+      ),
+    ],
+  );
+
+  String _missionIssuesPath(String operationId, String missionId) =>
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+      '/missions/${Uri.encodeComponent(missionId)}/issues';
+
+  /// The issues a Mission is linked to and what it posted.
+  Future<MissionIssuesSummary> loadMissionIssues(
+    String operationId,
+    String missionId,
+  ) async {
+    if (demo) return _demoMissionIssues;
+    final response = await _userRequest(
+      'GET',
+      _missionIssuesPath(operationId, missionId),
+    );
+    if (response.statusCode == 404) return const MissionIssuesSummary();
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the linked issues.',
+      );
+    }
+    return MissionIssuesSummary.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> _issueWrite(
+    String method,
+    String path, {
+    Object? body,
+    required String refused,
+  }) async {
+    if (demo) throw StateError('Writing to issues is unavailable in preview.');
+    final response = await _userRequest(method, path, body: body);
+    if (response.statusCode >= 300) {
+      throw GatewayRefused(response.statusCode, refused);
+    }
+  }
+
+  /// Links an issue, named `TRACKER:ITEM`, to a Mission.
+  Future<void> linkIssue(String operationId, String missionId, String issue) =>
+      _issueWrite(
+        'POST',
+        _missionIssuesPath(operationId, missionId),
+        body: {'issue': issue},
+        refused: 'The gateway refused the link.',
+      );
+
+  Future<void> unlinkIssue(
+    String operationId,
+    String missionId,
+    String issue,
+  ) => _issueWrite(
+    'DELETE',
+    '${_missionIssuesPath(operationId, missionId)}/${Uri.encodeComponent(issue)}',
+    refused: 'The gateway refused to unlink the issue.',
+  );
+
+  /// Accepts a link an Agent proposed.
+  Future<void> acceptIssue(
+    String operationId,
+    String missionId,
+    String issue,
+  ) => _issueWrite(
+    'POST',
+    '${_missionIssuesPath(operationId, missionId)}/'
+        '${Uri.encodeComponent(issue)}/accept',
+    refused: 'The gateway refused to accept the link.',
+  );
+
+  /// Posts a comment under the Operation's identity, with this person's name in a footer.
+  Future<void> commentOnIssue(
+    String operationId,
+    String missionId,
+    String issue,
+    String body,
+  ) => _issueWrite(
+    'POST',
+    '${_missionIssuesPath(operationId, missionId)}/'
+        '${Uri.encodeComponent(issue)}/comments',
+    body: {'body': body},
+    refused: 'The gateway refused the comment.',
+  );
+
+  Future<void> closeIssue(String operationId, String missionId, String issue) =>
+      _issueWrite(
+        'POST',
+        '${_missionIssuesPath(operationId, missionId)}/'
+            '${Uri.encodeComponent(issue)}/update',
+        body: {'close': true},
+        refused: 'The gateway refused to close the issue.',
+      );
+
+  /// What Agents asked to create in an Operation.
+  Future<List<IssueProposalSummary>> loadIssueProposals(
+    String operationId,
+  ) async {
+    if (demo) return const [];
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/issue-proposals',
+    );
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the issue proposals.',
+      );
+    }
+    return (jsonDecode(response.body) as List<dynamic>)
+        .map(
+          (proposal) =>
+              IssueProposalSummary.fromJson(proposal as Map<String, dynamic>),
+        )
+        .toList(growable: false);
+  }
+
+  /// Approves or rejects what an Agent asked to create.
+  Future<void> decideIssueProposal(
+    String operationId,
+    String proposalId, {
+    required bool approve,
+    bool markReady = false,
+  }) => _issueWrite(
+    'POST',
+    '/v1/user/operations/${Uri.encodeComponent(operationId)}/issue-proposals/'
+        '${Uri.encodeComponent(proposalId)}/${approve ? 'approve' : 'reject'}',
+    body: approve ? {'mark_ready': markReady} : const <String, Object?>{},
+    refused: 'The gateway refused the decision.',
+  );
 
   /// A link to one of the person's pages (`POST /v1/user/pages/{id}/open`): where to open it
   /// outside the app and when it stops working; with [network] `none`, a link whose page can
@@ -2382,10 +2554,13 @@ class StationSummary {
     this.resources,
     this.config,
     this.headOfStation,
+    this.issuesWeakened = const [],
   });
 
   /// The Agent handlers it has loaded.
   final List<String> handlers;
+  /// Lines naming each Operation's issue settings looser than the default.
+  final List<String> issuesWeakened;
 
   final String stationId;
   final bool healthy;
@@ -2432,6 +2607,8 @@ class StationSummary {
         : StationLogReport.fromJson(
             json['head_of_station'] as Map<String, dynamic>,
           ),
+    issuesWeakened: ((json['issues_weakened'] as List<dynamic>?) ?? const [])
+        .cast<String>(),
   );
 }
 
@@ -3290,6 +3467,12 @@ class MissionBriefSummary {
   final String operationId;
   final String missionId;
   final String prompt;
+
+  /// The issue a brief from a Source came from, as `TRACKER:ITEM`.
+  String? get sourceIssue =>
+      origin?.origin == 'source' && origin?.reference != null
+      ? '${origin?.principal ?? 'source'}:${origin!.reference}'
+      : null;
 
   /// Where the brief came from, as the Station recorded it; `null` for a Mission started
   /// directly on a Station.
@@ -4389,6 +4572,20 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                     child: Chip(label: Text('Demo data: decisions are off')),
                   ),
                 const SizedBox(height: 8),
+                if (operationId != null)
+                  ConstrainedBox(
+                    // The Mission proposals below keep the page's room to scroll.
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(context).height / 2,
+                    ),
+                    child: SingleChildScrollView(
+                      child: IssueProposalsPanel(
+                        board: widget.board,
+                        operationId: operationId,
+                        itemId: itemId,
+                      ),
+                    ),
+                  ),
                 Expanded(
                   child: FutureBuilder<List<MissionProposalSummary>>(
                     future: _proposals,
