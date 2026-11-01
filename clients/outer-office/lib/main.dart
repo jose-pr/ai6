@@ -49,6 +49,7 @@ import 'shell/sign_in_page.dart';
 import 'shell/station_watch.dart';
 import 'shell/top_bar.dart';
 import 'theme/oo_appearance.dart';
+import 'theme/oo_art.dart';
 import 'theme/oo_icon.dart';
 import 'theme/oo_theme.dart';
 import 'timeline/timeline_page.dart';
@@ -101,6 +102,7 @@ Future<void> _startWeb() async {
   }
   final config = await loadWebConfig(Uri.base);
   OoRouteLimits.current = config.routeLimits;
+  OoArtLimits.current = config.art;
   final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
     apiOrigin: _apiOrigin(config),
@@ -130,6 +132,7 @@ Future<void> _startWeb() async {
 void _startDesktop() {
   final config = loadDesktopConfig();
   OoRouteLimits.current = config.routeLimits;
+  OoArtLimits.current = config.art;
   final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
     apiOrigin: _apiOrigin(config),

@@ -19,5 +19,5 @@ the assistant inside it, keeps her own icon as her chat avatar:
 `clients/outer-office/assets/brand/moneypenny-128.png` (128 × 128). The app's menu
 heading uses the Outer Office icon at 256 px (`assets/brand/outer-office-256.png`). Its
 Overview hero art is cut from the two banners: the world map from the left of
-`ai6-header.png` (`assets/heroes/map.jpg`, 940 × 278) and the skyline from the right of
-`outer-office-header.png` (`assets/heroes/skyline.jpg`, 774 × 278).
+`ai6-header.png` (`assets/heroes/map-940.jpg`, 940 × 278) and the skyline from the right of
+`outer-office-header.png` (`assets/heroes/skyline-774.jpg`, 774 × 278).

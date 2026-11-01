@@ -57,9 +57,58 @@ enum OoArtTint {
   /// [night] at a lower gain: the lines stay nearer `surface`.
   quiet,
 
-  /// A light paper picture (`paper.jpg`): the paper becomes `surface`, its darkest lines
+  /// A light paper picture (the paper hero): the paper becomes `surface`, its darkest lines
   /// `muted`.
   paper,
+}
+
+/// A theme's wallpaper: its one drawing's colours (`assets/backdrops/wallpaper.svg`), each read
+/// from the picture the drawing replaced.
+@immutable
+class OoWallpaper {
+  const OoWallpaper({
+    required this.centre,
+    required this.middle,
+    required this.edge,
+    required this.grid,
+    required this.circle,
+    required this.line,
+    required this.ring,
+    required this.dot,
+    required this.rule,
+    required this.label,
+  });
+
+  /// The background's radial gradient, from its brightest point out.
+  final Color centre;
+  final Color middle;
+  final Color edge;
+
+  /// The fine grid, the large circles, the graph's lines, the rings around its nodes and their
+  /// dots.
+  final Color grid;
+  final Color circle;
+  final Color line;
+  final Color ring;
+  final Color dot;
+
+  /// The label's rule and text.
+  final Color rule;
+  final Color label;
+
+  /// Every colour it paints, for the panel contrast test.
+  List<Color> get colours => [
+    centre,
+    middle,
+    edge,
+    grid,
+    circle,
+    line,
+    ring,
+    dot,
+    rule,
+    label,
+  ];
 }
 
 /// The opacity of the `surface` panel that holds text over art (`OoHero`, `OoBackdrop`).
@@ -111,7 +160,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
   final List<Color> series;
 
   /// The art of the Overview hero, painted only by `OoHero`; null when it is turned off.
-  final ImageProvider? hero;
+  final OoArt? hero;
 
   /// How [hero] is redrawn in this theme's colours ([heroMatrix]).
   final OoArtTint heroTint;
@@ -294,6 +343,15 @@ class OoTokens extends ThemeExtension<OoTokens> {
   }
 }
 
+const _mapHero = OoArt([OoArtFile('assets/heroes/map-940.jpg', 940, 278)]);
+const _skylineHero = OoArt([
+  OoArtFile('assets/heroes/skyline-774.jpg', 774, 278),
+]);
+const _paperHero = OoArt([
+  OoArtFile('assets/heroes/paper-940.jpg', 940, 278),
+  OoArtFile('assets/heroes/paper-1536.jpg', 1536, 454),
+]);
+
 // The design kit's tokens. Where a kit colour fell below WCAG AA where text is drawn with
 // it (`test/theme_test.dart`), only its HSL lightness moved, by the smallest 1% step that
 // passes. The series take the accent first where it has enough chroma to name a series,
@@ -309,8 +367,19 @@ const _nightOps = OoTokens(
   success: Color(0xFF32C995),
   warning: Color(0xFFE9A845),
   danger: Color(0xFFD8595C),
-  backdrop: AssetImage('assets/backdrops/night-ops.jpg'),
-  hero: AssetImage('assets/heroes/map.jpg'),
+  backdrop: OoWallpaper(
+    centre: Color(0xFF0B2230),
+    middle: Color(0xFF091B29),
+    edge: Color(0xFF06121D),
+    grid: Color(0xFF0A1D2A),
+    circle: Color(0xFF102432),
+    line: Color(0xFF102432),
+    ring: Color(0xFF172C39),
+    dot: Color(0xFF806E46),
+    rule: Color(0xFF806E46),
+    label: Color(0xFF7D745E),
+  ),
+  hero: _mapHero,
   series: [
     Color(0xFFD6A958), // accent
     Color(0xFF3987E5), // blue
@@ -334,8 +403,19 @@ const _blackOps = OoTokens(
   success: Color(0xFF65C59D),
   warning: Color(0xFFE1B76C),
   danger: Color(0xFFDD6A6A),
-  backdrop: AssetImage('assets/backdrops/black-ops.jpg'),
-  hero: AssetImage('assets/heroes/map.jpg'),
+  backdrop: OoWallpaper(
+    centre: Color(0xFF12151C),
+    middle: Color(0xFF0F1217),
+    edge: Color(0xFF0B0C10),
+    grid: Color(0xFF0F1217),
+    circle: Color(0xFF16191E),
+    line: Color(0xFF16191E),
+    ring: Color(0xFF1D1F25),
+    dot: Color(0xFF73767B),
+    rule: Color(0xFF73767B),
+    label: Color(0xFF797C81),
+  ),
+  hero: _mapHero,
   heroTint: OoArtTint.quiet,
   series: [
     Color(0xFF3987E5), // blue
@@ -360,8 +440,19 @@ const _dusk = OoTokens(
   success: Color(0xFF6DCCA5),
   warning: Color(0xFFF1BA69),
   danger: Color(0xFFEC616E),
-  backdrop: AssetImage('assets/backdrops/dusk.jpg'),
-  hero: AssetImage('assets/heroes/skyline.jpg'),
+  backdrop: OoWallpaper(
+    centre: Color(0xFF341E21),
+    middle: Color(0xFF2A1A21),
+    edge: Color(0xFF191421),
+    grid: Color(0xFF2B1A22),
+    circle: Color(0xFF342229),
+    line: Color(0xFF342329),
+    ring: Color(0xFF3C2B31),
+    dot: Color(0xFF9A714C),
+    rule: Color(0xFF9A714C),
+    label: Color(0xFF957865),
+  ),
+  hero: _skylineHero,
   series: [
     Color(0xFFECAC70), // accent
     Color(0xFF3987E5), // blue
@@ -385,8 +476,19 @@ const _classic = OoTokens(
   success: Color(0xFF367253),
   warning: Color(0xFF915D1D),
   danger: Color(0xFF9F3D34),
-  backdrop: AssetImage('assets/backdrops/classic.jpg'),
-  hero: AssetImage('assets/heroes/paper.jpg'),
+  backdrop: OoWallpaper(
+    centre: Color(0xFF554430),
+    middle: Color(0xFF493B2A),
+    edge: Color(0xFF362C22),
+    grid: Color(0xFF4B3C2B),
+    circle: Color(0xFF554634),
+    line: Color(0xFF544534),
+    ring: Color(0xFF5F4F3D),
+    dot: Color(0xFF9F8453),
+    rule: Color(0xFF9F8453),
+    label: Color(0xFF9D8664),
+  ),
+  hero: _paperHero,
   heroTint: OoArtTint.paper,
   series: [
     Color(0xFF7A6DF5), // violet
@@ -411,8 +513,19 @@ const _light = OoTokens(
   success: Color(0xFF258262),
   warning: Color(0xFF9D691A),
   danger: Color(0xFFBA4F55),
-  backdrop: AssetImage('assets/backdrops/light.jpg'),
-  hero: AssetImage('assets/heroes/paper.jpg'),
+  backdrop: OoWallpaper(
+    centre: Color(0xFFEFE9DB),
+    middle: Color(0xFFECE6D9),
+    edge: Color(0xFFE8E2D6),
+    grid: Color(0xFFECE6D9),
+    circle: Color(0xFFE5DFD1),
+    line: Color(0xFFE4DED0),
+    ring: Color(0xFFDBD6C8),
+    dot: Color(0xFFB3997B),
+    rule: Color(0xFFB3997B),
+    label: Color(0xFFA79277),
+  ),
+  hero: _paperHero,
   series: [
     Color(0xFF3481E0), // blue
     Color(0xFFEB6834), // orange
@@ -437,7 +550,7 @@ const _redFile = OoTokens(
   success: Color(0xFF5ECEA0),
   warning: Color(0xFFE6B04C),
   danger: Color(0xFFFF6C72),
-  hero: AssetImage('assets/heroes/map.jpg'),
+  hero: _mapHero,
   heroTint: OoArtTint.night,
   series: [
     Color(0xFFE65960), // accent
@@ -451,7 +564,7 @@ const _redFile = OoTokens(
   ],
 );
 
-// The luminance (0-255) of `paper.jpg`'s darkest line and of its paper (the median).
+// The luminance (0-255) of the paper hero's darkest line and of its paper (the median).
 const _paperLines = 70.0;
 const _paperTone = 240.0;
 

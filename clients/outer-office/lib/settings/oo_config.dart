@@ -5,6 +5,7 @@ import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
 
 import '../routes/oo_route.dart';
+import '../theme/oo_art.dart';
 import '../theme/oo_tokens.dart';
 
 /// The formats an `OO.cfg` can be written in.
@@ -26,6 +27,7 @@ class OoConfig {
     this.chat = const ChatSettings(),
     this.routeTextBytes,
     this.limits = const OoLimits(),
+    this.art = const OoArtLimits(),
   });
 
   /// `[unex] url`: Universal Exports' origin.
@@ -40,6 +42,9 @@ class OoConfig {
   /// `[routes] text_bytes`: the longest `text` filter a route may carry, in bytes; `null`
   /// keeps [OoRouteLimits.defaultTextBytes].
   final int? routeTextBytes;
+
+  /// `[art]`: how large a hero picture may be fetched.
+  final OoArtLimits art;
 
   /// `[refresh]`, `[controls]`, `[pages]`, `[terminal]` and `[limits]`: how often pages ask
   /// again, how a control is followed, how much a page asks for, the terminal's pace and how
@@ -64,6 +69,7 @@ class OoConfig {
       'appearance',
       'chat',
       'routes',
+      'art',
       'assets',
       'refresh',
       'controls',
@@ -151,6 +157,12 @@ class OoConfig {
         'OO.cfg: routes.text_bytes is not a whole number of bytes, 1 or more',
       );
     }
+    final maxWidth = table('art', {'max_width'})['max_width'];
+    if (maxWidth != null && (maxWidth is! int || maxWidth < 1)) {
+      throw const FormatException(
+        'OO.cfg: art.max_width is not a whole number of pixels, 1 or more',
+      );
+    }
     final url = string(unex, 'unex', 'url');
     final origin = url == null ? null : Uri.tryParse(url);
     if (url != null &&
@@ -163,6 +175,9 @@ class OoConfig {
       chat: chat,
       routeTextBytes: textBytes as int?,
       limits: limits,
+      art: maxWidth == null
+          ? const OoArtLimits()
+          : OoArtLimits(maxWidth: maxWidth as int),
     );
   }
 

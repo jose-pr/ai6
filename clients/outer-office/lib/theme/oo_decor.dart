@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'oo_art.dart';
 import 'oo_icon.dart';
 import 'oo_theme.dart';
 
@@ -173,14 +174,24 @@ class OoHero extends StatelessWidget {
     );
     final art = tokens.decorated ? tokens.hero : null;
     if (art == null) return Card(child: panel);
-    Widget image = Image(
-      image: art,
-      fit: BoxFit.cover,
-      excludeFromSemantics: true,
-      gaplessPlayback: true,
-      // Art that fails to load leaves the plain surface; the panel still shows.
-      errorBuilder: (context, error, stack) =>
-          ColoredBox(color: tokens.surface),
+    Widget image = LayoutBuilder(
+      builder: (context, box) {
+        final physical = box.biggest * MediaQuery.devicePixelRatioOf(context);
+        final file = art.pick(physical);
+        return Image(
+          // Decoded at the box, not the file: a wide picture would cost a phone 17 MB.
+          image: ResizeImage(
+            AssetImage(file.asset),
+            width: OoArt.decodeWidth(file, physical),
+          ),
+          fit: BoxFit.cover,
+          excludeFromSemantics: true,
+          gaplessPlayback: true,
+          // Art that fails to load leaves the plain surface; the panel still shows.
+          errorBuilder: (context, error, stack) =>
+              ColoredBox(color: tokens.surface),
+        );
+      },
     );
     if (tokens.heroMatrix case final matrix?) {
       image = ColorFiltered(
