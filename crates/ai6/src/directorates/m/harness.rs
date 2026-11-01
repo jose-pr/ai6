@@ -33,15 +33,31 @@ pub const PROJECT_FILES: [&str; 1] = [".mcp.json"];
 
 /// What a harness may do with the working directory's own configuration.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+)]
 #[serde(rename_all = "lowercase")]
+#[map(rename_all = "lowercase")]
 pub enum ProjectSettings {
     /// Never load it.
     #[default]
+    #[schema(label = "Never load them")]
     Ignore,
     /// Load it only while its manifest has the Operation's pin.
+    #[schema(label = "Load them only while they match a pinned digest")]
     Pinned,
     /// Load whatever is there.
+    #[schema(label = "Load whatever is there")]
     Load,
 }
 
@@ -58,14 +74,32 @@ impl ProjectSettings {
 
 /// An Operation's harness policy (`[operation.ID.harness]`); `ignore` unless configured.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
 #[serde(deny_unknown_fields)]
+#[map(deny_unknown_fields)]
 pub struct HarnessPolicy {
-    /// What a harness may do with the working directory's own configuration.
+    /// What a harness may do with the settings its working directory carries.
     #[serde(default)]
+    #[schema(title = "Settings in the checkout")]
+    #[map(default)]
     pub project_settings: ProjectSettings,
-    /// Under `pinned`, the digest the working directory's [`ProjectManifest`] must have.
+    /// The digest those settings must have, from `ai6 harness pin DIR`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(title = "Pinned digest")]
+    #[map(as_text)]
+    #[form(visible_when(field = "project_settings", equals = "pinned"))]
     pub pin: Option<PeerId>,
 }
 

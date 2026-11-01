@@ -8,7 +8,7 @@ use ai6::{AssistantPageLimits, PageNetwork};
 use super::*;
 
 fn limits(json: Value) -> AssistantPageLimits {
-    serde_json::from_value(json).unwrap()
+    ai6::read_definition(&json).unwrap()
 }
 
 fn page(id: &str, person: &str, files: &BTreeMap<String, Vec<u8>>) -> Page {

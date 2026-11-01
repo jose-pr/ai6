@@ -198,15 +198,31 @@ impl Vetting {
 
 /// Which briefs a check applies to.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+)]
 #[serde(rename_all = "lowercase")]
+#[map(rename_all = "lowercase")]
 pub enum VettingScope {
     /// Briefs whose text came from outside: Source items and Agents' proposals. The default.
     #[default]
+    #[schema(label = "Briefs whose text came from outside")]
     Untrusted,
     /// Every brief.
+    #[schema(label = "Every brief")]
     All,
     /// None.
+    #[schema(label = "None")]
     Off,
 }
 
@@ -362,22 +378,73 @@ impl VettingPolicy {
 }
 
 /// The vetting table as written in configuration.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
 pub struct VettingDefinition {
+    /// Check briefs before they are placed.
+    #[schema(title = "Vet briefs", default = Some(VettingPolicy::default().enabled))]
     enabled: Option<bool>,
+    /// The longest brief, in bytes, that goes through without a hold.
+    #[schema(title = "Longest brief", format = "bytes", default = Some(VettingPolicy::default().max_brief_bytes))]
     max_brief_bytes: Option<usize>,
+    /// Briefs from outside taken in an hour before the rest are held; 0 is no limit.
+    #[schema(title = "Briefs an hour", default = VettingPolicy::default().max_per_hour)]
     max_per_hour: Option<u32>,
+    /// The same, for one Source; 0 is no limit.
+    #[schema(title = "Briefs an hour from one Source", default = VettingPolicy::default().max_per_source_per_hour)]
     max_per_source_per_hour: Option<u32>,
+    /// Hold a brief that repeats work already queued or running.
+    #[schema(title = "Hold duplicates", default = Some(VettingPolicy::default().duplicates))]
     duplicates: Option<bool>,
+    /// Hold a brief past what the budget has left.
+    #[schema(title = "Hold what the budget cannot pay for", default = Some(VettingPolicy::default().budget))]
     budget: Option<bool>,
+    /// Which briefs are screened for hidden text, forged markers and manipulation.
+    #[schema(title = "Screen")]
     screening: Option<VettingScope>,
+    /// More phrases to screen for, beside the built-in ones.
+    #[schema(title = "Phrases to screen for")]
     phrases: Option<Vec<String>>,
+    /// Also hold a brief whose text carries HTML comments, which render as nothing.
+    #[schema(title = "Hold HTML comments", default = Some(VettingPolicy::default().html_comments))]
     html_comments: Option<bool>,
+    /// Which briefs an Agent reviews before they run.
+    #[schema(title = "Review")]
     review: Option<VettingScope>,
+    /// How long a brief held only for a rate limit waits before it is vetted again; 0 keeps it
+    /// until a person decides.
+    #[schema(title = "Hold for a rate limit", default = VettingPolicy::default().rate_hold_secs.map(|secs| secs / 3_600))]
+    #[form(unit = "hours")]
     rate_hold_hours: Option<u64>,
+    /// Reviews of Mission proposals in an hour; 0 is no limit.
+    #[schema(title = "Proposal reviews an hour", default = VettingPolicy::default().max_proposal_reviews_per_hour)]
     max_proposal_reviews_per_hour: Option<u32>,
+    /// Reviews of one Session's proposals in an hour; 0 is no limit.
+    #[schema(title = "Proposal reviews an hour for one Session", default = VettingPolicy::default().max_proposal_reviews_per_session_per_hour)]
     max_proposal_reviews_per_session_per_hour: Option<u32>,
+}
+
+/// An Operation's `vetting` as written: a switch, or the settings themselves.
+#[derive(Debug, Clone, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+#[map(untagged, rename_all = "lowercase")]
+pub(crate) enum VettingSetting {
+    /// Every check on, at its default.
+    #[schema(label = "On, as it comes")]
+    On,
+    /// No check at all.
+    #[schema(label = "Off")]
+    Off,
+    /// The checks as set here.
+    #[schema(title = "Custom", description = "Choose each check")]
+    Custom(VettingDefinition),
 }
 
 impl VettingDefinition {
@@ -437,23 +504,16 @@ impl VettingDefinition {
     }
 }
 
-/// Reads an Operation's `vetting` value: `"off"`, `"on"` or a [`VettingDefinition`] table.
+/// The policy an Operation's `vetting` value makes.
 ///
 /// # Errors
 ///
-/// Returns a message for another string, a table [`VettingDefinition::resolve`] refuses, or
-/// any other type.
-pub(crate) fn policy_from_toml(value: Option<&toml::Value>) -> Result<VettingPolicy, String> {
+/// Returns a message for settings [`VettingDefinition::resolve`] refuses.
+pub(crate) fn policy_of(value: Option<&VettingSetting>) -> Result<VettingPolicy, String> {
     match value {
-        None => Ok(VettingPolicy::default()),
-        Some(toml::Value::String(switch)) if switch == "off" => Ok(VettingPolicy::off()),
-        Some(toml::Value::String(switch)) if switch == "on" => Ok(VettingPolicy::default()),
-        Some(table @ toml::Value::Table(_)) => table
-            .clone()
-            .try_into::<VettingDefinition>()
-            .map_err(|error| format!("vetting: {error}"))?
-            .resolve(),
-        Some(_) => Err("vetting must be \"on\", \"off\" or a table".to_owned()),
+        None | Some(VettingSetting::On) => Ok(VettingPolicy::default()),
+        Some(VettingSetting::Off) => Ok(VettingPolicy::off()),
+        Some(VettingSetting::Custom(definition)) => definition.resolve(),
     }
 }
 
@@ -1706,8 +1766,16 @@ mod tests {
     #[test]
     fn configuration_overrides_each_check_and_reports_weakenings() {
         assert!(VettingPolicy::default().weakenings().is_empty());
-        assert_eq!(policy_from_toml(None).unwrap(), VettingPolicy::default());
-        let off = policy_from_toml(Some(&toml::Value::String("off".to_owned()))).unwrap();
+        let read = |written: serde_json::Value| {
+            crate::directorates::m::records::from_json::<VettingSetting>(&written)
+                .and_then(|setting| policy_of(Some(&setting)))
+        };
+        let table = |text: &str| {
+            crate::directorates::m::records::from_toml::<VettingDefinition>(text)
+                .and_then(|definition| definition.resolve())
+        };
+        assert_eq!(policy_of(None).unwrap(), VettingPolicy::default());
+        let off = read(serde_json::json!("off")).unwrap();
         assert!(!off.enabled);
         assert_eq!(off.weakenings().len(), 1);
         assert_eq!(
@@ -1718,12 +1786,11 @@ mod tests {
             ),
             Vetting::pass()
         );
-        let table: toml::Value = toml::from_str(
+        let loose = table(
             "max_brief_bytes = 1000000\nmax_per_hour = 0\nmax_per_source_per_hour = 50\n\
              duplicates = false\nbudget = false\nscreening = \"off\"\nreview = \"off\"\n",
         )
         .unwrap();
-        let loose = policy_from_toml(Some(&table)).unwrap();
         assert_eq!(loose.max_per_hour, None);
         assert_eq!(loose.max_per_source_per_hour, Some(50));
         assert_eq!(loose.weakenings().len(), 7);
@@ -1732,9 +1799,8 @@ mod tests {
             "phrases = [\" \"]",
             "colour = \"red\"",
         ] {
-            let table: toml::Value = toml::from_str(bad).unwrap();
-            assert!(policy_from_toml(Some(&table)).is_err(), "{bad}");
+            assert!(table(bad).is_err(), "{bad}");
         }
-        assert!(policy_from_toml(Some(&toml::Value::String("maybe".to_owned()))).is_err());
+        assert!(read(serde_json::json!("maybe")).is_err());
     }
 }

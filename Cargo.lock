@@ -114,6 +114,8 @@ dependencies = [
  "futures-util",
  "globset",
  "guatiao",
+ "guatiao-intake",
+ "guatiao-serde",
  "libc",
  "lru",
  "rcgen",
@@ -1867,6 +1869,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "guatiao-intake"
+version = "0.0.0-alpha.1"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=a67fd4be0aa319795614ac6fe12d35d856ec3d8b#a67fd4be0aa319795614ac6fe12d35d856ec3d8b"
+dependencies = [
+ "guatiao",
+ "guatiao-derive",
 ]
 
 [[package]]

@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lru::LruCache;
-use serde::Deserialize;
-use serde::de::Error as _;
 use sha2::{Digest, Sha256};
+
+use crate::bounds::Seconds;
 
 /// Default time without provider or terminal activity before a Session is stalled.
 pub const DEFAULT_STALL_TIMEOUT: Duration = Duration::from_secs(300);
@@ -20,26 +20,39 @@ pub const DEFAULT_LOOP_MIN_LINES: usize = 50;
 pub const DEFAULT_LINE_HISTORY: usize = 4096;
 /// Per-Agent overrides layered over the daemon's WatchdogConfig.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
 pub struct WatchdogOverrides {
-    /// Maximum quiet period without provider or terminal activity.
-    #[serde(deserialize_with = "deserialize_optional_duration")]
-    pub stall_timeout: Option<Duration>,
-    /// Quiet period after repeated output before loop detection fires.
-    #[serde(deserialize_with = "deserialize_optional_duration")]
-    pub loop_timeout: Option<Duration>,
-    /// Repeated lines required before loop detection applies.
+    /// How long a Session may stay quiet before it counts as stalled.
+    #[schema(title = "Stalled after")]
+    pub stall_timeout: Option<Seconds>,
+    /// How long a Session repeating itself may go on before it counts as looping.
+    #[schema(title = "Looping after")]
+    pub loop_timeout: Option<Seconds>,
+    /// How many lines must repeat before it can count as looping.
+    #[schema(title = "Repeated lines")]
     pub loop_min_lines: Option<usize>,
-    /// Quiet period before a prompt-shaped Session is marked blocked.
-    #[serde(deserialize_with = "deserialize_optional_duration")]
-    pub blocked_after: Option<Duration>,
-    /// Optional maximum Session runtime.
-    #[serde(deserialize_with = "deserialize_optional_duration")]
-    pub max_runtime: Option<Duration>,
-    /// Distinct terminal lines retained for repeated-output detection.
+    /// How long a Session showing a prompt may wait before it counts as blocked.
+    #[schema(title = "Blocked after")]
+    pub blocked_after: Option<Seconds>,
+    /// The longest a Session may run. Leave it empty for no limit of its own.
+    #[schema(title = "Longest run")]
+    pub max_runtime: Option<Seconds>,
+    /// How many different lines of output are remembered to spot repeats.
+    #[schema(title = "Lines remembered")]
     pub history: Option<usize>,
-    /// Normalize digit runs before comparing terminal lines.
+    /// Treat lines that differ only in their numbers as the same line.
+    #[schema(title = "Ignore numbers when comparing")]
     pub normalize_digits: Option<bool>,
 }
 
@@ -60,19 +73,19 @@ impl WatchdogOverrides {
     pub fn apply_to(&self, base: &WatchdogConfig) -> WatchdogConfig {
         let mut config = base.clone();
         if let Some(timeout) = self.stall_timeout {
-            config = config.with_stall_timeout(timeout);
+            config = config.with_stall_timeout(timeout.0);
         }
         if let Some(timeout) = self.loop_timeout {
-            config = config.with_loop_timeout(timeout);
+            config = config.with_loop_timeout(timeout.0);
         }
         if let Some(count) = self.loop_min_lines {
             config = config.with_loop_min_lines(count);
         }
         if let Some(timeout) = self.blocked_after {
-            config = config.with_blocked_after(timeout);
+            config = config.with_blocked_after(timeout.0);
         }
         if let Some(timeout) = self.max_runtime {
-            config = config.with_max_runtime(Some(timeout));
+            config = config.with_max_runtime(Some(timeout.0));
         }
         if let Some(count) = self.history {
             config = config.with_history(count);
@@ -82,16 +95,6 @@ impl WatchdogOverrides {
         }
         config
     }
-}
-
-fn deserialize_optional_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Option::<f64>::deserialize(deserializer)?
-        .map(Duration::try_from_secs_f64)
-        .transpose()
-        .map_err(D::Error::custom)
 }
 
 /// Thresholds used to detect quiet, blocked and looping Agent Sessions.
@@ -520,7 +523,7 @@ mod tests {
 
     #[test]
     fn agent_watchdog_overrides_layer_over_daemon_defaults() {
-        let limits: WatchdogOverrides = toml::from_str(
+        let limits: WatchdogOverrides = crate::directorates::m::records::from_toml(
             "stall_timeout = 12.5\nloop_min_lines = 3\nmax_runtime = 60\nnormalize_digits = true\n",
         )
         .unwrap();
@@ -540,8 +543,14 @@ mod tests {
 
     #[test]
     fn agent_watchdog_overrides_reject_invalid_values_and_unknown_fields() {
-        assert!(toml::from_str::<WatchdogOverrides>("stall_timeout = -1.0").is_err());
-        assert!(toml::from_str::<WatchdogOverrides>("stall_timeot = 1").is_err());
+        assert!(
+            crate::directorates::m::records::from_toml::<WatchdogOverrides>("stall_timeout = -1.0")
+                .is_err()
+        );
+        assert!(
+            crate::directorates::m::records::from_toml::<WatchdogOverrides>("stall_timeot = 1")
+                .is_err()
+        );
     }
 
     #[test]

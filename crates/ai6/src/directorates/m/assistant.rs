@@ -46,9 +46,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use coqui_peer::{Digest as PinDigest, PeerId};
-use serde::{Deserialize, Serialize};
+use guatiao::{FromValue, Schema, ToValue};
+use guatiao_intake::Form;
 use sha2::{Digest, Sha256};
 
+use crate::directorates::m::records;
 use crate::directorates::section_00::agent::AssistantNetwork;
 use crate::directorates::section_00::assistant::{
     AssistantReach, host_pattern, interpreter_name, valid_identity,
@@ -73,32 +75,113 @@ pub const ORG_SHARED: &str = "org";
 /// reads, what her scripts may run and reach, which skills she may use, and whether she may
 /// run on an elevated Station. The default keeps nothing, shares nothing, runs `python3` in the
 /// harness's sandbox, reaches no host, has no skill and refuses elevated Stations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+#[form(
+    section(
+        id = "memory",
+        label = "Memory and shared work",
+        help = "Where she keeps each person's work, and what teams share with her."
+    ),
+    section(
+        id = "reach",
+        label = "What she can reach",
+        help = "What her scripts may run and which hosts she may reach."
+    ),
+    section(id = "skills", label = "Skills"),
+    section(id = "narrowing", label = "For some people only"),
+    section(id = "limits", label = "Limits")
+)]
 pub struct AssistantSettings {
+    /// Where each person's memory and work is kept: a repository address with {person} or
+    /// {person_digest} in it. Leave it empty to keep nothing.
+    #[schema(title = "Personal repository", section = "memory")]
+    #[form(placeholder = "/srv/moneypenny/{person_digest}.git")]
     personal_repo: Option<String>,
+    /// A repository a directory group shares with her, by group name.
+    #[schema(title = "Repositories teams share", section = "memory", advanced)]
+    #[map(default)]
+    #[form(form = SharedRepo)]
     shared: BTreeMap<String, SharedRepo>,
+    /// A repository everyone shares with her.
+    #[schema(title = "Repository everyone shares", section = "memory", advanced)]
+    #[form(form = SharedRepo)]
     org: Option<SharedRepo>,
+    /// Let her run on a Station that runs as an administrator. A weakening.
+    #[schema(title = "Run on an elevated Station", section = "reach", advanced)]
+    #[map(default)]
     allow_elevated: bool,
+    /// The programs her scripts may run.
+    #[schema(title = "Script programs", section = "reach")]
+    #[map(default = AssistantSettings::default().interpreters)]
     interpreters: Vec<String>,
+    /// What her web tools and scripts may reach besides her own tools.
+    #[schema(title = "Network", section = "reach")]
+    #[map(default)]
     network: NetworkPolicy,
+    /// The hosts she may reach when the network is limited.
+    #[schema(title = "Hosts she may reach", section = "reach")]
+    #[map(default)]
+    #[form(visible_when(field = "network", equals = "limited"))]
     allowed_hosts: Vec<String>,
+    /// Networks she may not reach when the network is open, such as 10.0.0.0/8.
+    #[schema(title = "Networks she may not reach", section = "reach")]
+    #[map(default)]
+    #[form(visible_when(field = "network", equals = "open"))]
     denied_networks: Vec<String>,
+    /// Run her scripts outside the harness's sandbox. A weakening.
+    #[schema(title = "Run scripts without the sandbox", section = "reach", advanced)]
+    #[map(default)]
     unsandboxed_scripts: bool,
+    /// The skills she may use, by name.
+    #[schema(title = "Skill catalog", section = "skills", advanced)]
+    #[map(default)]
+    #[form(form = SkillEntry)]
     skills: BTreeMap<String, SkillEntry>,
+    /// Load a skill with no pinned digest. A weakening.
+    #[schema(title = "Allow unpinned skills", section = "skills", advanced)]
+    #[map(default)]
     skills_unpinned: bool,
+    /// Let a skill ask for tools of its own. A weakening.
+    #[schema(title = "Let skills ask for tools", section = "skills", advanced)]
+    #[map(default)]
     skills_allow_tools: bool,
+    /// What she may do for the members of a directory group, by group name. It can only narrow
+    /// the settings above.
+    #[schema(title = "For a group", section = "narrowing", advanced)]
+    #[map(default)]
+    #[form(form = AssistantNarrowing)]
     group: BTreeMap<String, AssistantNarrowing>,
+    /// What she may do for one person, by person ID. It can only narrow the settings above.
+    #[schema(title = "For a person", section = "narrowing", advanced)]
+    #[map(default)]
+    #[form(form = AssistantNarrowing)]
     person: BTreeMap<String, AssistantNarrowing>,
-    #[serde(skip_serializing_if = "AssistantViewLimits::is_unset")]
+    /// How large the views she shows may be.
+    #[schema(title = "Her views", section = "limits", advanced)]
+    #[map(default, skip_serializing_if = AssistantViewLimits::is_unset)]
+    #[form(form)]
     views: AssistantViewLimits,
-    #[serde(skip_serializing_if = "is_default")]
+    /// What passes between Universal Exports and a Station for her, and how much of her memory a
+    /// Station reads.
+    #[schema(title = "Messages and memory", section = "limits", advanced)]
+    #[map(default, skip_serializing_if = is_default)]
+    #[form(form)]
     limits: AssistantLimits,
-    #[serde(skip_serializing_if = "is_default")]
+    /// How each Station runs her harnesses.
+    #[schema(title = "Her desk on each Station", section = "limits", advanced)]
+    #[map(default, skip_serializing_if = is_default)]
+    #[form(form)]
     desk: AssistantDeskLimits,
-    #[serde(skip_serializing_if = "is_default")]
+    /// How Universal Exports keeps her conversations.
+    #[schema(title = "Her conversations", section = "limits", advanced)]
+    #[map(default, skip_serializing_if = is_default)]
+    #[form(form)]
     gateway: AssistantGatewayLimits,
-    #[serde(skip_serializing_if = "is_default")]
+    /// The pages she publishes and how they are served.
+    #[schema(title = "Her pages", section = "limits", advanced)]
+    #[map(default, skip_serializing_if = is_default)]
+    #[form(form)]
     pages: AssistantPageLimits,
 }
 
@@ -135,72 +218,98 @@ impl Default for AssistantSettings {
 /// The bounds Universal Exports holds Moneypenny's views to, `[assistant.views]`. Each is at
 /// least 1; an absent one takes Universal Exports' default.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct AssistantViewLimits {
-    /// Blocks in one view (default 24).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Blocks in one view.
+    #[schema(title = "Blocks in one view", default = AssistantViewLimits::defaults().blocks)]
     pub blocks: Option<u64>,
-    /// Bytes of one view as JSON (default 65536).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Bytes of one view as JSON.
+    #[schema(title = "Size of one view", format = "bytes", default = AssistantViewLimits::defaults().view_bytes)]
     pub view_bytes: Option<u64>,
-    /// Bytes of a text block's Markdown (default 8192).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Bytes of a text block's Markdown.
+    #[schema(title = "Size of a text block", format = "bytes", default = AssistantViewLimits::defaults().text_bytes)]
     pub text_bytes: Option<u64>,
-    /// Bytes of a title, label, cell or other short text (default 512).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Bytes of a title, label, cell or other short text.
+    #[schema(title = "Size of a title, label or cell", format = "bytes", default = AssistantViewLimits::defaults().short_bytes)]
     pub short_bytes: Option<u64>,
-    /// Columns of a table (default 12).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Columns of a table.
+    #[schema(title = "Columns of a table", default = AssistantViewLimits::defaults().columns)]
     pub columns: Option<u64>,
-    /// Rows of a table (default 200).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Rows of a table.
+    #[schema(title = "Rows of a table", default = AssistantViewLimits::defaults().rows)]
     pub rows: Option<u64>,
-    /// Items of a key-value list or a timeline (default 100).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Items of a key-value list or a timeline.
+    #[schema(title = "Items of a list or timeline", default = AssistantViewLimits::defaults().items)]
     pub items: Option<u64>,
-    /// Series of a chart (default 8).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Series of a chart.
+    #[schema(title = "Series of a chart", default = AssistantViewLimits::defaults().series)]
     pub series: Option<u64>,
-    /// Points of one series (default 200).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Points of one series.
+    #[schema(title = "Points of one series", default = AssistantViewLimits::defaults().points)]
     pub points: Option<u64>,
-    /// Slices of a pie (default 12).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Slices of a pie.
+    #[schema(title = "Slices of a pie", default = AssistantViewLimits::defaults().pie_slices)]
     pub pie_slices: Option<u64>,
-    /// Bytes of each side of a diff (default 16384).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Bytes of each side of a diff.
+    #[schema(title = "Size of each side of a diff", format = "bytes", default = AssistantViewLimits::defaults().diff_bytes)]
     pub diff_bytes: Option<u64>,
-    /// Fields of a form or a card (default 20).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Fields of a form or a card.
+    #[schema(title = "Fields of a form or card", default = AssistantViewLimits::defaults().fields)]
     pub fields: Option<u64>,
-    /// Rows of a schedule (default 50).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Rows of a schedule.
+    #[schema(title = "Rows of a schedule", default = AssistantViewLimits::defaults().schedule_rows)]
     pub schedule_rows: Option<u64>,
-    /// Nodes of a graph (default 60).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Nodes of a graph.
+    #[schema(title = "Nodes of a graph", default = AssistantViewLimits::defaults().graph_nodes)]
     pub graph_nodes: Option<u64>,
-    /// Edges of a graph (default 120).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Edges of a graph.
+    #[schema(title = "Edges of a graph", default = AssistantViewLimits::defaults().graph_edges)]
     pub graph_edges: Option<u64>,
-    /// Bytes of an SVG drawing (default 32768).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Bytes of an SVG drawing.
+    #[schema(title = "Size of a drawing", format = "bytes", default = AssistantViewLimits::defaults().svg_bytes)]
     pub svg_bytes: Option<u64>,
-    /// Elements of an SVG drawing (default 2000).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Elements of an SVG drawing.
+    #[schema(title = "Elements of a drawing", default = AssistantViewLimits::defaults().svg_elements)]
     pub svg_elements: Option<u64>,
-    /// How deep an SVG drawing nests its elements (default 16).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// How deep an SVG drawing nests its elements.
+    #[schema(title = "Nesting of a drawing", default = AssistantViewLimits::defaults().svg_depth)]
     pub svg_depth: Option<u64>,
-    /// Bytes of the label of a page she offers with `navigate` (default 120).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Bytes of the label of a page she offers with `navigate`.
+    #[schema(title = "Size of a page link's label", format = "bytes", default = AssistantViewLimits::defaults().navigate_label_bytes)]
     pub navigate_label_bytes: Option<u64>,
-    /// Bytes of an `id` in an SVG drawing (default 64).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Bytes of an `id` in an SVG drawing.
+    #[schema(title = "Size of an id in a drawing", format = "bytes", default = AssistantViewLimits::defaults().svg_id_bytes)]
     pub svg_id_bytes: Option<u64>,
 }
 
 impl AssistantViewLimits {
+    /// The bound of each when the record sets none.
+    pub fn defaults() -> Self {
+        Self {
+            blocks: Some(24),
+            view_bytes: Some(65536),
+            text_bytes: Some(8192),
+            short_bytes: Some(512),
+            columns: Some(12),
+            rows: Some(200),
+            items: Some(100),
+            series: Some(8),
+            points: Some(200),
+            pie_slices: Some(12),
+            diff_bytes: Some(16384),
+            fields: Some(20),
+            schedule_rows: Some(50),
+            graph_nodes: Some(60),
+            graph_edges: Some(120),
+            svg_bytes: Some(32768),
+            svg_elements: Some(2000),
+            svg_depth: Some(16),
+            navigate_label_bytes: Some(120),
+            svg_id_bytes: Some(64),
+        }
+    }
+
     fn is_unset(&self) -> bool {
         *self == Self::default()
     }
@@ -239,17 +348,35 @@ impl AssistantViewLimits {
 pub const DEFAULT_INTERPRETER: &str = "python3";
 
 /// What Moneypenny's web tools and scripts may reach besides her MCP servers, strictest first.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    ToValue,
+    FromValue,
+    Schema,
+)]
 #[serde(rename_all = "lowercase")]
+#[map(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum NetworkPolicy {
     /// Nothing: no web tool, and scripts reach no host.
+    #[schema(label = "None: no web tools, and scripts reach no host")]
     Denied,
     /// Only the hosts in `allowed_hosts`; with none, nothing.
     #[default]
+    #[schema(label = "Limited: only the hosts listed")]
     Limited,
     /// Everything the Station reaches, the Station itself and its network included, less
     /// `denied_networks`; and web search. A weakening.
+    #[schema(label = "Open: all the Station reaches, and web search")]
     Open,
 }
 
@@ -266,11 +393,15 @@ impl NetworkPolicy {
 
 /// One skill of the catalog (`[assistant.skills.<name>]`): a directory holding `SKILL.md` and
 /// its files, and the digest of that directory it must have when it is installed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct SkillEntry {
+    /// The directory holding the skill's SKILL.md and its files.
+    #[schema(title = "Directory")]
     path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The digest that directory must have when it is installed, from `ai6 harness pin DIR`.
+    #[schema(title = "Pinned digest")]
+    #[map(as_text)]
     pin: Option<PeerId>,
 }
 
@@ -307,14 +438,26 @@ impl SkillEntry {
 /// `[assistant]` for scripts and network, and `skills`, the catalog skills it keeps, each
 /// narrowing the deployment's setting for the members of that group or that person. A key left
 /// out narrows nothing; a table that would widen a setting is refused when the roster loads.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct AssistantNarrowing {
+    /// Only these of the programs her scripts may run.
+    #[schema(title = "Script programs")]
     interpreters: Option<Vec<String>>,
+    /// A network setting no looser than the general one.
+    #[schema(title = "Network")]
     network: Option<NetworkPolicy>,
+    /// Only these of the hosts she may reach.
+    #[schema(title = "Hosts she may reach")]
     allowed_hosts: Option<Vec<String>>,
+    /// More networks she may not reach.
+    #[schema(title = "Networks she may not reach")]
     denied_networks: Option<Vec<String>>,
+    /// Whether her scripts may run without the sandbox, when the general setting lets them.
+    #[schema(title = "Run scripts without the sandbox")]
     unsandboxed_scripts: Option<bool>,
+    /// Only these skills of the catalog.
+    #[schema(title = "Skills")]
     skills: Option<Vec<String>>,
 }
 
@@ -618,11 +761,15 @@ fn injects_commands(text: &str) -> bool {
 
 /// A repository a directory group (or everyone) shares with Moneypenny: checked out read-only
 /// for her; a change to it is a proposal the person confirms, or immediate with `write`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct SharedRepo {
+    /// The repository's address: a URL, user@host:path or a local path.
+    #[schema(title = "Repository")]
     repo: String,
-    #[serde(default)]
+    /// Let a member's change through without a proposal to confirm. A weakening.
+    #[schema(title = "Change without confirming")]
+    #[map(default)]
     write: bool,
 }
 
@@ -1399,8 +1546,8 @@ impl AssistantSettings {
                     changes.push(format!("{key} is removed: it no longer narrows anything"));
                     continue;
                 };
-                let (Ok(serde_json::Value::Object(was)), Ok(table)) =
-                    (serde_json::to_value(was), serde_json::to_value(table))
+                let (Some(serde_json::Value::Object(was)), Some(table)) =
+                    (records::to_json(was), records::to_json(table))
                 else {
                     continue;
                 };
@@ -1473,7 +1620,7 @@ mod tests {
         assert_eq!(reach.interpreters, ["python3"]);
         assert!(reach.network.reaches_nothing());
         assert!(!reach.unsandboxed_scripts);
-        let empty: AssistantSettings = toml::from_str("").unwrap();
+        let empty: AssistantSettings = crate::directorates::m::records::from_toml("").unwrap();
         assert_eq!(empty, settings, "an empty table is the default");
     }
 
@@ -1492,7 +1639,7 @@ mod tests {
             [person."eve@sis"]
             unsandboxed_scripts = false
         "#;
-        let settings: AssistantSettings = toml::from_str(toml).unwrap();
+        let settings: AssistantSettings = crate::directorates::m::records::from_toml(toml).unwrap();
         assert_eq!(settings.validate(), Ok(()));
         let analyst = settings.reach_for("q", &["analysts".to_owned()]);
         assert_eq!(analyst.interpreters, ["python3"]);
@@ -1529,12 +1676,14 @@ mod tests {
         ] {
             let widening =
                 format!("interpreters = [\"python3\"]\nallowed_hosts = [\"pypi.org\"]\n{table}");
-            let settings: AssistantSettings = toml::from_str(&widening).unwrap();
+            let settings: AssistantSettings =
+                crate::directorates::m::records::from_toml(&widening).unwrap();
             let refused = settings.validate().unwrap_err();
             assert!(refused.starts_with(key), "{refused}");
         }
         let unsandboxed: AssistantSettings =
-            toml::from_str("[group.ops]\nunsandboxed_scripts = true").unwrap();
+            crate::directorates::m::records::from_toml("[group.ops]\nunsandboxed_scripts = true")
+                .unwrap();
         assert!(
             unsandboxed
                 .validate()
@@ -1542,21 +1691,27 @@ mod tests {
                 .starts_with("assistant.group.ops.unsandboxed_scripts")
         );
         // Under an open deployment a table may list any hosts: that narrows it.
-        let open: AssistantSettings =
-            toml::from_str("network = \"open\"\n[group.ops]\nallowed_hosts = [\"a.example\"]")
-                .unwrap();
+        let open: AssistantSettings = crate::directorates::m::records::from_toml(
+            "network = \"open\"\n[group.ops]\nallowed_hosts = [\"a.example\"]",
+        )
+        .unwrap();
         assert_eq!(open.validate(), Ok(()));
         let ops = open.reach_for("q", &["ops".to_owned()]);
         assert_eq!(ops.network.policy, "limited");
         assert_eq!(ops.network.allowed_hosts, ["a.example"]);
-        assert!(toml::from_str::<AssistantSettings>("[group.ops]\nshell = true").is_err());
+        assert!(
+            crate::directorates::m::records::from_toml::<AssistantSettings>(
+                "[group.ops]\nshell = true"
+            )
+            .is_err()
+        );
         for bad in [
             "interpreters = [\"/bin/sh\"]",
             "allowed_hosts = [\"*\"]",
             "allowed_hosts = [\"localhost\"]",
             "network = \"everything\"",
         ] {
-            let parsed = toml::from_str::<AssistantSettings>(bad);
+            let parsed = crate::directorates::m::records::from_toml::<AssistantSettings>(bad);
             assert!(
                 parsed.is_err() || parsed.unwrap().validate().is_err(),
                 "{bad}"
@@ -1584,9 +1739,10 @@ mod tests {
     /// never takes from it.
     #[test]
     fn denied_networks_are_empty_by_default_and_tables_only_add_to_them() {
-        let open: AssistantSettings = toml::from_str("network = \"open\"").unwrap();
+        let open: AssistantSettings =
+            crate::directorates::m::records::from_toml("network = \"open\"").unwrap();
         assert!(open.deployment_reach().network.denied.is_empty());
-        let settings: AssistantSettings = toml::from_str(
+        let settings: AssistantSettings = crate::directorates::m::records::from_toml(
             "network = \"open\"\ndenied_networks = [\"loopback\", \"10.20.0.0/16\"]\n\
              [group.ops]\ndenied_networks = [\"private\"]\n\
              [person.\"eve@sis\"]\ndenied_networks = []\n",
@@ -1609,7 +1765,8 @@ mod tests {
             "denied_networks = [\"lan\"]",
             "[group.ops]\ndenied_networks = [\"10.0.0.0/40\"]",
         ] {
-            let settings: AssistantSettings = toml::from_str(bad).unwrap();
+            let settings: AssistantSettings =
+                crate::directorates::m::records::from_toml(bad).unwrap();
             let error = settings.validate().unwrap_err();
             assert!(error.contains("denied_networks"), "{error}");
         }
@@ -1688,7 +1845,7 @@ mod tests {
 
     #[test]
     fn what_a_record_changes_is_listed_against_the_current_one() {
-        let current: AssistantSettings = toml::from_str(
+        let current: AssistantSettings = crate::directorates::m::records::from_toml(
             "personal_repo = \"/srv/mp/{person_digest}.git\"\n\
              network = \"denied\"\n\
              allow_elevated = true\n\
@@ -1700,7 +1857,7 @@ mod tests {
         .unwrap();
         assert!(current.changes_from(&current).is_empty());
         // Weakening nothing against the defaults, yet loosening and redirecting what is set.
-        let next: AssistantSettings = toml::from_str(
+        let next: AssistantSettings = crate::directorates::m::records::from_toml(
             "personal_repo = \"/srv/elsewhere/{person_digest}.git\"\n\
              network = \"limited\"\n\
              allowed_hosts = [\"docs.python.org\"]\n\
@@ -1759,7 +1916,7 @@ mod tests {
             [org]
             repo = "https://host/org.git"
         "#;
-        let settings: AssistantSettings = toml::from_str(toml).unwrap();
+        let settings: AssistantSettings = crate::directorates::m::records::from_toml(toml).unwrap();
         assert_eq!(settings.validate(), Ok(()));
         let weakened = settings.weakenings();
         assert_eq!(weakened.len(), 2, "{weakened:?}");
@@ -1785,7 +1942,8 @@ mod tests {
             "personal_repo = \"git@host:people/{person}.git\"",
             "personal_repo = \"file:///srv/{person}.git\"",
         ] {
-            let settings: AssistantSettings = toml::from_str(good).unwrap();
+            let settings: AssistantSettings =
+                crate::directorates::m::records::from_toml(good).unwrap();
             assert_eq!(settings.validate(), Ok(()), "{good}");
         }
         for bad in [
@@ -1804,10 +1962,14 @@ mod tests {
             "[shared.org]\nrepo = \"/srv/x.git\"",
             "[shared.\"../x\"]\nrepo = \"/srv/x.git\"",
         ] {
-            let settings: AssistantSettings = toml::from_str(bad).unwrap();
+            let settings: AssistantSettings =
+                crate::directorates::m::records::from_toml(bad).unwrap();
             assert!(settings.validate().is_err(), "{bad}");
         }
-        assert!(toml::from_str::<AssistantSettings>("shell = true").is_err());
+        assert!(
+            crate::directorates::m::records::from_toml::<AssistantSettings>("shell = true")
+                .is_err()
+        );
     }
 
     #[test]
@@ -1823,7 +1985,7 @@ mod tests {
             [views]
             svg_id_bytes = 16
         "#;
-        let settings: AssistantSettings = toml::from_str(toml).unwrap();
+        let settings: AssistantSettings = crate::directorates::m::records::from_toml(toml).unwrap();
         assert_eq!(settings.validate(), Ok(()));
         assert_eq!(settings.limits().message_bytes, crate::bounds::Limit::at(8));
         assert_eq!(settings.views().svg_id_bytes, Some(16));
@@ -1841,7 +2003,7 @@ mod tests {
                 .contains(&"assistant.desk.live none is looser than the default 4".to_owned())
         );
         assert_eq!(
-            serde_json::to_value(&default).unwrap().get("desk"),
+            records::to_json(&default).unwrap().get("desk"),
             None,
             "defaults are not written out"
         );
@@ -1867,11 +2029,12 @@ svg_id_bytes = 0",
                 "assistant.views.svg_id_bytes",
             ),
         ] {
-            let settings: AssistantSettings = toml::from_str(bad).unwrap();
+            let settings: AssistantSettings =
+                crate::directorates::m::records::from_toml(bad).unwrap();
             assert!(settings.validate().unwrap_err().contains(key), "{bad}");
         }
         assert!(
-            toml::from_str::<AssistantSettings>(
+            crate::directorates::m::records::from_toml::<AssistantSettings>(
                 "[desk]
 lives = 1"
             )
@@ -2049,14 +2212,19 @@ lives = 1"
             [person."eve@sis"]
             skills = ["charts"]
         "#;
-        let parsed: AssistantSettings = toml::from_str(toml).unwrap();
+        let parsed: AssistantSettings = crate::directorates::m::records::from_toml(toml).unwrap();
         assert_eq!(parsed.skills_for("eve@sis", &[]), ["charts"]);
         assert!(
             parsed
                 .skills_for("eve@sis", &["contractors".to_owned()])
                 .is_empty()
         );
-        assert!(toml::from_str::<AssistantSettings>("[group.x]\nshell = true").is_err());
+        assert!(
+            crate::directorates::m::records::from_toml::<AssistantSettings>(
+                "[group.x]\nshell = true"
+            )
+            .is_err()
+        );
 
         // One table narrows scripts, network and skills together.
         let toml = r#"
@@ -2068,7 +2236,7 @@ lives = 1"
             network = "denied"
             skills = []
         "#;
-        let parsed: AssistantSettings = toml::from_str(toml).unwrap();
+        let parsed: AssistantSettings = crate::directorates::m::records::from_toml(toml).unwrap();
         let contractors = ["contractors".to_owned()];
         assert!(parsed.skills_for("q", &contractors).is_empty());
         assert!(

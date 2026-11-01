@@ -10,8 +10,11 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use guatiao::{FromValue, Schema, ToValue};
+use guatiao_intake::Form;
 use serde::{Deserialize, Serialize};
 
+use crate::bounds::Limit;
 use crate::directorates::m::approvals::{GreenInkDefinition, GreenInkPolicy};
 use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
@@ -20,8 +23,9 @@ use crate::directorates::m::inherit;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
 use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
+use crate::directorates::m::records;
 use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
-use crate::directorates::m::vetting::{VettingPolicy, policy_from_toml};
+use crate::directorates::m::vetting::{VettingPolicy, VettingSetting, policy_of};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition, utc_day};
@@ -36,6 +40,35 @@ const AGENTS_STEM: &str = "agents";
 const OPERATIONS_FILE: &str = "operations.toml";
 /// The clearances, lowest first.
 pub(crate) const CLEARANCES: &[&str] = &["desk", "field", "00"];
+
+/// A clearance as a person chooses it, lowest first.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+pub(crate) enum ClearanceLevel {
+    /// Reads and reports.
+    #[map(rename = "desk")]
+    #[schema(label = "Desk: reads and reports")]
+    Desk,
+    /// Works on its Mission.
+    #[default]
+    #[map(rename = "field")]
+    #[schema(label = "Field: does the work")]
+    Field,
+    /// Acts unattended where the Operation allows.
+    #[map(rename = "00")]
+    #[schema(label = "00: acts unattended where the Operation allows")]
+    DoubleO,
+}
+
+impl ClearanceLevel {
+    /// The name used in configuration.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Desk => "desk",
+            Self::Field => "field",
+            Self::DoubleO => "00",
+        }
+    }
+}
 
 /// A resolved Agent configuration.
 #[non_exhaustive]
@@ -91,14 +124,19 @@ pub const DEFAULT_RETIRE_WARNING_DAYS: u32 = 14;
 
 /// What happens to an Agent on its `retire_on` date (`on_retire`).
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, ToValue, FromValue, Schema,
+)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum OnRetire {
     /// Its clearance is capped at `desk`; it is still chosen for work.
     #[default]
+    #[schema(label = "Keep it on desk duty: still chosen, at desk clearance")]
     Desk,
     /// It is never chosen again; its running Missions finish and queued ones go to the
     /// next qualified Agent.
+    #[schema(label = "Retire it: its running Missions finish and queued ones go to the next Agent")]
     Retired,
 }
 
@@ -408,14 +446,29 @@ impl Default for Workspace {
 
 /// What happens to a Mission whose Session is lost with its Station (`on_lost`).
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    serde::Serialize,
+    ToValue,
+    FromValue,
+    Schema,
+)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum OnLost {
     /// Try again as a new attempt on another eligible Station, with a hand-off brief, until
     /// the Registry's attempt limit.
     #[default]
+    #[schema(label = "Try again on another Station, with a hand-off")]
     Retry,
     /// File the Mission as failed.
+    #[schema(label = "File the Mission as failed")]
     Fail,
 }
 
@@ -459,12 +512,17 @@ impl Operation {
 }
 
 /// Git author identity configured by an Operation.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize, ToValue, FromValue, Schema, Form,
+)]
 #[serde(deny_unknown_fields)]
+#[map(deny_unknown_fields)]
 pub struct CoverIdentity {
-    /// Commit author name.
+    /// The name on its commits.
+    #[schema(title = "Author name")]
     pub name: String,
-    /// Commit author email.
+    /// The email address on its commits.
+    #[schema(title = "Author email", format = "email")]
     pub email: String,
 }
 
@@ -490,21 +548,21 @@ pub const DEFAULT_MAX_OPERATION_DEPTH: usize = 64;
 /// Settings that apply to the whole roster: the `roster` record (a `[roster]` table in the
 /// global `operations` file).
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct RosterSettings {
-    /// How many levels the tree of Operations may have, a root being the first; `None`
-    /// (`"none"` in a file) is no bound. A missing parent or a cycle is refused whatever
-    /// this says.
-    #[serde(with = "optional_bound")]
-    pub max_operation_depth: Option<usize>,
+    /// How many levels the tree of Operations may have, a root being the first. A missing
+    /// parent or a cycle is refused whatever this says.
+    #[schema(title = "Deepest Operation tree")]
+    #[map(default = RosterSettings::default().max_operation_depth)]
+    pub max_operation_depth: Limit,
 }
 
 impl Default for RosterSettings {
     /// [`DEFAULT_MAX_OPERATION_DEPTH`] levels.
     fn default() -> Self {
         Self {
-            max_operation_depth: Some(DEFAULT_MAX_OPERATION_DEPTH),
+            max_operation_depth: Limit::at(DEFAULT_MAX_OPERATION_DEPTH as u64),
         }
     }
 }
@@ -515,9 +573,9 @@ impl RosterSettings {
         Self::default()
     }
 
-    /// These settings with `max_operation_depth` set; `None` is no bound.
+    /// These settings with `max_operation_depth` set.
     #[must_use]
-    pub fn with_max_operation_depth(mut self, depth: Option<usize>) -> Self {
+    pub fn with_max_operation_depth(mut self, depth: Limit) -> Self {
         self.max_operation_depth = depth;
         self
     }
@@ -528,7 +586,7 @@ impl RosterSettings {
     ///
     /// Names the first key that is not acceptable.
     pub fn validate(&self) -> Result<(), RosterError> {
-        if self.max_operation_depth == Some(0) {
+        if self.max_operation_depth == Limit::at(0) {
             return Err(error(
                 "roster.max_operation_depth must be at least 1, or \"none\"",
             ));
@@ -538,49 +596,18 @@ impl RosterSettings {
 
     /// Each value looser than its default, worded for a log line.
     pub fn weakenings(&self) -> Vec<String> {
-        match self.max_operation_depth {
-            Some(depth) if depth <= DEFAULT_MAX_OPERATION_DEPTH => Vec::new(),
-            depth => vec![format!(
-                "roster.max_operation_depth {} is looser than the default \
-                 {DEFAULT_MAX_OPERATION_DEPTH}",
-                depth.map_or_else(|| "none".to_owned(), |depth| depth.to_string())
-            )],
+        if self
+            .max_operation_depth
+            .get()
+            .is_some_and(|depth| depth <= DEFAULT_MAX_OPERATION_DEPTH as u64)
+        {
+            return Vec::new();
         }
-    }
-}
-
-/// A bound that may be lifted: a number, or `"none"` (JSON `null` too) for no bound.
-mod optional_bound {
-    use serde::de::Error as _;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub(super) fn serialize<S: Serializer>(
-        value: &Option<usize>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        match value {
-            Some(bound) => serializer.serialize_u64(*bound as u64),
-            None => serializer.serialize_str("none"),
-        }
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<usize>, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Bound {
-            Number(usize),
-            Text(String),
-        }
-        match Option::<Bound>::deserialize(deserializer)? {
-            None => Ok(None),
-            Some(Bound::Number(bound)) => Ok(Some(bound)),
-            Some(Bound::Text(text)) if text == "none" => Ok(None),
-            Some(Bound::Text(text)) => Err(D::Error::custom(format!(
-                "expected a whole number or \"none\", found {text:?}"
-            ))),
-        }
+        vec![format!(
+            "roster.max_operation_depth {} is looser than the default \
+             {DEFAULT_MAX_OPERATION_DEPTH}",
+            self.max_operation_depth
+        )]
     }
 }
 
@@ -687,9 +714,9 @@ impl RosterBuilder {
         self
     }
 
-    /// Sets how many levels the tree of Operations may have; `None` is no bound. The default
+    /// Sets how many levels the tree of Operations may have. The default
     /// is [`DEFAULT_MAX_OPERATION_DEPTH`].
-    pub fn max_operation_depth(mut self, depth: Option<usize>) -> Self {
+    pub fn max_operation_depth(mut self, depth: Limit) -> Self {
         self.settings.max_operation_depth = depth;
         self
     }
@@ -1236,21 +1263,18 @@ impl Roster {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Default, FromValue)]
+#[map(deny_unknown_fields)]
 struct OperationsDocument {
-    #[serde(default)]
+    #[map(with = guatiao_serde::adapt::any, default)]
     operation: BTreeMap<String, serde_json::Value>,
-    #[serde(default)]
+    #[map(default)]
     roster: RosterSettings,
 }
 
 /// Checks the tree that `parents` (each Operation's codename and its parent's) make: every
 /// parent registered, no cycle, and no Operation more than `max_depth` levels deep.
-fn check_tree(
-    parents: &BTreeMap<&str, Option<&str>>,
-    max_depth: Option<usize>,
-) -> Result<(), RosterError> {
+fn check_tree(parents: &BTreeMap<&str, Option<&str>>, max_depth: Limit) -> Result<(), RosterError> {
     for (&id, &parent) in parents {
         let mut chain = vec![id];
         let mut next = parent;
@@ -1269,8 +1293,8 @@ fn check_tree(
                     chain.join(" -> ")
                 )));
             }
-            if let Some(max_depth) = max_depth
-                && chain.len() > max_depth
+            if let Some(max_depth) = max_depth.get()
+                && !Limit::at(max_depth).allows(chain.len())
             {
                 return Err(error(format!(
                     "Operation {id:?} is more than {max_depth} levels deep \
@@ -1334,8 +1358,8 @@ fn resolve_operations(
         }
         chain.reverse();
         let layered = inherit::layer(&chain);
-        let definition =
-            OperationDefinition::deserialize(serde_json::Value::Object(layered.definition.clone()))
+        let definition: OperationDefinition =
+            records::from_json(&serde_json::Value::Object(layered.definition.clone()))
                 .map_err(|reason| invalid(id, &reason))?;
         let mut operation = definition.resolve(id.clone(), source)?;
         operation.origins = layered.origins;
@@ -1345,80 +1369,310 @@ fn resolve_operations(
     Ok(operations)
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Default, FromValue)]
+#[map(deny_unknown_fields)]
 struct AgentsDocument {
-    #[serde(default)]
+    #[map(default)]
     agent: BTreeMap<String, AgentDefinition>,
-    #[serde(default)]
+    #[map(default)]
     role: BTreeMap<String, AgentRoleDefinition>,
-    #[serde(default)]
     assistant: Option<AssistantSettings>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct OperationDefinition {
-    parent: Option<String>,
-    inherit: Option<bool>,
-    name: Option<String>,
-    description: String,
-    path: Option<String>,
-    theater: Option<String>,
-    config: Option<String>,
-    roster: Vec<String>,
-    clearance: String,
-    max_concurrent: Option<usize>,
-    workspace: WorkspaceDefinition,
-    station_labels: BTreeMap<String, String>,
-    stations: Vec<String>,
-    cover: String,
-    cover_identity: Option<CoverIdentity>,
-    on_blown: String,
-    on_limit: OnLimit,
-    limit_fallback_secs: Option<u64>,
-    on_lost: OnLost,
-    placement: PlacementStrategy,
-    lost_after_secs: Option<u64>,
-    budget: BudgetDefinition,
-    exposure: ExposureDefinition,
-    quarantine: QuarantineDefinition,
-    green_ink: GreenInkDefinition,
-    vetting: Option<toml::Value>,
-    sources: toml::Table,
-    sleepers: BTreeMap<String, Sleeper>,
-    pools: Option<Vec<String>>,
-    harness: HarnessPolicy,
-    promotion: PromotionDefinition,
+/// What an Operation's commits that blow their cover do.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(rename_all = "snake_case")]
+enum OnBlown {
+    /// Record it and keep the work.
+    #[default]
+    #[schema(label = "Record it and keep the work")]
+    Flag,
+    /// File the Mission as failed.
+    #[schema(label = "File the Mission as failed")]
+    Fail,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+impl OnBlown {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Flag => "flag",
+            Self::Fail => "fail",
+        }
+    }
+}
+
+/// An Operation: a project and how Missions work on it.
+#[derive(Debug, Clone, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+#[form(
+    section(id = "about", label = "About"),
+    section(
+        id = "checkout",
+        label = "Where the work is",
+        help = "A Mission works in this checkout, or on this Theater. An Operation with neither only groups others."
+    ),
+    section(
+        id = "roster",
+        label = "Who works here",
+        help = "Which Agents and Stations take this Operation's Missions."
+    ),
+    section(id = "cover", label = "Cover"),
+    section(id = "limits", label = "Limits and spending"),
+    section(id = "safety", label = "Safety and approvals"),
+    section(id = "sources", label = "Sources and standing orders")
+)]
+pub(crate) struct OperationDefinition {
+    /// A longer name for the project; it finds this Operation as its codename does.
+    #[schema(title = "Project name", section = "about")]
+    name: Option<String>,
+    /// What this project is, for the people and Agents working on it.
+    #[schema(title = "Description", section = "about")]
+    #[map(default)]
+    #[form(widget = "textarea")]
+    description: String,
+    /// The Operation this one sits under. It takes its parent's settings unless told not to.
+    #[schema(
+        title = "Parent Operation",
+        section = "about",
+        format = "record:operations"
+    )]
+    parent: Option<String>,
+    /// Layer this Operation's settings over its parent's. Off, it takes no settings from them;
+    /// access, account pools and Cables still follow the tree.
+    #[schema(title = "Take settings from the parent", section = "about", advanced)]
+    #[map(default = OperationDefinition::default().inherit)]
+    inherit: bool,
+
+    /// The project's checkout on the Station, such as /srv/projects/alpha. Leave it empty for
+    /// work on a Theater.
+    #[schema(title = "Checkout path", section = "checkout")]
+    path: Option<String>,
+    /// The Theater where the project is, when it is not on the Station.
+    #[schema(title = "Theater", section = "checkout", format = "reported:theaters")]
+    theater: Option<String>,
+    /// How each Mission gets its working directory.
+    #[schema(title = "Mission workspace", section = "checkout")]
+    #[map(default)]
+    #[form(form)]
+    workspace: WorkspaceDefinition,
+    /// Where this project's own settings are, when they are not in its checkout's `.ai6`.
+    #[schema(title = "Project settings directory", section = "checkout", advanced)]
+    config: Option<String>,
+
+    /// The Agents allowed to work here, by codename. Empty allows every Agent.
+    #[schema(title = "Agents", section = "roster", format = "record:agents")]
+    #[map(default)]
+    roster: Vec<String>,
+    /// The highest clearance any Agent has while working here.
+    #[schema(title = "Highest clearance", section = "roster")]
+    #[map(default)]
+    clearance: ClearanceLevel,
+    /// The Stations allowed to run these Missions. Empty allows every Station.
+    #[schema(
+        title = "Stations",
+        section = "roster",
+        format = "reported:stations",
+        advanced
+    )]
+    #[map(default)]
+    stations: Vec<String>,
+    /// Labels a Station needs before it takes these Missions, such as os = linux.
+    #[schema(title = "Station labels", section = "roster", advanced)]
+    #[map(default)]
+    station_labels: BTreeMap<String, String>,
+    /// Whether Missions go to the least busy place, or fill the busiest place with room.
+    #[schema(title = "Placement", section = "roster", advanced)]
+    #[map(default)]
+    placement: PlacementStrategy,
+    /// The account pools its Missions may draw from. Leave it unset for every pool that admits
+    /// this Operation.
+    #[schema(title = "Account pools", section = "roster", advanced)]
+    pools: Option<Vec<String>>,
+
+    /// The rule its commits follow about naming Agents and models.
+    #[schema(
+        title = "Cover policy",
+        section = "cover",
+        format = "record:covers",
+        examples("covert".to_owned(), "partial".to_owned(), "overt".to_owned())
+    )]
+    #[map(default = OperationDefinition::default().cover)]
+    cover: String,
+    /// The author its Agents commit as.
+    #[schema(title = "Commit author", section = "cover", advanced)]
+    #[form(form = CoverIdentity)]
+    cover_identity: Option<CoverIdentity>,
+    /// What happens when a commit breaks the cover policy.
+    #[schema(title = "When a cover is blown", section = "cover", advanced)]
+    #[map(default)]
+    on_blown: OnBlown,
+
+    /// How many of its Missions may run at once. Leave it empty for no limit of its own.
+    #[schema(title = "Missions at once", section = "limits", advanced)]
+    max_concurrent: Option<usize>,
+    /// What happens when a provider's usage limit stops a Session.
+    #[schema(title = "When a usage limit is hit", section = "limits", advanced)]
+    #[map(default)]
+    on_limit: OnLimit,
+    /// How long a Session waits when a provider reports a limit but no reset time.
+    #[schema(
+        title = "Wait when no reset time is given",
+        section = "limits",
+        format = "seconds",
+        advanced
+    )]
+    #[map(default = OperationDefinition::default().limit_fallback_secs)]
+    limit_fallback_secs: u64,
+    /// What happens when a Session is lost with its Station.
+    #[schema(title = "When a Session is lost", section = "limits", advanced)]
+    #[map(default)]
+    on_lost: OnLost,
+    /// How long a Session's runner may stay out of reach before its Station gives it up as lost.
+    #[schema(title = "Lost after", section = "limits", format = "seconds", advanced)]
+    #[map(default = OperationDefinition::default().lost_after_secs)]
+    lost_after_secs: u64,
+    /// What its Missions may spend.
+    #[schema(title = "Budget", section = "limits", advanced)]
+    #[map(default)]
+    #[form(form)]
+    budget: BudgetDefinition,
+
+    /// What a Session may do once it has read outside text.
+    #[schema(title = "After reading outside text", section = "safety", advanced)]
+    #[map(default)]
+    #[form(form)]
+    exposure: ExposureDefinition,
+    /// When an Agent working here is taken off work.
+    #[schema(title = "Quarantine", section = "safety", advanced)]
+    #[map(default)]
+    #[form(form)]
+    quarantine: QuarantineDefinition,
+    /// Which irreversible steps wait for a person's approval.
+    #[schema(title = "Green ink", section = "safety", advanced)]
+    #[map(default)]
+    #[form(form)]
+    green_ink: GreenInkDefinition,
+    /// How briefs are checked before they are placed.
+    #[schema(title = "Vetting", section = "safety", advanced)]
+    vetting: Option<VettingSetting>,
+    /// When its Agents may load settings their working directory carries.
+    #[schema(
+        title = "Harness settings in the checkout",
+        section = "safety",
+        advanced
+    )]
+    #[map(default)]
+    #[form(form)]
+    harness: HarnessPolicy,
+    /// When M asks a person to raise an Agent's clearance here.
+    #[schema(title = "Promotion", section = "safety", advanced)]
+    #[map(default)]
+    #[form(form)]
+    promotion: PromotionDefinition,
+
+    /// Trackers and CI this Operation takes briefs from; each source's settings are its own.
+    #[schema(title = "Work sources", section = "sources", advanced)]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    sources: toml::Table,
+    /// Briefs queued on a schedule, once an operator authorizes them.
+    #[schema(title = "Standing orders", section = "sources", advanced)]
+    #[map(default)]
+    #[form(form = Sleeper)]
+    sleepers: BTreeMap<String, Sleeper>,
+}
+
+impl Default for OperationDefinition {
+    fn default() -> Self {
+        Self {
+            name: None,
+            description: String::new(),
+            parent: None,
+            inherit: true,
+            path: None,
+            theater: None,
+            workspace: WorkspaceDefinition::default(),
+            config: None,
+            roster: Vec::new(),
+            clearance: ClearanceLevel::default(),
+            stations: Vec::new(),
+            station_labels: BTreeMap::new(),
+            placement: PlacementStrategy::default(),
+            pools: None,
+            cover: "covert".to_owned(),
+            cover_identity: None,
+            on_blown: OnBlown::default(),
+            max_concurrent: None,
+            on_limit: OnLimit::default(),
+            limit_fallback_secs: DEFAULT_LIMIT_FALLBACK_SECS,
+            on_lost: OnLost::default(),
+            lost_after_secs: DEFAULT_LOST_AFTER_SECS,
+            budget: BudgetDefinition::default(),
+            exposure: ExposureDefinition::default(),
+            quarantine: QuarantineDefinition::default(),
+            green_ink: GreenInkDefinition::default(),
+            vetting: None,
+            harness: HarnessPolicy::default(),
+            promotion: PromotionDefinition::default(),
+            sources: toml::Table::new(),
+            sleepers: BTreeMap::new(),
+        }
+    }
+}
+
+/// How an Operation's Missions get their working directory.
+#[derive(Debug, Clone, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 struct WorkspaceDefinition {
+    /// The safe house that makes each Mission's copy. Leave it empty to use git when the
+    /// checkout is a git repository.
+    #[schema(title = "Safe house")]
     provider: Option<String>,
+    /// Where the work comes from, when it is not the checkout path.
+    #[schema(title = "Source", advanced)]
     source: Option<String>,
+    /// The revision each Mission starts from.
+    #[schema(title = "Start from revision", advanced)]
+    #[map(default = Workspace::default().base)]
     base: String,
+    /// The name each Mission's branch gets; {id}, {slug} and {operation} are filled in.
+    #[schema(title = "Branch name", advanced)]
+    #[map(default = Workspace::default().branch)]
     branch: String,
+    /// Give each Mission its own copy. Off, Missions work in the source itself.
+    #[schema(title = "A copy for each Mission", advanced)]
+    #[map(default = Workspace::default().isolate)]
     isolate: bool,
+    /// The git remote, by name or address, each Mission's work is saved to, so a later attempt
+    /// on another Station carries on from it. Leave it empty to push nothing.
+    #[schema(title = "Save work to remote", advanced)]
     checkpoint_remote: Option<String>,
-    checkpoint_secs: Option<u64>,
+    /// How often a running Mission's work is saved.
+    #[schema(title = "Save every", format = "seconds", advanced)]
+    #[map(default = Workspace::default().checkpoint_secs)]
+    checkpoint_secs: u64,
 }
 
 impl Default for WorkspaceDefinition {
     fn default() -> Self {
+        let workspace = Workspace::default();
         Self {
-            provider: None,
+            provider: workspace.provider,
             source: None,
-            base: String::new(),
-            branch: String::new(),
-            isolate: true,
-            checkpoint_remote: None,
-            checkpoint_secs: None,
+            base: workspace.base,
+            branch: workspace.branch,
+            isolate: workspace.isolate,
+            checkpoint_remote: workspace.checkpoint_remote,
+            checkpoint_secs: workspace.checkpoint_secs,
         }
     }
 }
 
 impl OperationDefinition {
+    #[cfg(test)]
+    pub(crate) fn cover(&self) -> &str {
+        &self.cover
+    }
+
     fn resolve(self, id: String, source: &dyn fmt::Display) -> Result<Operation, RosterError> {
         let in_file = |reason: RosterError| error(format!("{source}: {reason}"));
         let operation = self.into_operation(id).map_err(in_file)?;
@@ -1449,69 +1703,43 @@ impl OperationDefinition {
             .green_ink
             .resolve()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
-        let vetting = policy_from_toml(self.vetting.as_ref())
+        let vetting = policy_of(self.vetting.as_ref())
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         let promotion = self
             .promotion
             .resolve()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
-        let workspace = Workspace::default();
         Ok(Operation {
             id,
             parent: self.parent,
-            inherit: self.inherit.unwrap_or(true),
+            inherit: self.inherit,
             name: self.name,
             description: self.description,
             path,
             theater: self.theater,
             config,
             roster: self.roster,
-            clearance: if self.clearance.is_empty() {
-                "field".to_owned()
-            } else {
-                self.clearance
-            },
+            clearance: self.clearance.as_str().to_owned(),
             max_concurrent: self.max_concurrent,
             workspace: Workspace {
                 provider: self.workspace.provider,
                 source: self.workspace.source.map(|path| expand_path(&path)),
-                base: if self.workspace.base.is_empty() {
-                    workspace.base
-                } else {
-                    self.workspace.base
-                },
-                branch: if self.workspace.branch.is_empty() {
-                    workspace.branch
-                } else {
-                    self.workspace.branch
-                },
+                base: self.workspace.base,
+                branch: self.workspace.branch,
                 isolate: self.workspace.isolate,
                 checkpoint_remote: self.workspace.checkpoint_remote,
-                checkpoint_secs: self
-                    .workspace
-                    .checkpoint_secs
-                    .unwrap_or(workspace.checkpoint_secs),
+                checkpoint_secs: self.workspace.checkpoint_secs,
             },
             station_labels: self.station_labels,
             stations: self.stations,
-            cover: if self.cover.is_empty() {
-                "covert".to_owned()
-            } else {
-                self.cover
-            },
+            cover: self.cover,
             cover_identity: self.cover_identity,
-            on_blown: if self.on_blown.is_empty() {
-                "flag".to_owned()
-            } else {
-                self.on_blown
-            },
+            on_blown: self.on_blown.as_str().to_owned(),
             on_limit: self.on_limit,
-            limit_fallback_secs: self
-                .limit_fallback_secs
-                .unwrap_or(DEFAULT_LIMIT_FALLBACK_SECS),
+            limit_fallback_secs: self.limit_fallback_secs,
             on_lost: self.on_lost,
             placement: self.placement,
-            lost_after_secs: self.lost_after_secs.unwrap_or(DEFAULT_LOST_AFTER_SECS),
+            lost_after_secs: self.lost_after_secs,
             budget,
             exposure,
             quarantine,
@@ -1629,35 +1857,141 @@ impl Operation {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct AgentDefinition {
-    aliases: Vec<String>,
+/// An Agent: a codename, the harness and model it runs on, and the work it is qualified for.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+#[form(
+    section(id = "about", label = "About"),
+    section(
+        id = "harness",
+        label = "Harness and model",
+        help = "What runs this Agent's Sessions."
+    ),
+    section(id = "duties", label = "Duties"),
+    section(id = "limits", label = "Limits and spending"),
+    section(id = "retire", label = "Retirement")
+)]
+pub(crate) struct AgentDefinition {
+    /// What this Agent is for.
+    #[schema(title = "Description", section = "about")]
+    #[map(default)]
+    #[form(widget = "textarea")]
     description: String,
+    /// Other names that find this Agent.
+    #[schema(title = "Other names", section = "about", advanced)]
+    #[map(default)]
+    aliases: Vec<String>,
+    /// Another Agent whose settings this one starts from; what is set here wins.
+    #[schema(
+        title = "Based on",
+        section = "about",
+        format = "record:agents",
+        advanced
+    )]
     extends: Option<String>,
+
+    /// The harness that runs its Sessions, from those the Stations report.
+    #[schema(title = "Handler", section = "harness", format = "reported:handlers")]
     handler: Option<String>,
-    handler_settings: serde_json::Map<String, serde_json::Value>,
+    /// The model it asks for; the harness's default when empty.
+    #[schema(title = "Model", section = "harness", format = "used:model")]
     model: Option<String>,
+    /// How hard the model thinks, in the harness's own words, such as high.
+    #[schema(
+        title = "Reasoning effort",
+        section = "harness",
+        format = "used:effort"
+    )]
     effort: Option<String>,
+    /// Settings for the handler, as its documentation describes them. Most handlers take none.
+    #[schema(
+        title = "Handler settings",
+        section = "harness",
+        format = "settings-of:handler",
+        advanced
+    )]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    handler_settings: serde_json::Map<String, serde_json::Value>,
+
+    /// The Mission roles it can take.
+    #[schema(title = "Roles", section = "duties", format = "record:roles")]
+    #[map(default)]
     roles: Vec<String>,
-    tags: Vec<String>,
-    clearance: Option<String>,
+    /// The most it may do on its own.
+    #[schema(
+        title = "Clearance",
+        section = "duties",
+        default = Some(ClearanceLevel::default())
+    )]
+    clearance: Option<ClearanceLevel>,
+    /// Among Agents that suit a Mission, the highest goes first.
+    #[schema(title = "Priority", section = "duties", default = Some(Agent::new("").priority))]
     priority: Option<i64>,
+    /// Labels a Mission can ask for.
+    #[schema(title = "Tags", section = "duties", advanced)]
+    #[map(default)]
+    tags: Vec<String>,
+    /// What it is told before every Mission's prompt.
+    #[schema(title = "Standing instructions", section = "duties", advanced)]
+    #[form(widget = "textarea")]
     context: Option<String>,
+    /// Environment variables its Sessions get. Keep secrets out of here: a loadout hands them
+    /// out.
+    #[schema(title = "Environment", section = "duties", advanced)]
+    #[map(default)]
     env: BTreeMap<String, String>,
-    limits: WatchdogOverrides,
-    budget: BudgetDefinition,
+
+    /// How many Sessions it may run at once. Leave it empty for no limit of its own.
+    #[schema(title = "Sessions at once", section = "limits", advanced)]
     max_concurrent: Option<usize>,
+    /// The one account pool its Sessions draw from, when it is tied to one.
+    #[schema(title = "Account pool", section = "limits", advanced)]
     pool: Option<String>,
+    /// When its Sessions count as stuck.
+    #[schema(title = "Watchdog", section = "limits", advanced)]
+    #[map(default)]
+    #[form(form)]
+    limits: WatchdogOverrides,
+    /// What its Sessions may spend, on top of its Operation's budget.
+    #[schema(title = "Budget", section = "limits", advanced)]
+    #[map(default)]
+    #[form(form)]
+    budget: BudgetDefinition,
+
+    /// The day its model reaches end of life, as YYYY-MM-DD (UTC).
+    #[schema(title = "Retire on", section = "retire", format = "date", advanced)]
     retire_on: Option<String>,
+    /// What happens to it on that day.
+    #[schema(
+        title = "On that day",
+        section = "retire",
+        advanced,
+        default = Some(OnRetire::default())
+    )]
     on_retire: Option<OnRetire>,
+    /// How many days before then the Station warns; 0 does not warn.
+    #[schema(
+        title = "Warn this many days before",
+        section = "retire",
+        advanced,
+        default = Some(DEFAULT_RETIRE_WARNING_DAYS)
+    )]
     retire_warning_days: Option<u32>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct AgentRoleDefinition {
+/// An Agent role: a job an Agent can be qualified for.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct AgentRoleDefinition {
+    /// The work this role suits, in a sentence.
+    #[schema(title = "Purpose")]
+    #[map(default)]
+    #[form(widget = "textarea")]
     purpose: String,
+    /// Instructions for doing this job. They do not grant permissions.
+    #[schema(title = "Instructions")]
+    #[map(default)]
+    #[form(widget = "textarea")]
     policy: String,
 }
 
@@ -1714,7 +2048,7 @@ pub(crate) fn roster_from_definitions(
     };
     let settings = match settings {
         Some(definition) => {
-            let settings = RosterSettings::deserialize(definition)
+            let settings: RosterSettings = records::from_json(&definition)
                 .map_err(|reason| error(format!("{source}: roster: {reason}")))?;
             settings
                 .validate()
@@ -1726,8 +2060,8 @@ pub(crate) fn roster_from_definitions(
     let parsed = resolve_operations(operations, &settings, source)?;
     let mut definitions = BTreeMap::new();
     for (id, definition) in agents {
-        let definition = AgentDefinition::deserialize(definition)
-            .map_err(|reason| invalid("Agent", &id, &reason))?;
+        let definition: AgentDefinition =
+            records::from_json(&definition).map_err(|reason| invalid("Agent", &id, &reason))?;
         definition
             .budget
             .resolve()
@@ -1743,13 +2077,13 @@ pub(crate) fn roster_from_definitions(
         .collect::<Result<Vec<_>, _>>()?;
     let mut typed_roles = Vec::new();
     for (id, definition) in roles {
-        let definition = AgentRoleDefinition::deserialize(definition)
+        let definition: AgentRoleDefinition = records::from_json(&definition)
             .map_err(|reason| invalid("Agent role", &id, &reason))?;
         typed_roles.push(definition.resolve(id, source)?);
     }
     let assistant = match assistant {
         Some(definition) => {
-            let mut settings = AssistantSettings::deserialize(definition)
+            let mut settings: AssistantSettings = records::from_json(&definition)
                 .map_err(|reason| error(format!("{source}: assistant: {reason}")))?;
             if let Some(base) = base {
                 settings.resolve_paths(base);
@@ -1876,9 +2210,9 @@ fn resolve_agent(
         },
         clearance: definition
             .clearance
-            .clone()
+            .map(|clearance| clearance.as_str().to_owned())
             .or_else(|| base.as_ref().map(|agent| agent.clearance.clone()))
-            .unwrap_or_else(|| "field".to_owned()),
+            .unwrap_or_else(|| ClearanceLevel::default().as_str().to_owned()),
         priority: definition
             .priority
             .or_else(|| base.as_ref().map(|agent| agent.priority))
@@ -1922,7 +2256,7 @@ fn resolve_agent(
     Ok(agent)
 }
 
-fn parse_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, RosterError> {
+fn parse_file<T: FromValue>(path: &Path) -> Result<T, RosterError> {
     let text = fs::read_to_string(path).map_err(|e| {
         let kind = if e.kind() == std::io::ErrorKind::InvalidData {
             RosterErrorKind::Invalid
@@ -1933,8 +2267,9 @@ fn parse_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, RosterErro
     })?;
     let format =
         crate::bootstrap::format::Format::for_path(path).map_err(|e| error(e.to_string()))?;
-    crate::bootstrap::format::from_str(format, &text)
-        .map_err(|e| error(format!("{}: {e}", path.display())))
+    let document: records::Document = crate::bootstrap::format::from_str(format, &text)
+        .map_err(|e| error(format!("{}: {e}", path.display())))?;
+    records::from_value(&document.0).map_err(|e| error(format!("{}: {e}", path.display())))
 }
 
 fn parse_operation_agents(path: &Path) -> Result<AgentsDocument, RosterError> {
@@ -2829,7 +3164,7 @@ sources = {{ jira = \"GUA\" }}\n",
         operations
             .into_iter()
             .fold(Roster::builder(), RosterBuilder::operation)
-            .max_operation_depth(depth)
+            .max_operation_depth(depth.map_or(Limit::UNBOUNDED, |depth| Limit::at(depth as u64)))
             .build()
     }
 
@@ -2885,7 +3220,7 @@ sources = {{ jira = \"GUA\" }}\n",
         assert!(Roster::load(&directory.0).is_err());
         directory.write("operations.toml", &file("\"none\""));
         let roster = Roster::load(&directory.0).unwrap();
-        assert_eq!(roster.settings().max_operation_depth, None);
+        assert_eq!(roster.settings().max_operation_depth, Limit::UNBOUNDED);
         directory.write("operations.toml", &file("\"deep\""));
         assert!(Roster::load(&directory.0).is_err());
     }

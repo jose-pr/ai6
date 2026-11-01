@@ -7,9 +7,11 @@
 //! `"none"` in TOML) takes the bound away. Other durations are [`Seconds`], whole or
 //! fractional.
 
-use serde::{Deserialize, Serialize};
+use guatiao::{FromValue, Schema, ToValue};
+use guatiao_intake::Form;
 
 use crate::bounds::{Limit, Seconds, TimeLimit};
+use crate::directorates::m::records;
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * 1024;
@@ -17,53 +19,94 @@ const MIB: u64 = 1024 * 1024;
 /// `[assistant.limits]`: the bounds of what passes between Universal Exports and a Station
 /// for Moneypenny, and of her memory on a Station.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct AssistantLimits {
-    /// Operations one job grants Cable actions in. Default 64.
+    /// Operations one job grants Cable actions in.
+    #[schema(title = "Operations with Cables in one job")]
+    #[map(default = AssistantLimits::default().cable_grants)]
     pub cable_grants: Limit,
-    /// Bytes of one job's message. Default 32 KiB.
+    /// Bytes of one job's message.
+    #[schema(title = "Longest message", format = "bytes")]
+    #[map(default = AssistantLimits::default().message_bytes)]
     pub message_bytes: Limit,
-    /// Bytes of one job's standing context and recap together. Default 24 KiB.
+    /// Bytes of one job's standing context and recap together.
+    #[schema(title = "Standing context and recap", format = "bytes")]
+    #[map(default = AssistantLimits::default().context_bytes)]
     pub context_bytes: Limit,
-    /// Bytes of one reported event's text; longer text is cut. Default 64 KiB.
+    /// Bytes of one reported event's text; longer text is cut.
+    #[schema(title = "Longest reported event", format = "bytes")]
+    #[map(default = AssistantLimits::default().event_bytes)]
     pub event_bytes: Limit,
-    /// Events in one report. Default 64.
+    /// Events in one report.
+    #[schema(title = "Events in one report")]
+    #[map(default = AssistantLimits::default().events)]
     pub events: Limit,
-    /// Bytes of file content in one memory change, commit or memory write. Default 64 KiB.
+    /// Bytes of file content in one memory change, commit or memory write.
+    #[schema(title = "File content in one memory change", format = "bytes")]
+    #[map(default = AssistantLimits::default().change_bytes)]
     pub change_bytes: Limit,
-    /// Files in one memory change or commit. Default 32.
+    /// Files in one memory change or commit.
+    #[schema(title = "Files in one memory change")]
+    #[map(default = AssistantLimits::default().change_files)]
     pub change_files: Limit,
-    /// Bytes of one commit's message. Default 4,096.
+    /// Bytes of one commit's message.
+    #[schema(title = "Longest commit message", format = "bytes")]
+    #[map(default = AssistantLimits::default().commit_message_bytes)]
     pub commit_message_bytes: Limit,
-    /// Shared-change bases one event carries, and Universal Exports keeps for one
-    /// conversation until their calls arrive. Default 32.
+    /// Shared-change bases one event carries, and Universal Exports keeps for one conversation
+    /// until their calls arrive.
+    #[schema(title = "Shared change bases")]
+    #[map(default = AssistantLimits::default().shared_bases)]
     pub shared_bases: Limit,
-    /// Files one memory listing names. Default 1,000.
+    /// Files one memory listing names.
+    #[schema(title = "Files in a memory listing")]
+    #[map(default = AssistantLimits::default().memory_list_files)]
     pub memory_list_files: Limit,
-    /// Bytes of paths one memory listing names. Default 128 KiB.
+    /// Bytes of paths one memory listing names.
+    #[schema(title = "Paths in a memory listing", format = "bytes")]
+    #[map(default = AssistantLimits::default().memory_list_bytes)]
     pub memory_list_bytes: Limit,
-    /// Skills one job gives her. Default 64.
+    /// Skills one job gives her.
+    #[schema(title = "Skills in one job")]
+    #[map(default = AssistantLimits::default().skills)]
     pub skills: Limit,
-    /// Bytes of `MEMORY.md` inlined into her standing context. Default 32 KiB.
+    /// Bytes of MEMORY.md inlined into her standing context.
+    #[schema(title = "MEMORY.md in her context", format = "bytes")]
+    #[map(default = AssistantLimits::default().inlined_memory_bytes)]
     pub inlined_memory_bytes: Limit,
     /// Bytes of one memory file the desk reads; a longer file is read to this length.
-    /// Default 256 KiB.
+    #[schema(title = "Longest memory file read", format = "bytes")]
+    #[map(default = AssistantLimits::default().memory_file_bytes)]
     pub memory_file_bytes: Limit,
-    /// Memory files the desk reads at a turn's edge. Default 1,024.
+    /// Memory files the desk reads at a turn's edge.
+    #[schema(title = "Memory files read per turn")]
+    #[map(default = AssistantLimits::default().memory_files)]
     pub memory_files: Limit,
-    /// Bytes over all the memory files the desk reads at a turn's edge. Default 8 MiB.
+    /// Bytes over all the memory files the desk reads at a turn's edge.
+    #[schema(title = "All memory read per turn", format = "bytes")]
+    #[map(default = AssistantLimits::default().memory_bytes)]
     pub memory_bytes: Limit,
-    /// Files of `personal/` looked at to name what a turn changed. Default 10,000.
+    /// Files of her personal folder looked at to name what a turn changed.
+    #[schema(title = "Files looked at per turn")]
+    #[map(default = AssistantLimits::default().memory_walk)]
     pub memory_walk: Limit,
-    /// How deep `@path` imports from her memory are followed to find outside text; Claude
-    /// Code follows five, so a smaller value is looser. Default 5.
+    /// How deep `@path` imports from her memory are followed to find outside text; Claude Code
+    /// follows five, so a smaller value is looser.
+    #[schema(title = "Depth of memory imports")]
+    #[map(default = AssistantLimits::default().memory_import_depth)]
     pub memory_import_depth: Limit,
     /// Bytes of one file the Station reads to publish a page. Default 8 MiB.
+    #[schema(title = "Largest file read for a page", format = "bytes")]
+    #[map(default = AssistantLimits::default().page_file_bytes)]
     pub page_file_bytes: Limit,
     /// Files the Station reads to publish one page. Default 200.
+    #[schema(title = "Files read for a page")]
+    #[map(default = AssistantLimits::default().page_files)]
     pub page_files: Limit,
     /// Bytes over all the files of one page the Station reads. Default 16 MiB.
+    #[schema(title = "All the files read for a page", format = "bytes")]
+    #[map(default = AssistantLimits::default().page_bytes)]
     pub page_bytes: Limit,
 }
 
@@ -99,53 +142,88 @@ impl Default for AssistantLimits {
 /// start, job and memory request; `known`, `parked` and `report_queue` at each use, and
 /// `unlocked_stale` when the desk starts.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct AssistantDeskLimits {
-    /// Seconds a harness waits for the next message, or writes nothing while answering,
-    /// before it is closed. Default 600.
+    /// Seconds a harness waits for the next message, or writes nothing while answering, before
+    /// it is closed.
+    #[schema(title = "Close an idle harness after")]
+    #[map(default = AssistantDeskLimits::default().idle)]
     pub idle: TimeLimit,
-    /// Harnesses a Station runs at once. Default 4.
+    /// Harnesses a Station runs at once.
+    #[schema(title = "Harnesses on one Station")]
+    #[map(default = AssistantDeskLimits::default().live)]
     pub live: Limit,
     /// Seconds before its token expires that a running harness is restarted with the job's.
-    /// Default 120.
+    #[schema(title = "Restart before a token expires")]
+    #[map(default = AssistantDeskLimits::default().token_margin)]
     pub token_margin: Seconds,
-    /// Seconds Universal Exports holds a job poll open. Default 1.
+    /// Seconds Universal Exports holds a job poll open.
+    #[schema(title = "Job poll held open")]
+    #[map(default = AssistantDeskLimits::default().job_wait)]
     pub job_wait: Seconds,
-    /// Bytes of one job as Universal Exports sends it. Default 256 KiB.
+    /// Bytes of one job as Universal Exports sends it.
+    #[schema(title = "Largest job", format = "bytes")]
+    #[map(default = AssistantDeskLimits::default().job_bytes)]
     pub job_bytes: Limit,
-    /// Seconds a request to Universal Exports may take past what it waits for. Default 2.
+    /// Seconds a request to Universal Exports may take past what it waits for.
+    #[schema(title = "Extra time for a request")]
+    #[map(default = AssistantDeskLimits::default().call_margin)]
     pub call_margin: Seconds,
-    /// Seconds before a failed job poll is tried again. Default 0.5.
+    /// Seconds before a failed job poll is tried again.
+    #[schema(title = "Retry a failed job poll after")]
+    #[map(default = AssistantDeskLimits::default().job_retry)]
     pub job_retry: Seconds,
     /// Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are
-    /// dropped. Default 256.
+    /// dropped.
+    #[schema(title = "Reports waiting to be sent")]
+    #[map(default = AssistantDeskLimits::default().report_queue)]
     pub report_queue: Limit,
-    /// Times a report is sent before it counts as lost. Default 3.
+    /// Times a report is sent before it counts as lost.
+    #[schema(title = "Tries to send a report")]
+    #[map(default = AssistantDeskLimits::default().report_attempts)]
     pub report_attempts: u32,
-    /// Seconds between tries of a report that did not reach Universal Exports. Default 0.2.
+    /// Seconds between tries of a report that did not reach Universal Exports.
+    #[schema(title = "Retry a report after")]
+    #[map(default = AssistantDeskLimits::default().report_retry)]
     pub report_retry: Seconds,
     /// Memory changes kept on the Station because they could not be delivered; past it the
-    /// oldest is dropped. Default 64.
+    /// oldest is dropped.
+    #[schema(title = "Memory changes kept undelivered")]
+    #[map(default = AssistantDeskLimits::default().parked)]
     pub parked: Limit,
-    /// Conversations whose provider Session the desk remembers for a resume. Default 1,024.
+    /// Conversations whose provider Session the desk remembers for a resume.
+    #[schema(title = "Conversations remembered for a resume")]
+    #[map(default = AssistantDeskLimits::default().known)]
     pub known: Limit,
-    /// Seconds a message waits for the conversation's closing harness. Default 10.
+    /// Seconds a message waits for the conversation's closing harness.
+    #[schema(title = "Wait for a closing harness")]
+    #[map(default = AssistantDeskLimits::default().close_wait)]
     pub close_wait: Seconds,
-    /// Seconds removing a closed harness's directory is tried again. Default 2.
+    /// Seconds removing a closed harness's directory is tried again.
+    #[schema(title = "Retry removing a directory for")]
+    #[map(default = AssistantDeskLimits::default().remove_retry)]
     pub remove_retry: Seconds,
     /// Seconds before a directory of working directories left without its lock, or a lock
-    /// without its directory, is swept. Default 3,600.
+    /// without its directory, is swept.
+    #[schema(title = "Sweep abandoned directories after")]
+    #[map(default = AssistantDeskLimits::default().unlocked_stale)]
     pub unlocked_stale: Seconds,
-    /// Seconds a clone of one of her repositories may take. Default 120.
+    /// Seconds a clone of one of her repositories may take.
+    #[schema(title = "Longest clone")]
+    #[map(default = AssistantDeskLimits::default().clone_timeout)]
     pub clone_timeout: Seconds,
-    /// Bytes a clone of one of her repositories may hold on disk. Default 512 MiB.
+    /// Bytes a clone of one of her repositories may hold on disk.
+    #[schema(title = "Largest clone", format = "bytes")]
+    #[map(default = AssistantDeskLimits::default().clone_bytes)]
     pub clone_bytes: Limit,
-    /// Bytes one save of her work in `personal/` may commit; past it nothing is saved.
-    /// Default 16 MiB.
+    /// Bytes one save of her work in her personal folder may commit; past it nothing is saved.
+    #[schema(title = "Largest save of her work", format = "bytes")]
+    #[map(default = AssistantDeskLimits::default().save_bytes)]
     pub save_bytes: Limit,
     /// The app's memory requests a Station makes at once; past it the next is refused.
-    /// Default 4.
+    #[schema(title = "Memory requests at once")]
+    #[map(default = AssistantDeskLimits::default().memory_requests)]
     pub memory_requests: Limit,
 }
 
@@ -178,84 +256,154 @@ impl Default for AssistantDeskLimits {
 /// `[assistant.gateway]`: how Universal Exports keeps Moneypenny's conversations. Universal
 /// Exports reads it when it starts.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct AssistantGatewayLimits {
-    /// Conversations kept for one person; the oldest goes first. Default 20.
+    /// Conversations kept for one person; the oldest goes first.
+    #[schema(title = "Conversations per person")]
+    #[map(default = AssistantGatewayLimits::default().conversations_per_person)]
     pub conversations_per_person: Limit,
-    /// Conversations kept in all. Default 2,000.
+    /// Conversations kept in all.
+    #[schema(title = "Conversations in all")]
+    #[map(default = AssistantGatewayLimits::default().conversations)]
     pub conversations: Limit,
-    /// Seconds a conversation is kept untouched. Default 7 days.
+    /// Seconds a conversation is kept untouched.
+    #[schema(title = "Keep an untouched conversation for")]
+    #[map(default = AssistantGatewayLimits::default().conversation_age)]
     pub conversation_age: TimeLimit,
-    /// Entries kept per conversation. Default 500.
+    /// Entries kept per conversation.
+    #[schema(title = "Entries per conversation")]
+    #[map(default = AssistantGatewayLimits::default().conversation_entries)]
     pub conversation_entries: Limit,
-    /// Bytes of entries kept per conversation. Default 1 MiB.
+    /// Bytes of entries kept per conversation.
+    #[schema(title = "Entries kept per conversation, in size", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().conversation_bytes)]
     pub conversation_bytes: Limit,
-    /// Bytes of entries kept per person. Default 4 MiB.
+    /// Bytes of entries kept per person.
+    #[schema(title = "Entries kept per person, in size", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().person_bytes)]
     pub person_bytes: Limit,
-    /// One person's conversations with a harness running or a message being answered at
-    /// once. Default 2.
+    /// One person's conversations with a harness running or a message being answered at once.
+    #[schema(title = "Live conversations per person")]
+    #[map(default = AssistantGatewayLimits::default().live_per_person)]
     pub live_per_person: Limit,
-    /// Tool calls one conversation makes in a minute. Default 120.
+    /// Tool calls one conversation makes in a minute.
+    #[schema(title = "Tool calls a minute")]
+    #[map(default = AssistantGatewayLimits::default().tool_calls_per_minute)]
     pub tool_calls_per_minute: Limit,
-    /// The app's memory requests waiting for a Station for one person. Default 2.
+    /// The app's memory requests waiting for a Station for one person.
+    #[schema(title = "Memory requests waiting per person")]
+    #[map(default = AssistantGatewayLimits::default().memory_requests_per_person)]
     pub memory_requests_per_person: Limit,
-    /// The app's memory requests waiting for a Station in all. Default 16.
+    /// The app's memory requests waiting for a Station in all.
+    #[schema(title = "Memory requests waiting in all")]
+    #[map(default = AssistantGatewayLimits::default().memory_requests)]
     pub memory_requests: Limit,
-    /// Seconds a token given to a harness for its tools is accepted. Default 3,600.
+    /// Seconds a token given to a harness for its tools is accepted.
+    #[schema(title = "A tool token lasts")]
+    #[map(default = AssistantGatewayLimits::default().token_ttl)]
     pub token_ttl: Seconds,
     /// Seconds a running harness's token must still have to be kept for the next message.
-    /// Default 600.
+    #[schema(title = "Keep a token if it still has")]
+    #[map(default = AssistantGatewayLimits::default().token_reuse_margin)]
     pub token_reuse_margin: Seconds,
-    /// Seconds a Station has to take up a message before another is asked. Default 60.
+    /// Seconds a Station has to take up a message before another is asked.
+    #[schema(title = "A Station takes up a message within")]
+    #[map(default = AssistantGatewayLimits::default().answer_timeout)]
     pub answer_timeout: Seconds,
-    /// Seconds an accepted message may go without word from its Station. Default 600.
+    /// Seconds an accepted message may go without word from its Station.
+    #[schema(title = "Give up on a silent answer after")]
+    #[map(default = AssistantGatewayLimits::default().answer_deadline)]
     pub answer_deadline: Seconds,
-    /// Seconds a Station has to answer a memory request. Default 30.
+    /// Seconds a Station has to answer a memory request.
+    #[schema(title = "A Station answers a memory request within")]
+    #[map(default = AssistantGatewayLimits::default().memory_timeout)]
     pub memory_timeout: Seconds,
-    /// Seconds a proposal waits for the person's confirmation. Default 3,600.
+    /// Seconds a proposal waits for the person's confirmation.
+    #[schema(title = "A proposal waits")]
+    #[map(default = AssistantGatewayLimits::default().proposal_ttl)]
     pub proposal_ttl: Seconds,
-    /// Proposals waiting for the person in one conversation. Default 32.
+    /// Proposals waiting for the person in one conversation.
+    #[schema(title = "Proposals waiting per conversation")]
+    #[map(default = AssistantGatewayLimits::default().proposals)]
     pub proposals: Limit,
-    /// Bytes of one message the person writes. Default 16 KiB.
+    /// Bytes of one message the person writes.
+    #[schema(title = "Longest message a person writes", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().message_bytes)]
     pub message_bytes: Limit,
-    /// Bytes of a commit message the person writes for a memory change. Default 1,024.
+    /// Bytes of a commit message the person writes for a memory change.
+    #[schema(title = "Longest memory commit message", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().memory_message_bytes)]
     pub memory_message_bytes: Limit,
-    /// Characters of the one-line message of a shared change she proposes. Default 200.
+    /// Characters of the one-line message of a shared change she proposes.
+    #[schema(title = "Longest shared change message")]
+    #[map(default = AssistantGatewayLimits::default().change_message_chars)]
     pub change_message_chars: Limit,
-    /// Bytes of the recap a resumed conversation starts with. Default 8 KiB.
+    /// Bytes of the recap a resumed conversation starts with.
+    #[schema(title = "Longest recap", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().recap_bytes)]
     pub recap_bytes: Limit,
-    /// Entries the app is sent when it opens a conversation. Default 100.
+    /// Entries the app is sent when it opens a conversation.
+    #[schema(title = "Entries sent when a conversation opens")]
+    #[map(default = AssistantGatewayLimits::default().ready_entries)]
     pub ready_entries: Limit,
-    /// Bytes of entries the app is sent when it opens a conversation. Default 512 KiB.
+    /// Bytes of entries the app is sent when it opens a conversation.
+    #[schema(title = "Size of those entries", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().ready_bytes)]
     pub ready_bytes: Limit,
-    /// Bytes of one message on the app's socket. Default 64 KiB.
+    /// Bytes of one message on the app's socket.
+    #[schema(title = "Longest message on the app's socket", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().socket_message_bytes)]
     pub socket_message_bytes: Limit,
-    /// Seconds the app's socket has to say hello. Default 10.
+    /// Seconds the app's socket has to say hello.
+    #[schema(title = "The app's socket says hello within")]
+    #[map(default = AssistantGatewayLimits::default().hello_timeout)]
     pub hello_timeout: Seconds,
-    /// Seconds a Station's job poll may be held open. Default 25.
+    /// Seconds a Station's job poll may be held open.
+    #[schema(title = "Longest job poll")]
+    #[map(default = AssistantGatewayLimits::default().max_wait)]
     pub max_wait: Seconds,
-    /// Seconds between sweeps of expired answers and proposals. Default 1.
+    /// Seconds between sweeps of expired answers and proposals.
+    #[schema(title = "Look for jobs nobody took every")]
+    #[map(default = AssistantGatewayLimits::default().sweep_every)]
     pub sweep_every: Seconds,
-    /// Seconds a shared change waits for its base from the Station. Default 5.
+    /// Seconds a shared change waits for its base from the Station.
+    #[schema(title = "A shared change waits for its base")]
+    #[map(default = AssistantGatewayLimits::default().shared_base_wait)]
     pub shared_base_wait: Seconds,
-    /// Events queued for one conversation's open sockets; a socket that falls further behind
-    /// is closed. Default 256.
+    /// Events queued for one conversation's open sockets; a socket that falls further behind is
+    /// closed.
+    #[schema(title = "Events queued for open sockets")]
+    #[map(default = AssistantGatewayLimits::default().event_buffer)]
     pub event_buffer: u64,
-    /// Bytes of an AI6 route's answer to one of her tools. Default 4 MiB.
+    /// Bytes of an AI6 route's answer to one of her tools.
+    #[schema(title = "Largest route answer to her tools", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().route_bytes)]
     pub route_bytes: Limit,
-    /// Characters of one tool's answer she is given; longer is cut. Default 200,000.
+    /// Characters of one tool's answer she is given; longer is cut.
+    #[schema(title = "Longest tool answer she is given")]
+    #[map(default = AssistantGatewayLimits::default().result_chars)]
     pub result_chars: Limit,
-    /// Characters of a person's name and email on her commits. Default 200.
+    /// Characters of a person's name and email on her commits.
+    #[schema(title = "Longest name and email on her commits")]
+    #[map(default = AssistantGatewayLimits::default().author_chars)]
     pub author_chars: Limit,
-    /// Bytes of an audit record's target. Default 512.
+    /// Bytes of an audit record's target.
+    #[schema(title = "Longest audit record target", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().audit_target_bytes)]
     pub audit_target_bytes: Limit,
     /// Sources a conversation lists as having exposed it, and a proposal carries as
-    /// `exposed_by`. Default 16.
+    /// `exposed_by`.
+    #[schema(title = "Sources of exposure listed")]
+    #[map(default = AssistantGatewayLimits::default().exposed_sources)]
     pub exposed_sources: Limit,
-    /// Bytes of one such source. Default 200.
+    /// Bytes of one such source.
+    #[schema(title = "Longest source of exposure", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().source_bytes)]
     pub source_bytes: Limit,
-    /// Read tool calls of one turn a proposal lists as what she had read. Default 16.
+    /// Read tool calls of one turn a proposal lists as what she had read.
+    #[schema(title = "Reads a proposal lists")]
+    #[map(default = AssistantGatewayLimits::default().proposal_reads)]
     pub proposal_reads: Limit,
 }
 
@@ -304,15 +452,20 @@ impl Default for AssistantGatewayLimits {
 
 /// What a page may reach from the browser, `[assistant.pages] network`.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
 pub enum PageNetwork {
     /// Anything: the page loads and fetches from any host. The default.
     #[default]
+    #[map(rename = "open")]
+    #[schema(label = "Anywhere")]
     Open,
     /// Only its own files and feeds, `data:` and `blob:`.
+    #[map(rename = "own")]
+    #[schema(label = "Its own files and feeds")]
     Own,
     /// Its own files only: no feeds, no outside request.
+    #[map(rename = "none")]
+    #[schema(label = "Its own files only")]
     None,
 }
 
@@ -349,51 +502,93 @@ impl PageNetwork {
 /// are open by default (scripts, network, feeds, the frame); an administrator may restrict
 /// any of it, and raise or lower any quota, which is a plain change and never a weakening.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
 pub struct AssistantPageLimits {
     /// Bytes of one file of a page. Default 8 MiB.
+    #[schema(title = "Largest file of a page", format = "bytes")]
+    #[map(default = AssistantPageLimits::default().max_file_bytes)]
     pub max_file_bytes: Limit,
     /// Bytes of one page. Default 16 MiB.
+    #[schema(title = "Largest page", format = "bytes")]
+    #[map(default = AssistantPageLimits::default().max_page_bytes)]
     pub max_page_bytes: Limit,
     /// Files of one page. Default 200.
+    #[schema(title = "Files in a page")]
+    #[map(default = AssistantPageLimits::default().max_page_files)]
     pub max_page_files: Limit,
     /// Pages one person keeps. Default 50.
+    #[schema(title = "Pages per person")]
+    #[map(default = AssistantPageLimits::default().max_pages)]
     pub max_pages: Limit,
     /// Bytes of all one person's pages. Default 64 MiB.
+    #[schema(title = "All of one person's pages", format = "bytes")]
+    #[map(default = AssistantPageLimits::default().max_person_bytes)]
     pub max_person_bytes: Limit,
     /// Bytes of all pages on one gateway. Default 2 GiB.
+    #[schema(title = "All pages on this gateway", format = "bytes")]
+    #[map(default = AssistantPageLimits::default().max_total_bytes)]
     pub max_total_bytes: Limit,
     /// Bytes of an inline page's content. Default 192 KiB.
+    #[schema(title = "Largest inline page", format = "bytes")]
+    #[map(default = AssistantPageLimits::default().inline_bytes)]
     pub inline_bytes: Limit,
     /// Characters of a page's title. Default 120.
+    #[schema(title = "Longest page title")]
+    #[map(default = AssistantPageLimits::default().title_chars)]
     pub title_chars: Limit,
     /// Feeds one dashboard declares. Default 8.
+    #[schema(title = "Feeds in a dashboard")]
+    #[map(default = AssistantPageLimits::default().max_feeds)]
     pub max_feeds: Limit,
     /// Feed reads one link makes in a minute. Default 60.
+    #[schema(title = "Feed reads a minute, per link")]
+    #[map(default = AssistantPageLimits::default().feed_reads_per_minute)]
     pub feed_reads_per_minute: Limit,
     /// Pages Universal Exports keeps staged from Stations at once. Default 64.
+    #[schema(title = "Uploads held from Stations")]
+    #[map(default = AssistantPageLimits::default().staged_uploads)]
     pub staged_uploads: Limit,
     /// Seconds a page lives unless remembered. Default 1 day.
+    #[schema(title = "Keep a page for")]
+    #[map(default = AssistantPageLimits::default().default_ttl)]
     pub default_ttl: Seconds,
     /// Seconds a link to a page is valid. Default 1 hour.
+    #[schema(title = "A link to a page lasts")]
+    #[map(default = AssistantPageLimits::default().open_ttl)]
     pub open_ttl: Seconds,
     /// Seconds a publish waits for the Station's files. Default 30.
+    #[schema(title = "Wait for a Station's files")]
+    #[map(default = AssistantPageLimits::default().upload_wait)]
     pub upload_wait: Seconds,
     /// Seconds a staged upload no call claims is kept. Default 300.
+    #[schema(title = "Keep an unclaimed upload for")]
+    #[map(default = AssistantPageLimits::default().stage_ttl)]
     pub stage_ttl: Seconds,
     /// Seconds between sweeps of expired pages, links and staged uploads. Default 60.
+    #[schema(title = "Sweep expired pages every")]
+    #[map(default = AssistantPageLimits::default().sweep_every)]
     pub sweep_every: Seconds,
     /// Whether a page's scripts run. Default true.
+    #[schema(title = "Run pages' scripts")]
+    #[map(default = AssistantPageLimits::default().scripts)]
     pub scripts: bool,
     /// What a page may reach from the browser. Default `open`.
+    #[schema(title = "What a page may reach")]
+    #[map(default = AssistantPageLimits::default().network)]
     pub network: PageNetwork,
     /// Whether dashboards may read live feeds. Default true.
+    #[schema(title = "Dashboards read live feeds")]
+    #[map(default = AssistantPageLimits::default().feeds)]
     pub feeds: bool,
     /// Whether a page is shown in the gateway's frame with the classification bar. A page
     /// made after she read outside text always is. Default true.
+    #[schema(title = "Show pages in the gateway's frame")]
+    #[map(default = AssistantPageLimits::default().frame)]
     pub frame: bool,
     /// Whether a person may share a page. Default true.
+    #[schema(title = "People may share pages")]
+    #[map(default = AssistantPageLimits::default().sharing)]
     pub sharing: bool,
 }
 
@@ -476,16 +671,15 @@ const DESK_PACE: &[&str] = &[
 const GATEWAY_PACE: &[&str] = &["token_reuse_margin", "sweep_every", "shared_base_wait"];
 
 /// One line per bound of `current` looser than its default, its pace keys left out.
-fn looser<T: Serialize + Default>(
+fn looser<T: ToValue + Default>(
     prefix: &str,
     current: &T,
     pace: &[&str],
     smaller_is_looser: &[&str],
 ) -> Vec<String> {
-    let (Ok(mut current), Ok(default)) = (
-        serde_json::to_value(current),
-        serde_json::to_value(T::default()),
-    ) else {
+    let (Some(mut current), Some(default)) =
+        (records::to_json(current), records::to_json(&T::default()))
+    else {
         return Vec::new();
     };
     if let Some(table) = current.as_object_mut() {
@@ -588,23 +782,29 @@ mod tests {
         assert!(pages.validate().is_ok());
         assert!(pages.scripts && pages.feeds && pages.frame && pages.sharing);
         assert_eq!(pages.network, PageNetwork::Open);
-        let set: AssistantPageLimits = serde_json::from_str(
-            r#"{"max_pages": 500, "network": "own", "scripts": false, "default_ttl": 3600}"#,
+        let set: AssistantPageLimits = crate::directorates::m::records::from_toml(
+            "max_pages = 500
+network = \"own\"
+scripts = false
+default_ttl = 3600",
         )
         .unwrap();
         assert_eq!(set.network, PageNetwork::Own);
         assert!(!set.scripts);
         assert_eq!(set.max_pages.get(), Some(500));
         assert!(
-            serde_json::from_str::<AssistantPageLimits>(r#"{"nonsense": 1}"#).is_err(),
+            crate::directorates::m::records::from_toml::<AssistantPageLimits>("nonsense = 1")
+                .is_err(),
             "unknown keys are refused"
         );
-        let zero: AssistantPageLimits = serde_json::from_str(r#"{"max_pages": 0}"#).unwrap();
+        let zero: AssistantPageLimits =
+            crate::directorates::m::records::from_toml("max_pages = 0").unwrap();
         assert_eq!(
             zero.validate(),
             Err("assistant.pages.max_pages: at least 1".to_owned())
         );
-        let ttl: AssistantPageLimits = serde_json::from_str(r#"{"open_ttl": 0}"#).unwrap();
+        let ttl: AssistantPageLimits =
+            crate::directorates::m::records::from_toml("open_ttl = 0").unwrap();
         assert_eq!(
             ttl.validate(),
             Err("assistant.pages.open_ttl: more than 0".to_owned())
@@ -624,19 +824,23 @@ mod tests {
         assert!(AssistantLimits::default().weakenings().is_empty());
         assert!(AssistantDeskLimits::default().weakenings().is_empty());
         assert!(AssistantGatewayLimits::default().weakenings().is_empty());
-        let desk: AssistantDeskLimits =
-            toml::from_str("live = \"none\"\njob_retry = 9\nreport_attempts = 9").unwrap();
+        let desk: AssistantDeskLimits = crate::directorates::m::records::from_toml(
+            "live = \"none\"\njob_retry = 9\nreport_attempts = 9",
+        )
+        .unwrap();
         assert_eq!(
             desk.weakenings(),
             ["assistant.desk.live none is looser than the default 4"]
         );
-        let limits: AssistantLimits = toml::from_str("memory_import_depth = 2").unwrap();
+        let limits: AssistantLimits =
+            crate::directorates::m::records::from_toml("memory_import_depth = 2").unwrap();
         assert_eq!(
             limits.weakenings(),
             ["assistant.limits.memory_import_depth 2 is looser than the default 5"]
         );
         let gateway: AssistantGatewayLimits =
-            toml::from_str("token_ttl = 7200\nsweep_every = 5").unwrap();
+            crate::directorates::m::records::from_toml("token_ttl = 7200\nsweep_every = 5")
+                .unwrap();
         assert_eq!(
             gateway.weakenings(),
             ["assistant.gateway.token_ttl 7200.0 is looser than the default 3600.0"]
@@ -645,18 +849,23 @@ mod tests {
 
     #[test]
     fn a_bound_nothing_could_pass_is_refused() {
-        let limits: AssistantLimits = toml::from_str("message_bytes = 0").unwrap();
+        let limits: AssistantLimits =
+            crate::directorates::m::records::from_toml("message_bytes = 0").unwrap();
         assert_eq!(
             limits.validate(),
             Err("assistant.limits.message_bytes: at least 1".to_owned())
         );
-        let gateway: AssistantGatewayLimits = toml::from_str("sweep_every = 0").unwrap();
+        let gateway: AssistantGatewayLimits =
+            crate::directorates::m::records::from_toml("sweep_every = 0").unwrap();
         assert!(gateway.validate().unwrap_err().contains("sweep_every"));
-        let desk: AssistantDeskLimits = toml::from_str("report_attempts = 0").unwrap();
+        let desk: AssistantDeskLimits =
+            crate::directorates::m::records::from_toml("report_attempts = 0").unwrap();
         assert!(desk.validate().unwrap_err().contains("report_attempts"));
         assert_eq!(AssistantLimits::default().validate(), Ok(()));
         assert_eq!(AssistantDeskLimits::default().validate(), Ok(()));
         assert_eq!(AssistantGatewayLimits::default().validate(), Ok(()));
-        assert!(toml::from_str::<AssistantDeskLimits>("lives = 2").is_err());
+        assert!(
+            crate::directorates::m::records::from_toml::<AssistantDeskLimits>("lives = 2").is_err()
+        );
     }
 }

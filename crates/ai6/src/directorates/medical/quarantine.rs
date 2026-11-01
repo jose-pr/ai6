@@ -95,12 +95,29 @@ impl QuarantinePolicy {
 }
 
 /// The quarantine settings as written in configuration (`[operation.ID.quarantine]`).
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
 pub struct QuarantineDefinition {
+    /// How far back incidents count.
+    #[schema(title = "Counting window", default = Some(DEFAULT_WINDOW_SECS as f64 / 3600.0))]
+    #[form(unit = "hours")]
     window_hours: Option<f64>,
+    /// Stalls or loops within the window that take an Agent off work; 0 turns this off.
+    #[schema(title = "Stalls and loops", default = Some(DEFAULT_STALLS))]
     stalls: Option<u32>,
+    /// Budget hard stops within the window that take an Agent off work; 0 turns this off.
+    #[schema(title = "Budget stops", default = Some(DEFAULT_BUDGET_STOPS))]
     budget_stops: Option<u32>,
+    /// Take an Agent off work for one blown cover.
+    #[schema(title = "A blown cover", default = Some(QuarantinePolicy::default().blown))]
     blown: Option<bool>,
 }
 
@@ -181,9 +198,10 @@ mod tests {
 
     #[test]
     fn zero_turns_a_trigger_off_and_the_window_is_a_setting() {
-        let off: QuarantineDefinition =
-            toml::from_str("stalls = 0\nbudget_stops = 0\nblown = false\nwindow_hours = 1\n")
-                .unwrap();
+        let off: QuarantineDefinition = crate::directorates::m::records::from_toml(
+            "stalls = 0\nbudget_stops = 0\nblown = false\nwindow_hours = 1\n",
+        )
+        .unwrap();
         let policy = off.resolve().unwrap();
         assert_eq!(policy.window_secs, 3600);
         let now = 100_000.0;
@@ -196,8 +214,12 @@ mod tests {
             incident(IncidentKind::Blown, now),
         ];
         assert_eq!(policy.reason(&many, now), None);
-        assert!(toml::from_str::<QuarantineDefinition>("stalls = -1").is_err());
-        let bad: QuarantineDefinition = toml::from_str("window_hours = 0").unwrap();
+        assert!(
+            crate::directorates::m::records::from_toml::<QuarantineDefinition>("stalls = -1")
+                .is_err()
+        );
+        let bad: QuarantineDefinition =
+            crate::directorates::m::records::from_toml("window_hours = 0").unwrap();
         assert!(bad.resolve().unwrap_err().contains("window_hours"));
     }
 }

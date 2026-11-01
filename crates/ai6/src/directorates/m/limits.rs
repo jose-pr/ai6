@@ -7,17 +7,33 @@ pub const DEFAULT_LIMIT_FALLBACK_SECS: u64 = 30 * 60;
 
 /// An Operation's response to a provider limit (`on_limit`).
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+)]
 #[serde(rename_all = "lowercase")]
+#[map(rename_all = "lowercase")]
 pub enum OnLimit {
     /// Move the Session to another account of its pools that has headroom: the same provider
     /// Session where its history goes with it (Claude's environment credentials), else a new
     /// attempt with a hand-off. Without a pool account to move to, the same as `Wait`.
     #[default]
+    #[schema(label = "Move to another account in its pools")]
     Rotate,
     /// Park the Session and resume the same provider Session when the limit resets.
+    #[schema(label = "Wait for the limit to reset")]
     Wait,
     /// Post the next qualified Agent as a new attempt; park only if there is none.
+    #[schema(label = "Hand over to the next qualified Agent")]
     Backup,
 }
 

@@ -591,7 +591,10 @@ mod tests {
             )
             .unwrap();
         let unbounded = provider.load("").unwrap().roster;
-        assert_eq!(unbounded.settings().max_operation_depth, None);
+        assert_eq!(
+            unbounded.settings().max_operation_depth,
+            crate::bounds::Limit::UNBOUNDED
+        );
 
         let dir = tempfile::tempdir().unwrap();
         crate::directorates::m::config::export(&provider, dir.path()).unwrap();
@@ -607,7 +610,7 @@ mod tests {
                 south.path = Some("/srv/fortitude-south".into());
                 south
             })
-            .max_operation_depth(None)
+            .max_operation_depth(crate::bounds::Limit::UNBOUNDED)
             .build()
             .unwrap();
         for id in ["BODYGUARD", "FORTITUDE", "SOUTH"] {

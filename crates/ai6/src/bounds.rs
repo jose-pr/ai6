@@ -8,8 +8,42 @@
 use std::fmt;
 use std::time::Duration;
 
+use guatiao::schema::KindBuilder;
+use guatiao::value::types::Tag;
+use guatiao::{Alloc, FromValue, MapError, Number, Schema, ToValue, Value, ValueError};
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
+
+/// The word a bound that is lifted is written as.
+const NO_BOUND: &str = "none";
+/// What the word reads as in a form.
+const NO_BOUND_LABEL: &str = "No limit";
+
+/// A number of seconds, for a renderer to show as a length of time.
+const SECONDS_FORMAT: &str = "seconds";
+
+/// Whether `value` is how a lifted bound is written: the word, or a null where a format has one.
+fn is_no_bound(value: &Value) -> bool {
+    matches!(value.tag(), Ok(Tag::GUATIAO_NULL))
+        || guatiao::value::read::str_or(Some(value), "") == NO_BOUND
+}
+
+fn unbounded_in(alloc: Alloc) -> Result<Value, ValueError> {
+    NO_BOUND.to_owned().to_value_in(alloc)
+}
+
+fn seconds_kind(alloc: Alloc) -> KindBuilder {
+    KindBuilder::float_bounds_in(alloc, Some(0.0), None).format(SECONDS_FORMAT)
+}
+
+/// A duration as a number that keeps its fraction: `7200.0`, as the files spell one.
+fn seconds_to_value(duration: Duration, alloc: Alloc) -> Result<Value, ValueError> {
+    Ok(Number::new_in(alloc, &format!("{:?}", duration.as_secs_f64()))?.into())
+}
+
+fn seconds_value(value: &Value) -> Result<Duration, MapError> {
+    seconds_from(f64::from_value(value)?).map_err(MapError::bad_value)
+}
 
 /// A count or a number of bytes, or no bound at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -113,10 +147,61 @@ impl<'de> Deserialize<'de> for Limit {
     }
 }
 
+impl ToValue for Limit {
+    fn to_value_in(&self, alloc: Alloc) -> Result<Value, ValueError> {
+        match self.0 {
+            Some(bound) => bound.to_value_in(alloc),
+            None => unbounded_in(alloc),
+        }
+    }
+}
+
+impl FromValue for Limit {
+    fn from_value(value: &Value) -> Result<Self, MapError> {
+        if is_no_bound(value) {
+            return Ok(Self::UNBOUNDED);
+        }
+        u64::from_value(value)
+            .map(Self::at)
+            .map_err(|_| MapError::bad_value("a whole number, 0 or more, or \"none\" for no bound"))
+    }
+}
+
+/// A whole number, 0 or more, or the word for no bound.
+impl Schema for Limit {
+    fn kind(alloc: Alloc) -> KindBuilder {
+        KindBuilder::union_in(
+            alloc,
+            vec![
+                KindBuilder::int_bounds_in(alloc, Some(0), None),
+                KindBuilder::enumeration_in(alloc, &[(NO_BOUND, NO_BOUND_LABEL)]),
+            ],
+        )
+    }
+}
+
 /// A duration read and written as a number of seconds, whole or fractional, finite and not
 /// negative.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Seconds(pub Duration);
+
+impl ToValue for Seconds {
+    fn to_value_in(&self, alloc: Alloc) -> Result<Value, ValueError> {
+        seconds_to_value(self.0, alloc)
+    }
+}
+
+impl FromValue for Seconds {
+    fn from_value(value: &Value) -> Result<Self, MapError> {
+        seconds_value(value).map(Self)
+    }
+}
+
+impl Schema for Seconds {
+    fn kind(alloc: Alloc) -> KindBuilder {
+        seconds_kind(alloc)
+    }
+}
 
 impl Seconds {
     /// `seconds` whole seconds.
@@ -178,6 +263,38 @@ impl TimeLimit {
     /// The bound in seconds, `f64::INFINITY` when there is none.
     pub fn as_secs_f64(self) -> f64 {
         self.0.map_or(f64::INFINITY, |bound| bound.as_secs_f64())
+    }
+}
+
+impl ToValue for TimeLimit {
+    fn to_value_in(&self, alloc: Alloc) -> Result<Value, ValueError> {
+        match self.0 {
+            Some(bound) => seconds_to_value(bound, alloc),
+            None => unbounded_in(alloc),
+        }
+    }
+}
+
+impl FromValue for TimeLimit {
+    fn from_value(value: &Value) -> Result<Self, MapError> {
+        if is_no_bound(value) {
+            return Ok(Self::UNBOUNDED);
+        }
+        seconds_value(value).map(Self::at)
+    }
+}
+
+/// A number of seconds, or the word for no bound.
+impl Schema for TimeLimit {
+    fn kind(alloc: Alloc) -> KindBuilder {
+        KindBuilder::union_in(
+            alloc,
+            vec![
+                seconds_kind(alloc),
+                KindBuilder::enumeration_in(alloc, &[(NO_BOUND, NO_BOUND_LABEL)]),
+            ],
+        )
+        .format(SECONDS_FORMAT)
     }
 }
 
@@ -289,6 +406,9 @@ fn walk(
             }
         }
         (Value::Null, Value::Number(_)) => {
+            lines.push(format!("{path} none is looser than the default {default}"));
+        }
+        (Value::String(word), Value::Number(_)) if word == NO_BOUND => {
             lines.push(format!("{path} none is looser than the default {default}"));
         }
         (Value::Number(value), Value::Number(bound)) => {

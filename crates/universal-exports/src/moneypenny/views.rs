@@ -67,28 +67,35 @@ pub struct ViewLimits {
 }
 
 impl Default for ViewLimits {
+    /// The defaults the `assistant` record's `views` table declares.
     fn default() -> Self {
+        let declared = ai6::AssistantViewLimits::defaults();
+        let bound = |value: Option<u64>| {
+            value
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(usize::MAX)
+        };
         Self {
-            blocks: 24,
-            view_bytes: 64 * 1024,
-            text_bytes: 8 * 1024,
-            short_bytes: 512,
-            columns: 12,
-            rows: 200,
-            items: 100,
-            series: 8,
-            points: 200,
-            pie_slices: 12,
-            diff_bytes: 16 * 1024,
-            fields: 20,
-            schedule_rows: 50,
-            graph_nodes: 60,
-            graph_edges: 120,
-            svg_bytes: 32 * 1024,
-            svg_elements: 2_000,
-            svg_depth: 16,
-            navigate_label_bytes: 120,
-            svg_id_bytes: 64,
+            blocks: bound(declared.blocks),
+            view_bytes: bound(declared.view_bytes),
+            text_bytes: bound(declared.text_bytes),
+            short_bytes: bound(declared.short_bytes),
+            columns: bound(declared.columns),
+            rows: bound(declared.rows),
+            items: bound(declared.items),
+            series: bound(declared.series),
+            points: bound(declared.points),
+            pie_slices: bound(declared.pie_slices),
+            diff_bytes: bound(declared.diff_bytes),
+            fields: bound(declared.fields),
+            schedule_rows: bound(declared.schedule_rows),
+            graph_nodes: bound(declared.graph_nodes),
+            graph_edges: bound(declared.graph_edges),
+            svg_bytes: bound(declared.svg_bytes),
+            svg_elements: bound(declared.svg_elements),
+            svg_depth: bound(declared.svg_depth),
+            navigate_label_bytes: bound(declared.navigate_label_bytes),
+            svg_id_bytes: bound(declared.svg_id_bytes),
         }
     }
 }

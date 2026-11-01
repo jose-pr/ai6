@@ -1273,7 +1273,7 @@ pub(crate) fn assemble(
     let mut covers = Covers::default();
     for (name, definition) in family(ConfigRecord::Cover) {
         covers.insert(
-            cover_from(name, definition).map_err(|reason| error(format!("{source}: {reason}")))?,
+            cover_from(name, &definition).map_err(|reason| error(format!("{source}: {reason}")))?,
         );
     }
     let assistant = family(ConfigRecord::Assistant)

@@ -56,13 +56,28 @@ pub struct OperationPolicy {
 
 /// How placement orders the places that pass (Operation key `placement`).
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+)]
 #[serde(rename_all = "kebab-case")]
+#[map(rename_all = "kebab-case")]
 pub enum PlacementStrategy {
     /// The least-loaded place first, to share work out.
     #[default]
+    #[schema(label = "Spread: the least busy place first")]
     Spread,
     /// The busiest place that still passes first, to keep others free.
+    #[schema(label = "Pack: the busiest place with room first")]
     Pack,
 }
 

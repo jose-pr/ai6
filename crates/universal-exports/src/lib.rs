@@ -1464,6 +1464,12 @@ impl Gateway {
                 get(roster::effective),
             )
             .route(
+                "/v1/user/roster/{kind}/schema",
+                get(roster::form)
+                    .put(roster::put_record_keyed_schema)
+                    .delete(roster::remove_record_keyed_schema),
+            )
+            .route(
                 "/v1/user/roster/{kind}/{key}",
                 axum::routing::put(roster::put_record).delete(roster::remove_record),
             )
@@ -1732,6 +1738,7 @@ fn board_station(
             .is_some_and(|lease| lease.station() == record.station() && lease.expires() > now),
         seen: record.seen(),
         roles: string_list("roles"),
+        handlers: string_list("handlers"),
         running: usize_value("running"),
         capacity: usize_value("capacity"),
         operations: operations.to_vec(),
@@ -3736,6 +3743,8 @@ pub struct BoardOperation {
 pub struct BoardStation {
     /// Daemon Station identity.
     pub station_id: String,
+    /// The Agent handlers it has loaded, as it reported at check-in.
+    pub handlers: Vec<String>,
     /// Whether the latest check-in is within the 45-second health window.
     pub healthy: bool,
     /// Whether this Station currently holds the elected Headquarters lease.

@@ -1636,15 +1636,18 @@ mod tests {
     fn a_page_past_the_limits_is_refused_not_cut() {
         let (_root, area) = page_area();
         let none = BTreeSet::new();
-        let small: AssistantLimits = serde_json::from_str(r#"{"page_file_bytes": 10}"#).unwrap();
+        let small: AssistantLimits =
+            crate::directorates::m::records::from_toml("page_file_bytes = 10").unwrap();
         let error = read_page(&area, "personal/site", &small, &none).unwrap_err();
         assert!(
             error.contains("index.html") || error.contains("longer"),
             "{error}"
         );
-        let few: AssistantLimits = serde_json::from_str(r#"{"page_files": 2}"#).unwrap();
+        let few: AssistantLimits =
+            crate::directorates::m::records::from_toml("page_files = 2").unwrap();
         assert!(read_page(&area, "personal/site", &few, &none).is_err());
-        let total: AssistantLimits = serde_json::from_str(r#"{"page_bytes": 12}"#).unwrap();
+        let total: AssistantLimits =
+            crate::directorates::m::records::from_toml("page_bytes = 12").unwrap();
         assert!(read_page(&area, "personal/site", &total, &none).is_err());
     }
 

@@ -317,7 +317,7 @@ fn assistant_record(input: &Map<String, Value>) -> Result<ai6::AssistantSettings
         ));
     }
     let definition = input.get("definition").cloned().unwrap_or(json!({}));
-    let settings = serde_json::from_value::<ai6::AssistantSettings>(definition)
+    let settings = ai6::read_definition::<ai6::AssistantSettings>(&definition)
         .map_err(|reason| format!("assistant: {reason}"))?;
     settings.validate()?;
     Ok(settings)

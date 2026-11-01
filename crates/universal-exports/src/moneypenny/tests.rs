@@ -1521,8 +1521,8 @@ fn exposed_by_keeps_sixteen_sources_of_two_hundred_bytes() {
     }
     assert_eq!(conversation.turn_reads.len(), 16);
 
-    let narrow: ai6::AssistantGatewayLimits = serde_json::from_value(
-        json!({"exposed_sources": 2, "source_bytes": 8, "proposal_reads": 1}),
+    let narrow: ai6::AssistantGatewayLimits = ai6::read_definition(
+        &json!({"exposed_sources": 2, "source_bytes": 8, "proposal_reads": 1}),
     )
     .unwrap();
     let mut conversation = Conversation::new("c".into(), "p".into(), "b".into(), 0.0, 8);
@@ -4056,7 +4056,7 @@ async fn the_persons_changes_are_audited_commits_by_them_and_refusals_keep_their
 
 /// A roster whose `[assistant.pages]` is `pages`.
 fn pages_roster(pages: Value) -> Arc<dyn ai6::ConfigProvider> {
-    let limits: ai6::AssistantPageLimits = serde_json::from_value(pages).unwrap();
+    let limits: ai6::AssistantPageLimits = ai6::read_definition(&pages).unwrap();
     let settings = ai6::AssistantSettings::new().with_pages(limits);
     Arc::new(ai6::MemoryProvider::new(
         ai6::Roster::builder().assistant(settings).build().unwrap(),

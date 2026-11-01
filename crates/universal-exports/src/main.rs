@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn view_limits_default_and_read_each_setting_of_the_record() {
         let record = |json: serde_json::Value| -> ai6::AssistantSettings {
-            serde_json::from_value(json).unwrap()
+            ai6::read_definition::<ai6::AssistantSettings>(&json).unwrap()
         };
         assert_eq!(
             view_limits(record(serde_json::json!({})).views()).unwrap(),
@@ -763,8 +763,8 @@ mod tests {
         let refused = zero.validate().unwrap_err();
         assert!(refused.contains("assistant.views.rows"), "{refused}");
         assert!(
-            serde_json::from_value::<ai6::AssistantSettings>(
-                serde_json::json!({"views": {"pixels": 1}})
+            ai6::read_definition::<ai6::AssistantSettings>(
+                &serde_json::json!({"views": {"pixels": 1}})
             )
             .is_err(),
             "an unknown bound is refused"

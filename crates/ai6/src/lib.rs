@@ -61,6 +61,9 @@ pub use directorates::m::promotion::{
     DEFAULT_FIELD_MISSIONS, DEFAULT_FIELD_QUIET_DAYS, Promotion, PromotionDefinition,
     PromotionPolicy, PromotionStep,
 };
+pub use directorates::m::records::{
+    RecordForm, RecordFormError, RecordKey, from_json as read_definition,
+};
 pub use directorates::m::roster::{
     Agent, AgentQuery, AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS,
     DEFAULT_MAX_OPERATION_DEPTH, DEFAULT_RETIRE_WARNING_DAYS, OnLost, OnRetire, Operation,

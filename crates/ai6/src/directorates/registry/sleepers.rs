@@ -27,32 +27,57 @@ use crate::directorates::registry::backend::*;
 pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
 
 /// A standing order, as written under `sleepers.<name>`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
 #[serde(deny_unknown_fields)]
+#[map(deny_unknown_fields)]
 pub struct Sleeper {
-    /// Five-field cron expression (minute hour day-of-month month day-of-week) in UTC.
+    /// When it runs, as five cron fields in UTC: minute, hour, day of month, month, day of week.
+    #[schema(title = "Schedule")]
+    #[form(placeholder = "0 6 * * 1")]
     pub schedule: String,
-    /// The brief's title.
+    /// What each brief it queues is called.
+    #[schema(title = "Brief title")]
     pub title: String,
-    /// The brief's instructions. Written by the operator, so not fenced as untrusted text.
+    /// What each brief asks for.
     #[serde(default)]
+    #[schema(title = "Instructions")]
+    #[map(default)]
+    #[form(widget = "textarea")]
     pub prompt: String,
-    /// Explicit Agent identity, when assigned.
+    /// The Agent that takes it, when it is always the same one.
     #[serde(default)]
+    #[schema(title = "Agent", format = "record:agents")]
     pub agent: Option<String>,
-    /// Requested Agent role, when not explicitly assigned.
+    /// The role it asks for, when no one Agent is named.
     #[serde(default)]
+    #[schema(title = "Role", format = "record:roles")]
     pub role: Option<String>,
-    /// Higher values sort first.
+    /// Among briefs waiting, the highest goes first.
     #[serde(default)]
+    #[schema(title = "Priority")]
+    #[map(default)]
     pub priority: i64,
-    /// Stations its briefs are limited to; empty adds no limit. Like a brief's `stations`, it
-    /// only narrows the Operation's.
+    /// The Stations its briefs are limited to; empty adds no limit. It can only narrow the
+    /// Operation's own list.
     #[serde(default)]
+    #[schema(title = "Stations", format = "reported:stations")]
+    #[map(default)]
     pub stations: Vec<String>,
-    /// Queue one brief per window for each live Station that placement accepts for the
-    /// Operation, each narrowed to that Station: a round of every Station.
+    /// Queue one brief for every live Station that may take it: a round of all Stations.
     #[serde(default)]
+    #[schema(title = "A brief for each Station")]
+    #[map(default)]
     pub each_station: bool,
 }
 

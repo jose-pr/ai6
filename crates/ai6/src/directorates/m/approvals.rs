@@ -23,7 +23,7 @@ use std::time::Duration;
 use globset::{Glob, GlobMatcher};
 use serde::{Deserialize, Serialize};
 
-use crate::directorates::m::roster::CLEARANCES;
+use crate::directorates::m::roster::{CLEARANCES, ClearanceLevel};
 
 /// The kinds of step every Operation governs.
 pub const BUILTIN_KINDS: [&str; 6] = [
@@ -193,13 +193,17 @@ pub enum Requirement {
 
 /// Named green ink policies.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
+)]
+#[map(rename_all = "lowercase")]
 pub enum GreenInkPreset {
     /// Every governed step needs green ink at every clearance; `desk` may not ask. The
     /// default.
+    #[schema(label = "Strict: every step waits for a person")]
     Strict,
     /// As `strict`, except `00` Agents push and merge without asking.
+    #[schema(label = "Licensed: as strict, but 00 Agents push and merge without asking")]
     Licensed,
 }
 
@@ -332,14 +336,34 @@ impl GreenInkPolicy {
 }
 
 /// The green ink settings as written in configuration (`[operation.ID.green_ink]`).
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
 pub struct GreenInkDefinition {
+    /// A starting point the values below are laid over.
+    #[schema(title = "Starting point")]
     preset: Option<GreenInkPreset>,
+    /// More kinds of step that wait for a person, beside the built-in ones.
+    #[schema(title = "More kinds of step")]
     kinds: Option<Vec<String>>,
-    requesters: Option<Vec<String>>,
+    /// The clearances whose Agents may ask.
+    #[schema(title = "Who may ask")]
+    requesters: Option<Vec<ClearanceLevel>>,
+    /// For each clearance (desk, field or 00), the kinds of step it takes without asking.
+    #[schema(title = "Without asking")]
     unattended: Option<BTreeMap<String, Vec<String>>>,
+    /// Branch patterns a push to which always waits for a person, such as main.
+    #[schema(title = "Protected branches")]
     protected: Option<Vec<String>>,
+    /// How long a request waits for a decision before it expires as refused.
+    #[schema(title = "A request waits", format = "seconds", default = Some(DEFAULT_REQUEST_TTL.as_secs()))]
     request_ttl_secs: Option<u64>,
 }
 
@@ -367,8 +391,8 @@ impl GreenInkDefinition {
         if let Some(requesters) = &self.requesters {
             policy.requesters = requesters
                 .iter()
-                .map(|clearance| known_clearance(clearance, "requesters"))
-                .collect::<Result<_, _>>()?;
+                .map(|clearance| clearance.as_str().to_owned())
+                .collect();
         }
         if let Some(unattended) = &self.unattended {
             for (clearance, kinds) in unattended {
@@ -505,10 +529,10 @@ mod tests {
 
     #[test]
     fn configuration_picks_a_preset_then_overrides_each_part() {
-        let strict: GreenInkDefinition = toml::from_str("").unwrap();
+        let strict: GreenInkDefinition = crate::directorates::m::records::from_toml("").unwrap();
         assert_eq!(strict.resolve().unwrap(), GreenInkPolicy::default());
 
-        let custom: GreenInkDefinition = toml::from_str(
+        let custom: GreenInkDefinition = crate::directorates::m::records::from_toml(
             "preset = \"licensed\"\nkinds = [\"deploy\"]\nrequesters = [\"desk\", \"field\", \"00\"]\n\
              unattended = { \"00\" = [], field = [\"deploy\"] }\nprotected = [\"refs/heads/trunk\"]\n\
              request_ttl_secs = 600\n",
@@ -542,8 +566,9 @@ mod tests {
             "protected = [\"refs/[\"]",
             "request_ttl_secs = 0",
         ] {
-            let definition: GreenInkDefinition = toml::from_str(bad).unwrap();
-            assert!(definition.resolve().is_err(), "{bad}");
+            let read = crate::directorates::m::records::from_toml::<GreenInkDefinition>(bad)
+                .and_then(|definition| definition.resolve());
+            assert!(read.is_err(), "{bad}");
         }
     }
 

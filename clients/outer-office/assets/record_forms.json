@@ -1,0 +1,4205 @@
+{
+  "operations": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Project name",
+          "description": "A longer name for the project; it finds this Operation as its codename does.",
+          "x-section": "about"
+        },
+        "description": {
+          "type": "string",
+          "title": "Description",
+          "description": "What this project is, for the people and Agents working on it.",
+          "x-section": "about",
+          "default": ""
+        },
+        "parent": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "record:operations",
+          "title": "Parent Operation",
+          "description": "The Operation this one sits under. It takes its parent's settings unless told not to.",
+          "x-section": "about"
+        },
+        "inherit": {
+          "type": "boolean",
+          "title": "Take settings from the parent",
+          "description": "Layer this Operation's settings over its parent's. Off, it takes no settings from them; access, account pools and Cables still follow the tree.",
+          "x-section": "about",
+          "x-advanced": true,
+          "default": true
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Checkout path",
+          "description": "The project's checkout on the Station, such as /srv/projects/alpha. Leave it empty for work on a Theater.",
+          "x-section": "checkout"
+        },
+        "theater": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "reported:theaters",
+          "title": "Theater",
+          "description": "The Theater where the project is, when it is not on the Station.",
+          "x-section": "checkout"
+        },
+        "workspace": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "Safe house",
+              "description": "The safe house that makes each Mission's copy. Leave it empty to use git when the checkout is a git repository."
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "Source",
+              "description": "Where the work comes from, when it is not the checkout path.",
+              "x-advanced": true
+            },
+            "base": {
+              "type": "string",
+              "title": "Start from revision",
+              "description": "The revision each Mission starts from.",
+              "x-advanced": true,
+              "default": "HEAD"
+            },
+            "branch": {
+              "type": "string",
+              "title": "Branch name",
+              "description": "The name each Mission's branch gets; {id}, {slug} and {operation} are filled in.",
+              "x-advanced": true,
+              "default": "{id}-{slug}"
+            },
+            "isolate": {
+              "type": "boolean",
+              "title": "A copy for each Mission",
+              "description": "Give each Mission its own copy. Off, Missions work in the source itself.",
+              "x-advanced": true,
+              "default": true
+            },
+            "checkpoint_remote": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "Save work to remote",
+              "description": "The git remote, by name or address, each Mission's work is saved to, so a later attempt on another Station carries on from it. Leave it empty to push nothing.",
+              "x-advanced": true
+            },
+            "checkpoint_secs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "seconds",
+              "title": "Save every",
+              "description": "How often a running Mission's work is saved.",
+              "x-advanced": true,
+              "default": 300
+            }
+          },
+          "additionalProperties": false,
+          "title": "Mission workspace",
+          "description": "How each Mission gets its working directory.",
+          "x-section": "checkout",
+          "default": {
+            "base": "HEAD",
+            "branch": "{id}-{slug}",
+            "isolate": true,
+            "checkpoint_secs": 300
+          }
+        },
+        "config": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Project settings directory",
+          "description": "Where this project's own settings are, when they are not in its checkout's `.ai6`.",
+          "x-section": "checkout",
+          "x-advanced": true
+        },
+        "roster": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "record:agents",
+          "title": "Agents",
+          "description": "The Agents allowed to work here, by codename. Empty allows every Agent.",
+          "x-section": "roster",
+          "default": []
+        },
+        "clearance": {
+          "type": "string",
+          "enum": [
+            "desk",
+            "field",
+            "00"
+          ],
+          "x-enum-labels": {
+            "desk": "Desk: reads and reports",
+            "field": "Field: does the work",
+            "00": "00: acts unattended where the Operation allows"
+          },
+          "title": "Highest clearance",
+          "description": "The highest clearance any Agent has while working here.",
+          "x-section": "roster",
+          "default": "field"
+        },
+        "stations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "reported:stations",
+          "title": "Stations",
+          "description": "The Stations allowed to run these Missions. Empty allows every Station.",
+          "x-section": "roster",
+          "x-advanced": true,
+          "default": []
+        },
+        "station_labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Station labels",
+          "description": "Labels a Station needs before it takes these Missions, such as os = linux.",
+          "x-section": "roster",
+          "x-advanced": true,
+          "default": {}
+        },
+        "placement": {
+          "type": "string",
+          "enum": [
+            "spread",
+            "pack"
+          ],
+          "x-enum-labels": {
+            "spread": "Spread: the least busy place first",
+            "pack": "Pack: the busiest place with room first"
+          },
+          "title": "Placement",
+          "description": "Whether Missions go to the least busy place, or fill the busiest place with room.",
+          "x-section": "roster",
+          "x-advanced": true,
+          "default": "spread"
+        },
+        "pools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Account pools",
+          "description": "The account pools its Missions may draw from. Leave it unset for every pool that admits this Operation.",
+          "x-section": "roster",
+          "x-advanced": true
+        },
+        "cover": {
+          "type": "string",
+          "format": "record:covers",
+          "title": "Cover policy",
+          "description": "The rule its commits follow about naming Agents and models.",
+          "x-section": "cover",
+          "examples": [
+            "covert",
+            "partial",
+            "overt"
+          ],
+          "default": "covert"
+        },
+        "cover_identity": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Author name",
+              "description": "The name on its commits."
+            },
+            "email": {
+              "type": "string",
+              "format": "email",
+              "title": "Author email",
+              "description": "The email address on its commits."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "email"
+          ],
+          "title": "Commit author",
+          "description": "The author its Agents commit as.",
+          "x-section": "cover",
+          "x-advanced": true
+        },
+        "on_blown": {
+          "type": "string",
+          "enum": [
+            "flag",
+            "fail"
+          ],
+          "x-enum-labels": {
+            "flag": "Record it and keep the work",
+            "fail": "File the Mission as failed"
+          },
+          "title": "When a cover is blown",
+          "description": "What happens when a commit breaks the cover policy.",
+          "x-section": "cover",
+          "x-advanced": true,
+          "default": "flag"
+        },
+        "max_concurrent": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Missions at once",
+          "description": "How many of its Missions may run at once. Leave it empty for no limit of its own.",
+          "x-section": "limits",
+          "x-advanced": true
+        },
+        "on_limit": {
+          "type": "string",
+          "enum": [
+            "rotate",
+            "wait",
+            "backup"
+          ],
+          "x-enum-labels": {
+            "rotate": "Move to another account in its pools",
+            "wait": "Wait for the limit to reset",
+            "backup": "Hand over to the next qualified Agent"
+          },
+          "title": "When a usage limit is hit",
+          "description": "What happens when a provider's usage limit stops a Session.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": "rotate"
+        },
+        "limit_fallback_secs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "format": "seconds",
+          "title": "Wait when no reset time is given",
+          "description": "How long a Session waits when a provider reports a limit but no reset time.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": 1800
+        },
+        "on_lost": {
+          "type": "string",
+          "enum": [
+            "retry",
+            "fail"
+          ],
+          "x-enum-labels": {
+            "retry": "Try again on another Station, with a hand-off",
+            "fail": "File the Mission as failed"
+          },
+          "title": "When a Session is lost",
+          "description": "What happens when a Session is lost with its Station.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": "retry"
+        },
+        "lost_after_secs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "format": "seconds",
+          "title": "Lost after",
+          "description": "How long a Session's runner may stay out of reach before its Station gives it up as lost.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": 45
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "preset": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "observe",
+                    "strict"
+                  ],
+                  "x-enum-labels": {
+                    "observe": "Measure only: no limit",
+                    "strict": "Strict: conservative ceilings on everything"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Starting point",
+              "description": "A starting point the values below are laid over. Measuring only sets no limit."
+            },
+            "session_tokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Tokens per Session",
+              "description": "The tokens one Session may use. Leave it empty for no limit."
+            },
+            "mission_tokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Tokens per Mission",
+              "description": "The tokens all of a Mission's Sessions may use. Leave it empty for no limit."
+            },
+            "mission_cost_usd": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Dollars per Mission",
+              "description": "The dollars all of a Mission's Sessions may spend. Leave it empty for no limit."
+            },
+            "operation_cost_usd_per_day": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Dollars per day",
+              "description": "The dollars an Operation's Missions may spend in one UTC day. Leave it empty for no limit."
+            },
+            "warn_at": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Warn at",
+              "description": "The share of a limit at which a warning goes out, above 0 and at most 1."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Budget",
+          "description": "What its Missions may spend.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": {}
+        },
+        "exposure": {
+          "type": "object",
+          "properties": {
+            "preset": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "strict",
+                    "observe"
+                  ],
+                  "x-enum-labels": {
+                    "strict": "Strict: every restriction applies",
+                    "observe": "Observe: only record it"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Starting point",
+              "description": "A starting point the values below replace."
+            },
+            "restrict": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "proposals",
+                  "approvals",
+                  "cables",
+                  "secrets"
+                ],
+                "x-enum-labels": {
+                  "proposals": "Its Mission proposals are never promoted without a person",
+                  "approvals": "Its requests always go to a person",
+                  "cables": "It may only reply to Cables",
+                  "secrets": "It gets no new secrets"
+                }
+              },
+              "title": "Restrictions",
+              "description": "What applies to a Session once it has read outside text."
+            },
+            "tools": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "title": "Tools that read outside text",
+              "description": "The tools whose results count as outside text."
+            }
+          },
+          "additionalProperties": false,
+          "title": "After reading outside text",
+          "description": "What a Session may do once it has read outside text.",
+          "x-section": "safety",
+          "x-advanced": true,
+          "default": {}
+        },
+        "quarantine": {
+          "type": "object",
+          "properties": {
+            "window_hours": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Counting window",
+              "description": "How far back incidents count.",
+              "default": 24
+            },
+            "stalls": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4294967295,
+              "title": "Stalls and loops",
+              "description": "Stalls or loops within the window that take an Agent off work; 0 turns this off.",
+              "default": 3
+            },
+            "budget_stops": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4294967295,
+              "title": "Budget stops",
+              "description": "Budget hard stops within the window that take an Agent off work; 0 turns this off.",
+              "default": 2
+            },
+            "blown": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "title": "A blown cover",
+              "description": "Take an Agent off work for one blown cover.",
+              "default": true
+            }
+          },
+          "additionalProperties": false,
+          "title": "Quarantine",
+          "description": "When an Agent working here is taken off work.",
+          "x-section": "safety",
+          "x-advanced": true,
+          "default": {}
+        },
+        "green_ink": {
+          "type": "object",
+          "properties": {
+            "preset": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "strict",
+                    "licensed"
+                  ],
+                  "x-enum-labels": {
+                    "strict": "Strict: every step waits for a person",
+                    "licensed": "Licensed: as strict, but 00 Agents push and merge without asking"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Starting point",
+              "description": "A starting point the values below are laid over."
+            },
+            "kinds": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "title": "More kinds of step",
+              "description": "More kinds of step that wait for a person, beside the built-in ones."
+            },
+            "requesters": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "desk",
+                  "field",
+                  "00"
+                ],
+                "x-enum-labels": {
+                  "desk": "Desk: reads and reports",
+                  "field": "Field: does the work",
+                  "00": "00: acts unattended where the Operation allows"
+                }
+              },
+              "title": "Who may ask",
+              "description": "The clearances whose Agents may ask."
+            },
+            "unattended": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "title": "Without asking",
+              "description": "For each clearance (desk, field or 00), the kinds of step it takes without asking."
+            },
+            "protected": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "title": "Protected branches",
+              "description": "Branch patterns a push to which always waits for a person, such as main."
+            },
+            "request_ttl_secs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "seconds",
+              "title": "A request waits",
+              "description": "How long a request waits for a decision before it expires as refused.",
+              "default": 86400
+            }
+          },
+          "additionalProperties": false,
+          "title": "Green ink",
+          "description": "Which irreversible steps wait for a person's approval.",
+          "x-section": "safety",
+          "x-advanced": true,
+          "default": {}
+        },
+        "vetting": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "off"
+                  ],
+                  "x-enum-labels": {
+                    "on": "On, as it comes",
+                    "off": "Off"
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "title": "Vet briefs",
+                      "description": "Check briefs before they are placed.",
+                      "default": true
+                    },
+                    "max_brief_bytes": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 18446744073709551615,
+                      "format": "bytes",
+                      "title": "Longest brief",
+                      "description": "The longest brief, in bytes, that goes through without a hold.",
+                      "default": 65536
+                    },
+                    "max_per_hour": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 4294967295,
+                      "title": "Briefs an hour",
+                      "description": "Briefs from outside taken in an hour before the rest are held; 0 is no limit.",
+                      "default": 20
+                    },
+                    "max_per_source_per_hour": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 4294967295,
+                      "title": "Briefs an hour from one Source",
+                      "description": "The same, for one Source; 0 is no limit.",
+                      "default": 10
+                    },
+                    "duplicates": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "title": "Hold duplicates",
+                      "description": "Hold a brief that repeats work already queued or running.",
+                      "default": true
+                    },
+                    "budget": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "title": "Hold what the budget cannot pay for",
+                      "description": "Hold a brief past what the budget has left.",
+                      "default": true
+                    },
+                    "screening": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "untrusted",
+                            "all",
+                            "off"
+                          ],
+                          "x-enum-labels": {
+                            "untrusted": "Briefs whose text came from outside",
+                            "all": "Every brief",
+                            "off": "None"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Screen",
+                      "description": "Which briefs are screened for hidden text, forged markers and manipulation."
+                    },
+                    "phrases": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      },
+                      "title": "Phrases to screen for",
+                      "description": "More phrases to screen for, beside the built-in ones."
+                    },
+                    "html_comments": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "title": "Hold HTML comments",
+                      "description": "Also hold a brief whose text carries HTML comments, which render as nothing.",
+                      "default": true
+                    },
+                    "review": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "untrusted",
+                            "all",
+                            "off"
+                          ],
+                          "x-enum-labels": {
+                            "untrusted": "Briefs whose text came from outside",
+                            "all": "Every brief",
+                            "off": "None"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Review",
+                      "description": "Which briefs an Agent reviews before they run."
+                    },
+                    "rate_hold_hours": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 18446744073709551615,
+                      "title": "Hold for a rate limit",
+                      "description": "How long a brief held only for a rate limit waits before it is vetted again; 0 keeps it until a person decides.",
+                      "default": 24
+                    },
+                    "max_proposal_reviews_per_hour": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 4294967295,
+                      "title": "Proposal reviews an hour",
+                      "description": "Reviews of Mission proposals in an hour; 0 is no limit.",
+                      "default": 20
+                    },
+                    "max_proposal_reviews_per_session_per_hour": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 4294967295,
+                      "title": "Proposal reviews an hour for one Session",
+                      "description": "Reviews of one Session's proposals in an hour; 0 is no limit.",
+                      "default": 5
+                    }
+                  },
+                  "additionalProperties": false,
+                  "title": "Custom",
+                  "description": "Choose each check"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Vetting",
+          "description": "How briefs are checked before they are placed.",
+          "x-section": "safety",
+          "x-advanced": true
+        },
+        "harness": {
+          "type": "object",
+          "properties": {
+            "project_settings": {
+              "type": "string",
+              "enum": [
+                "ignore",
+                "pinned",
+                "load"
+              ],
+              "x-enum-labels": {
+                "ignore": "Never load them",
+                "pinned": "Load them only while they match a pinned digest",
+                "load": "Load whatever is there"
+              },
+              "title": "Settings in the checkout",
+              "description": "What a harness may do with the settings its working directory carries.",
+              "default": "ignore"
+            },
+            "pin": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "Pinned digest",
+              "description": "The digest those settings must have, from `ai6 harness pin DIR`."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Harness settings in the checkout",
+          "description": "When its Agents may load settings their working directory carries.",
+          "x-section": "safety",
+          "x-advanced": true,
+          "default": {
+            "project_settings": "ignore"
+          }
+        },
+        "promotion": {
+          "type": "object",
+          "properties": {
+            "field": {
+              "type": "object",
+              "properties": {
+                "missions": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "title": "Missions done",
+                  "description": "Missions an Agent must finish before it is put forward."
+                },
+                "max_failure_rate": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "title": "Highest failure rate",
+                  "description": "The most of its Missions that may have failed or blown their cover, from 0 to 1."
+                },
+                "quiet_days": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "title": "Quiet days",
+                  "description": "Days it must have gone without any of the outcomes below."
+                },
+                "quiet_on": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Outcomes that count against it",
+                  "description": "The outcomes that break its quiet days: done, failed, blown, stalled, quarantined, budget_stop or green_ink_rejected."
+                }
+              },
+              "additionalProperties": false,
+              "title": "To field",
+              "description": "When a desk Agent is put forward for field clearance.",
+              "default": {}
+            },
+            "00": {
+              "type": "object",
+              "properties": {
+                "missions": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "title": "Missions done",
+                  "description": "Missions an Agent must finish before it is put forward."
+                },
+                "max_failure_rate": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "title": "Highest failure rate",
+                  "description": "The most of its Missions that may have failed or blown their cover, from 0 to 1."
+                },
+                "quiet_days": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "title": "Quiet days",
+                  "description": "Days it must have gone without any of the outcomes below."
+                },
+                "quiet_on": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Outcomes that count against it",
+                  "description": "The outcomes that break its quiet days: done, failed, blown, stalled, quarantined, budget_stop or green_ink_rejected."
+                }
+              },
+              "additionalProperties": false,
+              "title": "To 00",
+              "description": "When a field Agent is put forward for 00 clearance.",
+              "default": {}
+            }
+          },
+          "additionalProperties": false,
+          "title": "Promotion",
+          "description": "When M asks a person to raise an Agent's clearance here.",
+          "x-section": "safety",
+          "x-advanced": true,
+          "default": {
+            "field": {},
+            "00": {}
+          }
+        },
+        "sources": {
+          "type": "object",
+          "additionalProperties": {},
+          "title": "Work sources",
+          "description": "Trackers and CI this Operation takes briefs from; each source's settings are its own.",
+          "x-section": "sources",
+          "x-advanced": true,
+          "default": {}
+        },
+        "sleepers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "schedule": {
+                "type": "string",
+                "title": "Schedule",
+                "description": "When it runs, as five cron fields in UTC: minute, hour, day of month, month, day of week."
+              },
+              "title": {
+                "type": "string",
+                "title": "Brief title",
+                "description": "What each brief it queues is called."
+              },
+              "prompt": {
+                "type": "string",
+                "title": "Instructions",
+                "description": "What each brief asks for.",
+                "default": ""
+              },
+              "agent": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "record:agents",
+                "title": "Agent",
+                "description": "The Agent that takes it, when it is always the same one."
+              },
+              "role": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "record:roles",
+                "title": "Role",
+                "description": "The role it asks for, when no one Agent is named."
+              },
+              "priority": {
+                "type": "integer",
+                "minimum": -9223372036854775808,
+                "maximum": 9223372036854775807,
+                "title": "Priority",
+                "description": "Among briefs waiting, the highest goes first.",
+                "default": 0
+              },
+              "stations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "format": "reported:stations",
+                "title": "Stations",
+                "description": "The Stations its briefs are limited to; empty adds no limit. It can only narrow the Operation's own list.",
+                "default": []
+              },
+              "each_station": {
+                "type": "boolean",
+                "title": "A brief for each Station",
+                "description": "Queue one brief for every live Station that may take it: a round of all Stations.",
+                "default": false
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "schedule",
+              "title"
+            ]
+          },
+          "title": "Standing orders",
+          "description": "Briefs queued on a schedule, once an operator authorizes them.",
+          "x-section": "sources",
+          "x-advanced": true,
+          "default": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "sections": [
+        {
+          "id": "about",
+          "title": "About"
+        },
+        {
+          "id": "checkout",
+          "title": "Where the work is",
+          "description": "A Mission works in this checkout, or on this Theater. An Operation with neither only groups others."
+        },
+        {
+          "id": "roster",
+          "title": "Who works here",
+          "description": "Which Agents and Stations take this Operation's Missions."
+        },
+        {
+          "id": "cover",
+          "title": "Cover"
+        },
+        {
+          "id": "limits",
+          "title": "Limits and spending"
+        },
+        {
+          "id": "safety",
+          "title": "Safety and approvals"
+        },
+        {
+          "id": "sources",
+          "title": "Sources and standing orders"
+        }
+      ],
+      "fields": {
+        "description": {
+          "widget": "textarea"
+        },
+        "workspace": {
+          "form": {}
+        },
+        "cover_identity": {
+          "form": {}
+        },
+        "budget": {
+          "form": {
+            "fields": {
+              "mission_cost_usd": {
+                "unit": "USD"
+              },
+              "operation_cost_usd_per_day": {
+                "unit": "USD"
+              }
+            }
+          }
+        },
+        "exposure": {
+          "form": {}
+        },
+        "quarantine": {
+          "form": {
+            "fields": {
+              "window_hours": {
+                "unit": "hours"
+              }
+            }
+          }
+        },
+        "green_ink": {
+          "form": {}
+        },
+        "harness": {
+          "form": {
+            "fields": {
+              "pin": {
+                "visibleWhen": {
+                  "field": "project_settings",
+                  "equals": "pinned"
+                }
+              }
+            }
+          }
+        },
+        "promotion": {
+          "form": {
+            "fields": {
+              "field": {
+                "form": {
+                  "fields": {
+                    "quiet_days": {
+                      "unit": "days"
+                    }
+                  }
+                }
+              },
+              "00": {
+                "form": {
+                  "fields": {
+                    "quiet_days": {
+                      "unit": "days"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "sleepers": {
+          "form": {
+            "fields": {
+              "schedule": {
+                "placeholder": "0 6 * * 1"
+              },
+              "prompt": {
+                "widget": "textarea"
+              }
+            }
+          }
+        }
+      }
+    },
+    "key": {
+      "title": "Codename",
+      "description": "The name Missions and Stations know this Operation by. It cannot be changed later."
+    }
+  },
+  "agents": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "title": "Description",
+          "description": "What this Agent is for.",
+          "x-section": "about",
+          "default": ""
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Other names",
+          "description": "Other names that find this Agent.",
+          "x-section": "about",
+          "x-advanced": true,
+          "default": []
+        },
+        "extends": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "record:agents",
+          "title": "Based on",
+          "description": "Another Agent whose settings this one starts from; what is set here wins.",
+          "x-section": "about",
+          "x-advanced": true
+        },
+        "handler": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "reported:handlers",
+          "title": "Handler",
+          "description": "The harness that runs its Sessions, from those the Stations report.",
+          "x-section": "harness"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "used:model",
+          "title": "Model",
+          "description": "The model it asks for; the harness's default when empty.",
+          "x-section": "harness"
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "used:effort",
+          "title": "Reasoning effort",
+          "description": "How hard the model thinks, in the harness's own words, such as high.",
+          "x-section": "harness"
+        },
+        "handler_settings": {
+          "type": "object",
+          "additionalProperties": {},
+          "format": "settings-of:handler",
+          "title": "Handler settings",
+          "description": "Settings for the handler, as its documentation describes them. Most handlers take none.",
+          "x-section": "harness",
+          "x-advanced": true,
+          "default": {}
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "record:roles",
+          "title": "Roles",
+          "description": "The Mission roles it can take.",
+          "x-section": "duties",
+          "default": []
+        },
+        "clearance": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "desk",
+                "field",
+                "00"
+              ],
+              "x-enum-labels": {
+                "desk": "Desk: reads and reports",
+                "field": "Field: does the work",
+                "00": "00: acts unattended where the Operation allows"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Clearance",
+          "description": "The most it may do on its own.",
+          "x-section": "duties",
+          "default": "field"
+        },
+        "priority": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": -9223372036854775808,
+          "maximum": 9223372036854775807,
+          "title": "Priority",
+          "description": "Among Agents that suit a Mission, the highest goes first.",
+          "x-section": "duties",
+          "default": 0
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "description": "Labels a Mission can ask for.",
+          "x-section": "duties",
+          "x-advanced": true,
+          "default": []
+        },
+        "context": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Standing instructions",
+          "description": "What it is told before every Mission's prompt.",
+          "x-section": "duties",
+          "x-advanced": true
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "description": "Environment variables its Sessions get. Keep secrets out of here: a loadout hands them out.",
+          "x-section": "duties",
+          "x-advanced": true,
+          "default": {}
+        },
+        "max_concurrent": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Sessions at once",
+          "description": "How many Sessions it may run at once. Leave it empty for no limit of its own.",
+          "x-section": "limits",
+          "x-advanced": true
+        },
+        "pool": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Account pool",
+          "description": "The one account pool its Sessions draw from, when it is tied to one.",
+          "x-section": "limits",
+          "x-advanced": true
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "stall_timeout": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Stalled after",
+              "description": "How long a Session may stay quiet before it counts as stalled."
+            },
+            "loop_timeout": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Looping after",
+              "description": "How long a Session repeating itself may go on before it counts as looping."
+            },
+            "loop_min_lines": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Repeated lines",
+              "description": "How many lines must repeat before it can count as looping."
+            },
+            "blocked_after": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Blocked after",
+              "description": "How long a Session showing a prompt may wait before it counts as blocked."
+            },
+            "max_runtime": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest run",
+              "description": "The longest a Session may run. Leave it empty for no limit of its own."
+            },
+            "history": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Lines remembered",
+              "description": "How many different lines of output are remembered to spot repeats."
+            },
+            "normalize_digits": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "title": "Ignore numbers when comparing",
+              "description": "Treat lines that differ only in their numbers as the same line."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Watchdog",
+          "description": "When its Sessions count as stuck.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": {}
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "preset": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "observe",
+                    "strict"
+                  ],
+                  "x-enum-labels": {
+                    "observe": "Measure only: no limit",
+                    "strict": "Strict: conservative ceilings on everything"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Starting point",
+              "description": "A starting point the values below are laid over. Measuring only sets no limit."
+            },
+            "session_tokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Tokens per Session",
+              "description": "The tokens one Session may use. Leave it empty for no limit."
+            },
+            "mission_tokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Tokens per Mission",
+              "description": "The tokens all of a Mission's Sessions may use. Leave it empty for no limit."
+            },
+            "mission_cost_usd": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Dollars per Mission",
+              "description": "The dollars all of a Mission's Sessions may spend. Leave it empty for no limit."
+            },
+            "operation_cost_usd_per_day": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Dollars per day",
+              "description": "The dollars an Operation's Missions may spend in one UTC day. Leave it empty for no limit."
+            },
+            "warn_at": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Warn at",
+              "description": "The share of a limit at which a warning goes out, above 0 and at most 1."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Budget",
+          "description": "What its Sessions may spend, on top of its Operation's budget.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": {}
+        },
+        "retire_on": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date",
+          "title": "Retire on",
+          "description": "The day its model reaches end of life, as YYYY-MM-DD (UTC).",
+          "x-section": "retire",
+          "x-advanced": true
+        },
+        "on_retire": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "desk",
+                "retired"
+              ],
+              "x-enum-labels": {
+                "desk": "Keep it on desk duty: still chosen, at desk clearance",
+                "retired": "Retire it: its running Missions finish and queued ones go to the next Agent"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "On that day",
+          "description": "What happens to it on that day.",
+          "x-section": "retire",
+          "x-advanced": true,
+          "default": "desk"
+        },
+        "retire_warning_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Warn this many days before",
+          "description": "How many days before then the Station warns; 0 does not warn.",
+          "x-section": "retire",
+          "x-advanced": true,
+          "default": 14
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "sections": [
+        {
+          "id": "about",
+          "title": "About"
+        },
+        {
+          "id": "harness",
+          "title": "Harness and model",
+          "description": "What runs this Agent's Sessions."
+        },
+        {
+          "id": "duties",
+          "title": "Duties"
+        },
+        {
+          "id": "limits",
+          "title": "Limits and spending"
+        },
+        {
+          "id": "retire",
+          "title": "Retirement"
+        }
+      ],
+      "fields": {
+        "description": {
+          "widget": "textarea"
+        },
+        "context": {
+          "widget": "textarea"
+        },
+        "limits": {
+          "form": {}
+        },
+        "budget": {
+          "form": {
+            "fields": {
+              "mission_cost_usd": {
+                "unit": "USD"
+              },
+              "operation_cost_usd_per_day": {
+                "unit": "USD"
+              }
+            }
+          }
+        }
+      }
+    },
+    "key": {
+      "title": "Codename",
+      "description": "The name Missions ask for this Agent by. It cannot be changed later."
+    }
+  },
+  "roles": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "title": "Purpose",
+          "description": "The work this role suits, in a sentence.",
+          "default": ""
+        },
+        "policy": {
+          "type": "string",
+          "title": "Instructions",
+          "description": "Instructions for doing this job. They do not grant permissions.",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "fields": {
+        "purpose": {
+          "widget": "textarea"
+        },
+        "policy": {
+          "widget": "textarea"
+        }
+      }
+    },
+    "key": {
+      "title": "Role name",
+      "description": "Short and without spaces, such as case-officer. It cannot be changed later."
+    }
+  },
+  "covers": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "title": "Description",
+          "description": "What this cover is for.",
+          "default": ""
+        },
+        "agent_author": {
+          "type": "boolean",
+          "title": "Agent as author",
+          "description": "Let an Agent be the commit's author, instead of the Operation's commit author.",
+          "x-section": "shows",
+          "default": false
+        },
+        "model": {
+          "type": "boolean",
+          "title": "Name the model",
+          "description": "Let commits name the model.",
+          "x-section": "shows",
+          "default": false
+        },
+        "announce": {
+          "type": "boolean",
+          "title": "Say it was generated",
+          "description": "Let commits say they were generated, as a footer or a mark.",
+          "x-section": "shows",
+          "default": false
+        },
+        "trailers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed attribution lines",
+          "description": "Attribution lines commits may carry, such as Co-Authored-By.",
+          "x-section": "shows",
+          "default": []
+        },
+        "suggest": {
+          "type": "string",
+          "title": "Suggested attribution line",
+          "description": "The attribution line Agents are told to use; {agent} and {model} are filled in.",
+          "x-section": "adds",
+          "default": ""
+        },
+        "footer": {
+          "type": "string",
+          "title": "Required footer",
+          "description": "Text every commit must end with.",
+          "x-section": "adds",
+          "default": ""
+        },
+        "forbid": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden text",
+          "description": "Patterns no commit message may match, as regular expressions.",
+          "x-section": "adds",
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "sections": [
+        {
+          "id": "shows",
+          "title": "What commits may show"
+        },
+        {
+          "id": "adds",
+          "title": "What commits must carry"
+        }
+      ],
+      "fields": {
+        "description": {
+          "widget": "textarea"
+        }
+      }
+    },
+    "key": {
+      "title": "Cover name",
+      "description": "What Operations choose this cover by. It cannot be changed later."
+    }
+  },
+  "assistant": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "personal_repo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Personal repository",
+          "description": "Where each person's memory and work is kept: a repository address with {person} or {person_digest} in it. Leave it empty to keep nothing.",
+          "x-section": "memory"
+        },
+        "shared": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "repo": {
+                "type": "string",
+                "title": "Repository",
+                "description": "The repository's address: a URL, user@host:path or a local path."
+              },
+              "write": {
+                "type": "boolean",
+                "title": "Change without confirming",
+                "description": "Let a member's change through without a proposal to confirm. A weakening.",
+                "default": false
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "repo"
+            ]
+          },
+          "title": "Repositories teams share",
+          "description": "A repository a directory group shares with her, by group name.",
+          "x-section": "memory",
+          "x-advanced": true,
+          "default": {}
+        },
+        "org": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "repo": {
+              "type": "string",
+              "title": "Repository",
+              "description": "The repository's address: a URL, user@host:path or a local path."
+            },
+            "write": {
+              "type": "boolean",
+              "title": "Change without confirming",
+              "description": "Let a member's change through without a proposal to confirm. A weakening.",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "repo"
+          ],
+          "title": "Repository everyone shares",
+          "description": "A repository everyone shares with her.",
+          "x-section": "memory",
+          "x-advanced": true
+        },
+        "allow_elevated": {
+          "type": "boolean",
+          "title": "Run on an elevated Station",
+          "description": "Let her run on a Station that runs as an administrator. A weakening.",
+          "x-section": "reach",
+          "x-advanced": true,
+          "default": false
+        },
+        "interpreters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Script programs",
+          "description": "The programs her scripts may run.",
+          "x-section": "reach",
+          "default": [
+            "python3"
+          ]
+        },
+        "network": {
+          "type": "string",
+          "enum": [
+            "denied",
+            "limited",
+            "open"
+          ],
+          "x-enum-labels": {
+            "denied": "None: no web tools, and scripts reach no host",
+            "limited": "Limited: only the hosts listed",
+            "open": "Open: all the Station reaches, and web search"
+          },
+          "title": "Network",
+          "description": "What her web tools and scripts may reach besides her own tools.",
+          "x-section": "reach",
+          "default": "limited"
+        },
+        "allowed_hosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Hosts she may reach",
+          "description": "The hosts she may reach when the network is limited.",
+          "x-section": "reach",
+          "default": []
+        },
+        "denied_networks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Networks she may not reach",
+          "description": "Networks she may not reach when the network is open, such as 10.0.0.0/8.",
+          "x-section": "reach",
+          "default": []
+        },
+        "unsandboxed_scripts": {
+          "type": "boolean",
+          "title": "Run scripts without the sandbox",
+          "description": "Run her scripts outside the harness's sandbox. A weakening.",
+          "x-section": "reach",
+          "x-advanced": true,
+          "default": false
+        },
+        "skills": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "title": "Directory",
+                "description": "The directory holding the skill's SKILL.md and its files."
+              },
+              "pin": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "title": "Pinned digest",
+                "description": "The digest that directory must have when it is installed, from `ai6 harness pin DIR`."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "path"
+            ]
+          },
+          "title": "Skill catalog",
+          "description": "The skills she may use, by name.",
+          "x-section": "skills",
+          "x-advanced": true,
+          "default": {}
+        },
+        "skills_unpinned": {
+          "type": "boolean",
+          "title": "Allow unpinned skills",
+          "description": "Load a skill with no pinned digest. A weakening.",
+          "x-section": "skills",
+          "x-advanced": true,
+          "default": false
+        },
+        "skills_allow_tools": {
+          "type": "boolean",
+          "title": "Let skills ask for tools",
+          "description": "Let a skill ask for tools of its own. A weakening.",
+          "x-section": "skills",
+          "x-advanced": true,
+          "default": false
+        },
+        "group": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "interpreters": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Script programs",
+                "description": "Only these of the programs her scripts may run."
+              },
+              "network": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "denied",
+                      "limited",
+                      "open"
+                    ],
+                    "x-enum-labels": {
+                      "denied": "None: no web tools, and scripts reach no host",
+                      "limited": "Limited: only the hosts listed",
+                      "open": "Open: all the Station reaches, and web search"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Network",
+                "description": "A network setting no looser than the general one."
+              },
+              "allowed_hosts": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Hosts she may reach",
+                "description": "Only these of the hosts she may reach."
+              },
+              "denied_networks": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Networks she may not reach",
+                "description": "More networks she may not reach."
+              },
+              "unsandboxed_scripts": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "title": "Run scripts without the sandbox",
+                "description": "Whether her scripts may run without the sandbox, when the general setting lets them."
+              },
+              "skills": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Skills",
+                "description": "Only these skills of the catalog."
+              }
+            },
+            "additionalProperties": false
+          },
+          "title": "For a group",
+          "description": "What she may do for the members of a directory group, by group name. It can only narrow the settings above.",
+          "x-section": "narrowing",
+          "x-advanced": true,
+          "default": {}
+        },
+        "person": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "interpreters": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Script programs",
+                "description": "Only these of the programs her scripts may run."
+              },
+              "network": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "denied",
+                      "limited",
+                      "open"
+                    ],
+                    "x-enum-labels": {
+                      "denied": "None: no web tools, and scripts reach no host",
+                      "limited": "Limited: only the hosts listed",
+                      "open": "Open: all the Station reaches, and web search"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Network",
+                "description": "A network setting no looser than the general one."
+              },
+              "allowed_hosts": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Hosts she may reach",
+                "description": "Only these of the hosts she may reach."
+              },
+              "denied_networks": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Networks she may not reach",
+                "description": "More networks she may not reach."
+              },
+              "unsandboxed_scripts": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "title": "Run scripts without the sandbox",
+                "description": "Whether her scripts may run without the sandbox, when the general setting lets them."
+              },
+              "skills": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Skills",
+                "description": "Only these skills of the catalog."
+              }
+            },
+            "additionalProperties": false
+          },
+          "title": "For a person",
+          "description": "What she may do for one person, by person ID. It can only narrow the settings above.",
+          "x-section": "narrowing",
+          "x-advanced": true,
+          "default": {}
+        },
+        "views": {
+          "type": "object",
+          "properties": {
+            "blocks": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Blocks in one view",
+              "description": "Blocks in one view.",
+              "default": 24
+            },
+            "view_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Size of one view",
+              "description": "Bytes of one view as JSON.",
+              "default": 65536
+            },
+            "text_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Size of a text block",
+              "description": "Bytes of a text block's Markdown.",
+              "default": 8192
+            },
+            "short_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Size of a title, label or cell",
+              "description": "Bytes of a title, label, cell or other short text.",
+              "default": 512
+            },
+            "columns": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Columns of a table",
+              "description": "Columns of a table.",
+              "default": 12
+            },
+            "rows": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Rows of a table",
+              "description": "Rows of a table.",
+              "default": 200
+            },
+            "items": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Items of a list or timeline",
+              "description": "Items of a key-value list or a timeline.",
+              "default": 100
+            },
+            "series": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Series of a chart",
+              "description": "Series of a chart.",
+              "default": 8
+            },
+            "points": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Points of one series",
+              "description": "Points of one series.",
+              "default": 200
+            },
+            "pie_slices": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Slices of a pie",
+              "description": "Slices of a pie.",
+              "default": 12
+            },
+            "diff_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Size of each side of a diff",
+              "description": "Bytes of each side of a diff.",
+              "default": 16384
+            },
+            "fields": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Fields of a form or card",
+              "description": "Fields of a form or a card.",
+              "default": 20
+            },
+            "schedule_rows": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Rows of a schedule",
+              "description": "Rows of a schedule.",
+              "default": 50
+            },
+            "graph_nodes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Nodes of a graph",
+              "description": "Nodes of a graph.",
+              "default": 60
+            },
+            "graph_edges": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Edges of a graph",
+              "description": "Edges of a graph.",
+              "default": 120
+            },
+            "svg_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Size of a drawing",
+              "description": "Bytes of an SVG drawing.",
+              "default": 32768
+            },
+            "svg_elements": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Elements of a drawing",
+              "description": "Elements of an SVG drawing.",
+              "default": 2000
+            },
+            "svg_depth": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Nesting of a drawing",
+              "description": "How deep an SVG drawing nests its elements.",
+              "default": 16
+            },
+            "navigate_label_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Size of a page link's label",
+              "description": "Bytes of the label of a page she offers with `navigate`.",
+              "default": 120
+            },
+            "svg_id_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Size of an id in a drawing",
+              "description": "Bytes of an `id` in an SVG drawing.",
+              "default": 64
+            }
+          },
+          "additionalProperties": false,
+          "title": "Her views",
+          "description": "How large the views she shows may be.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": {}
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cable_grants": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Operations with Cables in one job",
+              "description": "Operations one job grants Cable actions in.",
+              "default": 64
+            },
+            "message_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest message",
+              "description": "Bytes of one job's message.",
+              "default": 32768
+            },
+            "context_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Standing context and recap",
+              "description": "Bytes of one job's standing context and recap together.",
+              "default": 24576
+            },
+            "event_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest reported event",
+              "description": "Bytes of one reported event's text; longer text is cut.",
+              "default": 65536
+            },
+            "events": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Events in one report",
+              "description": "Events in one report.",
+              "default": 64
+            },
+            "change_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "File content in one memory change",
+              "description": "Bytes of file content in one memory change, commit or memory write.",
+              "default": 65536
+            },
+            "change_files": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Files in one memory change",
+              "description": "Files in one memory change or commit.",
+              "default": 32
+            },
+            "commit_message_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest commit message",
+              "description": "Bytes of one commit's message.",
+              "default": 4096
+            },
+            "shared_bases": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Shared change bases",
+              "description": "Shared-change bases one event carries, and Universal Exports keeps for one conversation until their calls arrive.",
+              "default": 32
+            },
+            "memory_list_files": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Files in a memory listing",
+              "description": "Files one memory listing names.",
+              "default": 1000
+            },
+            "memory_list_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Paths in a memory listing",
+              "description": "Bytes of paths one memory listing names.",
+              "default": 131072
+            },
+            "skills": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Skills in one job",
+              "description": "Skills one job gives her.",
+              "default": 64
+            },
+            "inlined_memory_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "MEMORY.md in her context",
+              "description": "Bytes of MEMORY.md inlined into her standing context.",
+              "default": 32768
+            },
+            "memory_file_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest memory file read",
+              "description": "Bytes of one memory file the desk reads; a longer file is read to this length.",
+              "default": 262144
+            },
+            "memory_files": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Memory files read per turn",
+              "description": "Memory files the desk reads at a turn's edge.",
+              "default": 1024
+            },
+            "memory_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "All memory read per turn",
+              "description": "Bytes over all the memory files the desk reads at a turn's edge.",
+              "default": 8388608
+            },
+            "memory_walk": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Files looked at per turn",
+              "description": "Files of her personal folder looked at to name what a turn changed.",
+              "default": 10000
+            },
+            "memory_import_depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Depth of memory imports",
+              "description": "How deep `@path` imports from her memory are followed to find outside text; Claude Code follows five, so a smaller value is looser.",
+              "default": 5
+            },
+            "page_file_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest file read for a page",
+              "description": "Bytes of one file the Station reads to publish a page. Default 8 MiB.",
+              "default": 8388608
+            },
+            "page_files": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Files read for a page",
+              "description": "Files the Station reads to publish one page. Default 200.",
+              "default": 200
+            },
+            "page_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "All the files read for a page",
+              "description": "Bytes over all the files of one page the Station reads. Default 16 MiB.",
+              "default": 16777216
+            }
+          },
+          "additionalProperties": false,
+          "title": "Messages and memory",
+          "description": "What passes between Universal Exports and a Station for her, and how much of her memory a Station reads.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": {
+            "cable_grants": 64,
+            "message_bytes": 32768,
+            "context_bytes": 24576,
+            "event_bytes": 65536,
+            "events": 64,
+            "change_bytes": 65536,
+            "change_files": 32,
+            "commit_message_bytes": 4096,
+            "shared_bases": 32,
+            "memory_list_files": 1000,
+            "memory_list_bytes": 131072,
+            "skills": 64,
+            "inlined_memory_bytes": 32768,
+            "memory_file_bytes": 262144,
+            "memory_files": 1024,
+            "memory_bytes": 8388608,
+            "memory_walk": 10000,
+            "memory_import_depth": 5,
+            "page_file_bytes": 8388608,
+            "page_files": 200,
+            "page_bytes": 16777216
+          }
+        },
+        "desk": {
+          "type": "object",
+          "properties": {
+            "idle": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Close an idle harness after",
+              "description": "Seconds a harness waits for the next message, or writes nothing while answering, before it is closed.",
+              "default": 600.0
+            },
+            "live": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Harnesses on one Station",
+              "description": "Harnesses a Station runs at once.",
+              "default": 4
+            },
+            "token_margin": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Restart before a token expires",
+              "description": "Seconds before its token expires that a running harness is restarted with the job's.",
+              "default": 120.0
+            },
+            "job_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Job poll held open",
+              "description": "Seconds Universal Exports holds a job poll open.",
+              "default": 1.0
+            },
+            "job_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest job",
+              "description": "Bytes of one job as Universal Exports sends it.",
+              "default": 262144
+            },
+            "call_margin": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Extra time for a request",
+              "description": "Seconds a request to Universal Exports may take past what it waits for.",
+              "default": 2.0
+            },
+            "job_retry": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Retry a failed job poll after",
+              "description": "Seconds before a failed job poll is tried again.",
+              "default": 0.5
+            },
+            "report_queue": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Reports waiting to be sent",
+              "description": "Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are dropped.",
+              "default": 256
+            },
+            "report_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295,
+              "title": "Tries to send a report",
+              "description": "Times a report is sent before it counts as lost.",
+              "default": 3
+            },
+            "report_retry": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Retry a report after",
+              "description": "Seconds between tries of a report that did not reach Universal Exports.",
+              "default": 0.2
+            },
+            "parked": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Memory changes kept undelivered",
+              "description": "Memory changes kept on the Station because they could not be delivered; past it the oldest is dropped.",
+              "default": 64
+            },
+            "known": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Conversations remembered for a resume",
+              "description": "Conversations whose provider Session the desk remembers for a resume.",
+              "default": 1024
+            },
+            "close_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Wait for a closing harness",
+              "description": "Seconds a message waits for the conversation's closing harness.",
+              "default": 10.0
+            },
+            "remove_retry": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Retry removing a directory for",
+              "description": "Seconds removing a closed harness's directory is tried again.",
+              "default": 2.0
+            },
+            "unlocked_stale": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Sweep abandoned directories after",
+              "description": "Seconds before a directory of working directories left without its lock, or a lock without its directory, is swept.",
+              "default": 3600.0
+            },
+            "clone_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest clone",
+              "description": "Seconds a clone of one of her repositories may take.",
+              "default": 120.0
+            },
+            "clone_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest clone",
+              "description": "Bytes a clone of one of her repositories may hold on disk.",
+              "default": 536870912
+            },
+            "save_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest save of her work",
+              "description": "Bytes one save of her work in her personal folder may commit; past it nothing is saved.",
+              "default": 16777216
+            },
+            "memory_requests": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Memory requests at once",
+              "description": "The app's memory requests a Station makes at once; past it the next is refused.",
+              "default": 4
+            }
+          },
+          "additionalProperties": false,
+          "title": "Her desk on each Station",
+          "description": "How each Station runs her harnesses.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": {
+            "idle": 600.0,
+            "live": 4,
+            "token_margin": 120.0,
+            "job_wait": 1.0,
+            "job_bytes": 262144,
+            "call_margin": 2.0,
+            "job_retry": 0.5,
+            "report_queue": 256,
+            "report_attempts": 3,
+            "report_retry": 0.2,
+            "parked": 64,
+            "known": 1024,
+            "close_wait": 10.0,
+            "remove_retry": 2.0,
+            "unlocked_stale": 3600.0,
+            "clone_timeout": 120.0,
+            "clone_bytes": 536870912,
+            "save_bytes": 16777216,
+            "memory_requests": 4
+          }
+        },
+        "gateway": {
+          "type": "object",
+          "properties": {
+            "conversations_per_person": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Conversations per person",
+              "description": "Conversations kept for one person; the oldest goes first.",
+              "default": 20
+            },
+            "conversations": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Conversations in all",
+              "description": "Conversations kept in all.",
+              "default": 2000
+            },
+            "conversation_age": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Keep an untouched conversation for",
+              "description": "Seconds a conversation is kept untouched.",
+              "default": 604800.0
+            },
+            "conversation_entries": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Entries per conversation",
+              "description": "Entries kept per conversation.",
+              "default": 500
+            },
+            "conversation_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Entries kept per conversation, in size",
+              "description": "Bytes of entries kept per conversation.",
+              "default": 1048576
+            },
+            "person_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Entries kept per person, in size",
+              "description": "Bytes of entries kept per person.",
+              "default": 4194304
+            },
+            "live_per_person": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Live conversations per person",
+              "description": "One person's conversations with a harness running or a message being answered at once.",
+              "default": 2
+            },
+            "tool_calls_per_minute": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Tool calls a minute",
+              "description": "Tool calls one conversation makes in a minute.",
+              "default": 120
+            },
+            "memory_requests_per_person": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Memory requests waiting per person",
+              "description": "The app's memory requests waiting for a Station for one person.",
+              "default": 2
+            },
+            "memory_requests": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Memory requests waiting in all",
+              "description": "The app's memory requests waiting for a Station in all.",
+              "default": 16
+            },
+            "token_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A tool token lasts",
+              "description": "Seconds a token given to a harness for its tools is accepted.",
+              "default": 3600.0
+            },
+            "token_reuse_margin": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Keep a token if it still has",
+              "description": "Seconds a running harness's token must still have to be kept for the next message.",
+              "default": 600.0
+            },
+            "answer_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A Station takes up a message within",
+              "description": "Seconds a Station has to take up a message before another is asked.",
+              "default": 60.0
+            },
+            "answer_deadline": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Give up on a silent answer after",
+              "description": "Seconds an accepted message may go without word from its Station.",
+              "default": 600.0
+            },
+            "memory_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A Station answers a memory request within",
+              "description": "Seconds a Station has to answer a memory request.",
+              "default": 30.0
+            },
+            "proposal_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A proposal waits",
+              "description": "Seconds a proposal waits for the person's confirmation.",
+              "default": 3600.0
+            },
+            "proposals": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Proposals waiting per conversation",
+              "description": "Proposals waiting for the person in one conversation.",
+              "default": 32
+            },
+            "message_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest message a person writes",
+              "description": "Bytes of one message the person writes.",
+              "default": 16384
+            },
+            "memory_message_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest memory commit message",
+              "description": "Bytes of a commit message the person writes for a memory change.",
+              "default": 1024
+            },
+            "change_message_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest shared change message",
+              "description": "Characters of the one-line message of a shared change she proposes.",
+              "default": 200
+            },
+            "recap_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest recap",
+              "description": "Bytes of the recap a resumed conversation starts with.",
+              "default": 8192
+            },
+            "ready_entries": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Entries sent when a conversation opens",
+              "description": "Entries the app is sent when it opens a conversation.",
+              "default": 100
+            },
+            "ready_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Size of those entries",
+              "description": "Bytes of entries the app is sent when it opens a conversation.",
+              "default": 524288
+            },
+            "socket_message_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest message on the app's socket",
+              "description": "Bytes of one message on the app's socket.",
+              "default": 65536
+            },
+            "hello_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "The app's socket says hello within",
+              "description": "Seconds the app's socket has to say hello.",
+              "default": 10.0
+            },
+            "max_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest job poll",
+              "description": "Seconds a Station's job poll may be held open.",
+              "default": 25.0
+            },
+            "sweep_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Look for jobs nobody took every",
+              "description": "Seconds between sweeps of expired answers and proposals.",
+              "default": 1.0
+            },
+            "shared_base_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A shared change waits for its base",
+              "description": "Seconds a shared change waits for its base from the Station.",
+              "default": 5.0
+            },
+            "event_buffer": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Events queued for open sockets",
+              "description": "Events queued for one conversation's open sockets; a socket that falls further behind is closed.",
+              "default": 256
+            },
+            "route_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest route answer to her tools",
+              "description": "Bytes of an AI6 route's answer to one of her tools.",
+              "default": 4194304
+            },
+            "result_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest tool answer she is given",
+              "description": "Characters of one tool's answer she is given; longer is cut.",
+              "default": 200000
+            },
+            "author_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest name and email on her commits",
+              "description": "Characters of a person's name and email on her commits.",
+              "default": 200
+            },
+            "audit_target_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest audit record target",
+              "description": "Bytes of an audit record's target.",
+              "default": 512
+            },
+            "exposed_sources": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Sources of exposure listed",
+              "description": "Sources a conversation lists as having exposed it, and a proposal carries as `exposed_by`.",
+              "default": 16
+            },
+            "source_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest source of exposure",
+              "description": "Bytes of one such source.",
+              "default": 200
+            },
+            "proposal_reads": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Reads a proposal lists",
+              "description": "Read tool calls of one turn a proposal lists as what she had read.",
+              "default": 16
+            }
+          },
+          "additionalProperties": false,
+          "title": "Her conversations",
+          "description": "How Universal Exports keeps her conversations.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": {
+            "conversations_per_person": 20,
+            "conversations": 2000,
+            "conversation_age": 604800.0,
+            "conversation_entries": 500,
+            "conversation_bytes": 1048576,
+            "person_bytes": 4194304,
+            "live_per_person": 2,
+            "tool_calls_per_minute": 120,
+            "memory_requests_per_person": 2,
+            "memory_requests": 16,
+            "token_ttl": 3600.0,
+            "token_reuse_margin": 600.0,
+            "answer_timeout": 60.0,
+            "answer_deadline": 600.0,
+            "memory_timeout": 30.0,
+            "proposal_ttl": 3600.0,
+            "proposals": 32,
+            "message_bytes": 16384,
+            "memory_message_bytes": 1024,
+            "change_message_chars": 200,
+            "recap_bytes": 8192,
+            "ready_entries": 100,
+            "ready_bytes": 524288,
+            "socket_message_bytes": 65536,
+            "hello_timeout": 10.0,
+            "max_wait": 25.0,
+            "sweep_every": 1.0,
+            "shared_base_wait": 5.0,
+            "event_buffer": 256,
+            "route_bytes": 4194304,
+            "result_chars": 200000,
+            "author_chars": 200,
+            "audit_target_bytes": 512,
+            "exposed_sources": 16,
+            "source_bytes": 200,
+            "proposal_reads": 16
+          }
+        },
+        "pages": {
+          "type": "object",
+          "properties": {
+            "max_file_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest file of a page",
+              "description": "Bytes of one file of a page. Default 8 MiB.",
+              "default": 8388608
+            },
+            "max_page_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest page",
+              "description": "Bytes of one page. Default 16 MiB.",
+              "default": 16777216
+            },
+            "max_page_files": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Files in a page",
+              "description": "Files of one page. Default 200.",
+              "default": 200
+            },
+            "max_pages": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Pages per person",
+              "description": "Pages one person keeps. Default 50.",
+              "default": 50
+            },
+            "max_person_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "All of one person's pages",
+              "description": "Bytes of all one person's pages. Default 64 MiB.",
+              "default": 67108864
+            },
+            "max_total_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "All pages on this gateway",
+              "description": "Bytes of all pages on one gateway. Default 2 GiB.",
+              "default": 2147483648
+            },
+            "inline_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest inline page",
+              "description": "Bytes of an inline page's content. Default 192 KiB.",
+              "default": 196608
+            },
+            "title_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest page title",
+              "description": "Characters of a page's title. Default 120.",
+              "default": 120
+            },
+            "max_feeds": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Feeds in a dashboard",
+              "description": "Feeds one dashboard declares. Default 8.",
+              "default": 8
+            },
+            "feed_reads_per_minute": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Feed reads a minute, per link",
+              "description": "Feed reads one link makes in a minute. Default 60.",
+              "default": 60
+            },
+            "staged_uploads": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Uploads held from Stations",
+              "description": "Pages Universal Exports keeps staged from Stations at once. Default 64.",
+              "default": 64
+            },
+            "default_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Keep a page for",
+              "description": "Seconds a page lives unless remembered. Default 1 day.",
+              "default": 86400.0
+            },
+            "open_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A link to a page lasts",
+              "description": "Seconds a link to a page is valid. Default 1 hour.",
+              "default": 3600.0
+            },
+            "upload_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Wait for a Station's files",
+              "description": "Seconds a publish waits for the Station's files. Default 30.",
+              "default": 30.0
+            },
+            "stage_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Keep an unclaimed upload for",
+              "description": "Seconds a staged upload no call claims is kept. Default 300.",
+              "default": 300.0
+            },
+            "sweep_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Sweep expired pages every",
+              "description": "Seconds between sweeps of expired pages, links and staged uploads. Default 60.",
+              "default": 60.0
+            },
+            "scripts": {
+              "type": "boolean",
+              "title": "Run pages' scripts",
+              "description": "Whether a page's scripts run. Default true.",
+              "default": true
+            },
+            "network": {
+              "type": "string",
+              "enum": [
+                "open",
+                "own",
+                "none"
+              ],
+              "x-enum-labels": {
+                "open": "Anywhere",
+                "own": "Its own files and feeds",
+                "none": "Its own files only"
+              },
+              "title": "What a page may reach",
+              "description": "What a page may reach from the browser. Default `open`.",
+              "default": "open"
+            },
+            "feeds": {
+              "type": "boolean",
+              "title": "Dashboards read live feeds",
+              "description": "Whether dashboards may read live feeds. Default true.",
+              "default": true
+            },
+            "frame": {
+              "type": "boolean",
+              "title": "Show pages in the gateway's frame",
+              "description": "Whether a page is shown in the gateway's frame with the classification bar. A page made after she read outside text always is. Default true.",
+              "default": true
+            },
+            "sharing": {
+              "type": "boolean",
+              "title": "People may share pages",
+              "description": "Whether a person may share a page. Default true.",
+              "default": true
+            }
+          },
+          "additionalProperties": false,
+          "title": "Her pages",
+          "description": "The pages she publishes and how they are served.",
+          "x-section": "limits",
+          "x-advanced": true,
+          "default": {
+            "max_file_bytes": 8388608,
+            "max_page_bytes": 16777216,
+            "max_page_files": 200,
+            "max_pages": 50,
+            "max_person_bytes": 67108864,
+            "max_total_bytes": 2147483648,
+            "inline_bytes": 196608,
+            "title_chars": 120,
+            "max_feeds": 8,
+            "feed_reads_per_minute": 60,
+            "staged_uploads": 64,
+            "default_ttl": 86400.0,
+            "open_ttl": 3600.0,
+            "upload_wait": 30.0,
+            "stage_ttl": 300.0,
+            "sweep_every": 60.0,
+            "scripts": true,
+            "network": "open",
+            "feeds": true,
+            "frame": true,
+            "sharing": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "sections": [
+        {
+          "id": "memory",
+          "title": "Memory and shared work",
+          "description": "Where she keeps each person's work, and what teams share with her."
+        },
+        {
+          "id": "reach",
+          "title": "What she can reach",
+          "description": "What her scripts may run and which hosts she may reach."
+        },
+        {
+          "id": "skills",
+          "title": "Skills"
+        },
+        {
+          "id": "narrowing",
+          "title": "For some people only"
+        },
+        {
+          "id": "limits",
+          "title": "Limits"
+        }
+      ],
+      "fields": {
+        "personal_repo": {
+          "placeholder": "/srv/moneypenny/{person_digest}.git"
+        },
+        "shared": {
+          "form": {}
+        },
+        "org": {
+          "form": {}
+        },
+        "allowed_hosts": {
+          "visibleWhen": {
+            "field": "network",
+            "equals": "limited"
+          }
+        },
+        "denied_networks": {
+          "visibleWhen": {
+            "field": "network",
+            "equals": "open"
+          }
+        },
+        "skills": {
+          "form": {}
+        },
+        "group": {
+          "form": {}
+        },
+        "person": {
+          "form": {}
+        },
+        "views": {
+          "form": {}
+        },
+        "limits": {
+          "form": {}
+        },
+        "desk": {
+          "form": {}
+        },
+        "gateway": {
+          "form": {}
+        },
+        "pages": {
+          "form": {}
+        }
+      }
+    },
+    "key": {
+      "title": "Moneypenny's settings",
+      "description": "",
+      "fixed": "settings"
+    }
+  },
+  "roster": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "max_operation_depth": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Deepest Operation tree",
+          "description": "How many levels the tree of Operations may have, a root being the first. A missing parent or a cycle is refused whatever this says.",
+          "default": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "Roster settings",
+      "description": "",
+      "fixed": "settings"
+    }
+  }
+}

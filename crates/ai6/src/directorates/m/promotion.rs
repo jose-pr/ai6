@@ -8,8 +8,6 @@
 //! 30 days, and `field` to `00` after 25 done, at most 10 % failed or blown and no incident
 //! in 60 days. `missions = 0` turns a step off.
 
-use serde::Deserialize;
-
 use crate::directorates::m::roster::CLEARANCES;
 use crate::directorates::registry::agent_records::{AgentOutcome, AgentTally};
 
@@ -187,12 +185,30 @@ impl PromotionPolicy {
 }
 
 /// One step as written in configuration; unset keys keep the default.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
 struct StepDefinition {
+    /// Missions an Agent must finish before it is put forward.
+    #[schema(title = "Missions done")]
     missions: Option<u64>,
+    /// The most of its Missions that may have failed or blown their cover, from 0 to 1.
+    #[schema(title = "Highest failure rate")]
     max_failure_rate: Option<f64>,
+    /// Days it must have gone without any of the outcomes below.
+    #[schema(title = "Quiet days")]
+    #[form(unit = "days")]
     quiet_days: Option<u64>,
+    /// The outcomes that break its quiet days: done, failed, blown, stalled, quarantined,
+    /// budget_stop or green_ink_rejected.
+    #[schema(title = "Outcomes that count against it")]
     quiet_on: Option<Vec<String>>,
 }
 
@@ -227,11 +243,26 @@ impl StepDefinition {
 
 /// The promotion settings as written in configuration (`[operation.ID.promotion]`, with a
 /// `field` and a `"00"` table).
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
 pub struct PromotionDefinition {
+    /// When a desk Agent is put forward for field clearance.
+    #[schema(title = "To field")]
+    #[map(default)]
+    #[form(form)]
     field: StepDefinition,
-    #[serde(rename = "00")]
+    /// When a field Agent is put forward for 00 clearance.
+    #[schema(title = "To 00")]
+    #[map(rename = "00", default)]
+    #[form(form)]
     double_o: StepDefinition,
 }
 
@@ -334,7 +365,7 @@ mod tests {
 
     #[test]
     fn steps_are_configurable_and_zero_turns_one_off() {
-        let definition: PromotionDefinition = toml::from_str(
+        let definition: PromotionDefinition = crate::directorates::m::records::from_toml(
             "[field]\nmissions = 0\n[\"00\"]\nmissions = 3\nmax_failure_rate = 0.5\nquiet_on = [\"blown\"]\n",
         )
         .unwrap();
@@ -353,9 +384,15 @@ mod tests {
             "[field]\nmax_failure_rate = 2.0\n",
             "[field]\nquiet_on = [\"late\"]\n",
         ] {
-            let definition: PromotionDefinition = toml::from_str(bad).unwrap();
+            let definition: PromotionDefinition =
+                crate::directorates::m::records::from_toml(bad).unwrap();
             assert!(definition.resolve().is_err(), "{bad}");
         }
-        assert!(toml::from_str::<PromotionDefinition>("[desk]\nmissions = 1\n").is_err());
+        assert!(
+            crate::directorates::m::records::from_toml::<PromotionDefinition>(
+                "[desk]\nmissions = 1\n"
+            )
+            .is_err()
+        );
     }
 }

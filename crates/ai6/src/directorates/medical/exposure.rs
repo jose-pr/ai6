@@ -66,16 +66,34 @@ pub struct Exposure {
 
 /// What an exposed Session may not do.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum Restriction {
     /// Its Mission proposals are marked exposed, so they are never auto-promoted.
+    #[schema(label = "Its Mission proposals are never promoted without a person")]
     Proposals,
     /// Its requests for authorization always go to a human.
+    #[schema(label = "Its requests always go to a person")]
     Approvals,
     /// It may send a Cable only as a reply inside an existing conversation.
+    #[schema(label = "It may only reply to Cables")]
     Cables,
     /// It is given no new secret leases.
+    #[schema(label = "It gets no new secrets")]
     Secrets,
 }
 
@@ -101,12 +119,16 @@ impl Restriction {
 
 /// Named sets of restrictions.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
+)]
+#[map(rename_all = "lowercase")]
 pub enum ExposurePreset {
     /// Every restriction applies. The default.
+    #[schema(label = "Strict: every restriction applies")]
     Strict,
     /// Exposure is recorded and nothing is restricted.
+    #[schema(label = "Observe: only record it")]
     Observe,
 }
 
@@ -157,11 +179,25 @@ impl ExposurePolicy {
 }
 
 /// The exposure settings as written in configuration (`[operation.ID.exposure]`).
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
 pub struct ExposureDefinition {
+    /// A starting point the values below replace.
+    #[schema(title = "Starting point")]
     preset: Option<ExposurePreset>,
-    restrict: Option<Vec<String>>,
+    /// What applies to a Session once it has read outside text.
+    #[schema(title = "Restrictions")]
+    restrict: Option<Vec<Restriction>>,
+    /// The tools whose results count as outside text.
+    #[schema(title = "Tools that read outside text")]
     tools: Option<Vec<String>>,
 }
 
@@ -170,24 +206,11 @@ impl ExposureDefinition {
     ///
     /// # Errors
     ///
-    /// Returns a message naming the key when `restrict` lists an unknown restriction or
-    /// `tools` holds an empty name.
+    /// Returns a message naming the key when `tools` holds an empty name.
     pub fn resolve(&self) -> Result<ExposurePolicy, String> {
         let mut policy = ExposurePolicy::preset(self.preset.unwrap_or(ExposurePreset::Strict));
-        if let Some(names) = &self.restrict {
-            policy.restrictions = names
-                .iter()
-                .map(|name| {
-                    Restriction::ALL
-                        .into_iter()
-                        .find(|restriction| restriction.as_str() == name)
-                        .ok_or_else(|| {
-                            format!(
-                                "exposure restrict has unknown restriction {name:?}; use proposals, approvals, cables or secrets"
-                            )
-                        })
-                })
-                .collect::<Result<_, _>>()?;
+        if let Some(restrictions) = &self.restrict {
+            policy.restrictions = restrictions.iter().copied().collect();
         }
         if let Some(tools) = &self.tools {
             if tools.iter().any(|tool| tool.trim().is_empty()) {
@@ -334,13 +357,13 @@ mod tests {
 
     #[test]
     fn configuration_picks_a_preset_then_overrides_restrictions_and_tools() {
-        let strict: ExposureDefinition = toml::from_str("").unwrap();
+        let strict: ExposureDefinition = crate::directorates::m::records::from_toml("").unwrap();
         let policy = strict.resolve().unwrap();
         assert!(policy.restricts(Restriction::Secrets));
         assert!(policy.exposed_by_tool("WebSearch"));
         assert!(!policy.exposed_by_tool("Read"));
 
-        let custom: ExposureDefinition = toml::from_str(
+        let custom: ExposureDefinition = crate::directorates::m::records::from_toml(
             "preset = \"observe\"\nrestrict = [\"cables\"]\ntools = [\"WebFetch\", \"Browse\"]\n",
         )
         .unwrap();
@@ -350,8 +373,9 @@ mod tests {
         assert!(policy.exposed_by_tool("Browse") && !policy.exposed_by_tool("WebSearch"));
 
         for bad in ["restrict = [\"everything\"]", "tools = [\"\"]"] {
-            let definition: ExposureDefinition = toml::from_str(bad).unwrap();
-            assert!(definition.resolve().is_err(), "{bad}");
+            let read = crate::directorates::m::records::from_toml::<ExposureDefinition>(bad)
+                .and_then(|definition| definition.resolve());
+            assert!(read.is_err(), "{bad}");
         }
     }
 }

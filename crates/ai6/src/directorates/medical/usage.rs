@@ -205,12 +205,16 @@ impl fmt::Display for BudgetBreach {
 
 /// Named sets of limits.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
+)]
+#[map(rename_all = "lowercase")]
 pub enum BudgetPreset {
     /// Only measures; sets no limit. The default.
+    #[schema(label = "Measure only: no limit")]
     Observe,
     /// Conservative ceilings on every scope.
+    #[schema(label = "Strict: conservative ceilings on everything")]
     Strict,
 }
 
@@ -334,16 +338,37 @@ pub fn micro_usd(dollars: f64) -> u64 {
 
 /// The limits as written in configuration (`[operation.ID.budget]`, `[agent.ID.budget]`).
 ///
-/// Values stay untyped here so a bad one is refused with the key's name.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
 pub struct BudgetDefinition {
+    /// A starting point the values below are laid over. Measuring only sets no limit.
+    #[schema(title = "Starting point")]
     preset: Option<BudgetPreset>,
-    session_tokens: Option<toml::Value>,
-    mission_tokens: Option<toml::Value>,
-    mission_cost_usd: Option<toml::Value>,
-    operation_cost_usd_per_day: Option<toml::Value>,
-    warn_at: Option<toml::Value>,
+    /// The tokens one Session may use. Leave it empty for no limit.
+    #[schema(title = "Tokens per Session")]
+    session_tokens: Option<u64>,
+    /// The tokens all of a Mission's Sessions may use. Leave it empty for no limit.
+    #[schema(title = "Tokens per Mission")]
+    mission_tokens: Option<u64>,
+    /// The dollars all of a Mission's Sessions may spend. Leave it empty for no limit.
+    #[schema(title = "Dollars per Mission")]
+    #[form(unit = "USD")]
+    mission_cost_usd: Option<f64>,
+    /// The dollars an Operation's Missions may spend in one UTC day. Leave it empty for no limit.
+    #[schema(title = "Dollars per day")]
+    #[form(unit = "USD")]
+    operation_cost_usd_per_day: Option<f64>,
+    /// The share of a limit at which a warning goes out, above 0 and at most 1.
+    #[schema(title = "Warn at")]
+    warn_at: Option<f64>,
 }
 
 impl BudgetDefinition {
@@ -356,49 +381,34 @@ impl BudgetDefinition {
     pub fn resolve(&self) -> Result<Budget, String> {
         let mut budget = self.preset.map(Budget::preset).unwrap_or_default();
         let explicit = Budget {
-            session_tokens: tokens("session_tokens", self.session_tokens.as_ref())?,
-            mission_tokens: tokens("mission_tokens", self.mission_tokens.as_ref())?,
-            mission_cost_micro_usd: dollars("mission_cost_usd", self.mission_cost_usd.as_ref())?,
+            session_tokens: self.session_tokens,
+            mission_tokens: self.mission_tokens,
+            mission_cost_micro_usd: dollars("mission_cost_usd", self.mission_cost_usd)?,
             operation_cost_micro_usd_per_day: dollars(
                 "operation_cost_usd_per_day",
-                self.operation_cost_usd_per_day.as_ref(),
+                self.operation_cost_usd_per_day,
             )?,
-            warn_at_permille: fraction("warn_at", self.warn_at.as_ref())?,
+            warn_at_permille: fraction("warn_at", self.warn_at)?,
         };
         budget = budget.merge(&explicit);
         Ok(budget)
     }
 }
 
-fn number(key: &str, value: &toml::Value) -> Result<f64, String> {
-    let number = match value {
-        toml::Value::Integer(integer) => *integer as f64,
-        toml::Value::Float(float) => *float,
-        _ => return Err(format!("budget {key} must be a number")),
-    };
+fn number(key: &str, number: f64) -> Result<f64, String> {
     if !number.is_finite() || number < 0.0 {
         return Err(format!("budget {key} must not be negative"));
     }
     Ok(number)
 }
 
-fn tokens(key: &str, value: Option<&toml::Value>) -> Result<Option<u64>, String> {
-    value
-        .map(|value| match value {
-            toml::Value::Integer(integer) if *integer >= 0 => Ok(*integer as u64),
-            toml::Value::Integer(_) => Err(format!("budget {key} must not be negative")),
-            _ => Err(format!("budget {key} must be a whole number of tokens")),
-        })
-        .transpose()
-}
-
-fn dollars(key: &str, value: Option<&toml::Value>) -> Result<Option<u64>, String> {
+fn dollars(key: &str, value: Option<f64>) -> Result<Option<u64>, String> {
     value
         .map(|value| number(key, value).map(micro_usd))
         .transpose()
 }
 
-fn fraction(key: &str, value: Option<&toml::Value>) -> Result<Option<u16>, String> {
+fn fraction(key: &str, value: Option<f64>) -> Result<Option<u16>, String> {
     value
         .map(|value| {
             let fraction = number(key, value)?;
@@ -508,8 +518,10 @@ mod tests {
 
     #[test]
     fn the_strict_preset_sets_limits_and_keys_override_it() {
-        let definition: BudgetDefinition =
-            toml::from_str("preset = \"strict\"\nmission_cost_usd = 2.5\nwarn_at = 0.5\n").unwrap();
+        let definition: BudgetDefinition = crate::directorates::m::records::from_toml(
+            "preset = \"strict\"\nmission_cost_usd = 2.5\nwarn_at = 0.5\n",
+        )
+        .unwrap();
         let budget = definition.resolve().unwrap();
         assert_eq!(budget.mission_cost_micro_usd, Some(2_500_000));
         assert_eq!(budget.session_tokens, Some(STRICT_SESSION_TOKENS));
@@ -530,8 +542,9 @@ mod tests {
             ("warn_at = 1.5", "warn_at"),
             ("warn_at = 0", "warn_at"),
         ] {
-            let definition: BudgetDefinition = toml::from_str(text).unwrap();
-            let message = definition.resolve().unwrap_err();
+            let message = crate::directorates::m::records::from_toml::<BudgetDefinition>(text)
+                .and_then(|definition| definition.resolve())
+                .unwrap_err();
             assert!(message.contains(key), "{text}: {message}");
         }
     }

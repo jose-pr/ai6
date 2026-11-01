@@ -3,11 +3,10 @@
 use std::fs;
 use std::path::Path;
 
-use regex::{Regex, RegexBuilder};
-use serde::Deserialize;
-
+use crate::directorates::m::records;
 use crate::directorates::m::roster::CoverIdentity;
 use crate::directorates::q::safehouse::Change;
+use regex::{Regex, RegexBuilder};
 
 const COVERS_FILE: &str = "covers.toml";
 
@@ -384,7 +383,7 @@ impl Covers {
 
     /// Parses custom cover policies, replacing built-ins with matching names.
     pub fn parse_toml(source: &str) -> Result<Self, CoverError> {
-        let document: CoversDocument = toml::from_str(source)
+        let document: CoversDocument = records::from_toml(source)
             .map_err(|error| CoverError(format!("invalid cover policy: {error}")))?;
         let mut covers = Self::default();
         for (name, definition) in document.cover {
@@ -442,32 +441,64 @@ impl std::fmt::Display for CoverError {
 
 impl std::error::Error for CoverError {}
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Default, guatiao::FromValue)]
+#[map(deny_unknown_fields)]
 struct CoversDocument {
+    #[map(default)]
     cover: std::collections::BTreeMap<String, CoverDefinition>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct CoverDefinition {
+/// A cover policy: how an Operation's commits may name who wrote them.
+#[derive(
+    Debug, Default, guatiao::ToValue, guatiao::FromValue, guatiao::Schema, guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
+#[form(
+    section(id = "shows", label = "What commits may show"),
+    section(id = "adds", label = "What commits must carry")
+)]
+pub(crate) struct CoverDefinition {
+    /// What this cover is for.
+    #[schema(title = "Description")]
+    #[map(default)]
+    #[form(widget = "textarea")]
     description: String,
+    /// Let an Agent be the commit's author, instead of the Operation's commit author.
+    #[schema(title = "Agent as author", section = "shows")]
+    #[map(default)]
     agent_author: bool,
-    trailers: Vec<String>,
-    suggest: String,
+    /// Let commits name the model.
+    #[schema(title = "Name the model", section = "shows")]
+    #[map(default)]
     model: bool,
-    footer: String,
-    forbid: Vec<String>,
+    /// Let commits say they were generated, as a footer or a mark.
+    #[schema(title = "Say it was generated", section = "shows")]
+    #[map(default)]
     announce: bool,
+    /// Attribution lines commits may carry, such as Co-Authored-By.
+    #[schema(title = "Allowed attribution lines", section = "shows")]
+    #[map(default)]
+    trailers: Vec<String>,
+    /// The attribution line Agents are told to use; {agent} and {model} are filled in.
+    #[schema(title = "Suggested attribution line", section = "adds")]
+    #[map(default)]
+    suggest: String,
+    /// Text every commit must end with.
+    #[schema(title = "Required footer", section = "adds")]
+    #[map(default)]
+    footer: String,
+    /// Patterns no commit message may match, as regular expressions.
+    #[schema(title = "Forbidden text", section = "adds")]
+    #[map(default)]
+    forbid: Vec<String>,
 }
 
-/// A cover policy from the keys of its `[cover.<name>]` table, in any serde format.
-pub(crate) fn cover_from<'de, D>(name: String, definition: D) -> Result<Cover, CoverError>
-where
-    D: serde::Deserializer<'de>,
-    D::Error: std::fmt::Display,
-{
-    CoverDefinition::deserialize(definition)
+/// A cover policy from the keys of its `[cover.<name>]` table.
+pub(crate) fn cover_from(
+    name: String,
+    definition: &serde_json::Value,
+) -> Result<Cover, CoverError> {
+    records::from_json::<CoverDefinition>(definition)
         .map_err(|error| CoverError(format!("cover {name:?}: {error}")))?
         .resolve(name)
 }
