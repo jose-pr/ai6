@@ -175,7 +175,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/user/operations/{operation_id}/held-briefs/{key}/release` | Require `mission.create`; return the brief to the queue, cleared of the kinds it was held for. |
 | `POST` | `/v1/user/operations/{operation_id}/held-briefs/{key}/refuse` | Require `mission.create`; file the brief as refused, with an optional `reason` for the record. |
 | `GET` | `/v1/auth/session` | Validate a user bearer token and return its token ID, person ID and expiry. |
-| `GET` | `/v1/station/inputs/next` | Wait for one bounded binary terminal input or resize frame for M. |
+| `GET` | `/v1/station/inputs/next?wait_ms=<n>` | Wait up to `wait_ms` (default 1000, at most 25000) for one bounded binary terminal input or resize frame for M; `204` when none came. |
 | `GET` | `/v1/station/controls/next?station=<id>&wait_ms=<n>` | Wait up to `wait_ms` (default 1000, at most 25000) for the next control queued for that Station; `200` with one DipTel control value frame (channel 4) or `204`. |
 | `POST` | `/v1/station/controls/{control_id}/result` | Report a taken control's outcome: `{"station":"…","outcome":"applied"\|"rejected","state":"…","reason":"…"}`; `403` from another Station, `409` once finished. |
 | `POST` | `/v1/attach` | Exchange a token in the request body for a one-connection cookie. |

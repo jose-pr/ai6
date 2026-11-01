@@ -179,6 +179,7 @@ pub fn universal_exports::Gateway::public_origin(&self) -> &str
 pub async fn universal_exports::Gateway::publish_lifecycle(&self, &str, ai6_diptel::LifecycleEvent) -> core::result::Result<(), universal_exports::GatewayError>
 pub async fn universal_exports::Gateway::publish_terminal_output(&self, &str, ai6_diptel::SessionId, u64, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
 pub async fn universal_exports::Gateway::receive_agent_input(&self) -> core::option::Option<universal_exports::AgentInput>
+pub async fn universal_exports::Gateway::receive_agent_input_within(&self, core::time::Duration) -> core::option::Option<universal_exports::AgentInput>
 pub async fn universal_exports::Gateway::register_session(&self, &str, ai6_diptel::OperationId, ai6_diptel::MissionId, ai6_diptel::SessionId) -> core::result::Result<(), universal_exports::GatewayError>
 pub fn universal_exports::Gateway::router(self) -> axum::routing::Router
 pub async fn universal_exports::Gateway::serve_loopback<F>(self, u16, F) -> core::result::Result<(), core::io::error::Error> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static

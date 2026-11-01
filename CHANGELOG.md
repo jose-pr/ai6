@@ -1150,6 +1150,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Stations view shows a Station to anyone holding `station.read` on it, even with no
+  Operation's checkout. A control Station holds none, so the board said no Station had checked in.
+- A Station's input poll no longer aborts every two seconds: the gateway holds it for `wait_ms`
+  (`[publisher] input_wait`, 20 seconds by default, bounded by `max_poll_wait`) and answers `204`
+  when nothing came.
 - Idle Stations no longer poll Universal Exports in a loop while Moneypenny is off. The gateway
   holds the job poll for its wait (`[assistant.gateway] max_wait` bounds it), and a Station
   leaves at least `[assistant.desk] job_retry` between polls when the gateway answers early.

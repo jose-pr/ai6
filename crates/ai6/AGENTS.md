@@ -132,7 +132,7 @@ pub struct StationLimits {
     pub scheduler: SchedulerLimits,       // event_queue: Limit, interval, retry_delay, check_in: Seconds,
                                           // intake_attempts: u32, role_catalog_bytes: Limit, shutdown_wait: Seconds
     pub publisher: PublisherLimits,       // request_timeout, queue: usize, terminal_bytes, pre_bind_terminal_bytes,
-                                          // input_retry_delay, control_wait, control_queue: usize, control_report_attempts: u32
+                                          // input_retry_delay, control_wait, input_wait, control_queue: usize, control_report_attempts: u32
     pub sources: SourceLimits,            // poll, min_poll (smaller is looser), report_every, sleeper_every
     pub transports: TransportLimits,      // reprobe_after, report_every
     pub recovery: RecoveryLimits,         // first_reattach_delay, max_reattach_delay, give_up_tries: u32, notes_every

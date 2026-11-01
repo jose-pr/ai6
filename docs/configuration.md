@@ -669,6 +669,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `pre_bind_terminal_bytes` | 1 MiB | Bytes of terminal output held for a Session not yet bound to its Mission |
 | `input_retry_delay` | 0.1 | Seconds before a failed input or control poll is tried again |
 | `control_wait` | 1 | Seconds Universal Exports holds a control poll open |
+| `input_wait` | 20 | Seconds Universal Exports holds an input poll open; a keystroke ends it at once |
 | `control_queue` | 16 | Mission controls queued for the scheduler |
 | `control_report_attempts` | 3 | Times the outcome of a control is reported |
 
