@@ -6,13 +6,9 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../shell/oo_freshness.dart';
+import '../shell/oo_empty.dart';
 import '../shell/oo_link.dart';
-
-/// The time in UTC, to the second.
-String utcTime(double at) => DateTime.fromMillisecondsSinceEpoch(
-  (at * 1000).round(),
-  isUtc: true,
-).toIso8601String().replaceFirst(RegExp(r'\.\d+Z$'), 'Z');
+import '../theme/oo_icon.dart';
 
 /// An Agent's request to take one irreversible step, waiting for green ink.
 @immutable
@@ -358,15 +354,15 @@ class _GreenInkPageState extends State<GreenInkPage> {
                     if (requestId == null || request.id == requestId) request,
                 ];
                 if (requests.isEmpty) {
-                  return Center(
-                    child: Text(
-                      requestId == null
-                          ? 'No steps are waiting for green ink. An Agent asks here before '
-                                'an irreversible step, such as a push, and waits for your '
-                                'signature.'
-                          : 'Request $requestId is not waiting in Operation '
-                                '$operationId.',
-                    ),
+                  return OoEmptyState(
+                    icon: OoIconName.greenInk,
+                    title: requestId == null
+                        ? 'No steps are waiting for green ink.'
+                        : 'Request $requestId is not waiting in Operation '
+                              '$operationId.',
+                    body:
+                        'An Agent asks here before an irreversible step, such as a push, '
+                        'and waits for your signature.',
                   );
                 }
                 return ListView.separated(

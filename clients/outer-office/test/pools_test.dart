@@ -128,9 +128,8 @@ void main() {
     expect(find.text('Used by'), findsOneWidget);
     expect(find.text('Mission mission-1'), findsOneWidget);
     expect(
-      find.text(
-        '0 Sessions · five hour 100.0% · 0 tokens today · '
-        'Limited until 2030-03-17T17:46Z',
+      find.textContaining(
+        '0 Sessions · five hour 100.0% · 0 tokens today · Limited, back in ',
       ),
       findsOneWidget,
     );

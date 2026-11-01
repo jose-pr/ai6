@@ -3,9 +3,12 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 import 'mission_detail.dart';
 import 'missions_board.dart';
+import 'oo_empty.dart';
+import 'oo_freshness.dart';
 import 'oo_shell.dart';
 
 /// The Mission queue: the Missions a Missions route selects, newest update first unless the
@@ -181,6 +184,9 @@ class _MissionsPageState extends State<MissionsPage> {
             hasScrollBody: false,
             child: Center(child: CircularProgressIndicator()),
           )
+        else if (missions.isEmpty &&
+            boardProblem(board, BoardSource.board) != null)
+          SliverFillRemaining(child: boardProblem(board, BoardSource.board))
         else if (missions.isEmpty && listRoute.filtered)
           const SliverFillRemaining(
             hasScrollBody: false,
@@ -188,7 +194,6 @@ class _MissionsPageState extends State<MissionsPage> {
           )
         else if (missions.isEmpty && board.error == null)
           SliverFillRemaining(
-            hasScrollBody: false,
             child: EmptyBoard(
               operations: board.demo
                   ? const []
@@ -203,9 +208,13 @@ class _MissionsPageState extends State<MissionsPage> {
             ),
           )
         else if (missions.isEmpty && board.error != null)
-          const SliverFillRemaining(
-            hasScrollBody: false,
-            child: GatewayUnavailable(),
+          SliverFillRemaining(
+            child: OoEmptyState(
+              icon: OoIconName.missions,
+              title: 'Missions could not be read.',
+              body: 'Universal Exports did not answer. The app keeps trying.',
+              action: ('Try again', () => board.refresh()),
+            ),
           )
         else
           SliverPadding(

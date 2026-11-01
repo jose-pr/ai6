@@ -6,7 +6,9 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
+import '../shell/oo_empty.dart';
 import '../shell/oo_link.dart';
+import '../theme/oo_icon.dart';
 
 /// The clearances, lowest first.
 const clearances = ['desk', 'field', '00'];
@@ -439,7 +441,7 @@ class _AgentsPageState extends State<AgentsPage> {
           ),
         ),
         OoFilterBar(route: widget.route, onRoute: widget.onRoute),
-        if (_error case final error?)
+        if (_error case final error? when agents.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(error),
@@ -451,6 +453,13 @@ class _AgentsPageState extends State<AgentsPage> {
                     'Operation ${widget.route['operation_id']}\'s Agents are '
                     'not visible to this account.',
                   ),
+                )
+              : agents.isEmpty && _error != null
+              ? OoEmptyState(
+                  icon: OoIconName.agents,
+                  title: _error!,
+                  body: 'Nothing is shown because it could not be read.',
+                  action: ('Try again', () => unawaited(_load())),
                 )
               : agents.isEmpty
               ? Center(

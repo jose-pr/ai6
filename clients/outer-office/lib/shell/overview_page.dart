@@ -520,7 +520,12 @@ class _ActiveOperations extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(top: 6),
+            // Beside the name, which a phone's tap target sets lower.
+            padding: EdgeInsets.only(
+              top: MediaQuery.sizeOf(context).width < OoBreakpoints.phone
+                  ? 20
+                  : 6,
+            ),
             child: OoStatusDot(color),
           ),
           const SizedBox(width: 12),

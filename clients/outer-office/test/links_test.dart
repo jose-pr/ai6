@@ -10,6 +10,7 @@ import 'package:outer_office/shell/oo_link.dart';
 import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/shell/overview_page.dart';
 
+import 'moneypenny_off_test.dart' show gateway;
 import 'routes_test.dart' show locations;
 
 const wide = Size(1600, 1400);
@@ -326,6 +327,83 @@ void main() {
     test('an ID a route cannot take still goes to its page', () {
       expect(OoLinkTo.station('bad\nid').location, '/stations');
       expect(OoLinkTo.mission('G', 'bad\nid').page, OoPage.missions);
+    });
+  });
+
+  group('refused and failed are not empty', () {
+    Future<void> at(
+      WidgetTester tester,
+      String location,
+      int Function(String path) status,
+    ) async {
+      tester.view.physicalSize = wide;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      tester.binding.platformDispatcher.defaultRouteNameTestValue = location;
+      addTearDown(
+        tester.binding.platformDispatcher.clearDefaultRouteNameTestValue,
+      );
+      final board = MissionBoard(
+        apiOrigin: Uri.parse('https://oo.example'),
+        pollInterval: null,
+        client: gateway({}, status: status),
+      );
+      addTearDown(board.dispose);
+      await tester.pumpWidget(
+        OuterOfficeApp(board: board, desktopWindows: false),
+      );
+      await board.login('ana', 'secret');
+      await tester.pumpAndSettle();
+    }
+
+    int all(String path, int code) => path == '/v1/user/profile' ? 200 : code;
+
+    testWidgets('Sessions refused', (tester) async {
+      await at(tester, '/sessions', (path) => all(path, 403));
+      expect(find.text('Your account may not read Sessions.'), findsOneWidget);
+      expect(find.text('No Sessions yet'), findsNothing);
+    });
+
+    testWidgets('Sessions failed', (tester) async {
+      await at(tester, '/sessions', (path) => all(path, 500));
+      expect(find.text('Sessions could not be read.'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
+      expect(find.text('No Sessions yet'), findsNothing);
+    });
+
+    testWidgets('Sessions read and empty', (tester) async {
+      await at(tester, '/sessions', (_) => 200);
+      expect(find.text('No Sessions yet'), findsOneWidget);
+    });
+
+    testWidgets('Missions refused says so, with no connection banner', (
+      tester,
+    ) async {
+      await at(tester, '/missions', (path) => all(path, 403));
+      expect(find.text('Your account may not read Sessions.'), findsOneWidget);
+      expect(find.textContaining('Could not reach'), findsNothing);
+    });
+
+    testWidgets('Agents failed is not "no Agent is posted"', (tester) async {
+      await at(tester, '/agents', (path) => all(path, 500));
+      expect(find.textContaining('could not give'), findsOneWidget);
+      expect(find.textContaining('No Agent is posted'), findsNothing);
+      expect(find.text('Try again'), findsOneWidget);
+    });
+
+    testWidgets('Pools and Timeline say refused, not empty', (tester) async {
+      await at(tester, '/pools', (path) => all(path, 403));
+      expect(
+        find.textContaining('may not read the account pools'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('No pool account'), findsNothing);
+    });
+
+    testWidgets('Timeline failed is not "no activity"', (tester) async {
+      await at(tester, '/timeline', (path) => all(path, 500));
+      expect(find.textContaining('could not give'), findsOneWidget);
+      expect(find.textContaining('No activity recorded'), findsNothing);
     });
   });
 

@@ -293,7 +293,7 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
               ],
             ),
             if (widget.board.demo)
-              const Chip(label: Text('Demo data — decisions disabled')),
+              const Chip(label: Text('Demo data: decisions are off')),
             const SizedBox(height: 8),
             Expanded(
               child: FutureBuilder<List<HeldBriefSummary>>(

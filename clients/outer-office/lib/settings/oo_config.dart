@@ -308,7 +308,7 @@ class PageSettings {
   /// `audit`: records in the audit log.
   final int audit;
 
-  /// `summary`: items of recent activity an Operation's summary shows.
+  /// `summary`: items of recent activity, Operations and Stations a summary lists.
   final int summary;
 
   /// `search`: results the top bar's search lists at once.

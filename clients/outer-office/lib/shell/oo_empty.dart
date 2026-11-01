@@ -1,10 +1,32 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
+import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_backdrop.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
+import 'oo_freshness.dart';
 import 'oo_link.dart';
+
+/// Why [source] has nothing to show when that is not because it is empty: the person may not
+/// read it, or the read failed. Null while it can be taken at its word.
+Widget? boardProblem(MissionBoard board, BoardSource source) =>
+    switch (board.freshness(source)) {
+      OoFreshness.noAccess => OoEmptyState(
+        icon: OoIconName.settings,
+        title: 'Your account may not read ${source.label}.',
+        body: 'A controller grants access.',
+      ),
+      OoFreshness.unavailable => OoEmptyState(
+        icon: OoIconName.notifications,
+        title: '${source.label} could not be read.',
+        body: 'Universal Exports did not answer. The app keeps trying.',
+        action: ('Try again', () => unawaited(board.refresh())),
+      ),
+      _ => null,
+    };
 
 /// A page with nothing to list: what it is for and what to do first, not only "No X".
 /// [link] opens another page, [action] does something here; [actions] are for several.
@@ -89,12 +111,12 @@ class OoEmptyState extends StatelessWidget {
         ),
       ),
     );
-    return Center(
-      child: SingleChildScrollView(
-        child: backdrop
-            ? OoBackdrop(alignment: Alignment.center, child: content)
-            : content,
-      ),
-    );
+    final scrolled = SingleChildScrollView(child: content);
+    // The wallpaper fills the page: around only the text it would be a band with hard edges.
+    return backdrop
+        ? SizedBox.expand(
+            child: OoBackdrop(alignment: Alignment.center, child: scrolled),
+          )
+        : Center(child: scrolled);
   }
 }

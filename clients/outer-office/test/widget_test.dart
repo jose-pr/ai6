@@ -1157,32 +1157,19 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Preview placement'));
     await tester.pumpAndSettle();
-    expect(
-      find.text('station-alpha \u00b7 local \u00b7 007 \u00b7 score 1.25'),
-      findsOneWidget,
-    );
+    expect(find.text('score 1.25'), findsOneWidget);
+    expect(find.text('score 2.50'), findsOneWidget);
+    expect(find.text('it is at capacity (2 of 2 Missions)'), findsOneWidget);
+    expect(find.text('Agent 008: '), findsOneWidget);
+    expect(find.text('it has no handler configured'), findsOneWidget);
+    expect(find.text('station-alpha / lab / Agent 007: '), findsOneWidget);
     expect(
       find.text(
-        'station-alpha \u00b7 build-box \u00b7 007 \u00b7 remote-hands \u00b7 score 2.50',
+        'harness "claude" is missing on this Theater: claude>=2.1: not installed',
       ),
       findsOneWidget,
     );
-    expect(
-      find.text('station-beta: it is at capacity (2 of 2 Missions)'),
-      findsOneWidget,
-    );
-    expect(
-      find.text('Agent 008: it has no handler configured'),
-      findsOneWidget,
-    );
-    expect(
-      find.text(
-        'station-alpha / lab / Agent 007: harness "claude" is missing on this '
-        'Theater: claude>=2.1: not installed',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Operation operation-alpha'), findsOneWidget);
+    expect(find.text('operation-alpha'), findsOneWidget);
     expect(find.text('claude-session-123'), findsNothing);
     await openPage(tester, 'Missions');
     await tester.pumpAndSettle();
@@ -1220,7 +1207,7 @@ void main() {
     expect(find.text('claude-session-901'), findsOneWidget);
     expect(find.text('claude-session-789'), findsNothing);
 
-    await tester.tap(find.byTooltip('Show all Sessions'));
+    await tester.tap(find.byTooltip('Show every Session'));
     await tester.pumpAndSettle();
     expect(find.text('claude-session-123'), findsOneWidget);
     expect(find.text('codex-session-456'), findsOneWidget);

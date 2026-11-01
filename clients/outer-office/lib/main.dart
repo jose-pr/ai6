@@ -1131,7 +1131,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     }
     if (response.statusCode != 200) {
       _failed(BoardSource.timeline, forbidden: response.statusCode == 403);
-      throw StateError('The gateway refused the Operation timeline.');
+      throw _readRefused(response.statusCode, 'the Operation timeline');
     }
     _live(BoardSource.timeline);
     return TimelinePageSummary.fromJson(
@@ -1334,6 +1334,13 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     );
   }
 
+  /// Why a read of [what] came back with [status]: the person may not, or it failed.
+  StateError _readRefused(int status, String what) => StateError(
+    status == 403
+        ? 'This account may not read $what.'
+        : 'Universal Exports could not give $what (HTTP $status). Try again.',
+  );
+
   /// The pool accounts an Operation may draw from.
   Future<List<PoolAccountSummary>> loadPools(String operationId) async {
     if (demo) {
@@ -1380,7 +1387,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       headers: {'authorization': 'Bearer $token'},
     );
     if (response.statusCode != 200) {
-      throw StateError('The gateway refused the account pools.');
+      throw _readRefused(response.statusCode, 'the account pools');
     }
     final board = jsonDecode(response.body) as Map<String, dynamic>;
     return [
@@ -1429,7 +1436,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       '/v1/user/operations/${Uri.encodeComponent(operationId)}/agents',
     );
     if (response.statusCode != 200) {
-      throw StateError('The gateway refused the Operation\'s Agents.');
+      throw _readRefused(response.statusCode, 'the Operation\'s Agents');
     }
     return [
       for (final agent in jsonDecode(response.body) as List<dynamic>)
@@ -1796,7 +1803,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       headers: {'authorization': 'Bearer $token'},
     );
     if (response.statusCode != 200) {
-      throw StateError('The gateway refused audit records.');
+      throw _readRefused(response.statusCode, 'audit records');
     }
     final records = (jsonDecode(response.body) as List<dynamic>)
         .map(
@@ -1920,7 +1927,8 @@ class MissionBoard extends ChangeNotifier implements PageActions {
             // An unreadable answer counts as a failed read.
           }
         }
-        failed = true;
+        // A refusal is the person's access, not a failure to reach the gateway.
+        if (response?.statusCode != 403) failed = true;
         _failed(source, forbidden: response?.statusCode == 403);
       }
 
@@ -2002,11 +2010,17 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       }
       if (accessToken != token) return;
       // What is not read this time still counts: its last read failed, and the page says so.
-      final down = gaps(const [
-        BoardSource.board,
-        BoardSource.missions,
-        BoardSource.stations,
-      ]).any((source) => freshness(source) != OoFreshness.loading);
+      final down =
+          gaps(const [
+            BoardSource.board,
+            BoardSource.missions,
+            BoardSource.stations,
+          ]).any(
+            (source) => switch (freshness(source)) {
+              OoFreshness.stale || OoFreshness.unavailable => true,
+              _ => false,
+            },
+          );
       error = failed || down
           ? 'Could not load Stations from Universal Exports.'
           : null;
@@ -3416,9 +3430,8 @@ class _OuterOfficeAppState extends State<OuterOfficeApp>
       chatSettings: widget.chatSettings,
       router: router,
     ),
-    memory: (context) => widget.board.demo || widget.board.accessToken != null
-        ? MemoryPage(board: widget.board)
-        : null,
+    memory: (context) =>
+        widget.board.moneypennyServed ? MemoryPage(board: widget.board) : null,
   );
   final _location = PlatformRouteInformationProvider(
     initialRouteInformation: RouteInformation(

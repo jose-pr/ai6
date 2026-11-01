@@ -267,15 +267,19 @@ class OoShell extends StatelessWidget {
             ],
             if (!wide)
               Flexible(
-                child: Text(
-                  page.label,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: ooDisplayFamily,
-                    fontWeight: FontWeight.w700,
-                    fontSize: phone ? 18 : 20,
-                    letterSpacing: 1.2,
-                    color: tokens.text,
+                // A long name shrinks to fit between the buttons rather than being cut off.
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    page.label,
+                    style: TextStyle(
+                      fontFamily: ooDisplayFamily,
+                      fontWeight: FontWeight.w700,
+                      fontSize: phone ? 18 : 20,
+                      letterSpacing: 1.2,
+                      color: tokens.text,
+                    ),
                   ),
                 ),
               ),

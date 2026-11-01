@@ -9,6 +9,7 @@ import '../settings/oo_config.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_freshness.dart';
 import '../shell/oo_link.dart';
+import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_icon.dart';
 
 /// One entry of an Operation's activity timeline: metadata only.
@@ -334,7 +335,7 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
           ),
         ),
         OoFilterBar(route: widget.route, onRoute: widget.onRoute),
-        if (_error case final error?)
+        if (_error case final error? when _items.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(error),
@@ -347,16 +348,26 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
                     'not visible to this account.',
                   ),
                 )
+              : _items.isEmpty && _error != null
+              ? OoEmptyState(
+                  icon: OoIconName.timeline,
+                  title: _error!,
+                  body: 'Nothing is shown because it could not be read.',
+                  action: ('Try again', () => unawaited(_reload())),
+                )
+              : _items.isEmpty && _loading
+              ? const Center(child: CircularProgressIndicator())
               : _items.isEmpty
-              ? Center(
-                  child: _loading
-                      ? const CircularProgressIndicator()
-                      : Text(
-                          _mission == null
-                              ? 'No activity recorded yet. It shows here once a Mission runs.'
-                              : 'No activity of Mission $_mission in Operation '
-                                    '$operation.',
-                        ),
+              ? OoEmptyState(
+                  icon: OoIconName.timeline,
+                  title: _mission == null
+                      ? 'No activity recorded yet.'
+                      : 'No activity of Mission $_mission in Operation '
+                            '$operation.',
+                  body: 'What Missions and people do shows here once a Mission runs.',
+                  link: _mission == null
+                      ? const ('Go to Missions', OoRoute(OoPage.missions))
+                      : null,
                 )
               : ListView.builder(
                   key: const PageStorageKey('operation-timeline'),

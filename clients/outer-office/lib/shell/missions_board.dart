@@ -7,7 +7,6 @@ import '../routes/oo_route.dart';
 import 'oo_shell.dart' show OoPage;
 import '../terminal/session_connection.dart';
 import '../terminal/session_terminal.dart';
-import '../theme/oo_backdrop.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 import 'app_window.dart';
@@ -973,32 +972,6 @@ class DemoBanner extends StatelessWidget {
               child: Text(
                 'Demo data: nothing here is connected, and changes are turned off.',
               ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class GatewayUnavailable extends StatelessWidget {
-  const GatewayUnavailable({super.key});
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: OoBackdrop(
-      alignment: Alignment.center,
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off, size: 42, color: OoTokens.of(context).muted),
-            const SizedBox(height: 12),
-            const Text('Universal Exports is offline'),
-            const SizedBox(height: 4),
-            const Text(
-              'Start the gateway, or launch with OO_DEMO=true to preview.',
             ),
           ],
         ),

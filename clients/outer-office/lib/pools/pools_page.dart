@@ -6,6 +6,9 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
+import '../theme/oo_icon.dart';
+import '../shell/oo_empty.dart';
+import '../shell/oo_freshness.dart';
 import '../shell/oo_link.dart';
 
 /// How much of one provider quota window an account has used.
@@ -114,10 +117,9 @@ class PoolAccountSummary {
     return used.reduce((a, b) => a > b ? a : b) / 1000;
   }
 
-  /// When it comes back, in UTC to the minute.
+  /// When it comes back.
   String? get limitedLabel => switch (limitedUntil) {
-    final until? =>
-      'Limited until ${DateTime.fromMillisecondsSinceEpoch((until * 1000).round(), isUtc: true).toIso8601String().substring(0, 16)}Z',
+    final until? => 'Limited, back ${ooRelativeTime(until.toDouble())}',
     null => null,
   };
 }
@@ -254,7 +256,7 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
           ),
         ),
         OoFilterBar(route: widget.route, onRoute: widget.onRoute),
-        if (_error case final error?)
+        if (_error case final error? when accounts.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(error),
@@ -267,17 +269,24 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
                     'are not visible to this account.',
                   ),
                 )
+              : accounts.isEmpty && _error != null
+              ? OoEmptyState(
+                  icon: OoIconName.pools,
+                  title: _error!,
+                  body: 'Nothing is shown because it could not be read.',
+                  action: ('Try again', () => unawaited(_load())),
+                )
+              : accounts.isEmpty && _loading
+              ? const Center(child: CircularProgressIndicator())
               : accounts.isEmpty
-              ? Center(
-                  child: _loading
-                      ? const CircularProgressIndicator()
-                      : Text(
-                          pool == null
-                              ? 'No pool account serves this Operation. Without one, Sessions '
-                                    'use the login their Agent is given.'
-                              : 'No account pool named $pool in Operation '
-                                    '$operation.',
-                        ),
+              ? OoEmptyState(
+                  icon: OoIconName.pools,
+                  title: pool == null
+                      ? 'No pool account serves this Operation.'
+                      : 'No account pool named $pool in Operation $operation.',
+                  body:
+                      'A pool shares logins among Sessions. Without one, a Session uses '
+                      'the login its Agent is given.',
                 )
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),

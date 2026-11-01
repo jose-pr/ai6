@@ -39,7 +39,13 @@ Map<String, Object?> profile({bool moneypenny = false}) => {
   'operations': [
     {
       'operation_id': 'G',
-      'actions': ['mission.read', 'mission.create', 'audit.read'],
+      'actions': [
+        'mission.read',
+        'mission.create',
+        'audit.read',
+        'agent.read',
+        'pool.read',
+      ],
     },
     {
       'operation_id': 'L',

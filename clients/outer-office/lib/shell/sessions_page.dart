@@ -84,6 +84,12 @@ class SessionsPage extends StatelessWidget {
 
   Widget _page(double width) {
     if (board.sessions.isEmpty) {
+      if (boardProblem(board, BoardSource.board) case final problem?) {
+        return problem;
+      }
+      if (board.loading) {
+        return const Center(child: CircularProgressIndicator());
+      }
       return const OoEmptyState(
         icon: OoIconName.sessions,
         backdrop: true,
