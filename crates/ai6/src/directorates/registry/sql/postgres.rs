@@ -74,6 +74,11 @@ pub(crate) fn parse(url: &str, options: &SqlOptions) -> io::Result<Location> {
     if !given.contains("keepalives_idle") {
         config.keepalives_idle(options.keepalives_idle());
     }
+    // With no interval, Windows sends probes 0 ms apart and resets a connection idle past
+    // `keepalives_idle` unless the server's answer has already arrived.
+    if !given.contains("keepalives_interval") {
+        config.keepalives_interval(options.keepalives_interval());
+    }
     if !given.contains("tcp_user_timeout") {
         config.tcp_user_timeout(options.tcp_user_timeout());
     }
@@ -601,6 +606,31 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_handle_is_used_and_dropped_on_an_async_worker() {
         used_and_dropped_on_this_thread();
+    }
+
+    #[test]
+    fn keepalives_probe_at_an_interval_unless_the_location_gives_one() {
+        let options = SqlOptions::default();
+        let interval = |url: &str| {
+            parse(url, &options)
+                .unwrap()
+                .config
+                .get_keepalives_interval()
+        };
+        assert_eq!(
+            interval("postgres://db/ai6"),
+            Some(options.keepalives_interval())
+        );
+        assert!(options.keepalives_interval() > Duration::ZERO);
+        assert_eq!(
+            interval("postgres://db/ai6?keepalives_idle=30"),
+            Some(options.keepalives_interval()),
+            "a location's own idle still gets an interval"
+        );
+        assert_eq!(
+            interval("postgres://db/ai6?keepalives_interval=7"),
+            Some(Duration::from_secs(7))
+        );
     }
 
     #[test]

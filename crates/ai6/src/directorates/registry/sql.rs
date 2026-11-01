@@ -55,8 +55,9 @@ use crate::bounds::Limit;
 /// From a lease `L`: a statement, a wait for a lock and an idle open transaction are ended
 /// after `L/4` (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`,
 /// set on each session); connecting gives up and TCP keepalives start after `L/6`
-/// (`connect_timeout`, `keepalives_idle`), and unacknowledged data drops the connection after
-/// `L/4` (`tcp_user_timeout`, where the platform has it). A location that sets one of them
+/// (`connect_timeout`, `keepalives_idle`), probe every `L/60` (`keepalives_interval`), and
+/// unacknowledged data drops the connection after `L/4` (`tcp_user_timeout`, where the
+/// platform has it). A location that sets one of them
 /// itself (a parameter, or `-c` in `options`) keeps its own. SQLite ignores these, and waits
 /// for another connection's lock for its busy timeout instead.
 ///
@@ -160,6 +161,10 @@ impl SqlOptions {
 
     pub(crate) fn keepalives_idle(&self) -> Duration {
         self.fraction(6)
+    }
+
+    pub(crate) fn keepalives_interval(&self) -> Duration {
+        self.fraction(60)
     }
 
     pub(crate) fn tcp_user_timeout(&self) -> Duration {
