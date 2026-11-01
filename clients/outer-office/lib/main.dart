@@ -2559,6 +2559,7 @@ class StationSummary {
 
   /// The Agent handlers it has loaded.
   final List<String> handlers;
+
   /// Lines naming each Operation's issue settings looser than the default.
   final List<String> issuesWeakened;
 
