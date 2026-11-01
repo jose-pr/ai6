@@ -111,7 +111,10 @@ const ROLES: &str = r#"
     actions = ["mission.read"]
 
     [role.operator]
-    actions = ["mission.read", "mission.control", "audit.read", "cable.send", "cable.read"]
+    actions = [
+        "mission.read", "mission.control", "audit.read", "cable.send", "cable.read",
+        "issue.link", "issue.comment", "issue.update", "issue.create",
+    ]
 
     [role.roster-reader]
     actions = ["roster.read", "roster.manage"]
@@ -5680,4 +5683,187 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_the_profiles_ho
             ),
         }
     }
+}
+
+/// Links `gh:o/r#1` to Mission `mission-g`, which the served Registry holds a Session of.
+fn linked_issue(served: &Served) {
+    use ai6::directorates::registry::mission_issues::{IssueLink, LinkRelation, LinkState};
+    served
+        .registry
+        .link_issue(&IssueLink {
+            operation: "G".to_owned(),
+            mission_id: "mission-g".to_owned(),
+            tracker: "gh".to_owned(),
+            item: "o/r#1".to_owned(),
+            url: None,
+            relation: LinkRelation::Source,
+            state: LinkState::Active,
+            linked_by: "m".to_owned(),
+            linked_at: 1.0,
+            status_comment: None,
+            phase: None,
+            snapshot: None,
+        })
+        .unwrap();
+}
+
+fn issue_tool_calls() -> Vec<(&'static str, Value)> {
+    vec![
+        (
+            "propose_issue_link",
+            json!({"operation_id": "G", "mission_id": "mission-g", "issue": "gh:o/r#2",
+                   "decision": "link", "relation": "related"}),
+        ),
+        (
+            "propose_issue_comment",
+            json!({"operation_id": "G", "mission_id": "mission-g", "issue": "gh:o/r#1",
+                   "body": "Use the release branch."}),
+        ),
+        (
+            "propose_issue_update",
+            json!({"operation_id": "G", "mission_id": "mission-g", "issue": "gh:o/r#1",
+                   "close": true}),
+        ),
+        (
+            "propose_issue_create",
+            json!({"operation_id": "G", "tracker": "gh", "title": "Split this",
+                   "mission": "mission-g"}),
+        ),
+    ]
+}
+
+#[tokio::test]
+async fn each_issue_tool_needs_its_action_and_runs_only_when_the_person_confirms() {
+    use ai6::directorates::registry::mission_issues::OutboxKind;
+
+    let served = served(AssistantConfig::default()).await;
+    linked_issue(&served);
+
+    let (mut viewer, viewer_job) = accepted(&served, &served.viewer, "Comment on it.").await;
+    for (tool, input) in issue_tool_calls() {
+        let refused = call_tool(&served, &viewer_job.mcp_token, tool, input).await;
+        assert_eq!(refused["isError"], true, "{tool}: {refused}");
+    }
+    finish(&served, &mut viewer, &viewer_job).await;
+
+    let (mut app, job) = accepted(&served, &served.operator, "Comment on it.").await;
+    for (tool, input) in issue_tool_calls() {
+        let proposed = call_tool(&served, &job.mcp_token, tool, input).await;
+        assert_eq!(proposed["isError"], false, "{tool}: {proposed}");
+    }
+    assert!(
+        served
+            .registry
+            .outbox_entries(Some("mission-g"))
+            .unwrap()
+            .is_empty(),
+        "nothing is written before a person confirms"
+    );
+    let frames = finish(&served, &mut app, &job).await;
+    let proposals: Vec<Value> = frames
+        .iter()
+        .filter(|frame| frame["type"] == "entry" && frame["entry"]["role"] == "proposal")
+        .map(|frame| frame["entry"]["data"].clone())
+        .collect();
+    assert_eq!(proposals.len(), 4);
+    assert_eq!(proposals[0]["needs"]["action"], "issue.link");
+    assert_eq!(proposals[1]["needs"]["action"], "issue.comment");
+    assert_eq!(proposals[2]["needs"]["action"], "issue.update");
+    assert_eq!(proposals[3]["needs"]["action"], "issue.create");
+    for proposal in &proposals {
+        app.send(WsMessage::Text(
+            json!({"type": "confirm", "proposal": proposal["id"]})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let frames = receive_until(&mut app, |frame| {
+            frame["type"] == "proposal"
+                && frame["proposal"]["id"] == proposal["id"]
+                && matches!(
+                    frame["proposal"]["status"].as_str(),
+                    Some("done" | "failed")
+                )
+        })
+        .await;
+        assert_eq!(
+            proposal_of(&frames)["status"],
+            "done",
+            "{}",
+            proposal_of(&frames)
+        );
+    }
+    let entries = served.registry.outbox_entries(Some("mission-g")).unwrap();
+    for kind in [OutboxKind::Link, OutboxKind::Comment, OutboxKind::Update] {
+        assert!(
+            entries.iter().any(|entry| entry.kind == kind),
+            "{kind:?} in {entries:?}"
+        );
+    }
+    let comment = entries
+        .iter()
+        .find(|entry| entry.kind == OutboxKind::Comment)
+        .unwrap();
+    assert!(comment.body.starts_with("Use the release branch."));
+    assert!(comment.body.contains("operator-007"), "{}", comment.body);
+    assert_eq!(served.registry.issue_proposals(None).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation() {
+    use ai6::directorates::registry::mission_issues::{
+        IssueProposal, ProposalState, ProposedIssue,
+    };
+
+    let served = served(AssistantConfig::default()).await;
+    served
+        .registry
+        .propose_issues(&IssueProposal {
+            id: String::new(),
+            operation: "G".to_owned(),
+            mission_id: "mission-g".to_owned(),
+            proposer: "agent:007".to_owned(),
+            specs: vec![ProposedIssue {
+                tracker: "gh".to_owned(),
+                title: "Agent text".to_owned(),
+                ..ProposedIssue::default()
+            }],
+            exposure: Vec::new(),
+            findings: Vec::new(),
+            dropped: Vec::new(),
+            state: ProposalState::Pending,
+            decided_by: None,
+            mark_ready: false,
+            created: Vec::new(),
+            failed: Vec::new(),
+            retry_key: None,
+            told: false,
+            at: 1.0,
+        })
+        .unwrap();
+    let (mut app, job) = accepted(&served, &served.operator, "What did they ask for?").await;
+    let read = call_tool(
+        &served,
+        &job.mcp_token,
+        "issue_proposals",
+        json!({"operation_id": "G"}),
+    )
+    .await;
+    assert_eq!(read["isError"], false, "{read}");
+    assert!(
+        read["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Agent text"),
+        "{read}"
+    );
+    let frames = finish(&served, &mut app, &job).await;
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| frame["entry"]["data"]["exposed"] == true),
+        "{frames:?}"
+    );
+    assert!(!tools::exposes("issue_proposals"));
 }

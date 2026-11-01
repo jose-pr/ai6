@@ -16,10 +16,16 @@ use super::guide;
 use super::routes::{self, Route};
 use crate::Gateway;
 
-/// The read tools known to return no free text written by an Agent, an outside source or
-/// another person: this guide, the person's own identity and permissions, and a Station's
-/// numeric limits. Every other read tool exposes the conversation, including any added later.
-pub(crate) const QUIET_TOOLS: [&str; 3] = ["field_guide", "profile", "station_settings"];
+/// The read tools that do not expose the conversation: this guide, the person's own identity and
+/// permissions, a Station's numeric limits, and what Agents ask to create on issues (her gate is
+/// the person's confirmation, however the text reached her). Every other read tool exposes it,
+/// including any added later.
+pub(crate) const QUIET_TOOLS: [&str; 4] = [
+    "field_guide",
+    "issue_proposals",
+    "profile",
+    "station_settings",
+];
 
 /// The arguments of a read tool call that are identifiers, by name: only these are kept of
 /// what she read, never free text (`text`, `reason` and the like).
@@ -379,10 +385,19 @@ static READ_TOOLS: &[Tool] = &[
         post: None,
     },
     Tool {
+        name: "issue_proposals",
+        description: "What Agents asked to create on the Operation's trackers, with the exact \
+                      text, the fields it cannot carry over, what vetting found and how each \
+                      came out. Needs mission.read.",
+        schema: || object(&[operation()], &["operation_id"]),
+        plan: |input, _| operation_path(input, "issue-proposals"),
+        post: None,
+    },
+    Tool {
         name: "mission",
         description: "One Mission: its Sessions and states, its brief (the exact prompt and \
-                      launch manifest), its usage (tokens and cost) and every attempt. Needs \
-                      mission.read.",
+                      launch manifest), its usage (tokens and cost), every attempt, and the \
+                      issues it is linked to with what it posted. Needs mission.read.",
         schema: || {
             object(
                 &[operation(), ("mission_id", text("The Mission."))],
@@ -392,14 +407,24 @@ static READ_TOOLS: &[Tool] = &[
         plan: |input, _| {
             let operation = id(input, "operation_id")?;
             let mission = id(input, "mission_id")?;
-            Ok(Plan::Read(vec![(
-                "result",
-                Call::get(format!(
-                    "/v1/operations/{}/missions/{}",
-                    encode(operation),
-                    encode(mission)
-                )),
-            )]))
+            Ok(Plan::Read(vec![
+                (
+                    "result",
+                    Call::get(format!(
+                        "/v1/operations/{}/missions/{}",
+                        encode(operation),
+                        encode(mission)
+                    )),
+                ),
+                (
+                    "issues",
+                    Call::get(format!(
+                        "/v1/user/operations/{}/missions/{}/issues",
+                        encode(operation),
+                        encode(mission)
+                    )),
+                ),
+            ]))
         },
         post: None,
     },

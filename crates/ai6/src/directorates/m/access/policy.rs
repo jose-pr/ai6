@@ -212,12 +212,16 @@ pub fn seeded_policy() -> AccessPolicy {
         "cable.read",
     ];
     const WATCH: [&str; 2] = ["audit.read", "access.read"];
-    const WORK: [&str; 5] = [
+    const WORK: [&str; 9] = [
         "mission.create",
         "mission.control",
         "session.input",
         "cable.send",
         "approval.decide",
+        "issue.link",
+        "issue.comment",
+        "issue.update",
+        "issue.create",
     ];
     const ADMINISTER: [&str; 7] = [
         "roster.manage",

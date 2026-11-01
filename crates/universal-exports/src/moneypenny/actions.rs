@@ -632,6 +632,278 @@ static WRITE_TOOLS: &[WriteTool] = &[
         },
     },
     WriteTool {
+        name: "propose_issue_comment",
+        description: "Propose posting a comment on a linked issue, under the Operation's \
+                      identity with the person's name in a footer. On an issue with an open \
+                      question it is the answer, and the Mission resumes. Nothing changes \
+                      until the person confirms it in the app. Needs issue.comment.",
+        schema: || {
+            object(
+                &[
+                    operation(),
+                    ("mission_id", text("The Mission.")),
+                    ("issue", text("The linked issue, as TRACKER:ITEM.")),
+                    ("body", text("The exact text to post.")),
+                ],
+                &["operation_id", "mission_id", "issue", "body"],
+            )
+        },
+        plan: |input, _| {
+            let operation = id(input, "operation_id")?;
+            let mission = id(input, "mission_id")?;
+            let issue = id(input, "issue")?;
+            let body = string(input, "body").ok_or("body is required")?;
+            Ok(Draft {
+                summary: format!("comment on issue {issue}: {body}"),
+                call: post(
+                    format!(
+                        "/v1/user/operations/{}/missions/{}/issues/{}/comments",
+                        encode(operation),
+                        encode(mission),
+                        encode(issue)
+                    ),
+                    Some(json!({"body": body})),
+                ),
+                scope: Scope::Operation(operation.to_owned()),
+                action: "issue.comment",
+            })
+        },
+    },
+    WriteTool {
+        name: "propose_issue_create",
+        description: "Propose creating an issue in one of the Operation's trackers, as a child \
+                      of a linked issue when `parent` is set. The card shows the destination \
+                      and the exact text. Nothing changes until the person confirms it in the \
+                      app. Needs issue.create; a label that starts work also needs \
+                      mission.create.",
+        schema: || {
+            object(
+                &[
+                    operation(),
+                    ("tracker", text("The tracker instance to create it in.")),
+                    ("title", text("The title.")),
+                    ("body", text("The body, as Markdown.")),
+                    ("labels", strings("Labels to set.")),
+                    (
+                        "issue_type",
+                        text("The issue type, where the tracker has them."),
+                    ),
+                    ("priority", text("The priority, in the tracker's words.")),
+                    (
+                        "parent",
+                        text("The linked issue it is a child of, as TRACKER:ITEM."),
+                    ),
+                    ("mission", text("The Mission to link it to.")),
+                ],
+                &["operation_id", "tracker", "title"],
+            )
+        },
+        plan: |input, _| {
+            let operation = id(input, "operation_id")?;
+            let tracker = id(input, "tracker")?;
+            let title = string(input, "title").ok_or("title is required")?;
+            let mut body = Map::new();
+            for key in [
+                "tracker",
+                "title",
+                "body",
+                "labels",
+                "issue_type",
+                "priority",
+                "parent",
+                "mission",
+            ] {
+                if let Some(value) = input.get(key) {
+                    body.insert(key.to_owned(), value.clone());
+                }
+            }
+            Ok(Draft {
+                summary: format!("create an issue in {tracker}: {title}"),
+                call: post(
+                    format!("/v1/user/operations/{}/issues", encode(operation)),
+                    Some(Value::Object(body)),
+                ),
+                scope: Scope::Operation(operation.to_owned()),
+                action: "issue.create",
+            })
+        },
+    },
+    WriteTool {
+        name: "propose_issue_link",
+        description: "Propose linking an issue to a Mission, accepting a link an Agent \
+                      proposed, or unlinking one. Nothing changes until the person confirms \
+                      it in the app. Needs issue.link.",
+        schema: || {
+            object(
+                &[
+                    operation(),
+                    ("mission_id", text("The Mission.")),
+                    ("issue", text("The issue, as TRACKER:ITEM.")),
+                    (
+                        "decision",
+                        json!({"type": "string", "enum": ["link", "accept", "unlink"]}),
+                    ),
+                    (
+                        "relation",
+                        json!({"type": "string", "enum": ["related", "child", "parent", "mirror"]}),
+                    ),
+                ],
+                &["operation_id", "mission_id", "issue", "decision"],
+            )
+        },
+        plan: |input, _| {
+            let operation = id(input, "operation_id")?;
+            let mission = id(input, "mission_id")?;
+            let issue = id(input, "issue")?;
+            let decision = string(input, "decision").ok_or("decision is required")?;
+            let base = format!(
+                "/v1/user/operations/{}/missions/{}/issues",
+                encode(operation),
+                encode(mission)
+            );
+            let call = match decision {
+                "link" => {
+                    let mut body = json!({"issue": issue});
+                    if let Some(relation) = string(input, "relation") {
+                        body["relation"] = json!(relation);
+                    }
+                    post(base, Some(body))
+                }
+                "accept" => post(format!("{base}/{}/accept", encode(issue)), None),
+                "unlink" => Call {
+                    method: Method::DELETE,
+                    path: format!("{base}/{}", encode(issue)),
+                    body: None,
+                },
+                _ => return Err("decision is link, accept or unlink".to_owned()),
+            };
+            Ok(Draft {
+                summary: format!("{decision} issue {issue} on Mission {mission}"),
+                call,
+                scope: Scope::Operation(operation.to_owned()),
+                action: "issue.link",
+            })
+        },
+    },
+    WriteTool {
+        name: "propose_issue_proposal_decision",
+        description: "Propose approving or rejecting what an Agent asked to create. The card \
+                      shows the destination, the exact text, the fields it cannot carry over \
+                      and `mark_ready` when set. Nothing changes until the person confirms it \
+                      in the app. Needs issue.create; mark_ready also needs mission.create.",
+        schema: || {
+            object(
+                &[
+                    operation(),
+                    (
+                        "proposal",
+                        text("The proposal, as issue_proposals lists it."),
+                    ),
+                    (
+                        "decision",
+                        json!({"type": "string", "enum": ["approve", "reject"]}),
+                    ),
+                    ("mark_ready", json!({"type": "boolean"})),
+                    ("reason", text("Why, for a rejection.")),
+                ],
+                &["operation_id", "proposal", "decision"],
+            )
+        },
+        plan: |input, _| {
+            let operation = id(input, "operation_id")?;
+            let proposal = id(input, "proposal")?;
+            let decision = string(input, "decision").ok_or("decision is required")?;
+            let mark_ready = input.get("mark_ready").and_then(Value::as_bool) == Some(true);
+            if decision != "approve" && decision != "reject" {
+                return Err("decision is approve or reject".to_owned());
+            }
+            let body = if decision == "approve" {
+                json!({"mark_ready": mark_ready})
+            } else {
+                match string(input, "reason") {
+                    Some(reason) => json!({"reason": reason}),
+                    None => json!({}),
+                }
+            };
+            Ok(Draft {
+                summary: format!(
+                    "{decision} issue proposal {proposal} in Operation {operation}{}",
+                    if mark_ready { " and mark it ready" } else { "" }
+                ),
+                call: post(
+                    format!(
+                        "/v1/user/operations/{}/issue-proposals/{}/{decision}",
+                        encode(operation),
+                        encode(proposal)
+                    ),
+                    Some(body),
+                ),
+                scope: Scope::Operation(operation.to_owned()),
+                action: "issue.create",
+            })
+        },
+    },
+    WriteTool {
+        name: "propose_issue_update",
+        description: "Propose changing a linked issue: labels, a workflow transition, closing \
+                      or reopening it, or its assignees. Nothing changes until the person \
+                      confirms it in the app. Needs issue.update.",
+        schema: || {
+            object(
+                &[
+                    operation(),
+                    ("mission_id", text("The Mission.")),
+                    ("issue", text("The linked issue, as TRACKER:ITEM.")),
+                    ("add_labels", strings("Labels to add.")),
+                    ("remove_labels", strings("Labels to remove.")),
+                    ("transition", text("A workflow transition by name.")),
+                    ("close", json!({"type": "boolean"})),
+                    ("reopen", json!({"type": "boolean"})),
+                    ("add_assignees", strings("Assignees to add.")),
+                    ("remove_assignees", strings("Assignees to remove.")),
+                ],
+                &["operation_id", "mission_id", "issue"],
+            )
+        },
+        plan: |input, _| {
+            let operation = id(input, "operation_id")?;
+            let mission = id(input, "mission_id")?;
+            let issue = id(input, "issue")?;
+            let mut body = Map::new();
+            for key in [
+                "add_labels",
+                "remove_labels",
+                "transition",
+                "close",
+                "reopen",
+                "add_assignees",
+                "remove_assignees",
+            ] {
+                if let Some(value) = input.get(key) {
+                    body.insert(key.to_owned(), value.clone());
+                }
+            }
+            if body.is_empty() {
+                return Err("name something to change".to_owned());
+            }
+            let body = Value::Object(body);
+            Ok(Draft {
+                summary: format!("change issue {issue}: {body}"),
+                call: post(
+                    format!(
+                        "/v1/user/operations/{}/missions/{}/issues/{}/update",
+                        encode(operation),
+                        encode(mission),
+                        encode(issue)
+                    ),
+                    Some(body),
+                ),
+                scope: Scope::Operation(operation.to_owned()),
+                action: "issue.update",
+            })
+        },
+    },
+    WriteTool {
         name: "propose_mission",
         description: "Propose queuing a new Mission in an Operation, with its title and \
                       prompt. Nothing changes until the person confirms it in the app. \
@@ -1087,6 +1359,31 @@ mod tests {
                 "propose_station_settings",
                 json!({"station_id": "hq", "max_concurrent_missions": 4}),
                 Some("app:/stations?station_id=hq&tab=settings"),
+            ),
+            (
+                "propose_issue_link",
+                json!({"operation_id": "G", "mission_id": "m", "issue": "gh:o/r#1", "decision": "link"}),
+                Some("app:/missions?operation_id=G&mission_id=m"),
+            ),
+            (
+                "propose_issue_comment",
+                json!({"operation_id": "G", "mission_id": "m", "issue": "gh:o/r#1", "body": "x"}),
+                Some("app:/missions?operation_id=G&mission_id=m"),
+            ),
+            (
+                "propose_issue_update",
+                json!({"operation_id": "G", "mission_id": "m", "issue": "gh:o/r#1", "close": true}),
+                Some("app:/missions?operation_id=G&mission_id=m"),
+            ),
+            (
+                "propose_issue_create",
+                json!({"operation_id": "G", "tracker": "gh", "title": "x"}),
+                Some("app:/briefings?tab=proposals&operation_id=G"),
+            ),
+            (
+                "propose_issue_proposal_decision",
+                json!({"operation_id": "G", "proposal": "ip-1", "decision": "approve"}),
+                Some("app:/briefings?tab=proposals&operation_id=G&item_id=ip-1"),
             ),
         ];
         for tool in write_tools() {

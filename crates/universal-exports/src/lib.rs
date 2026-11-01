@@ -9,6 +9,7 @@ mod agents;
 mod controls;
 mod green_ink;
 mod held;
+mod issues;
 mod login_limit;
 mod moneypenny;
 mod pools;
@@ -59,6 +60,7 @@ pub use agents::{AgentView, RetirementNotice};
 use controls::ControlBook;
 pub use controls::ControlStatus;
 pub use held::{HeldBriefDecision, HeldBriefEntry};
+pub use issues::{EntryView, IssueView, IssueWrite, MissionIssues, QuestionView, ReplyCounts};
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
@@ -1355,6 +1357,42 @@ impl Gateway {
                 post(reject_user_mission_proposal),
             )
             .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/issues",
+                get(issues::list).post(issues::link),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/issues/{reference}",
+                axum::routing::delete(issues::unlink),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/issues/{reference}/accept",
+                post(issues::accept),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/issues/{reference}/comments",
+                post(issues::comment),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/issues/{reference}/update",
+                post(issues::update),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/issues",
+                post(issues::create),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/issue-proposals",
+                get(issues::proposals),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/issue-proposals/{id}/approve",
+                post(issues::approve),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/issue-proposals/{id}/reject",
+                post(issues::reject),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/held-briefs",
                 get(held::list),
             )
@@ -1749,6 +1787,22 @@ fn board_station(
         config: info
             .get("config")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        issues_weakened: info
+            .get("issues_weakened")
+            .and_then(serde_json::Value::as_array)
+            .map(|lines| {
+                lines
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .filter(|line| {
+                        operations
+                            .iter()
+                            .any(|operation| line.starts_with(&format!("Operation {operation:?} ")))
+                    })
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
         head_of_station: info
             .get("head_of_station")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),
@@ -3773,6 +3827,8 @@ pub struct BoardStation {
     /// until one is filed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub head_of_station: Option<ai6::StationReport>,
+    /// Each Operation's issue settings looser than the default, one line each.
+    pub issues_weakened: Vec<String>,
 }
 
 /// One Theater a Station reaches, as the Station published it at check-in.

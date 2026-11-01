@@ -637,6 +637,37 @@ pub(crate) fn opens(tool: &str, call: &Call) -> Option<Route> {
             "page": "briefings", "tab": "proposals", "operation_id": operation,
             "item_id": proposal
         }),
+        (
+            "propose_issue_link" | "propose_issue_comment" | "propose_issue_update",
+            [
+                "v1",
+                "user",
+                "operations",
+                operation,
+                "missions",
+                mission,
+                "issues",
+                ..,
+            ],
+        ) => json!({"page": "missions", "operation_id": operation, "mission_id": mission}),
+        ("propose_issue_create", ["v1", "user", "operations", operation, "issues"]) => {
+            json!({"page": "briefings", "tab": "proposals", "operation_id": operation})
+        }
+        (
+            "propose_issue_proposal_decision",
+            [
+                "v1",
+                "user",
+                "operations",
+                operation,
+                "issue-proposals",
+                proposal,
+                _,
+            ],
+        ) => json!({
+            "page": "briefings", "tab": "proposals", "operation_id": operation,
+            "item_id": proposal
+        }),
         ("propose_mission", ["v1", "user", "operations", operation, "missions"]) => {
             json!({"page": "missions", "operation_id": operation, "state": ["queued"]})
         }

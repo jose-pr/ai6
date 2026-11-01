@@ -224,9 +224,50 @@ pub fn check(
     Ok(MENTIONS.replace_all(&checked, "$1`@$2`").into_owned())
 }
 
+/// The check a person's own text passes: refused when empty, too long, holding characters a
+/// reader cannot see or something shaped like a credential. Links and mentions are the person's.
+pub fn check_person(text: &str, max_bytes: Limit) -> Result<String, Refusal> {
+    if text.trim().is_empty() {
+        return Err(Refusal::Empty);
+    }
+    if !max_bytes.allows(text.len()) {
+        return Err(Refusal::TooLong);
+    }
+    if text.chars().any(invisible) {
+        return Err(Refusal::InvisibleCharacters);
+    }
+    if CREDENTIALS.iter().any(|pattern| pattern.is_match(text)) {
+        return Err(Refusal::CredentialPattern);
+    }
+    Ok(text.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_persons_text_keeps_its_links_and_mentions_and_not_its_tokens() {
+        let text = "cc @maint, see https://anywhere.example/x";
+        assert_eq!(check_person(text, Limit::at(200)).unwrap(), text);
+        let token = ["gh", "p_", "0123456789abcdefghij0123456789abcdef"].concat();
+        assert_eq!(
+            check_person(&token, Limit::at(200)).unwrap_err(),
+            Refusal::CredentialPattern
+        );
+        assert_eq!(
+            check_person("a\u{202e}b", Limit::at(200)).unwrap_err(),
+            Refusal::InvisibleCharacters
+        );
+        assert_eq!(
+            check_person(" ", Limit::at(200)).unwrap_err(),
+            Refusal::Empty
+        );
+        assert_eq!(
+            check_person("long", Limit::at(2)).unwrap_err(),
+            Refusal::TooLong
+        );
+    }
 
     fn check_default(text: &str) -> Result<String, Refusal> {
         check(

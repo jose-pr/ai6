@@ -80,6 +80,10 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
     let work = [
         "approval.decide",
         "cable.send",
+        "issue.comment",
+        "issue.create",
+        "issue.link",
+        "issue.update",
         "mission.control",
         "mission.create",
         "session.input",
