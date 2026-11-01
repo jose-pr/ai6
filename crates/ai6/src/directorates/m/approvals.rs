@@ -37,6 +37,10 @@ pub const BUILTIN_KINDS: [&str; 9] = [
     ISSUE_ASSIGN,
     ISSUE_COMMENT,
 ];
+/// The kind a class authorisation names to approve an Agent's proposal to create issues, from
+/// an unexposed Session whose proposal has no findings; its target is the tracker instance.
+/// A proposal waits for a person otherwise, not for green ink, so it is not a governed step.
+pub const ISSUE_CREATE: &str = "issue-create";
 /// The kind of step that closes or reopens an issue, or moves it into a done status; its
 /// target names the issue as `TRACKER:ITEM`.
 pub const ISSUE_CLOSE: &str = "issue-close";

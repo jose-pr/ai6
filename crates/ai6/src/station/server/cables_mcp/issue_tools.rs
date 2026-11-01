@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::CableTools;
-use crate::station::server::issues::{Caller, IssueDesk, UpdateRequest};
+use crate::station::server::issues::{Caller, IssueDesk, NewIssue, UpdateRequest};
 
 #[derive(Deserialize, JsonSchema)]
 struct IssueArgs {
@@ -74,6 +74,64 @@ struct LinkArgs {
     relation: String,
     /// Why the Mission should be linked to it, for the person who accepts the link.
     reason: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct NewIssueArgs {
+    /// The title. It passes the same check as a comment.
+    title: String,
+    /// The body, as Markdown. It passes the same check as a comment.
+    #[serde(default)]
+    body: String,
+    /// Labels to set. Intake labels are removed: a created issue never starts work by itself.
+    #[serde(default)]
+    labels: Vec<String>,
+    /// The issue type, for a tracker that has them.
+    issue_type: Option<String>,
+    /// The priority, in the tracker's words.
+    priority: Option<String>,
+}
+
+impl From<NewIssueArgs> for NewIssue {
+    fn from(args: NewIssueArgs) -> Self {
+        Self {
+            title: args.title,
+            body: args.body,
+            labels: args.labels,
+            issue_type: args.issue_type,
+            priority: args.priority,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CreateArgs {
+    /// The tracker instance to create it in, one of the Operation's.
+    tracker: String,
+    #[serde(flatten)]
+    issue: NewIssueArgs,
+    /// Stable retry key; calling again with it returns the first answer and proposes nothing.
+    retry_key: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SplitArgs {
+    /// The linked issue to split: `TRACKER:ITEM`.
+    parent: String,
+    /// The issues to split it into, at most 10.
+    children: Vec<NewIssueArgs>,
+    /// Stable retry key, as for `issue_create`.
+    retry_key: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct MirrorArgs {
+    /// The linked issue to copy: `TRACKER:ITEM`.
+    from: String,
+    /// The tracker instance to copy it to, another of the Operation's.
+    to_tracker: String,
+    /// Stable retry key, as for `issue_create`.
+    retry_key: String,
 }
 
 impl CableTools {
@@ -171,6 +229,40 @@ impl CableTools {
                 assignees: args.assignees,
             };
             desk.update(caller, &args.issue, &request, &args.retry_key)
+        })
+        .await
+    }
+
+    /// Ask for a new issue.
+    #[tool(
+        description = "Ask for a new issue in one of the Operation's trackers. A person approves it unless the Operation says otherwise; the answer is proposed or queued, you carry on, and the new key arrives as a message. A created issue never starts work by itself, and it counts against the Mission's and the Operation's caps. Never include secrets."
+    )]
+    async fn issue_create(&self, Parameters(args): Parameters<CreateArgs>) -> String {
+        self.with_issues(move |desk, caller| {
+            desk.create(caller, &args.tracker, &args.issue.into(), &args.retry_key)
+        })
+        .await
+    }
+
+    /// Split a linked issue into smaller ones.
+    #[tool(
+        description = "Split a linked issue into actionable children, in the same tracker. Each child is attached to the parent where the tracker can, and is linked to this Mission. A person approves the split unless the Operation says otherwise. The depth of a split is capped."
+    )]
+    async fn issue_split(&self, Parameters(args): Parameters<SplitArgs>) -> String {
+        self.with_issues(move |desk, caller| {
+            let children: Vec<NewIssue> = args.children.into_iter().map(Into::into).collect();
+            desk.split(caller, &args.parent, &children, &args.retry_key)
+        })
+        .await
+    }
+
+    /// Copy a linked issue to another tracker.
+    #[tool(
+        description = "Copy a linked issue to another of the Operation's trackers: title, body as quoted text, the labels the target has, and the priority through the target's map. What cannot be carried over is listed in the answer. The original gets a comment leading to the copy, and both sides stay linked to this Mission. Nothing is kept in sync afterwards."
+    )]
+    async fn issue_mirror(&self, Parameters(args): Parameters<MirrorArgs>) -> String {
+        self.with_issues(move |desk, caller| {
+            desk.mirror(caller, &args.from, &args.to_tracker, &args.retry_key)
         })
         .await
     }

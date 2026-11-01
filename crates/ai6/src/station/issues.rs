@@ -16,8 +16,8 @@ use crate::directorates::m::roster::Roster;
 use crate::directorates::registry::approvals::{ApprovalStatus, Decision};
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::mission_issues::{
-    IssueLink, IssueReply, LinkRelation, LinkState, OutboxEntry, OutboxKind, OutboxResult,
-    OutboxSettle, OutboxState, ReplyState,
+    IssueLink, IssueProposal, IssueReply, IssueSnapshot, LinkRelation, LinkState, OutboxEntry,
+    OutboxKind, OutboxResult, OutboxSettle, OutboxState, ProposalState, ProposedIssue, ReplyState,
 };
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
@@ -30,6 +30,9 @@ use guatiao::{Status, library::ProviderError};
 
 /// `blocked_reason` of a Mission waiting for an answer on its issue.
 pub(crate) const ISSUE_REASON: &str = "issue";
+
+/// The Mission an issue a person created for no Mission is held under, in the gateway's words.
+const NO_MISSION: &str = "operation-created";
 
 /// Timeline kind of everything the issue machinery records.
 const TIMELINE_KIND: &str = "issue";
@@ -305,7 +308,10 @@ pub(crate) fn poll_replies(
                 }
             };
             for reply in batch.replies.into_iter().filter(|reply| !reply.own) {
-                for link in watched.iter().filter(|link| link.item == reply.item) {
+                for link in watched.iter().filter(|link| {
+                    link.item == reply.item
+                        && unix_of(&reply.created).is_none_or(|made| made >= link.linked_at)
+                }) {
                     let mut record = IssueReply {
                         id: reply.id.clone(),
                         mission_id: link.mission_id.clone(),
@@ -316,6 +322,7 @@ pub(crate) fn poll_replies(
                         body: reply.body.clone(),
                         created: reply.created.clone(),
                         state: ReplyState::Pending,
+                        operator: false,
                     };
                     if !reply.permitted {
                         record.state = ReplyState::Ignored;
@@ -349,9 +356,70 @@ pub(crate) fn poll_replies(
             {
                 let _ = registry.set_issue_cursor(&operation.id, &setup.name, &next);
             }
+            for link in watched.iter().filter(|link| link.snapshot.is_none()) {
+                refresh_snapshot(registry, tracker.as_ref(), link);
+            }
         }
     }
     stored
+}
+
+/// Reads a link's issue and records what it says, for the tools that show it.
+fn refresh_snapshot(registry: &dyn RegistryBackend, tracker: &dyn Tracker, link: &IssueLink) {
+    match tracker.issue(link.item.clone()) {
+        Ok(issue) => {
+            let snapshot = IssueSnapshot {
+                title: issue.title,
+                body: issue.body,
+                state: Some(issue.state),
+                labels: issue.labels,
+                priority: issue.priority,
+            };
+            if let Err(error) = registry.set_issue_snapshot(
+                &link.mission_id,
+                &link.tracker,
+                &link.item,
+                issue.url.as_deref(),
+                &snapshot,
+            ) {
+                eprintln!("ai6: issue {} not recorded: {error}", link.name());
+            }
+        }
+        Err(error) => eprintln!("ai6: issue {} not read: {error}", link.name()),
+    }
+}
+
+/// A timestamp's Unix seconds, whichever offset it carries: `2026-11-01T15:56:39Z` or
+/// `2026-11-01T22:57:12.421+0700`. `None` for one that does not parse.
+pub(crate) fn unix_of(text: &str) -> Option<f64> {
+    let (date, rest) = text.split_once('T')?;
+    let mut date = date.splitn(3, '-');
+    let year: i64 = date.next()?.parse().ok()?;
+    let month: i64 = date.next()?.parse().ok()?;
+    let day: i64 = date.next()?.parse().ok()?;
+    let zone = rest.find(['+', '-', 'Z'])?;
+    let (clock, offset) = rest.split_at(zone);
+    let mut clock = clock.splitn(3, ':');
+    let hours: f64 = clock.next()?.parse().ok()?;
+    let minutes: f64 = clock.next()?.parse().ok()?;
+    let seconds: f64 = clock.next()?.parse().ok()?;
+    let offset_seconds = if offset.starts_with('Z') {
+        0.0
+    } else {
+        let digits = offset[1..].replace(':', "");
+        let whole: f64 = digits.get(..2)?.parse().ok()?;
+        let parts: f64 = digits.get(2..4)?.parse().ok()?;
+        let sign = if offset.starts_with('-') { -1.0 } else { 1.0 };
+        sign * (whole * 3600.0 + parts * 60.0)
+    };
+    // The arithmetic is `days_from_civil` of <https://howardhinnant.github.io/date_algorithms.html>.
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days as f64 * 86_400.0 + hours * 3_600.0 + minutes * 60.0 + seconds - offset_seconds)
 }
 
 fn setups_of(
@@ -383,6 +451,7 @@ pub(crate) fn drain_outbox(
     let term = lease.term();
     release_held(registry, now);
     let mut trackers = TrackerCache::new();
+    advance_proposals(registry, roster, build, &mut trackers, now);
     let mut settled = recover_sending(registry, roster, build, &mut trackers, term, now);
     let Ok(due) = registry.due_outbox(now, limits.outbox_batch.or_max()) else {
         return settled;
@@ -427,6 +496,14 @@ pub(crate) fn drain_outbox(
                         format!("{}:{}:{}", done.mission_id, done.tracker, done.item),
                         now,
                     );
+                }
+                // A link a person made that cannot be read does not stay.
+                if done.kind == OutboxKind::Link
+                    && done.payload["resolve"] == true
+                    && done.settled()
+                    && done.state != OutboxState::Posted
+                {
+                    let _ = registry.unlink_issue(&done.mission_id, &done.tracker, &done.item);
                 }
                 if done.settled() {
                     let what = match done.state {
@@ -552,6 +629,7 @@ fn send(
         comment_id: Some(posted.id),
         url: posted.url,
         created_item: None,
+        ..OutboxResult::default()
     };
     match entry.kind {
         OutboxKind::Comment | OutboxKind::Question => {
@@ -629,12 +707,33 @@ fn send(
             tracker.update(update_of(entry)).map_err(fail)?;
             Ok(OutboxResult::default())
         }
-        OutboxKind::Create => {
-            let issue = tracker.create(spec_of(entry)).map_err(fail)?;
+        OutboxKind::Create => create_issue(tracker, entry),
+        OutboxKind::Link if entry.payload["resolve"] == true => {
+            let link = link.ok_or_else(|| plain("the issue is no longer linked"))?;
+            let issue = tracker.issue(entry.item.clone()).map_err(fail)?;
+            let url = issue.url.clone();
+            let snapshot = IssueSnapshot {
+                title: issue.title,
+                body: issue.body,
+                state: Some(issue.state),
+                labels: issue.labels,
+                priority: issue.priority,
+            };
+            registry
+                .set_issue_snapshot(
+                    &link.mission_id,
+                    &link.tracker,
+                    &link.item,
+                    url.as_deref(),
+                    &snapshot,
+                )
+                .map_err(|error| SendFailure {
+                    message: error.to_string(),
+                    final_error: false,
+                })?;
             Ok(OutboxResult {
-                comment_id: None,
-                url: issue.url,
-                created_item: Some(issue.id),
+                url,
+                ..OutboxResult::default()
             })
         }
         OutboxKind::Link => {
@@ -674,6 +773,7 @@ pub(crate) fn update_of(entry: &OutboxEntry) -> TrackerUpdate {
 }
 
 /// The payload of an `update` entry for `update`.
+#[cfg_attr(not(feature = "cables-mcp"), allow(dead_code))]
 pub(crate) fn update_payload(update: &TrackerUpdate) -> serde_json::Value {
     serde_json::json!({
         "add_labels": update.add_labels,
@@ -735,6 +835,431 @@ pub(crate) fn spec_of(entry: &OutboxEntry) -> IssueSpec {
         issue_type: text(&payload["issue_type"]),
         priority: text(&payload["priority"]),
         parent: text(&payload["parent"]),
+    }
+}
+
+/// Creates an entry's issue. A child the tracker cannot attach, or whose parent lives in another
+/// tracker, names its parent in its text instead.
+fn create_issue(tracker: &dyn Tracker, entry: &OutboxEntry) -> Result<OutboxResult, SendFailure> {
+    let mut spec = spec_of(entry);
+    if let Some(parent) = spec.parent.clone() {
+        let children = tracker.capabilities(Some(parent)).map_err(fail)?.children;
+        if children == "none" {
+            spec.parent = None;
+        }
+    }
+    if spec.parent.is_none()
+        && let Some(reference) = text(&entry.payload["parent_reference"])
+    {
+        spec.body = format!("Part of {reference}\n\n{}", spec.body);
+    }
+    let asked: Vec<String> = spec.labels.clone();
+    let wanted_parent = spec.parent.clone();
+    let issue = tracker.create(spec).map_err(fail)?;
+    let mut dropped = strings(&entry.payload["dropped"]);
+    dropped.extend(
+        asked
+            .iter()
+            .filter(|label| !issue.labels.iter().any(|kept| kept == *label))
+            .filter(|label| {
+                !issue
+                    .labels
+                    .iter()
+                    .any(|kept| kept == &label.replace(' ', "-"))
+            })
+            .map(|label| format!("label {label}")),
+    );
+    Ok(OutboxResult {
+        comment_id: None,
+        url: issue.url,
+        created_item: Some(issue.id),
+        dropped,
+        attached_to: issue.parent.filter(|_| wanted_parent.is_some()),
+    })
+}
+
+/// The labels an instance takes intake from.
+pub(crate) fn intake_labels(setup: &SourceSetup) -> Vec<String> {
+    match setup.settings.get("labels").and_then(toml::Value::as_array) {
+        Some(labels) => labels
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        None => match setup.provider.as_str() {
+            "github" => vec!["ai6:ready".to_owned()],
+            "jira" => vec!["ai6-ready".to_owned()],
+            _ => Vec::new(),
+        },
+    }
+}
+
+/// Whether `label` is one any of the Operation's instances takes intake from, or looks like one,
+/// so that nothing AI6 creates or changes can start work by itself.
+pub(crate) fn is_intake_label(setups: &[SourceSetup], label: &str) -> bool {
+    let lower = label.to_lowercase();
+    lower.starts_with("ai6:ready")
+        || lower.starts_with("ai6-ready")
+        || setups.iter().any(|setup| {
+            intake_labels(setup)
+                .iter()
+                .any(|intake| intake.eq_ignore_ascii_case(label))
+        })
+}
+
+/// The Operation's tracker instances.
+pub(crate) fn instances(operation: &crate::directorates::m::roster::Operation) -> Vec<SourceSetup> {
+    source_setups(operation, &SourceLimits::default())
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect()
+}
+
+/// `TRACKER:ITEM` split in two.
+fn reference(name: &str) -> Option<(&str, &str)> {
+    name.split_once(':')
+}
+
+/// The payload of the `create` entry of one proposed issue.
+fn create_payload(
+    proposal: &IssueProposal,
+    index: usize,
+    spec: &ProposedIssue,
+) -> serde_json::Value {
+    let parent = spec.parent.as_deref().and_then(reference);
+    // A parent in another tracker cannot be attached to; the child only names it.
+    let attachable = parent.filter(|(tracker, _)| *tracker == spec.tracker);
+    serde_json::json!({
+        "proposal": proposal.id,
+        "index": index,
+        "title": spec.title,
+        "labels": spec.labels,
+        "issue_type": spec.issue_type,
+        "priority": spec.priority,
+        "parent": attachable.map(|(_, item)| item),
+        "parent_reference": parent.map(|(_, item)| item),
+        "parent_name": spec.parent,
+        "mirror_of": spec.mirror_of,
+        "dropped": proposal.dropped,
+    })
+}
+
+/// Moves the approved proposals on: queues the creation of what each asks for, and settles what
+/// was created, in one idempotent pass, so a Station that takes over finishes what another left.
+fn advance_proposals(
+    registry: &dyn RegistryBackend,
+    roster: &Roster,
+    build: &TrackerBuilder<'_>,
+    trackers: &mut TrackerCache,
+    now: f64,
+) {
+    let Ok(proposals) = registry.issue_proposals(None) else {
+        return;
+    };
+    for proposal in proposals
+        .into_iter()
+        .filter(|proposal| proposal.state == ProposalState::Approved)
+    {
+        let entries: Vec<OutboxEntry> = registry
+            .outbox_entries(Some(&proposal.mission_id))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.payload["proposal"] == proposal.id.as_str())
+            .collect();
+        for (index, spec) in proposal.specs.iter().enumerate() {
+            if entries
+                .iter()
+                .any(|entry| entry.payload["index"] == serde_json::json!(index))
+            {
+                continue;
+            }
+            let mut entry = OutboxEntry::new(
+                &proposal.operation,
+                &proposal.mission_id,
+                &spec.tracker,
+                "",
+                OutboxKind::Create,
+                &proposal.proposer,
+                now,
+            );
+            entry.body = spec.body.clone();
+            entry.payload = create_payload(&proposal, index, spec);
+            match registry.queue_outbox(&entry) {
+                Ok(stored) => audit(registry, "queued", &stored, now),
+                Err(error) => {
+                    eprintln!("ai6: creation of {} not queued: {error}", proposal.id);
+                }
+            }
+        }
+        let mut made = Vec::new();
+        let mut failures = Vec::new();
+        for entry in entries.iter().filter(|entry| entry.settled()) {
+            let index = entry.payload["index"].as_u64().unwrap_or(0) as usize;
+            let spec = proposal.specs.get(index);
+            match (entry.state, entry.result.as_ref()) {
+                (OutboxState::Posted, Some(result)) => {
+                    if let Some(item) = &result.created_item {
+                        let name = format!("{}:{item}", entry.tracker);
+                        if !proposal.created.contains(&name) {
+                            after_created(
+                                registry, roster, build, trackers, &proposal, spec, entry, item,
+                                now,
+                            );
+                        }
+                        made.push(name);
+                    }
+                }
+                _ => failures.push(format!(
+                    "{}: {}",
+                    spec.map_or("an issue", |spec| spec.title.as_str()),
+                    entry.error.as_deref().unwrap_or("it could not be created")
+                )),
+            }
+        }
+        if made.is_empty() && failures.is_empty() {
+            continue;
+        }
+        let was_open = proposal.state == ProposalState::Approved;
+        match registry.record_created_issues(&proposal.id, &made, &failures) {
+            Ok(done) if was_open && done.state == ProposalState::Created => {
+                name_children_on_parents(registry, &done, &entries, now);
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("ai6: proposal {} not recorded: {error}", proposal.id),
+        }
+    }
+}
+
+/// Ties a created issue to its Mission, leads the original of a mirror to its copy, and adds the
+/// intake labels when the person who approved it asked for them.
+#[allow(clippy::too_many_arguments)]
+fn after_created(
+    registry: &dyn RegistryBackend,
+    roster: &Roster,
+    build: &TrackerBuilder<'_>,
+    trackers: &mut TrackerCache,
+    proposal: &IssueProposal,
+    spec: Option<&ProposedIssue>,
+    entry: &OutboxEntry,
+    item: &str,
+    now: f64,
+) {
+    if proposal.mission_id == NO_MISSION {
+        return;
+    }
+    let url = entry.result.as_ref().and_then(|result| result.url.clone());
+    let mirror_of = spec.and_then(|spec| spec.mirror_of.clone());
+    let link = IssueLink {
+        operation: proposal.operation.clone(),
+        mission_id: proposal.mission_id.clone(),
+        tracker: entry.tracker.clone(),
+        item: item.to_owned(),
+        url: url.clone(),
+        relation: if mirror_of.is_some() {
+            LinkRelation::Mirror
+        } else {
+            LinkRelation::Child
+        },
+        state: LinkState::Active,
+        linked_by: proposal.proposer.clone(),
+        linked_at: now,
+        status_comment: None,
+        phase: None,
+        snapshot: spec.map(|spec| IssueSnapshot {
+            title: spec.title.clone(),
+            body: spec.body.clone(),
+            state: Some("open".to_owned()),
+            labels: spec.labels.clone(),
+            priority: spec.priority.clone(),
+        }),
+    };
+    if let Err(error) = registry.link_issue(&link) {
+        eprintln!("ai6: created issue {} not linked: {error}", link.name());
+    }
+    if let Some(original) = mirror_of.as_deref().and_then(reference) {
+        back_link(
+            registry,
+            roster,
+            build,
+            trackers,
+            proposal,
+            original,
+            url.as_deref(),
+            &link,
+            now,
+        );
+    }
+    if proposal.mark_ready {
+        mark_ready(registry, roster, proposal, entry, item, now);
+    }
+}
+
+/// Leads the original of a mirror to its copy: a comment, and a remote link where the tracker
+/// has them.
+#[allow(clippy::too_many_arguments)]
+fn back_link(
+    registry: &dyn RegistryBackend,
+    roster: &Roster,
+    build: &TrackerBuilder<'_>,
+    trackers: &mut TrackerCache,
+    proposal: &IssueProposal,
+    (tracker, item): (&str, &str),
+    url: Option<&str>,
+    copy: &IssueLink,
+    now: f64,
+) {
+    let target = url.map_or_else(|| copy.name(), str::to_owned);
+    let mut comment = OutboxEntry::new(
+        &proposal.operation,
+        &proposal.mission_id,
+        tracker,
+        item,
+        OutboxKind::Comment,
+        "m",
+        now,
+    );
+    comment.body = format!("Tracked in {target}");
+    comment.payload = serde_json::json!({ "back_link_of": copy.name() });
+    match registry.queue_outbox(&comment) {
+        Ok(stored) => audit(registry, "queued", &stored, now),
+        Err(error) => eprintln!("ai6: back-link on {tracker}:{item} not queued: {error}"),
+    }
+    let Some(url) = url else {
+        return;
+    };
+    let Ok(setup) = setup_of(
+        roster,
+        &SourceLimits::default(),
+        &proposal.operation,
+        tracker,
+    ) else {
+        return;
+    };
+    let remote_links = trackers
+        .entry((proposal.operation.clone(), tracker.to_owned()))
+        .or_insert_with(|| build(&setup.provider, &setup.settings))
+        .as_ref()
+        .ok()
+        .and_then(|tracker| tracker.capabilities(None).ok())
+        .is_some_and(|capabilities| capabilities.links.iter().any(|kind| kind == "remote_links"));
+    if !remote_links {
+        return;
+    }
+    let mut link = OutboxEntry::new(
+        &proposal.operation,
+        &proposal.mission_id,
+        tracker,
+        item,
+        OutboxKind::Link,
+        "m",
+        now,
+    );
+    link.payload = serde_json::json!({ "relation": "mirror", "url": url });
+    match registry.queue_outbox(&link) {
+        Ok(stored) => audit(registry, "queued", &stored, now),
+        Err(error) => eprintln!("ai6: remote link on {tracker}:{item} not queued: {error}"),
+    }
+}
+
+/// Adds the intake labels to an issue created under an approval that asked for them. The person
+/// who approved it is the actor, and intake, vetting and review still decide what runs.
+fn mark_ready(
+    registry: &dyn RegistryBackend,
+    roster: &Roster,
+    proposal: &IssueProposal,
+    entry: &OutboxEntry,
+    item: &str,
+    now: f64,
+) {
+    let Ok(setup) = setup_of(
+        roster,
+        &SourceLimits::default(),
+        &proposal.operation,
+        &entry.tracker,
+    ) else {
+        return;
+    };
+    let actor = proposal
+        .decided_by
+        .as_deref()
+        .map_or_else(|| "m".to_owned(), |by| format!("person:{by}"));
+    let mut update = OutboxEntry::new(
+        &proposal.operation,
+        &proposal.mission_id,
+        &entry.tracker,
+        item,
+        OutboxKind::Update,
+        actor.clone(),
+        now,
+    );
+    update.payload = update_payload(&TrackerUpdate {
+        item: item.to_owned(),
+        add_labels: intake_labels(&setup),
+        ..TrackerUpdate::default()
+    });
+    match registry.queue_outbox(&update) {
+        Ok(stored) => {
+            let record = AuditRecord {
+                id: format!("issue-ready-{}", uuid::Uuid::new_v4().simple()),
+                actor,
+                action: "issue.ready".to_owned(),
+                operation: proposal.operation.clone(),
+                resource: None,
+                target: format!("{}:{item} {}", entry.tracker, stored.id),
+                at: now,
+            };
+            if let Err(error) = registry.record_audit(&record) {
+                eprintln!("ai6: issue audit record was not written: {error}");
+            }
+        }
+        Err(error) => eprintln!("ai6: ready labels on {item} not queued: {error}"),
+    }
+}
+
+/// A comment on each parent listing the children of a finished proposal the tracker could not
+/// attach, so the split can be followed from the parent.
+fn name_children_on_parents(
+    registry: &dyn RegistryBackend,
+    proposal: &IssueProposal,
+    entries: &[OutboxEntry],
+    now: f64,
+) {
+    let mut by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for entry in entries {
+        let Some(result) = &entry.result else {
+            continue;
+        };
+        let (Some(parent), Some(item), None) = (
+            text(&entry.payload["parent_name"]),
+            result.created_item.as_ref(),
+            result.attached_to.as_ref(),
+        ) else {
+            continue;
+        };
+        by_parent
+            .entry(parent)
+            .or_default()
+            .push(result.url.clone().unwrap_or_else(|| item.clone()));
+    }
+    for (parent, children) in by_parent {
+        let Some((tracker, item)) = reference(&parent) else {
+            continue;
+        };
+        let mut comment = OutboxEntry::new(
+            &proposal.operation,
+            &proposal.mission_id,
+            tracker,
+            item,
+            OutboxKind::Comment,
+            "m",
+            now,
+        );
+        comment.body = format!("Split into:\n\n- {}", children.join("\n- "));
+        comment.payload = serde_json::json!({ "children_of": proposal.id });
+        match registry.queue_outbox(&comment) {
+            Ok(stored) => audit(registry, "queued", &stored, now),
+            Err(error) => eprintln!("ai6: children of {parent} not named: {error}"),
+        }
     }
 }
 
@@ -889,6 +1414,7 @@ fn recovered(
             comment_id: Some(reply.id.clone()),
             url: None,
             created_item: None,
+            ..OutboxResult::default()
         }),
         None => again(),
     }
@@ -897,6 +1423,16 @@ fn recovered(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timestamps_of_both_trackers_read_as_one_clock() {
+        assert_eq!(unix_of("1970-01-01T00:00:01Z"), Some(1.0));
+        assert_eq!(
+            unix_of("2026-11-01T22:57:12.421+0700"),
+            unix_of("2026-11-01T15:57:12.421Z")
+        );
+        assert_eq!(unix_of("not a time"), None);
+    }
 
     #[test]
     fn mission_states_map_to_the_phases_an_issue_shows() {
@@ -925,3 +1461,11 @@ mod tests {
         assert_eq!(phase_of(MissionState::Queued, None), None);
     }
 }
+
+#[cfg(test)]
+#[path = "issues_tests.rs"]
+mod creating_tests;
+
+#[cfg(test)]
+#[path = "issues_live_tests.rs"]
+mod live_drain;

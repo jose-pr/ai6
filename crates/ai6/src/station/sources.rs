@@ -374,8 +374,50 @@ fn link_source(
                     item.id
                 );
             }
+            link_parent_of_created(registry, operation, &mission, provider, &item.id, now);
         }
         Err(error) => eprintln!("ai6: source {provider}: links unreadable: {error}"),
+    }
+}
+
+/// When AI6 created this issue, ties the Mission it became to the issue it was split from,
+/// read-only, and names the Mission that split it as who linked it.
+fn link_parent_of_created(
+    registry: &dyn RegistryBackend,
+    operation: &str,
+    mission: &str,
+    tracker: &str,
+    item: &str,
+    now: f64,
+) {
+    let name = format!("{tracker}:{item}");
+    let Ok(proposals) = registry.issue_proposals(None) else {
+        return;
+    };
+    let Some(proposal) = proposals
+        .iter()
+        .find(|proposal| proposal.operation == operation && proposal.created.contains(&name))
+    else {
+        return;
+    };
+    let Ok(entries) = registry.outbox_entries(Some(&proposal.mission_id)) else {
+        return;
+    };
+    let parent = entries.iter().find_map(|entry| {
+        let made = entry.result.as_ref()?.created_item.as_deref()? == item;
+        (made && entry.tracker == tracker)
+            .then(|| entry.payload["parent_name"].as_str().map(str::to_owned))
+            .flatten()
+    });
+    let Some((parent_tracker, parent_item)) = parent.as_deref().and_then(|p| p.split_once(':'))
+    else {
+        return;
+    };
+    let mut link = source_link(operation, mission, parent_tracker, parent_item, None, now);
+    link.relation = LinkRelation::Parent;
+    link.linked_by = format!("mission:{}", proposal.mission_id);
+    if let Err(error) = registry.link_issue(&link) {
+        eprintln!("ai6: parent of {name} not linked: {error}");
     }
 }
 
@@ -1485,6 +1527,14 @@ mod tests {
         assert!(assisted.body.contains("m-9"));
         let full = compose_report(Disclosure::Full, &finished(true));
         assert!(full.body.contains("sess-9") && full.body.contains("007"));
+    }
+
+    #[test]
+    fn the_table_in_the_docs_is_the_structs() {
+        crate::directorates::m::issues::check_schema_table(
+            "instance",
+            &crate::directorates::m::issues::schema_table::<InstanceKeys>(),
+        );
     }
 
     fn roster_issues(sources: &str, issues: &str) -> (tempfile::TempDir, Roster) {

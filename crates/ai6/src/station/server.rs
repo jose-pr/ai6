@@ -1568,6 +1568,7 @@ async fn scheduler_loop(base: DaemonState) {
         {
             green_ink::deliver_decisions(&state).await;
             issues::deliver_replies(&state).await;
+            issues::deliver_proposal_outcomes(&state).await;
         }
         let lapsing = state.clone();
         let _ = tokio::task::spawn_blocking(move || credentials::revoke_lapsed(&lapsing)).await;

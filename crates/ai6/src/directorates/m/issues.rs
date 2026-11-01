@@ -89,11 +89,13 @@ pub enum IssueCreate {
 #[serde(default, deny_unknown_fields)]
 #[map(deny_unknown_fields)]
 pub struct IssuePolicy {
-    /// Whether `00` Agents close and reopen issues without green ink.
+    /// `strict`, or `licensed`, which lets `00` Agents close and reopen without green ink.
     #[schema(title = "Preset")]
     #[map(default = IssuePolicy::default().preset)]
     pub preset: IssuePreset,
-    /// How much AI6 writes on the issues by itself.
+    /// `outcome`: only the report when the Mission ends; `milestones`: one status comment kept
+    /// current on the source issue (working, waiting, paused) plus the report; `all`: also on
+    /// every other linked issue.
     #[schema(title = "Automatic updates")]
     #[map(default = IssuePolicy::default().updates)]
     pub updates: IssueUpdates,
@@ -129,19 +131,22 @@ pub struct IssuePolicy {
     #[schema(title = "A question waits", format = "seconds")]
     #[map(default = IssuePolicy::default().reply_ttl_secs)]
     pub reply_ttl_secs: u64,
-    /// What a question nobody answers does.
+    /// `resume` tells the Agent nobody answered; `fail` fails the Mission; `wait` keeps waiting.
     #[schema(title = "When nobody answers")]
     #[map(default = IssuePolicy::default().on_timeout)]
     pub on_timeout: OnTimeout,
-    /// What a post that holds a secret does.
+    /// `refuse` refuses a post holding a secret; `redact` replaces it and posts the rest.
     #[schema(title = "When a post holds a secret")]
     #[map(default = IssuePolicy::default().on_secret)]
     pub on_secret: OnSecret,
-    /// Where links and images in Agent text may point.
+    /// `tracker`: links and images in Agent text only to the tracker's host and the Operation's
+    /// git remote host; `any`: every host.
     #[schema(title = "Links in Agent text")]
     #[map(default = IssuePolicy::default().links)]
     pub links: LinkHosts,
-    /// Whether an Agent creates issues itself.
+    /// `propose`: a person approves each creation, or a class authorisation `issue-create` one
+    /// from an unexposed Session with no findings; `direct`: the Agent creates at once;
+    /// `off`: Agents cannot ask.
     #[schema(title = "Creating issues")]
     #[map(default = IssuePolicy::default().create)]
     pub create: IssueCreate,
@@ -237,6 +242,30 @@ impl IssuePolicy {
     }
 }
 
+/// Whether `label` would start work: it looks like a ready label, or the Operation's instances
+/// take intake from it. `None` when the Operation's settings cannot be read.
+pub fn is_ready_label(
+    operation: Option<&crate::directorates::m::roster::Operation>,
+    label: &str,
+) -> bool {
+    let lower = label.to_lowercase();
+    lower.starts_with("ai6:ready")
+        || lower.starts_with("ai6-ready")
+        || operation.is_some_and(|operation| {
+            operation.sources.values().any(|instance| {
+                instance
+                    .get("labels")
+                    .and_then(toml::Value::as_array)
+                    .is_some_and(|labels| {
+                        labels
+                            .iter()
+                            .filter_map(toml::Value::as_str)
+                            .any(|named| named.eq_ignore_ascii_case(label))
+                    })
+            })
+        })
+}
+
 /// A Mission's progress on its issue, in the words the Operation's cover policy allows.
 ///
 /// `phase` is `working`, `waiting`, `paused`, `done` or `failed`.
@@ -270,9 +299,84 @@ pub fn compose_status(disclosure: Disclosure, phase: &str) -> String {
     }
 }
 
+/// A reference table of a settings struct, from its one declaration: each key's title,
+/// description and default.
+#[cfg(test)]
+pub(crate) fn schema_table<T: Schema + ToValue + Default>() -> String {
+    let json = |value: guatiao::Value| {
+        serde_json::to_value(guatiao_serde::Serializable::from(&value)).unwrap()
+    };
+    let schema = json(T::schema().unwrap());
+    let defaults = json(T::default().to_value().unwrap());
+    let shown = |value: Option<&serde_json::Value>| match value {
+        None | Some(serde_json::Value::Null) => "none".to_owned(),
+        Some(serde_json::Value::String(text)) => format!("`{text}`"),
+        Some(serde_json::Value::Array(list)) if list.is_empty() => "none".to_owned(),
+        Some(serde_json::Value::Object(map)) if map.is_empty() => "none".to_owned(),
+        Some(serde_json::Value::Object(map)) if map.values().all(serde_json::Value::is_null) => {
+            "none".to_owned()
+        }
+        Some(other) => format!("`{other}`"),
+    };
+    let mut table = String::from("| Key | Default | Meaning |\n| --- | --- | --- |\n");
+    for (key, field) in schema["properties"].as_object().unwrap() {
+        let description = field["description"]
+            .as_str()
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let title = field["title"].as_str().unwrap_or_default();
+        table.push_str(&format!(
+            "| `{key}` | {} | **{title}.** {description} |\n",
+            shown(defaults.get(key))
+        ));
+    }
+    table
+}
+
+/// Checks the table between `<!-- schema:NAME:begin -->` and its end in `docs/operations.md`, or
+/// writes it when `AI6_WRITE_SCHEMA_TABLES` is set.
+#[cfg(test)]
+pub(crate) fn check_schema_table(name: &str, table: &str) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/operations.md");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let (begin, end) = (
+        format!("<!-- schema:{name}:begin -->\n"),
+        format!("<!-- schema:{name}:end -->"),
+    );
+    let start = text.find(&begin).expect("the begin marker") + begin.len();
+    let stop = text.find(&end).expect("the end marker");
+    if std::env::var_os("AI6_WRITE_SCHEMA_TABLES").is_some() {
+        std::fs::write(&path, format!("{}{table}{}", &text[..start], &text[stop..])).unwrap();
+        return;
+    }
+    assert_eq!(
+        &text[start..stop],
+        table,
+        "the {name} table in docs/operations.md is not its struct's: run this test with \
+         AI6_WRITE_SCHEMA_TABLES=1"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_table_in_the_docs_is_the_structs() {
+        check_schema_table("issues", &schema_table::<IssuePolicy>());
+    }
+
+    #[test]
+    fn the_table_comes_from_the_declaration() {
+        let table = schema_table::<IssuePolicy>();
+        assert!(
+            table.contains("| `create` | `propose` | **Creating issues.** `propose`: a person"),
+            "{table}"
+        );
+        assert!(table.contains("| `posts_per_hour` | `6` |"), "{table}");
+    }
 
     fn resolve(text: &str) -> Result<IssuePolicy, String> {
         let policy: IssuePolicy = toml::from_str(text).map_err(|error| error.to_string())?;
