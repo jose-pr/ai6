@@ -20,11 +20,31 @@ fn walk(node: &Value, out: &mut String) {
                 .and_then(Value::as_str)
                 .unwrap_or("@someone"),
         ),
-        "inlineCard" => out.push_str(
+        "inlineCard" | "blockCard" | "embedCard" => out.push_str(
             node.pointer("/attrs/url")
                 .and_then(Value::as_str)
                 .unwrap_or_default(),
         ),
+        "emoji" => out.push_str(
+            node.pointer("/attrs/text")
+                .or_else(|| node.pointer("/attrs/shortName"))
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        ),
+        "status" => out.push_str(
+            node.pointer("/attrs/text")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        ),
+        "date" => {
+            if let Some(day) = node
+                .pointer("/attrs/timestamp")
+                .and_then(Value::as_str)
+                .and_then(utc_day)
+            {
+                out.push_str(&day);
+            }
+        }
         _ => {
             if kind == "listItem" {
                 out.push_str("- ");
@@ -48,6 +68,27 @@ fn walk(node: &Value, out: &mut String) {
             }
         }
     }
+}
+
+/// The UTC calendar day of a Unix time in milliseconds, which is how ADF stores a date.
+///
+/// The arithmetic is the `civil_from_days` algorithm of <https://howardhinnant.github.io/date_algorithms.html>.
+fn utc_day(millis: &str) -> Option<String> {
+    let shifted = millis.parse::<i64>().ok()?.div_euclid(86_400_000) + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    Some(format!("{year:04}-{month:02}-{day:02}"))
 }
 
 /// Wraps plain text as an ADF document with one paragraph per line.
@@ -88,6 +129,32 @@ mod tests {
             ]
         });
         assert_eq!(text(&doc), "It fails @sam\noften.\n- one");
+    }
+
+    #[test]
+    fn inline_atoms_keep_their_text() {
+        let doc = json!({
+            "type": "doc", "version": 1,
+            "content": [{ "type": "paragraph", "content": [
+                { "type": "emoji", "attrs": { "shortName": ":smile:", "text": "😄" } },
+                { "type": "text", "text": " " },
+                { "type": "emoji", "attrs": { "shortName": ":custom:" } },
+                { "type": "text", "text": " " },
+                { "type": "status", "attrs": { "text": "IN PROGRESS", "color": "blue" } },
+                { "type": "text", "text": " " },
+                { "type": "date", "attrs": { "timestamp": "1793491200000" } }
+            ]}]
+        });
+        assert_eq!(text(&doc), "😄 :custom: IN PROGRESS 2026-11-01");
+    }
+
+    #[test]
+    fn dates_are_utc_days() {
+        assert_eq!(utc_day("0").as_deref(), Some("1970-01-01"));
+        assert_eq!(utc_day("1793491200000").as_deref(), Some("2026-11-01"));
+        assert_eq!(utc_day("1709164800000").as_deref(), Some("2024-02-29"));
+        assert_eq!(utc_day("-86400000").as_deref(), Some("1969-12-31"));
+        assert_eq!(utc_day("soon"), None);
     }
 
     #[test]
