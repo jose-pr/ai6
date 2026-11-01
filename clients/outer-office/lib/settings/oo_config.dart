@@ -278,9 +278,14 @@ class ControlSettings {
 
 /// How much a page asks for, `OO.cfg`'s `[pages]` table.
 class PageSettings {
-  const PageSettings({this.timeline = 50, this.audit = 100, this.summary = 5});
+  const PageSettings({
+    this.timeline = 50,
+    this.audit = 100,
+    this.summary = 5,
+    this.search = 24,
+  });
 
-  static const keys = {'timeline', 'audit', 'summary'};
+  static const keys = {'timeline', 'audit', 'summary', 'search'};
 
   /// `timeline`: items in one page of an Operation's timeline.
   final int timeline;
@@ -290,6 +295,9 @@ class PageSettings {
 
   /// `summary`: items of recent activity an Operation's summary shows.
   final int summary;
+
+  /// `search`: results the top bar's search lists at once.
+  final int search;
 }
 
 /// The live terminal's pace, `OO.cfg`'s `[terminal]` table.
@@ -454,6 +462,7 @@ class OoLimits {
             whole(pagesTable, 'pages', 'timeline') ?? pageDefaults.timeline,
         audit: whole(pagesTable, 'pages', 'audit') ?? pageDefaults.audit,
         summary: whole(pagesTable, 'pages', 'summary') ?? pageDefaults.summary,
+        search: whole(pagesTable, 'pages', 'search') ?? pageDefaults.search,
       ),
       terminal: TerminalSettings(
         scrollbackLines:

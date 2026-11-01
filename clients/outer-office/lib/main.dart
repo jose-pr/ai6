@@ -3658,7 +3658,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           ) ??
           false);
 
-  /// The rail: every page this person's permissions open, in the kit's order.
+  /// Every page this person's permissions open; the shell puts them in the rail's groups.
   List<OoPage> _pages(MissionBoard board) => [
     OoPage.overview,
     OoPage.operations,
@@ -3962,7 +3962,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           builder: (context, _) => OoSearch(
             board: widget.board,
             pages: pages,
-            onOpen: _open,
+            onOpen: _openRoute,
             expanded: expanded,
           ),
         ),

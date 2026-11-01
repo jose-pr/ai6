@@ -296,10 +296,15 @@ class OoSearch extends StatefulWidget {
 
   final MissionBoard board;
   final List<OoPage> pages;
-  final ValueChanged<OoPage> onOpen;
+
+  /// Opens what a result names.
+  final ValueChanged<OoRoute> onOpen;
   final bool expanded;
 
   static const hint = 'Search operations, missions, sessions, stations…';
+
+  /// What the search covers, for the button that stands in for its field.
+  static const tooltip = 'Search Operations, Missions, Sessions and Stations';
 
   @override
   State<OoSearch> createState() => _OoSearchState();
@@ -339,8 +344,8 @@ class _OoSearchState extends State<OoSearch> {
     return true;
   }
 
-  /// Everything searchable, as (icon, title, detail, page).
-  List<(OoIconName, String, String, OoPage)> _entries() => [
+  /// Everything searchable, as (icon, title, detail, route).
+  List<(OoIconName, String, String, OoRoute)> _entries() => [
     for (final operation
         in widget.board.userSession?.operations ??
             const <UserOperationAccess>[])
@@ -348,28 +353,34 @@ class _OoSearchState extends State<OoSearch> {
         OoIconName.operations,
         'Operation ${operation.operationId}',
         'Operation',
-        OoPage.operations,
+        _route(OoPage.operations, {'operation_id': operation.operationId}),
       ),
     for (final mission in groupMissions(widget.board.sessions))
       (
         OoIconName.missions,
         'Mission ${mission.missionId}',
         'Operation ${mission.operationId} · ${mission.state}',
-        OoPage.missions,
+        _route(OoPage.missions, {
+          'operation_id': mission.operationId,
+          'mission_id': mission.missionId,
+        }),
       ),
     for (final session in widget.board.sessions)
       (
         OoIconName.sessions,
         'Session ${session.sessionId}',
         'Mission ${session.missionId} · ${session.state ?? 'working'}',
-        OoPage.sessions,
+        _route(OoPage.sessions, {
+          'operation_id': session.operationId,
+          'session_id': session.sessionId,
+        }),
       ),
     for (final station in widget.board.stationBoard.stations)
       (
         OoIconName.stations,
         'Station ${station.stationId}',
         station.healthy ? 'online' : 'dark',
-        OoPage.stations,
+        _route(OoPage.stations, {'station_id': station.stationId}),
       ),
   ];
 
@@ -419,21 +430,22 @@ class _OoSearchState extends State<OoSearch> {
               ),
             )
           : IconButton(
-              tooltip: 'Search',
+              tooltip: OoSearch.tooltip,
               onPressed: controller.openView,
               icon: const OoIcon(OoIconName.search),
             ),
       suggestionsBuilder: (context, controller) {
         final query = controller.text.trim().toLowerCase();
-        final matches = _entries()
+        final found = _entries()
             .where(
               (entry) =>
-                  widget.pages.contains(entry.$4) &&
+                  widget.pages.contains(entry.$4.page) &&
                   (query.isEmpty ||
                       '${entry.$2} ${entry.$3}'.toLowerCase().contains(query)),
             )
-            .take(24)
             .toList();
+        final limit = widget.board.limits.pages.search;
+        final matches = found.take(limit).toList();
         if (matches.isEmpty) {
           return [
             ListTile(
@@ -449,11 +461,13 @@ class _OoSearchState extends State<OoSearch> {
           ListTile(
             dense: true,
             title: Text(
-              'Results in the loaded board',
+              found.length > limit
+                  ? 'First $limit of ${found.length} results in the loaded board'
+                  : 'Results in the loaded board',
               style: TextStyle(color: tokens.muted),
             ),
           ),
-          for (final (icon, title, detail, page) in matches)
+          for (final (icon, title, detail, route) in matches)
             ListTile(
               leading: IconTheme.merge(
                 data: IconThemeData(color: tokens.accent, size: 20),
@@ -463,7 +477,7 @@ class _OoSearchState extends State<OoSearch> {
               subtitle: Text(detail, style: TextStyle(color: tokens.muted)),
               onTap: () {
                 controller.closeView(null);
-                widget.onOpen(page);
+                widget.onOpen(route);
               },
             ),
         ];
@@ -514,7 +528,7 @@ class UserChip extends StatelessWidget {
             ),
     );
     return Tooltip(
-      message: 'Operator account and preferences',
+      message: 'Your account and sign-out',
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(24),

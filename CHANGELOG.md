@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Outer Office's rail is organised by what a person is asking: Work, People and policy, Machines
+  and Record, each group shown only when the person may see something in it. Narrow windows get
+  icons with labels on hover, a phone a bottom bar with **More**. A search result opens what it
+  names, not just its page, and `[pages] search` says how many it lists.
 - Outer Office asks less of a slow link. The board reads what the page shown displays every three
   seconds, what only the bell and search need every `[refresh] slow`, and the person's profile
   every `[refresh] profile` (60 s), instead of everything every three seconds; while the tab cannot

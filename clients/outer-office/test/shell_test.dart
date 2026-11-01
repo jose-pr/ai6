@@ -2,12 +2,7 @@ import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart'
-    show
-        DataTable,
-        NavigationDrawer,
-        NavigationDrawerDestination,
-        NavigationRail,
-        NavigationRailLabelType;
+    show DataTable, NavigationDrawer, NavigationDrawerDestination;
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/shell/oo_shell.dart';
@@ -73,7 +68,6 @@ void main() {
   ) async {
     await demoAt(tester, const Size(1400, 900));
     expect(tester.widget<OoRail>(find.byType(OoRail)).extended, isTrue);
-    expect(find.byType(NavigationRail), findsNothing);
     expect(tester.getSize(find.byType(OoRail)).width, 226);
     for (final page in railPages) {
       expect(navLabel(page), findsOneWidget, reason: page);
@@ -81,13 +75,17 @@ void main() {
     expect(find.byTooltip('Open navigation menu'), findsNothing);
   });
 
-  testWidgets('a middle-width window has the compact rail', (tester) async {
+  testWidgets('a middle-width window has the icon rail, labels on hover', (
+    tester,
+  ) async {
     await demoAt(tester, const Size(1000, 800));
-    final rail = tester.widget<NavigationRail>(find.byType(NavigationRail));
+    final rail = tester.widget<OoRail>(find.byType(OoRail));
     expect(rail.extended, isFalse);
-    expect(rail.labelType, NavigationRailLabelType.all);
-    expect(rail.destinations, hasLength(12));
-    expect(tester.getSize(find.byType(NavigationRail)).width, lessThan(226));
+    expect(rail.pages, hasLength(12));
+    expect(tester.getSize(find.byType(OoRail)).width, OoRail.compactWidth);
+    for (final page in railPages) {
+      expect(navLabel(page), findsOneWidget, reason: page);
+    }
     await openPage(tester, 'Audit');
     expect(
       find.text('operator-007 · mission.create.requested'),
@@ -99,7 +97,7 @@ void main() {
     tester,
   ) async {
     await demoAt(tester, const Size(800, 1600));
-    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byType(OoRail), findsNothing);
     expect(find.byTooltip('Open navigation menu'), findsOneWidget);
     await tester.tap(find.byTooltip('Open navigation menu'));
     await tester.pumpAndSettle();

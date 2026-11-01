@@ -416,8 +416,8 @@ void main() {
 
     for (final (size, entry) in [
       (const Size(1440, 900), 'Settings'),
-      (const Size(1440, 900), 'Operator account and preferences'),
-      (const Size(390, 844), 'Operator account and preferences'),
+      (const Size(1440, 900), 'Your account and sign-out'),
+      (const Size(390, 844), 'Your account and sign-out'),
     ]) {
       for (final scale in [1.0, 2.0]) {
         testWidgets('opens from "$entry" at ${size.width.toInt()} px, '

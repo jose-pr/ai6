@@ -1399,7 +1399,7 @@ void main() {
       OuterOfficeApp(board: board, desktopWindows: false),
     );
     expect(find.text('O'), findsOneWidget);
-    await tester.tap(find.byTooltip('Operator account and preferences'));
+    await tester.tap(find.byTooltip('Your account and sign-out'));
     await tester.pumpAndSettle();
 
     expect(find.text('Person ID: operator-007'), findsOneWidget);

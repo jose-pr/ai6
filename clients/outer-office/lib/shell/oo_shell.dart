@@ -34,6 +34,43 @@ enum OoPage {
   Widget get icon => OoIcon(iconName);
 }
 
+/// The rail's groups, by what a person is asking, each with its pages in rail order. A group
+/// the person may see nothing of is not shown.
+enum OoRailGroup {
+  work('Work', [
+    OoPage.overview,
+    OoPage.missions,
+    OoPage.sessions,
+    OoPage.greenInk,
+    OoPage.briefings,
+  ]),
+  peopleAndPolicy('People and policy', [
+    OoPage.operations,
+    OoPage.agents,
+    OoPage.roster,
+    OoPage.pools,
+    OoPage.access,
+  ]),
+  machines('Machines', [OoPage.stations]),
+  record('Record', [OoPage.timeline, OoPage.audit]);
+
+  const OoRailGroup(this.label, this.pages);
+
+  final String label;
+  final List<OoPage> pages;
+
+  /// The groups [allowed] leaves something in, each with only those pages.
+  static List<(OoRailGroup, List<OoPage>)> of(Iterable<OoPage> allowed) => [
+    for (final group in values)
+      if (group.pages.where(allowed.contains).toList() case final pages
+          when pages.isNotEmpty)
+        (group, pages),
+  ];
+}
+
+/// How many pages a phone's bottom bar holds besides **More**.
+const _phoneBarPages = 4;
+
 /// Window widths at which the layout changes, in logical pixels.
 abstract final class OoBreakpoints {
   /// From here: the labelled rail and the board, with room for a panel beside it.
@@ -51,9 +88,9 @@ abstract final class OoBreakpoints {
 ///
 /// The top bar holds the wordmark, the [search] field (an icon below
 /// [OoBreakpoints.wide]) and [actions]. At [OoBreakpoints.wide] and wider the rail is
-/// 226 px with labels beside the icons; down to [OoBreakpoints.compact] it is compact,
-/// labels below the icons; narrower, the rail is a modal drawer behind a menu button, since
-/// twelve entries do not fit a bottom bar.
+/// 226 px with labels beside the icons, in groups; down to [OoBreakpoints.compact] it is icons
+/// with labels on hover; narrower, a modal drawer behind a menu button; on a phone the first
+/// pages sit in a bottom bar and **More** opens the drawer.
 class OoShell extends StatelessWidget {
   const OoShell({
     required this.pages,
@@ -82,7 +119,9 @@ class OoShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final selected = pages.indexOf(page);
+    final groups = OoRailGroup.of(pages);
+    final ordered = [for (final (_, pages) in groups) ...pages];
+    final selected = ordered.indexOf(page);
     final wide = width >= OoBreakpoints.wide;
     final phone = width < OoBreakpoints.phone;
     final tokens = OoTokens.of(context);
@@ -94,22 +133,32 @@ class OoShell extends StatelessWidget {
                 selectedIndex: selected < 0 ? null : selected,
                 onDestinationSelected: (index) {
                   Scaffold.of(context).closeDrawer();
-                  onSelect(pages[index]);
+                  onSelect(ordered[index]);
                 },
                 children: [
                   const _DrawerHeading(),
-                  for (final page in pages)
-                    NavigationDrawerDestination(
-                      icon: OoTile(page.iconName, size: 38),
-                      label: Text(page.label),
+                  for (final (group, pages) in groups) ...[
+                    _GroupLabel(
+                      group.label,
+                      padding: const EdgeInsets.fromLTRB(28, 14, 16, 8),
                     ),
+                    for (final page in pages)
+                      NavigationDrawerDestination(
+                        icon: OoTile(page.iconName, size: 38),
+                        label: Text(page.label),
+                      ),
+                  ],
                 ],
               ),
             )
           : null,
+      bottomNavigationBar: phone && ordered.isNotEmpty
+          ? _PhoneBar(pages: ordered, page: page, onSelect: onSelect)
+          : null,
       appBar: AppBar(
+        automaticallyImplyLeading: !phone,
         toolbarHeight: phone ? 60 : 68,
-        titleSpacing: phone ? 4 : 20,
+        titleSpacing: phone ? 16 : 20,
         title: Row(
           children: [
             if (wide)
@@ -153,10 +202,10 @@ class OoShell extends StatelessWidget {
         children: [
           if (width >= OoBreakpoints.compact) ...[
             OoRail(
-              pages: pages,
+              pages: ordered,
               selected: selected,
               extended: wide,
-              onSelect: (index) => onSelect(pages[index]),
+              onSelect: (index) => onSelect(ordered[index]),
             ),
             const VerticalDivider(width: 1),
           ],
@@ -167,8 +216,44 @@ class OoShell extends StatelessWidget {
   }
 }
 
-/// The rail of pages beside the board: [width] wide with labels beside the icons when
-/// [extended], else a compact [NavigationRail] with labels below them.
+/// A phone's bottom bar: the first pages the person may open and, when there are more,
+/// **More**, which opens the drawer with all of them and stands selected for a page not here.
+class _PhoneBar extends StatelessWidget {
+  const _PhoneBar({
+    required this.pages,
+    required this.page,
+    required this.onSelect,
+  });
+
+  final List<OoPage> pages;
+  final OoPage page;
+  final ValueChanged<OoPage> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final more = pages.length > _phoneBarPages + 1;
+    final shown = more ? pages.take(_phoneBarPages).toList() : pages;
+    final at = shown.indexOf(page);
+    return NavigationBar(
+      height: 64,
+      selectedIndex: at >= 0 ? at : (more ? shown.length : 0),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      onDestinationSelected: (index) => index < shown.length
+          ? onSelect(shown[index])
+          : Scaffold.of(context).openDrawer(),
+      destinations: [
+        for (final page in shown)
+          NavigationDestination(icon: page.icon, label: page.label),
+        if (more)
+          const NavigationDestination(icon: Icon(Icons.menu), label: 'More'),
+      ],
+    );
+  }
+}
+
+/// The rail of pages beside the board, in [OoRailGroup]s: [width] wide with labels beside the
+/// icons when [extended], else [compactWidth] wide with icons alone and each label on hover.
+/// Each entry takes the keyboard's focus in turn, and says its label to a screen reader.
 class OoRail extends StatelessWidget {
   const OoRail({
     required this.pages,
@@ -181,6 +266,9 @@ class OoRail extends StatelessWidget {
   /// The labelled rail's width, in logical pixels.
   static const double width = 226;
 
+  /// The icon rail's width, in logical pixels.
+  static const double compactWidth = 72;
+
   final List<OoPage> pages;
 
   /// The index of the current page in [pages], or -1.
@@ -190,33 +278,141 @@ class OoRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!extended) {
-      return NavigationRail(
-        selectedIndex: selected < 0 ? null : selected,
-        onDestinationSelected: onSelect,
-        scrollable: true,
-        labelType: NavigationRailLabelType.all,
-        destinations: [
-          for (final page in pages)
-            NavigationRailDestination(icon: page.icon, label: Text(page.label)),
-        ],
-      );
+    final tokens = OoTokens.of(context);
+    final groups = OoRailGroup.of(pages);
+    Widget entry(OoPage page) {
+      final index = pages.indexOf(page);
+      return extended
+          ? _RailEntry(
+              page: page,
+              selected: index == selected,
+              onTap: () => onSelect(index),
+            )
+          : _IconRailEntry(
+              page: page,
+              selected: index == selected,
+              onTap: () => onSelect(index),
+            );
     }
+
     return Material(
-      color: OoTokens.of(context).surface,
+      color: tokens.surface,
       child: SizedBox(
-        width: width,
+        width: extended ? width : compactWidth,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+          padding: extended
+              ? const EdgeInsets.fromLTRB(12, 4, 12, 16)
+              : const EdgeInsets.fromLTRB(10, 8, 10, 16),
           children: [
-            const _RailHeading(),
-            for (final (index, page) in pages.indexed)
-              _RailEntry(
-                page: page,
-                selected: index == selected,
-                onTap: () => onSelect(index),
-              ),
+            for (final (index, (group, pages)) in groups.indexed) ...[
+              if (extended)
+                _GroupLabel(group.label)
+              else if (index > 0)
+                Semantics(
+                  label: group.label,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Divider(height: 1, color: tokens.border),
+                  ),
+                ),
+              for (final page in pages) entry(page),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A group's quiet heading in the rail or the drawer.
+class _GroupLabel extends StatelessWidget {
+  const _GroupLabel(
+    this.text, {
+    this.padding = const EdgeInsets.fromLTRB(14, 14, 14, 6),
+  });
+
+  final String text;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: padding,
+    child: Semantics(
+      header: true,
+      child: Text(
+        text.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: OoTokens.of(context).muted,
+          letterSpacing: 1.1,
+          fontSize: 11,
+        ),
+      ),
+    ),
+  );
+}
+
+/// One entry of the icon rail: its label on hover and to a screen reader, and the selected
+/// highlight of the labelled rail.
+class _IconRailEntry extends StatelessWidget {
+  const _IconRailEntry({
+    required this.page,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final OoPage page;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = OoTokens.of(context);
+    final radius = BorderRadius.circular(10);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Tooltip(
+        message: page.label,
+        preferBelow: false,
+        waitDuration: Duration.zero,
+        excludeFromSemantics: true,
+        child: Semantics(
+          button: true,
+          selected: selected,
+          label: page.label,
+          child: DecoratedBox(
+            decoration: selected
+                ? BoxDecoration(
+                    borderRadius: radius,
+                    color: tokens.selectedFill,
+                    border: Border.all(
+                      color: tokens.accent.withValues(alpha: 0.7),
+                    ),
+                    boxShadow: tokens.glow(tokens.accent, radius: 10),
+                  )
+                : const BoxDecoration(),
+            child: Material(
+              type: MaterialType.transparency,
+              borderRadius: radius,
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                key: ValueKey('rail-${page.id}'),
+                onTap: onTap,
+                focusColor: tokens.accent.withValues(alpha: 0.3),
+                child: SizedBox(
+                  height: 48,
+                  child: Center(
+                    child: IconTheme.merge(
+                      data: IconThemeData(
+                        color: selected ? tokens.accent : tokens.muted,
+                        size: 22,
+                      ),
+                      child: page.icon,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -266,11 +462,13 @@ class _RailEntry extends StatelessWidget {
             borderRadius: radius,
             clipBehavior: Clip.antiAlias,
             child: InkWell(
+              key: ValueKey('rail-${page.id}'),
               onTap: onTap,
+              focusColor: tokens.accent.withValues(alpha: 0.3),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
-                  vertical: 12,
+                  vertical: 10,
                 ),
                 child: Row(
                   children: [
@@ -299,19 +497,6 @@ class _RailEntry extends StatelessWidget {
       ),
     );
   }
-}
-
-class _RailHeading extends StatelessWidget {
-  const _RailHeading();
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-    child: Text(
-      'COMMAND CENTER',
-      style: ooSectionLabel(context).copyWith(fontSize: 11.5),
-    ),
-  );
 }
 
 /// The menu drawer's heading: the app's mark and the wordmark.

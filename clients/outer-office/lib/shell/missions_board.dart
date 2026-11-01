@@ -364,12 +364,12 @@ class MissionCard extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.only(left: 27, bottom: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 12,
               children: [
-                Expanded(
-                  child: MissionFacts(mission: mission, board: board),
-                ),
+                MissionFacts(mission: mission, board: board),
                 if (onDetails case final onDetails?)
                   TextButton(
                     focusNode: detailsFocus,
@@ -583,6 +583,29 @@ class _SessionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = session.state ?? 'working';
     final tokens = OoTokens.of(context);
+    final marks = Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      children: [
+        if (session.exposure.isNotEmpty)
+          Tooltip(
+            message: 'Read untrusted input: ${session.exposure.join(', ')}',
+            child: const Chip(
+              label: Text('EXPOSED'),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        Chip(
+          label: Text(
+            [
+              state,
+              ?session.reason?.replaceAll('-', ' '),
+            ].join(' · ').toUpperCase(),
+          ),
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
     return Container(
       margin: const EdgeInsets.only(top: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -599,39 +622,31 @@ class _SessionRow extends StatelessWidget {
             OoStateMark(state, reason: session.reason),
             const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              // The state chips stay beside the ID when there is room and go under it when not.
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
                 children: [
-                  Text(
-                    session.sessionId,
-                    style: const TextStyle(fontFamily: 'monospace'),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        session.sessionId,
+                        style: const TextStyle(fontFamily: 'monospace'),
+                      ),
+                      Text(
+                        'Updated at event ${session.sequence}',
+                        style: Theme.of(context).textTheme.labelSmall
+                            ?.copyWith(color: tokens.muted),
+                      ),
+                    ],
                   ),
-                  Text(
-                    'Updated at event ${session.sequence}',
-                    style: Theme.of(context).textTheme.labelSmall
-                        ?.copyWith(color: tokens.muted),
-                  ),
+                  marks,
                 ],
               ),
-            ),
-            if (session.exposure.isNotEmpty) ...[
-              Tooltip(
-                message: 'Read untrusted input: ${session.exposure.join(', ')}',
-                child: const Chip(
-                  label: Text('EXPOSED'),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-              const SizedBox(width: 6),
-            ],
-            Chip(
-              label: Text(
-                [
-                  state,
-                  ?session.reason?.replaceAll('-', ' '),
-                ].join(' · ').toUpperCase(),
-              ),
-              visualDensity: VisualDensity.compact,
             ),
             if (desktopWindows) ...[
               const SizedBox(width: 8),

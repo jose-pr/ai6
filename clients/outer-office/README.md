@@ -77,8 +77,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   state; Sessions: every Session in a table sorted by any column (a list on a phone).
 - The top bar: the OO wordmark, search across the Operations, Missions, Sessions and
   Stations on the board (Ctrl+K, or ⌘K on macOS, opens it unless the key would type a
-  character into a text field; results say they are "in the loaded board" and a miss says
-  "No matches in the loaded board"), **Ask Moneypenny**, the bell **Needs attention** (a
+  character into a text field; results say they are "in the loaded board", each opens what it
+  names, and a miss says "No matches in the loaded board"), **Ask Moneypenny**, the bell **Needs attention** (a
   count of the items above, derived and never stored, with no unread state; its menu opens
   each item's page and, under **Your requests**, lists the controls you asked for that are
   not yet applied or refused, offering **Check again** on an outcome unknown), a **Demo
@@ -290,13 +290,16 @@ pages and may load what they need.
 
 ## Layout
 
-A top bar, a rail of pages (Overview, Operations, Missions, Sessions, Agents, Stations,
-Green Ink, Briefings, Roster, Account Pools, Timeline, Audit, Access; each shown only with its
-permission) and the page, Overview after sign-in. From 1200 px wide the rail has labels
-beside its icons, from 900 px labels below them, and narrower it opens from a menu button,
-one view at a time, its pages as rows with icon tiles. Below 600 px (a phone) the top bar
-keeps the page title, search, Moneypenny, the bell and the person's initials; Overview is
-one column, tables are lists, and Moneypenny's chat fills the screen.
+A top bar, a rail of pages and the page, Overview after sign-in. The rail groups its pages by
+what a person is asking: **Work** (Overview, Missions, Sessions, Green Ink, Briefings), **People
+and policy** (Operations, Agents, Roster, Account Pools, Access), **Machines** (Stations) and
+**Record** (Timeline, Audit). A page shows only with its permission, and a group with no page
+left does not show. From 1200 px wide the rail has labels beside its icons; from 900 px it is
+icons with each label on hover, the groups set apart by a line; narrower it opens from a menu
+button, one view at a time, its pages as rows with icon tiles. Below 600 px (a phone) the first
+pages sit in a bottom bar, **More** opens the same drawer, and the top bar keeps the page title,
+search, Moneypenny, the bell and the person's initials; Overview is one column, tables are
+lists, and Moneypenny's chat fills the screen.
 
 How often each page asks again (`[refresh]`), how a Mission control is followed
 (`[controls]`), how much the timeline and audit log ask for (`[pages]`), the live terminal's

@@ -78,10 +78,9 @@ void main() {
       findsOneWidget,
     );
     for (final tooltip in [
-      'Open navigation menu',
-      'Search',
+      OoSearch.tooltip,
       'Needs attention: 5',
-      'Operator account and preferences',
+      'Your account and sign-out',
     ]) {
       expect(find.byTooltip(tooltip), findsOneWidget, reason: tooltip);
     }
@@ -101,12 +100,21 @@ void main() {
     };
     expect(lefts, hasLength(1));
 
-    await tester.tap(find.byTooltip('Open navigation menu'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('More'),
+      ),
+    );
     await tester.pumpAndSettle();
     final drawer = find.byType(NavigationDrawer);
     expect(
-      find.descendant(of: drawer, matching: find.byType(OoTile)),
-      findsNWidgets(12),
+      tester
+          .widget<NavigationDrawer>(drawer)
+          .children
+          .whereType<NavigationDrawerDestination>()
+          .where((entry) => entry.icon is OoTile),
+      hasLength(12),
     );
     await tester.tap(
       find.descendant(of: drawer, matching: find.text('Sessions')),
@@ -146,7 +154,9 @@ void main() {
     expect(find.text('Session preview-session-007'), findsNothing);
     await tester.tap(find.text('Station station-remote-02'));
     await tester.pumpAndSettle();
-    expect(find.text('station-control-01'), findsOneWidget);
+    // It opens that Station, not just the page of Stations.
+    expect(find.text('station-remote-02'), findsWidgets);
+    expect(find.text('station-control-01'), findsNothing);
   });
 
   testWidgets('the user chip shows initials, name and directory group', (
