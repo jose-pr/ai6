@@ -1930,7 +1930,7 @@ mod tests {
             permitted,
             own,
             body: format!("text of {id}"),
-            created: "2026-10-05T10:00:00Z".to_owned(),
+            created: "2099-10-05T10:00:00Z".to_owned(),
         };
         OWN_REPLIES.lock().unwrap().extend([
             reply("r1", true, false),

@@ -977,14 +977,48 @@ pub(crate) async fn reject(
     Path((operation_id, id)): Path<(String, String)>,
     request: Option<Json<RejectRequest>>,
 ) -> Result<Json<IssueProposal>, ApiError> {
-    let _reason = request
+    let reason = request
         .map(|Json(request)| request)
         .unwrap_or_default()
-        .reason;
+        .reason
+        .map(|reason| reason.trim().to_owned())
+        .filter(|reason| !reason.is_empty());
+    if let Some(reason) = &reason
+        && (!gateway
+            .config
+            .unex()
+            .text
+            .held_reason_chars
+            .allows(reason.chars().count())
+            || reason
+                .chars()
+                .any(|character| character.is_control() && character != '\n'))
+    {
+        return Err(ApiError::bad_request());
+    }
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "issue.create").await?;
     proposal_of(&registry, &operation, &id).await?;
-    decide(&registry, &person, &operation, &id, false, false).await
+    let decided = decide(&registry, &person, &operation, &id, false, false).await?;
+    if let Some(reason) = reason {
+        let event = TimelineEvent::new(
+            "issue",
+            "proposal_rejected",
+            operation.to_string(),
+            unix_timestamp()?,
+        )
+        .mission(decided.mission_id.clone())
+        .actor(format!("person:{}", person.id))
+        .detail("proposal", id)
+        .detail("reason", reason);
+        let store = registry.clone();
+        blocking(move || {
+            let _ = store.record_event(&event);
+            Ok(())
+        })
+        .await?;
+    }
+    Ok(decided)
 }
 
 async fn decide(

@@ -558,6 +558,45 @@ async fn a_proposal_is_listed_decided_once_and_mark_ready_needs_mission_create()
 }
 
 #[tokio::test]
+async fn a_rejections_reason_goes_on_the_timeline_and_not_in_audit() {
+    let served = served_with(ROLES).await;
+    let id = pending_proposal(&served, "G");
+    let path = format!("G/issue-proposals/{id}/reject");
+    let control = call(
+        &served,
+        &served.operator,
+        Method::POST,
+        &path,
+        Some(json!({"reason": "a\u{0}b"})),
+    )
+    .await;
+    assert_eq!(control.status(), 400);
+    let rejected = call(
+        &served,
+        &served.operator,
+        Method::POST,
+        &path,
+        Some(json!({"reason": "Not this quarter."})),
+    )
+    .await;
+    assert_eq!(rejected.status(), 200);
+    let events = served.registry.timeline_events("G").unwrap();
+    let event = events
+        .iter()
+        .find(|event| event.action == "proposal_rejected")
+        .expect("the reason is recorded");
+    assert!(format!("{event:?}").contains("Not this quarter."));
+    assert!(
+        !served
+            .registry
+            .audit_records()
+            .unwrap()
+            .iter()
+            .any(|record| record.target.contains("Not this quarter."))
+    );
+}
+
+#[tokio::test]
 async fn approving_with_mark_ready_records_it_for_a_person_who_may() {
     let served = served_with(ROLES_READY).await;
     let id = pending_proposal(&served, "G");
