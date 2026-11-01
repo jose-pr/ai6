@@ -174,6 +174,9 @@ pub struct PublisherLimits {
     /// Seconds Universal Exports holds a control poll open; kept under `request_timeout`.
     /// Default 1.
     pub control_wait: Seconds,
+    /// Seconds Universal Exports holds an input poll open; a keystroke ends it at once, so
+    /// a long wait costs no delay. The gateway's `max_poll_wait` bounds it. Default 20.
+    pub input_wait: Seconds,
     /// Mission controls queued for the scheduler. Default 16.
     pub control_queue: usize,
     /// Times the outcome of a control is reported. Default 3.
@@ -189,6 +192,7 @@ impl Default for PublisherLimits {
             pre_bind_terminal_bytes: Limit::at(MIB),
             input_retry_delay: Seconds(std::time::Duration::from_millis(100)),
             control_wait: Seconds::new(1),
+            input_wait: Seconds::new(20),
             control_queue: 16,
             control_report_attempts: 3,
         }

@@ -1182,6 +1182,14 @@ impl Gateway {
         self.input_rx.lock().await.recv().await
     }
 
+    /// Waits at most `wait` for the next input; `None` when none came.
+    pub async fn receive_agent_input_within(&self, wait: Duration) -> Option<AgentInput> {
+        tokio::time::timeout(wait, self.receive_agent_input())
+            .await
+            .ok()
+            .flatten()
+    }
+
     /// Returns the configured public HTTPS origin for same-origin checks.
     pub fn public_origin(&self) -> &str {
         self.config.public_origin()
@@ -3812,15 +3820,33 @@ async fn exchange_attach_token(
     Ok(response)
 }
 
+/// How long an input poll is held: `wait_ms`, else the `controls` table's wait.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InputPoll {
+    wait_ms: Option<u64>,
+}
+
 async fn next_agent_input(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
+    Query(poll): Query<InputPoll>,
 ) -> Result<Response, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
-    let input = gateway
-        .receive_agent_input()
-        .await
-        .ok_or_else(ApiError::internal)?;
+    let table = &gateway.config.unex().controls;
+    let wait = poll
+        .wait_ms
+        .map_or(table.poll_wait.0, Duration::from_millis);
+    let wait = table
+        .max_poll_wait
+        .get()
+        .map_or(wait, |most| wait.min(most));
+    let Some(input) = gateway.receive_agent_input_within(wait).await else {
+        return Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .body(Body::empty())
+            .map_err(|_| ApiError::internal());
+    };
     let mut response = Response::new(Body::from(input.frame));
     *response.status_mut() = StatusCode::OK;
     response.headers_mut().insert(
@@ -6817,6 +6843,13 @@ mod tests {
             }
         }
         assert!(gateway.receive_agent_input().await.is_some());
+        assert!(
+            gateway
+                .receive_agent_input_within(Duration::from_millis(10))
+                .await
+                .is_none(),
+            "an idle poll ends with nothing instead of waiting for ever"
+        );
         gateway.disconnect(writer).await;
     }
 }

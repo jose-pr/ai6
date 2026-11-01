@@ -262,7 +262,7 @@ impl Publisher {
                     worker_error,
                 )
             })?;
-        let input_agent = gateway_agent(&tls, limits.request_timeout.0);
+        let input_agent = gateway_agent(&tls, limits.request_timeout.0 + limits.input_wait.0);
         let input_running = running.clone();
         let input_targets_for_worker = input_targets.clone();
         let input_limits = limits.clone();
@@ -761,9 +761,12 @@ fn receive_inputs(
     running: Arc<AtomicBool>,
     targets: Arc<Mutex<BTreeMap<SessionId, InputTargetRegistration>>>,
 ) {
-    let Ok(endpoint) = origin.join("v1/station/inputs/next") else {
+    let Ok(mut endpoint) = origin.join("v1/station/inputs/next") else {
         return;
     };
+    endpoint
+        .query_pairs_mut()
+        .append_pair("wait_ms", &limits.input_wait.0.as_millis().to_string());
     while running.load(Ordering::Acquire) {
         let response = agent
             .get(endpoint.as_str())
@@ -773,6 +776,10 @@ fn receive_inputs(
             thread::sleep(limits.input_retry_delay.0);
             continue;
         };
+        // The gateway held the poll for its wait and nothing came.
+        if response.status() == 204 {
+            continue;
+        }
         if response.status() != 200 {
             thread::sleep(limits.input_retry_delay.0);
             continue;
@@ -1263,7 +1270,7 @@ mod tests {
                     .nth(1)
                     .unwrap_or_default()
                     .to_owned();
-                let response = if path == "/v1/station/inputs/next" {
+                let response = if path.starts_with("/v1/station/inputs/next") {
                     received_input_poll = true;
                     "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 } else {
@@ -1535,7 +1542,8 @@ mod tests {
                         .write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{\"next_sequence\":41}")
                         .unwrap();
                     gateway_ready.store(true, Ordering::Release);
-                } else if path == "/v1/station/inputs/next" && gateway_ready.load(Ordering::Acquire)
+                } else if path == "/v1/station/inputs/next?wait_ms=20000"
+                    && gateway_ready.load(Ordering::Acquire)
                 {
                     assert!(headers.contains("Bearer test-token"));
                     let (frame, operation_id) = &frames[input_index];

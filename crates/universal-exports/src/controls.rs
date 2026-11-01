@@ -998,6 +998,23 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn an_idle_input_poll_is_held_and_answers_no_content() {
+        let served = served().await;
+        let started = std::time::Instant::now();
+        let response = reqwest::Client::new()
+            .get(format!(
+                "{}/v1/station/inputs/next?wait_ms=200",
+                served.base
+            ))
+            .bearer_auth(STATION_TOKEN)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(started.elapsed() >= Duration::from_millis(200));
+    }
+
+    #[tokio::test]
     async fn controls_need_mission_control_and_stay_in_their_operation() {
         let served = served().await;
         let cancel = serde_json::json!({"action": "cancel", "idempotency_key": "k"});
