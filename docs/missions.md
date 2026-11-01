@@ -591,8 +591,9 @@ issue's author or reporter, a GitHub owner, member or collaborator, a Jira assig
 login in the instance's `reply_authors`; AI6's own comments are skipped and any other author is
 a timeline event naming them, never their text. The Station that holds the Mission delivers a
 permitted reply as untrusted text in the same fence as an issue's body: a message to a live
-Session, a resume of one that ended its turn while it waited, nothing to a Mission that is not
-running. The Session is marked exposed (`issue:TRACKER`), which a later attempt inherits. One
+Session, a resume of one that ended its turn while it waited. A stalled, parked or quarantined
+Mission keeps the reply until it goes on; a queued or finished one is not told. The Session is
+marked exposed (`issue:TRACKER`), which a later attempt inherits. One
 question per issue may be open. Nobody answering within `reply_ttl_secs` (3 days) resumes the
 Agent told so (`on_timeout = "resume"`), fails the Mission (`"fail"`) or keeps waiting
 (`"wait"`); an operator who resumes or stops the Mission withdraws the question.
@@ -621,7 +622,8 @@ A title equal to an open linked issue, or to one AI6 created in the Operation in
 is a finding `duplicate`, which stops a class authorisation and never a person.
 
 The Headquarters Station then creates what was approved through the outbox, ties each new issue
-to the Mission, and the Agent is told the outcome with the new keys. A created issue never starts
+to the Mission, and the Agent is told the outcome with the new keys, as soon as a Session of the
+Mission can hear it. A created issue never starts
 work: every intake label of the Operation's instances is stripped, and an Agent cannot add one
 later. The person who approves may tick **mark ready** (which needs `mission.create` too): the
 Headquarters Station then adds the labels in that person's name (audit `issue.ready`), and intake,
