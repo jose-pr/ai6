@@ -92,6 +92,8 @@ pub(crate) struct Conversation {
     pub(crate) live: bool,
     /// When a Station last reported on the conversation, Unix seconds.
     pub(crate) heard_at: f64,
+    /// The person stopped the answer and it has not ended yet.
+    pub(crate) stopping: bool,
     /// The MCP token the conversation's harness was given, the Station it was given for, and
     /// when it expires; reused for later messages to that Station while it lasts.
     pub(crate) token: Option<(String, String, f64)>,
@@ -182,6 +184,7 @@ impl Conversation {
             proposals: Vec::new(),
             live: false,
             heard_at: now,
+            stopping: false,
             token: None,
             bytes: 0,
             exposed: false,
@@ -296,9 +299,25 @@ impl Conversation {
     /// Records whether a message is being answered and tells the app.
     pub(crate) fn set_busy(&mut self, busy: bool) {
         self.busy = busy;
+        if !busy {
+            self.stopping = false;
+        }
         let _ = self
             .events
             .send(serde_json::json!({"type": "busy", "busy": busy}));
+    }
+
+    /// Whether the tool token with this digest still serves past its time: it is the one the
+    /// conversation holds, and its answer runs with the Station heard from within `deadline`
+    /// seconds. A turn may outlast its token, and `answer_deadline` bounds only its silence.
+    pub(crate) fn outlasts_its_token(&self, token_digest: &str, now: f64, deadline: f64) -> bool {
+        self.busy
+            && !self.stopping
+            && now - self.heard_at <= deadline
+            && self
+                .token
+                .as_ref()
+                .is_some_and(|(token, _, _)| super::digest(token) == token_digest)
     }
 }
 

@@ -153,6 +153,8 @@ struct Served {
     pages_server: Option<(String, tokio::task::JoinHandle<()>)>,
     /// Where pages are kept.
     pages_dir: std::path::PathBuf,
+    /// Her desk, for a test to move its clock.
+    assistant: Arc<super::Assistant>,
     /// Actions the policy refuses from now on, whatever the roles say.
     denied: Arc<std::sync::Mutex<Vec<String>>>,
     _directory: tempfile::TempDir,
@@ -328,6 +330,7 @@ async fn served_full(
             }),
         )
     });
+    let assistant = gateway.assistant.clone().unwrap();
     let router = gateway.router();
     let server = tokio::spawn(async move {
         let _ = axum::serve(
@@ -344,6 +347,7 @@ async fn served_full(
         server,
         pages_server,
         pages_dir,
+        assistant,
         denied,
         _directory: directory,
     }
@@ -2431,6 +2435,121 @@ async fn a_renewed_token_keeps_her_tools_and_a_waiting_proposal() {
     assert_ne!(frames.last().unwrap()["type"], "error", "{frames:?}");
     let settled = proposal_of(&frames);
     assert_eq!(settled["status"], "done", "{settled}");
+}
+
+/// Moves the conversation's tool token past its time, as the clock moving on would.
+fn expire_tool_token(served: &Served, conversation: &str) {
+    let mut desk = served.assistant.desk();
+    let past = super::now() - 1.0;
+    for grant in desk.tokens.values_mut() {
+        if grant.conversation_id == conversation {
+            grant.expires_at = past;
+        }
+    }
+    let held = desk.store.conversations.get_mut(conversation).unwrap();
+    if let Some((_, _, expires_at)) = held.token.as_mut() {
+        *expires_at = past;
+    }
+}
+
+/// Moves the Station's last word on the conversation `seconds` back.
+fn quiet_for(served: &Served, conversation: &str, seconds: f64) {
+    let mut desk = served.assistant.desk();
+    desk.store
+        .conversations
+        .get_mut(conversation)
+        .unwrap()
+        .heard_at = super::now() - seconds;
+}
+
+#[tokio::test]
+async fn a_token_past_its_time_works_while_her_answer_runs_and_not_after() {
+    let served = served(tuned(|limits| limits.answer_deadline = Seconds::new(600))).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Which missions?").await;
+    let token = &job.mcp_token;
+    let conversation = &job.conversation_id;
+    let read = |token: String| {
+        let served = &served;
+        async move { mcp(served, &token, "tools/list", json!({})).await.status() }
+    };
+    assert_eq!(read(token.clone()).await, StatusCode::OK);
+
+    // Past its time, with her answer running and her Station heard from.
+    expire_tool_token(&served, conversation);
+    assert_eq!(read(token.clone()).await, StatusCode::OK, "busy");
+    let missions = call_tool(&served, token, "missions", json!({"operation_id": "G"})).await;
+    assert_eq!(missions["isError"], false, "{missions}");
+
+    // Another conversation's message does not sweep it away.
+    let (_other_app, other) = accepted(&served, &served.viewer, "And you?").await;
+    assert_ne!(&other.conversation_id, conversation);
+    assert_eq!(read(token.clone()).await, StatusCode::OK, "still held");
+
+    // Her Station has gone quiet past the deadline: the sweep has not run, and it is over.
+    quiet_for(&served, conversation, 601.0);
+    assert_eq!(
+        read(token.clone()).await,
+        StatusCode::UNAUTHORIZED,
+        "deadline passed"
+    );
+    quiet_for(&served, conversation, 1.0);
+    assert_eq!(read(token.clone()).await, StatusCode::OK, "heard again");
+
+    // The person stops the answer: it is over at once, before the Station reports.
+    app.send(WsMessage::Text(
+        json!({"type": "interrupt"}).to_string().into(),
+    ))
+    .await
+    .unwrap();
+    receive_until(&mut app, |frame| frame["type"] == "interrupt").await;
+    assert_eq!(
+        read(token.clone()).await,
+        StatusCode::UNAUTHORIZED,
+        "after Stop"
+    );
+    assert!(take(&served, "hq").await.interrupt);
+    report(
+        &served,
+        "hq",
+        &job,
+        None,
+        vec![AssistantEvent::new(EVENT_INTERRUPTED, None)],
+    )
+    .await;
+    receive_until(&mut app, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+    assert_eq!(read(token.clone()).await, StatusCode::UNAUTHORIZED, "idle");
+
+    // With nothing being answered a token past its time serves nothing.
+    say(&mut app, "Once more.", None).await;
+    let next = take(&served, "hq").await;
+    assert_ne!(&next.mcp_token, token, "a new one for the next message");
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &next,
+            Some(&next.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        read(token.clone()).await,
+        StatusCode::UNAUTHORIZED,
+        "the one it replaced"
+    );
+    assert_eq!(read(next.mcp_token.clone()).await, StatusCode::OK);
+    finish(&served, &mut app, &next).await;
+    expire_tool_token(&served, &next.conversation_id);
+    assert_eq!(
+        read(next.mcp_token.clone()).await,
+        StatusCode::UNAUTHORIZED,
+        "the answer has ended"
+    );
 }
 
 #[tokio::test]

@@ -803,8 +803,15 @@ impl Assistant {
                 pending.taken_at = None;
                 pending.queued_at = now;
                 let person_id = conversation.person_id.clone();
-                desk.tokens.retain(|_, grant| {
-                    grant.expires_at > now
+                let deadline = self.config.gateway.answer_deadline.0.as_secs_f64();
+                let Desk { store, tokens, .. } = &mut *desk;
+                tokens.retain(|key, grant| {
+                    let current = grant.expires_at > now
+                        || store
+                            .conversations
+                            .get(&grant.conversation_id)
+                            .is_some_and(|held| held.outlasts_its_token(key, now, deadline));
+                    current
                         && (grant.conversation_id != conversation_id || grant.station == station)
                 });
                 desk.tokens.insert(
@@ -1216,12 +1223,15 @@ impl Assistant {
     pub(crate) fn grant(&self, token: &str) -> Option<Granted> {
         let mut desk = self.desk();
         let now = now();
-        let grant = desk.tokens.get(&digest(token))?;
-        if grant.expires_at <= now {
-            return None;
-        }
+        let key = digest(token);
+        let grant = desk.tokens.get(&key)?;
+        let over = grant.expires_at <= now;
         let (conversation_id, person_id) = (grant.conversation_id.clone(), grant.person_id.clone());
         let conversation = desk.store.owned(&conversation_id, &person_id)?;
+        let deadline = self.config.gateway.answer_deadline.0.as_secs_f64();
+        if over && !conversation.outlasts_its_token(&key, now, deadline) {
+            return None;
+        }
         Some(Granted {
             conversation_id,
             person_id,
@@ -1927,6 +1937,7 @@ impl Assistant {
             stopped(conversation, bounds);
             return Ok(true);
         }
+        conversation.stopping = true;
         let job = control_job(
             conversation,
             &self.config.agent_id,
