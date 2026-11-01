@@ -223,7 +223,8 @@ A SQL roster (`sqlite:` or `postgres://`, shared by the Stations of an HA deploy
 same keys as one record of kind `assistant`, keyed `settings`, in the table
 `ai6_config_assistant`: the row `settings` holding `{"personal_repo":
 "/srv/moneypenny/{person_digest}.git"}` is the first line above. An administrator with
-`roster.manage` sets it with `PUT /v1/user/roster/assistant/settings` (the definition as a
+`roster.manage` sets it in Outer Office's form (Roster, Moneypenny's settings) or with
+`PUT /v1/user/roster/assistant/settings` (the definition as a
 JSON object, replacing the whole record) or removes it to go back to the defaults, through the
 API or on the app's Roster page under **Moneypenny's settings**. It is
 checked as the table is: an unknown key, a repository AI6 refuses or a record under another key

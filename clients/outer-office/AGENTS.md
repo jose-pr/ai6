@@ -35,6 +35,11 @@ native windows build their app with `boardThemedApp`.
   person's own memory, through `/v1/user/assistant/memory`; it saves with the digest of the
   text it opened as `base`, and shows a refusal in Universal Exports' own words.
 
+- `lib/forms/` renders any schema and form and names no kind of record, which
+  `test/record_forms_test.dart` checks; what is about the roster is in `lib/roster/`. No field,
+  title, default, choice or bound is written in Dart: the app shows what the route sends. A record
+  type's change regenerates `assets/record_forms.json` (see `README.md`).
+
 ## Flutter windowing
 
 - Stable Flutter lacks the first-party Desktop Windowing API; use the isolated Flutter `main` SDK described in `README.md` while prototyping native windows.

@@ -42,6 +42,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Forms in Outer Office for adding, editing and removing Operations, Agents, Agent roles, cover
+  policies and Moneypenny's settings, in place of the JSON box. Each form comes from the record's
+  own type: `#[derive(ToValue, FromValue, Schema, Form)]` declares every field's title, words,
+  default, choices and section once, and `GET /v1/user/roster/{kind}/schema` serves the schema and
+  form to anyone with `roster.read`. Fields that name another record offer it, handlers and
+  Stations come from what Stations report, what is rarely changed is folded, a refusal shows on the
+  field it names, and a removal first says what names the record. **Add** and edit controls are on
+  the Operations and Agents pages too. Rows show a summary in the fields' titles; a read-only "As
+  configuration" view stays for copying ([Operations](https://jose-pr.github.io/ai6/operations/)).
+- `If-Match` on `PUT` and `DELETE /v1/user/roster/{kind}/{key}`: the `revision` each record now
+  carries, or `0` for one that must be new. A record changed since it was read answers `409` with
+  `changed` and changes nothing; the app offers to reload. A write without it replaces what is
+  there, as before.
+- `handlers` on each Station of `GET /v1/stations`: the Agent handlers it reported at check-in.
+- Records are read through Guatiao's value: a stored definition or a file becomes a value at the
+  format boundary and the type comes from that (`FromValue`), so a refusal names the key in
+  Guatiao's words, never the value. What is stored does not change. `RosterSettings` and
+  `RosterBuilder::max_operation_depth` take a `Limit` and `WatchdogOverrides` holds `Seconds`.
+
 - Outer Office signs in with a name and password on the web as on desktop, on a page of its own
   with the wordmark over the theme's wallpaper. A wrong password, the login limit's `429` (its
   `Retry-After` counts down and holds **Continue**), a refused origin and an unreachable gateway

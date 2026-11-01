@@ -375,6 +375,26 @@ pub struct QuarantineDefinition;   // [operation.ID.quarantine]; 0 turns a count
 per UTC day. A budget value that is negative, non-numeric (or fractional for token counts)
 fails the roster load with an error naming the key.
 
+## Records a person writes
+
+Operations, Agents, Agent roles, cover policies, Moneypenny's settings and the roster's settings
+are declared once, on their types: `#[derive(ToValue, FromValue, Schema, Form)]` holds each field's
+title, description (its doc comment), default, choices, bounds and section. A stored definition or
+a file becomes a `guatiao::Value` at the format boundary and the type comes from that, so a refusal
+names the key and never the value.
+
+```rust
+impl ConfigRecord { pub fn form(self) -> Result<Option<RecordForm>, RecordFormError>; }  // None: no form yet
+pub struct RecordForm { pub schema: serde_json::Value, pub form: serde_json::Value, pub key: RecordKey }
+pub struct RecordKey { pub title: String, pub description: String, pub fixed: Option<String> }
+pub fn read_definition<T: guatiao::FromValue>(definition: &serde_json::Value) -> Result<T, String>;
+```
+
+`Limit`, `Seconds` and `TimeLimit` implement `ToValue`, `FromValue` and `Schema`: a `Limit` is a
+whole number or `"none"`, and `null` reads as `"none"`. `WatchdogOverrides` holds `Option<Seconds>`.
+`Sleeper`, `HarnessPolicy`, `CoverIdentity` and the record enums keep serde as well, for the Registry
+and check-ins they also cross.
+
 ## Operations and Agent roster (`ai6::directorates::m::roster`)
 
 ```rust
@@ -550,18 +570,18 @@ impl RosterBuilder {
     pub fn cover(self, cover: Cover) -> Self;      // replaces a built-in of the same name
     pub fn assistant(self, settings: AssistantSettings) -> Self;
     pub fn settings(self, settings: RosterSettings) -> Self;
-    pub fn max_operation_depth(self, depth: Option<usize>) -> Self;   // None: no bound
+    pub fn max_operation_depth(self, depth: Limit) -> Self;   // Limit::UNBOUNDED: no bound
     pub fn build(self) -> Result<Roster, RosterError>;   // Roster::from_parts; settings validated
 }
 /// The `roster` record: a `[roster]` table in the global `operations` file (serde; unknown
 /// keys refused). `max_operation_depth` reads a number, or "none" (JSON null too).
 #[non_exhaustive] #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RosterSettings {
-    pub max_operation_depth: Option<usize>,   // levels, a root the first; default Some(64); 0 refused
+    pub max_operation_depth: Limit,   // levels, a root the first; default 64; 0 refused
 }
 impl RosterSettings {   // Default: the defaults above
     pub fn new() -> Self;
-    #[must_use] pub fn with_max_operation_depth(self, depth: Option<usize>) -> Self;
+    #[must_use] pub fn with_max_operation_depth(self, depth: Limit) -> Self;
     pub fn validate(&self) -> Result<(), RosterError>;
     pub fn weakenings(&self) -> Vec<String>;  // "roster.max_operation_depth none is looser than the default 64"
 }
@@ -584,7 +604,10 @@ pub struct AssistantSettings;   // keys: personal_repo, shared.<group> {repo, wr
 pub struct AssistantViewLimits { pub blocks, view_bytes, text_bytes, short_bytes, columns,
     rows, items, series, points, pie_slices, diff_bytes, fields, schedule_rows, graph_nodes,
     graph_edges, svg_bytes, svg_elements, svg_depth, svg_id_bytes, navigate_label_bytes: Option<u64> }
-impl AssistantViewLimits { pub fn set(&self) -> Vec<(&'static str, u64)>; }  // the ones given
+impl AssistantViewLimits {
+    pub fn defaults() -> Self;                         // each bound when the record sets none
+    pub fn set(&self) -> Vec<(&'static str, u64)>;     // the ones given
+}
 // [assistant.limits], [assistant.desk], [assistant.gateway]: #[non_exhaustive], Default = the
 // documented defaults (docs/configuration.md "Moneypenny's limits"), serde(default,
 // deny_unknown_fields); Limit / TimeLimit fields take a number, null or "none".

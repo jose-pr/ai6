@@ -417,7 +417,10 @@ roles, labels, terminal, capacity and watchdog defaults.
 Universal Exports edits the roster for operators when it is started with the same
 location (`unex.cfg`'s `[provider] location`, or `--provider`): `roster.read` and `roster.manage` on the
 scope `config:roster` (for example `scope = "config:roster"` in `access.toml`) let a person
-list and change Operations, Agents, roles and covers from Outer Office's Roster page.
+list and change Operations, Agents, roles and covers from Outer Office's Roster page, and
+Operations and Agents from their own pages too, each in a form drawn from the record's own type:
+the same words, defaults and choices the roster reads it with. What a field holds is declared once,
+on its struct.
 The source checks the whole roster before it keeps an edit; an accepted edit is audited as
 `roster.update` or `roster.remove`, a refused one answers with the reason and is audited as
 `roster.refused`. A configuration directory is listed read-only: its files are edited by

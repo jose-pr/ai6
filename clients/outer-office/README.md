@@ -104,11 +104,16 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   the same control and never posts a second time. Requests are not kept across a reload.
 - Roster: the Operations, Agents, Agent roles, cover policies and Moneypenny's settings every
   Station reads, with the revision each Station runs and what any Station refused or waits to
-  restart for (`roster.read`); with `roster.manage` and a roster that takes edits (SQL), add,
-  edit (the record's definition as JSON) or remove a record. The roster checks the whole
-  roster first: a refused edit shows why and changes nothing; an accepted one reaches every
-  Station at its next poll. Moneypenny's settings are one record, keyed `assistant`; after an
-  edit, each setting it leaves looser than its default is shown.
+  restart for (`roster.read`), each row a summary in the fields' own titles and **As
+  configuration** for reading and copying what the files would hold; with `roster.manage` and a
+  roster that takes edits (SQL), add, edit or remove a record in a form the gateway describes
+  (below). The roster checks the whole roster first: a refused edit shows why on the field it
+  names and changes nothing; an accepted one reaches every Station at its next poll. A save names
+  the revision it read: if the record changed meanwhile, nothing is saved and **Reload** shows what
+  it holds now. A removal says first what else names the record. Moneypenny's settings are one
+  record; after an edit, each setting it leaves looser than its default is shown. **Add Operation**
+  and **Add Agent**, and an edit and a remove on each one, are on those pages too, with which
+  Stations run the change and any waiting for a restart.
 - Access (after Audit): the roles (the built-in `chief` is fixed; role editor with a switch per
   action, greyed with the reason when you do not hold it or the delegation cap withholds it),
   the ordered rules (drag handles or move buttons; Save sends the whole list with the revision
@@ -165,6 +170,20 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   text sits on a solid panel. Accent edges and glow mark only the selection and the
   primary action. Large icons (stat tiles, recent activity, the phone menu) are duotone
   drawings of the kit's icons in the theme's accent.
+
+## Forms
+
+`lib/forms/` draws a schema and a form from anywhere and gives back a value; it knows no kind of
+record. The types in the `ai6` crate declare every field once (title, words, default, choices,
+section, whether it is rarely changed), and `GET /v1/user/roster/{kind}/schema` serves them.
+`guatiao_intake` judges the form: whether it fits, the layout, and which fields show. The record's
+`format` names what a field refers to (`record:agents`, `reported:handlers`), and the page says what
+to offer for it (`lib/roster/record_editor.dart`). `assets/record_forms.json` holds the same answers
+for the preview's summaries and the tests; a test in the `ai6` crate fails when it is stale, and
+`AI6_UPDATE_RECORD_FORMS=1 cargo test -p ai6 --all-features --lib records` writes it.
+
+The forms need the `guatiao_intake` surface: `web/ai6_guatiao.wasm` on the web, built below, and on
+desktop the library its build hook bundles.
 
 ## Toolchain
 
@@ -232,7 +251,8 @@ its last event after a disconnect.
 
 The web build loads Guatiao's WebAssembly wire runtime from `web/ai6_guatiao.wasm`, which
 is generated and ignored: run `dart run tool/build_guatiao_wasm.dart` after `pub get` and
-before a non-demo web build. It builds `guatiao-intake` at the revision in `pubspec.lock`.
+before a non-demo web build. It builds `guatiao-intake` at the revision in `pubspec.lock`, and the
+record forms run in the same module.
 
 ## No outside requests by default
 
