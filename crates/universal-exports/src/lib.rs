@@ -2350,6 +2350,8 @@ struct UserProfile {
     /// The actions the person holds on the global access policy (`access.read`, `access.manage`),
     /// the accounts (`account.manage`) and other people's memory (`assistant.memory.admin`).
     global_actions: Vec<String>,
+    /// Whether this gateway serves Moneypenny, whom Outer Office offers only when it does.
+    moneypenny: bool,
 }
 
 #[derive(Serialize)]
@@ -2838,6 +2840,7 @@ async fn user_profile(
         stations,
         roster,
         global_actions,
+        moneypenny: gateway.assistant.is_some(),
     }))
 }
 
@@ -5729,6 +5732,7 @@ mod tests {
             serde_json::json!(["mission.read", "session.read"])
         );
         assert!(viewer_profile["stations"].as_array().unwrap().is_empty());
+        assert_eq!(viewer_profile["moneypenny"], false);
         let viewer_settings = client
             .get(format!("{base}/v1/user/stations/worker/settings"))
             .bearer_auth(&viewer_token)

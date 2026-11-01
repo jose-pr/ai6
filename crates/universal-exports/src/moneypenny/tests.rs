@@ -341,6 +341,21 @@ async fn served_full(
     }
 }
 
+#[tokio::test]
+async fn the_profile_says_she_is_served() {
+    let served = served(AssistantConfig::default()).await;
+    let profile: Value = reqwest::Client::new()
+        .get(format!("{}/v1/user/profile", served.base))
+        .bearer_auth(&served.viewer)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(profile["moneypenny"], true, "{profile}");
+}
+
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
