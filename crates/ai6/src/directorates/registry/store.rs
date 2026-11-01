@@ -1815,6 +1815,15 @@ pub trait AccessTokenStore {
 
     /// Revokes a token by its public UUID, returning false when unknown or already revoked.
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool>;
+
+    /// Moves an active token's expiry to `expires_at` (Unix seconds) when that is later, and
+    /// answers the record as it now stands; a time no later leaves it as it was. Its value,
+    /// issue time and revocation never change. `None` when unknown, revoked or expired.
+    fn extend_access_token(
+        &self,
+        token_id: &str,
+        expires_at: f64,
+    ) -> io::Result<Option<crate::AccessTokenRecord>>;
 }
 
 impl AccessTokenStore for FileRegistry {
@@ -1878,32 +1887,13 @@ impl AccessTokenStore for FileRegistry {
     }
 
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool> {
-        let parsed = uuid::Uuid::parse_str(token_id)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid token ID"))?;
-        if parsed.to_string() != token_id {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "token ID must be a canonical lowercase UUID",
-            ));
-        }
-        let token_path = self
-            .root
-            .join("access-tokens")
-            .join(format!("{token_id}.json"));
+        validate_token_id(token_id)?;
+        let token_path = self.access_token_path(token_id);
         let _registry_lock = self.lock()?;
-        let bytes = match fs::read(&token_path) {
-            Ok(bytes) if self.limits.tokens.record_bytes.allows(bytes.len()) => bytes,
-            Ok(_) => return Ok(false),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
-        };
-        let Ok(record) = serde_json::from_slice::<crate::AccessTokenRecord>(&bytes) else {
+        let Some(record) = self.stored_access_token(&token_path, token_id)? else {
             return Ok(false);
         };
-        let Ok(record) = validate_access_token_record(&record) else {
-            return Ok(false);
-        };
-        if record.token_id() != token_id || record.revoked_at().is_some() {
+        if record.revoked_at().is_some() {
             return Ok(false);
         }
         let updated = crate::AccessTokenRecord::try_new(
@@ -1918,6 +1908,56 @@ impl AccessTokenStore for FileRegistry {
         let updated = serde_json::to_vec(&updated).map_err(io::Error::other)?;
         self.write_atomic(&token_path, &updated)?;
         Ok(true)
+    }
+
+    fn extend_access_token(
+        &self,
+        token_id: &str,
+        expires_at: f64,
+    ) -> io::Result<Option<crate::AccessTokenRecord>> {
+        validate_token_id(token_id)?;
+        let token_path = self.access_token_path(token_id);
+        let _registry_lock = self.lock()?;
+        let Some(record) = self.stored_access_token(&token_path, token_id)? else {
+            return Ok(None);
+        };
+        let Some(extended) = extended_token(&record, expires_at, unix_time()?)? else {
+            return Ok(None);
+        };
+        if extended.expires_at() > record.expires_at() {
+            let bytes = serde_json::to_vec(&extended).map_err(io::Error::other)?;
+            self.write_atomic(&token_path, &bytes)?;
+        }
+        Ok(Some(extended))
+    }
+}
+
+impl FileRegistry {
+    fn access_token_path(&self, token_id: &str) -> PathBuf {
+        self.root
+            .join("access-tokens")
+            .join(format!("{token_id}.json"))
+    }
+
+    /// The valid record stored at `path` as `token_id`, under the caller's Registry lock.
+    fn stored_access_token(
+        &self,
+        path: &Path,
+        token_id: &str,
+    ) -> io::Result<Option<crate::AccessTokenRecord>> {
+        let bytes = match fs::read(path) {
+            Ok(bytes) if self.limits.tokens.record_bytes.allows(bytes.len()) => bytes,
+            Ok(_) => return Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let Ok(record) = serde_json::from_slice::<crate::AccessTokenRecord>(&bytes) else {
+            return Ok(None);
+        };
+        let Ok(record) = validate_access_token_record(&record) else {
+            return Ok(None);
+        };
+        Ok((record.token_id() == token_id).then_some(record))
     }
 }
 
@@ -2800,6 +2840,45 @@ pub(super) fn validate_access_token_record(
     .map_err(|_| invalid_data("invalid access token record"))
 }
 
+/// `record` with `expires_at` when that is later, `None` when it is not active at `now`.
+pub(super) fn extended_token(
+    record: &crate::AccessTokenRecord,
+    expires_at: f64,
+    now: f64,
+) -> io::Result<Option<crate::AccessTokenRecord>> {
+    if !expires_at.is_finite() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "an access token's expiry must be a finite time",
+        ));
+    }
+    if !record.active_at(now) {
+        return Ok(None);
+    }
+    crate::AccessTokenRecord::try_new(
+        record.token_id(),
+        record.digest(),
+        record.person_id(),
+        record.issued_at(),
+        record.expires_at().max(expires_at),
+        record.revoked_at(),
+    )
+    .map(Some)
+    .map_err(|_| invalid_data("invalid access token record"))
+}
+
+pub(super) fn validate_token_id(token_id: &str) -> io::Result<()> {
+    let parsed = uuid::Uuid::parse_str(token_id)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid token ID"))?;
+    if parsed.to_string() != token_id {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "token ID must be a canonical lowercase UUID",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_token_digest(digest: &str) -> io::Result<()> {
     if digest.len() != 64
         || !digest
@@ -3069,6 +3148,7 @@ mod tests {
         cable_inbox_and_delivery_updates_follow_session_and_expiry,
         cable_quotas_are_atomic_and_shared,
         access_tokens_are_shared_by_registries_and_revocation_is_immediate,
+        an_access_token_is_extended_never_shortened,
     );
 
     fn operation_agent_role_overrides_are_validated_and_isolated(store: &dyn Store) {
@@ -3939,6 +4019,79 @@ mod tests {
         );
         assert!(!verifier.revoke_access_token(record.token_id()).unwrap());
         assert!(verifier.revoke_access_token("not-a-uuid").is_err());
+    }
+
+    fn an_access_token_is_extended_never_shortened(store: &dyn Store) {
+        let registry = store.handle();
+        let verifier = store.handle();
+        let now = unix_time().unwrap();
+        let record = access_token(now);
+        let id = record.token_id();
+        let digest = record.digest();
+        let first = record.expires_at();
+        assert!(
+            registry
+                .extend_access_token(id, first + 60.0)
+                .unwrap()
+                .is_none()
+        );
+        registry.store_access_token(&record).unwrap();
+
+        let later = first + 3_600.0;
+        let extended = registry.extend_access_token(id, later).unwrap().unwrap();
+        assert!((extended.expires_at() - later).abs() < 1e-6);
+        assert_eq!(extended.digest(), digest);
+        assert!((extended.issued_at() - record.issued_at()).abs() < 1e-6);
+        let found = verifier.find_access_token(digest).unwrap().unwrap();
+        assert!(
+            (found.expires_at() - later).abs() < 1e-6,
+            "every handle sees it"
+        );
+
+        let earlier = registry.extend_access_token(id, first).unwrap().unwrap();
+        assert!((earlier.expires_at() - later).abs() < 1e-6, "never earlier");
+        let found = verifier.find_access_token(digest).unwrap().unwrap();
+        assert!(
+            (found.expires_at() - later).abs() < 1e-6,
+            "nothing was written"
+        );
+
+        assert!(registry.extend_access_token("not-a-uuid", later).is_err());
+        assert!(registry.extend_access_token(id, f64::INFINITY).is_err());
+
+        assert!(registry.revoke_access_token(id).unwrap());
+        assert!(
+            registry
+                .extend_access_token(id, later + 60.0)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            verifier.find_access_token(digest).unwrap().is_none(),
+            "a revoked one stays revoked"
+        );
+
+        // One past its time stays over, however late the new time.
+        let digest = Sha256::digest(b"another token")
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let over = crate::AccessTokenRecord::try_new(
+            "d1d9a2be-52b3-4a58-b3b5-5a9a1f7e8c10",
+            digest,
+            "person-007",
+            now - 7_200.0,
+            now - 3_600.0,
+            None,
+        )
+        .unwrap();
+        registry.store_access_token(&over).unwrap();
+        assert!(
+            registry
+                .extend_access_token(over.token_id(), later)
+                .unwrap()
+                .is_none()
+        );
     }
 
     // The file Registry's own layout: what other tools find on disk.

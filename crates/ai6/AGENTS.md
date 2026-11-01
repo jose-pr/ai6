@@ -3282,10 +3282,11 @@ state directory).
 `AccessTokenRecord` is the device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
 expiry and optional revocation times; its debug output redacts the digest.
-`AccessTokenStore` (`store_access_token`, `find_access_token`, `revoke_access_token`);
+`AccessTokenStore` (`store_access_token`, `find_access_token`, `revoke_access_token`,
+`extend_access_token`, which moves an active record's expiry later and never earlier);
 `FileRegistry` stores and validates records in the `access-tokens/` and `access-token-digests/`
-directories, returns only active records, and serializes revocation under the shared
-Registry lock.
+directories, returns only active records, and serializes revocation and extension under the
+shared Registry lock.
 
 ## Q Branch loadouts (`ai6::directorates::q`)
 

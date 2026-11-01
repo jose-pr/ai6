@@ -21,9 +21,9 @@ use crate::directorates::registry::sleepers::{
 };
 use crate::directorates::registry::store::{
     AccessTokenStore, AgentRoleStore, AuditRecord, AuditStore, BriefStore, CableStore, cable_error,
-    cable_sent_event, check_quota_buckets, invalid_data, quota_allows, quota_balances, unix_time,
-    validate_access_token_record, validate_cable_id, validate_registry_key, validate_station_id,
-    validate_token_digest,
+    cable_sent_event, check_quota_buckets, extended_token, invalid_data, quota_allows,
+    quota_balances, unix_time, validate_access_token_record, validate_cable_id,
+    validate_registry_key, validate_station_id, validate_token_digest, validate_token_id,
 };
 use crate::directorates::registry::timeline::{TimelineEvent, TimelineStore};
 use crate::directorates::registry::usage::{UsageStore, add_usage, cost_on_day, parse_ledger};
@@ -84,14 +84,7 @@ impl AccessTokenStore for SqlRegistry {
     }
 
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool> {
-        let parsed = uuid::Uuid::parse_str(token_id)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid token ID"))?;
-        if parsed.to_string() != token_id {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "token ID must be a canonical lowercase UUID",
-            ));
-        }
+        validate_token_id(token_id)?;
         self.write(|tx, revision| {
             let Some(row) = tx.query_opt(
                 "SELECT record FROM ai6_access_tokens WHERE token_id = $1",
@@ -120,6 +113,39 @@ impl AccessTokenStore for SqlRegistry {
                 &[token_id.into(), to_json(&updated)?.into(), revision.into()],
             )?;
             Ok(true)
+        })
+    }
+
+    fn extend_access_token(
+        &self,
+        token_id: &str,
+        expires_at: f64,
+    ) -> io::Result<Option<crate::AccessTokenRecord>> {
+        validate_token_id(token_id)?;
+        self.write(|tx, revision| {
+            let Some(row) = tx.query_opt(
+                "SELECT record FROM ai6_access_tokens WHERE token_id = $1",
+                &[token_id.into()],
+            )?
+            else {
+                return Ok(None);
+            };
+            let Some(record) = stored_token(&row.text(0)?, self.limits.tokens.record_bytes) else {
+                return Ok(None);
+            };
+            if record.token_id() != token_id {
+                return Ok(None);
+            }
+            let Some(extended) = extended_token(&record, expires_at, unix_time()?)? else {
+                return Ok(None);
+            };
+            if extended.expires_at() > record.expires_at() {
+                tx.execute(
+                    "UPDATE ai6_access_tokens SET record = $2, revision = $3 WHERE token_id = $1",
+                    &[token_id.into(), to_json(&extended)?.into(), revision.into()],
+                )?;
+            }
+            Ok(Some(extended))
         })
     }
 }

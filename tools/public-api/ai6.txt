@@ -2990,14 +2990,17 @@ pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorizat
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 pub mod ai6::directorates::registry::backend
 pub trait ai6::directorates::registry::backend::AccessTokenStore
+pub fn ai6::directorates::registry::backend::AccessTokenStore::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
@@ -4648,6 +4651,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
@@ -4848,6 +4852,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
@@ -4950,14 +4955,17 @@ pub fn ai6::directorates::registry::store::StationSettings::try_new(impl core::c
 pub fn ai6::directorates::registry::store::StationSettings::with_resource_limits(self, ai6::directorates::m::placement::ResourceLimits) -> core::io::error::Result<Self>
 pub const ai6::directorates::registry::store::DEFAULT_LEASE: core::time::Duration
 pub trait ai6::directorates::registry::store::AccessTokenStore
+pub fn ai6::directorates::registry::store::AccessTokenStore::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
@@ -7924,6 +7932,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
@@ -9184,6 +9193,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
@@ -9886,14 +9896,17 @@ pub const ai6::SCRIPT_ENVIRONMENT: [&str; 14]
 pub const ai6::SLEEPER_BRIEF_SOURCE: &str
 pub const ai6::SOURCE_BRIEF_PREFIX: &str
 pub trait ai6::AccessTokenStore
+pub fn ai6::AccessTokenStore::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
