@@ -186,6 +186,12 @@ pub const fn ai6::bounds::Limit::get(self) -> core::option::Option<u64>
 pub fn ai6::bounds::Limit::or_max(self) -> usize
 impl core::fmt::Display for ai6::bounds::Limit
 pub fn ai6::bounds::Limit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::schema::describe::Schema for ai6::bounds::Limit
+pub fn ai6::bounds::Limit::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bounds::Limit
+pub fn ai6::bounds::Limit::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bounds::Limit
+pub fn ai6::bounds::Limit::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 impl serde_core::ser::Serialize for ai6::bounds::Limit
 pub fn ai6::bounds::Limit::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::bounds::Limit
@@ -193,6 +199,12 @@ pub fn ai6::bounds::Limit::deserialize<D: serde_core::de::Deserializer<'de>>(D) 
 pub struct ai6::bounds::Seconds(pub core::time::Duration)
 impl ai6::bounds::Seconds
 pub const fn ai6::bounds::Seconds::new(u64) -> Self
+impl guatiao::schema::describe::Schema for ai6::bounds::Seconds
+pub fn ai6::bounds::Seconds::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bounds::Seconds
+pub fn ai6::bounds::Seconds::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bounds::Seconds
+pub fn ai6::bounds::Seconds::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 impl serde_core::ser::Serialize for ai6::bounds::Seconds
 pub fn ai6::bounds::Seconds::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::bounds::Seconds
@@ -208,6 +220,12 @@ pub const fn ai6::bounds::TimeLimit::get(self) -> core::option::Option<core::tim
 pub const fn ai6::bounds::TimeLimit::secs(u64) -> Self
 impl core::fmt::Display for ai6::bounds::TimeLimit
 pub fn ai6::bounds::TimeLimit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::schema::describe::Schema for ai6::bounds::TimeLimit
+pub fn ai6::bounds::TimeLimit::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bounds::TimeLimit
+pub fn ai6::bounds::TimeLimit::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bounds::TimeLimit
+pub fn ai6::bounds::TimeLimit::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 impl serde_core::ser::Serialize for ai6::bounds::TimeLimit
 pub fn ai6::bounds::TimeLimit::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::bounds::TimeLimit
@@ -618,6 +636,7 @@ pub ai6::directorates::m::assistant::AssistantViewLimits::svg_id_bytes: core::op
 pub ai6::directorates::m::assistant::AssistantViewLimits::text_bytes: core::option::Option<u64>
 pub ai6::directorates::m::assistant::AssistantViewLimits::view_bytes: core::option::Option<u64>
 impl ai6::directorates::m::assistant::AssistantViewLimits
+pub fn ai6::directorates::m::assistant::AssistantViewLimits::defaults() -> Self
 pub fn ai6::directorates::m::assistant::AssistantViewLimits::set(&self) -> alloc::vec::Vec<(&'static str, u64)>
 pub struct ai6::directorates::m::assistant::SharedRepo
 impl ai6::directorates::m::assistant::SharedRepo
@@ -672,6 +691,8 @@ pub const fn ai6::directorates::m::config::ConfigRecord::is_singleton(self) -> b
 pub const fn ai6::directorates::m::config::ConfigRecord::is_whole_file(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::name(self) -> &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::station_scoped(self) -> bool
+impl ai6::directorates::m::config::ConfigRecord
+pub fn ai6::directorates::m::config::ConfigRecord::form(self) -> core::result::Result<core::option::Option<ai6::directorates::m::records::RecordForm>, ai6::directorates::m::records::RecordFormError>
 impl core::fmt::Display for ai6::directorates::m::config::ConfigRecord
 pub fn ai6::directorates::m::config::ConfigRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum ai6::directorates::m::config::ConfigScope
@@ -1228,6 +1249,20 @@ pub const ai6::directorates::m::promotion::DEFAULT_00_MISSIONS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_00_QUIET_DAYS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_FIELD_MISSIONS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_FIELD_QUIET_DAYS: u64
+pub mod ai6::directorates::m::records
+#[non_exhaustive] pub struct ai6::directorates::m::records::RecordForm
+pub ai6::directorates::m::records::RecordForm::form: serde_json::value::Value
+pub ai6::directorates::m::records::RecordForm::key: ai6::directorates::m::records::RecordKey
+pub ai6::directorates::m::records::RecordForm::schema: serde_json::value::Value
+pub struct ai6::directorates::m::records::RecordFormError(_)
+impl core::error::Error for ai6::directorates::m::records::RecordFormError
+impl core::fmt::Display for ai6::directorates::m::records::RecordFormError
+pub fn ai6::directorates::m::records::RecordFormError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::records::RecordKey
+pub ai6::directorates::m::records::RecordKey::description: alloc::string::String
+pub ai6::directorates::m::records::RecordKey::fixed: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::records::RecordKey::title: alloc::string::String
+pub fn ai6::directorates::m::records::from_json<T: guatiao::value::convert::FromValue>(&serde_json::value::Value) -> core::result::Result<T, alloc::string::String>
 pub mod ai6::directorates::m::recovery
 pub const ai6::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS: u64
 pub fn ai6::directorates::m::recovery::adopter(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts], &ai6::directorates::registry::sessions::SessionRecord) -> core::result::Result<ai6::directorates::m::placement::PlacementChoice, alloc::string::String>
@@ -1375,7 +1410,7 @@ pub fn ai6::directorates::m::roster::RosterBuilder::agent(self, ai6::directorate
 pub fn ai6::directorates::m::roster::RosterBuilder::assistant(self, ai6::directorates::m::assistant::AssistantSettings) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::build(self) -> core::result::Result<ai6::directorates::m::roster::Roster, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterBuilder::cover(self, ai6::directorates::m::cover::Cover) -> Self
-pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, core::option::Option<usize>) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directorates::m::roster::Operation) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::directorates::m::roster::RosterSettings) -> Self
@@ -1386,12 +1421,12 @@ impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::m::roster::RosterSettings
-pub ai6::directorates::m::roster::RosterSettings::max_operation_depth: core::option::Option<usize>
+pub ai6::directorates::m::roster::RosterSettings::max_operation_depth: ai6::bounds::Limit
 impl ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
-pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, core::option::Option<usize>) -> Self
+pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Workspace
@@ -1880,13 +1915,13 @@ pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_stall_timeout(
 impl core::default::Default for ai6::directorates::medical::watchdog::WatchdogConfig
 pub fn ai6::directorates::medical::watchdog::WatchdogConfig::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::medical::watchdog::WatchdogOverrides
-pub ai6::directorates::medical::watchdog::WatchdogOverrides::blocked_after: core::option::Option<core::time::Duration>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::blocked_after: core::option::Option<ai6::bounds::Seconds>
 pub ai6::directorates::medical::watchdog::WatchdogOverrides::history: core::option::Option<usize>
 pub ai6::directorates::medical::watchdog::WatchdogOverrides::loop_min_lines: core::option::Option<usize>
-pub ai6::directorates::medical::watchdog::WatchdogOverrides::loop_timeout: core::option::Option<core::time::Duration>
-pub ai6::directorates::medical::watchdog::WatchdogOverrides::max_runtime: core::option::Option<core::time::Duration>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::loop_timeout: core::option::Option<ai6::bounds::Seconds>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::max_runtime: core::option::Option<ai6::bounds::Seconds>
 pub ai6::directorates::medical::watchdog::WatchdogOverrides::normalize_digits: core::option::Option<bool>
-pub ai6::directorates::medical::watchdog::WatchdogOverrides::stall_timeout: core::option::Option<core::time::Duration>
+pub ai6::directorates::medical::watchdog::WatchdogOverrides::stall_timeout: core::option::Option<ai6::bounds::Seconds>
 impl ai6::directorates::medical::watchdog::WatchdogOverrides
 pub fn ai6::directorates::medical::watchdog::WatchdogOverrides::apply_to(&self, &ai6::directorates::medical::watchdog::WatchdogConfig) -> ai6::directorates::medical::watchdog::WatchdogConfig
 pub const ai6::directorates::medical::watchdog::DEFAULT_BLOCKED_AFTER: core::time::Duration
@@ -5705,6 +5740,8 @@ pub const fn ai6::directorates::m::config::ConfigRecord::is_singleton(self) -> b
 pub const fn ai6::directorates::m::config::ConfigRecord::is_whole_file(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::name(self) -> &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::station_scoped(self) -> bool
+impl ai6::directorates::m::config::ConfigRecord
+pub fn ai6::directorates::m::config::ConfigRecord::form(self) -> core::result::Result<core::option::Option<ai6::directorates::m::records::RecordForm>, ai6::directorates::m::records::RecordFormError>
 impl core::fmt::Display for ai6::directorates::m::config::ConfigRecord
 pub fn ai6::directorates::m::config::ConfigRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum ai6::ConfigScope
@@ -6673,6 +6710,7 @@ pub ai6::AssistantViewLimits::svg_id_bytes: core::option::Option<u64>
 pub ai6::AssistantViewLimits::text_bytes: core::option::Option<u64>
 pub ai6::AssistantViewLimits::view_bytes: core::option::Option<u64>
 impl ai6::directorates::m::assistant::AssistantViewLimits
+pub fn ai6::directorates::m::assistant::AssistantViewLimits::defaults() -> Self
 pub fn ai6::directorates::m::assistant::AssistantViewLimits::set(&self) -> alloc::vec::Vec<(&'static str, u64)>
 pub struct ai6::AssistantWorkspace
 pub ai6::AssistantWorkspace::author_email: alloc::string::String
@@ -7442,6 +7480,12 @@ pub const fn ai6::bounds::Limit::get(self) -> core::option::Option<u64>
 pub fn ai6::bounds::Limit::or_max(self) -> usize
 impl core::fmt::Display for ai6::bounds::Limit
 pub fn ai6::bounds::Limit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::schema::describe::Schema for ai6::bounds::Limit
+pub fn ai6::bounds::Limit::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bounds::Limit
+pub fn ai6::bounds::Limit::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bounds::Limit
+pub fn ai6::bounds::Limit::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 impl serde_core::ser::Serialize for ai6::bounds::Limit
 pub fn ai6::bounds::Limit::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::bounds::Limit
@@ -7881,6 +7925,18 @@ pub struct ai6::ReadSpec
 pub ai6::ReadSpec::limit: u64
 pub ai6::ReadSpec::offset: u64
 pub ai6::ReadSpec::path: alloc::string::String
+#[non_exhaustive] pub struct ai6::RecordForm
+pub ai6::RecordForm::form: serde_json::value::Value
+pub ai6::RecordForm::key: ai6::directorates::m::records::RecordKey
+pub ai6::RecordForm::schema: serde_json::value::Value
+pub struct ai6::RecordFormError(_)
+impl core::error::Error for ai6::directorates::m::records::RecordFormError
+impl core::fmt::Display for ai6::directorates::m::records::RecordFormError
+pub fn ai6::directorates::m::records::RecordFormError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::RecordKey
+pub ai6::RecordKey::description: alloc::string::String
+pub ai6::RecordKey::fixed: core::option::Option<alloc::string::String>
+pub ai6::RecordKey::title: alloc::string::String
 pub struct ai6::Refusal
 pub ai6::Refusal::reason: alloc::string::String
 impl core::error::Error for ai6::Refusal
@@ -7993,7 +8049,7 @@ pub fn ai6::directorates::m::roster::RosterBuilder::agent(self, ai6::directorate
 pub fn ai6::directorates::m::roster::RosterBuilder::assistant(self, ai6::directorates::m::assistant::AssistantSettings) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::build(self) -> core::result::Result<ai6::directorates::m::roster::Roster, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterBuilder::cover(self, ai6::directorates::m::cover::Cover) -> Self
-pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, core::option::Option<usize>) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directorates::m::roster::Operation) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::directorates::m::roster::RosterSettings) -> Self
@@ -8004,12 +8060,12 @@ impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::RosterSettings
-pub ai6::RosterSettings::max_operation_depth: core::option::Option<usize>
+pub ai6::RosterSettings::max_operation_depth: ai6::bounds::Limit
 impl ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
-pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, core::option::Option<usize>) -> Self
+pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
 pub struct ai6::RuleDef
@@ -8112,6 +8168,12 @@ pub fn ai6::SandboxRequest::with_executable(self, impl core::convert::Into<alloc
 pub struct ai6::Seconds(pub core::time::Duration)
 impl ai6::bounds::Seconds
 pub const fn ai6::bounds::Seconds::new(u64) -> Self
+impl guatiao::schema::describe::Schema for ai6::bounds::Seconds
+pub fn ai6::bounds::Seconds::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bounds::Seconds
+pub fn ai6::bounds::Seconds::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bounds::Seconds
+pub fn ai6::bounds::Seconds::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 impl serde_core::ser::Serialize for ai6::bounds::Seconds
 pub fn ai6::bounds::Seconds::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::bounds::Seconds
@@ -8747,6 +8809,12 @@ pub const fn ai6::bounds::TimeLimit::get(self) -> core::option::Option<core::tim
 pub const fn ai6::bounds::TimeLimit::secs(u64) -> Self
 impl core::fmt::Display for ai6::bounds::TimeLimit
 pub fn ai6::bounds::TimeLimit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::schema::describe::Schema for ai6::bounds::TimeLimit
+pub fn ai6::bounds::TimeLimit::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bounds::TimeLimit
+pub fn ai6::bounds::TimeLimit::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bounds::TimeLimit
+pub fn ai6::bounds::TimeLimit::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 impl serde_core::ser::Serialize for ai6::bounds::TimeLimit
 pub fn ai6::bounds::TimeLimit::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::bounds::TimeLimit
@@ -8972,13 +9040,13 @@ pub fn ai6::directorates::medical::watchdog::WatchdogConfig::with_stall_timeout(
 impl core::default::Default for ai6::directorates::medical::watchdog::WatchdogConfig
 pub fn ai6::directorates::medical::watchdog::WatchdogConfig::default() -> Self
 #[non_exhaustive] pub struct ai6::WatchdogOverrides
-pub ai6::WatchdogOverrides::blocked_after: core::option::Option<core::time::Duration>
+pub ai6::WatchdogOverrides::blocked_after: core::option::Option<ai6::bounds::Seconds>
 pub ai6::WatchdogOverrides::history: core::option::Option<usize>
 pub ai6::WatchdogOverrides::loop_min_lines: core::option::Option<usize>
-pub ai6::WatchdogOverrides::loop_timeout: core::option::Option<core::time::Duration>
-pub ai6::WatchdogOverrides::max_runtime: core::option::Option<core::time::Duration>
+pub ai6::WatchdogOverrides::loop_timeout: core::option::Option<ai6::bounds::Seconds>
+pub ai6::WatchdogOverrides::max_runtime: core::option::Option<ai6::bounds::Seconds>
 pub ai6::WatchdogOverrides::normalize_digits: core::option::Option<bool>
-pub ai6::WatchdogOverrides::stall_timeout: core::option::Option<core::time::Duration>
+pub ai6::WatchdogOverrides::stall_timeout: core::option::Option<ai6::bounds::Seconds>
 impl ai6::directorates::medical::watchdog::WatchdogOverrides
 pub fn ai6::directorates::medical::watchdog::WatchdogOverrides::apply_to(&self, &ai6::directorates::medical::watchdog::WatchdogConfig) -> ai6::directorates::medical::watchdog::WatchdogConfig
 #[non_exhaustive] pub struct ai6::Workspace
@@ -9761,6 +9829,7 @@ pub fn ai6::outside_tool(&str, bool) -> bool
 pub fn ai6::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities, &ai6::station::limits::ProvisionLimits) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
+pub fn ai6::read_definition<T: guatiao::value::convert::FromValue>(&serde_json::value::Value) -> core::result::Result<T, alloc::string::String>
 pub fn ai6::read_review(&str, &ai6::station::limits::VettingLimits) -> ai6::directorates::m::vetting::Vetting
 pub fn ai6::record_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
 pub fn ai6::review_brief(&ai6::directorates::registry::store::Brief, &ai6::directorates::m::vetting::ReviewTarget, (&str, &str), (&[ai6::directorates::m::vetting::KnownWork], &ai6::station::limits::VettingLimits), (&str, i64)) -> ai6::directorates::registry::store::Brief

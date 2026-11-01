@@ -108,6 +108,7 @@ pub universal_exports::BoardSession::updated_at: core::option::Option<f64>
 #[non_exhaustive] pub struct universal_exports::BoardStation
 pub universal_exports::BoardStation::capacity: usize
 pub universal_exports::BoardStation::config: core::option::Option<ai6::directorates::m::config::ConfigStatus>
+pub universal_exports::BoardStation::handlers: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardStation::head_of_station: core::option::Option<ai6::directorates::registry::logbook::StationReport>
 pub universal_exports::BoardStation::headquarters: bool
 pub universal_exports::BoardStation::healthy: bool
@@ -308,6 +309,7 @@ pub universal_exports::RosterChange::weakened: alloc::vec::Vec<alloc::string::St
 #[non_exhaustive] pub struct universal_exports::RosterRecord
 pub universal_exports::RosterRecord::definition: serde_json::value::Value
 pub universal_exports::RosterRecord::key: alloc::string::String
+pub universal_exports::RosterRecord::revision: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::RosterRecords
 pub universal_exports::RosterRecords::kind: alloc::string::String
 pub universal_exports::RosterRecords::records: alloc::vec::Vec<universal_exports::RosterRecord>
