@@ -1201,6 +1201,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A restricted Session over ACP now ends when an agent runs a tool it was refused, not only one
+  it never asked about, and an agent cannot make a restricted tool pass by claiming another kind
+  when it asks.
 - A PostgreSQL connection now sets a keepalive interval, a tenth of its idle, unless its location
   gives one. Without it Windows sent probes 0 ms apart and reset any connection idle for 10
   seconds on a link slow enough that the answer had not arrived.

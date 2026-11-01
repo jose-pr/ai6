@@ -16,7 +16,7 @@ use futures::future::{self, Either};
 use guatiao::Status;
 use guatiao::library::{Object, ProviderError};
 use serde_json::{Map, Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -119,7 +119,7 @@ pub struct AcpOptions {
     pub reattach: Option<u64>,
     /// Whether the Session only reads and answers: every permission request for a tool that
     /// edits, deletes, moves or executes is refused, and a tool of those kinds that runs
-    /// without asking ends the Session.
+    /// without leave ends the Session.
     pub restricted: bool,
     /// Sent before the session request, when the agent needs it.
     pub authenticate: Option<Authenticate>,
@@ -217,7 +217,6 @@ struct Inner {
     /// A completed, failed or limit event ended the current turn.
     finished: bool,
     text: String,
-    asked: HashSet<String>,
     kinds: HashMap<String, String>,
 }
 
@@ -347,31 +346,20 @@ impl Shared {
                 }
             }
             SessionUpdate::ToolCall(call) => {
-                let kind = kind_name(&call.kind);
                 let id = call.tool_call_id.0.to_string();
-                if let Ok(mut inner) = self.inner.lock() {
-                    inner.kinds.insert(id.clone(), kind.to_owned());
-                }
+                let kind = self.settled_kind(&id, Some(kind_name(&call.kind)));
                 let mut tool = event("tool", Some(call.title.clone()));
                 tool.tools.push(call.name.clone().unwrap_or(call.title));
                 self.emit(tool);
-                self.check_unasked(&id, kind, call.status);
+                if let Some(kind) = kind {
+                    self.check_without_leave(&kind, call.status);
+                }
             }
             SessionUpdate::ToolCallUpdate(update) => {
                 let id = update.tool_call_id.0.to_string();
-                let kind = update
-                    .fields
-                    .kind
-                    .as_ref()
-                    .map(|kind| kind_name(kind).to_owned())
-                    .or_else(|| {
-                        self.inner
-                            .lock()
-                            .ok()
-                            .and_then(|inner| inner.kinds.get(&id).cloned())
-                    });
+                let kind = self.settled_kind(&id, update.fields.kind.as_ref().map(kind_name));
                 if let (Some(kind), Some(status)) = (kind, update.fields.status) {
-                    self.check_unasked(&id, &kind, status);
+                    self.check_without_leave(&kind, status);
                 }
             }
             SessionUpdate::UsageUpdate(usage) => {
@@ -399,30 +387,39 @@ impl Shared {
         }
     }
 
-    /// A tool of a restricted kind that runs without the agent having asked leave ends a
-    /// restricted Session.
-    fn check_unasked(&self, id: &str, kind: &str, status: ToolCallStatus) {
+    /// Records what the agent claims a tool does and answers what the tool counts as: a kind
+    /// once restricted stays so, or an agent could relabel an edit as a read before asking.
+    fn settled_kind(&self, id: &str, claimed: Option<&str>) -> Option<String> {
+        let mut inner = self.inner.lock().ok()?;
+        let recorded = inner.kinds.get(id).cloned();
+        let settled = match (recorded, claimed) {
+            (Some(recorded), _) if RESTRICTED_KINDS.contains(&recorded.as_str()) => Some(recorded),
+            (_, Some(claimed)) => Some(claimed.to_owned()),
+            (recorded, None) => recorded,
+        };
+        if let Some(kind) = &settled {
+            inner.kinds.insert(id.to_owned(), kind.clone());
+        }
+        settled
+    }
+
+    /// A tool of a restricted kind that runs ends a restricted Session: asking changes nothing,
+    /// since `permission` refuses every such kind there. One reporting failure ran nothing.
+    fn check_without_leave(&self, kind: &str, status: ToolCallStatus) {
         if !self.restricted
             || !RESTRICTED_KINDS.contains(&kind)
             || !matches!(
                 status,
                 ToolCallStatus::InProgress | ToolCallStatus::Completed
             )
+            || self.closing.swap(true, Ordering::SeqCst)
         {
-            return;
-        }
-        let asked = self
-            .inner
-            .lock()
-            .map(|inner| inner.asked.contains(id))
-            .unwrap_or(true);
-        if asked || self.closing.swap(true, Ordering::SeqCst) {
             return;
         }
         self.emit(event(
             "failed",
             Some(format!(
-                "the agent ran a {kind} tool in a restricted Session without asking leave; the Session was ended"
+                "the agent ran a {kind} tool in a restricted Session without leave; the Session was ended"
             )),
         ));
         let _ = self.commands.unbounded_send(Command::Abort);
@@ -501,22 +498,7 @@ async fn permission(shared: &Arc<Shared>, params: Value) -> Result<Value, Error>
     let request: RequestPermissionRequest =
         serde_json::from_value(params).map_err(|_| Error::invalid_params())?;
     let id = request.tool_call.tool_call_id.0.to_string();
-    let kind = request
-        .tool_call
-        .fields
-        .kind
-        .as_ref()
-        .map(|kind| kind_name(kind).to_owned())
-        .or_else(|| {
-            shared
-                .inner
-                .lock()
-                .ok()
-                .and_then(|inner| inner.kinds.get(&id).cloned())
-        });
-    if let Ok(mut inner) = shared.inner.lock() {
-        inner.asked.insert(id.clone());
-    }
+    let kind = shared.settled_kind(&id, request.tool_call.fields.kind.as_ref().map(kind_name));
     let asked = PermissionRequest {
         session_id: request.session_id.0.to_string(),
         tool_call_id: id,

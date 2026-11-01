@@ -418,6 +418,10 @@ struct Script {
     ask: Option<&'static str>,
     /// A tool of this kind runs without being asked.
     run_unasked: Option<&'static str>,
+    /// The tool asked about is announced as this kind first.
+    announce: Option<&'static str>,
+    /// The tool asked about runs whatever the answer was.
+    run_regardless: bool,
     cost: Option<f64>,
     stop: Option<&'static str>,
     fail_prompt: bool,
@@ -549,6 +553,13 @@ fn agent_request(
                                "kind": kind, "status": "completed"}),
                     );
                 }
+                if let Some(kind) = script.announce {
+                    update(
+                        &cx,
+                        json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Run it",
+                               "kind": kind, "status": "pending"}),
+                    );
+                }
                 if let Some(kind) = script.ask {
                     let asked = futures::executor::block_on(
                         cx.send_request(
@@ -570,6 +581,13 @@ fn agent_request(
                     )
                     .unwrap();
                     *seen.outcome.lock().unwrap() = Some(asked);
+                    if script.run_regardless {
+                        update(
+                            &cx,
+                            json!({"sessionUpdate": "tool_call_update", "toolCallId": "t1",
+                                   "status": "in_progress"}),
+                        );
+                    }
                 }
                 if let Some(amount) = script.cost {
                     update(
@@ -833,6 +851,46 @@ fn a_restricted_session_refuses_what_changes_things_without_asking_the_decider()
 }
 
 #[test]
+fn a_restricted_session_ends_when_a_refused_tool_runs_anyway() {
+    let mut options = external("go");
+    options.restricted = true;
+    let (session, _seen) = connect_agent(
+        Script {
+            ask: Some("edit"),
+            run_regardless: true,
+            ..Script::default()
+        },
+        options,
+    );
+    let events = until(&session.unwrap(), &["failed", "completed"]);
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, "failed");
+    assert!(last.text.as_deref().unwrap().contains("without leave"));
+}
+
+#[test]
+fn an_agent_cannot_relabel_a_restricted_tool_before_asking() {
+    let decider = Arc::new(Decider {
+        allow: true,
+        ..Decider::default()
+    });
+    let mut options = external("go");
+    options.decider = decider.clone();
+    options.restricted = true;
+    let (session, seen) = connect_agent(
+        Script {
+            announce: Some("edit"),
+            ask: Some("read"),
+            ..Script::default()
+        },
+        options,
+    );
+    until(&session.unwrap(), &["completed"]);
+    assert!(decider.asked.lock().unwrap().is_empty());
+    assert_eq!(outcome(&seen)["outcome"]["optionId"], "no");
+}
+
+#[test]
 fn a_restricted_session_ends_when_a_tool_runs_without_asking() {
     let mut options = external("go");
     options.restricted = true;
@@ -846,7 +904,7 @@ fn a_restricted_session_ends_when_a_tool_runs_without_asking() {
     let events = until(&session.unwrap(), &["failed", "completed"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "failed");
-    assert!(last.text.as_deref().unwrap().contains("without asking"));
+    assert!(last.text.as_deref().unwrap().contains("without leave"));
     let deadline = Instant::now() + Duration::from_secs(10);
     while seen.cancels.load(Ordering::SeqCst) == 0 {
         assert!(Instant::now() < deadline, "the agent was not told to stop");

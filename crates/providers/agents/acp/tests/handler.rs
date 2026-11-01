@@ -179,7 +179,7 @@ fn an_answer_only_session_refuses_an_edit_and_ends_when_one_runs_unasked() {
     let events = until(&session, &["completed", "failed"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "failed");
-    assert!(last.text.as_deref().unwrap().contains("without asking"));
+    assert!(last.text.as_deref().unwrap().contains("without leave"));
 }
 
 #[test]
