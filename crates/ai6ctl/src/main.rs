@@ -159,6 +159,16 @@ enum Command {
     },
     /// List the briefs vetting held, and release or refuse them (needs mission.create on the
     /// Operation).
+    /// Link, comment on, change and create the issues Missions work from.
+    Issues {
+        #[command(subcommand)]
+        command: IssuesCommand,
+    },
+    /// What Agents asked to create on the trackers.
+    IssueProposals {
+        #[command(subcommand)]
+        command: IssueProposalsCommand,
+    },
     HeldBriefs {
         #[command(subcommand)]
         command: HeldCommand,
@@ -349,8 +359,177 @@ struct HeldDecision {
 }
 
 /// Mission lifecycle controls; the Station holding the Mission decides whether they apply.
+#[derive(Debug, Deserialize)]
+struct IssueWritten {
+    issue: Option<String>,
+    proposal: Option<String>,
+    state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueProposalRow {
+    id: String,
+    state: String,
+    proposer: String,
+    mission_id: String,
+    specs: Vec<serde_json::Value>,
+    #[serde(default)]
+    findings: Vec<String>,
+    #[serde(default)]
+    dropped: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MissionIssuesView {
+    issues: Vec<IssueRow>,
+    entries: Vec<IssueEntryRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueRow {
+    issue: String,
+    relation: String,
+    state: String,
+    url: Option<String>,
+    phase: Option<String>,
+    open_question: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueEntryRow {
+    id: String,
+    kind: String,
+    issue: String,
+    state: String,
+    url: Option<String>,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+enum IssuesCommand {
+    /// Link an issue to a Mission.
+    Link {
+        /// The issue, as TRACKER:ITEM.
+        issue: String,
+        #[arg(long)]
+        mission: String,
+        #[arg(long)]
+        operation: String,
+        /// `related` (the default), `child`, `parent` or `mirror`.
+        #[arg(long)]
+        relation: Option<String>,
+    },
+    /// Unlink an issue from a Mission.
+    Unlink {
+        /// The issue, as TRACKER:ITEM.
+        issue: String,
+        #[arg(long)]
+        mission: String,
+        #[arg(long)]
+        operation: String,
+    },
+    /// Accept a link an Agent proposed.
+    Accept {
+        /// The issue, as TRACKER:ITEM.
+        issue: String,
+        #[arg(long)]
+        mission: String,
+        #[arg(long)]
+        operation: String,
+    },
+    /// Comment on a linked issue, with your name in a footer.
+    Comment {
+        /// The issue, as TRACKER:ITEM.
+        issue: String,
+        #[arg(long)]
+        mission: String,
+        #[arg(long)]
+        operation: String,
+        #[arg(long)]
+        body: String,
+    },
+    /// Change a linked issue's labels, state, workflow status or assignees.
+    Update {
+        /// The issue, as TRACKER:ITEM.
+        issue: String,
+        #[arg(long)]
+        mission: String,
+        #[arg(long)]
+        operation: String,
+        #[arg(long = "add-label")]
+        add_labels: Vec<String>,
+        #[arg(long = "remove-label")]
+        remove_labels: Vec<String>,
+        #[arg(long)]
+        transition: Option<String>,
+        #[arg(long)]
+        close: bool,
+        #[arg(long)]
+        reopen: bool,
+        #[arg(long = "add-assignee")]
+        add_assignees: Vec<String>,
+        #[arg(long = "remove-assignee")]
+        remove_assignees: Vec<String>,
+    },
+    /// Create an issue in one of the Operation's trackers.
+    Create {
+        /// The tracker instance.
+        tracker: String,
+        #[arg(long)]
+        operation: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long, default_value = "")]
+        body: String,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        issue_type: Option<String>,
+        #[arg(long)]
+        priority: Option<String>,
+        /// The linked issue it is a child of, as TRACKER:ITEM; needs `--mission`.
+        #[arg(long)]
+        parent: Option<String>,
+        /// The Mission to link it to.
+        #[arg(long)]
+        mission: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum IssueProposalsCommand {
+    /// What Agents asked to create and how it came out.
+    List {
+        #[arg(long)]
+        operation: String,
+    },
+    /// Approve a proposal; the Headquarters Station creates what it asks for.
+    Approve {
+        id: String,
+        #[arg(long)]
+        operation: String,
+        /// Add the intake labels to what it creates; needs `mission.create` too.
+        #[arg(long)]
+        mark_ready: bool,
+    },
+    /// Reject a proposal.
+    Reject {
+        id: String,
+        #[arg(long)]
+        operation: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum MissionCommand {
+    /// The issues a Mission is linked to and what it posted.
+    Issues {
+        mission: String,
+        #[arg(long)]
+        operation: String,
+    },
     /// Stop the Mission's live Session, if any, and abandon the Mission.
     Cancel {
         /// AI6 Mission ID.
@@ -787,6 +966,26 @@ async fn run() -> Result<(), String> {
             }
         }
         Command::Mission {
+            control: Some(MissionCommand::Issues { mission, operation }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let request = operation_request(
+                &client,
+                &server,
+                &token,
+                Method::GET,
+                &[&operation, "missions", &mission, "issues"],
+            )?;
+            let view: MissionIssuesView = send(
+                request,
+                "this needs mission.read on the Operation",
+                "linked issues",
+            )
+            .await?;
+            print_mission_issues(&view);
+        }
+        Command::Mission {
             control: Some(command),
             ..
         } => {
@@ -815,6 +1014,7 @@ async fn run() -> Result<(), String> {
                     "resume",
                     message.map(|message| ("message", message)),
                 ),
+                MissionCommand::Issues { .. } => unreachable!("handled above"),
             };
             let operation = match target.operation {
                 Some(operation) => operation,
@@ -963,6 +1163,14 @@ async fn run() -> Result<(), String> {
         Command::ClassAuthorizations { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             class_authorizations(&client, &server, &token, command).await?;
+        }
+        Command::Issues { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            issues_command(&client, &server, &token, command).await?;
+        }
+        Command::IssueProposals { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            issue_proposals_command(&client, &server, &token, command).await?;
         }
         Command::HeldBriefs { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -1331,6 +1539,285 @@ async fn held_briefs(
     let decided: HeldDecision = send(request, PERMISSION, "held brief decision").await?;
     println!("{}\t{}", plain(&decided.key), plain(&decided.state));
     Ok(())
+}
+
+/// The body of `issues update`, with only what was asked for.
+#[allow(clippy::too_many_arguments)]
+fn update_body(
+    add_labels: Vec<String>,
+    remove_labels: Vec<String>,
+    transition: Option<String>,
+    close: bool,
+    reopen: bool,
+    add_assignees: Vec<String>,
+    remove_assignees: Vec<String>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "add_labels": add_labels,
+        "remove_labels": remove_labels,
+        "close": close,
+        "reopen": reopen,
+        "add_assignees": add_assignees,
+        "remove_assignees": remove_assignees,
+    });
+    if let Some(transition) = transition {
+        body["transition"] = transition.into();
+    }
+    body
+}
+
+/// Each of `ai6ctl issues`.
+async fn issues_command(
+    client: &Client,
+    server: &Url,
+    token: &str,
+    command: IssuesCommand,
+) -> Result<(), String> {
+    const PERMISSION: &str = "this needs the issue action on the Operation";
+    let (operation, method, path, body): (String, Method, Vec<String>, Option<serde_json::Value>) =
+        match command {
+            IssuesCommand::Link {
+                issue,
+                mission,
+                operation,
+                relation,
+            } => {
+                let mut body = serde_json::json!({"issue": issue});
+                if let Some(relation) = relation {
+                    body["relation"] = relation.into();
+                }
+                let path = vec!["missions".to_owned(), mission, "issues".to_owned()];
+                (operation, Method::POST, path, Some(body))
+            }
+            IssuesCommand::Unlink {
+                issue,
+                mission,
+                operation,
+            } => {
+                let path = vec!["missions".to_owned(), mission, "issues".to_owned(), issue];
+                (operation, Method::DELETE, path, None)
+            }
+            IssuesCommand::Accept {
+                issue,
+                mission,
+                operation,
+            } => {
+                let path = vec![
+                    "missions".to_owned(),
+                    mission,
+                    "issues".to_owned(),
+                    issue,
+                    "accept".to_owned(),
+                ];
+                (operation, Method::POST, path, None)
+            }
+            IssuesCommand::Comment {
+                issue,
+                mission,
+                operation,
+                body,
+            } => {
+                let path = vec![
+                    "missions".to_owned(),
+                    mission,
+                    "issues".to_owned(),
+                    issue,
+                    "comments".to_owned(),
+                ];
+                let body = serde_json::json!({"body": body});
+                (operation, Method::POST, path, Some(body))
+            }
+            IssuesCommand::Update {
+                issue,
+                mission,
+                operation,
+                add_labels,
+                remove_labels,
+                transition,
+                close,
+                reopen,
+                add_assignees,
+                remove_assignees,
+            } => {
+                let path = vec![
+                    "missions".to_owned(),
+                    mission,
+                    "issues".to_owned(),
+                    issue,
+                    "update".to_owned(),
+                ];
+                let body = update_body(
+                    add_labels,
+                    remove_labels,
+                    transition,
+                    close,
+                    reopen,
+                    add_assignees,
+                    remove_assignees,
+                );
+                (operation, Method::POST, path, Some(body))
+            }
+            IssuesCommand::Create {
+                tracker,
+                operation,
+                title,
+                body,
+                labels,
+                issue_type,
+                priority,
+                parent,
+                mission,
+            } => {
+                let body = serde_json::json!({
+                    "tracker": tracker,
+                    "title": title,
+                    "body": body,
+                    "labels": labels,
+                    "issue_type": issue_type,
+                    "priority": priority,
+                    "parent": parent,
+                    "mission": mission,
+                });
+                (
+                    operation,
+                    Method::POST,
+                    vec!["issues".to_owned()],
+                    Some(body),
+                )
+            }
+        };
+    let mut segments: Vec<&str> = vec![&operation];
+    segments.extend(path.iter().map(String::as_str));
+    let mut request = operation_request(client, server, token, method, &segments)?;
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let written: IssueWritten = send(request, PERMISSION, "issue write").await?;
+    println!(
+        "{}\t{}",
+        plain(
+            written
+                .issue
+                .as_deref()
+                .or(written.proposal.as_deref())
+                .unwrap_or("-")
+        ),
+        plain(&written.state)
+    );
+    Ok(())
+}
+
+/// Each of `ai6ctl issue-proposals`.
+async fn issue_proposals_command(
+    client: &Client,
+    server: &Url,
+    token: &str,
+    command: IssueProposalsCommand,
+) -> Result<(), String> {
+    const PERMISSION: &str = "this needs issue.create on the Operation";
+    let (operation, id, action, body) = match command {
+        IssueProposalsCommand::List { operation } => {
+            let request = operation_request(
+                client,
+                server,
+                token,
+                Method::GET,
+                &[&operation, "issue-proposals"],
+            )?;
+            let listed: Vec<IssueProposalRow> = send(
+                request,
+                "this needs mission.read on the Operation",
+                "issue proposals",
+            )
+            .await?;
+            print_issue_proposals(&listed);
+            return Ok(());
+        }
+        IssueProposalsCommand::Approve {
+            id,
+            operation,
+            mark_ready,
+        } => (
+            operation,
+            id,
+            "approve",
+            serde_json::json!({"mark_ready": mark_ready}),
+        ),
+        IssueProposalsCommand::Reject {
+            id,
+            operation,
+            reason,
+        } => {
+            let mut body = serde_json::json!({});
+            if let Some(reason) = reason {
+                body["reason"] = reason.into();
+            }
+            (operation, id, "reject", body)
+        }
+    };
+    let request = operation_request(
+        client,
+        server,
+        token,
+        Method::POST,
+        &[&operation, "issue-proposals", &id, action],
+    )?
+    .json(&body);
+    let decided: IssueProposalRow = send(request, PERMISSION, "issue proposal decision").await?;
+    println!("{}\t{}", plain(&decided.id), plain(&decided.state));
+    Ok(())
+}
+
+fn print_issue_proposals(listed: &[IssueProposalRow]) {
+    println!("ID\tSTATE\tPROPOSER\tMISSION\tISSUES\tFINDINGS\tDROPPED");
+    for proposal in listed {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            plain(&proposal.id),
+            plain(&proposal.state),
+            plain(&proposal.proposer),
+            plain(&proposal.mission_id),
+            proposal.specs.len(),
+            plain(&proposal.findings.join(",")),
+            plain(&proposal.dropped.join(",")),
+        );
+    }
+}
+
+fn print_mission_issues(view: &MissionIssuesView) {
+    println!("ISSUE\tRELATION\tSTATE\tPHASE\tQUESTION\tURL");
+    for issue in &view.issues {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            plain(&issue.issue),
+            plain(&issue.relation),
+            plain(&issue.state),
+            plain(issue.phase.as_deref().unwrap_or("-")),
+            if issue.open_question.is_some() {
+                "open"
+            } else {
+                "-"
+            },
+            plain(issue.url.as_deref().unwrap_or("-")),
+        );
+    }
+    println!("ENTRY\tKIND\tISSUE\tSTATE\tURL_OR_REASON");
+    for entry in &view.entries {
+        println!(
+            "{}\t{}\t{}\t{}\t{}",
+            plain(&entry.id),
+            plain(&entry.kind),
+            plain(&entry.issue),
+            plain(&entry.state),
+            plain(
+                entry
+                    .url
+                    .as_deref()
+                    .or(entry.reason.as_deref())
+                    .unwrap_or("-")
+            ),
+        );
+    }
 }
 
 fn print_held(held: &[HeldBrief]) {
