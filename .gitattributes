@@ -6,3 +6,6 @@
 *.jpeg binary
 *.ico binary
 *.ttf binary
+
+# Recorded from real services: the bytes stay as they were recorded.
+crates/providers/sources/*/tests/fixtures/** -text
