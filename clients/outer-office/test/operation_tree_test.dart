@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:convert';
 import 'dart:ui' show Size;
 
@@ -5,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show Card, DropdownButton, DropdownMenuItem, Key, MaterialApp, Scaffold;
+    show Card, DropdownButton, Key, MaterialApp, Scaffold;
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/operations/operation_tree.dart';
@@ -124,17 +125,28 @@ void main() {
       [access('ROOT'), access('P', 'ROOT'), access('G', 'P'), access('OTHER')],
       roster: ['roster.read', 'roster.manage'],
       respond: (request) => http.Response(
-        jsonEncode({
-          'kind': 'operations',
-          'revision': '3',
-          'writable': true,
-          'records': [
-            {
-              'key': 'P',
-              'definition': {'parent': 'ROOT'},
-            },
-          ],
-        }),
+        request.url.path.endsWith('/schema')
+            ? jsonEncode(
+                (jsonDecode(File('assets/record_forms.json').readAsStringSync())
+                    as Map<String, dynamic>)['operations'],
+              )
+            : jsonEncode({
+                'kind': 'operations',
+                'revision': '3',
+                'writable': true,
+                'records': [
+                  {'key': 'ROOT', 'definition': <String, dynamic>{}},
+                  {
+                    'key': 'P',
+                    'definition': {'parent': 'ROOT'},
+                  },
+                  {
+                    'key': 'G',
+                    'definition': {'parent': 'P'},
+                  },
+                  {'key': 'OTHER', 'definition': <String, dynamic>{}},
+                ],
+              }),
         200,
       ),
     );
@@ -146,13 +158,15 @@ void main() {
     await tester.tap(find.byTooltip('Edit P'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('roster-parent')));
-    await tester.pumpAndSettle();
+    final picker = tester.widget<DropdownButton<String>>(
+      find.descendant(
+        of: find.byKey(const Key('form-field-parent')),
+        matching: find.byType(DropdownButton<String>),
+      ),
+    );
     final offered = [
-      for (final item in tester.widgetList<DropdownMenuItem<String?>>(
-        find.byType(DropdownMenuItem<String?>),
-      ))
-        if (item.value != null) item.value,
+      for (final item in picker.items!)
+        if (item.value!.isNotEmpty) item.value,
     ];
     expect(offered.toSet(), {'ROOT', 'OTHER'});
     expect(offered, isNot(contains('G')));

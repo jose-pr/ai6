@@ -28,6 +28,7 @@ import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
 import 'pools/pools_page.dart';
+import 'roster/record_editor.dart';
 import 'roster/roster_page.dart';
 import 'routes/oo_filters.dart';
 import 'routes/oo_route.dart';
@@ -1203,6 +1204,31 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     );
   }
 
+  /// How records of one kind are shown, from the type that declares them; read once.
+  Future<RecordFormSpec> loadRecordForm(String kind) async {
+    final known = _recordForms[kind];
+    if (known != null) return known;
+    final Map<String, dynamic> answer;
+    if (demo) {
+      answer =
+          (jsonDecode(await rootBundle.loadString('assets/record_forms.json'))
+                  as Map<String, dynamic>)[kind]
+              as Map<String, dynamic>;
+    } else {
+      final response = await _userRequest(
+        'GET',
+        '/v1/user/roster/${Uri.encodeComponent(kind)}/schema',
+      );
+      if (response.statusCode != 200) {
+        throw StateError('The gateway refused the form of these records.');
+      }
+      answer = jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    return _recordForms[kind] = RecordFormSpec.fromJson(answer);
+  }
+
+  final _recordForms = <String, RecordFormSpec>{};
+
   /// One Operation as its Stations resolve it: its definition with its ancestors' keys and
   /// the Operation that wrote each. Needs `roster.read`.
   Future<EffectiveOperationSummary> effectiveOperation(
@@ -1225,29 +1251,37 @@ class MissionBoard extends ChangeNotifier implements PageActions {
 
   /// Stores one record's definition; returns the roster revision it moved to and what the
   /// stored record weakens. Throws [RosterRefused] with the reason when the roster it would
-  /// leave is not acceptable.
+  /// leave is not acceptable, and [RosterChanged] when `revision`, the one the record was read
+  /// at (`0`: there was none), is no longer its own.
   Future<RosterChange> saveRosterRecord(
     String kind,
     String key,
-    Map<String, dynamic> definition,
-  ) async {
+    Map<String, dynamic> definition, {
+    String? revision,
+  }) async {
     if (demo) throw StateError('Roster changes are unavailable in preview.');
     return _rosterChange(
       await _userRequest(
         'PUT',
         '/v1/user/roster/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(key)}',
         body: definition,
+        headers: {if (revision != null) 'if-match': '"$revision"'},
       ),
     );
   }
 
   /// Removes one record; returns the roster revision it moved to.
-  Future<RosterChange> deleteRosterRecord(String kind, String key) async {
+  Future<RosterChange> deleteRosterRecord(
+    String kind,
+    String key, {
+    String? revision,
+  }) async {
     if (demo) throw StateError('Roster changes are unavailable in preview.');
     return _rosterChange(
       await _userRequest(
         'DELETE',
         '/v1/user/roster/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(key)}',
+        headers: {if (revision != null) 'if-match': '"$revision"'},
       ),
     );
   }
@@ -1264,6 +1298,10 @@ class MissionBoard extends ChangeNotifier implements PageActions {
               as String,
         );
       case 409:
+        final answer = jsonDecode(response.body.isEmpty ? '{}' : response.body);
+        if (answer is Map && answer.containsKey('changed')) {
+          throw const RosterChanged();
+        }
         throw StateError('This roster is read-only; edit its files instead.');
       case 404:
         throw StateError('There is no such roster record.');
@@ -2339,11 +2377,15 @@ class StationSummary {
     required this.running,
     required this.capacity,
     required this.operations,
+    this.handlers = const [],
     this.theaters = const [],
     this.resources,
     this.config,
     this.headOfStation,
   });
+
+  /// The Agent handlers it has loaded.
+  final List<String> handlers;
 
   final String stationId;
   final bool healthy;
@@ -2373,6 +2415,7 @@ class StationSummary {
     running: json['running'] as int,
     capacity: json['capacity'] as int,
     operations: (json['operations'] as List<dynamic>).cast<String>(),
+    handlers: ((json['handlers'] as List<dynamic>?) ?? const []).cast<String>(),
     theaters: ((json['theaters'] as List<dynamic>?) ?? const [])
         .map(
           (theater) => TheaterSummary.fromJson(theater as Map<String, dynamic>),

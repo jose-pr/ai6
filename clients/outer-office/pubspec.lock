@@ -161,8 +161,17 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/guatiao"
-      ref: c68361008a0e58c644fb0a3c4cfe107114cf22e9
-      resolved-ref: c68361008a0e58c644fb0a3c4cfe107114cf22e9
+      ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
+      resolved-ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
+      url: "https://github.com/Boriken-Dev/guatiao.git"
+    source: git
+    version: "0.0.0-alpha.1"
+  guatiao_intake:
+    dependency: "direct main"
+    description:
+      path: "bindings/dart/guatiao_intake"
+      ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
+      resolved-ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
       url: "https://github.com/Boriken-Dev/guatiao.git"
     source: git
     version: "0.0.0-alpha.1"

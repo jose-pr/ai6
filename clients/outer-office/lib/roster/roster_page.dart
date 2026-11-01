@@ -1,12 +1,13 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../forms/form_model.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import 'record_editor.dart';
 
 /// The roster revision a Station runs, what it refused and which changed files wait for a
 /// restart, as it reported them at check-in.
@@ -33,17 +34,24 @@ class StationConfigStatus {
       );
 }
 
-/// One roster record: its key and its definition, the keys of its configuration table.
+/// One roster record: its key, its definition, the keys of its configuration table, and the
+/// revision a save of it names.
 @immutable
 class RosterRecord {
-  const RosterRecord({required this.key, required this.definition});
+  const RosterRecord({
+    required this.key,
+    required this.definition,
+    this.revision = '0',
+  });
 
   final String key;
   final Map<String, dynamic> definition;
+  final String revision;
 
   factory RosterRecord.fromJson(Map<String, dynamic> json) => RosterRecord(
     key: json['key'] as String,
     definition: json['definition'] as Map<String, dynamic>,
+    revision: json['revision'] as String? ?? '0',
   );
 }
 
@@ -141,9 +149,6 @@ const _kinds = {
 /// The kind of Moneypenny's `[assistant]` settings: at most one record, keyed `settings`.
 const _assistantKind = 'assistant';
 
-/// The key of the one record of a family that has one, such as Moneypenny's settings.
-const _singletonKey = 'settings';
-
 /// A route's roster `kind` and the kind the gateway's roster API names.
 const _routeKinds = {
   'operation': 'operations',
@@ -177,6 +182,7 @@ class RosterPage extends StatefulWidget {
 
 class _RosterPageState extends State<RosterPage> {
   RosterRecords? _records;
+  RecordFormSpec? _spec;
   String? _error;
   bool _loading = false;
 
@@ -198,6 +204,7 @@ class _RosterPageState extends State<RosterPage> {
     if (oldWidget.route['kind'] != widget.route['kind']) {
       setState(() {
         _records = null;
+        _spec = null;
         _weakened = const [];
       });
       unawaited(_load());
@@ -214,6 +221,7 @@ class _RosterPageState extends State<RosterPage> {
         _records = records;
         _error = null;
       });
+      await _loadSpec(kind);
     } on StateError catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
@@ -221,15 +229,39 @@ class _RosterPageState extends State<RosterPage> {
     }
   }
 
+  /// The form of this kind, which rows are summarized by; without it they say how much they
+  /// hold.
+  Future<void> _loadSpec(String kind) async {
+    try {
+      final spec = await widget.board.loadRecordForm(kind);
+      if (mounted && kind == _kind) setState(() => _spec = spec);
+    } on Object {
+      if (mounted && kind == _kind) setState(() => _spec = null);
+    }
+  }
+
+  String _summary(RosterRecord record) {
+    final spec = _spec;
+    if (spec != null) {
+      final lines = summaryOf(spec.schema, record.definition);
+      if (lines.isNotEmpty) return lines.join(' · ');
+    }
+    final count = record.definition.length;
+    return count == 0
+        ? 'Every setting at its default'
+        : '$count setting${count == 1 ? '' : 's'}';
+  }
+
   void _say(String text) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   Future<void> _edit(RosterRecord? record) async {
-    final change = await showDialog<RosterChange>(
-      context: context,
-      builder: (context) =>
-          _RecordEditor(board: widget.board, kind: _kind, record: record),
+    final change = await showRecordEditor(
+      context,
+      board: widget.board,
+      kind: _kind,
+      recordKey: record?.key,
     );
     if (change == null || !mounted) return;
     setState(() => _weakened = change.weakened);
@@ -269,36 +301,40 @@ class _RosterPageState extends State<RosterPage> {
     ),
   );
 
-  Future<void> _delete(RosterRecord record) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Remove ${record.key}?'),
-        content: const Text(
-          'Every Station stops using it at its next poll. Running Sessions keep '
-          'the roster they started with.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+  Future<void> _showConfiguration(RosterRecord record) async {
+    final spec = _spec ?? await widget.board.loadRecordForm(_kind);
+    if (!mounted) return;
+    await showRecordConfiguration(
+      context,
+      kind: _kind,
+      recordKey: record.key,
+      definition: record.definition,
+      schema: FieldSchema(spec.schema),
     );
-    if (confirmed != true || !mounted) return;
+  }
+
+  Future<void> _delete(RosterRecord record) async {
     try {
-      final change = await widget.board.deleteRosterRecord(_kind, record.key);
-      if (!mounted) return;
+      final change = await confirmRemoveRecord(
+        context,
+        board: widget.board,
+        kind: _kind,
+        recordKey: record.key,
+        revision: record.revision,
+      );
+      if (change == null || !mounted) return;
       setState(() => _weakened = change.weakened);
       _say('Removed; roster revision ${change.revision}.');
       await _load();
+    } on RosterRefused catch (refused) {
+      if (mounted) _say('Refused: ${refused.reason}');
+    } on RosterChanged {
+      if (mounted) {
+        _say('Someone changed this record meanwhile; nothing was removed.');
+        await _load();
+      }
     } on Object catch (error) {
-      if (mounted) _say(error.toString());
+      if (mounted) _say(error is StateError ? error.message : error.toString());
     }
   }
 
@@ -326,21 +362,25 @@ class _RosterPageState extends State<RosterPage> {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              DropdownButton<String>(
-                value: _kind,
-                items: [
-                  for (final MapEntry(:key, :value) in _kinds.entries)
-                    DropdownMenuItem(value: key, child: Text(value)),
-                ],
-                onChanged: (kind) {
-                  if (kind == null || kind == _kind) return;
-                  final singular = _routeKinds.entries
-                      .firstWhere((entry) => entry.value == kind)
-                      .key;
-                  widget.onRoute(
-                    widget.route.without('key').withField('kind', singular),
-                  );
-                },
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 260),
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  value: _kind,
+                  items: [
+                    for (final MapEntry(:key, :value) in _kinds.entries)
+                      DropdownMenuItem(value: key, child: Text(value)),
+                  ],
+                  onChanged: (kind) {
+                    if (kind == null || kind == _kind) return;
+                    final singular = _routeKinds.entries
+                        .firstWhere((entry) => entry.value == kind)
+                        .key;
+                    widget.onRoute(
+                      widget.route.without('key').withField('kind', singular),
+                    );
+                  },
+                ),
               ),
               IconButton(
                 tooltip: 'Refresh the roster',
@@ -399,36 +439,39 @@ class _RosterPageState extends State<RosterPage> {
                     child: ListTile(
                       title: Text(record.key),
                       subtitle: Text(
-                        jsonEncode(record.definition),
+                        _summary(record),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: canEdit || _kind == 'operations'
-                          ? Wrap(
-                              children: [
-                                if (_kind == 'operations')
-                                  IconButton(
-                                    tooltip:
-                                        'Effective policy of ${record.key}',
-                                    onPressed: () =>
-                                        unawaited(_showEffective(record.key)),
-                                    icon: const Icon(Icons.account_tree),
-                                  ),
-                                if (canEdit) ...[
-                                  IconButton(
-                                    tooltip: 'Edit ${record.key}',
-                                    onPressed: () => unawaited(_edit(record)),
-                                    icon: const Icon(Icons.edit_outlined),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Remove ${record.key}',
-                                    onPressed: () => unawaited(_delete(record)),
-                                    icon: const Icon(Icons.delete_outline),
-                                  ),
-                                ],
-                              ],
-                            )
-                          : null,
+                      trailing: Wrap(
+                        children: [
+                          IconButton(
+                            tooltip: 'As configuration: ${record.key}',
+                            onPressed: () =>
+                                unawaited(_showConfiguration(record)),
+                            icon: const Icon(Icons.description_outlined),
+                          ),
+                          if (_kind == 'operations')
+                            IconButton(
+                              tooltip: 'Effective policy of ${record.key}',
+                              onPressed: () =>
+                                  unawaited(_showEffective(record.key)),
+                              icon: const Icon(Icons.account_tree),
+                            ),
+                          if (canEdit) ...[
+                            IconButton(
+                              tooltip: 'Edit ${record.key}',
+                              onPressed: () => unawaited(_edit(record)),
+                              icon: const Icon(Icons.edit_outlined),
+                            ),
+                            IconButton(
+                              tooltip: 'Remove ${record.key}',
+                              onPressed: () => unawaited(_delete(record)),
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
               ],
@@ -522,201 +565,4 @@ class _Weakened extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Edits one record's key and definition as a JSON object; the key of Moneypenny's settings
-/// is fixed.
-class _RecordEditor extends StatefulWidget {
-  const _RecordEditor({
-    required this.board,
-    required this.kind,
-    required this.record,
-  });
-
-  final MissionBoard board;
-  final String kind;
-  final RosterRecord? record;
-
-  @override
-  State<_RecordEditor> createState() => _RecordEditorState();
-}
-
-class _RecordEditorState extends State<_RecordEditor> {
-  late final _fixedKey = widget.kind == _assistantKind;
-  late final _key = TextEditingController(
-    text: widget.record?.key ?? (_fixedKey ? _singletonKey : ''),
-  );
-  late final _definition = TextEditingController(
-    text: const JsonEncoder.withIndent('  ')
-        .convert(widget.record?.definition ?? const <String, dynamic>{}),
-  );
-  String? _problem;
-  bool _saving = false;
-
-  /// The `parent` the definition text names, when it parses.
-  String? get _parent {
-    try {
-      final definition = jsonDecode(_definition.text);
-      return definition is Map<String, dynamic>
-          ? definition['parent'] as String?
-          : null;
-    } on Object {
-      return null;
-    }
-  }
-
-  /// Sets or clears `parent` in the definition text; the gateway still refuses a cycle.
-  void _setParent(String? parent) {
-    try {
-      final definition = jsonDecode(_definition.text);
-      if (definition is! Map<String, dynamic>) return;
-      if (parent == null) {
-        definition.remove('parent');
-      } else {
-        definition['parent'] = parent;
-      }
-      setState(() {
-        _definition.text = const JsonEncoder.withIndent('  ')
-            .convert(definition);
-      });
-    } on FormatException {
-      setState(() => _problem = 'Fix the JSON before choosing a parent.');
-    }
-  }
-
-  @override
-  void dispose() {
-    _key.dispose();
-    _definition.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    final key = _key.text.trim();
-    Object? definition;
-    try {
-      definition = jsonDecode(_definition.text);
-    } on FormatException catch (error) {
-      setState(() => _problem = 'Not JSON: ${error.message}');
-      return;
-    }
-    if (key.isEmpty || definition is! Map<String, dynamic>) {
-      setState(
-        () => _problem = 'Give a key and a definition that is a JSON object.',
-      );
-      return;
-    }
-    setState(() {
-      _saving = true;
-      _problem = null;
-    });
-    try {
-      final change = await widget.board.saveRosterRecord(
-        widget.kind,
-        key,
-        definition,
-      );
-      if (mounted) Navigator.of(context).pop(change);
-    } on RosterRefused catch (refused) {
-      if (mounted) setState(() => _problem = 'Refused: ${refused.reason}');
-    } on Object catch (error) {
-      if (mounted) setState(() => _problem = error.toString());
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      widget.record == null
-          ? 'Add to ${_kinds[widget.kind]}'
-          : 'Edit ${widget.record!.key}',
-    ),
-    content: SizedBox(
-      width: 480,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_fixedKey)
-            const Text('Key: assistant (the one record of this kind)')
-          else
-            TextField(
-              key: const Key('roster-key'),
-              controller: _key,
-              enabled: widget.record == null && !_saving,
-              decoration: const InputDecoration(labelText: 'Key'),
-            ),
-          if (widget.kind == 'operations') ...[
-            const SizedBox(height: 12),
-            _ParentPicker(
-              choices: parentChoices({
-                for (final access
-                    in widget.board.userSession?.operations ?? const [])
-                  access.operationId: access.parent,
-              }, _key.text.trim()),
-              parent: _parent,
-              onChanged: _saving ? null : _setParent,
-            ),
-          ],
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('roster-definition'),
-            controller: _definition,
-            enabled: !_saving,
-            minLines: 6,
-            maxLines: 16,
-            decoration: const InputDecoration(
-              labelText: 'Definition (JSON)',
-              helperText: 'The keys of its table in the configuration files',
-            ),
-          ),
-          if (_problem case final problem?) ...[
-            const SizedBox(height: 12),
-            Text(
-              problem,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
-        ],
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: _saving ? null : () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: _saving ? null : () => unawaited(_save()),
-        child: Text(_saving ? 'Saving…' : 'Save'),
-      ),
-    ],
-  );
-}
-
-/// Chooses the Operation another sits under; the choices leave out its own subtree.
-class _ParentPicker extends StatelessWidget {
-  const _ParentPicker({
-    required this.choices,
-    required this.parent,
-    required this.onChanged,
-  });
-
-  final List<String> choices;
-  final String? parent;
-  final ValueChanged<String?>? onChanged;
-
-  @override
-  Widget build(BuildContext context) => DropdownButtonFormField<String?>(
-    key: const Key('roster-parent'),
-    initialValue: parent,
-    decoration: const InputDecoration(labelText: 'Parent Operation'),
-    items: [
-      const DropdownMenuItem<String?>(child: Text('None (a root Operation)')),
-      for (final id in {...choices, ?parent})
-        DropdownMenuItem<String?>(value: id, child: Text(id)),
-    ],
-    onChanged: onChanged,
-  );
 }

@@ -14,8 +14,13 @@ dependencies:
   guatiao:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: c68361008a0e58c644fb0a3c4cfe107114cf22e9
+      ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
       path: bindings/dart/guatiao
+  guatiao_intake:
+    git:
+      url: https://github.com/Boriken-Dev/guatiao.git
+      ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
+      path: bindings/dart/guatiao_intake
   http: ^1.6.0
   material_ui: ^1.1.0
   shared_preferences: ^2.5.5
@@ -27,6 +32,14 @@ dependencies:
   xterm2: ^5.4.0
   yaml: ^3.1.3
   yaml_edit: ^2.2.2
+
+# guatiao_intake names package:guatiao as a hosted package; both come from this revision.
+dependency_overrides:
+  guatiao:
+    git:
+      url: https://github.com/Boriken-Dev/guatiao.git
+      ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
+      path: bindings/dart/guatiao
 
 dev_dependencies:
   crypto: ^3.0.7
@@ -42,6 +55,7 @@ flutter:
     - assets/backdrops/
     - assets/brand/moneypenny-128.png
     - assets/brand/outer-office-256.png
+    - assets/record_forms.json
     - assets/fonts/LICENSE-Cinzel.txt
     - assets/fonts/LICENSE-Noto.txt
     - assets/fonts/LICENSE-Roboto.txt

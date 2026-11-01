@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
 import '../routes/oo_filters.dart';
+import '../roster/record_editor.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
 import '../shell/oo_empty.dart';
@@ -267,7 +268,17 @@ class AgentsPage extends StatefulWidget {
   State<AgentsPage> createState() => _AgentsPageState();
 }
 
-class _AgentsPageState extends State<AgentsPage> {
+class _AgentsPageState extends State<AgentsPage>
+    with RecordActions<AgentsPage> {
+  @override
+  MissionBoard get recordBoard => widget.board;
+
+  @override
+  String get recordKind => 'agents';
+
+  @override
+  Future<void> recordsChanged() => _load();
+
   List<AgentSummary> _agents = const [];
   bool _loading = false;
   bool _changing = false;
@@ -287,6 +298,7 @@ class _AgentsPageState extends State<AgentsPage> {
   void initState() {
     super.initState();
     unawaited(_load());
+    unawaited(checkRecordsTakeEdits());
   }
 
   @override
@@ -437,9 +449,20 @@ class _AgentsPageState extends State<AgentsPage> {
                 onPressed: () => unawaited(_load()),
                 icon: const Icon(Icons.refresh),
               ),
+              if (canChangeRecords)
+                FilledButton.icon(
+                  onPressed: () => unawaited(editRecord()),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Agent'),
+                ),
             ],
           ),
         ),
+        if (recordReachNote() case final note?)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: note,
+          ),
         OoFilterBar(route: widget.route, onRoute: widget.onRoute),
         if (_error case final error? when agents.isNotEmpty)
           Padding(
@@ -478,6 +501,12 @@ class _AgentsPageState extends State<AgentsPage> {
                     for (final agent in agents)
                       _AgentTile(
                         agent: agent,
+                        onEdit: canChangeRecords
+                            ? () => unawaited(editRecord(agent.agent))
+                            : null,
+                        onRemove: canChangeRecords
+                            ? () => unawaited(removeRecord(agent.agent))
+                            : null,
                         onLower:
                             canConfigure &&
                                 !_changing &&
@@ -498,9 +527,19 @@ class _AgentsPageState extends State<AgentsPage> {
 }
 
 class _AgentTile extends StatelessWidget {
-  const _AgentTile({required this.agent, this.onLower, this.onRestore});
+  const _AgentTile({
+    required this.agent,
+    this.onLower,
+    this.onRestore,
+    this.onEdit,
+    this.onRemove,
+  });
 
   final AgentSummary agent;
+
+  /// Opens its record's form, and removes the record; `null` without `roster.manage`.
+  final VoidCallback? onEdit;
+  final VoidCallback? onRemove;
   final VoidCallback? onLower;
   final VoidCallback? onRestore;
 
@@ -546,6 +585,18 @@ class _AgentTile extends StatelessWidget {
                           ? '$clearance (configured $configured)'
                           : clearance,
                     ),
+                  ),
+                if (onEdit != null)
+                  IconButton(
+                    tooltip: 'Edit ${agent.agent}',
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                if (onRemove != null)
+                  IconButton(
+                    tooltip: 'Remove ${agent.agent}',
+                    onPressed: onRemove,
+                    icon: const Icon(Icons.delete_outline),
                   ),
               ],
             ),

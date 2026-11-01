@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../access/access_words.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
+import '../roster/record_editor.dart';
 import '../routes/oo_route.dart';
 import 'missions_board.dart';
 import 'oo_empty.dart';
@@ -38,7 +41,45 @@ class OperationsPage extends StatefulWidget {
   State<OperationsPage> createState() => _OperationsPageState();
 }
 
-class _OperationsPageState extends State<OperationsPage> {
+class _OperationsPageState extends State<OperationsPage>
+    with RecordActions<OperationsPage> {
+  @override
+  MissionBoard get recordBoard => widget.board;
+
+  @override
+  String get recordKind => 'operations';
+
+  // The Operations shown come from the profile the board keeps fresh.
+  @override
+  Future<void> recordsChanged() async {}
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(checkRecordsTakeEdits());
+  }
+
+  /// What leads the page: adding an Operation, and what the last change came to.
+  Widget _actions() {
+    final note = recordReachNote();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 8,
+      children: [
+        if (canChangeRecords)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: () => unawaited(editRecord()),
+              icon: const Icon(Icons.add),
+              label: const Text('Add Operation'),
+            ),
+          ),
+        ?note,
+      ],
+    );
+  }
+
   /// The Operations whose subordinates are folded away.
   final _collapsed = <String>{};
 
@@ -72,13 +113,22 @@ class _OperationsPageState extends State<OperationsPage> {
       );
     }
     if (operations.isEmpty) {
-      return const OoEmptyState(
-        icon: OoIconName.operations,
-        backdrop: true,
-        title: 'No Operations are open to this account.',
-        body:
-            'An Operation is a project and its policy, and the Missions run under it. A '
-            'controller grants access to one.',
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(padding: const EdgeInsets.all(20), child: _actions()),
+          const Expanded(
+            child: OoEmptyState(
+              icon: OoIconName.operations,
+              backdrop: true,
+              title: 'No Operations are open to this account.',
+              body:
+                  'An Operation is a project and its policy, and the Missions run under it. A '
+                  'controller grants access to one, and someone who manages the roster can add one '
+                  'here.',
+            ),
+          ),
+        ],
       );
     }
     if (selected != null) {
@@ -120,10 +170,17 @@ class _OperationsPageState extends State<OperationsPage> {
           SizedBox(height: index == 0 && !route.filtered ? 0 : 12),
       itemBuilder: (context, index) {
         if (index == 0) {
-          return OoFilterBar(
-            route: route,
-            onRoute: onRoute,
-            padding: EdgeInsets.zero,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: 8,
+            children: [
+              _actions(),
+              OoFilterBar(
+                route: route,
+                onRoute: onRoute,
+                padding: EdgeInsets.zero,
+              ),
+            ],
           );
         }
         final (node, depth) = rows[index - 1];
@@ -170,6 +227,12 @@ class _OperationsPageState extends State<OperationsPage> {
                         .withField('operation_id', operation.operationId),
                   )
                 : null,
+            onEdit: canChangeRecords
+                ? () => unawaited(editRecord(operation.operationId))
+                : null,
+            onRemove: canChangeRecords
+                ? () => unawaited(removeRecord(operation.operationId))
+                : null,
           ),
         );
       },
@@ -188,9 +251,15 @@ class _OperationCard extends StatelessWidget {
     required this.onToggle,
     required this.onSubtree,
     required this.onAccess,
+    this.onEdit,
+    this.onRemove,
   });
 
   final UserOperationAccess operation;
+
+  /// Opens its record's form, and removes the record; `null` without `roster.manage`.
+  final VoidCallback? onEdit;
+  final VoidCallback? onRemove;
 
   /// Opens the Operation's own access policy; `null` without `access.read` there.
   final VoidCallback? onAccess;
@@ -251,6 +320,18 @@ class _OperationCard extends StatelessWidget {
                   '$total Mission${total == 1 ? '' : 's'}',
                   style: text.labelMedium,
                 ),
+                if (onEdit != null)
+                  IconButton(
+                    tooltip: 'Edit ${operation.operationId}',
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                if (onRemove != null)
+                  IconButton(
+                    tooltip: 'Remove ${operation.operationId}',
+                    onPressed: onRemove,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
               ],
             ),
             if (subordinates > 0) ...[
