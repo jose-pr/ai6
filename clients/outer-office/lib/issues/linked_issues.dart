@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../assistant/pages.dart' show launchPage;
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../main.dart';
+import '../shell/oo_link.dart';
 import '../theme/oo_theme.dart';
 
 /// A question on a linked issue that waits for an answer.
@@ -655,10 +656,13 @@ class _IssueProposalsPanelState extends State<IssueProposalsPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '${proposal.proposer} · Mission ${proposal.missionId}',
-              style: text.labelMedium,
-            ),
+            Text(proposal.proposer, style: text.labelMedium),
+            OoLinkLine([
+              (
+                'Mission ${proposal.missionId}',
+                OoLinkTo.mission(widget.operationId, proposal.missionId),
+              ),
+            ]),
             for (final spec in proposal.specs) ...[
               const SizedBox(height: 6),
               Text(

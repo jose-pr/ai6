@@ -453,13 +453,15 @@
                   "proposals",
                   "approvals",
                   "cables",
-                  "secrets"
+                  "secrets",
+                  "issues"
                 ],
                 "x-enum-labels": {
                   "proposals": "Its Mission proposals are never promoted without a person",
                   "approvals": "Its requests always go to a person",
                   "cables": "It may only reply to Cables",
-                  "secrets": "It gets no new secrets"
+                  "secrets": "It gets no new secrets",
+                  "issues": "It posts directly only on the issues whose text exposed it and the children it created; any other post waits for a person's green ink."
                 }
               },
               "title": "Restrictions",
@@ -634,6 +636,324 @@
           "x-section": "safety",
           "x-advanced": true,
           "default": {}
+        },
+        "issues": {
+          "type": "object",
+          "properties": {
+            "preset": {
+              "type": "string",
+              "enum": [
+                "strict",
+                "licensed"
+              ],
+              "x-enum-labels": {
+                "strict": "Strict: closing and assigning wait for a person",
+                "licensed": "Licensed: as strict, but 00 Agents close and reopen without asking"
+              },
+              "title": "Preset",
+              "description": "`strict`, or `licensed`, which lets `00` Agents close and reopen without green ink.",
+              "default": "strict"
+            },
+            "updates": {
+              "type": "string",
+              "enum": [
+                "outcome",
+                "milestones",
+                "all"
+              ],
+              "x-enum-labels": {
+                "outcome": "Only the report when the Mission ends",
+                "milestones": "One status comment kept current, and the report",
+                "all": "As that, on every linked issue"
+              },
+              "title": "Automatic updates",
+              "description": "`outcome`: only the report when the Mission ends; `milestones`: one status comment kept current on the source issue (working, waiting, paused) plus the report; `all`: also on every other linked issue.",
+              "default": "milestones"
+            },
+            "max_body_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Size of a post",
+              "description": "Bytes of one posted comment.",
+              "default": 8192
+            },
+            "posts_per_hour": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Posts an hour, per Mission",
+              "description": "Agent and person posts per hour per Mission (the bucket's refill).",
+              "default": 6
+            },
+            "post_burst": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Burst of posts",
+              "description": "Posts a Mission may make in a burst.",
+              "default": 3
+            },
+            "posts_per_mission": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Posts per Mission",
+              "description": "Posts one Mission may make in all.",
+              "default": 40
+            },
+            "operation_posts_per_hour": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Posts an hour, per Operation",
+              "description": "Agent and person posts per hour for the whole Operation.",
+              "default": 60
+            },
+            "tracker_posts_per_hour": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Writes an hour, per tracker",
+              "description": "Writes per hour to one tracker instance, every kind counted.",
+              "default": 300
+            },
+            "status_interval_secs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "seconds",
+              "title": "Between status writes",
+              "description": "Seconds at least between two status writes to one issue.",
+              "default": 60
+            },
+            "reply_ttl_secs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "seconds",
+              "title": "A question waits",
+              "description": "Seconds a question waits for an answer.",
+              "default": 259200
+            },
+            "on_timeout": {
+              "type": "string",
+              "enum": [
+                "resume",
+                "fail",
+                "wait"
+              ],
+              "x-enum-labels": {
+                "resume": "Resume the Agent, told nobody answered",
+                "fail": "Fail the Mission",
+                "wait": "Keep waiting"
+              },
+              "title": "When nobody answers",
+              "description": "`resume` tells the Agent nobody answered; `fail` fails the Mission; `wait` keeps waiting.",
+              "default": "resume"
+            },
+            "on_secret": {
+              "type": "string",
+              "enum": [
+                "refuse",
+                "redact"
+              ],
+              "x-enum-labels": {
+                "refuse": "Refuse the post",
+                "redact": "Replace the secret and post the rest"
+              },
+              "title": "When a post holds a secret",
+              "description": "`refuse` refuses a post holding a secret; `redact` replaces it and posts the rest.",
+              "default": "refuse"
+            },
+            "links": {
+              "type": "string",
+              "enum": [
+                "tracker",
+                "any"
+              ],
+              "x-enum-labels": {
+                "tracker": "Only the tracker's and the git remote's hosts",
+                "any": "Any host"
+              },
+              "title": "Links in Agent text",
+              "description": "`tracker`: links and images in Agent text only to the tracker's host and the Operation's git remote host; `any`: every host.",
+              "default": "tracker"
+            },
+            "create": {
+              "type": "string",
+              "enum": [
+                "propose",
+                "direct",
+                "off"
+              ],
+              "x-enum-labels": {
+                "propose": "A person approves each one",
+                "direct": "The Agent creates at once",
+                "off": "Agents cannot ask"
+              },
+              "title": "Creating issues",
+              "description": "`propose`: a person approves each creation, or a class authorisation `issue-create` one from an unexposed Session with no findings; `direct`: the Agent creates at once; `off`: Agents cannot ask.",
+              "default": "propose"
+            },
+            "max_created": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Issues per Mission",
+              "description": "Issues one Mission may create, those waiting for a person included.",
+              "default": 10
+            },
+            "max_created_per_day": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Issues a day, per Operation",
+              "description": "Issues an Operation's Agents may create per day.",
+              "default": 50
+            },
+            "max_split_depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Depth of a split",
+              "description": "How deep a split may go (a child of a child is depth 2).",
+              "default": 2
+            }
+          },
+          "additionalProperties": false,
+          "title": "Linked issues",
+          "description": "What AI6 writes on the issues its Missions are linked to, and what Agents may ask for there.",
+          "x-section": "safety",
+          "x-advanced": true,
+          "default": {
+            "preset": "strict",
+            "updates": "milestones",
+            "max_body_bytes": 8192,
+            "posts_per_hour": 6,
+            "post_burst": 3,
+            "posts_per_mission": 40,
+            "operation_posts_per_hour": 60,
+            "tracker_posts_per_hour": 300,
+            "status_interval_secs": 60,
+            "reply_ttl_secs": 259200,
+            "on_timeout": "resume",
+            "on_secret": "refuse",
+            "links": "tracker",
+            "create": "propose",
+            "max_created": 10,
+            "max_created_per_day": 50,
+            "max_split_depth": 2
+          }
         },
         "vetting": {
           "anyOf": [
@@ -1130,6 +1450,9 @@
           }
         },
         "green_ink": {
+          "form": {}
+        },
+        "issues": {
           "form": {}
         },
         "harness": {

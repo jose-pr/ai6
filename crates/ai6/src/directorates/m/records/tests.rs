@@ -13,116 +13,124 @@ const KINDS: [ConfigRecord; 6] = [
     ConfigRecord::Roster,
 ];
 
+/// Every key of an Operation's `issues`, apart, since a single `json!` has a recursion limit.
+fn issue_policy_example() -> Value {
+    json!({
+        "preset": "licensed",
+        "updates": "all",
+        "max_body_bytes": 4096,
+        "posts_per_hour": 3,
+        "post_burst": 2,
+        "posts_per_mission": 10,
+        "operation_posts_per_hour": 30,
+        "tracker_posts_per_hour": 100,
+        "status_interval_secs": 120,
+        "reply_ttl_secs": 3600,
+        "on_timeout": "fail",
+        "on_secret": "redact",
+        "links": "any",
+        "create": "off",
+        "max_created": 5,
+        "max_created_per_day": 20,
+        "max_split_depth": 1
+    })
+}
+
 /// A record of each kind holding every key a person can write.
 fn full_example(record: ConfigRecord) -> Value {
     match record {
-        ConfigRecord::Operation => json!({
-            "name": "alpha",
-            "description": "The alpha project",
-            "parent": "PARENT",
-            "inherit": false,
-            "path": "/srv/alpha",
-            "theater": "lab",
-            "workspace": {
-                "provider": "git",
-                "source": "/srv/alpha.git",
-                "base": "main",
-                "branch": "{id}",
-                "isolate": false,
-                "checkpoint_remote": "origin",
-                "checkpoint_secs": 60
-            },
-            "config": "/etc/alpha",
-            "roster": ["007"],
-            "clearance": "00",
-            "stations": ["station-a"],
-            "station_labels": {"os": "linux"},
-            "placement": "pack",
-            "pools": ["main"],
-            "cover": "covert",
-            "cover_identity": {"name": "Field", "email": "field@example.invalid"},
-            "on_blown": "fail",
-            "max_concurrent": 3,
-            "on_limit": "wait",
-            "limit_fallback_secs": 60,
-            "on_lost": "fail",
-            "lost_after_secs": 90,
-            "budget": {
-                "preset": "strict",
-                "session_tokens": 10,
-                "mission_tokens": 20,
-                "mission_cost_usd": 1.5,
-                "operation_cost_usd_per_day": 3,
-                "warn_at": 0.5
-            },
-            "exposure": {"preset": "observe", "restrict": ["cables"], "tools": ["WebFetch"]},
-            "quarantine": {"window_hours": 2.5, "stalls": 1, "budget_stops": 1, "blown": false},
-            "green_ink": {
-                "preset": "licensed",
-                "kinds": ["deploy"],
-                "requesters": ["field"],
-                "unattended": {"00": ["push"]},
-                "protected": ["main"],
-                "request_ttl_secs": 60
-            },
-            "vetting": {
-                "enabled": true,
-                "max_brief_bytes": 1000,
-                "max_per_hour": 5,
-                "max_per_source_per_hour": 5,
-                "duplicates": false,
-                "budget": false,
-                "screening": "all",
-                "phrases": ["deploy now"],
-                "html_comments": false,
-                "review": "off",
-                "rate_hold_hours": 2,
-                "max_proposal_reviews_per_hour": 4,
-                "max_proposal_reviews_per_session_per_hour": 2
-            },
-            "harness": {"project_settings": "ignore"},
-            "promotion": {
-                "field": {
-                    "missions": 1,
-                    "max_failure_rate": 0.5,
-                    "quiet_days": 2,
-                    "quiet_on": ["blown"]
+        ConfigRecord::Operation => {
+            let mut operation = json!({
+                "name": "alpha",
+                "description": "The alpha project",
+                "parent": "PARENT",
+                "inherit": false,
+                "path": "/srv/alpha",
+                "theater": "lab",
+                "workspace": {
+                    "provider": "git",
+                    "source": "/srv/alpha.git",
+                    "base": "main",
+                    "branch": "{id}",
+                    "isolate": false,
+                    "checkpoint_remote": "origin",
+                    "checkpoint_secs": 60
                 },
-                "00": {"missions": 2}
-            },
-            "issues": {
-                "preset": "licensed",
-                "updates": "all",
-                "max_body_bytes": 4096,
-                "posts_per_hour": 3,
-                "post_burst": 2,
-                "posts_per_mission": 10,
-                "operation_posts_per_hour": 30,
-                "tracker_posts_per_hour": 100,
-                "status_interval_secs": 120,
-                "reply_ttl_secs": 3600,
-                "on_timeout": "fail",
-                "on_secret": "redact",
-                "links": "any",
-                "create": "off",
-                "max_created": 5,
-                "max_created_per_day": 20,
-                "max_split_depth": 1
-            },
-            "sources": {"tracker": {"kind": "github", "repository": "a/b", "every": 60}},
-            "sleepers": {
-                "round": {
-                    "schedule": "0 6 * * 1",
-                    "title": "Weekly round",
-                    "prompt": "Look around",
-                    "agent": "007",
-                    "role": "case-officer",
-                    "priority": 2,
-                    "stations": ["station-a"],
-                    "each_station": true
+                "config": "/etc/alpha",
+                "roster": ["007"],
+                "clearance": "00",
+                "stations": ["station-a"],
+                "station_labels": {"os": "linux"},
+                "placement": "pack",
+                "pools": ["main"],
+                "cover": "covert",
+                "cover_identity": {"name": "Field", "email": "field@example.invalid"},
+                "on_blown": "fail",
+                "max_concurrent": 3,
+                "on_limit": "wait",
+                "limit_fallback_secs": 60,
+                "on_lost": "fail",
+                "lost_after_secs": 90,
+                "budget": {
+                    "preset": "strict",
+                    "session_tokens": 10,
+                    "mission_tokens": 20,
+                    "mission_cost_usd": 1.5,
+                    "operation_cost_usd_per_day": 3,
+                    "warn_at": 0.5
+                },
+                "exposure": {"preset": "observe", "restrict": ["cables"], "tools": ["WebFetch"]},
+                "quarantine": {"window_hours": 2.5, "stalls": 1, "budget_stops": 1, "blown": false},
+                "green_ink": {
+                    "preset": "licensed",
+                    "kinds": ["deploy"],
+                    "requesters": ["field"],
+                    "unattended": {"00": ["push"]},
+                    "protected": ["main"],
+                    "request_ttl_secs": 60
+                },
+                "vetting": {
+                    "enabled": true,
+                    "max_brief_bytes": 1000,
+                    "max_per_hour": 5,
+                    "max_per_source_per_hour": 5,
+                    "duplicates": false,
+                    "budget": false,
+                    "screening": "all",
+                    "phrases": ["deploy now"],
+                    "html_comments": false,
+                    "review": "off",
+                    "rate_hold_hours": 2,
+                    "max_proposal_reviews_per_hour": 4,
+                    "max_proposal_reviews_per_session_per_hour": 2
+                },
+                "harness": {"project_settings": "ignore"},
+                "promotion": {
+                    "field": {
+                        "missions": 1,
+                        "max_failure_rate": 0.5,
+                        "quiet_days": 2,
+                        "quiet_on": ["blown"]
+                    },
+                    "00": {"missions": 2}
+                },
+                "sources": {"tracker": {"kind": "github", "repository": "a/b", "every": 60}},
+                "sleepers": {
+                    "round": {
+                        "schedule": "0 6 * * 1",
+                        "title": "Weekly round",
+                        "prompt": "Look around",
+                        "agent": "007",
+                        "role": "case-officer",
+                        "priority": 2,
+                        "stations": ["station-a"],
+                        "each_station": true
+                    }
                 }
-            }
-        }),
+            });
+            operation["issues"] = issue_policy_example();
+            operation
+        }
         ConfigRecord::Agent => json!({
             "description": "A case officer",
             "aliases": ["bond"],
