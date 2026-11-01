@@ -50,7 +50,7 @@ fn the_built_library_loads_as_a_source_and_serves_a_poll_and_a_report() {
     let fake = serve(|_| {
         vec![
             canned(200, include_str!("fixtures/issues_page2.json")),
-            canned(201, "{}"),
+            canned(201, include_str!("fixtures/comment_created.json")),
         ]
     });
     let source = plugins
@@ -65,12 +65,12 @@ fn the_built_library_loads_as_a_source_and_serves_a_poll_and_a_report() {
 
     let batch = source.poll(SourcePoll { cursor: None }).unwrap();
     assert_eq!(batch.items.len(), 1);
-    assert_eq!(batch.items[0].id, "o/r#14");
-    assert_eq!(batch.cursor.as_deref(), Some("2026-10-04T11:15:00Z"));
+    assert_eq!(batch.items[0].id, "o/r#2");
+    assert_eq!(batch.cursor.as_deref(), Some("2026-11-01T15:56:02Z"));
 
     source
         .report(CxReport {
-            item_id: "o/r#14".to_owned(),
+            item_id: "o/r#2".to_owned(),
             mission_id: "m".to_owned(),
             outcome: "done".to_owned(),
             body: "The requested work is finished.".to_owned(),
@@ -78,7 +78,7 @@ fn the_built_library_loads_as_a_source_and_serves_a_poll_and_a_report() {
         })
         .unwrap();
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests[1].target, "/repos/o/r/issues/14/comments");
+    assert_eq!(requests[1].target, "/repos/o/r/issues/2/comments");
 }
 
 #[test]

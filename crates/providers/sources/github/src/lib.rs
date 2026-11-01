@@ -221,6 +221,12 @@ impl Github {
                 "GitHub refused the token in {}",
                 self.settings.token_env
             ))),
+            // A private repository answers 404, not 401, to a request with no token.
+            404 if self.token().is_none() => Err(failure(&format!(
+                "GitHub does not show this repository or issue without a token: \
+                 set the environment variable {}",
+                self.settings.token_env
+            ))),
             404 => Err(failure(
                 "GitHub does not show this repository or issue to the token",
             )),
@@ -301,6 +307,11 @@ impl Source for Github {
             .rsplit_once('#')
             .and_then(|(_, number)| number.parse::<u64>().ok())
             .ok_or_else(|| failure("the item ID has no issue number"))?;
+        if report.body.trim().is_empty() {
+            return Err(failure(
+                "the report body is empty, and GitHub refuses such a comment",
+            ));
+        }
         let base = format!("/repos/{}/issues/{number}", self.settings.repo);
         self.post(
             &format!("{base}/comments"),
@@ -387,6 +398,16 @@ mod tests {
         );
         assert_eq!(next_link(Some(r#"<https://a/x>; rel="last""#)), None);
         assert_eq!(next_link(None), None);
+        assert_eq!(
+            next_link(Some(
+                include_str!("../tests/fixtures/issues_page2.link").trim()
+            ))
+            .as_deref(),
+            Some(
+                "https://api.github.com/repositories/1/issues?state=open&sort=updated&direction=asc&per_page=1&labels=ai6%3Aready&after=Y3Vyc29yOnYyOpLPAAABoZfTLlDPAAAAAW6BOcY%3D&page=3"
+            ),
+            "next, not prev, though the host sends both"
+        );
     }
 
     #[test]
