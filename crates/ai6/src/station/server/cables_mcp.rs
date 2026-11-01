@@ -948,13 +948,14 @@ mod tests {
     }
 
     async fn assistant(relay: Arc<CableRelay>, registry: Arc<FileRegistry>) -> Assistant {
-        assistant_until(relay, registry, unix_now() + 3_600.0).await
+        assistant_until(relay, registry, unix_now() + 3_600.0, Arc::new(|| false)).await
     }
 
     async fn assistant_until(
         relay: Arc<CableRelay>,
         registry: Arc<FileRegistry>,
         expires_at: f64,
+        answering: TurnRunning,
     ) -> Assistant {
         let events = Arc::new(Mutex::new(Vec::new()));
         let gate = TestGate::open();
@@ -985,6 +986,7 @@ mod tests {
             Arc::new(move |event| sink.lock().unwrap().push(event)),
             gate.clone(),
             expires_at,
+            answering,
         )
         .await
         .unwrap();
@@ -1388,12 +1390,36 @@ mod tests {
     #[tokio::test]
     async fn her_cable_token_expires_with_the_jobs() {
         let (_directory, registry, relay, _agent) = station_with_agent_008().await;
-        let expired = assistant_until(relay, registry, unix_now() - 1.0).await;
+        let expired = assistant_until(relay, registry, unix_now() - 1.0, Arc::new(|| false)).await;
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(expired.endpoint.url().to_owned())
                 .auth_header(expired.endpoint.token().to_owned()),
         );
         assert!(().serve(transport).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn her_cable_token_past_its_time_works_while_her_answer_runs() {
+        let (_directory, registry, relay, _agent) = station_with_agent_008().await;
+        let answering = Arc::new(AtomicBool::new(true));
+        let running = answering.clone();
+        let expired = assistant_until(
+            relay,
+            registry,
+            unix_now() - 1.0,
+            Arc::new(move || running.load(Ordering::SeqCst)),
+        )
+        .await;
+        let connect = || {
+            ().serve(StreamableHttpClientTransport::from_config(
+                StreamableHttpClientTransportConfig::with_uri(expired.endpoint.url().to_owned())
+                    .auth_header(expired.endpoint.token().to_owned()),
+            ))
+        };
+        let her = connect().await.expect("her answer runs");
+        her.cancel().await.unwrap();
+        answering.store(false, Ordering::SeqCst);
+        assert!(connect().await.is_err(), "her answer has ended");
     }
 }
 
@@ -1414,13 +1440,17 @@ pub(super) async fn authorize(
     next.run(request).await
 }
 
-/// [`authorize`], for a token accepted only until a time (Unix seconds).
+/// Whether the harness behind an endpoint is answering and has not been told to stop.
+pub(super) type TurnRunning = Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// [`authorize`], for a token accepted until a time (Unix seconds) or, past it, while the turn
+/// runs: a turn may outlast its token.
 async fn authorize_until(
-    State((token, expires_at)): State<(String, f64)>,
+    State((token, expires_at, running)): State<(String, f64, TurnRunning)>,
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    if unix_now() >= expires_at {
+    if unix_now() >= expires_at && !running() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     authorize(State(token), request, next).await
@@ -2474,8 +2504,8 @@ pub(super) struct AssistantEndpoint {
 
 impl AssistantEndpoint {
     /// Serves the endpoint on a loopback port, its token accepted until `expires_at` (Unix
-    /// seconds, the job's own token's expiry), and enters the conversation's Session in the
-    /// relay's directory, so replies reach it.
+    /// seconds, the job's own token's expiry) and past it while `running` says the turn runs,
+    /// and enters the conversation's Session in the relay's directory, so replies reach it.
     ///
     /// # Errors
     ///
@@ -2490,6 +2520,7 @@ impl AssistantEndpoint {
         report: EventReporter,
         gate: Arc<dyn CableGate>,
         expires_at: f64,
+        running: TurnRunning,
     ) -> std::io::Result<Self> {
         let first = grants
             .first()
@@ -2526,7 +2557,7 @@ impl AssistantEndpoint {
             StreamableHttpServerConfig::default(),
         );
         let router = axum::Router::new().route_service("/mcp", service).layer(
-            middleware::from_fn_with_state((token.clone(), expires_at), authorize_until),
+            middleware::from_fn_with_state((token.clone(), expires_at, running), authorize_until),
         );
         let server = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;

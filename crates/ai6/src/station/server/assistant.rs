@@ -1192,9 +1192,23 @@ impl Desk {
             environment.insert("CLAUDE_CODE_TMPDIR".to_owned(), temp);
         }
         let exposed = Arc::new(AtomicBool::new(job.exposed));
+        let flags = Arc::new(Flags {
+            busy: AtomicBool::new(true),
+            alive: AtomicBool::new(true),
+            stop: AtomicBool::new(false),
+            interrupting: AtomicBool::new(false),
+            last_active: Mutex::new(Instant::now()),
+        });
         #[cfg(feature = "cables-mcp")]
         let cables = match self
-            .open_cables(job, &agent.id, &mut mode, &mut environment, &exposed)
+            .open_cables(
+                job,
+                &agent.id,
+                &mut mode,
+                &mut environment,
+                &exposed,
+                &flags,
+            )
             .await
         {
             Ok(cables) => cables,
@@ -1302,13 +1316,6 @@ impl Desk {
                 return Err(format!("the assistant harness did not start: {error}"));
             }
         };
-        let flags = Arc::new(Flags {
-            busy: AtomicBool::new(true),
-            alive: AtomicBool::new(true),
-            stop: AtomicBool::new(false),
-            interrupting: AtomicBool::new(false),
-            last_active: Mutex::new(Instant::now()),
-        });
         let session = Arc::new(Mutex::new(session));
         self.live
             .lock()
@@ -1480,6 +1487,7 @@ impl Desk {
         mode: &mut AssistantMode,
         environment: &mut BTreeMap<String, String>,
         exposed: &Arc<AtomicBool>,
+        flags: &Arc<Flags>,
     ) -> Result<Option<Arc<AssistantEndpoint>>, String> {
         let Some(person) = job.person_id.clone().filter(|_| !job.cables.is_empty()) else {
             return Ok(None);
@@ -1515,8 +1523,16 @@ impl Desk {
                 exposure: self.exposure.clone(),
                 exposed: exposed.clone(),
             }),
-            // The harness is started again before the job's token expires; so is this one.
+            // A job with a new token starts the harness again, and this with it; a turn that
+            // outlasts the job's token keeps it until the turn ends or the person stops it.
             job.token_expires_at,
+            {
+                let flags = flags.clone();
+                Arc::new(move || {
+                    flags.busy.load(Ordering::Acquire)
+                        && !flags.interrupting.load(Ordering::Acquire)
+                })
+            },
         )
         .await
         .map_err(|error| format!("the conversation's Cable endpoint did not start: {error}"))?;
@@ -4149,6 +4165,36 @@ event_bytes = 7
         assert!(refusing.answer(refused, true).await);
         refusing.send(reported("c-gone", &[EVENT_MEMORY_CHANGES, EVENT_CLOSED]));
         assert_eq!(refusing.parked.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_warm_harness_restarts_when_the_job_carries_a_new_token() {
+        let fixture = fixture(true, IDLE);
+        // A long way from the margin either way: only the token itself differs.
+        fixture.desk.handle(job("c-t", "first")).await;
+        until(|| kinds(&fixture, "c-t").contains(&EVENT_COMPLETED.to_owned())).await;
+        fixture.desk.handle(job("c-t", "second")).await;
+        until(|| fixture.asked.lock().unwrap().messages.len() == 1).await;
+        assert!(
+            fixture.asked.lock().unwrap().resumes.is_empty(),
+            "the same token reaches it warm"
+        );
+
+        let mut third = job("c-t", "third");
+        third.mcp_token = "fresh-conversation-token-".repeat(2);
+        fixture.desk.handle(third).await;
+        until(|| fixture.asked.lock().unwrap().resumes.len() == 1).await;
+        let asked = fixture.asked.lock().unwrap();
+        assert_eq!(
+            asked.resumes[0]
+                .environment
+                .get(ASSISTANT_MCP_TOKEN_ENV)
+                .map(String::as_str),
+            Some("fresh-conversation-token-fresh-conversation-token-")
+        );
+        assert_eq!(asked.messages.len(), 1, "not sent to the old harness");
+        drop(asked);
+        fixture.desk.close_all();
     }
 
     #[tokio::test]
