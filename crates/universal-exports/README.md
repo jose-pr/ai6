@@ -146,8 +146,9 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/station/sessions/{session_id}/events/{sequence}` | Ingest one guatiao frame. Schema/close frames use cursor `0`; values use a positive event sequence. |
 | `POST` | `/v1/station/attach-grants` | Issue a read or write token within M's Station grant. |
 | `GET` | `/v1/auth/methods` | Say what `/v1/auth/login` accepts here, with no token: `{"methods": [...]}`, `password` for a name and a secret, `proxy` for an identity the reverse proxy asserts. |
-| `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token. |
+| `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token with `expires_at` and `ends_at` (when renewing it stops, `null` with no bound). |
 | `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the Registry. |
+| `POST` | `/v1/auth/renew` | Move the presented token's expiry on by `[gateway] access_token_ttl`, up to `session_max` after it was issued; the token's value does not change. `200 {token_id, expires_at, ends_at}`, no secret; `401` when it is not active or the person has left the directory. |
 | `GET` | `/v1/user/profile` | Return directory identity and effective `mission.read`, `mission.create`, `mission.control`, `approval.decide`, `approval.class`, `session.read`, `session.input`, `audit.read`, `agent.read`, `agent.configure`, `pool.read`, `pool.manage`, `cable.send` and `cable.read` actions by authorized Operation, and `moneypenny`: whether this gateway serves her. |
 | `GET` | `/v1/user/operations/{operation_id}/green-ink` | Require `approval.decide`; list the steps Agents wait to take, oldest first. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/approve` | Require `approval.decide`; sign the step as the caller for `expires_in_secs` (default one hour) with an optional `note`. |

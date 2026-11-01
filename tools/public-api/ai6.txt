@@ -1669,6 +1669,8 @@ pub ai6::directorates::m::unex_limits::TextLimits::roster_target_bytes: ai6::bou
 impl core::default::Default for ai6::directorates::m::unex_limits::TextLimits
 pub fn ai6::directorates::m::unex_limits::TextLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::unex_limits::UnexGatewayLimits
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::access_token_max_ttl: ai6::bounds::TimeLimit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::access_token_ttl: ai6::bounds::Seconds
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::attach_token_ttl: ai6::bounds::Seconds
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::client_slots: ai6::bounds::Limit
@@ -1679,6 +1681,7 @@ pub ai6::directorates::m::unex_limits::UnexGatewayLimits::input_frames_per_secon
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::input_queue: u64
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::origin_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::scrollback_events: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::session_max: ai6::bounds::TimeLimit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::sessions: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::station_token_min_bytes: u64
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::write_lease_ttl: ai6::bounds::Seconds
@@ -9612,6 +9615,8 @@ pub fn ai6::directorates::q::transport::TransportClient::write_file(&self, &ai6:
 pub struct ai6::TransportConfig
 pub ai6::TransportConfig::settings_toml: alloc::string::String
 #[non_exhaustive] pub struct ai6::UnexGatewayLimits
+pub ai6::UnexGatewayLimits::access_token_max_ttl: ai6::bounds::TimeLimit
+pub ai6::UnexGatewayLimits::access_token_ttl: ai6::bounds::Seconds
 pub ai6::UnexGatewayLimits::attach_token_ttl: ai6::bounds::Seconds
 pub ai6::UnexGatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::client_slots: ai6::bounds::Limit
@@ -9622,6 +9627,7 @@ pub ai6::UnexGatewayLimits::input_frames_per_second: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::input_queue: u64
 pub ai6::UnexGatewayLimits::origin_bytes: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::scrollback_events: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::session_max: ai6::bounds::TimeLimit
 pub ai6::UnexGatewayLimits::sessions: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::station_token_min_bytes: u64
 pub ai6::UnexGatewayLimits::write_lease_ttl: ai6::bounds::Seconds

@@ -304,11 +304,16 @@ async fn served_full(
         let registry = Arc::new(registry.clone());
         let person = person.to_owned();
         async move {
-            issue_access_token_record(registry, person, 600)
-                .await
-                .ok()
-                .unwrap()
-                .token
+            issue_access_token_record(
+                registry,
+                person,
+                Duration::from_secs(600),
+                ai6::TimeLimit::UNBOUNDED,
+            )
+            .await
+            .ok()
+            .unwrap()
+            .token
         }
     };
     let operator = token("operator-007").await;
@@ -1099,7 +1104,8 @@ async fn a_confirmed_roster_edit_goes_through_the_roster_with_its_checks_and_aud
     let other_session = issue_access_token_record(
         Arc::new(served.registry.clone()),
         "operator-007".to_owned(),
-        600,
+        Duration::from_secs(600),
+        ai6::TimeLimit::UNBOUNDED,
     )
     .await
     .ok()
@@ -2332,6 +2338,99 @@ async fn a_stopped_message_a_station_took_cuts_its_harness_off() {
             .any(|frame| frame.to_string().contains("Too late.")),
         "{shown:?}"
     );
+}
+
+/// Moves the token's stored times `seconds` back, as the clock moving on would leave them.
+fn age_token(served: &Served, token: &str, seconds: f64) -> f64 {
+    let digest = crate::access_token_digest(token);
+    let found = served.registry.find_access_token(&digest).unwrap().unwrap();
+    let aged = ai6::AccessTokenRecord::try_new(
+        found.token_id(),
+        found.digest(),
+        found.person_id(),
+        found.issued_at() - seconds,
+        found.expires_at() - seconds,
+        None,
+    )
+    .unwrap();
+    std::fs::write(
+        served
+            ._directory
+            .path()
+            .join("access-tokens")
+            .join(format!("{}.json", found.token_id())),
+        serde_json::to_vec(&aged).unwrap(),
+    )
+    .unwrap();
+    aged.expires_at()
+}
+
+#[tokio::test]
+async fn a_renewed_token_keeps_her_tools_and_a_waiting_proposal() {
+    let served = served(AssistantConfig::default()).await;
+    let token = served.operator.clone();
+    let (mut app, job) = accepted(&served, &token, "Retry mission-g.").await;
+    let proposed = call_tool(
+        &served,
+        &job.mcp_token,
+        "propose_mission_control",
+        json!({"operation_id": "G", "mission_id": "mission-g", "action": "retry"}),
+    )
+    .await;
+    assert_eq!(proposed["isError"], false, "{proposed}");
+
+    let client = reqwest::Client::new();
+    let digest = crate::access_token_digest(&token);
+    let first_expiry = served
+        .registry
+        .find_access_token(&digest)
+        .unwrap()
+        .unwrap()
+        .expires_at();
+    let renewed = client
+        .post(format!("{}/v1/auth/renew", served.base))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(renewed.status(), StatusCode::OK);
+
+    // The clock moves past the token's first expiry, with its renewed time still ahead.
+    let aged_by = 1_200.0;
+    assert!(
+        first_expiry - aged_by < super::now(),
+        "past its first expiry"
+    );
+    assert!(age_token(&served, &token, aged_by) > super::now());
+
+    let missions = call_tool(
+        &served,
+        &job.mcp_token,
+        "missions",
+        json!({"operation_id": "G"}),
+    )
+    .await;
+    assert_eq!(missions["isError"], false, "{missions}");
+
+    let frames = finish(&served, &mut app, &job).await;
+    let proposal = proposal_of(&frames);
+    assert_eq!(proposal["status"], "pending", "{proposal}");
+    app.send(WsMessage::Text(
+        json!({"type": "confirm", "proposal": proposal["id"]})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
+    let frames = receive_until(&mut app, |frame| {
+        frame["type"] == "error"
+            || (frame["type"] == "proposal"
+                && ["done", "failed"].contains(&frame["proposal"]["status"].as_str().unwrap()))
+    })
+    .await;
+    assert_ne!(frames.last().unwrap()["type"], "error", "{frames:?}");
+    let settled = proposal_of(&frames);
+    assert_eq!(settled["status"], "done", "{settled}");
 }
 
 #[tokio::test]
@@ -4789,7 +4888,8 @@ async fn pages_a_link_fails_after_its_ttl_and_after_sign_out() {
     let second = issue_access_token_record(
         Arc::new(served.registry.clone()),
         "operator-007".into(),
-        600,
+        Duration::from_secs(600),
+        ai6::TimeLimit::UNBOUNDED,
     )
     .await
     .ok()

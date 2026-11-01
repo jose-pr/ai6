@@ -28,7 +28,7 @@ use ai6::directorates::registry::backend::*;
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
     Authorizer, Brief, ConfigProvider, Directory, Lookup, MissionProposal, MissionUsage, Origin,
-    Person, Provenance, Quarantine, StationSettings, Verdict,
+    Person, Provenance, Quarantine, StationSettings, TimeLimit, Verdict,
 };
 
 /// How a brief's provenance names the gateway as the place it was accepted.
@@ -1554,6 +1554,7 @@ impl Gateway {
             .route("/v1/auth/methods", get(auth_methods))
             .route("/v1/auth/login", post(login))
             .route("/v1/auth/logout", post(logout))
+            .route("/v1/auth/renew", post(renew))
             .route("/v1/auth/session", get(access_session))
             .route("/v1/user/profile", get(user_profile))
             .route("/v1/user/audit", get(user_audit))
@@ -2375,12 +2376,8 @@ struct LoginRequest {
     name: String,
     #[serde(default)]
     secret: String,
-    #[serde(default = "default_access_token_ttl")]
-    ttl_seconds: u64,
-}
-
-fn default_access_token_ttl() -> u64 {
-    3_600
+    #[serde(default)]
+    ttl_seconds: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -2388,6 +2385,39 @@ struct IssuedAccessToken {
     token_id: String,
     token: String,
     expires_at: f64,
+    /// When renewing stops ([`session_end`]).
+    ends_at: Option<f64>,
+}
+
+/// What `POST /v1/auth/renew` answers: the token's times, and no secret.
+#[derive(Serialize)]
+struct RenewedAccessToken {
+    token_id: String,
+    expires_at: f64,
+    /// When renewing stops ([`session_end`]).
+    ends_at: Option<f64>,
+}
+
+/// When renewing a token stops: `session_max` after it was issued, or its own expiry when that
+/// is later (a lifetime asked for at sign-in, or renewal turned off). `None` with no bound.
+fn session_end(issued_at: f64, expires_at: f64, session_max: TimeLimit) -> Option<f64> {
+    session_max
+        .get()
+        .map(|max| (issued_at + max.as_secs_f64()).max(expires_at))
+}
+
+/// How long a token is issued for: `asked`, seconds within `access_token_max_ttl`, else the
+/// gateway's `access_token_ttl`.
+fn access_token_ttl(gateway: &Gateway, asked: Option<u64>) -> Result<Duration, ApiError> {
+    let table = &gateway.config.unex().gateway;
+    let Some(asked) = asked else {
+        return Ok(table.access_token_ttl.0);
+    };
+    let asked = Duration::from_secs(asked);
+    if !table.access_token_max_ttl.allows(asked) {
+        return Err(ApiError::bad_request());
+    }
+    Ok(asked)
 }
 
 #[derive(Serialize)]
@@ -2472,12 +2502,10 @@ async fn issue_access_token(
     gateway
         .authenticate_station(bearer(&headers)?)
         .map_err(ApiError::from)?;
-    if !(60..=86_400).contains(&request.ttl_seconds) {
-        return Err(ApiError::bad_request());
-    }
+    let ttl = access_token_ttl(&gateway, Some(request.ttl_seconds))?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::internal)?;
-    let issued =
-        issue_access_token_record(registry, request.person_id, request.ttl_seconds).await?;
+    let session_max = gateway.config.unex().gateway.session_max;
+    let issued = issue_access_token_record(registry, request.person_id, ttl, session_max).await?;
     Ok((StatusCode::CREATED, Json(issued)))
 }
 
@@ -2519,11 +2547,8 @@ async fn login(
     if headers.contains_key(ORIGIN) {
         require_origin(&gateway, &headers)?;
     }
-    if !(60..=86_400).contains(&request.ttl_seconds) {
-        return Err(ApiError::bad_request());
-    }
+    let ttl = access_token_ttl(&gateway, request.ttl_seconds)?;
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
-    let ttl_seconds = request.ttl_seconds;
     let person = if let Some(proxy) = &providers.proxy_identity {
         if let Some(value) = headers.get(&proxy.header) {
             require_origin(&gateway, &headers)?;
@@ -2560,8 +2585,47 @@ async fn login(
         authenticate_password(&gateway, &providers, &headers, connection, request).await?
     };
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let issued = issue_access_token_record(registry, person.id, ttl_seconds).await?;
+    let session_max = gateway.config.unex().gateway.session_max;
+    let issued = issue_access_token_record(registry, person.id, ttl, session_max).await?;
     Ok((StatusCode::CREATED, Json(issued)))
+}
+
+/// `POST /v1/auth/renew`: moves the presented token's expiry on by `access_token_ttl`, up to
+/// `session_max` after it was issued. The value does not change, so what is bound to it keeps
+/// working; the person must still be in the directory, and it is no try at a password.
+async fn renew(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+) -> Result<Json<RenewedAccessToken>, ApiError> {
+    if headers.contains_key(ORIGIN) {
+        require_origin(&gateway, &headers)?;
+    }
+    let token = bearer(&headers)?;
+    resolve_user(&gateway, token).await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let digest = access_token_digest(token);
+    let record = tokio::task::spawn_blocking(move || registry.find_access_token(&digest))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(ApiError::unauthorized)?;
+    let table = &gateway.config.unex().gateway;
+    let session_max = table.session_max;
+    let expires_at = (unix_timestamp()? + table.access_token_ttl.0.as_secs_f64())
+        .min(record.issued_at() + session_max.as_secs_f64());
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let token_id = record.token_id().to_owned();
+    let extended =
+        tokio::task::spawn_blocking(move || registry.extend_access_token(&token_id, expires_at))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(|_| ApiError::internal())?
+            .ok_or_else(ApiError::unauthorized)?;
+    Ok(Json(RenewedAccessToken {
+        token_id: extended.token_id().to_owned(),
+        expires_at: extended.expires_at(),
+        ends_at: session_end(extended.issued_at(), extended.expires_at(), session_max),
+    }))
 }
 
 async fn authenticate_password(
@@ -2607,10 +2671,11 @@ async fn authenticate_password(
 async fn issue_access_token_record(
     registry: Arc<dyn RegistryBackend>,
     person_id: String,
-    ttl_seconds: u64,
+    ttl: Duration,
+    session_max: TimeLimit,
 ) -> Result<IssuedAccessToken, ApiError> {
     let issued_at = unix_timestamp()?;
-    let expires_at = issued_at + ttl_seconds as f64;
+    let expires_at = issued_at + ttl.as_secs_f64();
     let token_id = Uuid::new_v4().to_string();
     // Two independent UUIDs provide 256 random bits without a separate token crate.
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -2632,6 +2697,7 @@ async fn issue_access_token_record(
         token_id,
         token,
         expires_at,
+        ends_at: session_end(issued_at, expires_at, session_max),
     })
 }
 
@@ -5371,6 +5437,341 @@ mod tests {
             .await,
             serde_json::json!([])
         );
+    }
+
+    /// Alice, until `gone` is set: the directory answers for her no longer.
+    struct Leaving {
+        gone: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Authenticator for Leaving {
+        fn authenticate(&self, attempt: Attempt) -> Result<Verdict, ProviderError> {
+            OneAccount.authenticate(attempt)
+        }
+    }
+
+    impl Directory for Leaving {
+        fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
+            let known = ["alice", "alice-id"].contains(&lookup.value.as_str());
+            Ok(
+                (known && !self.gone.load(std::sync::atomic::Ordering::SeqCst)).then(|| Person {
+                    id: "alice-id".to_owned(),
+                    name: "alice".to_owned(),
+                    ..Person::default()
+                }),
+            )
+        }
+    }
+
+    /// A gateway under `change`d `[gateway]` limits, for what signing in and renewing do.
+    struct Signing {
+        base: String,
+        registry: FileRegistry,
+        gone: Arc<std::sync::atomic::AtomicBool>,
+        server: tokio::task::JoinHandle<()>,
+        _directory: tempfile::TempDir,
+    }
+
+    impl Drop for Signing {
+        fn drop(&mut self) {
+            self.server.abort();
+        }
+    }
+
+    impl Signing {
+        async fn new(change: impl FnOnce(&mut ai6::UnexGatewayLimits)) -> Self {
+            let mut limits = ai6::UnexLimits::default();
+            change(&mut limits.gateway);
+            let config = GatewayConfig::new(
+                "https://localhost",
+                "m-token-that-is-long-enough-for-testing",
+                test_limits(),
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .unwrap()
+            .with_unex_limits(limits);
+            let directory = tempfile::tempdir().unwrap();
+            let registry = FileRegistry::open(directory.path());
+            let gone = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let people = Arc::new(Leaving { gone: gone.clone() });
+            let gateway = Gateway::with_access(
+                config,
+                Arc::new(registry.clone()),
+                AccessProviders::new(people.clone(), people, Arc::new(RoleAuthorizer::default())),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let _ = axum::serve(
+                    listener,
+                    gateway
+                        .router()
+                        .into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .await;
+            });
+            Self {
+                base,
+                registry,
+                gone,
+                server,
+                _directory: directory,
+            }
+        }
+
+        /// Signs in as Alice, naming the lifetime when `ttl_seconds` does.
+        async fn login(&self, ttl_seconds: Option<u64>) -> reqwest::Response {
+            let mut body = serde_json::json!({"name": "alice", "secret": "right"});
+            if let Some(ttl_seconds) = ttl_seconds {
+                body["ttl_seconds"] = ttl_seconds.into();
+            }
+            reqwest::Client::new()
+                .post(format!("{}/v1/auth/login", self.base))
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+
+        async fn renew(&self, token: &str) -> reqwest::Response {
+            reqwest::Client::new()
+                .post(format!("{}/v1/auth/renew", self.base))
+                .bearer_auth(token)
+                .send()
+                .await
+                .unwrap()
+        }
+
+        /// A token of Alice's with these times, returning its value.
+        fn token(&self, issued_at: f64, expires_at: f64) -> String {
+            let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+            let record = AccessTokenRecord::try_new(
+                Uuid::new_v4().to_string(),
+                access_token_digest(&token),
+                "alice-id",
+                issued_at,
+                expires_at,
+                None,
+            )
+            .unwrap();
+            self.registry.store_access_token(&record).unwrap();
+            token
+        }
+
+        async fn session(&self, token: &str) -> reqwest::Response {
+            reqwest::Client::new()
+                .get(format!("{}/v1/auth/session", self.base))
+                .bearer_auth(token)
+                .send()
+                .await
+                .unwrap()
+        }
+    }
+
+    async fn body_of(response: reqwest::Response) -> serde_json::Value {
+        assert_eq!(response.status(), StatusCode::OK);
+        response.json().await.unwrap()
+    }
+
+    fn time_in(body: &serde_json::Value, key: &str) -> f64 {
+        body[key]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{key} in {body}"))
+    }
+
+    #[tokio::test]
+    async fn renewal_keeps_the_same_token_up_to_the_cap() {
+        let signing = Signing::new(|gateway| {
+            gateway.access_token_ttl = ai6::Seconds::new(3_600);
+            gateway.session_max = TimeLimit::secs(7_200);
+        })
+        .await;
+        let before = unix_timestamp().ok().unwrap();
+
+        // Signing in says when the token ends and when renewing does.
+        let signed_in: serde_json::Value = signing.login(None).await.json().await.unwrap();
+        let expires_at = time_in(&signed_in, "expires_at");
+        assert!(expires_at >= before + 3_600.0, "{signed_in}");
+        assert!(
+            (time_in(&signed_in, "ends_at") - (expires_at + 3_600.0)).abs() < 1e-3,
+            "{signed_in}"
+        );
+
+        // A renewal gives a whole lifetime from now, with the same token and no secret.
+        let token = signing.token(before - 10.0, before + 120.0);
+        let id = body_of(signing.session(&token).await).await["token_id"].clone();
+        let renewed = body_of(signing.renew(&token).await).await;
+        assert_eq!(renewed["token_id"], id);
+        assert!(renewed.get("token").is_none(), "{renewed}");
+        let renewed_until = time_in(&renewed, "expires_at");
+        assert!(renewed_until >= before + 3_600.0, "{renewed}");
+        assert!(
+            (time_in(&renewed, "ends_at") - (before - 10.0 + 7_200.0)).abs() < 1e-3,
+            "{renewed}"
+        );
+        let session = body_of(signing.session(&token).await).await;
+        assert_eq!(session["token_id"], id);
+        assert!((time_in(&session, "expires_at") - renewed_until).abs() < 1e-3);
+
+        // Near the cap it stops there, and again it stays there.
+        let issued_at = before - 5_000.0;
+        let token = signing.token(issued_at, before + 120.0);
+        for _ in 0..2 {
+            let capped = body_of(signing.renew(&token).await).await;
+            assert!(
+                (time_in(&capped, "expires_at") - (issued_at + 7_200.0)).abs() < 1e-3,
+                "{capped}"
+            );
+            assert!(
+                (time_in(&capped, "ends_at") - (issued_at + 7_200.0)).abs() < 1e-3,
+                "{capped}"
+            );
+        }
+
+        // A browser's renewal must come from the public origin, like its sign-in.
+        let foreign = reqwest::Client::new()
+            .post(format!("{}/v1/auth/renew", signing.base))
+            .bearer_auth(&token)
+            .header(ORIGIN, "https://elsewhere.example")
+            .header("x-forwarded-proto", "https")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(foreign.status(), StatusCode::FORBIDDEN);
+        let own = reqwest::Client::new()
+            .post(format!("{}/v1/auth/renew", signing.base))
+            .bearer_auth(&token)
+            .header(ORIGIN, "https://localhost")
+            .header("x-forwarded-proto", "https")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(own.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn session_max_turns_renewal_off_or_lets_it_run_on() {
+        let off = Signing::new(|gateway| gateway.session_max = TimeLimit::secs(0)).await;
+        let signed_in: serde_json::Value = off.login(None).await.json().await.unwrap();
+        let expires_at = time_in(&signed_in, "expires_at");
+        assert!(
+            (time_in(&signed_in, "ends_at") - expires_at).abs() < 1e-3,
+            "it ends when the token does: {signed_in}"
+        );
+        let token = signed_in["token"].as_str().unwrap();
+        let renewed = body_of(off.renew(token).await).await;
+        assert!((time_in(&renewed, "expires_at") - expires_at).abs() < 1e-3);
+
+        let unbound = Signing::new(|gateway| gateway.session_max = TimeLimit::UNBOUNDED).await;
+        let now = unix_timestamp().ok().unwrap();
+        let token = unbound.token(now - 1_000_000.0, now + 120.0);
+        let renewed = body_of(unbound.renew(&token).await).await;
+        assert!(renewed["ends_at"].is_null(), "{renewed}");
+        assert!(
+            time_in(&renewed, "expires_at") >= now + 3_600.0,
+            "{renewed}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_requested_lifetime_is_bound_by_the_setting_and_has_no_floor() {
+        let signing = Signing::new(|gateway| {
+            gateway.access_token_max_ttl = TimeLimit::secs(100);
+            gateway.access_token_ttl = ai6::Seconds::new(50);
+        })
+        .await;
+        let before = unix_timestamp().ok().unwrap();
+        let default: serde_json::Value = signing.login(None).await.json().await.unwrap();
+        assert!(
+            time_in(&default, "expires_at") < before + 100.0,
+            "{default}"
+        );
+        assert_eq!(signing.login(Some(1)).await.status(), StatusCode::CREATED);
+        assert_eq!(signing.login(Some(100)).await.status(), StatusCode::CREATED);
+        assert_eq!(
+            signing.login(Some(101)).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            signing.login(Some(0)).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        let issued = reqwest::Client::new()
+            .post(format!("{}/v1/station/access-tokens", signing.base))
+            .bearer_auth("m-token-that-is-long-enough-for-testing")
+            .json(&serde_json::json!({"person_id": "alice-id", "ttl_seconds": 101}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(issued.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_revoked_or_expired_token_cannot_renew() {
+        let signing = Signing::new(|_| {}).await;
+        let now = unix_timestamp().ok().unwrap();
+        let expired = signing.token(now - 7_200.0, now - 3_600.0);
+        assert_eq!(
+            signing.renew(&expired).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            signing.session(&expired).await.status(),
+            StatusCode::UNAUTHORIZED,
+            "and it is still over"
+        );
+
+        let signed_in: serde_json::Value = signing.login(None).await.json().await.unwrap();
+        let token = signed_in["token"].as_str().unwrap();
+        assert_eq!(signing.renew(token).await.status(), StatusCode::OK);
+        let signed_out = reqwest::Client::new()
+            .post(format!("{}/v1/auth/logout", signing.base))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(signed_out.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            signing.renew(token).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            signing.session(token).await.status(),
+            StatusCode::UNAUTHORIZED,
+            "and it stays revoked"
+        );
+
+        assert_eq!(
+            signing.renew("made-up").await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let no_token = reqwest::Client::new()
+            .post(format!("{}/v1/auth/renew", signing.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(no_token.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_person_gone_from_the_directory_cannot_renew() {
+        let signing = Signing::new(|_| {}).await;
+        let now = unix_timestamp().ok().unwrap();
+        let first = now + 600.0;
+        let token = signing.token(now - 10.0, first);
+        assert_eq!(signing.renew(&token).await.status(), StatusCode::OK);
+        let held = time_in(&body_of(signing.session(&token).await).await, "expires_at");
+
+        signing
+            .gone
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            signing.renew(&token).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let unmoved = time_in(&body_of(signing.session(&token).await).await, "expires_at");
+        assert!((unmoved - held).abs() < 1e-3, "nothing moved");
     }
 
     #[tokio::test]

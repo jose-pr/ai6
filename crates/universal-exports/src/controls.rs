@@ -796,18 +796,26 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
         }
-        let operator =
-            issue_access_token_record(Arc::new(registry.clone()), "operator-007".to_owned(), 600)
-                .await
-                .ok()
-                .unwrap()
-                .token;
-        let viewer =
-            issue_access_token_record(Arc::new(registry.clone()), "viewer-007".to_owned(), 600)
-                .await
-                .ok()
-                .unwrap()
-                .token;
+        let operator = issue_access_token_record(
+            Arc::new(registry.clone()),
+            "operator-007".to_owned(),
+            Duration::from_secs(600),
+            ai6::TimeLimit::UNBOUNDED,
+        )
+        .await
+        .ok()
+        .unwrap()
+        .token;
+        let viewer = issue_access_token_record(
+            Arc::new(registry.clone()),
+            "viewer-007".to_owned(),
+            Duration::from_secs(600),
+            ai6::TimeLimit::UNBOUNDED,
+        )
+        .await
+        .ok()
+        .unwrap()
+        .token;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let router = gateway.router();

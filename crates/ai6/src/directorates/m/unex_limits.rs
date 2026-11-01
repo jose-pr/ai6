@@ -64,6 +64,14 @@ pub struct UnexGatewayLimits {
     pub station_token_min_bytes: u64,
     /// Bytes of the public origin. Default 2,048.
     pub origin_bytes: Limit,
+    /// Seconds a sign-in that names no lifetime gets, and each renewal gives from then, more
+    /// than 0 and within `access_token_max_ttl`; longer is looser. Default 3,600.
+    pub access_token_ttl: Seconds,
+    /// The longest lifetime a request for a token may name, in seconds. Default 86,400.
+    pub access_token_max_ttl: TimeLimit,
+    /// How long renewing keeps a sign-in going, in seconds from when it was made; the password
+    /// is not asked again until then. `0` turns renewal off. Default 43,200.
+    pub session_max: TimeLimit,
 }
 
 impl Default for UnexGatewayLimits {
@@ -82,6 +90,9 @@ impl Default for UnexGatewayLimits {
             write_lease_ttl: Seconds::new(30),
             station_token_min_bytes: 32,
             origin_bytes: Limit::at(2048),
+            access_token_ttl: Seconds::new(3_600),
+            access_token_max_ttl: TimeLimit::secs(DAY),
+            session_max: TimeLimit::secs(43_200),
         }
     }
 }
@@ -271,10 +282,18 @@ impl UnexLimits {
         for (key, value) in [
             ("attach_token_ttl", gateway.attach_token_ttl),
             ("write_lease_ttl", gateway.write_lease_ttl),
+            ("access_token_ttl", gateway.access_token_ttl),
         ] {
             if value.0.is_zero() {
                 return Err(format!("gateway.{key}: more than 0"));
             }
+        }
+        // A sign-in naming no lifetime gets `access_token_ttl`, which the bound would refuse.
+        if !gateway
+            .access_token_max_ttl
+            .allows(gateway.access_token_ttl.0)
+        {
+            return Err("gateway.access_token_ttl: at most access_token_max_ttl".to_owned());
         }
         if self.timeline.page == 0 {
             return Err("timeline.page: at least 1".to_owned());
@@ -310,8 +329,22 @@ mod tests {
         limits.gateway.station_token_min_bytes = 8;
         limits.controls.pending_per_station = Limit::at(128);
         limits.controls.poll_wait = Seconds::new(9);
+        limits.gateway.session_max = TimeLimit::secs(86_400);
+        limits.gateway.access_token_ttl = Seconds::new(7_200);
         let found = limits.weakenings();
-        assert_eq!(found.len(), 3, "{found:?}");
+        assert_eq!(found.len(), 5, "{found:?}");
+        assert!(
+            found
+                .iter()
+                .any(|line| line.starts_with("unex.gateway.session_max 86400")),
+            "{found:?}"
+        );
+        assert!(
+            found
+                .iter()
+                .any(|line| line.starts_with("unex.gateway.access_token_ttl 7200")),
+            "{found:?}"
+        );
         assert!(
             found
                 .iter()
@@ -346,5 +379,21 @@ mod tests {
             zero.validate(),
             Err("gateway.sessions: at least 1".to_owned())
         );
+        let mut token = UnexLimits::default();
+        token.gateway.access_token_ttl = Seconds::new(0);
+        assert_eq!(
+            token.validate(),
+            Err("gateway.access_token_ttl: more than 0".to_owned())
+        );
+        token.gateway.access_token_ttl = Seconds::new(7_200);
+        token.gateway.access_token_max_ttl = TimeLimit::secs(3_600);
+        assert_eq!(
+            token.validate(),
+            Err("gateway.access_token_ttl: at most access_token_max_ttl".to_owned())
+        );
+        let mut off = UnexLimits::default();
+        off.gateway.session_max = TimeLimit::secs(0);
+        assert!(off.validate().is_ok(), "no renewal is a choice");
+        assert!(off.weakenings().is_empty(), "and a stricter one");
     }
 }
