@@ -12,6 +12,19 @@
 use guatiao::library::ProviderError;
 use guatiao::{FromValue, Schema, ToValue};
 
+/// A tracker provider's settings from an instance's table, through a Guatiao value, so one
+/// declaration on the settings' type gives its parsing, its defaults and its schema. A refusal
+/// names the key, never the value.
+///
+/// # Errors
+///
+/// Returns a message naming the first key that is unknown or not acceptable.
+pub fn settings_from_table<T: FromValue>(table: toml::Table) -> Result<T, String> {
+    let value = guatiao_serde::from_serde(toml::Value::Table(table))
+        .map_err(|error: toml::de::Error| error.to_string())?;
+    T::from_value(&value).map_err(|error| error.to_string())
+}
+
 /// What one tracker instance can do, discovered from the provider and the tracker.
 ///
 /// Answers about the repository or project are the same for every issue and may be cached
@@ -79,6 +92,8 @@ pub struct TrackerIssue {
     pub parent: Option<String>,
     /// The author's login or account ID, for the author rule of repliers.
     pub author_id: Option<String>,
+    /// The priority, in the tracker's words, when it has one.
+    pub priority: Option<String>,
 }
 
 /// A request for comments made after a moment on a set of issues.

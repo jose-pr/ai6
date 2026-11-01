@@ -4,14 +4,16 @@
 //! Strict unless configured. Every value looser than `strict` is a weakening the Station
 //! prints at start.
 
+use guatiao::{FromValue, Schema, ToValue};
 use serde::{Deserialize, Serialize};
 
 use crate::bounds::Limit;
 use crate::directorates::m::cover::Disclosure;
 
 /// A starting point for the keys left out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum IssuePreset {
     /// Closing, reopening and assignee changes need green ink at every clearance.
     Strict,
@@ -20,8 +22,9 @@ pub enum IssuePreset {
 }
 
 /// How much AI6 writes on a Mission's source issue by itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum IssueUpdates {
     /// Only the report when the Mission ends.
     Outcome,
@@ -33,8 +36,9 @@ pub enum IssueUpdates {
 }
 
 /// What happens when nobody answers a question on the issue in time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum OnTimeout {
     /// The Agent is resumed and told nobody answered.
     Resume,
@@ -45,8 +49,9 @@ pub enum OnTimeout {
 }
 
 /// What happens to a post that holds a secret.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum OnSecret {
     /// The post is refused.
     Refuse,
@@ -55,8 +60,9 @@ pub enum OnSecret {
 }
 
 /// Where links and images in an Agent's text may point.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum LinkHosts {
     /// Only the tracker's host and the Operation's git remote host.
     Tracker,
@@ -65,65 +71,98 @@ pub enum LinkHosts {
 }
 
 /// Whether an Agent creates issues itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
 #[serde(rename_all = "snake_case")]
+#[map(rename_all = "snake_case")]
 pub enum IssueCreate {
-    /// A person approves each creation.
-    Proposal,
-    /// The Agent creates the issue.
+    /// A person approves each creation, or a class authorisation approves one from an
+    /// unexposed Session with no findings.
+    Propose,
+    /// The Agent creates the issue at once.
     Direct,
+    /// Agents cannot ask for issues.
+    Off,
 }
 
-/// An Operation's issue policy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// An Operation's issue policy, `[operation.ID.issues]`. A key left out takes its default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToValue, FromValue, Schema)]
+#[serde(default, deny_unknown_fields)]
+#[map(deny_unknown_fields)]
 pub struct IssuePolicy {
-    /// The preset the rest started from.
+    /// Whether `00` Agents close and reopen issues without green ink.
+    #[schema(title = "Preset")]
+    #[map(default = IssuePolicy::default().preset)]
     pub preset: IssuePreset,
-    /// How much AI6 writes by itself.
+    /// How much AI6 writes on the issues by itself.
+    #[schema(title = "Automatic updates")]
+    #[map(default = IssuePolicy::default().updates)]
     pub updates: IssueUpdates,
     /// Bytes of one posted comment.
+    #[schema(title = "Size of a post", format = "bytes")]
+    #[map(default = IssuePolicy::default().max_body_bytes)]
     pub max_body_bytes: Limit,
     /// Agent and person posts per hour per Mission (the bucket's refill).
+    #[schema(title = "Posts an hour, per Mission")]
+    #[map(default = IssuePolicy::default().posts_per_hour)]
     pub posts_per_hour: Limit,
     /// Posts a Mission may make in a burst.
+    #[schema(title = "Burst of posts")]
+    #[map(default = IssuePolicy::default().post_burst)]
     pub post_burst: Limit,
     /// Posts one Mission may make in all.
+    #[schema(title = "Posts per Mission")]
+    #[map(default = IssuePolicy::default().posts_per_mission)]
     pub posts_per_mission: Limit,
     /// Agent and person posts per hour for the whole Operation.
+    #[schema(title = "Posts an hour, per Operation")]
+    #[map(default = IssuePolicy::default().operation_posts_per_hour)]
     pub operation_posts_per_hour: Limit,
     /// Writes per hour to one tracker instance, every kind counted.
+    #[schema(title = "Writes an hour, per tracker")]
+    #[map(default = IssuePolicy::default().tracker_posts_per_hour)]
     pub tracker_posts_per_hour: Limit,
     /// Seconds at least between two status writes to one issue.
+    #[schema(title = "Between status writes", format = "seconds")]
+    #[map(default = IssuePolicy::default().status_interval_secs)]
     pub status_interval_secs: u64,
     /// Seconds a question waits for an answer.
+    #[schema(title = "A question waits", format = "seconds")]
+    #[map(default = IssuePolicy::default().reply_ttl_secs)]
     pub reply_ttl_secs: u64,
     /// What a question nobody answers does.
+    #[schema(title = "When nobody answers")]
+    #[map(default = IssuePolicy::default().on_timeout)]
     pub on_timeout: OnTimeout,
     /// What a post that holds a secret does.
+    #[schema(title = "When a post holds a secret")]
+    #[map(default = IssuePolicy::default().on_secret)]
     pub on_secret: OnSecret,
     /// Where links and images in Agent text may point.
+    #[schema(title = "Links in Agent text")]
+    #[map(default = IssuePolicy::default().links)]
     pub links: LinkHosts,
     /// Whether an Agent creates issues itself.
+    #[schema(title = "Creating issues")]
+    #[map(default = IssuePolicy::default().create)]
     pub create: IssueCreate,
-    /// Issues one Mission may create.
+    /// Issues one Mission may create, those waiting for a person included.
+    #[schema(title = "Issues per Mission")]
+    #[map(default = IssuePolicy::default().max_created)]
     pub max_created: Limit,
     /// Issues an Operation's Agents may create per day.
+    #[schema(title = "Issues a day, per Operation")]
+    #[map(default = IssuePolicy::default().max_created_per_day)]
     pub max_created_per_day: Limit,
     /// How deep a split may go (a child of a child is depth 2).
+    #[schema(title = "Depth of a split")]
+    #[map(default = IssuePolicy::default().max_split_depth)]
     pub max_split_depth: Limit,
 }
 
 impl Default for IssuePolicy {
     fn default() -> Self {
-        Self::preset(IssuePreset::Strict)
-    }
-}
-
-impl IssuePolicy {
-    /// The policy of a named preset.
-    pub fn preset(preset: IssuePreset) -> Self {
         Self {
-            preset,
+            preset: IssuePreset::Strict,
             updates: IssueUpdates::Milestones,
             max_body_bytes: Limit::at(8192),
             posts_per_hour: Limit::at(6),
@@ -136,19 +175,39 @@ impl IssuePolicy {
             on_timeout: OnTimeout::Resume,
             on_secret: OnSecret::Refuse,
             links: LinkHosts::Tracker,
-            create: IssueCreate::Proposal,
+            create: IssueCreate::Propose,
             max_created: Limit::at(10),
             max_created_per_day: Limit::at(50),
             max_split_depth: Limit::at(2),
         }
     }
+}
 
+impl IssuePolicy {
     /// Whether an Agent of `clearance` closes or reopens an issue without green ink.
     pub fn closes_without_ink(&self, clearance: &str) -> bool {
         self.preset == IssuePreset::Licensed && clearance == "00"
     }
 
-    /// One line per setting looser than `strict`, for the Station to print and publish.
+    /// Refuses values that cannot work.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the key for a zero body size, burst or reply lifetime.
+    pub fn validate(&self) -> Result<(), String> {
+        for (key, zero) in [
+            ("max_body_bytes", self.max_body_bytes.get() == Some(0)),
+            ("post_burst", self.post_burst.get() == Some(0)),
+            ("reply_ttl_secs", self.reply_ttl_secs == 0),
+        ] {
+            if zero {
+                return Err(format!("issues {key} must be at least 1"));
+            }
+        }
+        Ok(())
+    }
+
+    /// One line per setting looser than the default, for the Station to print and publish.
     pub fn weakenings(&self) -> Vec<String> {
         let strict = Self::default();
         let mut lines = crate::bounds::looser(
@@ -172,77 +231,9 @@ impl IssuePolicy {
             note("links", "any", "tracker");
         }
         if self.create == IssueCreate::Direct {
-            note("create", "direct", "proposal");
+            note("create", "direct", "propose");
         }
         lines
-    }
-}
-
-/// The issue policy as written in configuration (`[operation.ID.issues]`).
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct IssuesDefinition {
-    preset: Option<IssuePreset>,
-    updates: Option<IssueUpdates>,
-    max_body_bytes: Option<Limit>,
-    posts_per_hour: Option<Limit>,
-    post_burst: Option<Limit>,
-    posts_per_mission: Option<Limit>,
-    operation_posts_per_hour: Option<Limit>,
-    tracker_posts_per_hour: Option<Limit>,
-    status_interval_secs: Option<u64>,
-    reply_ttl_secs: Option<u64>,
-    on_timeout: Option<OnTimeout>,
-    on_secret: Option<OnSecret>,
-    links: Option<LinkHosts>,
-    create: Option<IssueCreate>,
-    max_created: Option<Limit>,
-    max_created_per_day: Option<Limit>,
-    max_split_depth: Option<Limit>,
-}
-
-impl IssuesDefinition {
-    /// Applies the written values over the preset.
-    ///
-    /// # Errors
-    ///
-    /// Returns a message naming the key for a value that cannot work: a zero body size, a
-    /// zero burst or a zero reply lifetime.
-    pub fn resolve(&self) -> Result<IssuePolicy, String> {
-        let mut policy = IssuePolicy::preset(self.preset.unwrap_or(IssuePreset::Strict));
-        macro_rules! take {
-            ($($field:ident),*) => {
-                $(if let Some(value) = self.$field { policy.$field = value; })*
-            };
-        }
-        take!(
-            updates,
-            max_body_bytes,
-            posts_per_hour,
-            post_burst,
-            posts_per_mission,
-            operation_posts_per_hour,
-            tracker_posts_per_hour,
-            status_interval_secs,
-            reply_ttl_secs,
-            on_timeout,
-            on_secret,
-            links,
-            create,
-            max_created,
-            max_created_per_day,
-            max_split_depth
-        );
-        for (key, zero) in [
-            ("max_body_bytes", policy.max_body_bytes.get() == Some(0)),
-            ("post_burst", policy.post_burst.get() == Some(0)),
-            ("reply_ttl_secs", policy.reply_ttl_secs == 0),
-        ] {
-            if zero {
-                return Err(format!("issues {key} must be at least 1"));
-            }
-        }
-        Ok(policy)
     }
 }
 
@@ -284,9 +275,41 @@ mod tests {
     use super::*;
 
     fn resolve(text: &str) -> Result<IssuePolicy, String> {
-        toml::from_str::<IssuesDefinition>(text)
-            .map_err(|error| error.to_string())?
-            .resolve()
+        let policy: IssuePolicy = toml::from_str(text).map_err(|error| error.to_string())?;
+        policy.validate()?;
+        Ok(policy)
+    }
+
+    #[test]
+    fn every_setting_a_person_writes_has_a_title_and_a_description() {
+        let schema = IssuePolicy::schema().unwrap();
+        let schema = serde_json::to_value(guatiao_serde::Serializable::from(&schema)).unwrap();
+        let properties = schema["properties"].as_object().unwrap();
+        assert!(properties.len() >= 17, "{schema}");
+        for (key, field) in properties {
+            assert!(field["title"].is_string(), "{key} has no title: {field}");
+            assert!(
+                field["description"].is_string(),
+                "{key} has no description: {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_value_reads_the_same_through_guatiao_as_through_toml() {
+        let table: toml::Table =
+            toml::from_str("create = \"off\"\nmax_created = \"none\"\nreply_ttl_secs = 60")
+                .unwrap();
+        let value = guatiao_serde::from_serde(toml::Value::Table(table.clone()))
+            .map_err(|error: toml::de::Error| error)
+            .unwrap();
+        let through_value = IssuePolicy::from_value(&value).unwrap();
+        let through_toml: IssuePolicy = toml::Value::Table(table).try_into().unwrap();
+        assert_eq!(through_value, through_toml);
+        assert_eq!(through_value.create, IssueCreate::Off);
+        assert_eq!(through_value.max_created, Limit::UNBOUNDED);
+        assert_eq!(through_value.reply_ttl_secs, 60);
+        assert_eq!(through_value.posts_per_hour, Limit::at(6), "a default");
     }
 
     #[test]
@@ -313,7 +336,7 @@ mod tests {
             "issues.preset licensed is looser than the default strict",
             "issues.on_secret redact is looser than the default refuse",
             "issues.links any is looser than the default tracker",
-            "issues.create direct is looser than the default proposal",
+            "issues.create direct is looser than the default propose",
         ] {
             assert!(lines.contains(expected), "{expected} in {lines}");
         }
