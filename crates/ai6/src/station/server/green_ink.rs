@@ -810,7 +810,7 @@ mod tests {
         state.clock.now() as f64
     }
 
-    fn told_about(request_id: &str) -> Vec<(String, String)> {
+    fn recorded_about(request_id: &str) -> Vec<(String, String)> {
         RECORDED_MESSAGES
             .lock()
             .unwrap()
@@ -818,6 +818,19 @@ mod tests {
             .filter(|(_, text)| text.contains(request_id))
             .cloned()
             .collect()
+    }
+
+    /// What the mock was told, waiting for it: a message reaches the harness on the ACP
+    /// connection's thread, after `send_message` has returned.
+    async fn told_about(request_id: &str) -> Vec<(String, String)> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let told = recorded_about(request_id);
+            if !told.is_empty() || Instant::now() >= deadline {
+                return told;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     #[tokio::test]
@@ -857,7 +870,7 @@ mod tests {
             .unwrap();
         deliver_decisions(&state).await;
 
-        let told = told_about(&request_id);
+        let told = told_about(&request_id).await;
         assert_eq!(told.len(), 1, "{told:?}");
         assert_eq!(told[0].0, "provider-session-remote");
         assert!(
@@ -878,7 +891,13 @@ mod tests {
         };
         assert!(approval.notified_at.is_some());
         deliver_decisions(&state).await;
-        assert_eq!(told_about(&request_id).len(), 1, "a decision is told once");
+        // Long enough for a second message to arrive if one was sent.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            recorded_about(&request_id).len(),
+            1,
+            "a decision is told once"
+        );
         let actions = state
             .intake
             .timeline_events("G")
@@ -1300,7 +1319,7 @@ mod tests {
         state.intake.request_approval(&request).unwrap();
 
         deliver_decisions(&state).await;
-        let told = told_about(&request.id);
+        let told = told_about(&request.id).await;
         assert!(
             told.iter()
                 .any(|(_, text)| text.contains("expired without a decision")),
