@@ -285,13 +285,16 @@ of the Agent's own Mission; anything else answers "not linked to this Mission".
 | Tool | What it does |
 | --- | --- |
 | `issues` | Lists the Mission's links: relation, whether the Agent may write, the title (untrusted), the last status and whether a question is open |
-| `issue_read` | One issue's title and the recent comments from people allowed to answer for it, each fenced as untrusted data; reading exposes the Session |
+| `issue_read` | One issue's title and body as last read, and the recent comments from people allowed to answer for it, each fenced as untrusted data; reading exposes the Session |
 | `issue_comment` | Comments. `queued` (the Station sends it), `pending` (green ink first) or `refused` with the rule |
 | `issue_request_info` | Asks a question and blocks the Mission (`blocked`, reason `issue`, the Watchdog paused) until a permitted reply or the timeout; the Agent ends its turn |
 | `issue_update` | Labels within the instance's `agent_labels`, a transition the instance lists in `agent_transitions`, assignees, close or reopen. The last three, and any other transition, need green ink (`issue-assign`, `issue-close`) |
 | `issue_link` | Proposes a `related` or `parent` link; a person accepts it before the Mission may write there |
+| `issue_create` | Asks for a new issue in one of the Operation's trackers; `proposed` until a person approves, or `queued` |
+| `issue_split` | Asks for up to 10 children of a linked issue, in its tracker |
+| `issue_mirror` | Asks for a copy of a linked issue in another tracker, and lists what the copy cannot carry |
 
-`desk` Agents have the read tools only. The Mission's source issue, a related issue a person
+`desk` Agents have the read tools and may ask for issues, never create them directly. The Mission's source issue, a related issue a person
 accepted and a child the Agent created are writable; a parent or a mirror is read-only. The
 intake labels are never settable. Every call repeated with its `retry_key` returns the first
 answer. What an Agent writes passes a check before it is queued: the values of secrets the

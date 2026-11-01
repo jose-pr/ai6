@@ -55,9 +55,8 @@ as TOML, in `SourceConfig::settings_toml`.
 | `capability_ttl_secs` | 600 | how long the repository's labels and settings are remembered |
 
 Unknown keys are refused. `provider`, `intake` and `interval_secs` are read by the Station and
-never reach the provider. `status_labels`, `agent_labels`, `agent_transitions`, `status_transitions`,
-`issue_type`, `subtask_type` and `priority_map` are applied by the Station and accepted and
-ignored here, so one table serves every tracker.
+never reach the provider, nor do the Station's own keys (`status_labels`, `status_transitions`,
+`agent_labels`, `agent_transitions`, `priority_map`): an unknown key here is refused.
 
 ## Behaviour
 
@@ -79,7 +78,8 @@ ignored here, so one table serves every tracker.
 - **Post** comments (`POST .../comments`) or edits (`PATCH .../issues/comments/{id}`; the ID
   is digits only). A `marker` is appended as an HTML comment `<!-- ai6:NAME -->`, which GitHub
   keeps in `body`. A blank body is an error before any request, since GitHub refuses it.
-- **Update**: labels added and removed (a label already gone is not an error), assignees
+- **Update**: labels added (a label the repository lacks is created) and removed (a label the
+  issue lacks is not an error; a missing issue is, told apart by GitHub's message), assignees
   added and removed, `state` `open` or `closed` (closing sets `state_reason: completed`). A
   `transition` is `GUATIAO_ERR_UNSUPPORTED`.
 - **Create** keeps only the labels the repository has (GitHub would create the rest);
@@ -89,11 +89,13 @@ ignored here, so one table serves every tracker.
 - **Replies** read `GET .../issues/comments?since=` (repository-wide, cursor = newest
   `updated_at`, inclusive) for the issues asked about. `permitted`: the comment's
   `author_association` is in `reply_associations`, the login is in `reply_authors`, or the
-  login is the issue's author. `own`: the login is the token's (`GET /user`; unknown
-  identities own nothing).
+  login is the issue's author. `own`: the login is the token's (`GET /user`), or the comment
+  carries the provider's marker, for a token with no user.
 - **Token**: read from `token_env` on each call; a missing token is an error for every call
   but a read (`GET`), and a private repository answers a read with no token with 404, so that
   error names the unset variable. Errors name the variable, never the value or a response body.
+- **API version**: every request asks for `2026-03-10`; under `2022-11-28` creating an issue
+  answers `Deprecation`, with a sunset of 2028-03-10.
 - **Rate limits**: a 429, or a 403 with `x-ratelimit-remaining: 0`, is an error naming
   the reset time; the cursor does not move and the Station polls again at its next interval.
 - Every request has a `request_timeout_secs` (30 s) timeout and follows no redirects.

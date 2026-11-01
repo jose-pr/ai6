@@ -167,6 +167,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and `ai6ctl accounts` (list, create, disable, enable, groups, reset-password), and an Access
   page in Outer Office: roles with a switch per action greyed where you could not give it, the
   ordered rules, the cap, accounts and a Check, for the global policy and for one Operation.
+- The issue policy and a tracker instance's settings are declared once, on their structs, with a
+  title and a description on each key; the tables in the Operations guide are generated from them
+  and a test fails when they differ. The GitHub provider asks for REST API `2026-03-10`, whose
+  issue creation carries no deprecation; `2022-11-28` sunsets on 2028-03-10.
 - Trackers: a second Guatiao kind (`ai6_tracker`) the `github` and `jira` providers serve
   beside `ai6_source`, built from the same `sources.<name>` table and token. A Tracker reads
   an issue, lists the replies that may answer a question, posts and edits a comment, changes
@@ -187,6 +191,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   rate limited, retried with a doubling delay, and settled once across a Headquarters change.
   `[operation.ID.issues]` sets how much is written and its bounds; looser values are reported
   at start and at check-in. `CableStore::take_cable_quotas` is renamed `take_quotas`.
+- Agents split work across trackers: `issue_create`, `issue_split` and `issue_mirror` ask for
+  issues a person approves, or a class authorisation `issue-create` for an unexposed Session with
+  no findings, or none under `create = "direct"`, a reported weakening. Children go under their
+  parent where the tracker can; a mirror lists what it cannot carry and leads the original to the
+  copy. A created issue never starts work: intake labels are stripped, and only an approval with
+  `mark_ready`, which also needs `mission.create`, adds them. Caps per Mission and per day and the
+  depth of a split are refused at the call
+  ([Linked issues](https://jose-pr.github.io/ai6/missions/#linked-issues)).
+- People work a Mission's issues: `issue.link`, `issue.comment`, `issue.update` and `issue.create`,
+  seeded on controller and operator and delegable, with routes under
+  `/v1/user/operations/{op}/missions/{mission}/issues`, `/v1/user/operations/{op}/issues` and
+  `/v1/user/operations/{op}/issue-proposals`, `ai6ctl mission issues`, `ai6ctl issues` and
+  `ai6ctl issue-proposals`, Moneypenny's `issue_proposals` and `propose_issue_*`, and Outer Office's
+  Linked issues on Mission detail. A person's comment carries their name in a footer, and on an
+  issue with an open question it answers it as an operator's text. A PostgreSQL Registry needs the
+  new `ai6_issue_*` tables and `ai6_mission_issues` from `schema/postgres.sql`, created as role `ai6`
+  with every Station and gateway stopped.
 - Agents work their issues. A Mission linked to issues gives its Agent `issues`, `issue_read`,
   `issue_comment`, `issue_request_info`, `issue_update` and `issue_link` on its Session endpoint:
   comment on the source, a related issue a person accepted and the children it created, ask a

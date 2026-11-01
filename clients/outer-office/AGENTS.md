@@ -66,3 +66,7 @@ native windows build their app with `boardThemedApp`.
 ## Verification
 
 From this directory, run `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze`, `flutter test`, and build the Windows and Web targets with the documented main SDK.
+
+`lib/issues/linked_issues.dart` holds a Mission's Linked issues section and the issue proposals panel.
+Issue text is other people's: show it through `revealInvisible`. An action a person lacks is shown
+disabled with what it needs, not hidden. `reasonWords` words a blocked reason everywhere it is shown.

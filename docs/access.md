@@ -44,7 +44,8 @@ A longer lifetime is reported at start.
 first rule that matches decides, and no match denies. The actions Universal Exports checks
 are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.read`, `approval.class`, `approval.decide`,
 `assistant.memory.admin`, `audit.read`,
-`cable.read`, `cable.send`, `mission.control`, `mission.create`, `mission.read`,
+`cable.read`, `cable.send`, `issue.comment`, `issue.create`, `issue.link`, `issue.update`,
+`mission.control`, `mission.create`, `mission.read`,
 `pool.manage`, `pool.read`,
 `roster.manage`, `roster.read`, `session.input`, `session.read`, `station.configure` and
 `station.read`. `roster.read` and `roster.manage` at `config:roster` list and edit the
@@ -137,7 +138,7 @@ The policy has four built-in role names and two places to write more.
 | --- | --- | --- |
 | `chief` | every action, including any added later; not stored and not editable | only through the chief list (`chief = [...]` in the `access` record, `[access] chief` in `unex.cfg`) |
 | `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `access.manage`, `account.manage`, `audit.read` and `access.read` | seeded; ordinary data you may edit or delete |
-| `operator` | the read actions (`mission.read`, `session.read`, `agent.read`, `roster.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `session.input`, `cable.send`, `approval.decide` | seeded |
+| `operator` | the read actions (`mission.read`, `session.read`, `agent.read`, `roster.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `session.input`, `cable.send`, `approval.decide`, `issue.link`, `issue.comment`, `issue.update`, `issue.create` | seeded |
 | `auditor` | the read actions, `audit.read` and `access.read` | seeded |
 
 The first start of Universal Exports with user access and no `access` record writes the last

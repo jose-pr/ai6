@@ -2826,12 +2826,14 @@ dropped oldest first), `entry_bytes` 128 KiB. Station `[sources]` gains `outbox_
 `all`), `max_body_bytes` 8192, `posts_per_hour` 6, `post_burst` 3, `posts_per_mission` 40,
 `operation_posts_per_hour` 60, `tracker_posts_per_hour` 300, `status_interval_secs` 60,
 `reply_ttl_secs` 259200, `on_timeout` (`resume`, `fail`), `on_secret` (`refuse`, `redact`),
-`links` (`tracker`, `any`), `create` (`proposal`, `direct`), `max_created` 10,
-`max_created_per_day` 50, `max_split_depth` 2; counts are `Limit`s. `weakenings()` lists each
-value looser than `strict`, printed at start and published at check-in as `issues_weakened`;
-`compose_status(disclosure, phase)` words a status for the cover policy.
+`links` (`tracker`, `any`), `create` (`propose`, `direct`, `off`), `max_created` 10,
+`max_created_per_day` 50, `max_split_depth` 2; counts are `Limit`s. It is parsed as written,
+the one declaration of these keys with their titles (`Schema`); `validate()` refuses what cannot
+work, `weakenings()` lists each value looser than the default, printed at start and published at check-in as `issues_weakened`;
+`compose_status(disclosure, phase)` words a status for the cover policy; `is_ready_label(operation,
+label)` says whether a label would start work.
 
-`IssueLink` also carries `title: Option<String>` (untrusted). `[registry.limits.issues]` adds
+`IssueLink` also carries `snapshot: Option<IssueSnapshot { title, body, state, labels, priority }>`, what the issue said when last read (untrusted; `set_issue_snapshot`). `[registry.limits.issues]` adds
 `replies_per_mission` 200 and `reply_bytes` 64 KiB; `[sources]` adds `reply_every` 60 s.
 `OnTimeout` is `resume`, `fail` or `wait`. New green ink kinds `issue-close`, `issue-assign` and
 `issue-comment` (`ISSUE_CLOSE`, `ISSUE_ASSIGN`, `ISSUE_COMMENT`; `licensed` adds `issue-close` to
@@ -2847,6 +2849,8 @@ image to a host the `LinkRule` does not name (`LinkRule::hosts`, `LinkRule::any`
 six bytes are not matched) and credential shapes (`ghp_`/`gho_`/`ghs_`, `github_pat_`, `ATATT`, `xox?-`,
 `AKIA`, PEM private key headers, JWTs, `sk-ant-`); under `OnSecret::Redact` the last two are replaced with
 `[redacted]` instead. `Refusal::rule()` names the rule, never a value. Mentions come back in backticks.
+`check_person(text, max_bytes)` is what a person's own text passes: empty, too long, invisible
+characters and credential shapes are refused; links and mentions are theirs.
 
 On the Station, the issue tools live on the Session's Cable MCP endpoint (`issues`, `issue_read`,
 `issue_comment`, `issue_request_info`, `issue_update`, `issue_link`; `station::server::issues`):
@@ -2867,6 +2871,25 @@ every `outbox_every`: it builds the Tracker of the entry's instance, sends under
 settles. The first status posts a comment and keeps its ID (`status_comment`); later ones edit
 it (a new comment only for `waiting` where editing is unsupported); `status_labels` are
 swapped and `status_transitions` made when the issue offers them.
+
+An Agent asks for issues with `issue_create`, `issue_split` and `issue_mirror`: an `IssueProposal
+{ id, operation, mission_id, proposer, specs: Vec<ProposedIssue>, exposure, findings, dropped, state:
+pending|approved|rejected|created, decided_by, mark_ready, created, failed, retry_key, told, at }`,
+kept by `propose_issues`, `issue_proposal`, `issue_proposals`, `decide_issue_proposal`,
+`record_created_issues` and `mark_proposal_told`, table `ai6_issue_proposals`. Class authorisations
+name kind `issue-create` (`ISSUE_CREATE`), not a governed step. The Headquarters Station queues
+`create` entries for approved proposals and settles them in one idempotent pass: it links each new
+issue (`child` or `mirror`, `linked_by` the proposer), adds a mirror's back-link comment and remote
+link, adds `mark_ready`'s labels as `person:SUBJECT` (audit `issue.ready`), and lists children the
+tracker could not attach on their parent. A person's creation is an approved proposal whose Mission
+is the `mission` it names, or `operation-created` for none. A `link` entry with `payload.resolve`
+reads the issue into the link's `snapshot`, and unlinks it when it cannot be read. An `IssueReply` with
+`operator: true` is a person's comment through the gateway: it answers a question and exposes nothing.
+
+`ai6::settings_from_table::<T>(toml::Table)` builds a provider's settings through a Guatiao value, so
+its one declaration gives its parsing, defaults and schema. `source_setups` strips `provider`,
+`intake`, `interval_secs` and the keys of `InstanceKeys` (`status_labels`, `status_transitions`,
+`agent_labels`, `agent_transitions`, `priority_map`) before a provider sees the table.
 
 ## Sleepers (`ai6::directorates::registry::sleepers`)
 

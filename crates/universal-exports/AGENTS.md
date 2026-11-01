@@ -299,7 +299,8 @@ rules apply). Every authorization of an Operation goes through one helper, so th
 each route alike. A person sees an ancestor only with `mission.read` on it: `parent` in the
 profile and on the board is the nearest readable ancestor, and a hidden one is never named.
 
-`GET /v1/stations` returns this user's visible Station check-ins and hosted Operations
+`GET /v1/stations` returns this user's visible Station check-ins and hosted Operations, each
+Station with `issues_weakened`, the issue settings looser than the default of the Operations the person may read,
 from the shared Registry, and `operations`: every Operation of the Stations and of the tree
 the person may read, each with its `parent`. A Station is healthy when its check-in is no older than 45
 seconds; stale check-ins remain visible as offline. `headquarters_station` and each
@@ -515,7 +516,7 @@ runs, and identifiers are percent-encoded into paths. Results are JSON inside
 `roster`, `station_settings`, `timeline`; all read only. `propose_shared_change` is listed
 with the write tools.
 
-Write tools only propose (an input whose text holds a character AI6 vetting counts as invisible is refused, `INVALID_INPUT`): `propose_class_authorization` (approval.class), `propose_held_brief_decision`
+Write tools only propose (an input whose text holds a character AI6 vetting counts as invisible is refused, `INVALID_INPUT`): `propose_issue_comment` (issue.comment), `propose_issue_create` (issue.create), `propose_issue_link` (issue.link), `propose_issue_proposal_decision` (issue.create, `mark_ready` also mission.create), `propose_issue_update` (issue.update), `propose_class_authorization` (approval.class), `propose_held_brief_decision`
 (release or refuse; mission.create), `propose_mission` (mission.create),
 `propose_mission_control` (cancel, retry, resume, interrupt; mission.control; the proposal ID
 is the idempotency key), `propose_mission_proposal_decision` (mission.create),
@@ -890,6 +891,16 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/operations/{operation_id}/mission-proposals` | Requires `mission.create`; returns at most 100 pending `ai6::MissionProposal`s, oldest first, each with `vetting` once Headquarters has vetted it (absent until then). |
 | `POST /v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve` | Requires `mission.create`; promotes the proposal to the queue (`202`, `{operation_id, proposal_id, mission_id, state: "queued"}`) and clears the promoted brief of every vetting finding kind but `malformed` (the operator saw them) in the same Registry step (`promote_cleared`), and audits `mission.proposal.approved`. `409` for a rejected proposal. |
 | `POST /v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/reject` | Requires `mission.create`; files the proposal as rejected and audits `mission.proposal.rejected`; `409` for an approved one. |
+| `GET /v1/user/operations/{operation_id}/missions/{mission_id}/issues` | Requires `mission.read`; `MissionIssues { issues: [IssueView { issue, tracker, item, url, relation, state, linked_by, title, issue_state, labels, phase, open_question }], entries: [EntryView { id, kind, issue, actor, state, url, reason, dropped, at }], replies: ReplyCounts { delivered, pending, ignored } }`; a Mission nothing in this Operation names is `404`. Titles and labels are untrusted text; entries carry no body. |
+| `POST .../missions/{mission_id}/issues` | Requires `issue.link`; body `{"issue":"TRACKER:ITEM","relation"?:"related"\|"child"\|"parent"\|"mirror"}`. Writes the link active and a `link` entry the Headquarters Station resolves: a foreign or missing issue comes back unlinked. Audited `issue.link`. |
+| `DELETE .../missions/{mission_id}/issues/{reference}` | Requires `issue.link`; unlinks, refusing what still waits to write to it. `404` for a reference not linked to this Mission, before audit, as on every route below. Audited `issue.unlink`. |
+| `POST .../issues/{reference}/accept` | Requires `issue.link`; accepts a link an Agent proposed, `409` when it is not proposed. Audited `issue.link.accepted`. |
+| `POST .../issues/{reference}/comments` | Requires `issue.comment`; body `{"body"}`. Refused `400` for a token shape, invisible characters, or past the Operation's `max_body_bytes`; links and mentions are the person's. Takes the Mission's and the Operation's post buckets (`429`). Footed with the person's name. On an issue with an open question it is the answer: a reply with `operator: true`, which resumes the Mission unexposed, and the answer says `answered: true`. Audited `issue.comment.queued`, never the text. |
+| `POST .../issues/{reference}/update` | Requires `issue.update`; body `{"add_labels"?,"remove_labels"?,"transition"?,"close"?,"reopen"?,"add_assignees"?,"remove_assignees"?}`. No green ink. A label that starts work also needs `mission.create`. Audited `issue.update.queued`. |
+| `POST /v1/user/operations/{operation_id}/issues` | Requires `issue.create` (a label that starts work also `mission.create`); body `{"tracker","title","body"?,"labels"?,"issue_type"?,"priority"?,"parent"?,"mission"?}`. `202`: an approved proposal the Headquarters Station sends. `parent` needs `mission`. Audited `issue.create.queued`. |
+| `GET /v1/user/operations/{operation_id}/issue-proposals` | Requires `mission.read`; every `IssueProposal` of the Operation, oldest first, with the exact text, findings, dropped fields and how it came out. |
+| `POST .../issue-proposals/{id}/approve` | Requires `issue.create`; body `{"mark_ready"?}`, which also needs `mission.create`. Returns the proposal; `404` for another Operation's, `409` once decided. Audited `issue.create.approved`. |
+| `POST .../issue-proposals/{id}/reject` | Requires `issue.create`; body `{"reason"?}`. Audited `issue.create.rejected`. |
 | `GET /v1/user/operations/{operation_id}/held-briefs` | Requires `mission.create`; returns at most 500 `HeldBriefEntry { key, operation, brief, vetting, held_at }` (the `ai6::HeldBrief` flattened beside its Registry key), oldest first. The brief carries its untrusted text; show it only on request. |
 | `POST /v1/user/operations/{operation_id}/held-briefs/{key}/release` | Requires `mission.create`; no body. Returns the brief to the queue cleared of the kinds it was held for, for its content as it is (an edited brief is vetted again), and returns `HeldBriefDecision { operation_id, key, state: "queued" }`; releasing again returns the same; `404` when the Operation neither holds nor released such a brief, `409` once it was placed or finished. Audited as `mission.brief.released` (target: the key) and recorded on the timeline as `intake` `released`. |
 | `POST /v1/user/operations/{operation_id}/held-briefs/{key}/refuse` | Requires `mission.create`; body `{"reason"?: up to 1,024 characters}`. Files the brief as failed with outcome state `refused` (a Source gets its CX report; the reason stays in the Registry) and returns `state: "refused"`; refusing again returns the same, `409` once it was placed or finished. Audited as `mission.brief.refused`, timeline `intake` `refused`. |

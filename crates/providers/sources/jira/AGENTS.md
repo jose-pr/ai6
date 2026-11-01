@@ -57,11 +57,11 @@ as TOML, in `SourceConfig::settings_toml`.
 | `issue_type` | `Task` | the type of a created issue |
 | `subtask_type` | the project's first sub-task type | the type of a created child |
 | `capability_ttl_secs` | 600 | how long the project's issue types and priorities are remembered |
+| `link_type` | `Relates` | the issue link type that ties a child to a parent it cannot sit under |
 
 Unknown keys are refused. `provider`, `intake` and `interval_secs` are read by the Station and
-never reach the provider. `status_labels`, `status_transitions`, `agent_labels`, `agent_transitions`,
-`priority_map` and `reply_associations` are applied by the Station (or are GitHub's) and are
-accepted and ignored here, so one table serves every tracker.
+never reach the provider, nor do the Station's own keys (`status_labels`, `status_transitions`,
+`agent_labels`, `agent_transitions`, `priority_map`): an unknown key here is refused.
 
 ## Behaviour
 
@@ -99,15 +99,21 @@ accepted and ignored here, so one table serves every tracker.
   (case-insensitive) or ID, or a `state`: `closed` takes a transition into a `done`-category
   status, `open` one into `new` or `indeterminate`. An unmatched transition is
   `GUATIAO_ERR_UNSUPPORTED` naming the ones that are open.
-- **Create** posts `fields` with the project, the first line of the title, the body, the
-  type (`issue_type`; a child takes `subtask_type` or the first sub-task type, and on Server
-  needs one), labels, a priority only when the project has it, and `parent`. It returns the
-  issue read back. `link` posts `POST /issueLink` (`Relates`) for an issue in the project, or
-  `POST /issue/{key}/remotelink` for an `http(s)` address.
+- **Create** posts `fields` with the project, the first line of the title cut to 255 bytes, the
+  body when there is one, the type, labels, a priority only when the project has it. A child on
+  Cloud takes the instance's `issue_type` under an epic and `subtask_type` (or the first sub-task
+  type) under a standard issue; under a sub-task, or with no sub-task type, it is created beside
+  its parent and tied by `link_type`, and comes back with no parent. On Server a child needs a
+  sub-task type. It returns the issue read back. `link` posts `POST /issueLink` (`link_type`) for
+  an issue in the project, or `POST /issue/{key}/remotelink` for an `http(s)` address.
 - **Replies** list each issue's comments (`GET /issue/{key}/comment`), keep those updated
   after the cursor (newest `updated` becomes it), and flatten ADF to text. `permitted`: the
   author is the issue's reporter or assignee, or is in `reply_authors`. `own`: the author is
-  the credential's account (`GET /myself`).
+  the credential's account (`GET /myself`); a call that cannot name it fails, since its comments
+  carry no marker. Timestamps are ordered by the instant they name, not their text: each carries
+  the account's offset.
+- **Capabilities on a refused credential**: an error naming `token_env`, not a project that
+  cannot create: when create metadata cannot be read, the project lookup decides.
 - **Credentials** are read from the named variables on each call; a missing one is an
   error that names the variable. Cloud answers a refused credential on an issue with 404,
   so that error names `token_env` too. Errors never carry the credential or a response body.

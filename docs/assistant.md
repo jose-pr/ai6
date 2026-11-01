@@ -119,10 +119,10 @@ says so. When the person signs out, her tools stop working.
 | Tool | Reads |
 | --- | --- |
 | `board` | Stations (health, running and capacity, resources, Theaters, the Headquarters Station) and every visible Session |
-| `missions`, `mission` | Missions with their Sessions, attempts, brief and usage |
+| `missions`, `mission` | Missions with their Sessions, attempts, brief and usage; `mission` also the issues it is linked to and what it posted |
 | `timeline` | An Operation's activity |
 | `pools` | Account pools: Sessions, quota windows, tokens today |
-| `held_briefs`, `mission_proposals` | Work waiting for a person |
+| `held_briefs`, `mission_proposals`, `issue_proposals` | Work waiting for a person; `issue_proposals` sets no exposure on her conversation |
 | `green_ink`, `class_authorizations` | Irreversible steps waiting for green ink, standing approvals |
 | `roster` | Operations, Agents, roles, covers and her own `[assistant]` settings |
 | `audit` | Audit records |
@@ -143,6 +143,11 @@ Moneypenny changes nothing herself. Her write tools only propose:
 | `propose_mission_control` | Cancel, retry, resume or interrupt a Mission | `mission.control` |
 | `propose_mission_proposal_decision` | Approving or rejecting an Agent's Mission proposal | `mission.create` |
 | `propose_held_brief_decision` | Releasing or refusing a held brief | `mission.create` |
+| `propose_issue_comment` | A comment on a linked issue, in the person's name; on a waiting issue it is the answer | `issue.comment` |
+| `propose_issue_create` | An issue in one of the Operation's trackers, a child when `parent` is set | `issue.create` |
+| `propose_issue_link` | Linking an issue, accepting a link an Agent proposed, or unlinking one | `issue.link` |
+| `propose_issue_proposal_decision` | Approving or rejecting what an Agent asked to create, with `mark_ready` | `issue.create`, and `mission.create` for `mark_ready` |
+| `propose_issue_update` | A linked issue's labels, state, transition or assignees | `issue.update` |
 | `propose_roster_edit`, `propose_roster_removal` | A roster record set or removed | `roster.manage` |
 | `propose_station_settings` | A Station's limits | `station.configure` |
 | `propose_access_change` | A role, the rule list or the delegation cap, global or of one Operation | `access.manage` there |

@@ -149,6 +149,17 @@ signed by the token's person and audited with the step, never the Agent's reason
 
 ### Held briefs
 
+- `ai6ctl mission issues <MISSION> --operation <ID>` (`mission.read`): from `GET
+  .../missions/<MISSION>/issues`, tables `ISSUE\tRELATION\tSTATE\tPHASE\tQUESTION\tURL` and
+  `ENTRY\tKIND\tISSUE\tSTATE\tURL_OR_REASON`; never an issue's text.
+- `ai6ctl issues link|unlink|accept|comment|update <TRACKER:ITEM> --mission <ID> --operation <ID>`
+  and `ai6ctl issues create <TRACKER> --operation <ID> --title <TEXT> [--body] [--label]...
+  [--issue-type] [--priority] [--parent] [--mission]`: the routes of the same names; prints the
+  issue or proposal and its state.
+- `ai6ctl issue-proposals list --operation <ID>` (`mission.read`): header
+  `ID\tSTATE\tPROPOSER\tMISSION\tISSUES\tFINDINGS\tDROPPED`, never their text.
+  `ai6ctl issue-proposals approve <ID> --operation <ID> [--mark-ready]` and `reject <ID> --operation
+  <ID> [--reason <TEXT>]` (`issue.create`; `--mark-ready` also `mission.create`).
 - `ai6ctl held-briefs list --operation <ID>` (`mission.create`): the briefs vetting held,
   oldest first, from `GET .../held-briefs`. Header `KEY\tSOURCE\tTITLE\tHELD_UNIX\tFINDINGS`;
   findings are `kind: detail (related)` joined by `; `. The brief's body is never printed;

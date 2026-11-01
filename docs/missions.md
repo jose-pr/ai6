@@ -609,6 +609,55 @@ instance's `status_labels` swapped and its `status_transitions` made when the is
 them (one it does not offer is a timeline event). When the Mission ends the report is a new
 comment, so people are notified. Every word follows the Operation's cover policy.
 
+**Creating, splitting and mirroring.** An Agent asks for issues with `issue_create`,
+`issue_split` and `issue_mirror`; its text passes the same check as a comment, and it carries on
+without waiting. By default a person approves each request (`create = "propose"`), or a class
+authorisation `issue-create` approves one from an unexposed Session with no findings; `create =
+"direct"` is a weakening that lets `field` and `00` Agents create at once, except from an exposed
+Session, and `create = "off"` refuses them. A Mission may hold `max_created` (10) issues, those
+waiting included, an Operation's Agents `max_created_per_day` (50), and a split may go
+`max_split_depth` (2) levels below an issue a person made; past any of these the call is refused.
+A title equal to an open linked issue, or to one AI6 created in the Operation in the last 30 days,
+is a finding `duplicate`, which stops a class authorisation and never a person.
+
+The Headquarters Station then creates what was approved through the outbox, ties each new issue
+to the Mission, and the Agent is told the outcome with the new keys. A created issue never starts
+work: every intake label of the Operation's instances is stripped, and an Agent cannot add one
+later. The person who approves may tick **mark ready** (which needs `mission.create` too): the
+Headquarters Station then adds the labels in that person's name (audit `issue.ready`), and intake,
+vetting and the Chief of Staff decide what runs, as for any issue. When intake takes an issue AI6
+created, its Mission is linked to the issue it was split from, read-only.
+
+A child goes under its parent where the tracker can: a GitHub sub-issue; on Jira Cloud a sub-task
+under a standard issue and a standard issue under an epic; on Server a sub-task. Where it cannot,
+the child names its parent in its first line and the parent gets one comment listing the children;
+a Jira child of a sub-task is created beside it and tied by `link_type` (`Relates`). A mirror copies
+the title (Jira cuts it to 255 bytes), the body as quoted text under a header naming the original,
+the labels the target has, and the priority through the target instance's `priority_map`. Assignees,
+the issue type, components, sprints, custom fields, attachments and comment history are not carried,
+and each dropped field is listed in the proposal and the result. The original gets a comment "Tracked
+in URL", and a remote link where the tracker has them; both sides stay linked to the Mission, and
+nothing is kept in sync afterwards.
+
+**People.** Reading a Mission's links and posts needs `mission.read`. `issue.link`, `issue.comment`,
+`issue.update` and `issue.create` on the Operation let a person write, from Mission detail,
+`ai6ctl` or through Moneypenny's proposals, which they confirm:
+
+```text
+ai6ctl mission issues m-12 --operation G
+ai6ctl issues comment github:jose-pr/ai6#12 --mission m-12 --operation G --body "Use the release branch."
+ai6ctl issues link jira:GUA-7 --mission m-12 --operation G --relation related
+ai6ctl issue-proposals list --operation G
+ai6ctl issue-proposals approve ip-1 --operation G --mark-ready
+```
+
+No route calls a tracker: each writes records the Headquarters Station sends. A person's writes go
+out under the Operation's token, with a footer naming them, and need no green ink: their action is
+the permission. Their text is refused for a token shape or invisible characters, and keeps its links
+and mentions. A comment on an issue with an open question is its answer, as an operator's text: the
+Mission resumes, unexposed. A link a person makes is read once by the Headquarters Station; a foreign
+or missing issue comes back unlinked, with the reason on the entry.
+
 ## Sleepers
 
 A **Sleeper** is a standing order: a brief that queues itself on a schedule, such as a

@@ -77,6 +77,10 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `green-ink reject <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Refuses a waiting step; the Agent is told the reason |
 | `green-ink revoke <REQUEST_ID> --operation <ID>` | Withdraws an approval before it expires |
 | `class-authorizations list\|revoke [<ID>] --operation <ID>` | Standing approvals of a kind of step (`approval.class`) |
+| `mission issues <MISSION> --operation <ID>` | The issues a Mission is linked to and what it posted, without their text (`mission.read`) |
+| `issues link\|unlink\|accept\|comment\|update <TRACKER:ITEM> --mission <ID> --operation <ID>` | Link, unlink or accept an issue (`issue.link`), comment (`issue.comment`), change labels, state or assignees (`issue.update`) |
+| `issues create <TRACKER> --operation <ID> --title <TEXT>` | Create an issue, optionally `--parent` and `--mission` (`issue.create`) |
+| `issue-proposals list\|approve\|reject [<ID>] --operation <ID>` | What Agents asked to create (`mission.read`); approve, with `--mark-ready` (also `mission.create`), or reject (`issue.create`) |
 | `held-briefs list\|release\|refuse [<KEY>] --operation <ID> [--reason <TEXT>]` | Briefs vetting held, with what it found; release one to the queue or refuse it (`mission.create`) |
 
 Every command accepts `--server <ORIGIN>`, `--ca-file <PATH>` and `--timeout <SECONDS>` (default 5,
