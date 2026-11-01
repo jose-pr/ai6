@@ -5124,14 +5124,14 @@ pub fn ai6::station::limits::RecoveryLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::RunnerLimits
 pub ai6::station::limits::RunnerLimits::cable_connect_timeout: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::cable_request_bytes: ai6::bounds::Limit
-pub ai6::station::limits::RunnerLimits::call_margin: ai6::bounds::Seconds
-pub ai6::station::limits::RunnerLimits::call_output_bytes: ai6::bounds::Limit
 pub ai6::station::limits::RunnerLimits::connect_timeout: ai6::bounds::Seconds
+pub ai6::station::limits::RunnerLimits::feed_poll: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::keep_ended: ai6::bounds::Seconds
-pub ai6::station::limits::RunnerLimits::max_wait: ai6::bounds::Seconds
-pub ai6::station::limits::RunnerLimits::page: usize
+pub ai6::station::limits::RunnerLimits::pump_poll: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::read_wait: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::refused_body_drain_bytes: ai6::bounds::Limit
+pub ai6::station::limits::RunnerLimits::replay_batch: usize
+pub ai6::station::limits::RunnerLimits::start_margin: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::start_wait: ai6::bounds::Seconds
 impl core::default::Default for ai6::station::limits::RunnerLimits
 pub fn ai6::station::limits::RunnerLimits::default() -> Self
