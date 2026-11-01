@@ -91,7 +91,6 @@ fn utc_day(millis: &str) -> Option<String> {
     Some(format!("{year:04}-{month:02}-{day:02}"))
 }
 
-/// Wraps plain text as an ADF document with one paragraph per line.
 /// Turns Markdown into an ADF document: headings, bullet and numbered lists, fenced code
 /// blocks, `[text](url)` links on `http` and `https` addresses, and one paragraph per other
 /// line (a blank line is an empty paragraph). Everything else, raw HTML included, stays

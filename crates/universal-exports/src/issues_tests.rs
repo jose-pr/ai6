@@ -579,3 +579,43 @@ async fn approving_with_mark_ready_records_it_for_a_person_who_may() {
             .mark_ready
     );
 }
+
+#[tokio::test]
+async fn a_stations_issue_weakenings_show_only_for_operations_the_person_reads() {
+    let served = served_with(ROLES).await;
+    served
+        .registry
+        .check_in(
+            "worker",
+            std::collections::BTreeMap::from([
+                ("operations".to_owned(), json!(["G", "L"])),
+                (
+                    "issues_weakened".to_owned(),
+                    json!([
+                        "Operation \"G\" issues is weakened: issues.create direct",
+                        "Operation \"L\" issues is weakened: issues.links any",
+                    ]),
+                ),
+            ]),
+        )
+        .unwrap();
+    let board: Value = reqwest::Client::new()
+        .get(format!("{}/v1/stations", served.base))
+        .bearer_auth(&served.viewer)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let worker = board["stations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|station| station["station_id"] == "worker")
+        .unwrap();
+    assert_eq!(
+        worker["issues_weakened"],
+        json!(["Operation \"G\" issues is weakened: issues.create direct"])
+    );
+}

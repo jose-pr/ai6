@@ -192,6 +192,13 @@ impl IssueDesk {
             .intake
             .issue_questions(&caller.mission)
             .unwrap_or_default();
+        // A title and labels are outside text like an issue's body.
+        for link in links
+            .iter()
+            .filter(|link| link.state != LinkState::Unlinked && link.snapshot.is_some())
+        {
+            self.mark_exposed(caller, &link.tracker);
+        }
         let list: Vec<_> = links
             .iter()
             .filter(|link| link.state != LinkState::Unlinked)
@@ -1297,7 +1304,11 @@ pub(super) async fn deliver_proposal_outcomes(state: &DaemonState) {
             continue;
         };
         let live = matches!(mission.state, MissionState::Working | MissionState::Blocked);
-        let told = !live || tell(state, &proposal.mission_id, outcome_text(&proposal), false).await;
+        // A person's own creation has nobody to tell.
+        let asked_by_agent = proposal.proposer.starts_with("agent:");
+        let told = !live
+            || !asked_by_agent
+            || tell(state, &proposal.mission_id, outcome_text(&proposal), false).await;
         if told {
             let _ = registry.mark_proposal_told(&proposal.id);
         }
@@ -2918,5 +2929,21 @@ mod tests {
             MissionState::Working
         );
         state.stopping.store(true, Ordering::Release);
+    }
+
+    #[test]
+    fn listing_what_an_issue_says_exposes_the_session() {
+        let root = tempfile::tempdir().unwrap();
+        let (_state, mission, desk) = station(root.path(), "list", "");
+        let mut me = caller(&mission, "007");
+        me.exposure = ExposureGate::new(
+            crate::directorates::medical::exposure::ExposurePolicy::default(),
+            Vec::new(),
+            &Default::default(),
+        );
+        assert!(!me.exposure.is_exposed());
+        let listed = desk.issues(&me).unwrap();
+        assert_eq!(listed["issues"][0]["title_untrusted"], "Flaky test");
+        assert!(me.exposure.is_exposed());
     }
 }

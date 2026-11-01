@@ -8,6 +8,8 @@ import 'package:outer_office/issues/linked_issues.dart';
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/oo_freshness.dart';
 
+import 'work_views_test.dart' show openAt;
+
 const _issues = {
   'issues': [
     {
@@ -342,6 +344,133 @@ void main() {
       tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).onChanged,
       isNull,
     );
+  });
+
+  /// A board with one Mission waiting on its issue and a Station reporting weakened settings.
+  Future<MissionBoard> waitingBoard() async {
+    final board = MissionBoard(
+      apiOrigin: Uri.parse('https://oo.example'),
+      pollInterval: null,
+      client: MockClient((request) async {
+        http.Response json(Object body, [int status = 200]) => http.Response(
+          jsonEncode(body),
+          status,
+          headers: {'content-type': 'application/json'},
+        );
+        return switch (request.url.path) {
+          '/v1/auth/login' => json({'token': 'user-token'}, 201),
+          '/v1/board' => json([
+            {
+              'operation_id': 'G',
+              'mission_id': 'm1',
+              'session_id': 'session-1',
+              'state': 'blocked',
+              'reason': 'issue',
+              'sequence': 1,
+              'updated_at': 100.0,
+            },
+          ]),
+          '/v1/stations' => json({
+            'headquarters_station': null,
+            'stations': [
+              {
+                'station_id': 'hq',
+                'healthy': true,
+                'headquarters': true,
+                'seen': 1.0,
+                'roles': <String>[],
+                'running': 0,
+                'capacity': 1,
+                'operations': ['G'],
+                'issues_weakened': [
+                  'Operation "G" issues is weakened: issues.create direct is '
+                      'looser than the default propose',
+                ],
+              },
+            ],
+          }),
+          '/v1/user/profile' => json({
+            'person_id': 'operator-007',
+            'name': 'operator',
+            'display_name': null,
+            'groups': [],
+            'expires_at': 1_900_000_000,
+            'operations': [
+              {
+                'operation_id': 'G',
+                'actions': ['mission.read'],
+              },
+            ],
+            'stations': [],
+          }),
+          '/v1/user/operations/G/missions/m1/issues' => json(_issues),
+          _ => json(const <Object>[]),
+        };
+      }),
+    );
+    await board.login('operator', 'secret');
+    addTearDown(board.dispose);
+    return board;
+  }
+
+  for (final width in [390.0, 1400.0]) {
+    testWidgets('the chip of a Mission waiting on its issue says so at $width px', (
+      tester,
+    ) async {
+      await openAt(
+        tester,
+        await waitingBoard(),
+        '/missions?operation_id=G',
+        size: Size(width, 1200),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Waiting on the issue'), findsWidgets);
+    });
+  }
+
+  testWidgets('a Mission detail opens with its linked issues', (tester) async {
+    await openAt(
+      tester,
+      await waitingBoard(),
+      '/missions?operation_id=G&mission_id=m1',
+      size: const Size(1400, 1600),
+    );
+    expect(find.text('LINKED ISSUES'), findsOneWidget);
+    expect(find.text('gh:o/r#1'), findsOneWidget);
+  });
+
+  testWidgets('an Operation lists its issue settings looser than the default', (
+    tester,
+  ) async {
+    await openAt(tester, await waitingBoard(), '/operations?operation_id=G');
+    expect(find.text('ISSUE SETTINGS LOOSER THAN THE DEFAULT'), findsOneWidget);
+    expect(
+      find.text('issues.create direct is looser than the default propose'),
+      findsOneWidget,
+    );
+  });
+
+  test('a brief from a Source names the issue it came from', () {
+    final brief = MissionBriefSummary(
+      operationId: 'G',
+      missionId: 'm1',
+      prompt: 'x',
+      agentId: null,
+      roleId: null,
+      handlerProvider: 'h',
+      terminalProvider: 't',
+      workingDirectory: '.',
+      model: null,
+      effort: null,
+      environmentKeys: const [],
+      origin: const BriefOrigin(
+        origin: 'source',
+        receivedBy: 'hq',
+        principal: 'github',
+        reference: 'o/r#12',
+      ),
+    );
+    expect(brief.sourceIssue, 'github:o/r#12');
   });
 
   test('a blocked reason of issue reads in words', () {

@@ -490,7 +490,10 @@ fn every_tracker_write_reaches_the_issue() {
             ..TrackerUpdate::default()
         })
         .unwrap();
-    assert_eq!(provider.issue(key.clone()).unwrap().assignees, [me.clone()]);
+    assert_eq!(
+        provider.issue(key.clone()).unwrap().assignees,
+        std::slice::from_ref(&me)
+    );
     provider
         .update(TrackerUpdate {
             item: key.clone(),

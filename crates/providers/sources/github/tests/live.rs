@@ -455,7 +455,7 @@ fn every_tracker_write_reaches_the_issue() {
         .unwrap();
     assert_eq!(
         provider.issue(item.clone()).unwrap().assignees,
-        [owner.clone()]
+        std::slice::from_ref(&owner)
     );
     provider
         .update(TrackerUpdate {
