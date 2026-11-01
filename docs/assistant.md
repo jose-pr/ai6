@@ -641,7 +641,8 @@ The Station running her gives her a second MCP server, `cables`, with `discover_
 `send_cable`, `read_cables`, `acknowledge_cable` and `reply_to_cable`; every call names an
 Operation, and one outside your permissions is refused exactly as an unknown target is. Its
 token expires with the token of her own tools, and the Station starts her again with new ones
-before that. Recipients see the Cable as from her **for you** (`moneypenny for <your person
+before the next message after that; a turn already running keeps it until it ends or you stop it.
+Recipients see the Cable as from her **for you** (`moneypenny for <your person
 ID>`), and only Agents of the Operation it is sent in can get it. Your permissions are not
 enough on their own: the Station's `cables.toml` must also let her Agent send and receive,
 and its quotas and fan-out limits apply to her as to any Agent, except that the sender quota
@@ -879,7 +880,7 @@ answered does nothing.
 | The bounds of her views | [Views she shows](#views-she-shows) | `[assistant.views]` |
 | What a job, a report and her memory may hold | 32 KiB a message, 64 events a report, and so on | `[assistant.limits]` ([Moneypenny's limits](configuration.md#moneypennys-limits)) |
 | Conversations kept | 20 a person, 2,000 in all, 7 days | `[assistant.gateway]` `conversations_per_person`, `conversations`, `conversation_age` |
-| Tool token lifetime | 1 hour | `[assistant.gateway] token_ttl` |
+| Tool token lifetime | 1 hour, and past it for a turn already running while its Station is heard from | `[assistant.gateway] token_ttl` |
 | Time for a Station to take a message | 60 seconds | `[assistant.gateway] answer_timeout` |
 | Tool calls per conversation | 120 a minute | `[assistant.gateway] tool_calls_per_minute` |
 | Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `[assistant.gateway] live_per_person` |

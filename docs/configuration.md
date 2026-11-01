@@ -960,7 +960,7 @@ report; `unlocked_stale` when the desk starts.
 | --- | --- | --- |
 | `idle` | 600 | Seconds a harness waits for the next message, or writes nothing while answering, before it is closed; `"none"` keeps it |
 | `live` | 4 | Harnesses a Station runs or starts at once; past it a message is refused and another Station is asked |
-| `token_margin` | 120 | Seconds before its tool token expires that a running harness is restarted with the job's |
+| `token_margin` | 120 | Seconds before its tool token expires that a running harness is restarted with the job's; a job with another token restarts it whatever is left |
 | `job_wait` | 1 | Seconds Universal Exports holds a job poll open |
 | `job_bytes` | 256 KiB | Bytes of one job as Universal Exports sends it |
 | `call_margin` | 2 | Seconds a request to Universal Exports may take past what it waits for |
@@ -992,7 +992,7 @@ report; `unlocked_stale` when the desk starts.
 | `tool_calls_per_minute` | 120 | Tool calls one conversation makes in a minute |
 | `memory_requests_per_person` | 2 | The app's memory requests waiting for a Station, for one person; `429` past it |
 | `memory_requests` | 16 | The same, for everyone |
-| `token_ttl` | 3,600 | Seconds a tool token given to a harness is accepted |
+| `token_ttl` | 3,600 | Seconds a tool token given to a harness is accepted; past it, while that harness's answer runs and its Station was heard from within `answer_deadline`, until the person stops it |
 | `token_reuse_margin` | 600 | Seconds a token must still have to be given to the next message; kept above `[assistant.desk] token_margin` |
 | `answer_timeout` | 60 | Seconds a Station has to take up a message before another is asked |
 | `answer_deadline` | 600 | Seconds an accepted message may go without word from its Station before it is given up |

@@ -460,7 +460,8 @@ The command reads `[assistant.limits]`, `[assistant.gateway]`, `[assistant.views
 `cables` record at start. Defaults: 20 conversations a person and 2,000 in all (oldest idle one
 dropped first), each kept until untouched for 7 days with its newest 500 entries and at most
 1 MiB of them (4 MiB a person: the person's oldest views are emptied first, then their oldest
-entries dropped); tool tokens accepted for one hour;
+entries dropped); tool tokens accepted for one hour (`[assistant.gateway] token_ttl`), and past it for a conversation's
+current token while her answer runs, its Station heard from within `answer_deadline` and no Stop asked;
 a Station has 60 seconds to take up a message, and an accepted message is given up (an
 `error` entry, `busy` false) after 10 minutes without a report from its Station; 120 tool
 calls a conversation per minute; 2 conversations a person with a harness running or an answer
