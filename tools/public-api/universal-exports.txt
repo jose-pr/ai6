@@ -112,6 +112,7 @@ pub universal_exports::BoardStation::handlers: alloc::vec::Vec<alloc::string::St
 pub universal_exports::BoardStation::head_of_station: core::option::Option<ai6::directorates::registry::logbook::StationReport>
 pub universal_exports::BoardStation::headquarters: bool
 pub universal_exports::BoardStation::healthy: bool
+pub universal_exports::BoardStation::issues_weakened: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardStation::operations: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardStation::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub universal_exports::BoardStation::roles: alloc::vec::Vec<alloc::string::String>
@@ -170,6 +171,16 @@ impl coqui_access::kind::Authorizer for universal_exports::EitherAuthorizer
 pub fn universal_exports::EitherAuthorizer::authorize(&self, coqui_access::model::AuthorizationRequest) -> core::result::Result<coqui_access::model::AuthorizationDecision, guatiao::library::kind::ProviderError>
 impl core::fmt::Debug for universal_exports::EitherAuthorizer
 pub fn universal_exports::EitherAuthorizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct universal_exports::EntryView
+pub universal_exports::EntryView::actor: alloc::string::String
+pub universal_exports::EntryView::at: f64
+pub universal_exports::EntryView::dropped: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::EntryView::id: alloc::string::String
+pub universal_exports::EntryView::issue: alloc::string::String
+pub universal_exports::EntryView::kind: ai6::directorates::registry::mission_issues::OutboxKind
+pub universal_exports::EntryView::reason: core::option::Option<alloc::string::String>
+pub universal_exports::EntryView::state: ai6::directorates::registry::mission_issues::OutboxState
+pub universal_exports::EntryView::url: core::option::Option<alloc::string::String>
 pub struct universal_exports::Gateway
 impl universal_exports::Gateway
 pub async fn universal_exports::Gateway::attach(&self, &ai6_diptel::SessionId, &str, u64) -> core::result::Result<universal_exports::Attachment, universal_exports::GatewayError>
@@ -235,6 +246,25 @@ pub universal_exports::HeldBriefDecision::state: &'static str
 #[non_exhaustive] pub struct universal_exports::HeldBriefEntry
 pub universal_exports::HeldBriefEntry::held: ai6::directorates::registry::vetting::HeldBrief
 pub universal_exports::HeldBriefEntry::key: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::IssueView
+pub universal_exports::IssueView::issue: alloc::string::String
+pub universal_exports::IssueView::issue_state: core::option::Option<alloc::string::String>
+pub universal_exports::IssueView::item: alloc::string::String
+pub universal_exports::IssueView::labels: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::IssueView::linked_by: alloc::string::String
+pub universal_exports::IssueView::open_question: core::option::Option<universal_exports::QuestionView>
+pub universal_exports::IssueView::phase: core::option::Option<alloc::string::String>
+pub universal_exports::IssueView::relation: ai6::directorates::registry::mission_issues::LinkRelation
+pub universal_exports::IssueView::state: ai6::directorates::registry::mission_issues::LinkState
+pub universal_exports::IssueView::title: core::option::Option<alloc::string::String>
+pub universal_exports::IssueView::tracker: alloc::string::String
+pub universal_exports::IssueView::url: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::IssueWrite
+pub universal_exports::IssueWrite::answered: bool
+pub universal_exports::IssueWrite::entry: core::option::Option<alloc::string::String>
+pub universal_exports::IssueWrite::issue: core::option::Option<alloc::string::String>
+pub universal_exports::IssueWrite::proposal: core::option::Option<alloc::string::String>
+pub universal_exports::IssueWrite::state: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::LaunchManifest
 pub universal_exports::LaunchManifest::agent_id: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::effort: core::option::Option<alloc::string::String>
@@ -284,6 +314,10 @@ pub universal_exports::MissionAttempt::session_id: alloc::string::String
 pub universal_exports::MissionAttempt::station: alloc::string::String
 pub universal_exports::MissionAttempt::status: alloc::string::String
 pub universal_exports::MissionAttempt::theater: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::MissionIssues
+pub universal_exports::MissionIssues::entries: alloc::vec::Vec<universal_exports::EntryView>
+pub universal_exports::MissionIssues::issues: alloc::vec::Vec<universal_exports::IssueView>
+pub universal_exports::MissionIssues::replies: universal_exports::ReplyCounts
 pub struct universal_exports::PagesConfig
 pub universal_exports::PagesConfig::dir: std::path::PathBuf
 pub universal_exports::PagesConfig::listen: core::option::Option<core::net::socket_addr::SocketAddr>
@@ -299,6 +333,13 @@ pub universal_exports::PlacementPreview::rejections: alloc::vec::Vec<ai6::direct
 #[non_exhaustive] pub struct universal_exports::PoolBoard
 pub universal_exports::PoolBoard::accounts: alloc::vec::Vec<universal_exports::BoardAccount>
 pub universal_exports::PoolBoard::operation_id: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::QuestionView
+pub universal_exports::QuestionView::asked_at: f64
+pub universal_exports::QuestionView::expires_at: f64
+#[non_exhaustive] pub struct universal_exports::ReplyCounts
+pub universal_exports::ReplyCounts::delivered: usize
+pub universal_exports::ReplyCounts::ignored: usize
+pub universal_exports::ReplyCounts::pending: usize
 #[non_exhaustive] pub struct universal_exports::RetirementNotice
 pub universal_exports::RetirementNotice::on_retire: alloc::string::String
 pub universal_exports::RetirementNotice::retire_on: alloc::string::String
