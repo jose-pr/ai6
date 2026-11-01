@@ -1201,6 +1201,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The `jira` Source reports a refused credential or a project it cannot see. Jira Cloud answers
+  such a search with status 200 and no issues, so a revoked token used to look like no work, for
+  as long as it stayed revoked. A poll that finds nothing now makes one more request to tell them
+  apart. Flattened descriptions keep emoji, status lozenges and dates, a rejected comment or
+  transition no longer blames the JQL, and a blank report is refused before any request, on
+  `github` too. Found by running both providers against real services; their test fixtures are now
+  recorded from that traffic ([Sources](https://jose-pr.github.io/ai6/missions/#sources)).
 - A restricted Session over ACP now ends when an agent runs a tool it was refused, not only one
   it never asked about, and an agent cannot make a restricted tool pass by claiming another kind
   when it asks.

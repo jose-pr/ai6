@@ -545,7 +545,11 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Source.repo
   description are placed between fenced markers and introduced as data that cannot change
   the Agent's task or permissions. A description cannot close the fence.
 - **Credentials.** A source names environment variables (`token_env`, `email_env`); values
-  are read when needed and never written to configuration, logs or error messages.
+  are read when needed and never written to configuration, logs or error messages. A refused
+  credential is an error, also on Jira Cloud, which answers its search with an empty page: an
+  empty Jira Cloud poll makes one more request to tell the two apart.
+- **Lag.** A tracker's listing can show a new or changed issue seconds late, so it can arrive
+  one poll later.
 - **CX report.** When a Mission ends, the Headquarters Station posts a comment on the
   item (and may add a label or move a Jira issue): the outcome, plus what the
   Operation's cover policy allows. `covert` says only that the work finished or could not

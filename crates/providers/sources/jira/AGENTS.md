@@ -54,16 +54,29 @@ provider.
   AND updated >= "<cursor minute>" ORDER BY updated ASC`. Cloud uses
   `GET /rest/api/3/search/jql` with `nextPageToken`; Server uses `GET /rest/api/2/search`
   with `startAt`. At most `max_pages` (5) pages of `page_size` (50). Each issue becomes a `SourceItem` whose ID is the
-  issue key; Cloud descriptions in Atlassian Document Format are flattened to plain text.
+  issue key; Cloud descriptions in Atlassian Document Format are flattened to plain text:
+  one line per block, links and mentions as their visible text, emoji and status lozenges as
+  their text, dates as a UTC `YYYY-MM-DD`; an attachment has no text and is dropped.
+- **Empty search (Cloud)**: Jira Cloud answers a search by a refused credential, or one
+  naming a project the credential cannot see, with status 200 and no issues. So when a poll
+  finds nothing, it makes one more request, `GET /project/KEY` (or `GET /myself` when only
+  `jql` is set), and a 404 or 401 there is an error naming `token_env`. An unknown field or
+  project inside `jql` still looks like an empty search: Jira answers that with 200 too.
+- **Search lag**: a new or changed issue can take a few seconds to reach the search, so it
+  can appear on a later poll.
 - **Cursor** is the newest `updated` timestamp. JQL compares at minute precision in the
   account's time zone, so the next search starts at that minute (`updated >= "YYYY-MM-DD
   HH:MM"`) and the newest issue repeats; the Registry sees it as unchanged.
 - **Report** posts `body` as a comment (ADF paragraphs on Cloud, plain text on Server),
   then applies `done_transition` (outcome `done`) or `failed_transition` (any other outcome)
   by listing the issue's transitions and matching a name case-insensitively or an ID. A
-  transition that does not match is an error after the comment is posted.
+  transition that does not match is an error after the comment is posted. A blank `body` is
+  an error before any request, since Jira refuses it.
 - **Credentials** are read from the named variables on each call; a missing one is an
-  error that names the variable. Errors never carry the credential or a response body.
+  error that names the variable. Cloud answers a refused credential on an issue with 404,
+  so that error names `token_env` too. Errors never carry the credential or a response body.
+- **Wrong `deployment`**: Cloud has removed REST v2 search and answers 410; the error says
+  to check `deployment`.
 - **Rate limits**: a 429 is an error naming `Retry-After`; the cursor does not move.
 - Every request has a `request_timeout_secs` (30 s) timeout and follows no redirects.
 - Moving an issue when its Mission starts is not implemented.

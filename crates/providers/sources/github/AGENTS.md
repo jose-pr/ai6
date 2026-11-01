@@ -53,11 +53,15 @@ provider.
   it as `since`, which GitHub treats as inclusive, so the newest item repeats and the
   Registry sees it as unchanged. A `Link: rel="next"` that leaves the API origin is not
   followed, so the token is never sent elsewhere.
+- **Listing lag**: a new or changed issue can take several seconds to show in the listing,
+  so it can appear on a later poll.
 - **Report** posts `body` as an issue comment, then adds `done_label` (outcome `done`) or
-  `failed_label` (any other outcome) when set. The token is required.
+  `failed_label` (any other outcome) when set; a label the repository lacks is created. The
+  token is required. A blank `body` is an error before any request, since GitHub refuses it.
 - **Token**: read from `token_env` on each call; a missing token is an error only where a
-  token is required (`report`). Errors name the variable, never the value or a response
-  body.
+  token is required (`report`), and a private repository answers a request with no token
+  with 404, so that error names the unset variable. Errors name the variable, never the
+  value or a response body.
 - **Rate limits**: a 429, or a 403 with `x-ratelimit-remaining: 0`, is an error naming
   the reset time; the cursor does not move and the Station polls again at its next interval.
 - Every request has a `request_timeout_secs` (30 s) timeout and follows no redirects.

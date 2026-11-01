@@ -44,6 +44,11 @@ Stations failing over); `AI6_TEST_POSTGRES_TLS_URL` names a TLS-only server, wit
 `cargo test -- --nocapture` prints how many were skipped. CI's Linux legs start both
 servers in Docker. Building the `sqlite` feature compiles SQLite, so it needs a C compiler.
 
+The `tests/live.rs` of `crates/providers/sources/{github,jira}` run a provider against the real
+service. They are ignored by default and need `AI6_TEST_LIVE_SOURCES` and the settings each
+file names; asked for without them, they fail. Their fixtures are recorded and scrubbed:
+`tests/fixtures_scrubbed.rs` refuses a token, an address or an account ID in one.
+
 ## Rules
 
 - Work and infrastructure are separate: Operation → Mission → Session is the work;

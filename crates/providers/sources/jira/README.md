@@ -19,6 +19,8 @@ configured, a workflow transition. See the
   Server or Data Center (REST v2).
 - Reads its credentials from environment variables the Operation names; they are never
   configured or logged.
+- Reports a refused credential or an unseen project as an error, although Jira Cloud answers
+  that search with an empty page and status 200.
 - Comments the Mission outcome on the issue and can move it through a named transition.
 - Builds as both a Rust library and the Guatiao provider library a Station loads.
 
@@ -56,7 +58,10 @@ cargo test -p ai6-source-jira
 cargo clippy -p ai6-source-jira --all-targets -- -D warnings
 ```
 
-Tests run against a loopback HTTP server; they never call Jira.
+Tests run against a loopback HTTP server that answers with responses recorded from a Jira
+Cloud site and scrubbed; they never call Jira. The Server and Data Center response is written
+from the documented API, not recorded. `tests/live.rs` is the exception: it runs the provider
+against a real Cloud project, is ignored by default, and says at its top what it needs.
 
 ## License
 

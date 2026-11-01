@@ -53,7 +53,9 @@ cargo test -p ai6-source-github
 cargo clippy -p ai6-source-github --all-targets -- -D warnings
 ```
 
-Tests run against a loopback HTTP server; they never call GitHub.
+Tests run against a loopback HTTP server that answers with responses recorded from GitHub
+and scrubbed; they never call GitHub. `tests/live.rs` is the exception: it runs the provider
+against a real repository, is ignored by default, and says at its top what it needs.
 
 ## License
 
