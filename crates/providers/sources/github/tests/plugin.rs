@@ -84,7 +84,7 @@ fn the_built_library_loads_as_a_source_and_a_tracker_and_serves_a_poll_and_a_pos
             marker: None,
         })
         .unwrap();
-    assert_eq!(posted.id, "5");
+    assert_eq!(posted.id, "6560483139");
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests[1].target, "/repos/o/r/issues/2/comments");
 }

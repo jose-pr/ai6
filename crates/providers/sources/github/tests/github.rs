@@ -252,9 +252,9 @@ fn a_comment_id_that_is_not_a_number_is_refused_before_any_request() {
 fn an_update_changes_labels_assignees_and_state_and_refuses_transitions() {
     let fake = serve(|_| {
         vec![
+            canned(200, LABELS_ADDED),
             canned(200, "[]"),
-            canned(200, "[]"),
-            canned(404, "{}"),
+            canned(404, include_str!("fixtures/tracker_label_absent.json")),
             canned(200, "[]"),
             canned(200, "[]"),
             canned(200, "{}"),
@@ -626,16 +626,6 @@ fn a_write_without_a_token_fails_without_calling_out() {
         .to_string();
     assert!(error.contains("AI6_TEST_GITHUB_TOKEN_UNSET"), "{error}");
     assert!(fake.requests.lock().unwrap().is_empty());
-}
-
-#[test]
-fn a_table_with_the_keys_the_station_applies_builds() {
-    init();
-    Github::from_settings(
-        "repo = \"o/r\"\nstatus_labels = { working = \"w\", done = \"d\" }\nagent_labels = [\"x\"]\n\
-         priority_map = { high = \"P1\" }\nreply_associations = [\"OWNER\"]",
-    )
-    .unwrap();
 }
 
 #[test]

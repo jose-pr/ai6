@@ -113,8 +113,10 @@ pub(crate) fn document(body: &str) -> Value {
             if !language.is_empty() {
                 block["attrs"] = json!({ "language": language });
             }
+            let code = code.join("\n");
+            // Jira refuses an empty text node.
             if !code.is_empty() {
-                block["content"] = json!([{ "type": "text", "text": code.join("\n") }]);
+                block["content"] = json!([{ "type": "text", "text": code }]);
             }
             blocks.push(block);
         } else if let Some((level, text)) = heading(line) {

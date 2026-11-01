@@ -16,7 +16,11 @@ use std::sync::Once;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ai6::{Source, SourceItem, SourcePoll, Tracker, TrackerPost, TrackerUpdate};
+use ai6::guatiao::Status;
+use ai6::{
+    IssueSpec, ReplyPoll, Source, SourceItem, SourcePoll, Tracker, TrackerLink, TrackerPost,
+    TrackerUpdate,
+};
 use ai6_source_jira::Jira;
 use data_encoding::BASE64;
 use serde_json::{Value, json};
@@ -368,4 +372,301 @@ fn a_search_that_can_see_nothing_is_an_error_not_an_empty_poll() {
         .poll(SourcePoll { cursor: None })
         .unwrap();
     assert!(empty.items.is_empty(), "a search with no match is no error");
+}
+
+#[test]
+#[ignore = "calls a real Jira site: set AI6_TEST_LIVE_SOURCES and see the top of this file"]
+fn every_tracker_write_reaches_the_issue() {
+    let mut live = Live::from_env();
+    let key = live.create(
+        "Task",
+        "tracker writes",
+        Some(text_document(&[NON_ASCII])),
+        &[],
+    );
+    let provider = live.provider("");
+
+    let capabilities = provider.capabilities(Some(key.clone())).unwrap();
+    assert!(capabilities.comment && capabilities.edit_comment && capabilities.create);
+    assert_eq!(capabilities.children, "parent");
+    assert!(capabilities.issue_types.iter().any(|name| name == "Task"));
+    assert!(capabilities.priorities.iter().any(|name| name == "Medium"));
+    assert!(!capabilities.transitions.is_empty());
+    assert!(!capabilities.markers);
+
+    let read = provider.issue(key.clone()).unwrap();
+    assert_eq!(read.body, NON_ASCII);
+    assert_eq!(read.state, "open");
+    assert!(
+        read.url
+            .as_deref()
+            .is_some_and(|url| url.ends_with(&format!("/browse/{key}")))
+    );
+
+    let markdown = "# AI6 test data\n\nA [link](https://example.com/x) and text.\n\n- one\n- two\n\n1. first\n\n```rust\nlet x = 1;\n```";
+    let posted = provider
+        .post(TrackerPost {
+            item: key.clone(),
+            body: markdown.to_owned(),
+            edit: None,
+            marker: Some("status".to_owned()),
+        })
+        .unwrap();
+    let stored = live.get(&format!("/issue/{key}/comment/{}", posted.id));
+    let kinds: Vec<&str> = stored["body"]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|block| block["type"].as_str())
+        .collect();
+    for kind in ["heading", "bulletList", "orderedList", "codeBlock"] {
+        assert!(kinds.contains(&kind), "{kind} in {kinds:?}");
+    }
+    let edited = provider
+        .post(TrackerPost {
+            item: key.clone(),
+            body: "AI6 test data: waiting.".to_owned(),
+            edit: Some(posted.id.clone()),
+            marker: Some("status".to_owned()),
+        })
+        .unwrap();
+    assert_eq!(edited.id, posted.id, "the same comment, edited in place");
+    let comments = live.get(&format!("/issue/{key}/comment"));
+    assert_eq!(comments["comments"].as_array().unwrap().len(), 1);
+
+    let blank = provider
+        .post(TrackerPost {
+            item: key.clone(),
+            body: " \n ".to_owned(),
+            ..TrackerPost::default()
+        })
+        .unwrap_err();
+    assert!(blank.to_string().contains("empty"), "{blank}");
+
+    let replies = provider
+        .replies(ReplyPoll {
+            items: vec![key.clone()],
+            since: None,
+        })
+        .unwrap();
+    assert_eq!(replies.replies.len(), 1);
+    let reply = &replies.replies[0];
+    assert!(reply.own, "the credential's own comment");
+    assert!(reply.permitted, "the issue's reporter");
+    assert_eq!(reply.body, "AI6 test data: waiting.");
+    let cursor = replies.cursor.clone().expect("a cursor");
+    let later = provider
+        .replies(ReplyPoll {
+            items: vec![key.clone()],
+            since: Some(cursor),
+        })
+        .unwrap();
+    assert!(later.replies.is_empty(), "nothing after the cursor");
+
+    provider
+        .update(TrackerUpdate {
+            item: key.clone(),
+            add_labels: vec!["ai6-working".to_owned(), "two words".to_owned()],
+            ..TrackerUpdate::default()
+        })
+        .unwrap();
+    provider
+        .update(TrackerUpdate {
+            item: key.clone(),
+            remove_labels: vec!["ai6-working".to_owned()],
+            ..TrackerUpdate::default()
+        })
+        .unwrap();
+    assert_eq!(provider.issue(key.clone()).unwrap().labels, ["two-words"]);
+
+    let me = live.get("/myself")["accountId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    provider
+        .update(TrackerUpdate {
+            item: key.clone(),
+            add_assignees: vec![me.clone()],
+            ..TrackerUpdate::default()
+        })
+        .unwrap();
+    assert_eq!(provider.issue(key.clone()).unwrap().assignees, [me.clone()]);
+    provider
+        .update(TrackerUpdate {
+            item: key.clone(),
+            remove_assignees: vec![me],
+            ..TrackerUpdate::default()
+        })
+        .unwrap();
+    assert!(provider.issue(key.clone()).unwrap().assignees.is_empty());
+
+    let in_progress = live.transition_into(&key, "indeterminate").unwrap();
+    provider
+        .update(TrackerUpdate {
+            item: key.clone(),
+            transition: Some(in_progress.name.to_lowercase()),
+            ..TrackerUpdate::default()
+        })
+        .unwrap();
+    assert_eq!(live.status(&key), in_progress.status);
+    let unknown = provider
+        .update(TrackerUpdate {
+            item: key.clone(),
+            transition: Some("Ship it".to_owned()),
+            ..TrackerUpdate::default()
+        })
+        .unwrap_err();
+    assert_eq!(unknown.status, Status::GUATIAO_ERR_UNSUPPORTED);
+    assert!(unknown.to_string().contains("Ship it"), "{unknown}");
+    provider
+        .update(TrackerUpdate {
+            item: key.clone(),
+            state: Some("closed".to_owned()),
+            ..TrackerUpdate::default()
+        })
+        .unwrap();
+    assert_eq!(provider.issue(key.clone()).unwrap().state, "closed");
+    provider
+        .update(TrackerUpdate {
+            item: key.clone(),
+            state: Some("open".to_owned()),
+            ..TrackerUpdate::default()
+        })
+        .unwrap();
+    assert_eq!(provider.issue(key.clone()).unwrap().state, "open");
+
+    let long = "ñ".repeat(300);
+    let created = provider
+        .create(IssueSpec {
+            title: format!(
+                "AI6 test data: created ({}) {long}\nsecond line",
+                live.stamp
+            ),
+            body: "A *new* issue.\n\n- one".to_owned(),
+            labels: vec!["two words".to_owned()],
+            priority: Some("Medium".to_owned()),
+            ..IssueSpec::default()
+        })
+        .unwrap();
+    live.opened.push(created.id.clone());
+    assert!(created.title.len() <= 255 && !created.title.contains('\n'));
+    assert_eq!(created.labels, ["two-words"]);
+    assert!(created.body.contains("A *new* issue."));
+
+    let bare = provider
+        .create(IssueSpec {
+            title: format!("AI6 test data: no body ({})", live.stamp),
+            ..IssueSpec::default()
+        })
+        .unwrap();
+    live.opened.push(bare.id.clone());
+    assert_eq!(bare.body, "");
+
+    let child = provider
+        .create(IssueSpec {
+            title: format!("AI6 test data: a sub-task ({})", live.stamp),
+            parent: Some(key.clone()),
+            ..IssueSpec::default()
+        })
+        .unwrap();
+    live.opened.push(child.id.clone());
+    assert_eq!(child.parent.as_deref(), Some(key.as_str()));
+
+    let epic = live.create("Epic", "an epic", None, &[]);
+    let under_epic = provider
+        .create(IssueSpec {
+            title: format!("AI6 test data: under an epic ({})", live.stamp),
+            parent: Some(epic.clone()),
+            ..IssueSpec::default()
+        })
+        .unwrap();
+    live.opened.push(under_epic.id.clone());
+    assert_eq!(under_epic.parent.as_deref(), Some(epic.as_str()));
+    let kind = live.get(&format!("/issue/{}?fields=issuetype", under_epic.id));
+    assert_eq!(kind["fields"]["issuetype"]["name"], "Task");
+
+    let under_subtask = provider
+        .create(IssueSpec {
+            title: format!("AI6 test data: under a sub-task ({})", live.stamp),
+            parent: Some(child.id.clone()),
+            ..IssueSpec::default()
+        })
+        .unwrap();
+    live.opened.push(under_subtask.id.clone());
+    assert_eq!(under_subtask.parent, None, "a sub-task has no children");
+    let links = live.get(&format!("/issue/{}?fields=issuelinks", under_subtask.id));
+    assert_eq!(links["fields"]["issuelinks"].as_array().unwrap().len(), 1);
+
+    provider
+        .link(TrackerLink {
+            from: created.id.clone(),
+            to: Some(key.clone()),
+            relation: "related".to_owned(),
+            url: None,
+        })
+        .unwrap();
+    let links = live.get(&format!("/issue/{}?fields=issuelinks", created.id));
+    assert_eq!(links["fields"]["issuelinks"].as_array().unwrap().len(), 1);
+    provider
+        .link(TrackerLink {
+            from: created.id.clone(),
+            to: None,
+            relation: "mirror".to_owned(),
+            url: Some("https://example.com/ai6-test-data".to_owned()),
+        })
+        .unwrap();
+    let remote = live.get(&format!("/issue/{}/remotelink", created.id));
+    assert_eq!(remote.as_array().unwrap().len(), 1);
+
+    let foreign = provider.issue("OTHER-1".to_owned()).unwrap_err();
+    assert_eq!(foreign.status, Status::GUATIAO_ERR_BAD_VALUE);
+    assert!(foreign.to_string().contains("foreign item"), "{foreign}");
+}
+
+#[test]
+#[ignore = "calls a real Jira site: set AI6_TEST_LIVE_SOURCES and see the top of this file"]
+fn a_refused_credential_on_each_tracker_call_names_the_variable() {
+    let mut live = Live::from_env();
+    let key = live.create("Task", "refused credential", None, &[]);
+    let refused = Jira::from_settings(&format!(
+        "site = \"{}\"\nproject = \"{}\"\nemail_env = \"{FALSE_EMAIL_VAR}\"\n\
+         token_env = \"{FALSE_TOKEN_VAR}\"",
+        live.site, live.project
+    ))
+    .unwrap();
+    let errors = [
+        refused.issue(key.clone()).unwrap_err(),
+        refused
+            .post(TrackerPost {
+                item: key.clone(),
+                body: "x".to_owned(),
+                ..TrackerPost::default()
+            })
+            .unwrap_err(),
+        refused
+            .update(TrackerUpdate {
+                item: key.clone(),
+                state: Some("closed".to_owned()),
+                ..TrackerUpdate::default()
+            })
+            .unwrap_err(),
+        refused.capabilities(None).unwrap_err(),
+        refused
+            .replies(ReplyPoll {
+                items: vec![key.clone()],
+                since: None,
+            })
+            .unwrap_err(),
+        refused
+            .create(IssueSpec {
+                title: "AI6 test data: must not exist".to_owned(),
+                ..IssueSpec::default()
+            })
+            .unwrap_err(),
+    ];
+    for error in errors {
+        let text = error.to_string();
+        assert!(text.contains(FALSE_TOKEN_VAR), "{text}");
+        assert!(!text.contains("not-a-token"), "{text}");
+    }
 }

@@ -18,110 +18,74 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use ai6::guatiao::library::ProviderError;
-use ai6::guatiao::{Provider, Status};
+use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
     IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Source, SourceBatch, SourceConfig,
     SourceItem, SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
-    TrackerUpdate,
+    TrackerUpdate, settings_from_table,
 };
-use serde::Deserialize;
-use serde::de::IgnoredAny;
 use url::Url;
 
 /// The provider ID an Operation names under `sources`.
 pub const PROVIDER_ID: &str = "github";
 
+/// The REST API version asked for. Creating an issue under `2022-11-28` answers `Deprecation`
+/// with a sunset of 2028-03-10; this one answers the same fields less the singular `assignee`.
+const API_VERSION: &str = "2026-03-10";
+
+/// What marks a comment the provider posted, whoever the token turns out to be.
+const MARKER_PREFIX: &str = "<!-- ai6:";
+
 /// One instance's settings, from `[operation.<id>.sources.<name>]`.
 ///
-/// The Station reads `provider`, `intake` and `interval_secs` itself and does not pass them
-/// on. Keys the Station applies (status labels, agent labels, the type and priority
-/// settings Jira uses) are accepted here so one table serves every tracker; the provider
-/// ignores them.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// The Station reads its own keys (`provider`, `intake`, `interval_secs`, the status maps and
+/// what Agents may touch) and passes the rest here.
+#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
 struct Settings {
     /// `owner/name`; a bare string under `sources` is this value.
-    #[serde(alias = "target")]
+    #[schema(title = "Repository")]
     repo: String,
     /// An issue needs every one of these labels to become a Mission.
-    #[serde(default = "default_labels")]
+    #[schema(title = "Intake labels")]
+    #[map(default = vec!["ai6:ready".to_owned()])]
     labels: Vec<String>,
     /// Only issues assigned to this login, when set.
+    #[schema(title = "Assignee")]
     assignee: Option<String>,
     /// The environment variable holding the token; the token itself is never configured.
-    #[serde(default = "default_token_env")]
+    #[schema(title = "Token variable")]
+    #[map(default = "GITHUB_TOKEN".to_owned())]
     token_env: String,
     /// The REST API root; `https`, or `http` on a loopback address.
-    #[serde(default = "default_api_url")]
+    #[schema(title = "API address")]
+    #[map(default = "https://api.github.com".to_owned())]
     api_url: String,
-    /// Seconds one request may take. Default 30; 0 is refused.
-    #[serde(default = "default_request_timeout_secs")]
+    /// Seconds one request may take. 0 is refused.
+    #[schema(title = "A request may take", format = "seconds")]
+    #[map(default = 30)]
     request_timeout_secs: u64,
-    /// Issues asked for per page. Default 100; 0 is refused.
-    #[serde(default = "default_page_size")]
+    /// Issues asked for per page. 0 is refused.
+    #[schema(title = "Issues per page")]
+    #[map(default = 100)]
     page_size: u32,
-    /// Pages one poll reads at most. Default 5; 0 is refused.
-    #[serde(default = "default_max_pages")]
-    max_pages: usize,
+    /// Pages one poll reads at most. 0 is refused.
+    #[schema(title = "Pages per poll")]
+    #[map(default = 5)]
+    max_pages: u64,
     /// GitHub logins besides the issue's author and the associations below whose comments
     /// may answer a question.
-    #[serde(default)]
+    #[schema(title = "People who may answer")]
+    #[map(default)]
     reply_authors: Vec<String>,
     /// `author_association` values whose comments may answer a question.
-    #[serde(default = "default_reply_associations")]
+    #[schema(title = "Associations that may answer")]
+    #[map(default = ["OWNER", "MEMBER", "COLLABORATOR"].map(str::to_owned).to_vec())]
     reply_associations: Vec<String>,
-    /// How long, in seconds, the repository's labels and settings are remembered. Default
-    /// 600.
-    #[serde(default = "default_capability_ttl_secs")]
+    /// How long, in seconds, the repository's labels and settings are remembered.
+    #[schema(title = "Remember the repository for", format = "seconds")]
+    #[map(default = 600)]
     capability_ttl_secs: u64,
-    #[serde(default, rename = "status_labels")]
-    _status_labels: IgnoredAny,
-    #[serde(default, rename = "agent_labels")]
-    _agent_labels: IgnoredAny,
-    #[serde(default, rename = "agent_transitions")]
-    _agent_transitions: IgnoredAny,
-    #[serde(default, rename = "issue_type")]
-    _issue_type: IgnoredAny,
-    #[serde(default, rename = "subtask_type")]
-    _subtask_type: IgnoredAny,
-    #[serde(default, rename = "priority_map")]
-    _priority_map: IgnoredAny,
-    #[serde(default, rename = "status_transitions")]
-    _status_transitions: IgnoredAny,
-}
-
-fn default_request_timeout_secs() -> u64 {
-    30
-}
-
-fn default_page_size() -> u32 {
-    100
-}
-
-fn default_max_pages() -> usize {
-    5
-}
-
-fn default_capability_ttl_secs() -> u64 {
-    600
-}
-
-fn default_labels() -> Vec<String> {
-    vec!["ai6:ready".to_owned()]
-}
-
-fn default_reply_associations() -> Vec<String> {
-    ["OWNER", "MEMBER", "COLLABORATOR"]
-        .map(str::to_owned)
-        .to_vec()
-}
-
-fn default_token_env() -> String {
-    "GITHUB_TOKEN".to_owned()
-}
-
-fn default_api_url() -> String {
-    "https://api.github.com".to_owned()
 }
 
 /// GitHub issues as an AI6 Source and Tracker.
@@ -152,7 +116,11 @@ impl Github {
     /// Returns a message for an unknown key, a malformed repository name or an insecure
     /// API address.
     pub fn from_settings(settings_toml: &str) -> Result<Self, String> {
-        let settings: Settings = toml::from_str(settings_toml).map_err(|e| e.to_string())?;
+        let mut table: toml::Table = toml::from_str(settings_toml).map_err(|e| e.to_string())?;
+        if let Some(target) = table.remove("target") {
+            table.insert("repo".to_owned(), target);
+        }
+        let settings: Settings = settings_from_table(table)?;
         let valid_part = |part: &str| {
             !part.is_empty()
                 && part
@@ -206,9 +174,9 @@ impl Github {
             .filter(|token| !token.trim().is_empty())
     }
 
-    /// One request. Reads go without a token when none is set (public repositories); any
-    /// other method needs one.
-    fn call(
+    /// One request, answered with whatever status GitHub gave. Reads go without a token when
+    /// none is set (public repositories); any other method needs one.
+    fn send(
         &self,
         method: &str,
         url: &str,
@@ -223,7 +191,7 @@ impl Github {
             .method(method)
             .uri(url.as_str())
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("X-GitHub-Api-Version", API_VERSION)
             .header("User-Agent", "ai6-source-github");
         match self.token() {
             Some(token) => request = request.header("Authorization", format!("Bearer {token}")),
@@ -245,10 +213,20 @@ impl Github {
         let request = request
             .body(bytes)
             .map_err(|e| failure(&format!("bad request: {e}")))?;
-        let response = self
-            .agent
+        self.agent
             .run(request)
-            .map_err(|e| failure(&format!("request failed: {e}")))?;
+            .map_err(|e| failure(&format!("request failed: {e}")))
+    }
+
+    /// One request whose status must be a success.
+    fn call(
+        &self,
+        method: &str,
+        url: &str,
+        query: &[(&str, String)],
+        body: Option<&serde_json::Value>,
+    ) -> Result<ureq::http::Response<ureq::Body>, ProviderError> {
+        let response = self.send(method, url, query, body)?;
         self.check(&response)?;
         Ok(response)
     }
@@ -600,7 +578,8 @@ impl Tracker for Github {
                     permitted,
                     own: own
                         .as_deref()
-                        .is_some_and(|own| own.eq_ignore_ascii_case(login)),
+                        .is_some_and(|own| own.eq_ignore_ascii_case(login))
+                        || text("body").is_some_and(|body| body.contains(MARKER_PREFIX)),
                     body: text("body").unwrap_or_default().to_owned(),
                     created: text("created_at").unwrap_or_default().to_owned(),
                 });
@@ -626,7 +605,7 @@ impl Tracker for Github {
                 .chars()
                 .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
                 .collect();
-            body.push_str(&format!("\n\n<!-- ai6:{marker} -->"));
+            body.push_str(&format!("\n\n{MARKER_PREFIX}{marker} -->"));
         }
         let payload = serde_json::json!({ "body": body });
         let comment = match &post.edit {
@@ -682,17 +661,26 @@ impl Tracker for Github {
             )?;
         }
         for label in &update.remove_labels {
-            match self.call(
+            let mut response = self.send(
                 "DELETE",
                 &format!("{base}/labels/{}", encode_segment(label)),
                 &[],
                 None,
-            ) {
-                Ok(_) => {}
-                // A label that is already gone is the state asked for.
-                Err(error) if error.to_string().contains("does not show") => {}
-                Err(error) => return Err(error),
+            )?;
+            if response.status().as_u16() == 404 {
+                // A label the issue lacks is the state asked for, but a missing issue is not:
+                // GitHub tells them apart only in the message.
+                let answer: serde_json::Value = response.body_mut().read_json().unwrap_or_default();
+                if answer.get("message").and_then(serde_json::Value::as_str)
+                    == Some("Label does not exist")
+                {
+                    continue;
+                }
+                return Err(failure(
+                    "GitHub does not show this repository or issue to the token",
+                ));
             }
+            self.check(&response)?;
         }
         if !update.add_assignees.is_empty() {
             self.call(
@@ -851,6 +839,7 @@ fn issue_of(repo: &str, issue: &serde_json::Value) -> Option<TrackerIssue> {
             .and_then(trailing_number)
             .map(|number| format!("{repo}#{number}")),
         author_id: item.author,
+        priority: None,
     })
 }
 

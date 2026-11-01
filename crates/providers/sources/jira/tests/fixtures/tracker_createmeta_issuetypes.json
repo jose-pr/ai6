@@ -1,0 +1,57 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 5,
+  "issueTypes": [
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10000",
+      "id": "10000",
+      "description": "A big user story that needs to be broken down. Created by Jira Software - do not edit or delete.",
+      "iconUrl": "https://example.atlassian.net/images/icons/issuetypes/epic.svg",
+      "name": "Epic",
+      "untranslatedName": "Epic",
+      "subtask": false,
+      "hierarchyLevel": 1
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10007",
+      "id": "10007",
+      "description": "A small, distinct piece of work.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
+      "name": "Task",
+      "untranslatedName": "Task",
+      "subtask": false,
+      "hierarchyLevel": 0
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10008",
+      "id": "10008",
+      "description": "A small piece of work that's part of a larger task.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10316?size=medium",
+      "name": "Sub-task",
+      "untranslatedName": "Sub-task",
+      "subtask": true,
+      "hierarchyLevel": -1
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10009",
+      "id": "10009",
+      "description": "Stories track functionality or features expressed as user goals.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10300?size=medium",
+      "name": "Story",
+      "untranslatedName": "Story",
+      "subtask": false,
+      "hierarchyLevel": 0
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10010",
+      "id": "10010",
+      "description": "A problem or error.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10303?size=medium",
+      "name": "Bug",
+      "untranslatedName": "Bug",
+      "subtask": false,
+      "hierarchyLevel": 0
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+{
+  "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations,customfield_10010.requestTypePractice",
+  "id": "10006",
+  "self": "https://example.atlassian.net/rest/api/3/issue/10006",
+  "key": "AI6-7",
+  "fields": {
+    "statuscategorychangedate": "2026-11-01T22:56:12.613+0700",
+    "issuetype": {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10007",
+      "id": "10007",
+      "description": "A small, distinct piece of work.",
+      "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
+      "name": "Task",
+      "subtask": false,
+      "avatarId": 10318,
+      "hierarchyLevel": 0
+    },
+    "timespent": null,
+    "customfield_10030": null,
+    "project": {
+      "self": "https://example.atlassian.net/rest/api/3/project/10001",
+      "id": "10001",
+      "key": "AI6",
+      "name": "AI6 test project",
+      "projectTypeKey": "software",
+      "simplified": false,
+      "avatarUrls": {
+        "48x48": "https://example.invalid/avatar.png",
+        "24x24": "https://example.invalid/avatar.png",
+        "16x16": "https://example.invalid/avatar.png",
+        "32x32": "https://example.invalid/avatar.png"
+      }
+    },
+    "customfield_10031": null,
+    "customfield_10032": null,
+    "customfield_10033": null,
+    "fixVersions": [],
+    "aggregatetimespent": null,
+    "customfield_10034": null,
+    "statusCategory": {
+      "self": "https://example.atlassian.net/rest/api/3/statuscategory/2",
+      "id": 2,
+      "key": "new",
+      "colorName": "blue-gray",
+      "name": "To Do"
+    },
+    "customfield_10035": null,
+    "resolution": null,
+    "customfield_10036": null,
+    "customfield_10027": null,
+    "customfield_10028": null,
+    "customfield_10029": null,
+    "resolutiondate": null,
+    "workratio": -1,
+    "watches": {
+      "self": "https://example.atlassian.net/rest/api/3/issue/AI6-7/watchers",
+      "watchCount": 1,
+      "isWatching": true
+    },
+    "lastViewed": null,
+    "created": "2026-11-01T22:56:11.934+0700",
+    "customfield_10020": null,
+    "customfield_10021": null,
+    "customfield_10022": null,
+    "customfield_10023": null,
+    "priority": {
+      "self": "https://example.atlassian.net/rest/api/3/priority/3",
+      "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+      "name": "Medium",
+      "id": "3"
+    },
+    "customfield_10024": null,
+    "customfield_10025": null,
+    "labels": [
+      "ai6-recording"
+    ],
+    "customfield_10026": null,
+    "customfield_10016": null,
+    "customfield_10017": null,
+    "customfield_10019": "0|i0000w:",
+    "timeestimate": null,
+    "aggregatetimeoriginalestimate": null,
+    "versions": [],
+    "issuelinks": [],
+    "assignee": {
+      "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+      "accountId": "000000:00000000-0000-0000-0000-000000000000",
+      "emailAddress": "reporter@example.invalid",
+      "avatarUrls": {
+        "48x48": "https://example.invalid/avatar.png",
+        "24x24": "https://example.invalid/avatar.png",
+        "16x16": "https://example.invalid/avatar.png",
+        "32x32": "https://example.invalid/avatar.png"
+      },
+      "displayName": "Sam Reporter",
+      "active": true,
+      "timeZone": "Etc/UTC",
+      "accountType": "atlassian"
+    },
+    "updated": "2026-11-01T22:56:12.422+0700",
+    "status": {
+      "self": "https://example.atlassian.net/rest/api/3/status/10005",
+      "description": "",
+      "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+      "name": "Backlog",
+      "id": "10005",
+      "statusCategory": {
+        "self": "https://example.atlassian.net/rest/api/3/statuscategory/2",
+        "id": 2,
+        "key": "new",
+        "colorName": "blue-gray",
+        "name": "To Do"
+      }
+    },
+    "components": [],
+    "timeoriginalestimate": null,
+    "description": null,
+    "customfield_10010": null,
+    "customfield_10014": null,
+    "timetracking": {},
+    "customfield_10015": null,
+    "customfield_10005": null,
+    "customfield_10006": null,
+    "customfield_10007": null,
+    "security": null,
+    "customfield_10008": null,
+    "attachment": [],
+    "aggregatetimeestimate": null,
+    "customfield_10009": null,
+    "summary": "AI6 test data: tracker recording",
+    "creator": {
+      "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+      "accountId": "000000:00000000-0000-0000-0000-000000000000",
+      "emailAddress": "reporter@example.invalid",
+      "avatarUrls": {
+        "48x48": "https://example.invalid/avatar.png",
+        "24x24": "https://example.invalid/avatar.png",
+        "16x16": "https://example.invalid/avatar.png",
+        "32x32": "https://example.invalid/avatar.png"
+      },
+      "displayName": "Sam Reporter",
+      "active": true,
+      "timeZone": "Etc/UTC",
+      "accountType": "atlassian"
+    },
+    "subtasks": [],
+    "customfield_10040": null,
+    "customfield_10041": null,
+    "customfield_10042": null,
+    "reporter": {
+      "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+      "accountId": "000000:00000000-0000-0000-0000-000000000000",
+      "emailAddress": "reporter@example.invalid",
+      "avatarUrls": {
+        "48x48": "https://example.invalid/avatar.png",
+        "24x24": "https://example.invalid/avatar.png",
+        "16x16": "https://example.invalid/avatar.png",
+        "32x32": "https://example.invalid/avatar.png"
+      },
+      "displayName": "Sam Reporter",
+      "active": true,
+      "timeZone": "Etc/UTC",
+      "accountType": "atlassian"
+    },
+    "aggregateprogress": {
+      "progress": 0,
+      "total": 0
+    },
+    "customfield_10001": null,
+    "customfield_10002": [],
+    "customfield_10003": null,
+    "customfield_10004": null,
+    "customfield_10038": [],
+    "environment": null,
+    "duedate": null,
+    "progress": {
+      "progress": 0,
+      "total": 0
+    },
+    "votes": {
+      "self": "https://example.atlassian.net/rest/api/3/issue/AI6-7/votes",
+      "votes": 0,
+      "hasVoted": false
+    },
+    "comment": {
+      "comments": [],
+      "self": "https://example.atlassian.net/rest/api/3/issue/10006/comment",
+      "maxResults": 0,
+      "total": 0,
+      "startAt": 0
+    },
+    "worklog": {
+      "startAt": 0,
+      "maxResults": 20,
+      "total": 0,
+      "worklogs": []
+    }
+  }
+}

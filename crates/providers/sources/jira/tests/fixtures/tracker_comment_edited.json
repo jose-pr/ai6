@@ -1,0 +1,52 @@
+{
+  "self": "https://example.atlassian.net/rest/api/3/issue/10006/comment/10000",
+  "id": "10000",
+  "author": {
+    "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+    "accountId": "000000:00000000-0000-0000-0000-000000000000",
+    "emailAddress": "reporter@example.invalid",
+    "avatarUrls": {
+      "48x48": "https://example.invalid/avatar.png",
+      "24x24": "https://example.invalid/avatar.png",
+      "16x16": "https://example.invalid/avatar.png",
+      "32x32": "https://example.invalid/avatar.png"
+    },
+    "displayName": "Sam Reporter",
+    "active": true,
+    "timeZone": "Etc/UTC",
+    "accountType": "atlassian"
+  },
+  "body": {
+    "type": "doc",
+    "version": 1,
+    "content": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "text": "AI6 test data: the edited comment."
+          }
+        ]
+      }
+    ]
+  },
+  "updateAuthor": {
+    "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+    "accountId": "000000:00000000-0000-0000-0000-000000000000",
+    "emailAddress": "reporter@example.invalid",
+    "avatarUrls": {
+      "48x48": "https://example.invalid/avatar.png",
+      "24x24": "https://example.invalid/avatar.png",
+      "16x16": "https://example.invalid/avatar.png",
+      "32x32": "https://example.invalid/avatar.png"
+    },
+    "displayName": "Sam Reporter",
+    "active": true,
+    "timeZone": "Etc/UTC",
+    "accountType": "atlassian"
+  },
+  "created": "2026-11-01T22:57:12.421+0700",
+  "updated": "2026-11-01T22:57:12.977+0700",
+  "jsdPublic": true
+}

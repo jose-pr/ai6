@@ -15,25 +15,26 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use ai6::guatiao::library::ProviderError;
-use ai6::guatiao::{Provider, Status};
+use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
     IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Source, SourceBatch, SourceConfig,
     SourceItem, SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
-    TrackerUpdate,
+    TrackerUpdate, settings_from_table,
 };
-use serde::Deserialize;
-use serde::de::IgnoredAny;
 use url::Url;
 
 /// The provider ID an Operation names under `sources`.
 pub const PROVIDER_ID: &str = "jira";
 
 const FIELDS: &str = "summary,description,labels,reporter,updated";
-const ISSUE_FIELDS: &str = "summary,description,labels,reporter,assignee,updated,status,parent";
+const ISSUE_FIELDS: &str =
+    "summary,description,labels,reporter,assignee,updated,status,parent,priority";
+/// The longest summary Jira takes.
+const SUMMARY_BYTES: usize = 255;
 
 /// Which Jira API the site speaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, rename_all = "lowercase")]
 enum Deployment {
     /// Jira Cloud: REST v3, ADF text, token-paged `search/jql`.
     Cloud,
@@ -42,8 +43,8 @@ enum Deployment {
 }
 
 /// How requests authenticate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, rename_all = "lowercase")]
 enum Auth {
     /// `email:token` as HTTP Basic (Jira Cloud API tokens).
     Basic,
@@ -53,101 +54,71 @@ enum Auth {
 
 /// One instance's settings, from `[operation.<id>.sources.<name>]`.
 ///
-/// The Station reads `provider`, `intake` and `interval_secs` itself and does not pass them
-/// on. Keys the Station applies (status labels and transitions, agent labels, the priority
-/// map, GitHub's reply associations) are accepted here so one table serves every tracker;
-/// the provider ignores them.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// The Station reads its own keys (`provider`, `intake`, `interval_secs`, the status maps and
+/// what Agents may touch) and passes the rest here.
+#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
 struct Settings {
     /// The site root, for example `https://example.atlassian.net`.
+    #[schema(title = "Site")]
     site: String,
     /// The project key; a bare string under `sources` is this value.
-    #[serde(alias = "target")]
+    #[schema(title = "Project")]
     project: Option<String>,
     /// An extra JQL condition, combined with the project and label filters by AND.
+    #[schema(title = "Extra JQL")]
     jql: Option<String>,
     /// An issue needs every one of these labels to become a Mission.
-    #[serde(default = "default_labels")]
+    #[schema(title = "Intake labels")]
+    #[map(default = vec!["ai6-ready".to_owned()])]
     labels: Vec<String>,
-    #[serde(default = "default_deployment")]
+    /// Which API the site speaks.
+    #[schema(title = "Deployment")]
+    #[map(default = Deployment::Cloud)]
     deployment: Deployment,
-    #[serde(default = "default_auth")]
+    /// How requests authenticate.
+    #[schema(title = "Authentication")]
+    #[map(default = Auth::Basic)]
     auth: Auth,
     /// The environment variable holding the account email (Basic authentication only).
+    #[schema(title = "Email variable")]
     email_env: Option<String>,
     /// The environment variable holding the API token.
-    #[serde(default = "default_token_env")]
+    #[schema(title = "Token variable")]
+    #[map(default = "JIRA_API_TOKEN".to_owned())]
     token_env: String,
-    /// Seconds one request may take. Default 30; 0 is refused.
-    #[serde(default = "default_request_timeout_secs")]
+    /// Seconds one request may take. 0 is refused.
+    #[schema(title = "A request may take", format = "seconds")]
+    #[map(default = 30)]
     request_timeout_secs: u64,
-    /// Issues asked for per page. Default 50; 0 is refused.
-    #[serde(default = "default_page_size")]
+    /// Issues asked for per page. 0 is refused.
+    #[schema(title = "Issues per page")]
+    #[map(default = 50)]
     page_size: u32,
-    /// Pages one poll reads at most. Default 5; 0 is refused.
-    #[serde(default = "default_max_pages")]
-    max_pages: usize,
+    /// Pages one poll reads at most. 0 is refused.
+    #[schema(title = "Pages per poll")]
+    #[map(default = 5)]
+    max_pages: u64,
     /// Account IDs (Cloud) or user names (Server), besides the issue's reporter and
     /// assignee, whose comments may answer a question.
-    #[serde(default)]
+    #[schema(title = "People who may answer")]
+    #[map(default)]
     reply_authors: Vec<String>,
-    /// The issue type a created issue has. Default `Task`.
-    #[serde(default = "default_issue_type")]
+    /// The issue type a created issue has.
+    #[schema(title = "Type of a new issue")]
+    #[map(default = "Task".to_owned())]
     issue_type: String,
     /// The issue type of a child; default the project's first sub-task type.
+    #[schema(title = "Type of a child")]
     subtask_type: Option<String>,
-    /// How long, in seconds, the project's answers are remembered. Default 600.
-    #[serde(default = "default_capability_ttl_secs")]
+    /// How long, in seconds, the project's answers are remembered.
+    #[schema(title = "Remember the project for", format = "seconds")]
+    #[map(default = 600)]
     capability_ttl_secs: u64,
-    #[serde(default, rename = "status_labels")]
-    _status_labels: IgnoredAny,
-    #[serde(default, rename = "status_transitions")]
-    _status_transitions: IgnoredAny,
-    #[serde(default, rename = "agent_labels")]
-    _agent_labels: IgnoredAny,
-    #[serde(default, rename = "agent_transitions")]
-    _agent_transitions: IgnoredAny,
-    #[serde(default, rename = "priority_map")]
-    _priority_map: IgnoredAny,
-    #[serde(default, rename = "reply_associations")]
-    _reply_associations: IgnoredAny,
-}
-
-fn default_request_timeout_secs() -> u64 {
-    30
-}
-
-fn default_page_size() -> u32 {
-    50
-}
-
-fn default_max_pages() -> usize {
-    5
-}
-
-fn default_capability_ttl_secs() -> u64 {
-    600
-}
-
-fn default_issue_type() -> String {
-    "Task".to_owned()
-}
-
-fn default_labels() -> Vec<String> {
-    vec!["ai6-ready".to_owned()]
-}
-
-fn default_deployment() -> Deployment {
-    Deployment::Cloud
-}
-
-fn default_auth() -> Auth {
-    Auth::Basic
-}
-
-fn default_token_env() -> String {
-    "JIRA_API_TOKEN".to_owned()
+    /// The issue link type that ties a child to a parent it cannot sit under.
+    #[schema(title = "Link type")]
+    #[map(default = "Relates".to_owned())]
+    link_type: String,
 }
 
 /// What the project's create metadata said, kept with the capabilities.
@@ -174,8 +145,8 @@ pub struct Jira {
     agent: ureq::Agent,
     /// The project-level answers and when they were read.
     discovered: Mutex<Option<(Instant, Discovered)>>,
-    /// The account the credential belongs to; `Some(None)` once Jira declined to say.
-    identity: Mutex<Option<Option<String>>>,
+    /// The account the credential belongs to, once known.
+    identity: Mutex<Option<String>>,
 }
 
 impl Jira {
@@ -186,7 +157,11 @@ impl Jira {
     /// Returns a message for an unknown key, a missing project and JQL, a malformed key or
     /// an insecure site address.
     pub fn from_settings(settings_toml: &str) -> Result<Self, String> {
-        let settings: Settings = toml::from_str(settings_toml).map_err(|e| e.to_string())?;
+        let mut table: toml::Table = toml::from_str(settings_toml).map_err(|e| e.to_string())?;
+        if let Some(target) = table.remove("target") {
+            table.insert("project".to_owned(), target);
+        }
+        let settings: Settings = settings_from_table(table)?;
         if settings.project.is_none() && settings.jql.is_none() {
             return Err("set `project` or `jql`".to_owned());
         }
@@ -496,16 +471,26 @@ impl Jira {
     }
 
     /// The account the credential belongs to, asked once.
-    fn own_account(&self) -> Option<String> {
-        let mut identity = self.identity.lock().ok()?;
-        if identity.is_none() {
-            let account = self
-                .get_json(&self.api("/myself"), &[], "Jira rejected asking for the account")
-                .ok()
-                .and_then(|me| person_id(&me));
-            *identity = Some(account);
+    ///
+    /// Jira comments carry no marker, so the account is the only way to tell AI6's own comments
+    /// from replies: not knowing it is an error, never "owns nothing".
+    fn own_account(&self) -> Result<String, ProviderError> {
+        if let Ok(identity) = self.identity.lock()
+            && let Some(account) = identity.as_ref()
+        {
+            return Ok(account.clone());
         }
-        identity.clone().flatten()
+        let me = self.get_json(
+            &self.api("/myself"),
+            &[],
+            "Jira rejected asking for the account",
+        )?;
+        let account = person_id(&me)
+            .ok_or_else(|| failure("Jira answered with no account for the credential"))?;
+        if let Ok(mut identity) = self.identity.lock() {
+            *identity = Some(account.clone());
+        }
+        Ok(account)
     }
 
     fn discover(&self) -> Result<Discovered, ProviderError> {
@@ -525,6 +510,10 @@ impl Jira {
                 &[],
                 &format!("Jira rejected asking for the issue types of {project}"),
             );
+            if meta.is_err() {
+                // A refused credential is an error here, not "this project cannot create".
+                self.confirm_empty_search()?;
+            }
             if let Ok(meta) = meta {
                 let types = meta
                     .get("issueTypes")
@@ -546,7 +535,11 @@ impl Jira {
             }
         }
         let priorities = self
-            .get_json(&self.api("/priority"), &[], "Jira rejected listing the priorities")
+            .get_json(
+                &self.api("/priority"),
+                &[],
+                "Jira rejected listing the priorities",
+            )
             .ok()
             .and_then(|list| {
                 Some(
@@ -706,7 +699,7 @@ impl Tracker for Jira {
         if keys.is_empty() {
             return Ok(ReplyBatch { replies, cursor });
         }
-        let own = self.own_account();
+        let own = self.own_account()?;
         for key in keys {
             let mut who: Option<Vec<String>> = None;
             let mut start_at = 0_u64;
@@ -738,11 +731,11 @@ impl Tracker for Jira {
                     if request
                         .since
                         .as_deref()
-                        .is_some_and(|since| updated.as_str() <= since)
+                        .is_some_and(|since| !is_after(&updated, since))
                     {
                         continue;
                     }
-                    if cursor.as_deref().is_none_or(|c| updated.as_str() > c) {
+                    if cursor.as_deref().is_none_or(|c| is_after(&updated, c)) {
                         cursor = Some(updated.clone());
                     }
                     let author = comment.get("author").cloned().unwrap_or_default();
@@ -767,7 +760,7 @@ impl Tracker for Jira {
                             .to_owned(),
                         item: key.to_owned(),
                         permitted: permitted && !author_id.is_empty(),
-                        own: own.as_deref() == Some(author_id.as_str()) && !author_id.is_empty(),
+                        own: own == author_id,
                         author_id,
                         author: text(&author, "displayName").unwrap_or_default(),
                         body,
@@ -939,33 +932,47 @@ impl Tracker for Jira {
             .as_deref()
             .map(|parent| self.key(parent))
             .transpose()?;
+        let standard = spec
+            .issue_type
+            .clone()
+            .unwrap_or_else(|| self.settings.issue_type.clone());
         let child_type = self
             .settings
             .subtask_type
             .clone()
             .or(discovered.subtask_type.clone());
-        let kind = match (parent, self.settings.deployment) {
-            (Some(_), Deployment::Server) => child_type.ok_or_else(|| {
-                unsupported(
-                    "create a child without a sub-task type",
-                    "create issues without a parent",
-                )
-            })?,
-            (Some(_), Deployment::Cloud) => child_type
-                .or(spec.issue_type.clone())
-                .unwrap_or_else(|| self.settings.issue_type.clone()),
-            (None, _) => spec
-                .issue_type
-                .clone()
-                .unwrap_or_else(|| self.settings.issue_type.clone()),
+        // What may sit under what: on Cloud a standard type under an epic and a sub-task type
+        // under a standard issue; on Server a sub-task type under anything. Anything else is
+        // created beside its parent and linked to it.
+        let (kind, attach) = match (parent, self.settings.deployment) {
+            (None, _) => (standard, false),
+            (Some(_), Deployment::Server) => (
+                child_type.ok_or_else(|| {
+                    unsupported(
+                        "create a child without a sub-task type",
+                        "create issues without a parent",
+                    )
+                })?,
+                true,
+            ),
+            (Some(parent), Deployment::Cloud) => match self.hierarchy_level(parent)? {
+                level if level > 0 => (standard, true),
+                0 => match child_type {
+                    Some(child) => (child, true),
+                    None => (standard, false),
+                },
+                _ => (standard, false),
+            },
         };
         let mut fields = serde_json::json!({
             "project": { "key": project },
-            "summary": spec.title.lines().next().unwrap_or_default(),
-            "description": self.text(&spec.body),
+            "summary": summary_of(&spec.title),
             "issuetype": { "name": kind },
             "labels": spec.labels.iter().map(|label| jira_label(label)).collect::<Vec<_>>(),
         });
+        if !spec.body.trim().is_empty() {
+            fields["description"] = self.text(&spec.body);
+        }
         let priorities = &discovered.capabilities.priorities;
         if let Some(priority) = spec
             .priority
@@ -974,7 +981,7 @@ impl Tracker for Jira {
         {
             fields["priority"] = serde_json::json!({ "name": priority });
         }
-        if let Some(parent) = parent {
+        if let Some(parent) = parent.filter(|_| attach) {
             fields["parent"] = serde_json::json!({ "key": parent });
         }
         let created = read_json(self.call(
@@ -988,6 +995,9 @@ impl Tracker for Jira {
             .get("key")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| failure("Jira answered without an issue key"))?;
+        if let Some(parent) = parent.filter(|_| !attach) {
+            self.link_issues(key, parent, "the child")?;
+        }
         self.issue(key.to_owned())
     }
 
@@ -995,18 +1005,7 @@ impl Tracker for Jira {
         let from = self.key(&link.from)?;
         match (&link.to, &link.url) {
             (Some(to), _) => {
-                let to = self.key(to)?;
-                self.call(
-                    "POST",
-                    &self.api("/issueLink"),
-                    &[],
-                    Some(&serde_json::json!({
-                        "type": { "name": "Relates" },
-                        "inwardIssue": { "key": from },
-                        "outwardIssue": { "key": to },
-                    })),
-                    &format!("Jira rejected the link from {from} to {to}"),
-                )?;
+                self.link_issues(from, self.key(to)?, "the link")?;
             }
             (None, Some(url)) => {
                 if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -1049,12 +1048,109 @@ fn person_id(person: &serde_json::Value) -> Option<String> {
     })
 }
 
+/// A title as a summary: one line of at most [`SUMMARY_BYTES`], cut on a character boundary.
+fn summary_of(title: &str) -> String {
+    let line = title.lines().next().unwrap_or_default();
+    let mut end = line.len().min(SUMMARY_BYTES);
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    line[..end].to_owned()
+}
+
+/// Whether timestamp `a` is later than `b`. Each carries the account's offset, which a change of
+/// clock moves, so the text alone does not order them; text that does not parse compares as text.
+fn is_after(a: &str, b: &str) -> bool {
+    match (instant(a), instant(b)) {
+        (Some(a), Some(b)) => a > b,
+        _ => a > b,
+    }
+}
+
+/// `2026-11-01T22:57:12.421+0700` as milliseconds since the Unix epoch.
+fn instant(text: &str) -> Option<i64> {
+    let (date, rest) = text.split_once('T')?;
+    let mut parts = date.splitn(3, '-');
+    let year: i64 = parts.next()?.parse().ok()?;
+    let month: i64 = parts.next()?.parse().ok()?;
+    let day: i64 = parts.next()?.parse().ok()?;
+    let zone_at = rest.find(['+', '-', 'Z'])?;
+    let (clock, zone) = rest.split_at(zone_at);
+    let (clock, fraction) = clock.split_once('.').unwrap_or((clock, ""));
+    let mut clock = clock.splitn(3, ':');
+    let hours: i64 = clock.next()?.parse().ok()?;
+    let minutes: i64 = clock.next()?.parse().ok()?;
+    let seconds: i64 = clock.next()?.parse().ok()?;
+    let millis: i64 = format!("{fraction:0<3}").get(..3)?.parse().ok()?;
+    let offset_minutes = match zone.strip_prefix('Z') {
+        Some(_) => 0,
+        None => {
+            let digits = zone[1..].replace(':', "");
+            let sign = if zone.starts_with('-') { -1 } else { 1 };
+            sign * (digits.get(..2)?.parse::<i64>().ok()? * 60
+                + digits.get(2..4)?.parse::<i64>().ok()?)
+        }
+    };
+    // The arithmetic is `days_from_civil` of <https://howardhinnant.github.io/date_algorithms.html>.
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let shifted_month = (month + 9) % 12;
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(
+        ((days * 86_400 + hours * 3_600 + minutes * 60 + seconds) - offset_minutes * 60) * 1_000
+            + millis,
+    )
+}
+
 /// Jira labels cannot hold whitespace.
 fn jira_label(label: &str) -> String {
     label.split_whitespace().collect::<Vec<_>>().join("-")
 }
 
 impl Jira {
+    /// Links two issues of this project with the instance's `link_type`.
+    fn link_issues(&self, from: &str, to: &str, what: &str) -> Result<(), ProviderError> {
+        self.call(
+            "POST",
+            &self.api("/issueLink"),
+            &[],
+            Some(&serde_json::json!({
+                "type": { "name": self.settings.link_type },
+                "inwardIssue": { "key": from },
+                "outwardIssue": { "key": to },
+            })),
+            &format!(
+                "Jira rejected {what} from {from} to {to} (check `link_type`: {})",
+                self.settings.link_type
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// An issue's level: above 0 an epic, 0 a standard issue, below 0 a sub-task.
+    fn hierarchy_level(&self, key: &str) -> Result<i64, ProviderError> {
+        let issue = self.get_json(
+            &self.api(&format!("/issue/{key}")),
+            &[("fields", "issuetype".to_owned())],
+            &format!("Jira rejected reading {key}"),
+        )?;
+        let kind = issue.pointer("/fields/issuetype");
+        Ok(kind
+            .and_then(|kind| kind.get("hierarchyLevel"))
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or_else(|| {
+                let subtask = kind.and_then(|kind| kind.get("subtask"));
+                if subtask.and_then(serde_json::Value::as_bool) == Some(true) {
+                    -1
+                } else {
+                    0
+                }
+            }))
+    }
+
     /// The reporter's and assignee's IDs: the people who may answer for an issue.
     fn reporter_and_assignee(&self, key: &str) -> Vec<String> {
         self.get_json(
@@ -1102,6 +1198,10 @@ impl Jira {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
             author_id: fields.get("reporter").and_then(person_id),
+            priority: fields
+                .pointer("/priority/name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
         })
     }
 }
@@ -1177,6 +1277,32 @@ fn failure(message: &str) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timestamps_order_by_the_instant_they_name_and_not_their_text() {
+        let east = "2026-11-01T22:57:12.421+0700";
+        let utc = "2026-11-01T15:57:12.421+0000";
+        assert_eq!(instant(east), instant(utc));
+        assert_eq!(instant("1970-01-01T00:00:01.5Z"), Some(1_500));
+        assert!(
+            is_after("2026-11-01T15:57:13.000+0000", east),
+            "later, though its text sorts first"
+        );
+        assert!(!is_after(east, utc));
+        assert!(
+            is_after("b", "a"),
+            "text that does not parse compares as text"
+        );
+    }
+
+    #[test]
+    fn a_summary_is_one_line_cut_on_a_character_boundary() {
+        assert_eq!(summary_of("one\ntwo"), "one");
+        let long = "ñ".repeat(200);
+        let cut = summary_of(&long);
+        assert!(cut.len() <= SUMMARY_BYTES && cut.chars().all(|c| c == 'ñ'));
+        assert_eq!(cut.len(), 254);
+    }
 
     #[test]
     fn cursors_become_minute_precision_jql_times() {

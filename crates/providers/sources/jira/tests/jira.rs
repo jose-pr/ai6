@@ -237,13 +237,13 @@ fn a_rejected_comment_or_transition_names_what_was_rejected() {
     });
     let error = cloud(&fake.base, "")
         .post(TrackerPost {
-            item: "GUA-12".to_owned(),
+            item: "AI6-12".to_owned(),
             body: "x".to_owned(),
             ..TrackerPost::default()
         })
         .unwrap_err()
         .to_string();
-    assert!(error.contains("rejected the comment on GUA-12"), "{error}");
+    assert!(error.contains("rejected the comment on AI6-12"), "{error}");
 
     let fake = serve(|_| {
         vec![
@@ -256,7 +256,7 @@ fn a_rejected_comment_or_transition_names_what_was_rejected() {
     });
     let error = cloud(&fake.base, "")
         .update(TrackerUpdate {
-            item: "GUA-12".to_owned(),
+            item: "AI6-12".to_owned(),
             transition: Some("Done".to_owned()),
             ..TrackerUpdate::default()
         })
@@ -270,7 +270,7 @@ fn a_blank_post_fails_without_calling_out() {
     let fake = serve(|_| vec![canned(201, COMMENT_CREATED)]);
     let error = cloud(&fake.base, "")
         .post(TrackerPost {
-            item: "GUA-12".to_owned(),
+            item: "AI6-12".to_owned(),
             body: "\n\n".to_owned(),
             ..TrackerPost::default()
         })
@@ -285,7 +285,7 @@ fn a_refused_credential_on_an_issue_call_names_the_variable() {
     let fake = serve(|_| vec![canned(404, PROJECT_UNKNOWN)]);
     let error = cloud(&fake.base, "")
         .post(TrackerPost {
-            item: "GUA-12".to_owned(),
+            item: "AI6-12".to_owned(),
             body: "x".to_owned(),
             ..TrackerPost::default()
         })
@@ -323,7 +323,7 @@ fn a_server_poll_uses_v2_offsets_and_a_bearer_token() {
 fn server(site: &str, extra: &str) -> Jira {
     init();
     Jira::from_settings(&format!(
-        "site = \"{site}\"\nproject = \"GUA\"\ndeployment = \"server\"\nauth = \"bearer\"\n\
+        "site = \"{site}\"\nproject = \"AI6\"\ndeployment = \"server\"\nauth = \"bearer\"\n\
          token_env = \"AI6_TEST_JIRA_TOKEN\"\n{extra}"
     ))
     .unwrap()
@@ -349,7 +349,7 @@ fn a_cloud_post_comments_in_rich_text_and_an_edit_replaces_it() {
     let jira = cloud(&fake.base, "");
     let posted = jira
         .post(TrackerPost {
-            item: "GUA-12".to_owned(),
+            item: "AI6-12".to_owned(),
             body: "## Status\n- started\nSee [PR](https://example.invalid/1)".to_owned(),
             edit: None,
             marker: Some("ignored".to_owned()),
@@ -360,10 +360,10 @@ fn a_cloud_post_comments_in_rich_text_and_an_edit_replaces_it() {
         posted
             .url
             .unwrap()
-            .ends_with("/browse/GUA-12?focusedCommentId=9001")
+            .ends_with("/browse/AI6-12?focusedCommentId=9001")
     );
     jira.post(TrackerPost {
-        item: "GUA-12".to_owned(),
+        item: "AI6-12".to_owned(),
         body: "Waiting.".to_owned(),
         edit: Some("9001".to_owned()),
         marker: None,
@@ -371,13 +371,13 @@ fn a_cloud_post_comments_in_rich_text_and_an_edit_replaces_it() {
     .unwrap();
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].target, "/rest/api/3/issue/GUA-12/comment");
+    assert_eq!(requests[0].target, "/rest/api/3/issue/AI6-12/comment");
     let comment = body_of(&requests[0]);
     assert_eq!(comment["body"]["type"], "doc");
     assert_eq!(comment["body"]["content"][0]["type"], "heading");
     assert_eq!(comment["body"]["content"][1]["type"], "bulletList");
     assert_eq!(requests[1].method, "PUT");
-    assert_eq!(requests[1].target, "/rest/api/3/issue/GUA-12/comment/9001");
+    assert_eq!(requests[1].target, "/rest/api/3/issue/AI6-12/comment/9001");
 }
 
 #[test]
@@ -385,13 +385,13 @@ fn a_server_post_is_plain_text_on_v2() {
     let fake = serve(|_| vec![canned(201, r#"{"id": "5"}"#)]);
     server(&fake.base, "")
         .post(TrackerPost {
-            item: "GUA-12".to_owned(),
+            item: "AI6-12".to_owned(),
             body: "Branch: `agent/fix`".to_owned(),
             ..TrackerPost::default()
         })
         .unwrap();
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests[0].target, "/rest/api/2/issue/GUA-12/comment");
+    assert_eq!(requests[0].target, "/rest/api/2/issue/AI6-12/comment");
     assert_eq!(body_of(&requests[0])["body"], "Branch: `agent/fix`");
 }
 
@@ -399,7 +399,7 @@ fn a_server_post_is_plain_text_on_v2() {
 fn items_outside_the_project_or_not_keys_are_refused_before_any_request() {
     let fake = serve(|_| vec![]);
     let jira = cloud(&fake.base, "");
-    for item in ["OPS-1", "GUA-", "GUA", "GUA-1/../x", "-1"] {
+    for item in ["OPS-1", "AI6-", "AI6", "AI6-1/../x", "-1"] {
         let error = jira.issue(item.to_owned()).unwrap_err();
         assert_eq!(error.status, Status::GUATIAO_ERR_BAD_VALUE, "{item}");
     }
@@ -413,21 +413,21 @@ fn an_issue_is_read_with_state_assignee_reporter_and_parent() {
     let fake = serve(|_| {
         vec![canned(
             200,
-            r#"{"id": "10012", "key": "GUA-12", "fields": {
+            r#"{"id": "10012", "key": "AI6-12", "fields": {
                 "summary": "T", "description": "plain", "labels": ["bug"],
                 "reporter": {"accountId": "acc-rep", "displayName": "Sam"},
                 "assignee": {"accountId": "acc-as"},
                 "updated": "2026-10-02T09:30:00.000+0000",
                 "status": {"statusCategory": {"key": "done"}},
-                "parent": {"key": "GUA-3"}}}"#,
+                "parent": {"key": "AI6-3"}}}"#,
         )]
     });
-    let issue = cloud(&fake.base, "").issue("GUA-12".to_owned()).unwrap();
-    assert_eq!(issue.id, "GUA-12");
+    let issue = cloud(&fake.base, "").issue("AI6-12".to_owned()).unwrap();
+    assert_eq!(issue.id, "AI6-12");
     assert_eq!(issue.native_id, "10012");
     assert_eq!(issue.state, "closed");
     assert_eq!(issue.assignees, ["acc-as"]);
-    assert_eq!(issue.parent.as_deref(), Some("GUA-3"));
+    assert_eq!(issue.parent.as_deref(), Some("AI6-3"));
     assert_eq!(issue.author_id.as_deref(), Some("acc-rep"));
 }
 
@@ -455,13 +455,13 @@ fn capabilities_come_from_create_metadata_and_transitions_per_item() {
     assert!(capabilities.free_labels && !capabilities.markers);
     assert_eq!(capabilities.visibility, "unknown");
     assert!(capabilities.transitions.is_empty());
-    let with_item = jira.capabilities(Some("GUA-12".to_owned())).unwrap();
+    let with_item = jira.capabilities(Some("AI6-12".to_owned())).unwrap();
     assert_eq!(with_item.transitions, ["To Do", "Done"]);
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests.len(), 3, "the project answers are cached");
     assert_eq!(
         requests[0].target,
-        "/rest/api/3/issue/createmeta/GUA/issuetypes"
+        "/rest/api/3/issue/createmeta/AI6/issuetypes"
     );
 }
 
@@ -492,7 +492,7 @@ fn an_update_edits_labels_assignee_and_transitions_by_name_or_state() {
     });
     let jira = cloud(&fake.base, "");
     jira.update(TrackerUpdate {
-        item: "GUA-12".to_owned(),
+        item: "AI6-12".to_owned(),
         add_labels: vec!["ai6 done".to_owned()],
         remove_labels: vec!["ai6-ready".to_owned()],
         add_assignees: vec!["acc-1".to_owned()],
@@ -501,19 +501,19 @@ fn an_update_edits_labels_assignee_and_transitions_by_name_or_state() {
     })
     .unwrap();
     jira.update(TrackerUpdate {
-        item: "GUA-12".to_owned(),
+        item: "AI6-12".to_owned(),
         state: Some("closed".to_owned()),
         ..TrackerUpdate::default()
     })
     .unwrap();
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests[0].method, "PUT");
-    assert_eq!(requests[0].target, "/rest/api/3/issue/GUA-12");
+    assert_eq!(requests[0].target, "/rest/api/3/issue/AI6-12");
     assert_eq!(
         body_of(&requests[0])["update"]["labels"],
         serde_json::json!([{"add": "ai6-done"}, {"remove": "ai6-ready"}])
     );
-    assert_eq!(requests[1].target, "/rest/api/3/issue/GUA-12/assignee");
+    assert_eq!(requests[1].target, "/rest/api/3/issue/AI6-12/assignee");
     assert_eq!(body_of(&requests[1])["accountId"], "acc-1");
     assert_eq!(body_of(&requests[3])["transition"]["id"], "41");
     assert_eq!(body_of(&requests[5])["transition"]["id"], "41");
@@ -524,7 +524,7 @@ fn an_unknown_transition_is_unsupported_and_names_the_open_ones() {
     let fake = serve(|_| vec![canned(200, CATEGORIZED)]);
     let error = cloud(&fake.base, "")
         .update(TrackerUpdate {
-            item: "GUA-12".to_owned(),
+            item: "AI6-12".to_owned(),
             transition: Some("Ship it".to_owned()),
             ..TrackerUpdate::default()
         })
@@ -542,13 +542,13 @@ fn a_server_assignee_uses_the_user_name_and_can_be_cleared() {
     let fake = serve(|_| vec![canned(204, ""), canned(204, "")]);
     let jira = server(&fake.base, "");
     jira.update(TrackerUpdate {
-        item: "GUA-12".to_owned(),
+        item: "AI6-12".to_owned(),
         add_assignees: vec!["sam".to_owned()],
         ..TrackerUpdate::default()
     })
     .unwrap();
     jira.update(TrackerUpdate {
-        item: "GUA-12".to_owned(),
+        item: "AI6-12".to_owned(),
         remove_assignees: vec!["sam".to_owned()],
         ..TrackerUpdate::default()
     })
@@ -587,7 +587,7 @@ fn replies_mark_the_reporter_and_listed_authors_and_the_credentials_own_comments
     });
     let batch = cloud(&fake.base, "reply_authors = [\"acc-listed\"]")
         .replies(ReplyPoll {
-            items: vec!["GUA-12".to_owned()],
+            items: vec!["AI6-12".to_owned()],
             since: Some("2026-10-04T12:00:00.000+0000".to_owned()),
         })
         .unwrap();
@@ -612,21 +612,21 @@ fn replies_mark_the_reporter_and_listed_authors_and_the_credentials_own_comments
     assert!(
         requests[1]
             .target
-            .starts_with("/rest/api/3/issue/GUA-12/comment?")
+            .starts_with("/rest/api/3/issue/AI6-12/comment?")
     );
 }
 
 #[test]
 fn a_child_is_created_with_the_subtask_type_and_its_parent() {
     let meta = r#"{"values": [{"name": "Task", "subtask": false}, {"name": "Sub-task", "subtask": true}]}"#;
-    let created_issue = r#"{"id": "10020", "key": "GUA-20", "fields": {
+    let created_issue = r#"{"id": "10020", "key": "AI6-20", "fields": {
         "summary": "Child", "labels": [], "updated": "2026-10-06T00:00:00.000+0000",
-        "status": {"statusCategory": {"key": "new"}}, "parent": {"key": "GUA-3"}}}"#;
+        "status": {"statusCategory": {"key": "new"}}, "parent": {"key": "AI6-3"}}}"#;
     let fake = serve(|_| {
         vec![
             canned(200, meta),
             canned(200, r#"[{"name": "High"}]"#),
-            canned(201, r#"{"id": "10020", "key": "GUA-20"}"#),
+            canned(201, r#"{"id": "10020", "key": "AI6-20"}"#),
             canned(200, created_issue),
         ]
     });
@@ -636,19 +636,19 @@ fn a_child_is_created_with_the_subtask_type_and_its_parent() {
             body: "Do it.".to_owned(),
             labels: vec!["split work".to_owned()],
             priority: Some("Urgent".to_owned()),
-            parent: Some("GUA-3".to_owned()),
+            parent: Some("AI6-3".to_owned()),
             ..IssueSpec::default()
         })
         .unwrap();
-    assert_eq!(issue.id, "GUA-20");
-    assert_eq!(issue.parent.as_deref(), Some("GUA-3"));
+    assert_eq!(issue.id, "AI6-20");
+    assert_eq!(issue.parent.as_deref(), Some("AI6-3"));
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests[2].method, "POST");
     assert_eq!(requests[2].target, "/rest/api/2/issue");
     let fields = &body_of(&requests[2])["fields"];
-    assert_eq!(fields["project"]["key"], "GUA");
+    assert_eq!(fields["project"]["key"], "AI6");
     assert_eq!(fields["issuetype"]["name"], "Sub-task");
-    assert_eq!(fields["parent"]["key"], "GUA-3");
+    assert_eq!(fields["parent"]["key"], "AI6-3");
     assert_eq!(fields["labels"][0], "split-work");
     assert_eq!(fields["description"], "Do it.");
     assert!(
@@ -666,10 +666,10 @@ fn a_cloud_issue_uses_the_configured_type_and_adf() {
                 r#"{"issueTypes": [{"name": "Story", "subtask": false}]}"#,
             ),
             canned(200, r#"[{"name": "High"}]"#),
-            canned(201, r#"{"key": "GUA-21"}"#),
+            canned(201, r#"{"key": "AI6-21"}"#),
             canned(
                 200,
-                r#"{"id": "1", "key": "GUA-21", "fields": {"summary": "S", "updated": "t"}}"#,
+                r#"{"id": "1", "key": "AI6-21", "fields": {"summary": "S", "updated": "t"}}"#,
             ),
         ]
     });
@@ -707,7 +707,7 @@ fn creating_needs_a_project_and_a_server_child_needs_a_subtask_type() {
     let error = server(&fake.base, "")
         .create(IssueSpec {
             title: "x".to_owned(),
-            parent: Some("GUA-1".to_owned()),
+            parent: Some("AI6-1".to_owned()),
             ..IssueSpec::default()
         })
         .unwrap_err();
@@ -719,14 +719,14 @@ fn links_are_issue_links_or_remote_links_and_must_name_something() {
     let fake = serve(|_| vec![canned(201, "{}"), canned(201, "{}")]);
     let jira = cloud(&fake.base, "");
     jira.link(TrackerLink {
-        from: "GUA-1".to_owned(),
-        to: Some("GUA-2".to_owned()),
+        from: "AI6-1".to_owned(),
+        to: Some("AI6-2".to_owned()),
         relation: "related".to_owned(),
         url: None,
     })
     .unwrap();
     jira.link(TrackerLink {
-        from: "GUA-1".to_owned(),
+        from: "AI6-1".to_owned(),
         to: None,
         relation: "mirror".to_owned(),
         url: Some("https://github.com/o/r/issues/4".to_owned()),
@@ -734,8 +734,8 @@ fn links_are_issue_links_or_remote_links_and_must_name_something() {
     .unwrap();
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests[0].target, "/rest/api/3/issueLink");
-    assert_eq!(body_of(&requests[0])["outwardIssue"]["key"], "GUA-2");
-    assert_eq!(requests[1].target, "/rest/api/3/issue/GUA-1/remotelink");
+    assert_eq!(body_of(&requests[0])["outwardIssue"]["key"], "AI6-2");
+    assert_eq!(requests[1].target, "/rest/api/3/issue/AI6-1/remotelink");
     assert_eq!(
         body_of(&requests[1])["object"]["url"],
         "https://github.com/o/r/issues/4"
@@ -743,16 +743,16 @@ fn links_are_issue_links_or_remote_links_and_must_name_something() {
     drop(requests);
     for bad in [
         TrackerLink {
-            from: "GUA-1".to_owned(),
+            from: "AI6-1".to_owned(),
             ..TrackerLink::default()
         },
         TrackerLink {
-            from: "GUA-1".to_owned(),
+            from: "AI6-1".to_owned(),
             url: Some("javascript:alert(1)".to_owned()),
             ..TrackerLink::default()
         },
         TrackerLink {
-            from: "GUA-1".to_owned(),
+            from: "AI6-1".to_owned(),
             to: Some("OPS-2".to_owned()),
             ..TrackerLink::default()
         },
@@ -762,17 +762,6 @@ fn links_are_issue_links_or_remote_links_and_must_name_something() {
             Status::GUATIAO_ERR_BAD_VALUE
         );
     }
-}
-
-#[test]
-fn a_table_with_the_keys_the_station_applies_builds() {
-    init();
-    Jira::from_settings(
-        "site = \"https://x.example\"\nproject = \"GUA\"\nemail_env = \"E\"\n\
-         status_labels = { working = \"w\" }\nstatus_transitions = { done = \"Done\" }\n\
-         priority_map = { high = \"High\" }\nagent_labels = [\"x\"]\nsubtask_type = \"Sub-task\"",
-    )
-    .unwrap();
 }
 
 #[test]
@@ -809,7 +798,7 @@ fn a_missing_credential_fails_before_any_request() {
     init();
     let fake = serve(|_| vec![canned(200, "{}")]);
     let jira = Jira::from_settings(&format!(
-        "site = \"{}\"\nproject = \"GUA\"\nauth = \"bearer\"\ntoken_env = \"AI6_TEST_JIRA_UNSET\"",
+        "site = \"{}\"\nproject = \"AI6\"\nauth = \"bearer\"\ntoken_env = \"AI6_TEST_JIRA_UNSET\"",
         fake.base
     ))
     .unwrap();
@@ -844,7 +833,7 @@ fn the_page_size_and_page_count_are_settings() {
         init();
         assert!(
             Jira::from_settings(&format!(
-                "site = \"https://x.example\"\nproject = \"GUA\"\nemail_env = \"E\"\n{zero}"
+                "site = \"https://x.example\"\nproject = \"AI6\"\nemail_env = \"E\"\n{zero}"
             ))
             .is_err(),
             "{zero}"

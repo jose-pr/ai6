@@ -17,7 +17,9 @@ use crate::directorates::m::cover::Disclosure;
 use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::roster::{Operation, Roster};
 use crate::directorates::registry::backend::*;
-use crate::directorates::registry::mission_issues::{IssueLink, LinkRelation, LinkState};
+use crate::directorates::registry::mission_issues::{
+    IssueLink, IssueSnapshot, LinkRelation, LinkState,
+};
 use crate::directorates::registry::sleepers::{Fire, Sleeper};
 use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
@@ -29,26 +31,68 @@ use crate::station::issues::{
 
 use crate::station::limits::SourceLimits;
 use crate::station::plugins::Plugins;
-use guatiao::ToValue;
+use guatiao::{FromValue, Schema, ToValue};
 
 /// Constructs the provider for a provider ID and an Operation's settings.
 type SourceBuilder<'a> = dyn Fn(&str, &toml::Table) -> Result<Box<dyn Source>, String> + 'a;
 
 /// The words a Mission's progress is written in on an instance: a label or a workflow
 /// transition per milestone. Unset milestones write nothing.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub(crate) struct StatusWords {
     /// While an Agent works.
+    #[schema(title = "While working")]
     pub working: Option<String>,
     /// While the Mission waits for an answer on the issue.
+    #[schema(title = "While waiting for an answer")]
     pub waiting: Option<String>,
     /// While the Mission is paused.
+    #[schema(title = "While paused")]
     pub paused: Option<String>,
     /// When the Mission ended successfully.
+    #[schema(title = "When done")]
     pub done: Option<String>,
     /// When the Mission ended without completing.
+    #[schema(title = "When failed")]
     pub failed: Option<String>,
+}
+
+/// What the Station itself reads of `[operation.ID.sources.NAME]`; the rest of the table goes
+/// to the provider.
+#[derive(Debug, Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub(crate) struct InstanceKeys {
+    /// The labels a Mission's milestones write.
+    #[schema(title = "Status labels")]
+    #[map(default)]
+    pub status_labels: StatusWords,
+    /// The workflow transitions a Mission's milestones make.
+    #[schema(title = "Status transitions")]
+    #[map(default)]
+    pub status_transitions: StatusWords,
+    /// The only labels an Agent may add or remove on a linked issue.
+    #[schema(title = "Labels Agents may touch")]
+    #[map(default)]
+    pub agent_labels: Vec<String>,
+    /// The workflow transitions an Agent may make without green ink.
+    #[schema(title = "Transitions Agents may make")]
+    #[map(default)]
+    pub agent_transitions: Vec<String>,
+    /// The priority a mirrored issue takes here, by the priority it has where it comes from.
+    #[schema(title = "Priority map")]
+    #[map(default)]
+    pub priority_map: BTreeMap<String, String>,
+}
+
+impl InstanceKeys {
+    const NAMES: [&str; 5] = [
+        "status_labels",
+        "status_transitions",
+        "agent_labels",
+        "agent_transitions",
+        "priority_map",
+    ];
 }
 
 impl StatusWords {
@@ -106,6 +150,8 @@ pub(crate) struct SourceSetup {
     pub agent_labels: Vec<String>,
     /// The workflow transitions an Agent may make without green ink.
     pub agent_transitions: Vec<String>,
+    /// The priority a mirrored issue takes here, by the priority it has where it comes from.
+    pub priority_map: BTreeMap<String, String>,
 }
 
 /// Reads an Operation's `sources` table into per-instance settings.
@@ -156,30 +202,14 @@ pub(crate) fn source_setups(
                     ));
                 }
             };
-            let words = |key: &str| -> Result<StatusWords, String> {
-                settings.get(key).map_or_else(
-                    || Ok(StatusWords::default()),
-                    |value| {
-                        value.clone().try_into().map_err(|error| {
-                            format!("Operation {}: sources.{name}.{key}: {error}", operation.id)
-                        })
-                    },
-                )
-            };
-            let names = |key: &str| -> Result<Vec<String>, String> {
-                settings.get(key).map_or_else(
-                    || Ok(Vec::new()),
-                    |value| {
-                        value.clone().try_into().map_err(|error| {
-                            format!("Operation {}: sources.{name}.{key}: {error}", operation.id)
-                        })
-                    },
-                )
-            };
-            let agent_labels = names("agent_labels")?;
-            let agent_transitions = names("agent_transitions")?;
-            let status_labels = words("status_labels")?;
-            let status_transitions = words("status_transitions")?;
+            let mut own = toml::Table::new();
+            for key in InstanceKeys::NAMES {
+                if let Some(value) = settings.remove(key) {
+                    own.insert(key.to_owned(), value);
+                }
+            }
+            let keys: InstanceKeys = crate::settings_from_table(own)
+                .map_err(|error| format!("Operation {}: sources.{name}: {error}", operation.id))?;
             let interval = match settings.remove("interval_secs") {
                 None => limits.poll.0,
                 Some(toml::Value::Integer(seconds)) if seconds > 0 => {
@@ -198,10 +228,11 @@ pub(crate) fn source_setups(
                 settings,
                 interval,
                 intake,
-                status_labels,
-                status_transitions,
-                agent_labels,
-                agent_transitions,
+                status_labels: keys.status_labels,
+                status_transitions: keys.status_transitions,
+                agent_labels: keys.agent_labels,
+                agent_transitions: keys.agent_transitions,
+                priority_map: keys.priority_map,
             })
         })
         .collect()
@@ -330,7 +361,13 @@ fn link_source(
                 item.url.clone(),
                 now,
             );
-            link.title = Some(item.title.clone());
+            link.snapshot = Some(IssueSnapshot {
+                title: item.title.clone(),
+                body: item.body.clone(),
+                state: Some("open".to_owned()),
+                labels: item.labels.clone(),
+                priority: None,
+            });
             if let Err(error) = registry.link_issue(&link) {
                 eprintln!(
                     "ai6: source {provider}: item {:?} not linked: {error}",
@@ -523,7 +560,7 @@ pub(crate) fn source_link(
         linked_at: now,
         status_comment: None,
         phase: None,
-        title: None,
+        snapshot: None,
     }
 }
 

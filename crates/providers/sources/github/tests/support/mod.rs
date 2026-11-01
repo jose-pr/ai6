@@ -26,6 +26,7 @@ pub struct Recorded {
     pub method: String,
     pub target: String,
     pub authorization: Option<String>,
+    pub api_version: Option<String>,
     pub body: String,
 }
 
@@ -108,6 +109,7 @@ fn read_request(stream: &mut std::net::TcpStream) -> Option<Recorded> {
         method,
         target,
         authorization: header("authorization"),
+        api_version: header("x-github-api-version"),
         body: String::from_utf8_lossy(&data[head_end..]).into_owned(),
     })
 }

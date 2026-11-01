@@ -1,0 +1,13 @@
+[
+  {
+    "id": 12918033157,
+    "node_id": "NODE_ID",
+    "url": "https://api.github.com/repos/o/r/labels/ai6:ready",
+    "name": "ai6:ready",
+    "color": "0E8A16",
+    "default": false,
+    "description": "AI6 Source: take this issue as a Mission",
+    "archived_at": null,
+    "archived_by": null
+  }
+]
