@@ -1427,13 +1427,20 @@ async fn stations(
         let mut stations = Vec::new();
         let mut readable = BTreeSet::new();
         for station in station_records {
-            let Some(operation_values) = station
+            let reads_station = authorizer
+                .authorize(AuthorizationRequest {
+                    person: person.clone(),
+                    action: "station.read".to_owned(),
+                    resource: format!("station:{}", station.station()),
+                    ancestors: Vec::new(),
+                })
+                .map_err(|_| ApiError::internal())?
+                .allowed;
+            let operation_values = station
                 .info()
                 .get("operations")
                 .and_then(serde_json::Value::as_array)
-            else {
-                continue;
-            };
+                .map_or(&[][..], Vec::as_slice);
             let mut operations = Vec::new();
             for operation_value in operation_values {
                 let Some(operation_id) = operation_value.as_str() else {
@@ -1455,24 +1462,15 @@ async fn stations(
                     operations.push(operation_id.to_string());
                 }
             }
-            if operations.is_empty() {
+            // A control Station holds no checkout, so an Operation alone would never show it.
+            if operations.is_empty() && !reads_station {
                 continue;
             }
             operations.sort();
             operations.dedup();
             let mut board = board_station(&station, &operations, now, headquarters.as_ref(), dark);
             // The report covers every Operation on the Station: it is the Station's to read.
-            if board.head_of_station.is_some()
-                && !authorizer
-                    .authorize(AuthorizationRequest {
-                        person: person.clone(),
-                        action: "station.read".to_owned(),
-                        resource: format!("station:{}", station.station()),
-                        ancestors: Vec::new(),
-                    })
-                    .map_err(|_| ApiError::internal())?
-                    .allowed
-            {
+            if !reads_station {
                 board.head_of_station = None;
             }
             stations.push(board);
@@ -6052,6 +6050,14 @@ mod tests {
             .iter()
             .find(|station| station["station_id"] == "worker")
             .unwrap();
+        let control = operator_board["stations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|station| station["station_id"] == "hq")
+            .expect("station.read shows a Station that holds no checkout");
+        assert_eq!(control["operations"], serde_json::json!([]));
+        assert_eq!(operator_board["headquarters_station"], "hq");
         assert_eq!(
             worker["head_of_station"],
             serde_json::json!({

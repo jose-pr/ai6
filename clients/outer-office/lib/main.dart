@@ -3675,7 +3675,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                   ],
                 ),
           empty: stationId == null
-              ? 'No Stations have checked in yet.'
+              ? 'No Station to show: none has checked in, or none is open to this account.'
               : 'Station $stationId is not on this board.',
           onCreateMission: (operationId) =>
               _showCreateMission(context, operationId, widget.board),
