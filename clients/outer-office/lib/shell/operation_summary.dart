@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../access/access_words.dart';
 import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_icon.dart';
@@ -102,17 +103,7 @@ class _OperationSummaryState extends State<OperationSummary> {
         const SizedBox(height: 14),
         Text('YOUR ACCESS', style: ooSectionLabel(context)),
         const SizedBox(height: 6),
-        if (widget.operation.actions.isEmpty)
-          Text('No actions granted', style: TextStyle(color: tokens.muted))
-        else
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final action in widget.operation.actions)
-                Chip(label: Text(action), visualDensity: VisualDensity.compact),
-            ],
-          ),
+        OoAccessSummary(widget.operation.actions),
         const SizedBox(height: 20),
         Text('MISSIONS', style: ooSectionLabel(context)),
         const SizedBox(height: 6),

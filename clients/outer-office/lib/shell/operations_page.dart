@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../access/access_words.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
@@ -292,11 +293,11 @@ class _OperationCard extends StatelessWidget {
             ],
             const SizedBox(height: 10),
             Text(
-              operation.actions.isEmpty
-                  ? 'No actions granted'
-                  : 'Your access: ${operation.actions.join(', ')}',
-              style: text.bodySmall?.copyWith(color: tokens.muted),
+              'Your access',
+              style: text.labelMedium?.copyWith(color: tokens.muted),
             ),
+            const SizedBox(height: 2),
+            OoAccessSummary(operation.actions),
           ],
         ),
       ),

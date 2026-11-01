@@ -427,7 +427,8 @@ void main() {
       );
       expect(find.text('Operation G'), findsOneWidget);
       expect(find.text('0 of 1 Mission done'), findsOneWidget);
-      expect(find.text('mission.read'), findsOneWidget);
+      expect(find.textContaining('Missions: '), findsOneWidget);
+      expect(find.byTooltip('mission.read, mission.control'), findsOneWidget);
       expect(find.text('1 held brief'), findsOneWidget);
       expect(find.text('1 Mission proposal'), findsOneWidget);
       expect(

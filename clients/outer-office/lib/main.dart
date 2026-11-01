@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guatiao/guatiao.dart' as guatiao;
 
 import 'access/access_page.dart';
+import 'access/access_words.dart';
 import 'agents/agents_page.dart';
 import 'assistant/assistant_controller.dart';
 import 'assistant/chat_layout.dart';
@@ -5108,15 +5109,22 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                               ),
                             ],
                             const SizedBox(height: 10),
-                            const Text('Effective actions by Operation'),
+                            const Text('Your access by Operation'),
                             if (account.operations.isEmpty)
                               const Text('No AI6 actions are granted.')
                             else
                               for (final operation in account.operations)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 8),
-                                  child: Text(
-                                    '${operation.operationId}: ${operation.actions.join(', ')}',
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Operation ${operation.operationId}',
+                                      ),
+                                      OoAccessSummary(operation.actions),
+                                    ],
                                   ),
                                 ),
                           ],

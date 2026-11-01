@@ -1403,11 +1403,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Person ID: operator-007'), findsOneWidget);
-    expect(find.text('Effective actions by Operation'), findsOneWidget);
-    expect(
-      find.text('operation-alpha: mission.read, session.read'),
-      findsOneWidget,
-    );
+    expect(find.text('Your access by Operation'), findsOneWidget);
+    expect(find.byTooltip('mission.read'), findsOneWidget);
+    expect(find.byTooltip('session.read'), findsOneWidget);
     await tester.ensureVisible(find.text('Light'));
     await tester.tap(find.text('Light'));
     await tester.pumpAndSettle();
