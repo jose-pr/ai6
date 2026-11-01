@@ -37,6 +37,7 @@ MissionBoard _board(FakeChannel channel, List<http.BaseRequest> requests) {
   board.loading = false;
   board.userSession = const UserSessionSummary(
     personId: 'ana',
+    moneypenny: true,
     name: 'ana',
     displayName: 'Ana Ortiz',
     groups: ['operators'],

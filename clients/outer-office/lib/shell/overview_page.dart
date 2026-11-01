@@ -44,7 +44,7 @@ class OverviewPage extends StatelessWidget {
   /// Opens the page an attention item points to, with its filters.
   final ValueChanged<OoRoute> onRoute;
 
-  /// The conversation with Moneypenny; null in the demo and before sign-in.
+  /// The conversation with Moneypenny; null where she is not served, and her card goes too.
   final AssistantController? assistant;
 
   /// Opens Moneypenny's chat and asks her the text.
@@ -187,13 +187,16 @@ class OverviewPage extends StatelessWidget {
       missions: missions,
       onOpen: (page) => pages.contains(page) ? () => onOpen(page) : null,
     );
-    final moneypenny = _MoneypennyCard(
-      board: board,
-      assistant: assistant,
-      onAsk: onAsk,
-      waiting: attention.length,
-      covered: gaps == null,
-    );
+    final moneypenny = switch ((assistant, onAsk)) {
+      (final assistant?, final onAsk?) => _MoneypennyCard(
+        board: board,
+        assistant: assistant,
+        onAsk: onAsk,
+        waiting: attention.length,
+        covered: gaps == null,
+      ),
+      _ => null,
+    };
     final gap = phone ? 12.0 : 16.0;
     final side = width >= 1000;
     final threeColumns = width >= 1080;
@@ -250,14 +253,15 @@ class OverviewPage extends StatelessWidget {
                   Expanded(child: activity),
                   SizedBox(width: gap),
                   Expanded(child: upcoming),
-                  SizedBox(width: gap),
-                  Expanded(child: moneypenny),
+                  if (moneypenny != null) ...[
+                    SizedBox(width: gap),
+                    Expanded(child: moneypenny),
+                  ],
                 ],
               ),
             )
           else ...[
-            moneypenny,
-            SizedBox(height: gap),
+            if (moneypenny != null) ...[moneypenny, SizedBox(height: gap)],
             activity,
             SizedBox(height: gap),
             upcoming,
@@ -862,8 +866,8 @@ class _UpcomingRow extends StatelessWidget {
 }
 
 /// Moneypenny on Overview: her portrait, a greeting with what needs the person, quick
-/// questions and a field; each opens her chat and asks. Without a conversation (the demo,
-/// before sign-in) they are disabled and the card says why.
+/// questions and a field; each opens her chat and asks. She greets only once her socket says
+/// she is there; until then the card says it is connecting, or that it failed, with a retry.
 class _MoneypennyCard extends StatefulWidget {
   const _MoneypennyCard({
     required this.board,
@@ -874,8 +878,8 @@ class _MoneypennyCard extends StatefulWidget {
   });
 
   final MissionBoard board;
-  final AssistantController? assistant;
-  final ValueChanged<String>? onAsk;
+  final AssistantController assistant;
+  final ValueChanged<String> onAsk;
 
   /// Whether every attention source was read: only then may she say nothing needs them.
   final bool covered;
@@ -891,6 +895,18 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
   final _message = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    widget.assistant.open();
+  }
+
+  @override
+  void didUpdateWidget(_MoneypennyCard old) {
+    super.didUpdateWidget(old);
+    if (old.assistant != widget.assistant) widget.assistant.open();
+  }
+
+  @override
   void dispose() {
     _message.dispose();
     super.dispose();
@@ -898,15 +914,19 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
 
   void _ask(String text) {
     if (text.trim().isEmpty) return;
-    widget.onAsk?.call(text.trim());
+    widget.onAsk(text.trim());
     _message.clear();
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      ListenableBuilder(listenable: widget.assistant, builder: _card);
+
+  Widget _card(BuildContext context, Widget? _) {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
-    final enabled = widget.assistant != null && widget.onAsk != null;
+    final assistant = widget.assistant;
+    final enabled = assistant.connected;
     final hour = DateTime.now().hour;
     final part = hour < 12
         ? 'morning'
@@ -921,16 +941,20 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
             .trim()
             .split(RegExp(r'\s+'))
             .first;
-    final greeting = [
-      'Good $part${name.isEmpty ? '' : ', $name'}.',
-      switch (widget.waiting) {
-        0 when !widget.covered => 'Nothing found in what loaded.',
-        0 => 'Nothing needs your attention right now.',
-        1 => 'One item needs your attention.',
-        final count => '$count items need your attention.',
-      },
-      if (enabled) 'What would you like to know?',
-    ].join(' ');
+    final greeting = !enabled
+        ? assistant.connecting
+              ? 'Connecting to Moneypenny…'
+              : assistant.problem ?? 'Moneypenny is not connected.'
+        : [
+            'Good $part${name.isEmpty ? '' : ', $name'}.',
+            switch (widget.waiting) {
+              0 when !widget.covered => 'Nothing found in what loaded.',
+              0 => 'Nothing needs your attention right now.',
+              1 => 'One item needs your attention.',
+              final count => '$count items need your attention.',
+            },
+            'What would you like to know?',
+          ].join(' ');
     return OoPanel(
       title: 'MONEYPENNY',
       child: Column(
@@ -998,13 +1022,14 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
               ),
             ),
           ),
-          if (!enabled) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Moneypenny answers once you are signed in.',
-              style: text.bodySmall?.copyWith(color: tokens.muted),
+          if (!enabled && !assistant.connecting)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: assistant.retry,
+                child: const Text('Try again'),
+              ),
             ),
-          ],
         ],
       ),
     );

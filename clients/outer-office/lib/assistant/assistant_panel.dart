@@ -217,8 +217,10 @@ class _AssistantPanelState extends State<AssistantPanel> {
                           ),
                         ),
                         Text(
-                          !controller.connected
+                          controller.connecting
                               ? 'Connecting…'
+                              : !controller.connected
+                              ? 'Not connected'
                               : controller.stopping
                               ? 'Stopping…'
                               : controller.busy
@@ -347,9 +349,23 @@ class _AssistantPanelState extends State<AssistantPanel> {
           if (controller.problem != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              child: Text(
-                controller.problem!,
-                style: TextStyle(color: theme.colorScheme.error),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        controller.problem!,
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                    ),
+                  ),
+                  if (!controller.connected && !controller.connecting)
+                    TextButton(
+                      onPressed: controller.retry,
+                      child: const Text('Try again'),
+                    ),
+                ],
               ),
             ),
           _column(

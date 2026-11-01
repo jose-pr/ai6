@@ -131,6 +131,9 @@ class OoConfig {
                 'OO.cfg: chat.transition_ms is not a whole number of 0 or more',
               ),
             },
+      connectTimeout: number(chatTable, 'connect_timeout') == null
+          ? defaults.connectTimeout
+          : _seconds(number(chatTable, 'connect_timeout')!),
     );
     if (chat.minWidth > chat.maxWidth ||
         chat.width < chat.minWidth ||
@@ -476,7 +479,10 @@ class ChatSettings {
     this.windowWidth = 520,
     this.windowHeight = 760,
     this.transitionMs = 200,
+    this.connectTimeout = defaultConnectTimeout,
   });
+
+  static const defaultConnectTimeout = Duration(seconds: 10);
 
   /// The table's keys, in the order above.
   static const keys = {
@@ -489,6 +495,7 @@ class ChatSettings {
     'window_width',
     'window_height',
     'transition_ms',
+    'connect_timeout',
   };
 
   /// `min_width`, `max_width`: how narrow and wide the docked chat may be dragged.
@@ -514,6 +521,10 @@ class ChatSettings {
   /// `transition_ms`: how long the chat takes to move; none when the system asks for no
   /// animations.
   final int transitionMs;
+
+  /// `connect_timeout`: how long, in seconds, her socket may take to say it is ready before
+  /// the chat says it failed and offers to try again.
+  final Duration connectTimeout;
 
   /// [width] kept between [minWidth] and [maxWidth].
   double clamp(double width) => width.clamp(minWidth, maxWidth);

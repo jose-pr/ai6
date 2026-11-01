@@ -47,6 +47,7 @@ MissionBoard signedIn(FakeChannel channel) {
   board.loading = false;
   board.userSession = const UserSessionSummary(
     personId: 'ana',
+    moneypenny: true,
     name: 'ana',
     displayName: 'Ana Ortiz',
     groups: ['operators'],
@@ -217,8 +218,9 @@ void main() {
     });
   });
 
-  testWidgets('without a conversation the Overview card is disabled and says '
-      'why', (tester) async {
+  testWidgets('without a conversation the Overview has no card for her', (
+    tester,
+  ) async {
     await atSize(tester, const Size(1400, 900));
     final board = signedIn(FakeChannel());
     addTearDown(board.dispose);
@@ -234,13 +236,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'), findsNothing);
-    final chip = tester.widget<ActionChip>(
-      find.widgetWithText(ActionChip, 'Summarise the board'),
-    );
-    expect(chip.onPressed, isNull);
+    expect(find.text('MONEYPENNY'), findsNothing);
     expect(
-      find.text('Moneypenny answers once you are signed in.'),
-      findsOneWidget,
+      find.widgetWithText(ActionChip, 'Summarise the board'),
+      findsNothing,
     );
   });
 

@@ -1121,6 +1121,9 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   /// Operations whose account pools this account may read (`pool.read`).
   List<String> get poolOperations => _operationsWith('pool.read');
 
+  /// Whether Moneypenny is on this deployment, once the profile has said so.
+  bool get moneypennyServed => demo || (userSession?.moneypenny ?? false);
+
   /// Whether the person may read the roster every Station reads.
   bool get canReadRoster =>
       demo || (userSession?.roster.contains('roster.read') ?? false);
@@ -1901,7 +1904,15 @@ class MissionBoard extends ChangeNotifier implements PageActions {
         );
       }
       if (accessToken != token) return;
-      error = failed ? 'Could not load Stations from Universal Exports.' : null;
+      // What is not read this time still counts: its last read failed, and the page says so.
+      final down = gaps(const [
+        BoardSource.board,
+        BoardSource.missions,
+        BoardSource.stations,
+      ]).any((source) => freshness(source) != OoFreshness.loading);
+      error = failed || down
+          ? 'Could not load Stations from Universal Exports.'
+          : null;
     } on Object {
       error = 'Could not load Stations from Universal Exports.';
     } finally {
@@ -2777,6 +2788,7 @@ class UserSessionSummary {
     this.stations = const [],
     this.roster = const [],
     this.globalActions = const [],
+    this.moneypenny = false,
   });
 
   final String personId;
@@ -2792,6 +2804,9 @@ class UserSessionSummary {
 
   /// The person's actions on the global access policy and the accounts.
   final List<String> globalActions;
+
+  /// Whether this gateway serves Moneypenny; the app offers her only when it does.
+  final bool moneypenny;
 
   factory UserSessionSummary.fromJson(Map<String, dynamic> json) =>
       UserSessionSummary(
@@ -2816,6 +2831,7 @@ class UserSessionSummary {
         roster: (json['roster'] as List<dynamic>? ?? const []).cast<String>(),
         globalActions: (json['global_actions'] as List<dynamic>? ?? const [])
             .cast<String>(),
+        moneypenny: json['moneypenny'] as bool? ?? false,
       );
 }
 
@@ -3349,12 +3365,12 @@ class _AccessGateState extends State<_AccessGate> {
     super.dispose();
   }
 
-  /// The conversation with Moneypenny for the signed-in token: made at sign-in, replaced
-  /// when the token changes, gone at sign-out. The preview gets the scripted sample
-  /// conversation, which reaches no network, and nothing else does.
+  /// The conversation with Moneypenny for the signed-in token: made once the profile says this
+  /// gateway serves her, replaced when the token changes, gone at sign-out. The preview gets
+  /// the scripted sample conversation, which reaches no network, and nothing else does.
   MoneypennyChat? _chatFor(MissionBoard board) {
     final token = board.demo ? 'demo' : board.accessToken;
-    if (token == null) {
+    if (token == null || !board.moneypennyServed) {
       _drop();
       return null;
     }
@@ -3366,6 +3382,7 @@ class _AccessGateState extends State<_AccessGate> {
         connect: board.demo
             ? DemoAssistantChannel.new
             : board.assistantChannel ?? () => connectAssistant(board.apiOrigin),
+        connectTimeout: widget.chatSettings.connectTimeout,
       ),
       label: board.demo ? demoConversationLabel : null,
       preferences: ChatPreferences(SharedPreferences.getInstance()),
@@ -3851,14 +3868,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                 icon: const Icon(Icons.link),
               ),
             ),
-          if (chat != null)
-            MoneypennyButton(chat: chat)
-          else
-            const IconButton(
-              tooltip: 'Moneypenny answers once you are signed in',
-              onPressed: null,
-              icon: OoIcon(OoIconName.moneypenny),
-            ),
+          if (chat != null) MoneypennyButton(chat: chat),
           AnimatedBuilder(
             animation: widget.board,
             builder: (context, _) => AttentionBell(
@@ -3869,7 +3879,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           ),
           if (!phone)
             IconButton(
-              tooltip: 'Appearance settings',
+              tooltip: 'Settings',
               onPressed: () => _showAppearance(context, widget.board),
               icon: const OoIcon(OoIconName.settings),
             ),
@@ -5150,7 +5160,7 @@ Future<void> _showAppearance(BuildContext context, MissionBoard board) =>
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Appearance'),
+        title: const Text('Settings'),
         content: SizedBox(
           width: 440,
           child: SingleChildScrollView(
@@ -5176,13 +5186,32 @@ class _ThemeChooser extends StatelessWidget {
   final MissionBoard board;
 
   @override
-  Widget build(BuildContext context) => OoAppearanceChooser(
-    themeId: board.themeId,
-    backdrop: board.backdrop,
-    onTheme: board.setThemeId,
-    onBackdrop: board.setBackdrop,
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      OoAppearanceChooser(
+        themeId: board.themeId,
+        backdrop: board.backdrop,
+        onTheme: board.setThemeId,
+        onBackdrop: board.setBackdrop,
+      ),
+      if (board.userSession != null && !board.moneypennyServed) ...[
+        const SizedBox(height: 18),
+        Text(
+          moneypennyOffNote,
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: OoTokens.of(context).muted),
+        ),
+      ],
+    ],
   );
 }
+
+/// What Settings says on a deployment that does not serve Moneypenny.
+const moneypennyOffNote =
+    'Moneypenny is off on this deployment. Whoever runs its Universal Exports can turn her '
+    'on (assistant in unex.cfg).';
 
 /// Asks the gateway where a Mission for an Operation would run and shows the
 /// reason for every Station, Theater or Agent it would not.

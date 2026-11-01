@@ -460,6 +460,7 @@ void main() {
     final ben = signedIn(benChannel)
       ..userSession = const UserSessionSummary(
         personId: 'ben',
+        moneypenny: true,
         name: 'ben',
         displayName: 'Ben Lee',
         groups: [],

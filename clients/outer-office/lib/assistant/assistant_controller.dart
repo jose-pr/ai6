@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../routes/oo_route.dart';
+import '../settings/oo_config.dart' show ChatSettings;
 import 'assistant_view.dart' show ViewLimits;
 
 /// A text channel to Universal Exports' Moneypenny socket; tests give a fake one.
@@ -15,7 +16,11 @@ abstract interface class AssistantChannel {
 }
 
 class _SocketChannel implements AssistantChannel {
-  _SocketChannel(this._socket);
+  _SocketChannel(this._socket) {
+    // A failed connection also fails `ready`; [incoming] reports it, and left alone this
+    // future would be an uncaught error.
+    unawaited(_socket.ready.catchError((Object _) {}));
+  }
 
   final WebSocketChannel _socket;
 
@@ -27,7 +32,13 @@ class _SocketChannel implements AssistantChannel {
   void send(String frame) => _socket.sink.add(frame);
 
   @override
-  Future<void> close() => _socket.sink.close();
+  Future<void> close() async {
+    try {
+      await _socket.sink.close();
+    } on Object {
+      // Closing a socket that never opened has nothing to report.
+    }
+  }
 }
 
 /// `/v1/user/moneypenny` on the gateway's origin, as a WebSocket URL.
@@ -79,11 +90,16 @@ class AssistantController extends ChangeNotifier {
   AssistantController({
     required this.token,
     required AssistantChannel Function() connect,
+    this.connectTimeout = ChatSettings.defaultConnectTimeout,
   }) : _openChannel = connect;
 
   /// The person's access token, sent in the socket's first frame only.
   final String token;
   final AssistantChannel Function() _openChannel;
+
+  /// How long the socket may take to say it is ready before the attempt counts as failed.
+  final Duration connectTimeout;
+  Timer? _connecting;
 
   AssistantChannel? _channel;
   StreamSubscription<String>? _subscription;
@@ -115,6 +131,9 @@ class AssistantController extends ChangeNotifier {
   bool connected = false;
   String? problem;
 
+  /// A socket is open or opening and has not said it is ready: neither connected nor failed.
+  bool get connecting => _channel != null && !connected;
+
   final _arrivals = StreamController<AssistantEntry>.broadcast(sync: true);
 
   /// Each entry as it arrives while the conversation is open; not those a reconnect sends
@@ -127,13 +146,24 @@ class AssistantController extends ChangeNotifier {
   /// Opens the socket and says hello, resuming the last conversation when there is one.
   void open() {
     if (_channel != null) return;
-    final channel = _openChannel();
+    problem = null;
+    final AssistantChannel channel;
+    try {
+      channel = _openChannel();
+    } on Object {
+      problem = 'The connection to Moneypenny failed.';
+      return;
+    }
     _channel = channel;
     _subscription = channel.incoming.listen(
       _receive,
       onError: (Object _) => _closed('The connection to Moneypenny failed.'),
       onDone: () => _closed(null),
     );
+    _connecting = Timer(connectTimeout, () {
+      unawaited(channel.close());
+      _closed('Moneypenny did not answer.');
+    });
     channel.send(
       jsonEncode({
         'type': 'hello',
@@ -143,14 +173,22 @@ class AssistantController extends ChangeNotifier {
     );
   }
 
+  /// Tries the socket again after it failed; a message asked meanwhile is still sent.
+  void retry() {
+    open();
+    notifyListeners();
+  }
+
   void _closed(String? why) {
+    _connecting?.cancel();
+    _connecting = null;
     _subscription?.cancel();
     _subscription = null;
     _channel = null;
     connected = false;
     busy = false;
     stopping = false;
-    problem = why ?? problem;
+    problem = why ?? problem ?? 'The connection to Moneypenny closed.';
     notifyListeners();
   }
 
@@ -163,6 +201,8 @@ class AssistantController extends ChangeNotifier {
     }
     switch (message['type']) {
       case 'ready':
+        _connecting?.cancel();
+        _connecting = null;
         connected = true;
         problem = null;
         conversationId = message['conversation'] as String?;
@@ -271,6 +311,7 @@ class AssistantController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _connecting?.cancel();
     _subscription?.cancel();
     unawaited(_arrivals.close());
     unawaited(_channel?.close());

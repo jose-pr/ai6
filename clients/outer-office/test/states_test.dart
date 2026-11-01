@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/controls/mission_actions.dart';
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/oo_freshness.dart';
@@ -13,6 +15,24 @@ import 'package:outer_office/shell/top_bar.dart';
 import 'routes_test.dart' show locations;
 
 const _jsonHeaders = {'content-type': 'application/json'};
+
+/// A Moneypenny socket that says it is ready, so her field on Overview takes typing.
+class ReadyChannel implements AssistantChannel {
+  ReadyChannel() {
+    _incoming.add(jsonEncode({'type': 'ready', 'entries': <Object>[]}));
+  }
+
+  final _incoming = StreamController<String>();
+
+  @override
+  Stream<String> get incoming => _incoming.stream;
+
+  @override
+  void send(String frame) {}
+
+  @override
+  Future<void> close() => _incoming.close();
+}
 
 /// A gateway with one Operation, one working Session, one held brief and one green ink
 /// request waiting, which each test turns into the failure it needs. Every request is kept in
@@ -101,6 +121,7 @@ class Gateway {
           },
         ],
         'stations': <Object>[],
+        'moneypenny': true,
       });
     }
     if (path == '$actions/held-briefs') {
@@ -154,6 +175,7 @@ Future<MissionBoard> signedIn(Gateway gateway) async {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
+    assistantChannel: ReadyChannel.new,
     client: MockClient(gateway.handle),
   );
   await board.login('operator', 'secret');
