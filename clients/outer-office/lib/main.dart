@@ -36,6 +36,7 @@ import 'settings/connection_settings.dart';
 import 'settings/oo_config.dart';
 import 'settings/oo_config_file.dart';
 import 'shell/app_window.dart';
+import 'shell/board_reads.dart';
 import 'shell/oo_shell.dart';
 import 'operations/operation_tree.dart';
 import 'shell/operations_page.dart';
@@ -351,7 +352,8 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     unawaited(refresh());
     final every = pollInterval;
     if (every != null) {
-      _poll = Timer.periodic(every, (_) => unawaited(refresh()));
+      _cadence = BoardCadence(every: every, settings: limits.refresh);
+      _poll = Timer.periodic(every, (_) => _tick());
     }
   }
 
@@ -372,6 +374,16 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   final AssistantChannel Function()? assistantChannel;
   final http.Client _client;
   Timer? _poll;
+
+  /// What the timer reads and when; null with no [pollInterval].
+  BoardCadence? _cadence;
+
+  /// Whether the timer's last read is still out: a slow link gets no second one on top.
+  bool _reading = false;
+
+  /// Whether the tab or window can be seen; hidden, the board and the pages' own timers back
+  /// off (`[refresh] hidden`).
+  bool visible = true;
   List<SessionSummary> sessions = const [];
   List<MissionBriefSummary> missionBriefs = const [];
 
@@ -1801,20 +1813,83 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     }
   }
 
-  /// Reads the board again. Each source settles on its own: a failed read keeps that
-  /// source's last data and marks it stale, a 403 hides it, and a 401 ends the sign-in.
+  /// The timer: reads what the page shown needs now.
+  void _tick() {
+    if (demo || accessToken == null || _reading) return;
+    final cadence = _cadence!;
+    final now = ooClock();
+    final due = cadence.due(now);
+    if (due.isEmpty) return;
+    cadence.read(due, now);
+    _reading = true;
+    unawaited(_read(due).whenComplete(() => _reading = false));
+  }
+
+  /// Says which page is shown, so the timer reads what it displays; what it wants and has not
+  /// read lately is read now.
+  void showPage(OoPage page) {
+    final cadence = _cadence;
+    if (cadence == null || cadence.page == page) return;
+    cadence.page = page;
+    _catchUp();
+  }
+
+  /// Says whether the tab or window can be seen; on coming back, what the page shows is read
+  /// now.
+  void setVisible(bool visible) {
+    if (this.visible == visible) return;
+    this.visible = visible;
+    _cadence?.visible = visible;
+    if (visible) _catchUp();
+  }
+
+  void _catchUp() {
+    final cadence = _cadence;
+    if (cadence == null || demo || accessToken == null) return;
+    final now = ooClock();
+    final due = cadence.catchUp(now);
+    if (due.isEmpty) return;
+    cadence.read(due, now);
+    unawaited(_read(due));
+  }
+
+  /// Reads the whole board again, as after a change the person made. Each source settles on its
+  /// own: a failed read keeps that source's last data and marks it stale, a 403 hides it, and a
+  /// 401 ends the sign-in.
   Future<void> refresh() async {
+    final now = ooClock();
+    final slow = limits.refresh.slow;
+    final reads = {
+      BoardRead.board,
+      BoardRead.missions,
+      BoardRead.stations,
+      BoardRead.profile,
+      BoardRead.heldBriefs,
+      if (_slowAt == null ||
+          slow == null ||
+          now.difference(_slowAt!) >= slow) ...{
+        BoardRead.proposals,
+        BoardRead.greenInk,
+      },
+    };
+    _cadence?.read(reads, now);
+    await _read(reads);
+  }
+
+  Future<void> _read(Set<BoardRead> reads) async {
     final token = accessToken;
     if (demo || token == null) {
       notifyListeners();
       return;
     }
     try {
+      Future<http.Response?> core(BoardRead read, String path) =>
+          reads.contains(read) ? _core(path) : Future<http.Response?>.value();
       final responses = await Future.wait([
-        _core('/v1/board'),
-        _core('/v1/missions'),
-        _core('/v1/stations'),
-        _core('/v1/user/profile'),
+        core(BoardRead.board, '/v1/board'),
+        core(BoardRead.missions, '/v1/missions'),
+        core(BoardRead.stations, '/v1/stations'),
+        core(BoardRead.profile, '/v1/user/profile'),
       ]);
       if (accessToken != token) return;
       if (responses.any((response) => response?.statusCode == 401)) {
@@ -1841,63 +1916,76 @@ class MissionBoard extends ChangeNotifier implements PageActions {
         _failed(source, forbidden: response?.statusCode == 403);
       }
 
-      settle(BoardSource.board, responses[0], (body) {
-        sessions = (jsonDecode(body) as List<dynamic>)
-            .map(
-              (item) => SessionSummary.fromJson(item as Map<String, dynamic>),
-            )
-            .toList(growable: false);
-      });
-      settle(BoardSource.missions, responses[1], (body) {
-        final missions = jsonDecode(body) as List<dynamic>;
-        missionBriefs = missions
-            .map(
-              (item) => MissionBriefSummary.fromMissionJson(
-                item as Map<String, dynamic>,
-              ),
-            )
-            .whereType<MissionBriefSummary>()
-            .toList(growable: false);
-        missionAttempts = {
-          for (final item in missions.cast<Map<String, dynamic>>())
-            (item['operation_id'] as String, item['mission_id'] as String): [
-              for (final attempt
-                  in (item['attempts'] as List<dynamic>? ?? const []))
-                MissionAttemptSummary.fromJson(attempt as Map<String, dynamic>),
-            ],
-        };
-      });
-      settle(BoardSource.stations, responses[2], (body) {
-        stationBoard = StationBoardSummary.fromJson(
-          jsonDecode(body) as Map<String, dynamic>,
-        );
-      });
-      final profile = responses[3];
-      if (profile?.statusCode == 200) {
-        try {
-          userSession = UserSessionSummary.fromJson(
-            jsonDecode(profile!.body) as Map<String, dynamic>,
+      if (reads.contains(BoardRead.board)) {
+        settle(BoardSource.board, responses[0], (body) {
+          sessions = (jsonDecode(body) as List<dynamic>)
+              .map(
+                (item) => SessionSummary.fromJson(item as Map<String, dynamic>),
+              )
+              .toList(growable: false);
+        });
+      }
+      if (reads.contains(BoardRead.missions)) {
+        settle(BoardSource.missions, responses[1], (body) {
+          final missions = jsonDecode(body) as List<dynamic>;
+          missionBriefs = missions
+              .map(
+                (item) => MissionBriefSummary.fromMissionJson(
+                  item as Map<String, dynamic>,
+                ),
+              )
+              .whereType<MissionBriefSummary>()
+              .toList(growable: false);
+          missionAttempts = {
+            for (final item in missions.cast<Map<String, dynamic>>())
+              (item['operation_id'] as String, item['mission_id'] as String): [
+                for (final attempt
+                    in (item['attempts'] as List<dynamic>? ?? const []))
+                  MissionAttemptSummary.fromJson(
+                    attempt as Map<String, dynamic>,
+                  ),
+              ],
+          };
+        });
+      }
+      if (reads.contains(BoardRead.stations)) {
+        settle(BoardSource.stations, responses[2], (body) {
+          stationBoard = StationBoardSummary.fromJson(
+            jsonDecode(body) as Map<String, dynamic>,
           );
-        } on Object {
+        });
+      }
+      if (reads.contains(BoardRead.profile)) {
+        final profile = responses[3];
+        if (profile?.statusCode == 200) {
+          try {
+            userSession = UserSessionSummary.fromJson(
+              jsonDecode(profile!.body) as Map<String, dynamic>,
+            );
+          } on Object {
+            failed = true;
+          }
+        } else {
           failed = true;
         }
-      } else {
-        failed = true;
       }
-      heldBriefs = _settle(
-        BoardSource.heldBriefs,
-        await _sweep(proposalOperations, loadHeldBriefs),
-        heldBriefs,
-      );
-      final now = ooClock();
-      final slow = limits.refresh.slow;
-      if (_slowAt == null || slow == null || now.difference(_slowAt!) >= slow) {
-        _slowAt = now;
+      if (reads.contains(BoardRead.heldBriefs)) {
+        heldBriefs = _settle(
+          BoardSource.heldBriefs,
+          await _sweep(proposalOperations, loadHeldBriefs),
+          heldBriefs,
+        );
+      }
+      if (reads.contains(BoardRead.proposals)) {
+        _slowAt = ooClock();
         missionProposals = _settle(
           BoardSource.proposals,
           await _loadAllProposals(),
           missionProposals,
         );
+      }
+      if (reads.contains(BoardRead.greenInk)) {
+        _slowAt = ooClock();
         greenInkRequests = _settle(
           BoardSource.greenInk,
           await _sweep(greenInkOperations, loadGreenInk),
@@ -1933,6 +2021,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
 
   void _clearBoard() {
     accessToken = null;
+    _cadence?.forget();
     sessions = const [];
     missionBriefs = const [];
     missionAttempts = const {};
@@ -3295,7 +3384,23 @@ class OuterOfficeApp extends StatefulWidget {
   State<OuterOfficeApp> createState() => _OuterOfficeAppState();
 }
 
-class _OuterOfficeAppState extends State<OuterOfficeApp> {
+class _OuterOfficeAppState extends State<OuterOfficeApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  // On the web these follow the page's visibility: a tab in the background is `hidden`, and a
+  // window merely behind another stays `inactive`, still shown.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      widget.board.setVisible(switch (state) {
+        AppLifecycleState.resumed || AppLifecycleState.inactive => true,
+        _ => false,
+      });
+
   late final OoRouterDelegate _router = OoRouterDelegate(
     shell: (context, router) => _AccessGate(
       board: widget.board,
@@ -3323,6 +3428,7 @@ class _OuterOfficeAppState extends State<OuterOfficeApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _router.dispose();
     _location.dispose();
     super.dispose();
@@ -3832,6 +3938,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     final route = pages.contains(widget.route.page)
         ? widget.route
         : const OoRoute(OoPage.overview);
+    widget.board.showPage(route.page);
     final chat = widget.chat;
     final width = MediaQuery.sizeOf(context).width;
     final phone = width < OoBreakpoints.phone;

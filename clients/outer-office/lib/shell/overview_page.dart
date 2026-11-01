@@ -548,7 +548,9 @@ class _RecentActivityState extends State<_RecentActivity> {
     super.initState();
     unawaited(_load());
     if (widget.every case final every?) {
-      _timer = Timer.periodic(every, (_) => unawaited(_load()));
+      _timer = Timer.periodic(every, (_) {
+        if (widget.board.visible) unawaited(_load());
+      });
     }
   }
 

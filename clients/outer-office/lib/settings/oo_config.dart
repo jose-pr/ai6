@@ -194,6 +194,8 @@ class RefreshSettings {
     this.timeline = defaultTimeline,
     this.pools = defaultPools,
     this.slow = defaultSlow,
+    this.profile = defaultProfile,
+    this.hidden = defaultHidden,
     this.silentIntervals = defaultSilentIntervals,
   });
 
@@ -202,6 +204,8 @@ class RefreshSettings {
   static const defaultTimeline = Duration(seconds: 10);
   static const defaultPools = Duration(seconds: 15);
   static const defaultSlow = Duration(seconds: 15);
+  static const defaultProfile = Duration(seconds: 60);
+  static const defaultHidden = Duration(seconds: 60);
   static const defaultSilentIntervals = 3;
 
   static const keys = {
@@ -210,10 +214,13 @@ class RefreshSettings {
     'timeline',
     'pools',
     'slow',
+    'profile',
+    'hidden',
     'silent_intervals',
   };
 
-  /// `sessions`: the board of Sessions, Stations and Missions.
+  /// `sessions`: what the page shown displays from the board of Sessions, Stations and
+  /// Missions.
   final Duration? sessions;
 
   /// `overview`: the overview's activity.
@@ -225,9 +232,18 @@ class RefreshSettings {
   /// `pools`: the account pools.
   final Duration? pools;
 
-  /// `slow`: the green ink requests and Mission proposals the board reads, which change
-  /// slowly; `null` (0) reads them with every refresh.
+  /// `slow`: what the page shown does not display but the bell and the search need: Sessions,
+  /// Stations, held briefs, green ink requests and Mission proposals; `null` (0) reads them
+  /// with every refresh.
   final Duration? slow;
+
+  /// `profile`: who the person is and what they may do, which changes rarely; `null` (0) reads
+  /// it only at sign-in and when the operator menu opens.
+  final Duration? profile;
+
+  /// `hidden`: everything, while the tab or window cannot be seen; `null` (0) reads nothing
+  /// until it can.
+  final Duration? hidden;
 
   /// `silent_intervals`: a Station that has not checked in for this many refresh intervals
   /// (of `sessions`) is shown as silent.
@@ -420,6 +436,8 @@ class OoLimits {
         timeline: refresh(refreshTable, 'timeline', refreshDefaults.timeline!),
         pools: refresh(refreshTable, 'pools', refreshDefaults.pools!),
         slow: refresh(refreshTable, 'slow', refreshDefaults.slow!),
+        profile: refresh(refreshTable, 'profile', refreshDefaults.profile!),
+        hidden: refresh(refreshTable, 'hidden', refreshDefaults.hidden!),
         silentIntervals:
             whole(refreshTable, 'refresh', 'silent_intervals') ??
             refreshDefaults.silentIntervals,

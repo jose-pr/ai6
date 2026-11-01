@@ -160,7 +160,9 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
     super.initState();
     unawaited(_load());
     if (widget.refreshEvery case final every?) {
-      _timer = Timer.periodic(every, (_) => unawaited(_load()));
+      _timer = Timer.periodic(every, (_) {
+        if (widget.board.visible) unawaited(_load());
+      });
     }
   }
 

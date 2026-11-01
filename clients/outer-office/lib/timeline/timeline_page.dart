@@ -146,7 +146,9 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
     _missionFilter.text = _mission ?? '';
     unawaited(_reload());
     if (widget.refreshEvery case final every?) {
-      _timer = Timer.periodic(every, (_) => unawaited(_refresh()));
+      _timer = Timer.periodic(every, (_) {
+        if (widget.board.visible) unawaited(_refresh());
+      });
     }
   }
 
