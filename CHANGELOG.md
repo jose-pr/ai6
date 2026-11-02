@@ -225,6 +225,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A program the `pipe` terminal starts outlives the thread that asked for it. The Grok CLI asks to
+  be signalled when the thread that started it ends, which ended Moneypenny's harness on Linux with
+  "the agent closed its connection" as soon as her first prompt was sent.
+- Moneypenny's resume gets her Agent's `handler_settings`: on the `acp` handler it failed for want
+  of a `command`, and every message started afresh from the recap.
+- A message or a Stop reaches her harness while the Station waits on its output, rather than when
+  the harness next writes something or closes for being idle.
+- An `acp` Session lost to its agent's death says how the process ended and what it last wrote.
+- An interrupted turn on the `acp` handler ends as an interrupted turn. A turn the agent cancels
+  by itself, as Grok does when a tool is refused, no longer leaves Moneypenny's answer waiting: the
+  conversation says why and takes the next message.
+- A restricted `acp` Session refuses every permission request but reading and the tools of its own
+  MCP servers. It used to grant the kind `other`, which is how Grok reports `monitor`, a tool that
+  runs any command.
+
 - **Security.** An ACP permission request AI6 cannot decide is refused, not answered with an error: one
   that does not parse, a decision that cannot start or an answer that cannot be written now answers
   outcome `cancelled` with a `blocked` event saying why. The Claude ACP adapter 0.99.1 has been seen to

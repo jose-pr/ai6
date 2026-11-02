@@ -19,6 +19,7 @@ pub struct AcpSettings {
     pub start_timeout_ms: u64,                  // 60000
     pub close_grace_ms: u64,                    // 2000
     pub diagnostic_lines: usize,                // 20
+    pub exit_wait_ms: i64,                      // 1000
     pub poll_ms: i64,                           // 200
     pub unconfined_desk: bool,                  // false
 }
@@ -34,10 +35,15 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
   and the task; `resume` uses `session/resume`, else `session/load`, else fails.
 - MCP servers: `AI6_CABLE_MCP_{URL,TOKEN}` and an assistant's `<prefix>_{URL,TOKEN}` become HTTP
   `mcpServers`; `AI6_THEATER_MCP_URL` (remote hands) is refused.
-- Permissions: `GateDecider` (green ink); restricted Sessions refuse edit/delete/move/execute.
+- Permissions: `GateDecider` (green ink); restricted Sessions refuse all but reading and the tools
+  of their own MCP servers. A tool the agent runs without asking is out of reach of this: on Grok
+  an agent profile takes those away (`docs/acp.md`).
 - Clearance: a Mission's `start` or `resume` at a clearance `ai6::clearance_runs_commands` denies
   (`desk`, anything else) fails with `GUATIAO_ERR_UNSUPPORTED`, before the agent starts, unless
   `unconfined_desk` is set; answer-only and assistant Sessions are not refused. `weakenings` answers
   one line when `unconfined_desk` is set, whatever the Agent's clearance.
 - `assistant_scripts` and `assistant_skills` keep the trait defaults (none).
-- A failed open appends the agent's last non-protocol output lines to the error.
+- A failed open appends the agent's last non-protocol output lines to the error; a connection
+  lost later is `failed` with the agent's exit status and those lines.
+- An interrupted turn the agent answers `cancelled` is `completed`; one it cancels by itself is
+  `blocked` with the text `ai6`'s `TURN_CANCELLED`.

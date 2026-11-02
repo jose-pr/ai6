@@ -20,13 +20,17 @@ handler_settings = { command = "npx", args = ["-y", "@agentclientprotocol/claude
 `command` (required), `args`, `env` (under the Session's own), `meta` (a table passed as
 `session/new._meta`, for an adapter's options), `model_option` and `effort_option` (config option
 ids), `protocol` (`"v1"`), and the timeouts `initialize_timeout_ms` (20000), `request_timeout_ms`
-(30000), `start_timeout_ms` (60000) and `close_grace_ms` (2000), `diagnostic_lines` (20) and
-`poll_ms` (200), and `unconfined_desk` (false). Unknown keys are refused when the handler loads.
+(30000), `start_timeout_ms` (60000) and `close_grace_ms` (2000), `diagnostic_lines` (20),
+`exit_wait_ms` (1000) and `poll_ms` (200), and `unconfined_desk` (false). Unknown keys are refused
+when the handler loads.
 
 ## Behaviour
 
 - Permission requests go through the green-ink gate; restricted Sessions (answer only, assistant)
-  refuse every request for a tool that edits, deletes, moves or executes.
+  refuse every request but reading and the tools of their own MCP servers. A tool the agent runs
+  without asking is its own settings' to take away.
+- An agent that dies is reported with its exit status and the last lines it wrote outside the
+  protocol.
 - A Mission's Session at `desk` clearance is refused, because AI6 does not choose an external
   agent's tools, unless `unconfined_desk = true`, reported as a weakening.
 - Cable and assistant MCP servers are passed as HTTP `mcpServers`; an agent without HTTP MCP

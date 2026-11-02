@@ -3327,7 +3327,9 @@ pub struct AcpOptions {          // Default: timeouts 20000 / 30000 / 2000 ms, n
     pub model_option: Option<String>, pub effort_option: Option<String>,  // config option ids
     pub prompt: Option<String>, pub resume: Option<String>, pub restricted: bool,
     pub authenticate: Option<Authenticate>, pub initialize_timeout_ms: u64,
-    pub request_timeout_ms: u64, pub close_grace_ms: u64, pub decider: Arc<dyn PermissionDecider> }
+    pub request_timeout_ms: u64, pub close_grace_ms: u64, pub decider: Arc<dyn PermissionDecider>,
+    pub disconnect_detail: Option<DisconnectDetail> }  // what became of a lost agent
+pub type DisconnectDetail = Box<dyn Fn() -> Option<String> + Send + Sync>;
 pub struct AcpSession;           // implements AgentSession
 impl AcpSession {
     /// initialize -> (authenticate) -> session/new | session/resume | session/load -> config
@@ -3344,6 +3346,7 @@ impl AcpFacade {
     pub fn serve(&self, transport: impl ConnectTo<Agent> + 'static) -> JoinHandle<()>;
 }
 pub fn lines_over_io(reader, writer, diagnostic_lines: usize) -> (IoLines, Diagnostics);  // NDJSON transport
+pub type Diagnostics = Arc<Mutex<VecDeque<String>>>;  // the peer's last non-protocol lines
 pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
 ```
 
@@ -3359,7 +3362,13 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
   is read from `session/update` and the stop reason: message chunks coalesce into one `text`
   event per turn segment, `tool_call` is a `tool` event, `usage_update.cost` (USD) is `usage` with
   `cost_micro_usd` (token counts are not guessed); `end_turn|max_tokens|max_turn_requests` ->
-  `completed`, `refusal` -> `failed`, `cancelled` -> `blocked`, a JSON-RPC error -> `failed`.
+  `completed`, `refusal` -> `failed`, `cancelled` -> `completed` after `interrupt`, else `blocked`
+  with the text `TURN_CANCELLED`, a JSON-RPC error -> `failed`. A connection that ends unclosed
+  is `failed`: `the agent closed its connection`, then `disconnect_detail`'s answer.
+- **Restricted.** With `AcpOptions::restricted`, only a request of kind `read`, `search` or `think`
+  or for a tool of a server in `mcp_servers` (the Grok CLI's `UseTool` input, else a title
+  `mcp__<server>__`) reaches the decider; every other is refused. A tool of a `RESTRICTED_KINDS`
+  kind that runs unasked ends the Session.
   No limit or quota detection for external agents.
 - **Permissions.** `session/request_permission` always gets an outcome: what cannot be parsed,
   decided or answered is `cancelled` with a `blocked` event, never an error. It goes to the decider on its own thread. With
@@ -3806,6 +3815,7 @@ build; a field runner logs them at each launch.
 
 ```rust
 pub const LIMIT_EVENT: &str = "limit";
+pub const TURN_CANCELLED: &str = "the agent cancelled the turn";  // text of a `blocked` event; no `completed` follows
 pub const DENIED_EVENT: &str = "denied";
 pub struct UsageLimit { pub resets_at: Option<i64> /* Unix seconds */, pub window: Option<String> }
 pub struct TokenUsage { pub input: u64, pub output: u64, pub cache_read: u64, pub cache_write: u64,

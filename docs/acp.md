@@ -40,6 +40,7 @@ AI6 installs no adapter. These exist and are pinned by you:
 | Claude (Node 22 or later) | `npx -y @agentclientprotocol/claude-agent-acp@0.99.1`; set `CLAUDE_CODE_EXECUTABLE` to the `claude` it drives |
 | Codex (Node 22 or later) | `npx -y @agentclientprotocol/codex-acp@2.5.0` |
 | Gemini | `gemini --acp` |
+| Grok | `grok agent stdio`; read [Grok](#grok) before giving it a restricted Session |
 
 ### Settings
 
@@ -58,6 +59,7 @@ Unknown keys are refused when the handler loads; every number is a setting.
 | `start_timeout_ms` | `60000` | How long a facade-style start may take. |
 | `close_grace_ms` | `2000` | How long close waits before the process is ended. |
 | `diagnostic_lines` | `20` | Non-protocol output lines kept to explain the agent's death. |
+| `exit_wait_ms` | `1000` | How long the report of a lost agent waits for its exit status. |
 | `poll_ms` | `200` | How often a silent agent's output is checked for a stop request. |
 | `unconfined_desk` | `false` | Starts a `desk` Session with whatever tools the agent has, in place of refusing it. A weakening. |
 
@@ -77,10 +79,13 @@ launch data (mission, clearance, environment) travels only to AI6's own facade a
 An agent's `session/request_permission` is answered by the green-ink gate, the same check a Claude
 `PreToolUse` hook calls: a shell command that pushes to a protected ref, merges or releases is
 refused until green ink covers it, and the refusal appears as a `permission` event. Other tool
-kinds are allowed. In a restricted Session (answer-only review, Moneypenny) every request for a
-tool that edits, deletes, moves or executes is refused without asking, and a tool of those kinds
-that runs without a request ends the Session. Remote-hands mode, which replaces the harness's own
-tools, is refused: an ACP agent cannot be made to give them up.
+kinds are allowed. In a restricted Session (answer-only review, Moneypenny) only a request for
+reading (`read`, `search`, `think`) or for a tool of the Session's own MCP servers is put to the
+gate; every other is refused without asking, whatever kind the agent gives it, and a tool that
+edits, deletes, moves or executes and runs without a request ends the Session, after it has run.
+None of this binds a tool the agent runs without asking: only the agent's own settings can take
+those away. Remote-hands mode, which replaces the harness's own tools, is refused: an ACP agent
+cannot be made to give them up.
 
 A request that does not parse, or that cannot be decided or answered for any other reason, is answered
 with outcome `cancelled` and a `blocked` event, never with a JSON-RPC error: the Claude ACP adapter
@@ -97,7 +102,60 @@ it runs without asking is not stopped.
 
 The handler resumes with `session/resume` when the agent advertises it, else `session/load` (the
 agent's replay of history is not shown on the board), else the resume fails and the Station starts
-afresh with the recap, as it does for any handler that cannot resume.
+afresh with the recap, as it does for any handler that cannot resume. A resume gets the Agent's
+`handler_settings`, as a start does.
+
+### When an agent dies
+
+A connection that ends without AI6 closing it fails the Session with `the agent closed its
+connection`, how the process ended (`it exited with code 1`, `it was ended by signal 15`) and the
+last `diagnostic_lines` lines it wrote outside the protocol. On the `pipe` terminal that is the
+last of its standard error, which is what a person sees in the chat.
+
+### Grok
+
+Grok CLI 1.0.70 speaks ACP version 1 as `grok agent stdio`. It advertises `session/resume`,
+`session/load`, `session/close` and MCP over HTTP; AI6 uses `session/resume`. It sets
+`PR_SET_PDEATHSIG` on Linux, so it ends when the thread that started it does; the `pipe` terminal
+starts every program on a thread that lasts as long as its session. Refusing a tool ends Grok's
+turn as `cancelled`, so a refused tool costs the whole answer rather than one step of it: a
+Mission is blocked, and Moneypenny's answer ends with a notice.
+
+A restricted Session is not restricted on Grok without a profile. These run without asking, as
+the Station's user and outside the working directory: `read_file`, `list_dir`, `grep`, `todo_write`,
+`enter_plan_mode`, `search_tool`, and `run_terminal_command` with a command Grok takes for read-only
+(`ls`, `cat`, `head`, `git log`), which AI6 notices only to end the Session after it ran. `~/.grok/auth.json`
+and whatever else that user can read are within reach. Asked, and refused in a restricted Session:
+`run_terminal_command` otherwise, `write`, `search_replace`, and, since the kind `other` it gives them
+says nothing, `monitor` (which runs any command), `spawn_subagent`, `scheduler_create`, `send_feedback`,
+`image_gen` and the other media tools.
+
+The flags `--tools`, `--disallowed-tools`, `--deny` and `--no-subagents` are accepted before `agent`
+and change nothing under `agent stdio`. What does is an agent profile, whose `tools` are the
+whole of what the model is offered and can call, on `session/resume` too:
+
+```markdown
+---
+name: moneypenny
+description: The AI6 assistant, on her MCP tools alone
+tools: search_tool, use_tool
+---
+You are an assistant. Your only tools are the MCP tools reached through search_tool and use_tool.
+```
+
+```toml
+[agent.moneypenny]
+handler = "acp"
+model = "grok-4.7"
+[agent.moneypenny.handler_settings]
+command = "/var/lib/ai6/.grok/bin/grok"
+args = ["--no-auto-update", "--disable-web-search", "agent", "--agent-profile", "/etc/ai6/moneypenny-grok.md", "stdio"]
+env = { HOME = "/var/lib/ai6", GROK_DISABLE_AUTOUPDATER = "1", GROK_MEMORY = "0", DISABLE_TELEMETRY = "1", DISABLE_ERROR_REPORTING = "1" }
+```
+
+`--no-auto-update` and `--disable-web-search` go before `agent`. AI6 cannot tell whether a profile
+is set, so nothing warns of an Agent without one. xAI's server-side search for this model is not in
+that list and is not settled here: a turn's text goes to xAI either way.
 
 ### What an external agent cannot give
 
@@ -107,7 +165,7 @@ converted to millionths of a dollar when it is in USD), AI6 cannot park a Sessio
 or read an account's quota windows from it, and the Agent's context goes in front of the first
 prompt as text. The agent also decides how it ends a turn: `end_turn`, `max_tokens` and
 `max_turn_requests` complete the Mission's turn, `refusal` and an error fail it, and `cancelled`
-blocks it.
+completes a turn AI6 asked to interrupt and otherwise blocks it.
 
 ## Field runners
 

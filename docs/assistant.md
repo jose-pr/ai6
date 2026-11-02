@@ -36,6 +36,11 @@ its last words; so is one that writes nothing for ten minutes while answering. A
 cannot be resumed is noted in the Station's log, and the conversation starts afresh with a
 recap.
 
+On an [ACP agent](acp.md#the-acp-handler) AI6 does not choose her tools. It refuses what the agent
+asks leave for beyond reading and her own MCP tools, and the rest is the agent's to give up: she
+is not restricted on Grok without the [agent profile](acp.md#grok) that takes its own tools away.
+An answer whose tool was refused may end there, which Grok does; the conversation says so.
+
 An assistant Session is not a Mission: it has no Operation, and never appears on the board;
 it reaches Agents only through [Cables](#cables), for the person. It works in a directory of
 its own, the same one each time its conversation's harness starts on that Station, because

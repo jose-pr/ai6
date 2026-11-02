@@ -51,6 +51,9 @@ comment; the rest of the crate denies it.
   `.bat` or `.cmd` file runs under the system's `cmd.exe` with its arguments quoted as the
   standard library quotes them (`%` expands nothing, `&` ends nothing); an argument holding CR
   or LF is refused for one.
+- **Parent**: the program is started on a thread that lasts as long as the session, so one that
+  asks to be signalled when the thread that started it ends (Linux's `PR_SET_PDEATHSIG`, as the
+  Grok CLI does) lives on when the caller's thread ends.
 - **Alone**: the child inherits only its standard streams. On Unix it leads a new session (so
   also a new process group, with no controlling terminal), and every descriptor above
   standard error is marked close-on-exec before the program runs (`close_range` on Linux
