@@ -4845,6 +4845,12 @@ async fn resume_mission(
             telemetry
         })
     });
+    #[cfg(feature = "publisher")]
+    let mut refused = RefusedResume {
+        state: state.clone(),
+        mission_id: mission_id.clone(),
+        telemetry: telemetry.clone(),
+    };
     let watchdog = Watchdog::with_config(resume_agent.limits.apply_to(&state.watchdog));
     let resume_wrapped =
         resume_mode == ExecutionMode::Field && !resume_own_host && runner.is_none();
@@ -5223,8 +5229,11 @@ async fn resume_mission(
     sync_session_record(&state, &mission_id);
     recovery::record_launch(&state, &mission_id);
     #[cfg(feature = "publisher")]
-    if let Some(telemetry) = &telemetry {
-        telemetry.publish_lifecycle("working");
+    {
+        refused.telemetry = None;
+        if let Some(telemetry) = &telemetry {
+            telemetry.publish_lifecycle("working");
+        }
     }
     spawn_event_pump(state.clone(), mission_id.clone(), resumed);
     close_replaced(&mission_id, replaced).await;
@@ -5238,6 +5247,38 @@ async fn resume_mission(
         }),
     ))
 }
+
+/// Publishes the Mission's state on the telemetry of a resume that returns without running: the
+/// gateway shows a Session it hears of as working until told otherwise, and the resume binds the
+/// Session before anything can refuse it. A resume that runs takes `telemetry` away.
+#[cfg(feature = "publisher")]
+struct RefusedResume {
+    state: DaemonState,
+    mission_id: String,
+    telemetry: Option<Arc<SessionTelemetry>>,
+}
+
+#[cfg(feature = "publisher")]
+impl Drop for RefusedResume {
+    fn drop(&mut self) {
+        let Some(telemetry) = &self.telemetry else {
+            return;
+        };
+        let mission_state = self
+            .state
+            .missions
+            .lock()
+            .ok()
+            .and_then(|missions| Some(missions.get(&self.mission_id)?.state));
+        if let Some(name) = mission_state.and_then(lifecycle_name) {
+            telemetry.publish_lifecycle_for(name, held_reason(&self.state, &self.mission_id));
+        }
+    }
+}
+
+/// The lifecycle reason of a Mission that ended with its harness having refused calls.
+#[cfg(feature = "publisher")]
+const DENIED_REASON: &str = "permission-denied";
 
 /// Why a Mission an operator interrupted is blocked.
 const INTERRUPTED_REASON: &str = "interrupted";

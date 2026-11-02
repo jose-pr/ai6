@@ -563,6 +563,47 @@ mod tests {
         assert_eq!(mission.session_ids[0].as_str(), PROVIDER_SESSION);
     }
 
+    /// A refused resume has told the gateway of the Session again, which then shows it working.
+    #[cfg(feature = "publisher")]
+    #[tokio::test]
+    async fn a_refused_resume_publishes_the_missions_state() {
+        use super::super::tests::{recording_gateway, wait_for_publication};
+        use crate::station::publisher::{Config, Publisher};
+        let root = tempfile::tempdir().unwrap();
+        let mut state = state_in(root.path(), TWO_AGENTS);
+        let (origin, requests) = recording_gateway();
+        state.publisher =
+            Some(Publisher::start(Config::try_new(&origin, "test-token").unwrap()).unwrap());
+        blocked_mission(&state).await;
+        let registered = |path: &str, _: &serde_json::Value| path == "/v1/station/sessions";
+        wait_for_publication(&requests, |path, body| {
+            path.contains("/lifecycle/") && body["state"] == "blocked"
+        })
+        .expect("the start publishes the block");
+        // The handler no longer builds, as a resume finds out after it binds its telemetry.
+        state
+            .sessions
+            .lock()
+            .unwrap()
+            .get_mut("mission-1")
+            .unwrap()
+            .handler_provider = "no-such-handler".to_owned();
+
+        let refused = apply(
+            &state,
+            &on_session(control("mission-1", ControlAction::Resume)),
+        )
+        .await;
+
+        assert_eq!(refused.outcome, "rejected");
+        assert_eq!(refused.state, Some("blocked"));
+        wait_for_publication(&requests, registered).expect("the resume binds the Session again");
+        let lifecycle = wait_for_publication(&requests, |path, _| path.contains("/lifecycle/"))
+            .expect("the Mission's state is published after that");
+        assert_eq!(lifecycle["state"], "blocked");
+        stop(&state);
+    }
+
     #[tokio::test]
     async fn interrupt_stops_the_turn_and_keeps_the_session() {
         let root = tempfile::tempdir().unwrap();
