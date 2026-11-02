@@ -6,8 +6,8 @@ working build with one command and no machine-local path.
 
 ## On a clean machine
 
-`git` is the one thing to have first. A plain clone also downloads the `deps` branch (about
-127 MiB), so clone `main` alone:
+`git` is the one thing to have first, and `curl` on Linux and macOS. A plain clone also downloads
+the `deps` branch (about 127 MiB), so clone `main` alone:
 
 ```sh
 git clone --branch main --single-branch https://github.com/jose-pr/ai6
