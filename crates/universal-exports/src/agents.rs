@@ -77,6 +77,8 @@ pub struct AgentRoute {
     pub handler: Option<String>,
     /// The model; `None` when the record sets none, so the handler's default.
     pub model: Option<String>,
+    /// The account pool the route names, when it names one.
+    pub pool: Option<String>,
 }
 
 /// An Agent whose `retire_on` date is near or has come.
@@ -169,9 +171,20 @@ impl Headquarters {
             .into_iter()
             .flatten()
             .filter(|entry| entry.get("id").and_then(serde_json::Value::as_str) == Some(agent))
+            .flat_map(|entry| {
+                let listed = entry
+                    .get("routes")
+                    .and_then(serde_json::Value::as_array)
+                    .filter(|routes| !routes.is_empty());
+                match listed {
+                    Some(routes) => routes.as_slice(),
+                    None => std::slice::from_ref(entry),
+                }
+            })
             .map(|entry| AgentRoute {
                 handler: text(entry, "handler"),
                 model: text(entry, "model"),
+                pool: text(entry, "pool"),
             })
             .collect()
     }
@@ -688,6 +701,10 @@ mod tests {
                         {"id": "no-missions", "handler": "claude", "model": "opus-5", "roles": ["secret-role"]},
                         {"id": "changed", "handler": "codex", "model": "new-model"},
                         {"id": "unset", "handler": "claude", "model": null},
+                        {"id": "routed", "handler": null, "model": null, "routes": [
+                            {"handler": "acp", "model": "grok-4.7", "pool": "grok-free"},
+                            {"handler": "claude", "model": "gemini-free"},
+                        ]},
                     ]}}),
                 )]),
             )
@@ -735,18 +752,26 @@ mod tests {
         };
         assert_eq!(
             view("no-missions")["routes"],
-            serde_json::json!([{"handler": "claude", "model": "opus-5"}]),
+            serde_json::json!([{"handler": "claude", "model": "opus-5", "pool": null}]),
             "with no Mission there is no history, and the record still says"
         );
         assert_eq!(view("no-missions")["model_history"], serde_json::json!([]));
         assert_eq!(
+            view("routed")["routes"],
+            serde_json::json!([
+                {"handler": "acp", "model": "grok-4.7", "pool": "grok-free"},
+                {"handler": "claude", "model": "gemini-free", "pool": null},
+            ]),
+            "each route of a routed Agent"
+        );
+        assert_eq!(
             view("changed")["routes"],
-            serde_json::json!([{"handler": "codex", "model": "new-model"}])
+            serde_json::json!([{"handler": "codex", "model": "new-model", "pool": null}])
         );
         assert_eq!(view("changed")["model_history"][0]["model"], "old-model");
         assert_eq!(
             view("unset")["routes"],
-            serde_json::json!([{"handler": "claude", "model": null}])
+            serde_json::json!([{"handler": "claude", "model": null, "pool": null}])
         );
         assert_eq!(
             view("retired")["routes"],

@@ -150,17 +150,21 @@ const _defaultModel = "The handler's default model";
 /// One way an Agent's roster record says it reaches its model.
 @immutable
 class AgentRouteSummary {
-  const AgentRouteSummary({this.handler, this.model});
+  const AgentRouteSummary({this.handler, this.model, this.pool});
 
   final String? handler;
 
   /// Null when the record sets none, so the handler's default.
   final String? model;
 
+  /// The account pool the route names, when it names one.
+  final String? pool;
+
   factory AgentRouteSummary.fromJson(Map<String, dynamic> json) =>
       AgentRouteSummary(
         handler: json['handler'] as String?,
         model: json['model'] as String?,
+        pool: json['pool'] as String?,
       );
 }
 
@@ -308,6 +312,7 @@ class AgentSummary {
           '${route.model == null ? _defaultModel : name(route.model)}'
               '${since(route.model)}',
           if (route.handler case final handler?) 'handler $handler',
+          if (route.pool case final pool?) 'pool $pool',
         ].join(', '),
     ];
   }

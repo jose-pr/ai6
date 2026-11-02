@@ -280,6 +280,11 @@ class _AttemptCard extends StatelessWidget {
                   ),
               ],
             ),
+            if (attempt.route case final route?)
+              Text(
+                'Route $route',
+                style: text.bodySmall?.copyWith(color: tokens.muted),
+              ),
             if (attempt.lost case final lost?)
               Text(lost, style: text.bodySmall?.copyWith(color: tokens.muted)),
             if (attempt.checkpointBranch case final branch?)

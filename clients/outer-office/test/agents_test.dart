@@ -247,6 +247,20 @@ void main() {
       expect(agent.earlierModels, isEmpty);
     });
 
+    test('an Agent with routes shows each, with its pool', () {
+      final agent = summary({
+        'routes': [
+          {'handler': 'acp', 'model': 'grok-4.7', 'pool': 'grok-free'},
+          {'handler': 'claude', 'model': 'gemini-free'},
+        ],
+        'model_history': const [],
+      });
+      expect(agent.modelLabels, [
+        'Model grok-4.7, handler acp, pool grok-free',
+        'Model gemini-free, handler claude',
+      ]);
+    });
+
     test('a changed model: the record wins and what ran stays as history', () {
       final agent = summary({
         'routes': [

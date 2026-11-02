@@ -505,6 +505,7 @@ class MissionFacts extends StatelessWidget {
             ('Station $station', OoLinkTo.station(station)),
             if (attempt?.theater case final theater?)
               ('Theater $theater', OoLinkTo.theater(station, theater)),
+            if (attempt?.route case final route?) ('Route $route', null),
           ], style: muted),
         OoTime(mission.updatedAt, prefix: 'Updated '),
         if (agent != null || role != null)
@@ -551,6 +552,7 @@ class _AttemptHistory extends StatelessWidget {
                   'Theater $theater',
                   OoLinkTo.theater(attempt.station, theater),
                 ),
+              if (attempt.route case final route?) ('Route $route', null),
             ], style: Theme.of(context).textTheme.labelMedium),
             if (attempt.lost case final lost?) Text(lost, style: muted),
             if (attempt.checkpointBranch case final branch?)

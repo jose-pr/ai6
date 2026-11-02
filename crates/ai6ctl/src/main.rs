@@ -703,6 +703,52 @@ struct BoardProvenance {
 struct BoardAttempt {
     session_id: String,
     status: String,
+    #[serde(default)]
+    route: Option<BoardRoute>,
+    #[serde(default)]
+    account: Option<BoardAccount>,
+}
+
+/// Which handler, model and pool an attempt ran on.
+#[derive(Debug, Deserialize)]
+struct BoardRoute {
+    handler: String,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    pool: Option<String>,
+}
+
+/// The account an attempt drew from.
+#[derive(Debug, Deserialize)]
+struct BoardAccount {
+    pool: String,
+    account: String,
+}
+
+impl BoardAttempt {
+    /// `handler model (pool)` and the account, `-` before it was launched. As data.
+    fn route_column(&self) -> String {
+        let Some(route) = &self.route else {
+            return "-".to_owned();
+        };
+        let mut column = plain(&route.handler);
+        if let Some(model) = &route.model {
+            column.push(' ');
+            column.push_str(&plain(model));
+        }
+        if let Some(pool) = &route.pool {
+            column.push_str(&format!(" (pool {})", plain(pool)));
+        }
+        if let Some(account) = &self.account {
+            column.push_str(&format!(
+                " {}/{}",
+                plain(&account.pool),
+                plain(&account.account)
+            ));
+        }
+        column
+    }
 }
 
 impl BoardMission {
@@ -2134,6 +2180,14 @@ struct ModelTenure {
 /// The MODEL column: what the record says, when the person may read it; else what ran last, and
 /// `-` when neither says, since an empty history does not mean the handler's default.
 fn model_shown(view: &AgentView) -> String {
+    if view.routes.len() > 1 {
+        return view
+            .routes
+            .iter()
+            .map(|route| route.model.as_deref().map_or("default".to_owned(), plain))
+            .collect::<Vec<_>>()
+            .join("|");
+    }
     view.routes
         .first()
         .map(|route| route.model.as_deref())
@@ -2670,9 +2724,14 @@ fn print_mission(mission: &BoardMission) {
         println!("ITEM\t{}", plain(url));
     }
     if !mission.attempts.is_empty() {
-        println!("RUN\tSTATUS");
+        println!("RUN\tSTATUS\tROUTE");
         for run in &mission.attempts {
-            println!("{}\t{}", plain(&run.session_id), plain(&run.status));
+            println!(
+                "{}\t{}\t{}",
+                plain(&run.session_id),
+                plain(&run.status),
+                run.route_column()
+            );
         }
     }
     println!("SESSION\tSTATE\tREASON\tSEQUENCE\tEXPOSURE");

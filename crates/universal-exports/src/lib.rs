@@ -4236,11 +4236,23 @@ pub struct MissionAttempt {
     pub lost: Option<String>,
     /// The branch its work was last checkpointed to, when it was.
     pub checkpoint_branch: Option<String>,
+    /// The handler, model and pool it ran on, once it was launched.
+    pub route: Option<ai6::RouteRef>,
+    /// The account it drew from, when it drew from a pool.
+    pub account: Option<ai6::AccountRef>,
 }
 
 impl MissionAttempt {
     fn from_record(record: &ai6::SessionRecord) -> Self {
         Self {
+            route: record.launch.as_ref().map(|launch| {
+                ai6::RouteRef::new(
+                    launch.handler.clone(),
+                    launch.model.clone(),
+                    launch.pool.clone(),
+                )
+            }),
+            account: record.account.clone(),
             attempt: record.attempt,
             session_id: record.session_id.clone(),
             provider_session_id: record.provider_session_id.clone(),

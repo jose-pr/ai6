@@ -3733,6 +3733,7 @@ class MissionAttemptSummary {
     this.theater,
     this.lost,
     this.checkpointBranch,
+    this.route,
   });
 
   final int attempt;
@@ -3751,6 +3752,19 @@ class MissionAttemptSummary {
   /// The branch its work was last checkpointed to, when it was.
   final String? checkpointBranch;
 
+  /// The handler, model and pool it ran on, once it was launched.
+  final String? route;
+
+  /// `handler model (pool name)`, from what a Session record says of its route.
+  static String? _routeOf(Map<String, dynamic>? route) {
+    if (route == null) return null;
+    return [
+      route['handler'] as String,
+      if (route['model'] case final String model) model,
+      if (route['pool'] case final String pool) '(pool $pool)',
+    ].join(' ');
+  }
+
   factory MissionAttemptSummary.fromJson(Map<String, dynamic> json) =>
       MissionAttemptSummary(
         attempt: json['attempt'] as int,
@@ -3760,6 +3774,7 @@ class MissionAttemptSummary {
         theater: json['theater'] as String?,
         lost: json['lost'] as String?,
         checkpointBranch: json['checkpoint_branch'] as String?,
+        route: _routeOf(json['route'] as Map<String, dynamic>?),
       );
 
   String describe() => [

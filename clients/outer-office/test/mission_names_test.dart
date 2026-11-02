@@ -60,6 +60,29 @@ void main() {
     expect(attempt.runId, 'ai6-gh-63.2');
   });
 
+  test('an attempt says which handler, model and pool it ran on', () {
+    MissionAttemptSummary attempt(Map<String, dynamic>? route) =>
+        MissionAttemptSummary.fromJson({
+          'attempt': 1,
+          'station': 'hq',
+          'status': 'active',
+          'route': route,
+        });
+    expect(attempt(null).route, isNull);
+    expect(
+      attempt({'handler': 'claude', 'model': 'gemini-free'}).route,
+      'claude gemini-free',
+    );
+    expect(
+      attempt({
+        'handler': 'acp',
+        'model': 'grok-4.7',
+        'pool': 'grok-free',
+      }).route,
+      'acp grok-4.7 (pool grok-free)',
+    );
+  });
+
   test('search matches the ID, the run and the name', () {
     final board = demoBoard()
       ..sessions = [session('ai6-gh-63', 'p-1'), session('ai6-42', 'p-2')]
