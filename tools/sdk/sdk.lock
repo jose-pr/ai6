@@ -1,0 +1,95 @@
+# Every SDK a build of AI6 needs, and the only file to trust for them.
+#
+#   <group> <name> <version> <os-arch|any> <sha256|-> <url|->
+#
+# Two shells read this with no parser: space separated, one item a line, # for a comment.
+# tools/sdk/check_lock.py checks it against the repository, and tools/sdk/README.md says how to
+# change a line. A system line names what is checked and never installed; its version column is
+# the group that needs it.
+
+# Rust. The first rust line is the default toolchain: an exact stable, the newest the repository
+# has been tested on. The second is the minimum, Cargo.toml's rust-version.
+core rustup-init 1.29.2 windows-x64 00f139da614dced87d3c3d4121c43eebdac3c1bf8a5ee86b9d80dfd71c8d70fd https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-pc-windows-msvc/rustup-init.exe
+core rustup-init 1.29.2 windows-arm64 58005a321c5dcb9c4457c0a13bb5d6a56a5793efaef429004edaa1db33019b59 https://static.rust-lang.org/rustup/archive/1.29.2/aarch64-pc-windows-msvc/rustup-init.exe
+core rustup-init 1.29.2 linux-x64 5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init
+core rustup-init 1.29.2 linux-arm64 a9c168dbea81a84671c6b7a5c1795cb0eb699020110d107ddfca427bd797e697 https://static.rust-lang.org/rustup/archive/1.29.2/aarch64-unknown-linux-gnu/rustup-init
+core rustup-init 1.29.2 macos-arm64 f7c7e11eb2e07f006e532a8aaac77b32f4527d305ac386c0c633ca6133d35ca9 https://static.rust-lang.org/rustup/archive/1.29.2/aarch64-apple-darwin/rustup-init
+core rustup-init 1.29.2 macos-x64 b9610730ddeef52765723847866fd1e3540b2bf7d5ab0c324aa143a5edf25ba0 https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-apple-darwin/rustup-init
+core rust 1.99.1 any - -
+core rust 1.89.0 any - -
+core rust-component clippy any - -
+core rust-component rustfmt any - -
+core rust-target wasm32-unknown-unknown any - -
+
+# ring compiles with clang on Windows ARM64. Used only where neither Visual Studio's Clang
+# component nor a clang on PATH is found.
+core llvm 22.1.8 windows-arm64 de718c58ebbc5f61d58c17b90457fcf42983bc2c4a4aba3e010d108713bfd7f1 https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-aarch64-pc-windows-msvc.tar.xz
+
+# Flutter main, with what that commit is expected to report. deps is the deps branch's commit
+# holding pub/ and cdn/ for this Flutter and clients/outer-office/pubspec.lock.
+app flutter 2541e508405f5d9728286d6ed3307163a5406e08 any - https://github.com/flutter/flutter.git
+app flutter-version 3.50.0-1.0.pre-230 any - -
+app flutter-engine f8edeef41f4a89dc912421fedbd6102252394dab any - -
+app dart 3.15.0-72.0.dev any - -
+app deps 28f12ac57d6251d672d9c8bd00619ff3b743e6ce any - https://github.com/jose-pr/ai6.git
+
+# Public API snapshots.
+api rust nightly-2026-09-21 any - -
+api cargo-public-api 0.52.0 any - -
+
+# The documentation site; every Python package is in tools/sdk/docs-requirements.txt, hashed.
+docs python 3.14.7 any - -
+docs mkdocs 1.6.1 any - -
+docs mkdocs-material 9.7.7 any - -
+docs pymdown-extensions 12.3 any - -
+
+# PostgreSQL tests (the digest is the image index's) and the live ACP adapter check.
+test postgres 17 any 3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1 docker://docker.io/library/postgres
+test node 22.23.4 windows-x64 cbc74b5e0982c9dbb41525fd8fb5dcd32fbee237863f7829072f4639a1ce5f20 https://nodejs.org/dist/v22.23.4/node-v22.23.4-win-x64.zip
+test node 22.23.4 windows-arm64 a8b8cd79cbbb3062435f449591d98dd63730bbbf30ce2d7cc3a6376c236cb111 https://nodejs.org/dist/v22.23.4/node-v22.23.4-win-arm64.zip
+test node 22.23.4 linux-x64 1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-x64.tar.xz
+test node 22.23.4 linux-arm64 6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-arm64.tar.xz
+test node 22.23.4 macos-arm64 037650d0839f457747396f052073fb48333d31bf5abd3c98b74da20d89ebb1ad https://nodejs.org/dist/v22.23.4/node-v22.23.4-darwin-arm64.tar.xz
+test node 22.23.4 macos-x64 f42abca7aaac61efc57d49fb42ea84fc53bbeba9a749cb03a291ce6e4e7a69c1 https://nodejs.org/dist/v22.23.4/node-v22.23.4-darwin-x64.tar.xz
+
+# Windows: Visual Studio components by ID, found with vswhere. Licensed by the vendor, so they
+# are never fetched here. Flutter's own requirements are in its visual_studio.dart.
+system git core windows-x64 - -
+system git core windows-arm64 - -
+system Microsoft.VisualStudio.Component.VC.Tools.x86.x64 core windows-x64 - -
+system Microsoft.VisualStudio.Component.VC.Tools.ARM64 core windows-arm64 - -
+system windows-sdk core windows-x64 - -
+system windows-sdk core windows-arm64 - -
+system Microsoft.VisualStudio.Component.VC.CMake.Project app windows-x64 - -
+system Microsoft.VisualStudio.Component.VC.CMake.Project app windows-arm64 - -
+
+# Linux: commands, and pkg-config modules as pkg:<module>.
+system git core linux-x64 - -
+system git core linux-arm64 - -
+system cc core linux-x64 - -
+system cc core linux-arm64 - -
+system pkg-config core linux-x64 - -
+system pkg-config core linux-arm64 - -
+system clang app linux-x64 - -
+system clang app linux-arm64 - -
+system cmake app linux-x64 - -
+system cmake app linux-arm64 - -
+system ninja app linux-x64 - -
+system ninja app linux-arm64 - -
+system unzip app linux-x64 - -
+system unzip app linux-arm64 - -
+system pkg:gtk+-3.0 app linux-x64 - -
+system pkg:gtk+-3.0 app linux-arm64 - -
+system pkg:liblzma app linux-x64 - -
+system pkg:liblzma app linux-arm64 - -
+
+# macOS.
+system git core macos-arm64 - -
+system git core macos-x64 - -
+system xcodebuild core macos-arm64 - -
+system xcodebuild core macos-x64 - -
+
+# Everywhere, for the groups that need them.
+system python3 docs any - -
+system docker-or-podman test any - -
+system openssl test any - -
