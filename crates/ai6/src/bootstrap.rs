@@ -18,6 +18,7 @@
 //! relative to the file's directory. Secrets are [`SecretRef`]s, never values the file must hold.
 
 pub mod format;
+pub mod public;
 
 use std::ffi::OsString;
 use std::fmt;
@@ -540,7 +541,7 @@ pub struct Bootstrap {
     #[map(default)]
     pub station: StationSettings,
     /// `[oo]`: Outer Office's settings, which the app reads and declares. No Rust program reads
-    /// them.
+    /// them; [`public`] copies what a web page needs.
     #[schema(title = "Outer Office")]
     #[map(with = guatiao_serde::adapt::object, default)]
     pub oo: serde_json::Map<String, serde_json::Value>,

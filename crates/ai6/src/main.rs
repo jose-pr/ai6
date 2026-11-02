@@ -127,6 +127,15 @@ enum ConfigCommand {
         #[command(flatten)]
         bootstrap: BootstrapArg,
     },
+    /// Write the public ai6.cfg a web page reads beside index.html, from this host's file: its
+    /// [unex] url and what the page needs of [oo], and nothing else.
+    Public {
+        /// Where to write it (default: standard output); this host's own file is refused.
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+    },
     /// Write every family's global records, and each Station's own, as TOML family files.
     Export {
         /// The directory to write; files in it are replaced.
@@ -424,6 +433,7 @@ async fn main() -> ExitCode {
             command:
                 command @ (ConfigCommand::Show { .. }
                 | ConfigCommand::Import { .. }
+                | ConfigCommand::Public { .. }
                 | ConfigCommand::Export { .. }),
         } => match config_command(command) {
             Ok(output) => {
@@ -695,6 +705,7 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
     };
     match command {
         ConfigCommand::Path { .. } => Ok(String::new()),
+        ConfigCommand::Public { output, bootstrap } => public_config(output.as_deref(), &bootstrap),
         ConfigCommand::Show {
             family,
             key,
@@ -759,6 +770,33 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
             Ok(format!("Wrote {written} files to {}\n", dir.display()))
         }
     }
+}
+
+/// Runs `ai6 config public`. A key the allow list refused is named on standard error, so a person
+/// who expected it to reach the page finds out; its value is not.
+fn public_config(output: Option<&Path>, bootstrap: &BootstrapArg) -> Result<String, String> {
+    let located = load_bootstrap(bootstrap)?;
+    let public =
+        ai6::bootstrap::public::public_file(&located.value).map_err(|error| error.to_string())?;
+    for key in &public.left_out {
+        eprintln!("ai6: {key} is not on the public allow list, so it is left out");
+    }
+    let Some(output) = output else {
+        return Ok(public.text);
+    };
+    let same = located.path.as_deref().is_some_and(|own| {
+        let canonical = |path: &Path| std::fs::canonicalize(path).ok();
+        canonical(own).is_some() && canonical(own) == canonical(output)
+    });
+    if same {
+        return Err(format!(
+            "{} is this host's own file, which a public one must not replace",
+            output.display()
+        ));
+    }
+    std::fs::write(output, public.text)
+        .map_err(|error| format!("{}: {error}", output.display()))?;
+    Ok(format!("Wrote {}\n", output.display()))
 }
 
 /// The Station this command acts for: the bootstrap file's `[station] id`, else the ID a Station

@@ -639,3 +639,69 @@ fn the_token_is_one_key_for_both_sides_of_the_station_channel() {
         "relative to the file, whichever program reads it"
     );
 }
+
+#[test]
+fn config_public_holds_only_the_allow_list_and_names_what_it_left_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = write(
+        dir.path(),
+        "ai6.cfg",
+        &format!(
+            "[provider]\npassword = \"{PLANTED}\"\n[unex]\nurl = \"https://ai6.example\"\n\
+             station_token = \"{PLANTED}\"\nca_file = \"{PLANTED}.pem\"\n\
+             [station]\nid = \"{PLANTED}\"\n[oo.appearance]\ntheme = \"dusk\"\n\
+             [oo.chat]\nwidth = 480\nnote = \"{PLANTED}\"\n"
+        ),
+    );
+    let output = ai6()
+        .args(["config", "public", "--config"])
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let printed = String::from_utf8(output.stdout).unwrap();
+    let said = String::from_utf8(output.stderr).unwrap();
+    assert!(!printed.contains(PLANTED), "{printed}");
+    assert!(!said.contains(PLANTED), "{said}");
+    assert!(said.contains("oo.chat.note"), "{said}");
+    let read = read(&printed).unwrap();
+    assert_eq!(read.unex.url.as_deref(), Some("https://ai6.example"));
+    assert_eq!(read.oo["appearance"]["theme"], "dusk");
+    assert_eq!(read.oo["chat"]["width"], 480);
+
+    let public = dir.path().join("web-ai6.cfg");
+    let output = ai6()
+        .args(["config", "public", "--config"])
+        .arg(&config)
+        .arg("--output")
+        .arg(&public)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(std::fs::read_to_string(&public).unwrap(), printed);
+
+    // A file a person named as the output must not lose what the file does not make public.
+    let before = std::fs::read_to_string(&config).unwrap();
+    let output = ai6()
+        .args(["config", "public", "--config"])
+        .arg(&config)
+        .arg("--output")
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("own file"));
+
+    // A refused file writes nothing, and a key nobody knows refuses it as every program does.
+    std::fs::write(&config, format!("nobody = \"{PLANTED}\"\n")).unwrap();
+    let output = ai6()
+        .args(["config", "public", "--config"])
+        .arg(&config)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{said}");
+    assert!(said.contains("nobody") && !said.contains(PLANTED), "{said}");
+    assert!(output.stdout.is_empty());
+}
