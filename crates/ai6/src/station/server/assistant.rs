@@ -4590,11 +4590,15 @@ event_bytes = 7
         }
         assert_eq!(sweep_stale_roots(temp.path(), STALE), 0, "all held");
         drop(roots);
-        assert_eq!(
-            sweep_stale_roots(temp.path(), STALE),
-            50,
-            "once their desks let go"
-        );
+        // A process another test forks holds a copy of each lock's descriptor until it execs, so
+        // some locks can stay taken for a moment after their desks let go.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut swept = sweep_stale_roots(temp.path(), STALE);
+        while swept < 50 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            swept += sweep_stale_roots(temp.path(), STALE);
+        }
+        assert_eq!(swept, 50, "once their desks let go");
         assert_eq!(
             std::fs::read_dir(temp.path()).unwrap().count(),
             0,
