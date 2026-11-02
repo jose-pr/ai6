@@ -8291,7 +8291,13 @@ mod tests {
                 ai6::NewSession::new("attempt-2", "mission-g", "worker")
                     .with_theater("local")
                     .with_provider_session("session-g")
-                    .with_attempt(2, Some("attempt-1".to_owned())),
+                    .with_attempt(2, Some("attempt-1".to_owned()))
+                    .with_account(ai6::AccountRef::new("gateway", "key"))
+                    .with_launch(
+                        ai6::SessionLaunch::new("claude", "pipe", "/work")
+                            .with_model(Some("gemini-free".to_owned()), None)
+                            .with_pool(Some("gateway".to_owned())),
+                    ),
                 Duration::from_secs(60),
             )
             .unwrap();
@@ -8310,12 +8316,14 @@ mod tests {
                     "attempt": 1, "session_id": "attempt-1", "provider_session_id": null,
                     "predecessor": null, "station": "hq", "theater": "local",
                     "status": "lost", "lost": "Station \"hq\" went dark",
-                    "checkpoint_branch": null
+                    "checkpoint_branch": null, "route": null, "account": null
                 },
                 {
                     "attempt": 2, "session_id": "attempt-2", "provider_session_id": "session-g",
                     "predecessor": "attempt-1", "station": "worker", "theater": "local",
-                    "status": "active", "lost": null, "checkpoint_branch": null
+                    "status": "active", "lost": null, "checkpoint_branch": null,
+                    "route": {"handler": "claude", "model": "gemini-free", "pool": "gateway"},
+                    "account": {"pool": "gateway", "account": "key"}
                 }
             ])
         );
