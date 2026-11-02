@@ -502,7 +502,6 @@ class _EntryView extends StatelessWidget {
       'page' => Text(revealInvisible(entry.text)),
       'view' => AssistantViewCard(
         json: entry.data?['view'],
-        exposed: entry.data?['exposed'] == true,
         limits: controller.viewLimits,
         onOpen: onOpen,
         onSubmit: entry.id == null
@@ -720,14 +719,6 @@ class _ProposalCardState extends State<ProposalCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           spacing: 6,
           children: [
-            if (proposal['exposed'] == true)
-              OutsideTextStrip(
-                sources: [
-                  for (final source
-                      in (proposal['exposed_by'] as List?) ?? const [])
-                    '$source',
-                ],
-              ),
             Row(
               spacing: 8,
               children: [

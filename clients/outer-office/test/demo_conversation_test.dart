@@ -3,8 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_panel.dart';
-import 'package:outer_office/assistant/assistant_view.dart'
-    show OutsideTextStrip;
 import 'package:outer_office/assistant/chat_region.dart';
 import 'package:outer_office/assistant/demo_conversation.dart';
 import 'package:outer_office/main.dart';
@@ -73,18 +71,7 @@ void main() {
         scrollable: entries,
       );
     }
-    expect(
-      find.text(OutsideTextStrip.message),
-      findsNWidgets(2),
-      reason: 'a view and a page card made after reading briefs are marked',
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('navigation-demo-nav-g')),
-        matching: find.text(OutsideTextStrip.message),
-      ),
-      findsOneWidget,
-    );
+    expect(find.textContaining('outside AI6'), findsNothing);
     await tester.scrollUntilVisible(
       find.text('The board by Station'),
       120,

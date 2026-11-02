@@ -41,9 +41,9 @@ Future<bool> launchPage(Uri url) => launchUrl(
   webOnlyWindowName: '_blank',
 );
 
-/// A page she published: its kind, title, size and expiry (or "Remembered"), what she read
-/// when it was made after outside text, and the feeds it reads. **Open** launches it outside
-/// the app; the menu opens it with the network off, remembers or forgets it, and deletes it.
+/// A page she published: its kind, title, size and expiry (or "Remembered"), and the feeds it
+/// reads. **Open** launches it outside the app; the menu opens it with the network off,
+/// remembers or forgets it, and deletes it.
 ///
 /// The link is minted when the card is shown and again before it ends, so a click launches at
 /// once, within the click's activation, where a browser lets a window open.
@@ -55,7 +55,7 @@ class PageCard extends StatefulWidget {
     super.key,
   });
 
-  /// The entry's `data`: `{id, kind, title, bytes, expires_at, exposed, exposed_by, feeds}`.
+  /// The entry's `data`: `{id, kind, title, bytes, expires_at, feeds}`.
   final Map<String, Object?>? data;
   final PageActions actions;
   final PageLauncher launcher;
@@ -146,10 +146,6 @@ class _PageCardState extends State<PageCard> {
     final feeds = [
       for (final feed in (_data['feeds'] as List?) ?? const []) '$feed',
     ];
-    final sources = [
-      for (final source in (_data['exposed_by'] as List?) ?? const [])
-        '$source',
-    ];
     return Card(
       key: ValueKey('page-${_data['id']}'),
       margin: EdgeInsets.zero,
@@ -159,28 +155,6 @@ class _PageCardState extends State<PageCard> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 6,
           children: [
-            if (_data['exposed'] == true)
-              Container(
-                key: const ValueKey('page-exposed'),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Color.alphaBlend(
-                    tokens.warning.withValues(alpha: 0.14),
-                    tokens.raised,
-                  ),
-                  border: Border(
-                    left: BorderSide(color: tokens.warning, width: 3),
-                  ),
-                ),
-                child: Text(
-                  revealInvisible(
-                    'Made after she read text from outside AI6'
-                    '${sources.isEmpty ? '' : ': ${sources.take(5).join(', ')}'}'
-                    '${sources.length > 5 ? ' and ${sources.length - 5} more' : ''}',
-                  ),
-                  style: TextStyle(color: tokens.text),
-                ),
-              ),
             Row(
               spacing: 8,
               children: [

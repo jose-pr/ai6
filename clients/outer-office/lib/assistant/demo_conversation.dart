@@ -131,10 +131,8 @@ class DemoAssistantChannel implements AssistantChannel {
               'attempt at station-control-01; one of its Sessions is working and one '
               'is blocked. Operation L\'s mission-021 is done.',
         ),
-        // Her missions tool read briefs, text from outside AI6, so her views are stamped.
         _entry('view', '', {
           'id': 'demo-view',
-          'exposed': true,
           'view': {
             'version': 1,
             'title': 'The board by Station',
@@ -166,15 +164,10 @@ class DemoAssistantChannel implements AssistantChannel {
             ],
           },
         }),
-        _entry('view', '', {
-          'id': 'demo-view-g',
-          'exposed': true,
-          'view': _operationG,
-        }),
-        // The records she summarised; stamped like her views, so it waits for Open.
+        _entry('view', '', {'id': 'demo-view-g', 'view': _operationG}),
+        // The records she summarised.
         _entry('navigation', 'The Missions of Operation G I summarised', {
           'id': 'demo-nav-g',
-          'exposed': true,
           'route': {'page': 'missions', 'operation_id': 'G'},
           'label': 'The Missions of Operation G I summarised',
         }),

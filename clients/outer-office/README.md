@@ -380,8 +380,7 @@ A key that types a character in a text field is left to it, so AltGr layouts (wh
 reports AltGr as Ctrl+Alt) keep typing. The layout and width are kept per person on each
 device under `oo.chat.<person ID>`; a phone starts with the chat hidden. **Open
 Moneypenny's links at once** in her menu (`oo.chat.<person ID>.follow`, off by default) opens
-each page card as it arrives, except one she offered after reading outside text or while a
-dialog covers the page.
+each page card as it arrives, except while a dialog covers the page.
 
 Web is one Flutter app view: wide windows keep the board beside the selected Session,
 narrow windows navigate to it in-page with browser back. It opens no browser popups and

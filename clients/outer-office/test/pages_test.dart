@@ -45,17 +45,13 @@ class FakeActions implements PageActions {
   Future<void> delete(String id) async => deleted.add(id);
 }
 
-Map<String, Object?> fixture({bool exposed = false, num? expires}) => {
+Map<String, Object?> fixture({num? expires}) => {
   'id': 'page-1',
   'kind': 'dashboard',
   'title': 'Station load',
   'bytes': 2048,
   'expires_at':
       expires ?? ooClock().millisecondsSinceEpoch / 1000 + 20 * 3600 + 300,
-  'exposed': exposed,
-  'exposed_by': exposed
-      ? ['tool:missions', 'tool:WebFetch docs.example']
-      : <String>[],
   'feeds': ['stations', 'missions'],
 };
 
@@ -91,28 +87,26 @@ void main() {
     expect(find.text('2.0 KiB'), findsOneWidget);
     expect(find.text('Expires in 20 h'), findsOneWidget);
     expect(find.text('Reads live: stations, missions'), findsOneWidget);
-    expect(find.byKey(const ValueKey('page-exposed')), findsNothing);
     expect(
       find.text('Opens in a new tab or your browser, outside Outer Office.'),
       findsOneWidget,
     );
   });
 
-  testWidgets(
-    'a remembered page says so, and an exposed one names what she read',
-    (tester) async {
-      await show(tester, {...fixture(exposed: true), 'expires_at': null});
-      expect(find.text('Remembered'), findsOneWidget);
-      expect(find.textContaining('Expires'), findsNothing);
-      expect(
-        find.text(
-          'Made after she read text from outside AI6: tool:missions, '
-          'tool:WebFetch docs.example',
-        ),
-        findsOneWidget,
-      );
-    },
-  );
+  testWidgets('a remembered page says so, and no page names what she read', (
+    tester,
+  ) async {
+    await show(tester, {
+      ...fixture(),
+      'expires_at': null,
+      'exposed': true,
+      'exposed_by': ['tool:missions'],
+    });
+    expect(find.text('Remembered'), findsOneWidget);
+    expect(find.textContaining('Expires'), findsNothing);
+    expect(find.textContaining('outside AI6'), findsNothing);
+    expect(find.textContaining('tool:missions'), findsNothing);
+  });
 
   testWidgets(
     'Open launches the link made when the card was shown, outside the app',

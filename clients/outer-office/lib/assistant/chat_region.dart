@@ -69,16 +69,14 @@ class _ChatShellState extends State<ChatShell> {
     _arrivals = chat?.controller.arrivals.listen(_arrived);
   }
 
-  /// Opens a page she offers at once when the person chose that, the entry is not one she
-  /// offered after reading outside text, and nothing (a dialog, a sheet) covers the page.
-  /// Otherwise the card waits for Open.
+  /// Opens a page she offers at once when the person chose that and nothing (a dialog, a
+  /// sheet) covers the page. Otherwise the card waits for Open.
   void _arrived(AssistantEntry entry) {
     final chat = widget.chat;
     if (entry.role != 'navigation' ||
         chat == null ||
         !mounted ||
         !chat.followAtOnce ||
-        entry.data?['exposed'] == true ||
         !(_route?.isCurrent ?? true)) {
       return;
     }

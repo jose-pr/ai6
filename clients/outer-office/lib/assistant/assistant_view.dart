@@ -6,7 +6,6 @@ import 'package:material_ui/material_ui.dart';
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_route.dart';
 import '../shell/oo_shell.dart' show OoPage;
-import '../theme/oo_tokens.dart';
 import 'charts.dart';
 import 'entry_kind.dart';
 
@@ -1031,7 +1030,6 @@ String showValue(Object? value) => switch (value) {
 class AssistantViewCard extends StatelessWidget {
   const AssistantViewCard({
     required this.json,
-    this.exposed = false,
     this.limits = const ViewLimits(),
     this.onOpen,
     this.onSubmit,
@@ -1039,9 +1037,6 @@ class AssistantViewCard extends StatelessWidget {
   });
 
   final Object? json;
-
-  /// Whether she built it after reading text from outside AI6; the card says so above it.
-  final bool exposed;
 
   /// The bounds Universal Exports sent with the conversation.
   final ViewLimits limits;
@@ -1068,7 +1063,6 @@ class AssistantViewCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (exposed) const OutsideTextStrip(),
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(
@@ -1108,55 +1102,6 @@ class AssistantViewCard extends StatelessWidget {
               ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// The strip over a view she built after reading text from outside AI6.
-class OutsideTextStrip extends StatelessWidget {
-  const OutsideTextStrip({this.sources = const [], super.key});
-
-  /// What exposed the conversation, when it is known: `tool:missions`, or the source a Station
-  /// reported.
-  final List<String> sources;
-
-  /// What the strip says.
-  static const message =
-      'Made after reading text from outside AI6. Check it before acting on it.';
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = OoTokens.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: Color.alphaBlend(
-          tokens.warning.withValues(alpha: 0.14),
-          tokens.raised,
-        ),
-        border: Border(left: BorderSide(color: tokens.warning, width: 3)),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        spacing: 8,
-        children: [
-          Icon(Icons.warning_amber_rounded, color: tokens.warning, size: 18),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(message, style: TextStyle(color: tokens.text)),
-                if (sources.isNotEmpty)
-                  Text(
-                    revealInvisible('Read from: ${sources.join(', ')}'),
-                    style: TextStyle(color: tokens.muted, fontSize: 12),
-                  ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

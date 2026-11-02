@@ -83,7 +83,6 @@ void main() {
     );
     expect(find.text('Affects: Missions › G › m-12'), findsOneWidget);
     expect(find.text('Nothing changes until you confirm.'), findsOneWidget);
-    expect(find.byType(OutsideTextStrip), findsNothing);
     await tester.tap(find.byKey(const ValueKey('proposal-opens')));
     expect(opened, ['app:/missions?operation_id=G&mission_id=m-12']);
   });
@@ -108,7 +107,7 @@ void main() {
     expect(find.byKey(const ValueKey('proposal-opens')), findsNothing);
   });
 
-  testWidgets('an exposed proposal carries the strip naming what exposed it', (
+  testWidgets('a proposal carries no strip, whatever an entry says', (
     tester,
   ) async {
     await show(
@@ -120,11 +119,10 @@ void main() {
         },
       ),
     );
-    expect(find.text(OutsideTextStrip.message), findsOneWidget);
-    expect(
-      find.text('Read from: tool:missions, personal:notes/a.md'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('outside AI6'), findsNothing);
+    expect(find.textContaining('Read from:'), findsNothing);
+    expect(find.byIcon(Icons.warning_amber_rounded), findsNothing);
+    expect(find.text('Nothing changes until you confirm.'), findsOneWidget);
   });
 
   testWidgets('each status has its word, and a refusal its reason', (

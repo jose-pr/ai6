@@ -238,7 +238,7 @@ class MoneypennyChat extends ChangeNotifier {
   void Function(String link)? onLink;
 
   /// Whether a page she offers opens without the person's click: the person's choice, off
-  /// by default. Never for one offered after she read outside text, nor over a dialog.
+  /// by default. Never over a dialog.
   bool get followAtOnce => _followAtOnce;
   bool _followAtOnce = false;
 

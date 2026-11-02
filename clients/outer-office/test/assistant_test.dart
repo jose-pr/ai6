@@ -25,7 +25,6 @@ Future<void> showView(
   Object? view, {
   void Function(String link)? onOpen,
   void Function(Map<String, Object?> values)? onSubmit,
-  bool exposed = false,
 }) async {
   tester.view.physicalSize = const Size(900, 1600);
   tester.view.devicePixelRatio = 1;
@@ -37,7 +36,6 @@ Future<void> showView(
         body: SingleChildScrollView(
           child: AssistantViewCard(
             json: view,
-            exposed: exposed,
             onOpen: onOpen,
             onSubmit: onSubmit,
           ),
@@ -398,16 +396,9 @@ void main() {
     expect(find.text('View refused'), findsOneWidget);
   });
 
-  testWidgets('a view built after reading outside text carries the strip', (
+  testWidgets('no view carries a strip, whatever an entry says', (
     tester,
   ) async {
-    await showView(tester, valid['table']);
-    expect(find.text(OutsideTextStrip.message), findsNothing);
-    await showView(tester, valid['table'], exposed: true);
-    expect(find.text(OutsideTextStrip.message), findsOneWidget);
-    expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
-
-    // The panel reads the stamp Universal Exports put on the entry.
     final channel = FakeChannel();
     final controller = AssistantController(
       token: 'user-token',
@@ -428,19 +419,13 @@ void main() {
           'role': 'view',
           'text': '',
           'at': 1.0,
-          'data': {'id': 'view-1', 'view': valid['key_values']},
-        },
-        {
-          'role': 'view',
-          'text': '',
-          'at': 2.0,
-          'data': {'id': 'view-2', 'view': valid['table'], 'exposed': true},
+          'data': {'id': 'view-1', 'view': valid['table'], 'exposed': true},
         },
       ],
     });
     await tester.pumpAndSettle();
-    expect(find.text('Headquarters'), findsOneWidget);
-    expect(find.text(OutsideTextStrip.message), findsOneWidget);
+    expect(find.textContaining('outside AI6'), findsNothing);
+    expect(find.byIcon(Icons.warning_amber_rounded), findsNothing);
   });
 
   testWidgets('the panel streams the conversation and confirms a proposal', (

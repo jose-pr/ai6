@@ -4,7 +4,7 @@ import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import 'assistant_panel.dart' show MoneypennyAvatar;
-import 'assistant_view.dart' show OutsideTextStrip, RefusedView;
+import 'assistant_view.dart' show RefusedView;
 import 'entry_kind.dart';
 
 /// The route a navigation entry offers (its `data`), or why it is not one.
@@ -12,12 +12,11 @@ OoRoute navigationRoute(Map<String, Object?>? data) =>
     OoRoute.fromJson(data?['route']);
 
 /// A page Moneypenny offers to open: the page and every field of its route as chips, built
-/// from the route itself, her label beneath as her words, and Open. Opening only reads; an
-/// entry she offered after reading outside text says so above it.
+/// from the route itself, her label beneath as her words, and Open. Opening only reads.
 class NavigationCard extends StatelessWidget {
   const NavigationCard({required this.data, this.onOpen, super.key});
 
-  /// The entry's `data`: `{id, route, label, exposed?}`.
+  /// The entry's `data`: `{id, route, label}`.
   final Map<String, Object?>? data;
 
   /// Opens the route, as a link (`app:/<page>?...`); without it there is no Open.
@@ -43,7 +42,6 @@ class NavigationCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 8,
           children: [
-            if (data?['exposed'] == true) const OutsideTextStrip(),
             Row(
               spacing: 8,
               children: [

@@ -5,8 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:outer_office/assistant/assistant_view.dart'
-    show OutsideTextStrip;
 import 'package:outer_office/assistant/chat_layout.dart';
 import 'package:outer_office/assistant/navigation_card.dart';
 import 'package:outer_office/main.dart';
@@ -104,13 +102,12 @@ Future<(MoneypennyChat, List<MethodCall>)> _open(
 
 var _clock = 0;
 
-/// Moneypenny offers [route] with [label], after reading outside text when [exposed].
+/// Moneypenny offers [route] with [label].
 Future<void> _offer(
   WidgetTester tester,
   FakeChannel channel,
   Map<String, Object?> route, {
   String label = 'Look here',
-  bool exposed = false,
 }) async {
   final id = 'nav-${++_clock}';
   channel.answer({
@@ -119,12 +116,7 @@ Future<void> _offer(
       'role': 'navigation',
       'text': label,
       'at': _clock.toDouble(),
-      'data': {
-        'id': id,
-        'route': route,
-        'label': label,
-        if (exposed) 'exposed': true,
-      },
+      'data': {'id': id, 'route': route, 'label': label},
     },
   });
   await tester.pumpAndSettle();
@@ -210,8 +202,8 @@ void main() {
     expect(find.textContaining('missions has no token'), findsOneWidget);
   });
 
-  testWidgets('with the follow preference on, a clean card opens at once; an '
-      'exposed one, or one over a dialog, waits for Open', (tester) async {
+  testWidgets('with the follow preference on, a card opens at once; one over a '
+      'dialog waits for Open', (tester) async {
     SharedPreferences.setMockInitialValues({'oo.chat.ana.follow': true});
     final channel = FakeChannel();
     final board = _board(channel, []);
@@ -232,26 +224,6 @@ void main() {
     expect(find.text('Mission g-working'), findsNothing);
     expect(find.byKey(const ValueKey('opened-by-moneypenny')), findsOneWidget);
 
-    // Offered after reading outside text: the card says so and waits.
-    await _offer(tester, channel, {
-      'page': 'sessions',
-      'operation_id': 'G',
-    }, exposed: true);
-    expect(
-      locations(reported).last.$1,
-      '/missions?operation_id=G&state=failed',
-    );
-    expect(
-      find.descendant(
-        of: _card('nav-2'),
-        matching: find.text(OutsideTextStrip.message),
-      ),
-      findsOneWidget,
-    );
-    await tester.tap(_openButton('nav-2'));
-    await tester.pumpAndSettle();
-    expect(locations(reported).last, ('/sessions?operation_id=G', false));
-
     // A dialog over the page keeps it where it is.
     unawaited(
       showDialog<void>(
@@ -261,7 +233,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     await _offer(tester, channel, {'page': 'audit', 'operation_id': 'G'});
-    expect(locations(reported).last.$1, '/sessions?operation_id=G');
+    expect(
+      locations(reported).last.$1,
+      '/missions?operation_id=G&state=failed',
+    );
     expect(find.text('Busy'), findsOneWidget);
   });
 
