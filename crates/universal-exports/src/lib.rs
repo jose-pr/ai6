@@ -513,6 +513,8 @@ pub struct Gateway {
     compartment_reads: compartments::AuditMemory,
     accounts: Option<Arc<dyn ai6::Accounts>>,
     login_guard: std::sync::Arc<LoginGuard>,
+    /// Refused resumes, apart from `login_guard` so they cost nobody a try at their password.
+    resume_guard: std::sync::Arc<LoginGuard>,
     controls: Arc<std::sync::Mutex<ControlBook>>,
     control_ready: Arc<tokio::sync::Notify>,
     assistant: Option<Arc<moneypenny::Assistant>>,
@@ -578,6 +580,7 @@ impl Gateway {
     pub fn new(config: GatewayConfig) -> Self {
         let (input_tx, input_rx) = mpsc::channel(config.limits.input_queue_capacity);
         let login_guard = std::sync::Arc::new(LoginGuard::new(&config.login));
+        let resume_guard = std::sync::Arc::new(LoginGuard::new(&config.login));
         let controls = ControlBook::new(config.unex().controls.clone());
         Self {
             config: std::sync::Arc::new(config),
@@ -591,6 +594,7 @@ impl Gateway {
             compartment_reads: Default::default(),
             accounts: None,
             login_guard,
+            resume_guard,
             controls: Arc::new(std::sync::Mutex::new(controls)),
             control_ready: Arc::default(),
             assistant: None,
@@ -1649,6 +1653,7 @@ impl Gateway {
             .route("/v1/auth/login", post(login))
             .route("/v1/auth/logout", post(logout))
             .route("/v1/auth/renew", post(renew))
+            .route("/v1/auth/resume", post(resume))
             .route("/v1/auth/session", get(access_session))
             .route("/v1/user/profile", get(user_profile))
             .route("/v1/user/audit", get(user_audit))
@@ -2515,6 +2520,9 @@ struct LoginRequest {
     secret: String,
     #[serde(default)]
     ttl_seconds: Option<u64>,
+    /// `false` asks a browser's sign-in not to get a session cookie.
+    #[serde(default)]
+    session_cookie: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -2687,51 +2695,181 @@ async fn login(
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
-) -> Result<(StatusCode, Json<IssuedAccessToken>), ApiError> {
-    if headers.contains_key(ORIGIN) {
+) -> Result<Response, ApiError> {
+    // A browser always names the page's origin on a POST, and nothing else this gateway serves
+    // does, so that is what tells a web sign-in from a desktop app's or an API client's.
+    let from_browser = headers.contains_key(ORIGIN);
+    if from_browser {
         require_origin(&gateway, &headers)?;
     }
     let ttl = access_token_ttl(&gateway, request.ttl_seconds)?;
+    let wants_cookie = from_browser && request.session_cookie != Some(false);
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
-    let person = if let Some(proxy) = &providers.proxy_identity {
-        if let Some(value) = headers.get(&proxy.header) {
-            require_origin(&gateway, &headers)?;
-            let sent = headers
-                .get(PROXY_SECRET_HEADER)
-                .map(|value| value.as_bytes())
-                .unwrap_or_default();
-            let proven = proxy
-                .secret
-                .as_ref()
-                .is_some_and(|secret| constant_time_eq(secret.as_bytes(), sent));
-            if !proven {
-                return Err(ApiError::unauthorized());
-            }
-            let value = value.to_str().map_err(|_| ApiError::unauthorized())?;
-            let value = value.trim();
-            if value.is_empty() || value.len() > 512 || value.contains(',') {
-                return Err(ApiError::unauthorized());
-            }
-            let directory = providers.directory.clone();
-            let lookup = Lookup {
-                by: proxy.lookup_by.clone(),
-                value: value.to_owned(),
-            };
-            tokio::task::spawn_blocking(move || directory.lookup(lookup))
-                .await
-                .map_err(|_| ApiError::internal())?
-                .map_err(|_| ApiError::internal())?
-                .ok_or_else(ApiError::unauthorized)?
-        } else {
-            authenticate_password(&gateway, &providers, &headers, connection, request).await?
-        }
-    } else {
-        authenticate_password(&gateway, &providers, &headers, connection, request).await?
+    let person = match proxy_person(&gateway, &providers, &headers).await? {
+        Some(person) => person,
+        None => authenticate_password(&gateway, &providers, &headers, connection, request).await?,
     };
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let session_max = gateway.config.unex().gateway.session_max;
-    let issued = issue_access_token_record(registry, person.id, ttl, session_max).await?;
-    Ok((StatusCode::CREATED, Json(issued)))
+    let table = &gateway.config.unex().gateway;
+    let session_max = table.session_max;
+    let issued_at = unix_timestamp()?;
+    let cookie = if wants_cookie && session_cookies_on(table) {
+        Some(store_session_cookie(registry.clone(), &person.id, issued_at, session_max).await?)
+    } else {
+        None
+    };
+    let issued = store_bearer(
+        registry,
+        person.id,
+        Times {
+            issued_at,
+            expires_at: issued_at + ttl.as_secs_f64(),
+            now: issued_at,
+        },
+        session_max,
+        cookie.as_ref().map(|cookie| cookie.sign_in.clone()),
+    )
+    .await?;
+    let mut response = (StatusCode::CREATED, Json(issued)).into_response();
+    if let Some(cookie) = cookie {
+        response.headers_mut().insert(SET_COOKIE, cookie.header);
+    }
+    Ok(response)
+}
+
+/// The person a trusted reverse proxy asserts on this request; `None` when it asserts nobody.
+async fn proxy_person(
+    gateway: &Gateway,
+    providers: &AccessProviders,
+    headers: &HeaderMap,
+) -> Result<Option<Person>, ApiError> {
+    let Some(proxy) = &providers.proxy_identity else {
+        return Ok(None);
+    };
+    let Some(value) = headers.get(&proxy.header) else {
+        return Ok(None);
+    };
+    require_origin(gateway, headers)?;
+    let sent = headers
+        .get(PROXY_SECRET_HEADER)
+        .map(|value| value.as_bytes())
+        .unwrap_or_default();
+    let proven = proxy
+        .secret
+        .as_ref()
+        .is_some_and(|secret| constant_time_eq(secret.as_bytes(), sent));
+    if !proven {
+        return Err(ApiError::unauthorized());
+    }
+    let value = value.to_str().map_err(|_| ApiError::unauthorized())?;
+    let value = value.trim();
+    if value.is_empty() || value.len() > 512 || value.contains(',') {
+        return Err(ApiError::unauthorized());
+    }
+    let directory = providers.directory.clone();
+    let lookup = Lookup {
+        by: proxy.lookup_by.clone(),
+        value: value.to_owned(),
+    };
+    tokio::task::spawn_blocking(move || directory.lookup(lookup))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(ApiError::unauthorized)
+        .map(Some)
+}
+
+/// `POST /v1/auth/resume`: a fresh access token for the sign-in a session cookie holds, so a
+/// reloaded page need not ask for the password. The sign-in's time keeps running from when it
+/// was made. It answers as `login` does; a cookie that does not stand is cleared.
+async fn resume(
+    State(gateway): State<Gateway>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    // Unlike a bearer, a cookie goes along by itself, so the origin is not optional here.
+    require_origin(&gateway, &headers)?;
+    let value = session_cookie(&headers).ok_or_else(ApiError::unauthorized)?;
+    if let Some(issued) = resumed_token(&gateway, &headers, value).await? {
+        return Ok((StatusCode::CREATED, Json(issued)).into_response());
+    }
+    // Judged before being counted: the value cannot be guessed, so the count only slows a client
+    // hammering this route, and must not keep out a good cookie behind the same address.
+    let source = gateway.resume_guard.source(
+        &headers,
+        connection.map(|Extension(ConnectInfo(address))| address),
+    );
+    let refusal = match gateway.resume_guard.tried_address(source) {
+        Some(wait) => ApiError::too_many_attempts(wait),
+        None => ApiError::unauthorized(),
+    };
+    let mut response = refusal.into_response();
+    response.headers_mut().append(SET_COOKIE, ended_cookie()?);
+    Ok(response)
+}
+
+/// The token a session cookie's value gets; `None` when it gets none: the setting is off, the
+/// value is not a standing cookie, its time is up, its person has left the directory, or a
+/// front proxy now says this browser is someone else.
+async fn resumed_token(
+    gateway: &Gateway,
+    headers: &HeaderMap,
+    value: &str,
+) -> Result<Option<IssuedAccessToken>, ApiError> {
+    let table = &gateway.config.unex().gateway;
+    if !session_cookies_on(table) {
+        return Ok(None);
+    }
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let digest = session_cookie_digest(value);
+    let found = registry.clone();
+    let cookie = tokio::task::spawn_blocking(move || found.find_session_cookie(&digest))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+    let Some(cookie) = cookie else {
+        return Ok(None);
+    };
+    let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
+    let directory = providers.directory.clone();
+    let person_id = cookie.person_id().to_owned();
+    let person = tokio::task::spawn_blocking(move || {
+        directory.lookup(Lookup {
+            by: "id".to_owned(),
+            value: person_id,
+        })
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    let Some(person) = person else {
+        return Ok(None);
+    };
+    let asserted = proxy_person(gateway, &providers, headers).await?;
+    if asserted.is_some_and(|asserted| asserted.id != person.id) {
+        return Ok(None);
+    }
+    let now = unix_timestamp()?;
+    // The sign-in's end as it was set, or sooner if `session_max` has been lowered since.
+    let ends = cookie
+        .expires_at()
+        .min(cookie.issued_at() + table.session_max.as_secs_f64());
+    if ends <= now {
+        return Ok(None);
+    }
+    store_bearer(
+        registry,
+        person.id,
+        Times {
+            issued_at: cookie.issued_at(),
+            expires_at: (now + table.access_token_ttl.0.as_secs_f64()).min(ends),
+            now,
+        },
+        table.session_max,
+        Some(cookie.token_id().to_owned()),
+    )
+    .await
+    .map(Some)
 }
 
 /// `POST /v1/auth/renew`: moves the presented token's expiry on by `access_token_ttl`, up to
@@ -2820,12 +2958,51 @@ async fn issue_access_token_record(
     session_max: TimeLimit,
 ) -> Result<IssuedAccessToken, ApiError> {
     let issued_at = unix_timestamp()?;
-    let expires_at = issued_at + ttl.as_secs_f64();
+    store_bearer(
+        registry,
+        person_id,
+        Times {
+            issued_at,
+            expires_at: issued_at + ttl.as_secs_f64(),
+            now: issued_at,
+        },
+        session_max,
+        None,
+    )
+    .await
+}
+
+/// A bearer token's times. A resumed token's `issued_at` is the sign-in's, which is what keeps
+/// its renewals within `session_max` of that sign-in.
+struct Times {
+    issued_at: f64,
+    expires_at: f64,
+    now: f64,
+}
+
+/// A new secret. Two independent UUIDs provide 256 random bits without a separate token crate.
+fn new_secret() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+/// Stores a new bearer token, of the sign-in holding the session cookie `sign_in` when one is
+/// named.
+async fn store_bearer(
+    registry: Arc<dyn RegistryBackend>,
+    person_id: String,
+    times: Times,
+    session_max: TimeLimit,
+    sign_in: Option<String>,
+) -> Result<IssuedAccessToken, ApiError> {
+    let Times {
+        issued_at,
+        expires_at,
+        now,
+    } = times;
     let token_id = Uuid::new_v4().to_string();
-    // Two independent UUIDs provide 256 random bits without a separate token crate.
-    let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token = new_secret();
     let digest = access_token_digest(&token);
-    let record = AccessTokenRecord::try_new(
+    let mut record = AccessTokenRecord::try_new(
         token_id.clone(),
         digest,
         person_id,
@@ -2834,6 +3011,11 @@ async fn issue_access_token_record(
         None,
     )
     .map_err(|_| ApiError::bad_request())?;
+    if let Some(sign_in) = sign_in {
+        record = record
+            .in_sign_in(sign_in)
+            .map_err(|_| ApiError::internal())?;
+    }
     tokio::task::spawn_blocking(move || registry.store_access_token(&record))
         .await
         .map_err(|_| ApiError::internal())?
@@ -2842,8 +3024,58 @@ async fn issue_access_token_record(
         token_id,
         token,
         expires_at,
-        expires_in: expires_at - issued_at,
+        expires_in: expires_at - now,
         ends_at: session_end(issued_at, expires_at, session_max),
+    })
+}
+
+/// A session cookie just stored: its record's ID and the header that hands it to the browser.
+struct NewSessionCookie {
+    sign_in: String,
+    header: HeaderValue,
+}
+
+/// Whether a browser's sign-in gets a session cookie: with renewal off the sign-in ends with its
+/// first token, and there is nothing to come back to.
+fn session_cookies_on(table: &ai6::UnexGatewayLimits) -> bool {
+    table.session_cookie && table.session_max.get() != Some(Duration::ZERO)
+}
+
+/// Stores a sign-in's session cookie, which ends `session_max` after `issued_at` and never later.
+async fn store_session_cookie(
+    registry: Arc<dyn RegistryBackend>,
+    person_id: &str,
+    issued_at: f64,
+    session_max: TimeLimit,
+) -> Result<NewSessionCookie, ApiError> {
+    let lifetime = session_max.as_secs_f64();
+    // No bound leaves nothing to write down but the largest time there is. Past about a year a
+    // browser keeps a cookie only as long as it chooses, whatever Max-Age says.
+    let expires_at = if lifetime.is_finite() {
+        issued_at + lifetime
+    } else {
+        f64::MAX
+    };
+    let max_age = lifetime.ceil().min(f64::from(u32::MAX)) as u64;
+    let value = new_secret();
+    let sign_in = Uuid::new_v4().to_string();
+    let record = AccessTokenRecord::try_new(
+        sign_in.clone(),
+        session_cookie_digest(&value),
+        person_id,
+        issued_at,
+        expires_at,
+        None,
+    )
+    .map_err(|_| ApiError::bad_request())?
+    .into_session_cookie();
+    tokio::task::spawn_blocking(move || registry.store_access_token(&record))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+    Ok(NewSessionCookie {
+        sign_in,
+        header: session_cookie_header(&value, max_age)?,
     })
 }
 
@@ -3752,27 +3984,56 @@ async fn user_audit(
     Ok(Json(entries))
 }
 
-async fn logout(
-    State(gateway): State<Gateway>,
-    headers: HeaderMap,
-) -> Result<StatusCode, ApiError> {
+/// `POST /v1/auth/logout`: ends the sign-in of the presented token, of the session cookie when
+/// the app's own page sends one, or both. The cookie counts by itself because a token can be over
+/// by then, and signing out must still end what a reload would come back to.
+async fn logout(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Response, ApiError> {
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let digest = access_token_digest(bearer(&headers)?);
-    let record = tokio::task::spawn_blocking(move || registry.find_access_token(&digest))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|_| ApiError::internal())?
-        .ok_or_else(ApiError::unauthorized)?;
-    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let token_id = record.token_id().to_owned();
-    let revoked = tokio::task::spawn_blocking(move || registry.revoke_access_token(&token_id))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|_| ApiError::internal())?;
-    if !revoked {
-        return Err(ApiError::unauthorized());
+    let cookie = session_cookie(&headers);
+    let mut ended = false;
+    if let Some(value) = cookie.filter(|_| require_origin(&gateway, &headers).is_ok()) {
+        let digest = session_cookie_digest(value);
+        let found = registry.clone();
+        let record = tokio::task::spawn_blocking(move || found.find_session_cookie(&digest))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(|_| ApiError::internal())?;
+        if let Some(record) = record {
+            ended |= revoke_token_record(&registry, record).await?;
+        }
     }
-    Ok(StatusCode::NO_CONTENT)
+    if let Ok(token) = bearer(&headers) {
+        let digest = access_token_digest(token);
+        let found = registry.clone();
+        let record = tokio::task::spawn_blocking(move || found.find_access_token(&digest))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(|_| ApiError::internal())?;
+        if let Some(record) = record {
+            ended |= revoke_token_record(&registry, record).await?;
+        }
+    }
+    let mut response = if ended {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        ApiError::unauthorized().into_response()
+    };
+    if cookie.is_some() {
+        response.headers_mut().append(SET_COOKIE, ended_cookie()?);
+    }
+    Ok(response)
+}
+
+async fn revoke_token_record(
+    registry: &Arc<dyn RegistryBackend>,
+    record: AccessTokenRecord,
+) -> Result<bool, ApiError> {
+    let registry = registry.clone();
+    let token_id = record.token_id().to_owned();
+    tokio::task::spawn_blocking(move || registry.revoke_access_token(&token_id))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())
 }
 
 async fn revoke_access_token(
@@ -3792,9 +4053,19 @@ async fn revoke_access_token(
 }
 
 fn access_token_digest(token: &str) -> String {
+    secret_digest(b"ai6-access-token\0", token)
+}
+
+/// Under its own prefix, so a cookie's value presented as a bearer token looks up a digest that
+/// no record has.
+fn session_cookie_digest(value: &str) -> String {
+    secret_digest(b"ai6-session-cookie\0", value)
+}
+
+fn secret_digest(purpose: &[u8], secret: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"ai6-access-token\0");
-    hasher.update(token.as_bytes());
+    hasher.update(purpose);
+    hasher.update(secret.as_bytes());
     let mut digest = String::with_capacity(64);
     for byte in hasher.finalize() {
         let _ = write!(digest, "{byte:02x}");
@@ -4527,10 +4798,39 @@ fn bearer(headers: &HeaderMap) -> Result<&str, ApiError> {
 }
 
 fn attach_cookie(cookie: &str) -> Option<&str> {
+    named_cookie(cookie, "ai6_attach")
+}
+
+fn named_cookie<'a>(cookie: &'a str, wanted: &str) -> Option<&'a str> {
     cookie.split(';').find_map(|part| {
         let (name, value) = part.trim().split_once('=')?;
-        (name == "ai6_attach" && !value.is_empty()).then_some(value)
+        (name == wanted && !value.is_empty()).then_some(value)
     })
+}
+
+/// The cookie that resumes a sign-in; only `resume` and `logout` read it.
+const SESSION_COOKIE: &str = "ai6_session";
+
+/// A client speaking HTTP/2 may split `Cookie` over several headers.
+fn session_cookie(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get_all(COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|cookie| named_cookie(cookie, SESSION_COOKIE))
+}
+
+fn session_cookie_header(value: &str, max_age: u64) -> Result<HeaderValue, ApiError> {
+    HeaderValue::from_str(&format!(
+        "{SESSION_COOKIE}={value}; Path=/v1/auth; HttpOnly; Secure; SameSite=Strict; \
+         Max-Age={max_age}"
+    ))
+    .map_err(|_| ApiError::internal())
+}
+
+/// Tells the browser to drop the cookie.
+fn ended_cookie() -> Result<HeaderValue, ApiError> {
+    session_cookie_header("", 0)
 }
 
 struct ApiError {
@@ -5828,6 +6128,13 @@ mod tests {
 
     impl Directory for Leaving {
         fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
+            if lookup.value == "bob" {
+                return Ok(Some(Person {
+                    id: "bob-id".to_owned(),
+                    name: "bob".to_owned(),
+                    ..Person::default()
+                }));
+            }
             let known = ["alice", "alice-id"].contains(&lookup.value.as_str());
             Ok(
                 (known && !self.gone.load(std::sync::atomic::Ordering::SeqCst)).then(|| Person {
@@ -5856,6 +6163,14 @@ mod tests {
 
     impl Signing {
         async fn new(change: impl FnOnce(&mut ai6::UnexGatewayLimits)) -> Self {
+            Self::built(change, LoginLimits::default(), |providers| providers).await
+        }
+
+        async fn built(
+            change: impl FnOnce(&mut ai6::UnexGatewayLimits),
+            login: LoginLimits,
+            providers: impl FnOnce(AccessProviders) -> AccessProviders,
+        ) -> Self {
             let mut limits = ai6::UnexLimits::default();
             change(&mut limits.gateway);
             let config = GatewayConfig::new(
@@ -5866,7 +6181,8 @@ mod tests {
                 Duration::from_secs(30),
             )
             .unwrap()
-            .with_unex_limits(limits);
+            .with_unex_limits(limits)
+            .with_login_limits(login);
             let directory = tempfile::tempdir().unwrap();
             let registry = FileRegistry::open(directory.path());
             let gone = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -5874,7 +6190,11 @@ mod tests {
             let gateway = Gateway::with_access(
                 config,
                 Arc::new(registry.clone()),
-                AccessProviders::new(people.clone(), people, Arc::new(RoleAuthorizer::default())),
+                providers(AccessProviders::new(
+                    people.clone(),
+                    people,
+                    Arc::new(RoleAuthorizer::default()),
+                )),
             );
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}", listener.local_addr().unwrap());
@@ -5943,6 +6263,80 @@ mod tests {
                 .await
                 .unwrap()
         }
+
+        /// A POST as the app's own page sends one.
+        fn page_post(&self, path: &str) -> reqwest::RequestBuilder {
+            reqwest::Client::new()
+                .post(format!("{}{path}", self.base))
+                .header(ORIGIN, "https://localhost")
+                .header("x-forwarded-proto", "https")
+        }
+
+        /// Signs in as Alice from the app's page, returning the answer's body and the cookie as
+        /// a browser would send it back.
+        async fn web_login(&self) -> (serde_json::Value, String) {
+            let response = self
+                .page_post("/v1/auth/login")
+                .json(&serde_json::json!({"name": "alice", "secret": "right"}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+            let cookie = set_cookie_of(&response)
+                .expect("a web sign-in gets a cookie")
+                .split(';')
+                .next()
+                .unwrap()
+                .to_owned();
+            (response.json().await.unwrap(), cookie)
+        }
+
+        async fn resume(&self, cookie: &str) -> reqwest::Response {
+            self.page_post("/v1/auth/resume")
+                .header(COOKIE, cookie)
+                .send()
+                .await
+                .unwrap()
+        }
+
+        /// A session cookie of Alice's with these times, returning it as a browser sends it.
+        fn cookie(&self, issued_at: f64, expires_at: f64) -> String {
+            let value = new_secret();
+            let record = AccessTokenRecord::try_new(
+                Uuid::new_v4().to_string(),
+                session_cookie_digest(&value),
+                "alice-id",
+                issued_at,
+                expires_at,
+                None,
+            )
+            .unwrap()
+            .into_session_cookie();
+            self.registry.store_access_token(&record).unwrap();
+            format!("{SESSION_COOKIE}={value}")
+        }
+
+        /// The record of a token value, while it stands.
+        fn record_of(&self, token: &str) -> Option<AccessTokenRecord> {
+            self.registry
+                .find_access_token(&access_token_digest(token))
+                .unwrap()
+        }
+    }
+
+    fn set_cookie_of(response: &reqwest::Response) -> Option<String> {
+        response
+            .headers()
+            .get(SET_COOKIE)
+            .map(|value| value.to_str().unwrap().to_owned())
+    }
+
+    /// Says the response tells the browser to drop the session cookie.
+    fn assert_clears_cookie(response: &reqwest::Response) {
+        let set = set_cookie_of(response).expect("the cookie is cleared");
+        assert!(set.starts_with("ai6_session=;"), "{set}");
+        assert!(set.contains("Path=/v1/auth"), "{set}");
+        assert!(set.contains("Max-Age=0"), "{set}");
     }
 
     async fn body_of(response: reqwest::Response) -> serde_json::Value {
@@ -6154,6 +6548,520 @@ mod tests {
         );
         let unmoved = time_in(&body_of(signing.session(&token).await).await, "expires_at");
         assert!((unmoved - held).abs() < 1e-3, "nothing moved");
+    }
+
+    #[tokio::test]
+    async fn a_web_login_sets_exactly_the_session_cookie_and_keeps_only_its_digest() {
+        let signing = Signing::new(|gateway| gateway.session_max = TimeLimit::secs(7_200)).await;
+        let response = signing
+            .page_post("/v1/auth/login")
+            .json(&serde_json::json!({"name": "alice", "secret": "right"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let set = set_cookie_of(&response).unwrap();
+        let mut parts = set.split("; ");
+        let (name, value) = parts.next().unwrap().split_once('=').unwrap();
+        assert_eq!(name, "ai6_session");
+        assert_eq!(value.len(), 64, "{set}");
+        assert_eq!(
+            parts.collect::<Vec<_>>(),
+            [
+                "Path=/v1/auth",
+                "HttpOnly",
+                "Secure",
+                "SameSite=Strict",
+                "Max-Age=7200"
+            ]
+        );
+        let body: serde_json::Value = response.json().await.unwrap();
+        let token = body["token"].as_str().unwrap();
+        assert_ne!(token, value);
+
+        // Its record ends with the sign-in and holds only the digest, and the bearer names it.
+        let record = signing
+            .registry
+            .find_session_cookie(&session_cookie_digest(value))
+            .unwrap()
+            .unwrap();
+        assert!((record.expires_at() - (record.issued_at() + 7_200.0)).abs() < 1e-3);
+        let bearer = signing.record_of(token).unwrap();
+        assert_eq!(bearer.sign_in(), Some(record.token_id()));
+        assert!((bearer.issued_at() - record.issued_at()).abs() < 1e-6);
+        for entry in std::fs::read_dir(signing._directory.path().join("access-tokens")).unwrap() {
+            let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            assert!(!text.contains(value), "the value is never written");
+        }
+
+        // A client that is no browser, and a page that asks not to, get none.
+        let api = signing.login(None).await;
+        assert_eq!(api.status(), StatusCode::CREATED);
+        assert!(set_cookie_of(&api).is_none());
+        let api: serde_json::Value = api.json().await.unwrap();
+        let bearer = signing.record_of(api["token"].as_str().unwrap()).unwrap();
+        assert_eq!(bearer.sign_in(), None);
+        let declined = signing
+            .page_post("/v1/auth/login")
+            .json(&serde_json::json!({
+                "name": "alice", "secret": "right", "session_cookie": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(declined.status(), StatusCode::CREATED);
+        assert!(set_cookie_of(&declined).is_none());
+
+        // A failed sign-in gets none.
+        let refused = signing
+            .page_post("/v1/auth/login")
+            .json(&serde_json::json!({"name": "alice", "secret": "wrong"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+        assert!(set_cookie_of(&refused).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_resume_answers_as_login_does_with_a_new_token_of_the_same_sign_in() {
+        let signing = Signing::new(|gateway| {
+            gateway.access_token_ttl = ai6::Seconds::new(3_600);
+            gateway.session_max = TimeLimit::secs(7_200);
+        })
+        .await;
+        let (signed_in, cookie) = signing.web_login().await;
+        let first = signed_in["token"].as_str().unwrap();
+
+        let resumed = signing.resume(&cookie).await;
+        assert_eq!(resumed.status(), StatusCode::CREATED);
+        assert!(
+            set_cookie_of(&resumed).is_none(),
+            "the cookie stays as it is"
+        );
+        let resumed: serde_json::Value = resumed.json().await.unwrap();
+        let second = resumed["token"].as_str().unwrap();
+        assert_ne!(second, first);
+        assert!((3_590.0..=3_600.0).contains(&time_in(&resumed, "expires_in")));
+        assert!(time_in(&resumed, "expires_at") > time_in(&signed_in, "expires_at") - 1e-3);
+        assert!(
+            (time_in(&resumed, "ends_at") - time_in(&signed_in, "ends_at")).abs() < 1e-3,
+            "it ends when the sign-in does: {resumed}"
+        );
+        let session = body_of(signing.session(second).await).await;
+        assert_eq!(session["person_id"], "alice-id");
+        assert_eq!(session["token_id"], resumed["token_id"]);
+        assert_eq!(
+            signing.session(first).await.status(),
+            StatusCode::OK,
+            "another tab's token carries on"
+        );
+        let first = signing.record_of(first).unwrap();
+        let second = signing.record_of(second).unwrap();
+        assert_eq!(second.sign_in(), first.sign_in());
+        assert!((second.issued_at() - first.issued_at()).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn a_resume_cannot_pass_the_cap_of_the_original_sign_in() {
+        let signing = Signing::new(|gateway| {
+            gateway.access_token_ttl = ai6::Seconds::new(3_600);
+            gateway.session_max = TimeLimit::secs(7_200);
+        })
+        .await;
+        let now = unix_timestamp().ok().unwrap();
+
+        // A hundred seconds of the sign-in left: the token gets those and no more, however many
+        // times it is resumed, and renewing it cannot move it past them.
+        let issued_at = now - 7_100.0;
+        let ends = issued_at + 7_200.0;
+        let cookie = signing.cookie(issued_at, ends);
+        for _ in 0..2 {
+            let resumed = signing.resume(&cookie).await;
+            assert_eq!(resumed.status(), StatusCode::CREATED);
+            let resumed: serde_json::Value = resumed.json().await.unwrap();
+            assert!(
+                (time_in(&resumed, "expires_at") - ends).abs() < 1e-3,
+                "{resumed}"
+            );
+            assert!(
+                (time_in(&resumed, "ends_at") - ends).abs() < 1e-3,
+                "{resumed}"
+            );
+            assert!(time_in(&resumed, "expires_in") <= 100.0, "{resumed}");
+            let renewed = body_of(signing.renew(resumed["token"].as_str().unwrap()).await).await;
+            assert!(
+                (time_in(&renewed, "expires_at") - ends).abs() < 1e-3,
+                "{renewed}"
+            );
+        }
+
+        // Past it: refused and cleared.
+        let over = signing.cookie(now - 7_300.0, now - 100.0);
+        let refused = signing.resume(&over).await;
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+        assert_clears_cookie(&refused);
+
+        // A cookie written to last longer stops when `session_max` now says, lowered since.
+        let lowered = signing.cookie(now - 7_300.0, now + 10_000.0);
+        assert_eq!(
+            signing.resume(&lowered).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        // With no bound there is nothing to pass, and the cookie says the longest it can.
+        let unbound = Signing::new(|gateway| gateway.session_max = TimeLimit::UNBOUNDED).await;
+        let response = unbound
+            .page_post("/v1/auth/login")
+            .json(&serde_json::json!({"name": "alice", "secret": "right"}))
+            .send()
+            .await
+            .unwrap();
+        let set = set_cookie_of(&response).unwrap();
+        assert!(set.ends_with(&format!("Max-Age={}", u32::MAX)), "{set}");
+        let cookie = set.split(';').next().unwrap();
+        let resumed = unbound.resume(cookie).await;
+        assert_eq!(resumed.status(), StatusCode::CREATED);
+        let resumed: serde_json::Value = resumed.json().await.unwrap();
+        assert!(resumed["ends_at"].is_null(), "{resumed}");
+    }
+
+    #[tokio::test]
+    async fn a_revoked_sign_in_or_a_person_gone_cannot_resume() {
+        let signing = Signing::new(|_| {}).await;
+        let (signed_in, cookie) = signing.web_login().await;
+        let resumed: serde_json::Value = signing.resume(&cookie).await.json().await.unwrap();
+
+        // What Stations revoke by: the ID of any token of the sign-in.
+        let revoked = reqwest::Client::new()
+            .delete(format!(
+                "{}/v1/station/access-tokens/{}",
+                signing.base,
+                signed_in["token_id"].as_str().unwrap()
+            ))
+            .bearer_auth("m-token-that-is-long-enough-for-testing")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(revoked.status(), StatusCode::OK);
+        let refused = signing.resume(&cookie).await;
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+        assert_clears_cookie(&refused);
+        assert_eq!(
+            signing
+                .session(resumed["token"].as_str().unwrap())
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED,
+            "the token a resume gave goes with it"
+        );
+
+        let (_, cookie) = signing.web_login().await;
+        signing
+            .gone
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let refused = signing.resume(&cookie).await;
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+        assert_clears_cookie(&refused);
+    }
+
+    #[tokio::test]
+    async fn a_resume_needs_the_public_origin() {
+        let signing = Signing::new(|_| {}).await;
+        let (_, cookie) = signing.web_login().await;
+        let post = || {
+            reqwest::Client::new()
+                .post(format!("{}/v1/auth/resume", signing.base))
+                .header(COOKIE, &cookie)
+        };
+        for (request, what) in [
+            (
+                post()
+                    .header(ORIGIN, "https://elsewhere.example")
+                    .header("x-forwarded-proto", "https"),
+                "another site",
+            ),
+            (
+                post()
+                    .header(ORIGIN, "null")
+                    .header("x-forwarded-proto", "https"),
+                "a sandboxed page of Moneypenny's",
+            ),
+            (post().header("x-forwarded-proto", "https"), "no origin"),
+            (post().header(ORIGIN, "https://localhost"), "not over HTTPS"),
+            (
+                post()
+                    .header(ORIGIN, "https://localhost")
+                    .header("x-forwarded-proto", "http"),
+                "said to be HTTP",
+            ),
+        ] {
+            let refused = request.send().await.unwrap();
+            assert_eq!(refused.status(), StatusCode::FORBIDDEN, "{what}");
+            assert!(set_cookie_of(&refused).is_none(), "{what} clears nothing");
+            assert!(!refused.text().await.unwrap().contains("token"), "{what}");
+        }
+        assert_eq!(
+            signing.resume(&cookie).await.status(),
+            StatusCode::CREATED,
+            "and it still works from the page"
+        );
+        let none = signing.page_post("/v1/auth/resume").send().await.unwrap();
+        assert_eq!(none.status(), StatusCode::UNAUTHORIZED, "no cookie");
+        assert!(set_cookie_of(&none).is_none());
+    }
+
+    #[tokio::test]
+    async fn the_cookie_is_no_bearer_and_no_other_route_takes_it() {
+        let signing = Signing::new(|_| {}).await;
+        let (signed_in, cookie) = signing.web_login().await;
+        let value = cookie.split_once('=').unwrap().1;
+        let client = reqwest::Client::new();
+
+        // Its value as a bearer token, everywhere one is taken.
+        assert_eq!(
+            signing.session(value).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            signing.renew(value).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        for (path, post) in [
+            ("/v1/user/profile", false),
+            ("/v1/stations", false),
+            ("/v1/auth/logout", true),
+        ] {
+            let url = format!("{}{path}", signing.base);
+            let request = if post {
+                client.post(url)
+            } else {
+                client.get(url)
+            };
+            let answer = request.bearer_auth(value).send().await.unwrap();
+            assert_eq!(answer.status(), StatusCode::UNAUTHORIZED, "{path}");
+        }
+        // The cookie alone, as a route that wants a bearer sees it.
+        for (path, post) in [
+            ("/v1/auth/session", false),
+            ("/v1/auth/renew", true),
+            ("/v1/user/profile", false),
+            ("/v1/stations", false),
+        ] {
+            let url = format!("{}{path}", signing.base);
+            let request = if post {
+                client.post(url)
+            } else {
+                client.get(url)
+            };
+            let answer = request
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, "https://localhost")
+                .header("x-forwarded-proto", "https")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(answer.status(), StatusCode::UNAUTHORIZED, "{path}");
+        }
+        // A bearer token is no cookie either.
+        let token = signed_in["token"].as_str().unwrap();
+        let as_cookie = format!("{SESSION_COOKIE}={token}");
+        assert_eq!(
+            signing.resume(&as_cookie).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        // None of that ended anything.
+        assert_eq!(signing.session(token).await.status(), StatusCode::OK);
+        assert_eq!(signing.resume(&cookie).await.status(), StatusCode::CREATED);
+    }
+
+    #[tokio::test]
+    async fn signing_out_ends_the_cookie_and_every_token_of_that_sign_in() {
+        let signing = Signing::new(|_| {}).await;
+        let (signed_in, cookie) = signing.web_login().await;
+        let first = signed_in["token"].as_str().unwrap();
+        let resumed: serde_json::Value = signing.resume(&cookie).await.json().await.unwrap();
+        let second = resumed["token"].as_str().unwrap();
+        let (other, other_cookie) = signing.web_login().await;
+
+        let signed_out = signing
+            .page_post("/v1/auth/logout")
+            .header(COOKIE, &cookie)
+            .bearer_auth(second)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(signed_out.status(), StatusCode::NO_CONTENT);
+        assert_clears_cookie(&signed_out);
+        for token in [first, second] {
+            assert_eq!(
+                signing.session(token).await.status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        assert_eq!(
+            signing.resume(&cookie).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        // That sign-in alone: one elsewhere carries on.
+        assert_eq!(
+            signing
+                .session(other["token"].as_str().unwrap())
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            signing.resume(&other_cookie).await.status(),
+            StatusCode::CREATED
+        );
+    }
+
+    #[tokio::test]
+    async fn signing_out_with_a_token_past_its_time_still_ends_the_cookie() {
+        let signing = Signing::new(|_| {}).await;
+        let (signed_in, cookie) = signing.web_login().await;
+        let token = signed_in["token"].as_str().unwrap();
+
+        // From another site the cookie counts for nothing, and the person stays signed in.
+        let foreign = reqwest::Client::new()
+            .post(format!("{}/v1/auth/logout", signing.base))
+            .header(COOKIE, &cookie)
+            .header(ORIGIN, "https://elsewhere.example")
+            .header("x-forwarded-proto", "https")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(foreign.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(signing.session(token).await.status(), StatusCode::OK);
+
+        let signed_out = signing
+            .page_post("/v1/auth/logout")
+            .header(COOKIE, &cookie)
+            .bearer_auth("a-token-long-over")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(signed_out.status(), StatusCode::NO_CONTENT);
+        assert_clears_cookie(&signed_out);
+        assert_eq!(
+            signing.resume(&cookie).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            signing.session(token).await.status(),
+            StatusCode::UNAUTHORIZED,
+            "and the token that was still good goes with it"
+        );
+    }
+
+    #[tokio::test]
+    async fn with_the_setting_off_a_sign_in_lives_in_memory_alone() {
+        for off in [
+            Signing::new(|gateway| gateway.session_cookie = false).await,
+            Signing::new(|gateway| gateway.session_max = TimeLimit::secs(0)).await,
+        ] {
+            let response = off
+                .page_post("/v1/auth/login")
+                .json(&serde_json::json!({"name": "alice", "secret": "right"}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+            assert!(set_cookie_of(&response).is_none());
+            let body: serde_json::Value = response.json().await.unwrap();
+            let token = body["token"].as_str().unwrap();
+            assert_eq!(off.record_of(token).unwrap().sign_in(), None);
+
+            // One from before the setting changed is refused and cleared.
+            let now = unix_timestamp().ok().unwrap();
+            let refused = off.resume(&off.cookie(now - 10.0, now + 3_600.0)).await;
+            assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+            assert_clears_cookie(&refused);
+        }
+    }
+
+    #[tokio::test]
+    async fn refused_resumes_are_counted_apart_from_login_tries() {
+        let signing = Signing::built(
+            |_| {},
+            LoginLimits {
+                per_address: std::num::NonZeroU32::new(3).unwrap(),
+                per_name: std::num::NonZeroU32::new(3).unwrap(),
+                address_header: None,
+                ..LoginLimits::default()
+            },
+            |providers| providers,
+        )
+        .await;
+        let (_, good) = signing.web_login().await;
+
+        // No cookie is what every signed-out page sends: it is not counted.
+        for _ in 0..5 {
+            let none = signing.page_post("/v1/auth/resume").send().await.unwrap();
+            assert_eq!(none.status(), StatusCode::UNAUTHORIZED);
+        }
+        let bad = format!("{SESSION_COOKIE}=made-up");
+        for _ in 0..3 {
+            assert_eq!(
+                signing.resume(&bad).await.status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        let held = signing.resume(&bad).await;
+        assert_eq!(held.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(held.headers().contains_key(RETRY_AFTER));
+        assert_clears_cookie(&held);
+
+        // Nobody behind that address pays for it: a good cookie resumes, the person's password
+        // tries are untouched, and resuming spends none of them.
+        for _ in 0..4 {
+            assert_eq!(signing.resume(&good).await.status(), StatusCode::CREATED);
+        }
+        for _ in 0..2 {
+            let (_, again) = signing.web_login().await;
+            assert_eq!(signing.resume(&again).await.status(), StatusCode::CREATED);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_resume_stops_when_the_front_proxy_says_this_is_someone_else() {
+        let signing = Signing::built(
+            |_| {},
+            LoginLimits::default(),
+            |providers| {
+                providers
+                    .with_proxy_identity(HeaderName::from_static("x-forwarded-user"), "name")
+                    .with_proxy_secret(PROXY_TEST_SECRET, 32)
+                    .unwrap()
+            },
+        )
+        .await;
+        let (_, cookie) = signing.web_login().await;
+        let as_user = |user: &'static str| {
+            signing
+                .page_post("/v1/auth/resume")
+                .header(COOKIE, &cookie)
+                .header("x-forwarded-user", user)
+                .header(PROXY_SECRET_HEADER, PROXY_TEST_SECRET)
+        };
+        let same = as_user("alice").send().await.unwrap();
+        assert_eq!(same.status(), StatusCode::CREATED);
+        let other = as_user("bob").send().await.unwrap();
+        assert_eq!(other.status(), StatusCode::UNAUTHORIZED);
+        assert_clears_cookie(&other);
+        // A claim nobody can prove means nothing, and costs the person nothing.
+        let forged = signing
+            .page_post("/v1/auth/resume")
+            .header(COOKIE, &cookie)
+            .header("x-forwarded-user", "bob")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(forged.status(), StatusCode::UNAUTHORIZED);
+        assert!(set_cookie_of(&forged).is_none());
+        assert_eq!(signing.resume(&cookie).await.status(), StatusCode::CREATED);
     }
 
     #[tokio::test]

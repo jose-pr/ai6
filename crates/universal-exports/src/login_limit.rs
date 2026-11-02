@@ -118,6 +118,18 @@ impl LoginGuard {
         Some(refused.wait_time_from(now))
     }
 
+    /// Counts a try from `source` that names no account, so no account pays for it. `Some(wait)`
+    /// when it is one too many.
+    pub(crate) fn tried_address(&self, source: IpAddr) -> Option<Duration> {
+        if self.checks.fetch_add(1, Ordering::Relaxed) % self.forget_every == self.forget_every - 1
+        {
+            self.forget();
+        }
+        let now = self.clock.now();
+        let refused = self.addresses.check_key(&network(source)).err()?;
+        Some(refused.wait_time_from(now))
+    }
+
     fn forget(&self) {
         self.addresses.retain_recent();
         self.addresses.shrink_to_fit();
