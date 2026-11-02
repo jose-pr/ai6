@@ -50,6 +50,12 @@ pub struct AccessTokenRecord {
     issued_at: f64,
     expires_at: f64,
     revoked_at: Option<f64>,
+    /// The token ID of the session cookie this token's sign-in holds; revoking either ends both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sign_in: Option<String>,
+    /// This record is a sign-in's session cookie, whose secret is no bearer.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    session_cookie: bool,
 }
 
 impl AccessTokenRecord {
@@ -88,7 +94,70 @@ impl AccessTokenRecord {
             issued_at,
             expires_at,
             revoked_at,
+            sign_in: None,
+            session_cookie: false,
         })
+    }
+
+    /// The same record as a sign-in's session cookie. [`find_access_token`] never answers with
+    /// one, and its expiry never moves.
+    ///
+    /// [`find_access_token`]: crate::AccessTokenStore::find_access_token
+    #[must_use]
+    pub fn into_session_cookie(mut self) -> Self {
+        self.session_cookie = true;
+        self.sign_in = None;
+        self
+    }
+
+    /// The same record as a bearer token of the sign-in holding the session cookie `sign_in`,
+    /// a token ID: the token stops being accepted when that sign-in is revoked.
+    pub fn in_sign_in(mut self, sign_in: impl Into<String>) -> Result<Self, InvalidIdentity> {
+        let sign_in = sign_in.into();
+        let canonical = uuid::Uuid::parse_str(&sign_in).map_err(|_| InvalidIdentity)?;
+        if canonical.to_string() != sign_in || self.session_cookie {
+            return Err(InvalidIdentity);
+        }
+        self.sign_in = Some(sign_in);
+        Ok(self)
+    }
+
+    /// This record with other times, checked again; everything else it says is kept.
+    pub(crate) fn with_times(
+        &self,
+        expires_at: f64,
+        revoked_at: Option<f64>,
+    ) -> Result<Self, InvalidIdentity> {
+        if self.session_cookie && self.sign_in.is_some() {
+            return Err(InvalidIdentity);
+        }
+        let record = Self::try_new(
+            &self.token_id,
+            &self.digest,
+            &self.person_id,
+            self.issued_at,
+            expires_at,
+            revoked_at,
+        )?;
+        let record = match &self.sign_in {
+            Some(sign_in) => record.in_sign_in(sign_in)?,
+            None => record,
+        };
+        Ok(if self.session_cookie {
+            record.into_session_cookie()
+        } else {
+            record
+        })
+    }
+
+    /// The session cookie's token ID when this token belongs to such a sign-in.
+    pub fn sign_in(&self) -> Option<&str> {
+        self.sign_in.as_deref()
+    }
+
+    /// Whether this record is a sign-in's session cookie rather than a bearer token.
+    pub fn is_session_cookie(&self) -> bool {
+        self.session_cookie
     }
 
     /// Returns the public revocation identifier.
@@ -140,6 +209,8 @@ impl fmt::Debug for AccessTokenRecord {
             .field("issued_at", &self.issued_at)
             .field("expires_at", &self.expires_at)
             .field("revoked_at", &self.revoked_at)
+            .field("sign_in", &self.sign_in)
+            .field("session_cookie", &self.session_cookie)
             .finish()
     }
 }

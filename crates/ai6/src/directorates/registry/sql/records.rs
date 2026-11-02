@@ -22,8 +22,9 @@ use crate::directorates::registry::sleepers::{
 use crate::directorates::registry::store::{
     AccessTokenStore, AgentRoleStore, AuditRecord, AuditStore, BriefStore, CableStore, cable_error,
     cable_sent_event, check_quota_buckets, extended_token, invalid_data, quota_allows,
-    quota_balances, unix_time, validate_access_token_record, validate_cable_id,
-    validate_registry_key, validate_station_id, validate_token_digest, validate_token_id,
+    quota_balances, revoked_token, sign_in_stands, unix_time, validate_access_token_record,
+    validate_cable_id, validate_registry_key, validate_station_id, validate_token_digest,
+    validate_token_id,
 };
 use crate::directorates::registry::timeline::{TimelineEvent, TimelineStore};
 use crate::directorates::registry::usage::{UsageStore, add_usage, cost_on_day, parse_ledger};
@@ -63,24 +64,31 @@ impl AccessTokenStore for SqlRegistry {
 
     fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
         validate_token_digest(digest)?;
-        let Some(text) = self.read(|tx| {
-            tx.query_opt(
-                "SELECT record FROM ai6_access_tokens WHERE digest = $1",
-                &[digest.into()],
-            )?
-            .map(|row| row.text(0))
-            .transpose()
-        })?
-        else {
-            return Ok(None);
-        };
-        let Some(record) = stored_token(&text, self.limits.tokens.record_bytes) else {
-            return Ok(None);
-        };
-        if record.digest() != digest {
-            return Ok(None);
-        }
-        Ok(record.active_at(unix_time()?).then_some(record))
+        let limit = self.limits.tokens.record_bytes;
+        self.read(|tx| {
+            let Some(record) = token_by_digest(tx, digest, limit)? else {
+                return Ok(None);
+            };
+            if record.is_session_cookie() || !record.active_at(unix_time()?) {
+                return Ok(None);
+            }
+            let sign_in = match record.sign_in() {
+                Some(sign_in) => token_by_id(tx, sign_in, limit)?,
+                None => None,
+            };
+            Ok(sign_in_stands(&record, sign_in.as_ref()).then_some(record))
+        })
+    }
+
+    fn find_session_cookie(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
+        validate_token_digest(digest)?;
+        let limit = self.limits.tokens.record_bytes;
+        self.read(|tx| {
+            let Some(record) = token_by_digest(tx, digest, limit)? else {
+                return Ok(None);
+            };
+            Ok((record.is_session_cookie() && record.active_at(unix_time()?)).then_some(record))
+        })
     }
 
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool> {
@@ -99,18 +107,27 @@ impl AccessTokenStore for SqlRegistry {
             if record.token_id() != token_id || record.revoked_at().is_some() {
                 return Ok(false);
             }
-            let updated = crate::AccessTokenRecord::try_new(
-                record.token_id(),
-                record.digest(),
-                record.person_id(),
-                record.issued_at(),
-                record.expires_at(),
-                Some(unix_time()?),
-            )
-            .map_err(|_| invalid_data("invalid access token record"))?;
+            let now = unix_time()?;
+            if let Some(sign_in) = record.sign_in() {
+                let cookie = token_by_id(tx, sign_in, self.limits.tokens.record_bytes)?;
+                if let Some(cookie) = cookie.filter(|cookie| cookie.revoked_at().is_none()) {
+                    tx.execute(
+                        "UPDATE ai6_access_tokens SET record = $2, revision = $3 WHERE token_id = $1",
+                        &[
+                            sign_in.into(),
+                            to_json(&revoked_token(&cookie, now)?)?.into(),
+                            revision.into(),
+                        ],
+                    )?;
+                }
+            }
             tx.execute(
                 "UPDATE ai6_access_tokens SET record = $2, revision = $3 WHERE token_id = $1",
-                &[token_id.into(), to_json(&updated)?.into(), revision.into()],
+                &[
+                    token_id.into(),
+                    to_json(&revoked_token(&record, now)?)?.into(),
+                    revision.into(),
+                ],
             )?;
             Ok(true)
         })
@@ -148,6 +165,42 @@ impl AccessTokenStore for SqlRegistry {
             Ok(Some(extended))
         })
     }
+}
+
+/// The valid record stored under `digest`, active or not.
+fn token_by_digest(
+    tx: &mut Tx<'_>,
+    digest: &str,
+    limit: Limit,
+) -> io::Result<Option<crate::AccessTokenRecord>> {
+    let text = tx
+        .query_opt(
+            "SELECT record FROM ai6_access_tokens WHERE digest = $1",
+            &[digest.into()],
+        )?
+        .map(|row| row.text(0))
+        .transpose()?;
+    Ok(text
+        .and_then(|text| stored_token(&text, limit))
+        .filter(|record| record.digest() == digest))
+}
+
+/// The valid record stored as `token_id`, active or not.
+fn token_by_id(
+    tx: &mut Tx<'_>,
+    token_id: &str,
+    limit: Limit,
+) -> io::Result<Option<crate::AccessTokenRecord>> {
+    let text = tx
+        .query_opt(
+            "SELECT record FROM ai6_access_tokens WHERE token_id = $1",
+            &[token_id.into()],
+        )?
+        .map(|row| row.text(0))
+        .transpose()?;
+    Ok(text
+        .and_then(|text| stored_token(&text, limit))
+        .filter(|record| record.token_id() == token_id))
 }
 
 /// A stored token record that is within bounds and valid.

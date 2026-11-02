@@ -2165,15 +2165,23 @@ pub trait AccessTokenStore {
     /// once and is never written to the Registry. Token IDs and digests are unique.
     fn store_access_token(&self, record: &crate::AccessTokenRecord) -> io::Result<()>;
 
-    /// Returns an active token record by its lowercase SHA-256 digest.
+    /// Returns an active bearer token's record by its lowercase SHA-256 digest: never a session
+    /// cookie's, and nothing for a token whose sign-in was revoked.
     fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
 
-    /// Revokes a token by its public UUID, returning false when unknown or already revoked.
+    /// Returns an active session cookie's record by its lowercase SHA-256 digest; a bearer
+    /// token's digest finds nothing.
+    fn find_session_cookie(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
+
+    /// Revokes a token or session cookie by its public UUID, returning false when unknown or
+    /// already revoked. A token of a sign-in takes that sign-in with it, and so every other
+    /// token of it, including one issued a moment later.
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool>;
 
     /// Moves an active token's expiry to `expires_at` (Unix seconds) when that is later, and
     /// answers the record as it now stands; a time no later leaves it as it was. Its value,
-    /// issue time and revocation never change. `None` when unknown, revoked or expired.
+    /// issue time and revocation never change. `None` when unknown, revoked or expired, and
+    /// for a session cookie, whose end stays where signing in put it.
     fn extend_access_token(
         &self,
         token_id: &str,
@@ -2210,35 +2218,26 @@ impl AccessTokenStore for FileRegistry {
     fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
         validate_token_digest(digest)?;
         let _registry_lock = self.lock()?;
-        let digest_path = self
-            .root
-            .join("access-token-digests")
-            .join(format!("{digest}.txt"));
-        let token_id = match fs::read_to_string(digest_path) {
-            Ok(token_id) => token_id.trim().to_owned(),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let token_path = self
-            .root
-            .join("access-tokens")
-            .join(format!("{}.json", registry_station_component(&token_id)));
-        let bytes = match fs::read(&token_path) {
-            Ok(bytes) if self.limits.tokens.record_bytes.allows(bytes.len()) => bytes,
-            Ok(_) => return Ok(None),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let Ok(record) = serde_json::from_slice::<crate::AccessTokenRecord>(&bytes) else {
+        let Some(record) = self.token_by_digest(digest)? else {
             return Ok(None);
         };
-        let Ok(record) = validate_access_token_record(&record) else {
-            return Ok(None);
-        };
-        if record.token_id() != token_id || record.digest() != digest {
+        if record.is_session_cookie() || !record.active_at(unix_time()?) {
             return Ok(None);
         }
-        Ok(record.active_at(unix_time()?).then_some(record))
+        let sign_in = match record.sign_in() {
+            Some(sign_in) => self.stored_access_token(&self.access_token_path(sign_in), sign_in)?,
+            None => None,
+        };
+        Ok(sign_in_stands(&record, sign_in.as_ref()).then_some(record))
+    }
+
+    fn find_session_cookie(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
+        validate_token_digest(digest)?;
+        let _registry_lock = self.lock()?;
+        let Some(record) = self.token_by_digest(digest)? else {
+            return Ok(None);
+        };
+        Ok((record.is_session_cookie() && record.active_at(unix_time()?)).then_some(record))
     }
 
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool> {
@@ -2251,15 +2250,17 @@ impl AccessTokenStore for FileRegistry {
         if record.revoked_at().is_some() {
             return Ok(false);
         }
-        let updated = crate::AccessTokenRecord::try_new(
-            record.token_id(),
-            record.digest(),
-            record.person_id(),
-            record.issued_at(),
-            record.expires_at(),
-            Some(unix_time()?),
-        )
-        .map_err(|_| invalid_data("invalid access token record"))?;
+        let now = unix_time()?;
+        if let Some(sign_in) = record.sign_in() {
+            let path = self.access_token_path(sign_in);
+            let cookie = self.stored_access_token(&path, sign_in)?;
+            if let Some(cookie) = cookie.filter(|cookie| cookie.revoked_at().is_none()) {
+                let cookie = revoked_token(&cookie, now)?;
+                let bytes = serde_json::to_vec(&cookie).map_err(io::Error::other)?;
+                self.write_atomic(&path, &bytes)?;
+            }
+        }
+        let updated = revoked_token(&record, now)?;
         let updated = serde_json::to_vec(&updated).map_err(io::Error::other)?;
         self.write_atomic(&token_path, &updated)?;
         Ok(true)
@@ -2288,6 +2289,26 @@ impl AccessTokenStore for FileRegistry {
 }
 
 impl FileRegistry {
+    /// The valid record stored under `digest`, active or not, under the caller's Registry lock.
+    fn token_by_digest(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
+        let digest_path = self
+            .root
+            .join("access-token-digests")
+            .join(format!("{digest}.txt"));
+        let token_id = match fs::read_to_string(digest_path) {
+            Ok(token_id) => token_id.trim().to_owned(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let token_path = self
+            .root
+            .join("access-tokens")
+            .join(format!("{}.json", registry_station_component(&token_id)));
+        Ok(self
+            .stored_access_token(&token_path, &token_id)?
+            .filter(|record| record.digest() == digest))
+    }
+
     fn access_token_path(&self, token_id: &str) -> PathBuf {
         self.root
             .join("access-tokens")
@@ -3207,15 +3228,36 @@ pub(crate) fn validate_station_id(station: &str) -> io::Result<()> {
 pub(super) fn validate_access_token_record(
     record: &crate::AccessTokenRecord,
 ) -> io::Result<crate::AccessTokenRecord> {
-    crate::AccessTokenRecord::try_new(
-        record.token_id(),
-        record.digest(),
-        record.person_id(),
-        record.issued_at(),
-        record.expires_at(),
-        record.revoked_at(),
-    )
-    .map_err(|_| invalid_data("invalid access token record"))
+    record
+        .with_times(record.expires_at(), record.revoked_at())
+        .map_err(|_| invalid_data("invalid access token record"))
+}
+
+/// `record` revoked at `now`.
+pub(super) fn revoked_token(
+    record: &crate::AccessTokenRecord,
+    now: f64,
+) -> io::Result<crate::AccessTokenRecord> {
+    record
+        .with_times(record.expires_at(), Some(now))
+        .map_err(|_| invalid_data("invalid access token record"))
+}
+
+/// Whether a bearer token's sign-in lets it stand: `cookie` is the record `token` names as its
+/// sign-in, as found. One that cannot be found or read counts as ended.
+pub(super) fn sign_in_stands(
+    token: &crate::AccessTokenRecord,
+    cookie: Option<&crate::AccessTokenRecord>,
+) -> bool {
+    match (token.sign_in(), cookie) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(_), Some(cookie)) => {
+            cookie.is_session_cookie()
+                && cookie.revoked_at().is_none()
+                && cookie.person_id() == token.person_id()
+        }
+    }
 }
 
 /// `record` with `expires_at` when that is later, `None` when it is not active at `now`.
@@ -3230,19 +3272,13 @@ pub(super) fn extended_token(
             "an access token's expiry must be a finite time",
         ));
     }
-    if !record.active_at(now) {
+    if record.is_session_cookie() || !record.active_at(now) {
         return Ok(None);
     }
-    crate::AccessTokenRecord::try_new(
-        record.token_id(),
-        record.digest(),
-        record.person_id(),
-        record.issued_at(),
-        record.expires_at().max(expires_at),
-        record.revoked_at(),
-    )
-    .map(Some)
-    .map_err(|_| invalid_data("invalid access token record"))
+    record
+        .with_times(record.expires_at().max(expires_at), record.revoked_at())
+        .map(Some)
+        .map_err(|_| invalid_data("invalid access token record"))
 }
 
 pub(super) fn validate_token_id(token_id: &str) -> io::Result<()> {
@@ -3532,6 +3568,7 @@ mod tests {
         cable_quotas_are_atomic_and_shared,
         access_tokens_are_shared_by_registries_and_revocation_is_immediate,
         an_access_token_is_extended_never_shortened,
+        a_session_cookie_is_no_bearer_and_revoking_ends_its_whole_sign_in,
     );
 
     fn operation_agent_role_overrides_are_validated_and_isolated(store: &dyn Store) {
@@ -4532,6 +4569,121 @@ mod tests {
         assert!(
             registry
                 .extend_access_token(over.token_id(), later)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    fn a_session_cookie_is_no_bearer_and_revoking_ends_its_whole_sign_in(store: &dyn Store) {
+        let registry = store.handle();
+        let verifier = store.handle();
+        let now = unix_time().unwrap();
+        let record = |id: &str, secret: &str| {
+            let digest = Sha256::digest(secret.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            crate::AccessTokenRecord::try_new(id, digest, "person-007", now, now + 3_600.0, None)
+                .unwrap()
+        };
+        let sign_in = "a1111111-1111-4111-8111-111111111111";
+        let cookie = record(sign_in, "cookie").into_session_cookie();
+        let first = record("a2222222-2222-4222-8222-222222222222", "first")
+            .in_sign_in(sign_in)
+            .unwrap();
+        let second = record("a3333333-3333-4333-8333-333333333333", "second")
+            .in_sign_in(sign_in)
+            .unwrap();
+        let other_sign_in = "b1111111-1111-4111-8111-111111111111";
+        let other_cookie = record(other_sign_in, "other cookie").into_session_cookie();
+        let other = record("b2222222-2222-4222-8222-222222222222", "other")
+            .in_sign_in(other_sign_in)
+            .unwrap();
+        let plain = record("c2222222-2222-4222-8222-222222222222", "plain");
+        for record in [&cookie, &first, &second, &other_cookie, &other, &plain] {
+            registry.store_access_token(record).unwrap();
+        }
+
+        assert!(
+            verifier
+                .find_access_token(cookie.digest())
+                .unwrap()
+                .is_none(),
+            "a cookie is no bearer"
+        );
+        let found = verifier
+            .find_session_cookie(cookie.digest())
+            .unwrap()
+            .unwrap();
+        assert!(found.is_session_cookie());
+        assert!(
+            verifier
+                .find_session_cookie(first.digest())
+                .unwrap()
+                .is_none(),
+            "a bearer is no cookie"
+        );
+        let found = verifier.find_access_token(first.digest()).unwrap().unwrap();
+        assert_eq!(found.sign_in(), Some(sign_in));
+        assert!(
+            registry
+                .extend_access_token(sign_in, now + 7_200.0)
+                .unwrap()
+                .is_none(),
+            "a cookie's end does not move"
+        );
+        let renewed = registry
+            .extend_access_token(first.token_id(), now + 7_200.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(renewed.sign_in(), Some(sign_in), "renewing keeps it");
+
+        assert!(registry.revoke_access_token(first.token_id()).unwrap());
+        for gone in [&first, &second] {
+            assert!(
+                verifier.find_access_token(gone.digest()).unwrap().is_none(),
+                "the whole sign-in ends"
+            );
+        }
+        assert!(
+            verifier
+                .find_session_cookie(cookie.digest())
+                .unwrap()
+                .is_none(),
+            "and its cookie"
+        );
+        let late = record("a4444444-4444-4444-8444-444444444444", "late")
+            .in_sign_in(sign_in)
+            .unwrap();
+        registry.store_access_token(&late).unwrap();
+        assert!(
+            verifier.find_access_token(late.digest()).unwrap().is_none(),
+            "a token issued as it ended does not outlive it"
+        );
+        assert!(
+            verifier
+                .find_access_token(other.digest())
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            verifier
+                .find_session_cookie(other_cookie.digest())
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            verifier
+                .find_access_token(plain.digest())
+                .unwrap()
+                .is_some()
+        );
+
+        // The cookie revoked by its own ID ends the tokens too.
+        assert!(registry.revoke_access_token(other_sign_in).unwrap());
+        assert!(
+            verifier
+                .find_access_token(other.digest())
                 .unwrap()
                 .is_none()
         );
