@@ -503,7 +503,7 @@ fn plugins_sign_and_pin_read_a_key_as_openssl_writes_one() {
 fn plugins_key_text_appears_in_no_output() {
     let signed = Signed::new();
     let der = std::fs::read(&signed.key).unwrap();
-    // PKCS#8 version 2 as `ring` writes it: 16 bytes of framing, then the secret seed.
+    // The layout `spilled` assumes: the seed derives the public key this key prints.
     let seed = &der[16..48];
     assert!(
         signed
@@ -525,22 +525,28 @@ fn plugins_key_text_appears_in_no_output() {
     .unwrap();
     signed.records(&signed.publisher_entry());
 
-    let spilled = |output: std::process::Output| {
+    let spilled = |der: &[u8], output: std::process::Output| {
+        // PKCS#8 version 2 as `ring` writes it: 16 bytes of framing, then the secret seed.
+        let seed = &der[16..48];
         for stream in [&output.stdout, &output.stderr] {
             let said = text(stream);
             assert!(!stream.windows(32).any(|part| part == seed), "{output:?}");
             assert!(!said.contains(&hex(seed)), "{output:?}");
-            assert!(!said.contains(&hex(&der)), "{output:?}");
-            assert!(!said.contains(&base64(&der)), "{output:?}");
+            assert!(!said.contains(&hex(der)), "{output:?}");
+            assert!(!said.contains(&base64(der)), "{output:?}");
             assert!(!said.contains(&format!("{der:?}")), "{output:?}");
             assert!(!said.contains("PRIVATE KEY-----"), "{output:?}");
         }
     };
 
+    // A new key, with what `keygen` said held up against that key.
     let fresh = signed.root.path().join("fresh.key");
-    spilled(plugins_run!("keygen", "--out", &fresh));
-    spilled(plugins_run!("keygen", "--out", &signed.key,));
-    spilled(plugins_run!("sign", "--key", &signed.key, &signed.library,));
+    let output = plugins_run!("keygen", "--out", &fresh);
+    spilled(&std::fs::read(&fresh).unwrap(), output);
+
+    let spilled = |output| spilled(&der, output);
+    spilled(plugins_run!("keygen", "--out", &signed.key));
+    spilled(plugins_run!("sign", "--key", &signed.key, &signed.library));
     spilled(plugins_run!(
         "pin",
         "--publisher",
@@ -549,9 +555,9 @@ fn plugins_key_text_appears_in_no_output() {
     ));
     spilled(signed.check());
     // Each way the key file is handed to the wrong place, and a key that does not parse.
-    spilled(plugins_run!("sign", "--key", &signed.key, &signed.key,));
+    spilled(plugins_run!("sign", "--key", &signed.key, &signed.key));
     spilled(plugins_run!("pin", &signed.key));
-    spilled(plugins_run!("sign", "--key", &pem_path, &signed.library,));
+    spilled(plugins_run!("sign", "--key", &pem_path, &signed.library));
     spilled(plugins_run!(
         "pin",
         "--publisher",
