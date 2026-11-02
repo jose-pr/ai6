@@ -15,8 +15,35 @@ source ─► brief ─► Registry ─► AI6 Station ─► AgentHandler ─�
 
 A **Mission ID** identifies one unit of work and may group multiple agent Sessions. A
 **Session ID** comes from the provider and remains stable when AI6 resumes that same
-agent operation. An external tracker task ID is input metadata; it is not an AI6 Mission
-ID.
+agent operation. A tracker's code is the tracker's: AI6 owns the Mission ID and may quote
+the code in it, and the link to the issue stays apart from it.
+
+AI6 chooses the Mission ID once, where the brief enters, so a person can recognise a Mission
+from it:
+
+| Where it came from | Mission ID | Example |
+| --- | --- | --- |
+| A person, `ai6ctl`, Moneypenny, an Agent's proposal, a review | `<operation>-<n>` | `ai6-42` |
+| A Jira Source | `<operation>-<item key>` | `ai6-AI6-64` |
+| A GitHub Source | `<operation>-gh-<number>` | `ai6-gh-63` |
+| A Source instance that is not its provider's only one in the Operation | its instance name replaces `gh`; a Jira key already names its project | `ai6-backend-63` |
+| A Sleeper | `<operation>-<sleeper>-<n>`, the same counter | `ai6-nightly-43` |
+
+- The counter is per Operation and shared by every Station and gateway on the Registry. Numbers
+  count Missions in the order they entered and are never reused, even when a brief is
+  deleted. A brief with no Operation uses `mission` in its place. A review and a proposal take
+  their number when they enter the queue; a proposal has none while it waits.
+- The ID stays through a retry, a return to the queue, a resume and a Station restart, on
+  every Station. A re-polled item or a repeated approval finds the ID it already has, and an
+  item keeps its ID if the Operation adds a second instance of its provider later.
+- Nothing reads a code or a number back out of an ID: it is opaque. Only ASCII letters, digits,
+  `_` and `-` stay in it, so a code with odd characters is made safe rather than refused, and
+  the ID is valid as a file name, a Git branch and a URL part. Past `[registry.limits.briefs]
+  mission_id_bytes` it keeps its start and adds a short hash. Two IDs never differ only by
+  case, and when one is already taken (Operation `ai6-gh`'s Mission 63 and Operation `ai6`'s
+  GitHub item 63) a number is skipped or a short hash is added.
+- A brief dropped into the Registry's queue by hand goes through none of this: its ID is
+  `<source>--<id>` from its own fields.
 
 ```json
 {
@@ -539,10 +566,11 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
   cursor in the Registry, so a Station that takes over the lease resumes where the last one
   stopped. A poll searches `settling_secs` (default 60; 0 for none) behind the cursor, since a
   listing can show an item after a newer one; what repeats changes nothing.
-- **Brief identity.** An item becomes a brief keyed `source_<provider>--<item>`. If the
-  item changes while its brief is still in `new/`, the brief is updated in place. Once a
-  Station has claimed it, polling leaves it alone; a finished item is never queued again,
-  so a Mission is never duplicated.
+- **Brief identity.** An item's Mission ID comes from its Operation, instance and item
+  ([the table above](#mission-and-session-identities)), and polling it again finds the same
+  one. If the item changes while its brief is still in `new/`, the brief is updated in place.
+  Once a Station has claimed it, polling leaves it alone; a finished item is never queued
+  again, so a Mission is never duplicated.
 - **Untrusted text.** The brief's title is generated. The tracker's own title, labels and
   description are placed between fenced markers and introduced as data that cannot change
   the Agent's task or permissions. A description cannot close the fence. Labels are information
@@ -700,8 +728,8 @@ ai6 sleeper revoke G nightly-deps
   brief's `stations` does: it narrows the Operation's list and never widens it.
 - **A round of every Station.** With `each_station = true` the sleeper queues one brief per
   window for each Station whose last check-in placement accepts for the Operation and the
-  sleeper's Agent or role (within its `stations`), each narrowed to that Station and keyed by
-  the window and the Station, so a failover never doubles a round. A Station's load does not
+  sleeper's Agent or role (within its `stations`), each narrowed to that Station, and the
+  window and the Station keep one Mission ID, so a failover never doubles a round. A Station's load does not
   exclude it (its round waits for room); a Station that has gone dark gets its round when it
   checks in again within the window. This is how the [Head of
   Station](stations.md#head-of-station) runs.

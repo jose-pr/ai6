@@ -63,7 +63,7 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
 
 - **Poll** lists `GET /repos/{repo}/issues` (open, oldest change first, `page_size` (100) per page,
   at most `max_pages` (5) pages) and maps each issue or pull request to a `SourceItem` with ID
-  `owner/name#number`. The returned cursor is the newest `updated_at`, and never earlier than
+  `owner/name#number`, `code` the number and `code_tag` `gh`. The returned cursor is the newest `updated_at`, and never earlier than
   the one it was given; the next poll sends it, `settling_secs` earlier, as `since`, which GitHub
   treats as inclusive, so what changed in that margin repeats and the Registry sees it as
   unchanged. When the pages one poll reads hold nothing newer than the cursor and more remain,

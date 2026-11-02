@@ -69,8 +69,8 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
 - **Poll** searches `project = "KEY" AND labels = "..." AND (jql) AND statusCategory != Done
   AND updated >= "<cursor minute>" ORDER BY updated ASC`. Cloud uses
   `GET /rest/api/3/search/jql` with `nextPageToken`; Server uses `GET /rest/api/2/search`
-  with `startAt`. At most `max_pages` (5) pages of `page_size` (50). Each issue becomes a `SourceItem` whose ID is the
-  issue key; Cloud descriptions in Atlassian Document Format are flattened to plain text:
+  with `startAt`. At most `max_pages` (5) pages of `page_size` (50). Each issue becomes a `SourceItem` whose ID and `code` are the
+  issue key, with no `code_tag`; Cloud descriptions in Atlassian Document Format are flattened to plain text:
   one line per block, links and mentions as their visible text, emoji and status lozenges as
   their text, dates as a UTC `YYYY-MM-DD`; an attachment has no text and is dropped.
   The `<cursor minute>` is the cursor, `settling_secs` earlier, on its own clock; the returned

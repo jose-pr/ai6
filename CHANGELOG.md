@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A Mission ID names its Operation and a number or the tracker's code, not a random one: `ai6-42`,
+  `ai6-gh-63`, `ai6-AI6-64`, `ai6-backend-63`, `ai6-nightly-43`. It is chosen once, where the brief
+  enters, and stays through a retry, a return to the queue, a resume and a restart. Numbers
+  count per Operation across every Station and gateway on the Registry and are never reused. IDs
+  already stored stay as they are. New: `MissionEntry`, `BriefStore::allot_mission_id`,
+  `entered_mission_id` and `enter_brief`, `Brief::mission_id`, `SourceItem::code` and `code_tag`,
+  `[registry.limits.briefs] mission_id_bytes`. Removed: `ReviewTarget::review_key`. A PostgreSQL
+  Registry already in use needs two new tables.
 - Moneypenny's conversations carry no exposure: it is for an Agent doing work, and a Mission's
   Session keeps it unchanged. **This weakens what protected you.** Nothing she reads marks her
   conversation, so text she reads can steer her with nothing to show it happened. Her memory

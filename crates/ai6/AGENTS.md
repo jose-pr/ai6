@@ -1913,6 +1913,9 @@ timeline_events(operation: &str) -> io::Result<Vec<TimelineEvent>>
 station_settings(station: &str) -> io::Result<Option<StationSettings>>
 set_station_settings(station: &str, settings: &StationSettings) -> io::Result<()>
 submit_brief(brief: &Brief) -> io::Result<()>
+allot_mission_id(entry: &MissionEntry) -> io::Result<String>
+entered_mission_id(entry: &MissionEntry) -> io::Result<Option<String>>
+enter_brief(brief: &Brief, entry: &MissionEntry) -> io::Result<Brief>  // AlreadyExists when the entry's brief is in any state
 claim_with_lease(key: Option<&str>, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>
 lease(key: &str) -> io::Result<Option<Lease>>
 read_claimed(key: &str) -> io::Result<Option<Brief>>
@@ -1924,8 +1927,35 @@ hand_over(lease: &Lease, station: &str, duration: Duration, meta: BTreeMap<Strin
 finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<&[u8]>, station: Option<&str>) -> io::Result<bool>
 ```
 
-`submit_brief` validates and atomically writes a unique Mission brief to `new/`; it
-refuses a key already present in `new/`, `claimed/`, `done/` or `failed/`. Its
+A Mission ID is chosen once, where a brief enters, by the rule in `registry::mission_ids`, and
+kept in `Brief::mission_id`; `Brief::key()` is that ID, or `{source}--{id}` for a brief that has
+none (one dropped into the queue by hand). `Brief::id` stays what the brief is called where it
+came from.
+
+```rust
+pub struct MissionEntry;  // where a brief enters; all of these are the only way an ID is made
+impl MissionEntry {
+    pub fn person(operation: Option<&str>) -> Self;              // <operation>-<n>; `mission` with none
+    pub fn proposal(operation: &str, proposal_id: &str) -> Self; // <operation>-<n>, once per proposal
+    pub fn review(operation: &str, review_id: &str) -> Self;     // <operation>-<n>, once per review
+    pub fn sleeper(operation: &str, name: &str, window: &str, station: Option<&str>) -> Self; // <operation>-<name>-<n>
+    pub fn source(operation: &str, instance: &str, item: &str, code: Option<&str>, tag: Option<&str>) -> Self;
+        // <operation>-<tag>-<code>, <operation>-<code> with no tag, <operation>-<instance>-<item> with no code
+}
+```
+
+`allot_mission_id` returns the ID an entry was given, or issues one: atomically per Operation
+across processes (the file Registry's lock; the SQL Registry's write transaction), numbers never
+reused, however a brief later moves or is deleted. A person's entry is new each time; every other
+entry keeps its ID. Only ASCII letters, digits, `_` and `-` stay in an ID. No two IDs differ only
+by case, and a number or a code whose ID is taken is skipped or takes a short hash. A brief's
+`mission_id` must read as a Registry key or the brief is invalid. Stored under `mission-ids/` (file:
+`counters/`, `issued/`, `entries/`), `ai6_mission_counters` and `ai6_mission_ids` (SQL).
+
+`enter_brief` allots and queues in one step, which is how every entry point in AI6 but the
+gateway's queues a brief (the gateway allots first, to audit the ID before it writes).
+`submit_brief` validates and atomically writes a unique Mission brief to `new/` under the key it
+already has; it refuses a key already present in `new/`, `claimed/`, `done/` or `failed/`. Its
 `Brief::provenance` is stored apart from the record (see Bona fides below).
 Agent-authored Mission proposals are separately stored under `proposals/pending/<operation>/`
 and never appear in `list_new()`. `promote_mission_proposal` moves an authorized proposal into
@@ -2664,6 +2694,8 @@ pub struct SourceItem {
     pub labels: Vec<String>,
     pub author: Option<String>,
     pub updated: String,       // ISO 8601, as the provider spells it
+    pub code: Option<String>,  // the item's code as a person writes it ("AI6-64", "63"); in the Mission ID, made safe
+    pub code_tag: Option<String>,  // names the tracker when `code` does not ("gh"); replaced by the instance's name when it is not its provider's only one in the Operation
 }
 pub struct SourcePoll { pub cursor: Option<String> }
 pub struct SourceBatch { pub items: Vec<SourceItem>, pub cursor: Option<String> }
@@ -2675,7 +2707,8 @@ pub const SOURCE_BRIEF_PREFIX: &str = "source:";
 
 pub enum Ingest { Queued, Updated, Unchanged, InFlight, Finished }
 pub struct FinishedSourceBrief { pub brief: Brief, pub outcome: serde_json::Value, pub ok: bool }
-pub fn source_brief(operation: &str, provider: &str, item: &SourceItem, limits: &SourceLimits) -> Brief;  // no provenance; text cut to item_text_bytes
+pub fn source_brief(operation: &str, provider: &str, item: &SourceItem, limits: &SourceLimits) -> Brief;  // no provenance, no Mission ID; text cut to item_text_bytes, name to name_bytes
+pub fn source_entry(operation: &str, instance: &str, item: &SourceItem) -> MissionEntry;
 pub fn settled_cursor(cursor: &str, settling_secs: u64) -> Option<String>;  // the ISO 8601 cursor that much earlier on its own clock; None when it does not read as a time
 pub fn reportable(brief: &Brief, provider: &str) -> bool;  // a `source` provenance naming provider and item
 
@@ -2692,15 +2725,17 @@ on the network and is called off the async runtime. Writing to a tracker is the 
 below. A provider returns an error for a rate limit
 or a refused credential; the Station polls again at its next interval.
 
-`source_brief` keys the brief `source_<provider>--<id>` (the brief's `source` is
-`source:<provider>`), generates its title, and places the item's title, author, labels and
-text between fenced markers introduced as untrusted data; the fence is lengthened until the
-text cannot contain it. `ingest_source_item` queues the brief, updates a brief still in
+`source_brief` sets the brief's `source` to `source:<provider>`, generates its title, and places
+the item's title, author, labels and text between fenced markers introduced as untrusted data;
+the fence is lengthened until the text cannot contain it. The item's title also goes in
+`Brief::name`, one line and cut, to show beside the ID; it never reaches `Brief::prompt`
+unfenced. `ingest_source_item` gives the item its Mission ID, queues the brief, updates a brief still in
 `new/` when its fingerprint (title, text, labels, `updated`) changed, and leaves a claimed
 (`InFlight`) or finished brief alone. Cursors are stored under `sources/`.
 `unreported_source_briefs` lists finished source briefs without a report mark (at most
 `[registry.limits.sources] report_attempts`, five, attempts each); `mark_source_reported`
-records an attempt.
+records an attempt. A finished brief from anywhere else is marked as owing no report when it
+finishes.
 
 On the Station, the Headquarters holder runs a source desk: per Operation and instance
 (`sources.<name>`; `provider` names the provider, default the key; `intake = false` keeps an
@@ -2938,10 +2973,11 @@ Cron fields take `*`, numbers, `a-b`, `,` lists and `/step`; day-of-week is 0-7 
 Sunday); when both day fields are restricted a day matches if either does. A schedule that
 never matches within a year (`0 0 30 2 *`) parses but never fires.
 
-`fire_sleeper` submits a brief keyed `sleeper--<operation>.<name>.<window>` (with a Station,
-`...<window>.<station>`, the ID made key-safe with a digest when it had to change) and reports
-`AlreadyFired` when that key exists in `new`, `claimed`, `done` or `failed`, which is what
-makes a window, or one Station's round in it, fire once across Stations. A brief's
+`fire_sleeper` enters a brief whose `id` is `<operation>.<name>.<window>` (with a Station,
+`...<window>.<station>`, the ID made key-safe with a digest when it had to change) with the entry
+`MissionEntry::sleeper` for that window and Station, and reports `AlreadyFired` when that entry's
+brief exists in `new`, `claimed`, `done` or `failed`, which is what makes a window, or one
+Station's round in it, fire once across Stations. A brief's
 `stations` is the sleeper's, or `[station]` for a round; its data's `sleeper` object names
 `operation`, `name`, `window` and, for a round, `station`. For an `each_station` sleeper the
 Headquarters holder fires one round for each Station whose last check-in placement accepts
@@ -3080,7 +3116,7 @@ pub const REVIEW_DATA_KEY: &str = "vetting_review";  // Brief.data key holding t
 impl ReviewTarget {
     pub fn brief(brief: &Brief) -> Self;             // the brief as it reads now
     pub fn review_id(&self) -> String;               // "review-" + 32 hex of SHA-256: one review per content
-    pub fn review_key(&self) -> String;              // "ai6-vetting--" + review_id
+    pub fn review_entry(&self, operation: &str) -> MissionEntry;  // one review has one Mission ID
 }
 pub fn is_review(brief: &Brief) -> bool;             // REVIEW_SOURCE and an Origin::Review provenance
 pub fn review_target(brief: &Brief) -> Option<ReviewTarget>;  // None unless is_review
@@ -3097,7 +3133,7 @@ pub fn review_brief(reviewed: &Brief, target: &ReviewTarget, (operation, purpose
 pub fn read_review(text: &str, limits: &VettingLimits) -> Vetting;
 ```
 
-The review Mission's ID is its brief key `ai6-vetting--review-…`. Its Station starts it only
+A review Mission is one with the role and an `Origin::Review` provenance. Its Station starts it only
 on its own host, with clearance `desk`, `AgentStart::answer_only`, no Cable MCP tools (so no
 Cables, proposals or green ink), no credentials issued (no loadout, no pool account), only the
 model-credential and path variables of its Agent's environment (and

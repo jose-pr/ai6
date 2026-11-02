@@ -263,6 +263,7 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | `record_bytes` | 1 MiB | Bytes of one brief |
 | `records` | 1,000 | Queued briefs |
 | `provenance_bytes` | 16 KiB | Bytes of a brief's provenance |
+| `mission_id_bytes` | 120 | Bytes of a Mission ID, under 240 whatever this says; a longer one keeps its start and adds a short hash |
 
 `[registry.limits.cables]`
 
@@ -366,6 +367,7 @@ it.
 | --- | --- | --- |
 | `item_text_bytes` | 64 KiB | Bytes of a Source item's text |
 | `report_attempts` | 5 | Times reporting a finished brief to its Source is tried before it is dropped |
+| `name_bytes` | 256 | Bytes of the name a brief shows beside its Mission ID |
 
 `[registry.limits.stations]`
 
