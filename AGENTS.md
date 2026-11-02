@@ -18,7 +18,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | `examples/config/` | A runnable Operation and Agent roster |
 | `docs/`, `mkdocs.yml` | Narrative guides; the Rust API reference is published under `/rust/` |
 | `tools/public-api.ps1`, `tools/public-api/` | Checked public API snapshots of the library crates |
-| `tools/sdk/` | `sdk.lock`, every SDK a build needs at exact versions; `bootstrap.sh` and `bootstrap.ps1` install them under one directory; `check_lock.py` holds the lock to the repository |
+| `tools/sdk/` | `sdk.lock`, every SDK a build needs at exact versions; `bootstrap.sh` and `bootstrap.ps1` install them under one directory; `check_lock.py` holds the lock to the repository; `crates.py` keeps the `deps` branch's `crates/` equal to `Cargo.lock` and builds offline from it |
 
 ## Commands
 
@@ -38,7 +38,9 @@ at the versions `tools/sdk/sdk.lock` names; `tools/sdk/README.md` has the flags.
 needs the Flutter `main` commit named there, because native desktop windowing is not in stable
 Flutter. A change to that commit is one change: refresh the `deps` branch, then update the lock and
 the defaults of the Dockerfiles in `containers/` on `deps`. `python3 tools/sdk/check_lock.py` fails
-when they differ, or when the lock disagrees with the workflows, `Cargo.toml` or `tool/cdn_files.json`.
+when they differ, when the lock disagrees with the workflows, `Cargo.toml` or `tool/cdn_files.json`,
+or when the `deps` commit it names does not hold every crate `Cargo.lock` does. A change to
+`Cargo.lock` needs `python3 tools/sdk/crates.py refresh DEPS_DIR`, with a worktree on `deps`.
 
 The Registry test suite runs every case on the file Registry and SQLite. With
 `AI6_TEST_POSTGRES_URL` set to a `postgres://…?sslmode=disable` server whose user may

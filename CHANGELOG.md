@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   private until someone says otherwise. Text under `[oo]` other than `[oo.appearance] theme` and
   `[oo.assets] cdn` is left out and named on standard error, and a `url` holding a credential, a query
   or a fragment is refused.
+- The `deps` branch holds every Rust crate `Cargo.lock` names, for every target: each `.crate` from
+  crates.io and a source archive of each pinned git commit, 72.6 MiB, which a plain clone of the
+  repository also downloads. `tools/sdk/crates.py use DEPS_DIR` sets up a build from them with no
+  network, `sync` and `refresh` keep them equal to the lock, and `tools/sdk/check_lock.py` fails when
+  the commit `sdk.lock` names does not cover it.
 
 ### Changed
 
