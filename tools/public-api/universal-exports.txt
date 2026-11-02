@@ -272,6 +272,7 @@ pub universal_exports::LaunchManifest::environment_keys: alloc::vec::Vec<alloc::
 pub universal_exports::LaunchManifest::handler_provider: alloc::string::String
 pub universal_exports::LaunchManifest::mode: alloc::string::String
 pub universal_exports::LaunchManifest::model: core::option::Option<alloc::string::String>
+pub universal_exports::LaunchManifest::name: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::prompt: alloc::string::String
 pub universal_exports::LaunchManifest::provenance: core::option::Option<ai6::directorates::registry::bona_fides::Provenance>
 pub universal_exports::LaunchManifest::role_id: core::option::Option<alloc::string::String>
