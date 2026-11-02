@@ -23,6 +23,7 @@ pub ai6_agent_acp::AcpSettings::command: alloc::string::String
 pub ai6_agent_acp::AcpSettings::diagnostic_lines: usize
 pub ai6_agent_acp::AcpSettings::effort_option: core::option::Option<alloc::string::String>
 pub ai6_agent_acp::AcpSettings::env: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6_agent_acp::AcpSettings::exit_wait_ms: i64
 pub ai6_agent_acp::AcpSettings::initialize_timeout_ms: u64
 pub ai6_agent_acp::AcpSettings::meta: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6_agent_acp::AcpSettings::model_option: core::option::Option<alloc::string::String>

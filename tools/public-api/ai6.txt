@@ -5622,6 +5622,7 @@ pub ai6::directorates::section_00::acp::AcpOptions::close_grace_ms: u64
 pub ai6::directorates::section_00::acp::AcpOptions::close_on_drop: bool
 pub ai6::directorates::section_00::acp::AcpOptions::cwd: alloc::string::String
 pub ai6::directorates::section_00::acp::AcpOptions::decider: alloc::sync::Arc<dyn ai6::directorates::section_00::acp::PermissionDecider>
+pub ai6::directorates::section_00::acp::AcpOptions::disconnect_detail: core::option::Option<ai6::directorates::section_00::acp::DisconnectDetail>
 pub ai6::directorates::section_00::acp::AcpOptions::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::effort_option: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::fail_on_disconnect: bool
@@ -5761,8 +5762,10 @@ impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates
 pub fn ai6::directorates::section_00::acp::RefuseAll::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
 pub fn ai6::directorates::section_00::acp::duplex() -> (agent_client_protocol::jsonrpc::Channel, agent_client_protocol::jsonrpc::Channel)
 pub fn ai6::directorates::section_00::acp::exchange(impl agent_client_protocol::component::ConnectTo<agent_client_protocol::role::acp::Client> + 'static, core::option::Option<ai6::directorates::section_00::acp::Authenticate>, u64, u64, alloc::vec::Vec<(alloc::string::String, serde_json::value::Value)>) -> core::result::Result<alloc::vec::Vec<core::result::Result<serde_json::value::Value, ai6::directorates::section_00::acp::RpcFailure>>, alloc::string::String>
-pub fn ai6::directorates::section_00::acp::lines_over_io(impl alloc::io::read::Read + core::marker::Send + 'static, impl core::io::write::Write + core::marker::Send + 'static, usize) -> (ai6::directorates::section_00::acp::IoLines, alloc::sync::Arc<std::sync::poison::mutex::Mutex<alloc::collections::vec_deque::VecDeque<alloc::string::String>>>)
+pub fn ai6::directorates::section_00::acp::lines_over_io(impl alloc::io::read::Read + core::marker::Send + 'static, impl core::io::write::Write + core::marker::Send + 'static, usize) -> (ai6::directorates::section_00::acp::IoLines, ai6::directorates::section_00::acp::Diagnostics)
 pub type ai6::directorates::section_00::acp::Credential = (dyn core::ops::function::Fn(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> bool + core::marker::Send + core::marker::Sync)
+pub type ai6::directorates::section_00::acp::Diagnostics = alloc::sync::Arc<std::sync::poison::mutex::Mutex<alloc::collections::vec_deque::VecDeque<alloc::string::String>>>
+pub type ai6::directorates::section_00::acp::DisconnectDetail = alloc::boxed::Box<(dyn core::ops::function::Fn() -> core::option::Option<alloc::string::String> + core::marker::Send + core::marker::Sync)>
 pub type ai6::directorates::section_00::acp::IoLines = agent_client_protocol::jsonrpc::Lines<futures_util::sink::map_err::SinkMapErr<futures_channel::mpsc::UnboundedSender<alloc::string::String>, fn(futures_channel::mpsc::SendError) -> core::io::error::Error>, futures_channel::mpsc::UnboundedReceiver<core::io::error::Result<alloc::string::String>>>
 pub type ai6::directorates::section_00::acp::TerminalFactory = alloc::sync::Arc<(dyn core::ops::function::Fn() -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>, guatiao::library::kind::ProviderError> + core::marker::Send + core::marker::Sync)>
 pub mod ai6::directorates::section_00::agent
@@ -5853,6 +5856,7 @@ pub ai6::directorates::section_00::agent::UsageLimit::resets_at: core::option::O
 pub ai6::directorates::section_00::agent::UsageLimit::window: core::option::Option<alloc::string::String>
 pub const ai6::directorates::section_00::agent::DENIED_EVENT: &str
 pub const ai6::directorates::section_00::agent::LIMIT_EVENT: &str
+pub const ai6::directorates::section_00::agent::TURN_CANCELLED: &str
 pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
