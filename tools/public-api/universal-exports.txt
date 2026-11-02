@@ -239,6 +239,7 @@ pub universal_exports::GatewayLimits::max_input_frames_per_second: u32
 pub universal_exports::GatewayLimits::max_sessions: usize
 pub universal_exports::GatewayLimits::origin_bytes: ai6::bounds::Limit
 pub universal_exports::GatewayLimits::scrollback_events: usize
+pub universal_exports::GatewayLimits::socket_buffer_bytes: usize
 pub universal_exports::GatewayLimits::station_token_min_bytes: usize
 impl core::convert::From<&ai6::directorates::m::unex_limits::UnexGatewayLimits> for universal_exports::GatewayLimits
 pub fn universal_exports::GatewayLimits::from(&ai6::directorates::m::unex_limits::UnexGatewayLimits) -> Self
