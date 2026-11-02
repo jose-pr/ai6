@@ -1,3 +1,6 @@
+# Every text file is LF on every platform; pub/ and cdn/ below are third-party bytes.
+* text=auto eol=lf
+
 # Third-party bytes, kept exactly as pub wrote them.
 pub/** -text
 cdn/** -text
