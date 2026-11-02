@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../controls/mission_actions.dart';
 import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
@@ -98,14 +99,7 @@ List<(MissionGroup, SessionSummary?)> sessionsHere(
     final onStation = mission.sessions.where(
       (session) => session.stationId == stationId,
     );
-    here.add((
-      mission,
-      onStation.isEmpty
-          ? null
-          : onStation.reduce(
-              (left, right) => right.sequence > left.sequence ? right : left,
-            ),
-    ));
+    here.add((mission, currentSession(onStation)));
   }
   return here;
 }

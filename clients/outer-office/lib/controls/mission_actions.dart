@@ -145,12 +145,16 @@ const _labels = {
   'interrupt': 'Interrupt Session',
 };
 
-/// The Session carrying a Mission's current state: the one whose state changed last.
-SessionSummary? currentSession(List<SessionSummary> sessions) {
+/// The latest of [sessions], the one carrying a Mission's current state: the highest `updatedAt`,
+/// none counting as oldest and the first of equals winning. Never `sequence`: that is a cursor
+/// within one provider Session, so a long first attempt would outrank the newer retry after it.
+/// Universal Exports' `Route::shows_mission` decides the same.
+SessionSummary? currentSession(Iterable<SessionSummary> sessions) {
   SessionSummary? current;
   for (final session in sessions) {
     if (current == null ||
-        (session.updatedAt ?? 0) > (current.updatedAt ?? 0)) {
+        (session.updatedAt ?? double.negativeInfinity) >
+            (current.updatedAt ?? double.negativeInfinity)) {
       current = session;
     }
   }

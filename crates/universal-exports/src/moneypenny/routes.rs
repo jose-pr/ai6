@@ -308,10 +308,11 @@ impl Route {
     /// Whether this Missions route's page shows `mission`, an item of `GET /v1/missions`; the
     /// app's `routeMissions` decides the same, and `assistant_routes.json` holds the cases both
     /// test. A state filter looks at the Mission's state: that of its latest Session, the one
-    /// with the highest `sequence` and the first of equals (a Session without a state is
-    /// working). Station, Agent and text look at any of its Sessions, the text also at the
-    /// Operation, the Mission and the brief's prompt, without regard to case. Any other page
-    /// shows none.
+    /// with the highest `updated_at`, none counting as oldest and the first of equals winning
+    /// (a Session without a state is working). It is never `sequence`, a cursor within one
+    /// provider Session: a long first attempt would outrank the newer retry after it. Station,
+    /// Agent and text look at any of its Sessions, the text also at the Operation, the Mission
+    /// and the brief's prompt, without regard to case. Any other page shows none.
     pub(crate) fn shows_mission(&self, mission: &Value) -> bool {
         if self.page != Page::Missions {
             return false;
@@ -324,7 +325,8 @@ impl Route {
             .as_array()
             .map_or(&[][..], Vec::as_slice);
         let Some(latest) = sessions.iter().reduce(|left, right| {
-            if right["sequence"].as_u64() > left["sequence"].as_u64() {
+            // `None` orders below every number, so a Session with no time is the oldest.
+            if right["updated_at"].as_f64() > left["updated_at"].as_f64() {
                 right
             } else {
                 left

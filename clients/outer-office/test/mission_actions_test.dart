@@ -146,6 +146,34 @@ void main() {
     expect(currentSession([earlier, later])?.sessionId, 'second');
     expect(currentSession([later, earlier])?.sessionId, 'second');
     expect(currentSession(const []), isNull);
+
+    const unreported = SessionSummary(
+      operationId: 'G',
+      missionId: 'm',
+      sessionId: 'unreported',
+      state: 'parked',
+      sequence: 50,
+    );
+    expect(
+      currentSession([unreported, earlier])?.sessionId,
+      'first',
+      reason: 'a Session with no update time counts as oldest',
+    );
+    expect(
+      currentSession([unreported, unreported])?.state,
+      'parked',
+      reason: 'the first of equals',
+    );
+    const alsoAt20 = SessionSummary(
+      operationId: 'G',
+      missionId: 'm',
+      sessionId: 'also',
+      state: 'stalled',
+      sequence: 99,
+      updatedAt: 20,
+    );
+    expect(currentSession([later, alsoAt20])?.sessionId, 'second');
+    expect(currentSession([alsoAt20, later])?.sessionId, 'also');
   });
 
   testWidgets('the action menu explains unavailable controls and interrupts', (

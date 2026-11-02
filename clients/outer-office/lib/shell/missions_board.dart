@@ -212,10 +212,9 @@ class MissionGroup {
   final String missionId;
   final List<SessionSummary> sessions;
 
-  /// The Session that sets the Mission's state: the one with the latest event.
-  SessionSummary get latest => sessions.reduce(
-    (left, right) => right.sequence > left.sequence ? right : left,
-  );
+  /// The Session that sets the Mission's state, by [currentSession]'s rule. A group always has
+  /// a Session.
+  SessionSummary get latest => currentSession(sessions)!;
 
   /// The state of its latest Session; a Session not yet reporting one is working.
   String get state => latest.state ?? 'working';

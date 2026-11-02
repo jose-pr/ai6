@@ -13,6 +13,7 @@ import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/shell/oo_freshness.dart';
 import 'package:outer_office/shell/oo_shell.dart' show OoPage;
 import 'package:outer_office/shell/overview_page.dart';
+import 'package:outer_office/shell/station_watch.dart';
 
 import 'routes_test.dart' show locations;
 
@@ -262,17 +263,22 @@ void main() {
         String id,
         String state,
         int sequence,
+        double updatedAt,
       ) => SessionSummary(
         operationId: 'G',
         missionId: mission,
         sessionId: id,
         state: state,
         sequence: sequence,
+        updatedAt: updatedAt,
       );
       board.sessions = [
-        session('m-finished', 's-older', 'blocked', 4),
-        session('m-finished', 's-latest', 'done', 7),
-        session('m-open', 's-open', 'working', 2),
+        session('m-finished', 's-older', 'blocked', 4, 100),
+        session('m-finished', 's-latest', 'done', 7, 200),
+        session('m-open', 's-open', 'working', 2, 300),
+        // A long failed first attempt: its event count says nothing about the retry after it.
+        session('m-retry', 's-first', 'failed', 40, 400),
+        session('m-retry', 's-retry', 'working', 2, 500),
       ];
       await openAt(tester, board, '/overview', size: const Size(1400, 1600));
       final overview = find.byType(OverviewPage);
@@ -280,13 +286,14 @@ void main() {
         of: overview,
         matching: find.text('Missions'),
       );
-      expect(find.text('1 working · 2 on the board'), findsOneWidget);
+      expect(find.text('2 working · 3 on the board'), findsOneWidget);
       await tester.tap(tile.first);
       await tester.pumpAndSettle();
       expect(find.text('Mission m-open'), findsOneWidget);
+      expect(find.text('Mission m-retry'), findsOneWidget);
       expect(find.text('Mission m-finished'), findsNothing);
       expect(
-        find.text('All  2'),
+        find.text('All  3'),
         findsOneWidget,
         reason: 'the chips count Missions, not Sessions',
       );
@@ -299,6 +306,27 @@ void main() {
       expect(find.text('s-latest'), findsOneWidget);
     },
   );
+
+  test('a Station watch names the Session updated last, not the longest', () {
+    final board = demoBoard();
+    SessionSummary session(String id, int sequence, double updatedAt) =>
+        SessionSummary(
+          operationId: 'G',
+          missionId: 'm',
+          sessionId: id,
+          state: 'working',
+          sequence: sequence,
+          updatedAt: updatedAt,
+          stationId: 'hq',
+        );
+    board.sessions = [session('s-first', 40, 100), session('s-retry', 2, 200)];
+    board.missionAttempts = {
+      ('G', 'm'): const [
+        MissionAttemptSummary(attempt: 2, station: 'hq', status: 'active'),
+      ],
+    };
+    expect(sessionsHere(board, 'hq').single.$2?.sessionId, 's-retry');
+  });
 
   group('a Session row', () {
     const short = 's-1234';

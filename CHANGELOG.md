@@ -16,9 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   actions in words, with the action's name on hover; demo words are the same everywhere; Station
   cards take a phone's width.
 - A Missions route's `state`, in Outer Office and Moneypenny's `missions` tool, goes by a Mission's
-  state, that of its latest Session, so the Missions under a count on Overview or an Operation are
-  the ones it counted; it used to keep a Mission with any Session in that state. The page's state
-  chips count Missions too. The Sessions page still filters each Session by its own state.
+  state, that of the Session updated last, so the Missions under a count on Overview or an
+  Operation are the ones it counted; it used to keep a Mission with any Session in that state. The
+  page's state chips count Missions too. The Sessions page still filters each Session by its own
+  state. Outer Office used to pick that Session by event number, which is counted per Session, so a
+  long failed attempt hid the newer retry after it.
 - Outer Office's wallpapers are one drawing in each theme's colours, exact at any size and under
   a fifth of the bytes, and the hero picks its file by the box's physical size, decoding only what
   the box needs (`[art] max_width` in `OO.cfg`). Light and Classic gain a sharper paper hero. The

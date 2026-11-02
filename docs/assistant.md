@@ -731,7 +731,7 @@ shows it) is marked so, and the app frames it: "Made after reading text from out
 Check it before acting on it."
 
 Her `missions` tool filters exactly as the Missions page does (both are held to one shared
-set of cases): by Operation; by a Mission's state, that of its latest Session (a Session that
+set of cases): by Operation; by a Mission's state, that of the Session updated last (a Session that
 reported none is working); then by the Station or Agent of any of its Sessions and by text in the
 Operation, Mission, Session IDs or brief, in any case.
 

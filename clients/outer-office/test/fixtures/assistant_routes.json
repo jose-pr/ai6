@@ -115,7 +115,7 @@
             "state": "failed",
             "reason": null,
             "sequence": 9,
-            "updated_at": null,
+            "updated_at": 100,
             "exposure": [],
             "station_id": "hq",
             "agent": "007"
@@ -127,7 +127,7 @@
             "state": "working",
             "reason": null,
             "sequence": 12,
-            "updated_at": null,
+            "updated_at": 200,
             "exposure": [],
             "station_id": "worker",
             "agent": "007"
@@ -218,7 +218,7 @@
             "state": "blocked",
             "reason": null,
             "sequence": 4,
-            "updated_at": null,
+            "updated_at": 300,
             "exposure": [],
             "station_id": "worker",
             "agent": "007"
@@ -230,7 +230,106 @@
             "state": "done",
             "reason": null,
             "sequence": 7,
+            "updated_at": 400,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          }
+        ],
+        "brief": null,
+        "usage": null,
+        "attempts": []
+      },
+      {
+        "operation_id": "G",
+        "mission_id": "m-long-first",
+        "sessions": [
+          {
+            "operation_id": "G",
+            "mission_id": "m-long-first",
+            "session_id": "s-7",
+            "state": "failed",
+            "reason": null,
+            "sequence": 40,
+            "updated_at": 500,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          },
+          {
+            "operation_id": "G",
+            "mission_id": "m-long-first",
+            "session_id": "s-8",
+            "state": "working",
+            "reason": null,
+            "sequence": 2,
+            "updated_at": 600,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          }
+        ],
+        "brief": null,
+        "usage": null,
+        "attempts": []
+      },
+      {
+        "operation_id": "G",
+        "mission_id": "m-no-time",
+        "sessions": [
+          {
+            "operation_id": "G",
+            "mission_id": "m-no-time",
+            "session_id": "s-9",
+            "state": "parked",
+            "reason": null,
+            "sequence": 50,
             "updated_at": null,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          },
+          {
+            "operation_id": "G",
+            "mission_id": "m-no-time",
+            "session_id": "s-10",
+            "state": "quarantined",
+            "reason": null,
+            "sequence": 1,
+            "updated_at": 10,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          }
+        ],
+        "brief": null,
+        "usage": null,
+        "attempts": []
+      },
+      {
+        "operation_id": "G",
+        "mission_id": "m-tie",
+        "sessions": [
+          {
+            "operation_id": "G",
+            "mission_id": "m-tie",
+            "session_id": "s-11",
+            "state": "stalled",
+            "reason": null,
+            "sequence": 3,
+            "updated_at": 700,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          },
+          {
+            "operation_id": "G",
+            "mission_id": "m-tie",
+            "session_id": "s-12",
+            "state": "abandoned",
+            "reason": null,
+            "sequence": 8,
+            "updated_at": 700,
             "exposure": [],
             "station_id": "worker",
             "agent": "007"
@@ -250,7 +349,41 @@
           "m-retried",
           "m-quiet",
           "m-done",
-          "m-finished"
+          "m-finished",
+          "m-long-first",
+          "m-no-time",
+          "m-tie"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "parked"
+          ]
+        },
+        "shows": []
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "quarantined"
+          ]
+        },
+        "shows": [
+          "m-no-time"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "stalled"
+          ]
+        },
+        "shows": [
+          "m-tie"
         ]
       },
       {
@@ -280,7 +413,8 @@
         },
         "shows": [
           "m-retried",
-          "m-quiet"
+          "m-quiet",
+          "m-long-first"
         ]
       },
       {

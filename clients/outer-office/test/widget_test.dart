@@ -1020,6 +1020,7 @@ void main() {
               'session_id': 'claude-session-123',
               'state': 'working',
               'sequence': 4,
+              'updated_at': 100,
             },
             {
               'operation_id': 'operation-alpha',
@@ -1027,6 +1028,7 @@ void main() {
               'session_id': 'codex-session-456',
               'state': 'blocked',
               'sequence': 9,
+              'updated_at': 200,
             },
             {
               'operation_id': 'operation-alpha',

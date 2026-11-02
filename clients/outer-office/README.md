@@ -29,8 +29,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   current attempt, when the board last heard of it (relative, the exact local time and zone
   on hover) and the Agent and role its brief names, newest update first unless the route
   sorts, ties in Operation and Mission order so rows stay put between refreshes. Its state filter
-  and counts go by a Mission's state, that of its latest Session, as Overview and an Operation's
-  counts do; the Sessions page filters each Session by its own. With the
+  and counts go by a Mission's state, that of the Session updated last, as Overview and an
+  Operation's counts do; the Sessions page filters each Session by its own. With the
   `queued` state a strip counts the briefs vetting holds and the Mission proposals waiting,
   each linking to Briefings; neither is ever a row. **Mission details** (route
   `missions?operation_id=…&mission_id=…`) opens a read-only detail beside the queue, or in
