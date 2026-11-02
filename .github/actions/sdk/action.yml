@@ -1,0 +1,26 @@
+name: Install the locked SDKs
+description: Runs tools/sdk/bootstrap for these groups and puts what its env file sets into the job's environment.
+inputs:
+  groups:
+    description: The sdk.lock groups to install
+    required: false
+    default: core,app
+runs:
+  using: composite
+  steps:
+    - name: Bootstrap
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./tools/sdk/bootstrap.ps1 --groups "${{ inputs.groups }}" --prefix "$env:RUNNER_TEMP/ai6-sdk"
+    - name: Bootstrap
+      if: runner.os != 'Windows'
+      shell: sh
+      run: sh tools/sdk/bootstrap.sh --groups "${{ inputs.groups }}" --prefix "$RUNNER_TEMP/ai6-sdk"
+    - name: Export the environment
+      shell: pwsh
+      run: |
+        . "$env:RUNNER_TEMP/ai6-sdk/env.ps1"
+        foreach ($name in 'AI6_SDK_HOME', 'AI6_SDK_DEPS', 'RUSTUP_HOME', 'CARGO_HOME', 'FLUTTER_ROOT', 'PUB_CACHE', 'FLUTTER_WINDOWING', 'PATH') {
+          $value = [Environment]::GetEnvironmentVariable($name)
+          if ($value) { "$name=$value" | Add-Content -Path $env:GITHUB_ENV }
+        }

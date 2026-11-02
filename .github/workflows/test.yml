@@ -119,7 +119,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.toolchain == 'stable'
 
   outer-office:
-    name: Outer Office app (Windows, Flutter main)
+    name: Outer Office app (Windows, locked Flutter)
     runs-on: windows-latest
     defaults:
       run:
@@ -128,22 +128,81 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          targets: wasm32-unknown-unknown
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: main
-          cache: true
+      - uses: ./.github/actions/sdk
       - run: flutter config --enable-windowing
-      - run: flutter pub get
+      - run: flutter pub get --offline
       - run: dart run tool/build_guatiao_wasm.dart
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze --fatal-infos
       # Before the tests, so the no-CDN check reads a real build/web.
       - run: flutter build web --release
       # The Noto fallback fonts the build serves itself, checked against tool/cdn_files.json.
-      - run: dart run tool/cdn_files.dart fill
+      - run: dart run tool/cdn_files.dart fill --deps "$env:AI6_SDK_DEPS"
       - run: flutter test
       - run: flutter build windows --debug
+
+  outer-office-linux:
+    name: Outer Office app (Linux, locked Flutter)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/outer-office
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Install the system group
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev unzip
+      - uses: ./.github/actions/sdk
+      - run: flutter pub get --offline
+      - run: flutter build linux --debug
+
+  # A person's first command, on every platform Rust builds on.
+  bootstrap:
+    name: Bootstrap (${{ matrix.platform }})
+    if: startsWith(github.ref, 'refs/tags/ci-')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x64, os: ubuntu-latest }
+          - { platform: linux-arm64, os: ubuntu-24.04-arm }
+          - { platform: windows-x64, os: windows-latest }
+          - { platform: windows-arm64, os: windows-11-arm }
+          - { platform: macos-arm64, os: macos-latest }
+          - { platform: macos-x64, os: macos-15-intel }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Install the system group
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev unzip
+      - uses: ./.github/actions/sdk
+      # --check exits 1 on anything still missing, and fetches nothing.
+      - name: A second run has nothing to do
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/sdk/bootstrap.ps1 --check --prefix "$env:AI6_SDK_HOME"
+      - name: A second run has nothing to do
+        if: runner.os != 'Windows'
+        run: sh tools/sdk/bootstrap.sh --check --prefix "$AI6_SDK_HOME"
+      - name: The lock against the repository and upstream
+        if: matrix.platform == 'linux-x64'
+        run: |
+          git fetch --depth 1 origin "$(awk '$1 == "app" && $2 == "deps" { print $3 }' tools/sdk/sdk.lock)"
+          git fetch --depth 1 origin deps:refs/remotes/origin/deps
+          python3 tools/sdk/check_lock.py --online
+      - run: cargo --version
+      - run: flutter --version
+      - run: cargo check -p ai6-diptel
+      - run: flutter pub get --offline
+        working-directory: clients/outer-office
+      - run: flutter analyze --fatal-infos
+        working-directory: clients/outer-office
