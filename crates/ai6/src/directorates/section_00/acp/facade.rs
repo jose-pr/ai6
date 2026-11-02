@@ -466,8 +466,11 @@ fn attach(inner: &Arc<Inner>, operation: &Arc<Operation>, session: Object<dyn Ag
         .name("ai6-acp-pump".to_owned())
         .spawn(move || {
             while !operation.stop.load(Ordering::SeqCst) {
+                let polled = session.next_event(100);
+                // After the read: a harness's first event may be what reports its Session, and
+                // nothing else may follow it for a whole model turn.
                 let provider = session.session_id().ok().flatten().map(|id| id.to_string());
-                match session.next_event(100) {
+                match polled {
                     Ok(Some(event)) => {
                         notify(&operation, &provider, Some(&event));
                         end_turn(&operation, &provider, &event);

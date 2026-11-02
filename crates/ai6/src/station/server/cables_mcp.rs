@@ -227,6 +227,19 @@ impl Endpoint {
         self.registered = Some(endpoint);
         Ok(())
     }
+
+    /// Whether the endpoint knows the provider Session it answers for.
+    pub(super) fn is_bound(&self) -> bool {
+        self.registered.is_some()
+    }
+
+    /// The provider Session this endpoint answers for, once bound.
+    #[cfg(test)]
+    pub(super) fn bound_session(&self) -> Option<String> {
+        self.registered
+            .as_ref()
+            .and_then(|endpoint| endpoint.session_id().map(str::to_owned))
+    }
 }
 
 impl Drop for Endpoint {

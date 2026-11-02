@@ -21,6 +21,8 @@ mod medical;
 mod promotion;
 mod recovery;
 mod reload;
+#[cfg(test)]
+mod stream_tests;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
 mod vetting;
@@ -3371,7 +3373,7 @@ struct AgentOperation {
     /// Whether a harness on another host can still be reached, and why it was lost if not.
     reach: ReachWatch,
     #[cfg(feature = "cables-mcp")]
-    _cables_mcp: Option<cables_mcp::Endpoint>,
+    cables_mcp: Option<cables_mcp::Endpoint>,
     #[cfg(feature = "cables-mcp")]
     _theater_mcp: Option<theater_mcp::Endpoint>,
     #[cfg(feature = "publisher")]
@@ -4549,7 +4551,7 @@ async fn start_mission(
             runner: attachment,
             reach,
             #[cfg(feature = "cables-mcp")]
-            _cables_mcp: cables_mcp,
+            cables_mcp,
             #[cfg(feature = "cables-mcp")]
             _theater_mcp: theater_mcp,
             #[cfg(feature = "publisher")]
@@ -5155,7 +5157,7 @@ async fn resume_mission(
             runner: attachment,
             reach,
             #[cfg(feature = "cables-mcp")]
-            _cables_mcp: cables_mcp,
+            cables_mcp,
             #[cfg(feature = "cables-mcp")]
             _theater_mcp: theater_mcp,
             #[cfg(feature = "publisher")]
@@ -5629,6 +5631,8 @@ fn attach_observed_session(
     let Some(session_id) = session_id else {
         return;
     };
+    #[cfg(feature = "cables-mcp")]
+    bind_observed_endpoint(state, mission_id, session, &session_id);
     let should_attach = state
         .sessions
         .lock()
@@ -5666,6 +5670,44 @@ fn attach_observed_session(
                 publish_lifecycle(state, mission_id, current);
             }
         }
+    }
+}
+
+/// Binds a Session's Cable endpoint to the provider Session once its stream has reported it: a
+/// harness that reports it only after reading its first message starts with an unbound endpoint,
+/// and every tool that answers for the Session refuses until this. The endpoint leaves the
+/// Session's entry for the Registry write, so no other Mission waits on it; a failed bind is tried
+/// again on the next read.
+#[cfg(feature = "cables-mcp")]
+fn bind_observed_endpoint(
+    state: &DaemonState,
+    mission_id: &str,
+    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    session_id: &SessionId,
+) {
+    let endpoint = state.sessions.lock().ok().and_then(|mut sessions| {
+        let operation = sessions.get_mut(mission_id)?;
+        if !Arc::ptr_eq(&operation.session, session)
+            || operation
+                .cables_mcp
+                .as_ref()
+                .is_none_or(cables_mcp::Endpoint::is_bound)
+        {
+            return None;
+        }
+        operation.cables_mcp.take()
+    });
+    let Some(mut endpoint) = endpoint else {
+        return;
+    };
+    if let Err(error) = endpoint.bind_session(Some(session_id)) {
+        eprintln!("ai6: Mission {mission_id:?}: Cable Session binding failed: {error:?}");
+    }
+    if let Ok(mut sessions) = state.sessions.lock()
+        && let Some(operation) = sessions.get_mut(mission_id)
+        && Arc::ptr_eq(&operation.session, session)
+    {
+        operation.cables_mcp = Some(endpoint);
     }
 }
 
@@ -6738,7 +6780,7 @@ queue = 1
                     runner: None,
                     reach: ReachWatch::default(),
                     #[cfg(feature = "cables-mcp")]
-                    _cables_mcp: None,
+                    cables_mcp: None,
                     #[cfg(feature = "cables-mcp")]
                     _theater_mcp: None,
                     #[cfg(feature = "publisher")]
@@ -7286,6 +7328,7 @@ queue = 1
             MockTerminalProvider,
             MockSafeHouseProvider,
             MockPlainProvider,
+            super::stream_tests::MockStreamHandler,
             super::ephemeral::testing::MockMaker,
             super::ephemeral::testing::MockDir,
             super::vetting::testing::MockVerdictHandler
@@ -8203,6 +8246,7 @@ queue = 1
                 "mock-pooled",
                 "mock-recorder",
                 "mock-spend",
+                "mock-stream",
                 "mock-verdict"
             ])
         );
@@ -9033,7 +9077,7 @@ queue = 1
                 runner: None,
                 reach: ReachWatch::default(),
                 #[cfg(feature = "cables-mcp")]
-                _cables_mcp: None,
+                cables_mcp: None,
                 #[cfg(feature = "cables-mcp")]
                 _theater_mcp: None,
                 #[cfg(feature = "publisher")]
@@ -9142,7 +9186,7 @@ queue = 1
                 runner: None,
                 reach: ReachWatch::default(),
                 #[cfg(feature = "cables-mcp")]
-                _cables_mcp: None,
+                cables_mcp: None,
                 #[cfg(feature = "cables-mcp")]
                 _theater_mcp: None,
                 #[cfg(feature = "publisher")]
@@ -9331,7 +9375,7 @@ queue = 1
                 runner: None,
                 reach: ReachWatch::default(),
                 #[cfg(feature = "cables-mcp")]
-                _cables_mcp: None,
+                cables_mcp: None,
                 #[cfg(feature = "cables-mcp")]
                 _theater_mcp: None,
                 #[cfg(feature = "publisher")]
@@ -9726,7 +9770,7 @@ queue = 1
                 runner: None,
                 reach: ReachWatch::default(),
                 #[cfg(feature = "cables-mcp")]
-                _cables_mcp: None,
+                cables_mcp: None,
                 #[cfg(feature = "cables-mcp")]
                 _theater_mcp: None,
                 #[cfg(feature = "publisher")]
