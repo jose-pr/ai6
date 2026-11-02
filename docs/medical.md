@@ -77,6 +77,9 @@ A Session is **exposed** once it has read input someone else could have written:
 | `issue:TRACKER` | It was given a reply from a linked issue of that tracker instance, or read an issue's text with `issue_read` |
 | `review` | It read review text written by someone else |
 
+This is for an Agent doing work: [Moneypenny's conversations carry no exposure](assistant.md#what-she-reads-and-what-that-gives-up),
+and a Cable from her exposes no one.
+
 Exposure is recorded in the Session's Registry record, never goes away, and is inherited by
 a later attempt at the same Mission. Outer Office shows an `EXPOSED` chip on the Session and
 `ai6ctl` lists the sources. Marking is always on; what an exposed Session may then do is the

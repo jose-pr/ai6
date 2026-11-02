@@ -122,7 +122,7 @@ says so. When the person signs out, her tools stop working.
 | `missions`, `mission` | Missions with their Sessions, attempts, brief and usage; `mission` also the issues it is linked to and what it posted |
 | `timeline` | An Operation's activity |
 | `pools` | Account pools: Sessions, quota windows, tokens today |
-| `held_briefs`, `mission_proposals`, `issue_proposals` | Work waiting for a person; `issue_proposals` sets no exposure on her conversation |
+| `held_briefs`, `mission_proposals`, `issue_proposals` | Work waiting for a person |
 | `green_ink`, `class_authorizations` | Irreversible steps waiting for green ink, standing approvals |
 | `roster` | Operations, Agents, roles, covers and her own `[assistant]` settings |
 | `audit` | Audit records |
@@ -162,9 +162,8 @@ arguments, never free text), the page it changes as a chip ("Affects: Roster ›
 that only opens the page, and "Open" once it is applied), how it stands (Waiting for you,
 Applying, Applied, Refused with the reason, Cancelled, Expired) and **Confirm** and
 **Cancel**. **Confirm** answers once; a proposal still applying after thirty seconds says
-"Outcome unknown, check the page" instead of offering another. A proposal made in an exposed
-conversation also carries the strip naming what exposed it (`tool:missions`, or the source a
-Station reported). Every kind of entry has an icon and a label for screen readers: her answer,
+"Outcome unknown, check the page" instead of offering another. Every kind of entry has an icon
+and a label for screen readers: her answer,
 a proposal, a view ("Made by Moneypenny"), a link to a page in Outer Office and a page she
 published. If the person lacks that permission, there is no proposal at
 all: she is told she cannot. A proposal whose text holds a character that renders as nothing
@@ -259,13 +258,11 @@ the message `moneypenny: update <paths>` and the trailer `Via: Moneypenny (conve
 <id>)`. If `main` moved on meanwhile her commit is replayed on it once; if that conflicts, it
 is pushed to `moneypenny/<conversation digest>` instead and both of you are told.
 
-Her memory is never written unseen. At the start of each answer the Station copies
-`memory/`; at the end it puts that copy back and sends Universal Exports what she changed
-there, with a diff. In a conversation that has read nothing other people wrote, it is
-committed at once and the conversation shows what she kept. Once the conversation is
-**exposed** to such text, the change becomes a **proposal** with the diff: **Confirm** commits
-exactly what was shown (audited `moneypenny.confirmed`), **Cancel** discards it. Either way
-she is told. A memory change records what each of its files held when she made it, and its
+Her memory is committed at once, and you see it happen. At the start of each answer the
+Station copies `memory/`; at the end it puts that copy back and sends Universal Exports what
+she changed there, with a diff. Universal Exports sends it straight back as a commit, and the
+conversation shows what she kept, with the diff, whatever she has read. A memory change
+records what each of its files held when she made it, and its
 commit is refused when one of them has changed on `main` since (another conversation's
 memory, or the person's own edit), so nothing written meanwhile is lost: she proposes it
 again from what the file holds now. A memory change the Station cannot get to Universal
@@ -273,28 +270,6 @@ Exports (it is down, or no longer waits for that answer) is kept on that Station
 with the conversation's next message there; no queue drops a memory change, a held Cable or
 a Station's answer to make room (64 kept changes at most per Station, the oldest logged and
 dropped past that).
-
-A conversation is exposed, for good, when:
-
-- any of her read tools answers other than `field_guide`, `profile` and `station_settings`
-  (every other one can quote an Agent, a brief or another person), with a result or with a
-  refusal that quotes what AI6 answered;
-- she reads a [Cable](#cables) body;
-- she reads one of the files she wrote in an exposed conversation. The Station keeps their
-  paths in `.moneypenny/outside-text/` in the personal repository, a hidden directory she
-  cannot write with one entry per file (so two conversations recording at once keep both),
-  and counts as reading one a `Read` or `Edit` of it, a `Grep` or `Glob` whose search
-  covers it, a file tool call it cannot read the input of, and a `memory/MEMORY.md` that
-  imports it (`@path`); a script she runs counts too, since it may read any of them. Reading
-  other files does not expose the conversation. Removing those files, or the record, in the
-  repository clears it;
-- she fetches a page or searches the web (`WebFetch`, `WebSearch`), or runs a script while her
-  scripts may reach a host (a network policy that reaches one, or [unsandboxed
-  scripts](#her-scripts-and-the-web)).
-
-The repositories in `shared/` are trusted text: the group or the organisation chose what is
-in them, so reading them exposes nothing. Universal Exports keeps the one record of exposure;
-the Station reports what only it sees, and the conversation shows a notice the first time.
 
 A change to a shared repository is a proposal too, through `propose_shared_change` (the
 group, a file path, its new text and a commit subject), and only for a member of that group;
@@ -542,10 +517,6 @@ What differs from Claude Code:
   policy names hosts, and the Station logs it. She has no web search on Codex.
 - **Files only through scripts.** Codex has no file tool outside `exec`: without interpreters
   she writes nothing, and is told so.
-- **Every command counts as reading her files.** The Station sees each command Codex starts
-  (`exec_command`) and treats it as Claude Code's `Bash`: it reads the outside-text record's
-  files, and reaches the network while the policy names hosts. A command her code-mode script
-  runs is announced like any other (Codex 0.164).
 - **Links do not lead out.** A script may create a link in `personal/` pointing outside her
   working directory (a symbolic link on Linux and Windows; MXC refused a junction), but neither
   a script nor Codex's patch tool reached its target with Codex 0.164: the patch tool runs
@@ -669,10 +640,8 @@ them. Only a reply to one of her Cables reaches her, and only the conversation t
 never your other conversations or another person's. She reads only the Cables of the
 Operation she names; the others stay unread.
 
-Once the conversation is **exposed** ([as her memory is](#her-workspace-and-memory): a Cable
-body exposes it too), a Cable she sends or replies with is not sent. Universal Exports keeps
-that one record, and the Station shows her a Cable body only once Universal Exports has
-recorded it, so a conversation resumed or moved to another Station stays exposed. The Station
+Every Cable she sends or replies with waits for you, whatever she has read, because a Cable
+reaches other people and Agents. The Station
 holds the Cable and the chat shows it as a proposal with the Operation, the recipient, how
 long it lasts and the exact text, needing `cable.send`. Universal Exports checks that what it
 shows is what the Station holds (a digest of all of it) and shows nothing otherwise. Confirm,
@@ -689,6 +658,34 @@ Every Cable sent for you is recorded twice in the audit log: by the Station's re
 Cable is stored (action `cable.send`, you as actor, her Agent and the audience in the target;
 refusals too), and a Cable whose record cannot be written is not sent; then by Universal
 Exports (`moneypenny.cable.sent`, you as actor, the conversation and the Cable).
+
+## What she reads, and what that gives up
+
+Exposure is for [a Mission's Session](medical.md#exposure), an Agent doing work. A conversation
+with Moneypenny carries no such mark: nothing she reads sets one, and nothing she does is
+restricted or framed because of what she read. Her tool results still reach her inside
+`<ai6-data>`, which tells her they are data, and a Cable from her does not mark the Session that
+reads it.
+
+What this gives up, plainly:
+
+- **Text she reads can steer her, with nothing to show it happened.** A brief, an Agent's output,
+  an issue, a web page or a Cable can hold instructions. The framing tells her not to follow
+  them; nothing checks that she did not.
+- **Her memory is written without asking you.** Such text can persist into your later
+  conversations. The diff shows in the chat as it is committed, and you can
+  [edit her memory](#your-memory-in-the-app) afterwards; nothing stops it first.
+- **Her pages and offered links carry no warning.** A page, a view or a card she made after
+  reading such text looks like any other. With **Open Moneypenny's links at once** on, a page she
+  offers opens on its own (it only reads).
+- **Your confirmation is the one control on what she does.** Her proposals and her Cables wait for
+  you. Read what you confirm: it may have been written for you to confirm. A group's
+  `write = true` lets a shared change through without you.
+
+What keeps it narrower, for a deployer: no `personal_repo` gives her no memory; the
+[network policy](#her-scripts-and-the-web) decides what she can fetch and where her scripts reach;
+`[assistant.pages]` `network` and `feeds` bound her pages; and her tools can never do more than
+the person using her may.
 
 ## Views she shows
 
@@ -726,10 +723,6 @@ refused with the reason, never removed, so she fixes the drawing herself. Univer
 keeps the drawing written out again from what it accepted, and the app draws that text in the
 theme's colours (`currentColor` is the text colour), at most 480 pixels high; it loads
 nothing.
-
-A view she builds after reading text from outside AI6 (a conversation that is exposed when she
-shows it) is marked so, and the app frames it: "Made after reading text from outside AI6.
-Check it before acting on it."
 
 Her `missions` tool filters exactly as the Missions page does (both are held to one shared
 set of cases): by Operation; by a Mission's state, that of the Session updated last (a Session that
@@ -804,8 +797,7 @@ a `path` (a file or directory under `personal/` or `scratch/`, which the Station
 bundle's entry is `index.html`) or inline `content` of a `format` (html, markdown, text, csv,
 json, svg, up to 192 KiB). Markdown is rendered; text, CSV and JSON are shown as text; scripts,
 styles and images of a bundle load as they are; anything else (a PDF included) downloads.
-`replace` keeps a page's id. `unpublish_page` deletes one; `pages` lists yours (and, when one
-was made after outside text, marks her conversation exposed).
+`replace` keeps a page's id. `unpublish_page` deletes one; `pages` lists yours.
 
 A page is kept for a day unless you **Remember** it, counts toward quotas
 (`[assistant.pages]`, [Moneypenny's limits](configuration.md#moneypennys-limits)) and is audited
@@ -814,9 +806,8 @@ Only you can open it: another person, an administrator included, gets 404. The l
 capability, `{pages base}/v/{token}/`, valid for an hour, bound to your sign-in (signing out
 ends it) and to a network profile; the app mints it when you click. Opening shows the gateway's
 **classification bar** over the page: "Made by Moneypenny for you, not part of Outer Office",
-the title, kind and expiry, and, after she read text from outside AI6, an amber warning naming
-what she read (up to five sources, then a count). The close control hides the bar for that
-view; a reload shows it again.
+the title, kind and expiry. The close control hides the bar for that view; a reload shows it
+again.
 
 Pages are open by default: scripts run and they may fetch from anywhere, because a dashboard
 may need a chart library or an API. What they cannot do is act as the app. Every response
@@ -830,10 +821,10 @@ Feeds read; they never propose or send. Options, set by an administrator for eve
 = false`, and a separate origin for pages (`unex.cfg` `[pages] origin`). You may also open one
 page with the network off.
 
-The remaining risk, plainly: a dashboard made after she read outside text can be steered to
-read, through its declared feeds, whatever its viewer may read, and send it anywhere for as
-long as the link lives. Feeds are read-only and fixed at publish, so it can neither change
-anything nor read past them. The bar naming what she read is the mitigation; `network`, `feeds`
+The remaining risk, plainly: a dashboard she made after reading text someone else wrote can be
+steered to read, through its declared feeds, whatever its viewer may read, and send it anywhere
+for as long as the link lives, and nothing on the page says what she read. Feeds are read-only
+and fixed at publish, so it can neither change anything nor read past them. `network`, `feeds`
 and opening with the network off are the tighter options. On the API's own origin the address
 bar shows the app's host, so a page can draw a faithful sign-in: a separate origin removes that
 and a proxy that strips the sandbox header.

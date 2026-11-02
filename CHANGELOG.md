@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Moneypenny's conversations carry no exposure: it is for an Agent doing work, and a Mission's
+  Session keeps it unchanged. **This weakens what protected you.** Nothing she reads marks her
+  conversation, so text she reads can steer her with nothing to show it happened. Her memory
+  commits at once with its diff in the chat, whatever she has read, so such text can persist into
+  later conversations; the commit is still refused when a file changed on `main` since she read
+  it. Her views, proposals, link cards and pages no longer say "Made after reading text from
+  outside AI6", a page's bar no longer warns or names what she read, `frame = false` now applies
+  to every page, and **Open Moneypenny's links at once** applies to every link. Your confirmation
+  is the one control on what she does. It is tighter in one way: every Cable she sends or replies
+  with now waits for your confirmation, whatever she has read, because a Cable reaches other
+  people and Agents. Her tool results stay framed in `<ai6-data>`, green ink stays a person's, and
+  a Cable from her exposes no Session
+  ([what this gives up](https://jose-pr.github.io/ai6/assistant/#what-she-reads-and-what-that-gives-up)).
+- Removed with it: `[assistant.gateway] exposed_sources` and `source_bytes`, `[assistant.limits]
+  memory_import_depth`, `AssistantJob::exposed`, `AssistantPageFile::outside_text`,
+  `CheckpointSpec::record`, `outside_tool`, `AssistantReach::scripts_reach_hosts`, the EXPOSED
+  column of `ai6ctl pages list`, and `POST /v1/station/assistant/exposure`; a Station asks `GET
+  /v1/station/assistant/cables` for the person's Cable permissions. A roster or database record
+  that sets one of those settings is refused until it goes. Files already under
+  `.moneypenny/outside-text/` in a person's repository are left there, unread.
 - CI's app jobs and the documentation build use the SDKs `tools/sdk/sdk.lock` names instead of
   floating ones: Flutter at a commit rather than `channel: main`, Python and the docs tooling
   hash-locked, PostgreSQL's image by digest. One Rust leg stays on floating stable.
@@ -48,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   her chat, her tools and a waiting proposal carry on. Outer Office renews `[refresh] renew_before`
   (ten minutes) ahead on its own timer, says once when the sign-in is about to end, and goes back
   to its last conversation after signing in again. `session_max = 0` turns renewal off
-  ([Access and sign-in](docs/access.md#staying-signed-in)).
+  ([Access and sign-in](https://jose-pr.github.io/ai6/access/#staying-signed-in)).
 - A long answer no longer loses Moneypenny's tools when her tool token's time passes: past it, the
   token of a running turn stays accepted while its Station is heard from within `answer_deadline`,
   and until the person stops it. Her Cable token follows the same rule.

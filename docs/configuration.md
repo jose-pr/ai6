@@ -950,7 +950,6 @@ Universal Exports when it starts.
 | `memory_files` | 1,024 | Memory files the desk reads at a turn's edge |
 | `memory_bytes` | 8 MiB | Bytes over all of them |
 | `memory_walk` | 10,000 | Files of `personal/` looked at to name what a turn changed |
-| `memory_import_depth` | 5 | How deep `@path` imports from her memory are followed to find outside text; Claude Code follows five |
 
 `[assistant.desk]`: how each Station's desk runs her harnesses. Read for each job, harness
 start and memory request; `known`, `parked` and `report_queue` at each use; `job_wait`,
@@ -1015,8 +1014,6 @@ report; `unlocked_stale` when the desk starts.
 | `route_bytes` | 4 MiB | Bytes of an AI6 route's answer to one of her tools |
 | `result_chars` | 200,000 | Characters of one tool's answer she is given; longer is cut |
 | `author_chars` | 200 | Characters of a person's name and email on her commits |
-| `exposed_sources` | 16 | Sources a conversation lists as having exposed it (a proposal carries them as `exposed_by`) |
-| `source_bytes` | 200 | Bytes of one such source |
 | `proposal_reads` | 16 | Read tool calls of one turn a proposal lists as what she had read |
 | `audit_target_bytes` | 512 | Bytes of the target of an audit record of her actions |
 
@@ -1046,7 +1043,7 @@ never a weakening, and nothing is evicted when one is lowered. Pages are open by
 | `scripts` | true | Whether a page's scripts run |
 | `network` | `"open"` | `open`, `own` (its own files and feeds) or `none` (its own files) |
 | `feeds` | true | Whether dashboards may read live feeds |
-| `frame` | true | Whether pages show in the gateway's frame with the bar (a page made after outside text always does) |
+| `frame` | true | Whether pages show in the gateway's frame with the bar |
 | `sharing` | true | Whether a person may share a page |
 
 A Station reads `[assistant.limits]` `page_file_bytes` (8 MiB), `page_files` (200) and
