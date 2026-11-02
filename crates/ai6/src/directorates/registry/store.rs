@@ -1034,7 +1034,7 @@ pub trait BriefStore {
     fn submit_brief(&self, brief: &Brief) -> io::Result<()>;
 
     /// The Mission ID for `entry`: the one it was already given, or a new one by the rule in
-    /// [`mission_ids`](super::mission_ids), recorded for good. Numbers are atomic per Operation
+    /// [`mission_ids`], recorded for good. Numbers are atomic per Operation
     /// across every process sharing the Registry and are never reused, including when no brief
     /// follows.
     ///
