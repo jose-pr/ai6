@@ -863,8 +863,9 @@ impl IssueDesk {
         Ok(proposal_answer(&decided))
     }
 
-    /// What the vetting finds: a title equal to an open linked issue, or to one AI6 created in
-    /// the Operation lately. A finding keeps a class authorisation from approving, never a person.
+    /// What the vetting finds: a title equal to an open linked issue, other than the one a mirror
+    /// copies, or to one AI6 created in the Operation lately. A finding keeps a class authorisation
+    /// from approving, never a person.
     fn findings(
         &self,
         caller: &Caller,
@@ -872,30 +873,32 @@ impl IssueDesk {
         all: &[IssueProposal],
         now: f64,
     ) -> Vec<String> {
-        let open_titles: Vec<String> = self
+        let open_issues: Vec<(String, String)> = self
             .state
             .intake
             .active_issue_links()
             .unwrap_or_default()
             .into_iter()
             .filter(|link| link.operation == caller.operation)
-            .filter_map(|link| link.snapshot)
-            .filter(|snapshot| snapshot.state.as_deref() != Some("closed"))
-            .map(|snapshot| snapshot.title)
+            .filter_map(|link| {
+                let name = link.name();
+                link.snapshot
+                    .filter(|snapshot| snapshot.state.as_deref() != Some("closed"))
+                    .map(|snapshot| (name, snapshot.title))
+            })
             .collect();
         let duplicate = specs.iter().any(|spec| {
-            open_titles
-                .iter()
-                .any(|title| title.eq_ignore_ascii_case(&spec.title))
-                || all.iter().any(|proposal| {
-                    proposal.operation == caller.operation
-                        && proposal.state != ProposalState::Rejected
-                        && now - proposal.at < DUPLICATE_WINDOW_SECS
-                        && proposal
-                            .specs
-                            .iter()
-                            .any(|held| held.title.eq_ignore_ascii_case(&spec.title))
-                })
+            open_issues.iter().any(|(name, title)| {
+                title.eq_ignore_ascii_case(&spec.title) && spec.mirror_of.as_ref() != Some(name)
+            }) || all.iter().any(|proposal| {
+                proposal.operation == caller.operation
+                    && proposal.state != ProposalState::Rejected
+                    && now - proposal.at < DUPLICATE_WINDOW_SECS
+                    && proposal
+                        .specs
+                        .iter()
+                        .any(|held| held.title.eq_ignore_ascii_case(&spec.title))
+            })
         });
         if duplicate {
             vec!["duplicate".to_owned()]
@@ -2917,6 +2920,83 @@ mod tests {
             "{}",
             spec.body
         );
+
+        // A mirror's title is its original's, and that is no finding; a second copy still is.
+        assert_eq!(answer["findings"], serde_json::json!([]), "{answer}");
+        let again = desk.mirror(&me, "gh:o/r#1", "jira", "m3").unwrap();
+        assert_eq!(again["findings"][0], "duplicate", "{again}");
+    }
+
+    /// With no findings, a class authorisation can approve a mirror as it can any new issue.
+    #[test]
+    fn a_class_authorisation_approves_a_mirror() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "sources = { gh = { provider = \"github\", repo = \"o/r\", token_env = \"AI6_TEST_ISSUE_TOKEN\" }, \
+             jira = { site = \"https://x.example\", project = \"AI6\", token_env = \"AI6_TEST_ISSUE_TOKEN\" } }\n",
+            AGENTS,
+        );
+        let mission = format!("issues-mirror-class-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission).unwrap(),
+                Some("G".to_owned()),
+                "fix it".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        state
+            .intake
+            .link_issue(&IssueLink {
+                operation: "G".to_owned(),
+                mission_id: mission.clone(),
+                tracker: "gh".to_owned(),
+                item: "o/r#1".to_owned(),
+                url: None,
+                relation: LinkRelation::Source,
+                state: LinkState::Active,
+                linked_by: "m".to_owned(),
+                linked_at: 1.0,
+                status_comment: None,
+                phase: None,
+                snapshot: Some(IssueSnapshot {
+                    title: "Original".to_owned(),
+                    body: "One.".to_owned(),
+                    state: Some("open".to_owned()),
+                    labels: Vec::new(),
+                    priority: None,
+                }),
+            })
+            .unwrap();
+        state
+            .intake
+            .put_class_authorization(&crate::ClassAuthorization {
+                id: "class-create".to_owned(),
+                operation: "G".to_owned(),
+                kinds: vec![ISSUE_CREATE.to_owned()],
+                target_pattern: "*".to_owned(),
+                agents: vec!["007".to_owned()],
+                roles: Vec::new(),
+                proposed_roles: Vec::new(),
+                clearance_min: "desk".to_owned(),
+                max_uses: None,
+                uses: 0,
+                expires_at: 9_000_000_000.0,
+                signer: "sam".to_owned(),
+                created_at: 1.0,
+                revoked: None,
+            })
+            .unwrap();
+        let desk = IssueDesk::new(state.clone());
+        let answer = desk
+            .mirror(&caller(&mission, "007"), "gh:o/r#1", "jira", "m1")
+            .unwrap();
+        assert_eq!(answer["status"], "queued", "{answer}");
     }
 
     #[tokio::test]

@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- A mirror is no duplicate of its own original, so a class authorisation `issue-create` can
+  approve one; a second copy of the same issue still is.
 - `own` means a comment AI6 wrote, decided by AI6's mark and never by its author, so one person's
   token works: that person's reply on a tracker is delivered like anyone's when `reply_authors` or
   the tracker's rules permit it. GitHub marks with its hidden comment; Jira with the comment
