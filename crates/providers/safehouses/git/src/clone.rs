@@ -818,7 +818,11 @@ mod tests {
         Worktree::open(spec, Runner::default())
     }
     use ai6::directorates::q::safehouse::SafeHouseClone;
+    use std::io::ErrorKind;
+    use std::net::{SocketAddr, TcpListener};
     use std::process::Command;
+    use std::thread::JoinHandle;
+    use std::time::Instant;
 
     fn run(cwd: &Path, args: &[&str]) -> String {
         let output = Command::new("git")
@@ -837,6 +841,39 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    /// How long a test's stalled remote waits for its one connection.
+    const REMOTE_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
+    /// How long it holds that connection without answering.
+    const REMOTE_HOLD: Duration = Duration::from_secs(5);
+
+    /// A remote that takes one connection and never answers. Its thread returns whether anything
+    /// connected before `accept_for` passed: a clone stopped early never connects, and a blocking
+    /// `accept` would then outlive it, and the test joining the thread, for good.
+    fn stalled_remote(accept_for: Duration) -> (SocketAddr, JoinHandle<bool>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let remote = std::thread::spawn(move || {
+            let deadline = Instant::now() + accept_for;
+            loop {
+                match listener.accept() {
+                    Ok(held) => {
+                        std::thread::sleep(REMOTE_HOLD);
+                        drop(held);
+                        return true;
+                    }
+                    Err(error)
+                        if error.kind() == ErrorKind::WouldBlock && Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return false,
+                }
+            }
+        });
+        (address, remote)
     }
 
     fn spec(source: &str, target: &Path, create: bool) -> SafeHouseSpec {
@@ -1554,14 +1591,7 @@ mod tests {
         assert!(refused.contains("more than 65536 bytes"), "{refused}");
         assert!(!root.path().join("three").exists(), "nothing is left");
 
-        // A remote that takes the connection and never answers.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let stalled = std::thread::spawn(move || {
-            let held = listener.accept();
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            drop(held);
-        });
+        let (address, stalled) = stalled_remote(REMOTE_ACCEPT_DEADLINE);
         let mut silent = spec(
             &format!("http://{address}/eve.git"),
             &root.path().join("four"),
@@ -1576,9 +1606,26 @@ mod tests {
             timed_out.contains("timed out after 1 seconds"),
             "{timed_out}"
         );
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(started.elapsed() < REMOTE_HOLD);
         assert!(!root.path().join("four").exists(), "nothing is left");
-        stalled.join().unwrap();
+        assert!(
+            stalled.join().unwrap(),
+            "git was stopped before it connected, so the stalled remote was never reached"
+        );
+    }
+
+    #[test]
+    fn a_stalled_remote_nobody_connects_to_gives_up_at_its_deadline() {
+        let (_address, remote) = stalled_remote(Duration::from_millis(100));
+        let started = Instant::now();
+        while !remote.is_finished() {
+            assert!(
+                started.elapsed() < REMOTE_ACCEPT_DEADLINE,
+                "the remote still waits for a connection"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!remote.join().unwrap(), "nothing connected");
     }
 
     #[test]
