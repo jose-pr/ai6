@@ -107,10 +107,9 @@ ai6ctl session SESSION_ID
 ai6ctl session interrupt SESSION_ID
 ```
 
-A Station and the `ai6` command read what they need before they reach their configuration
-provider from the bootstrap file `ai6.cfg` (`--config`, else `AI6_CONFIG`, else the user's
-then the system's configuration directory); Universal Exports reads `unex.cfg` the same way
-(`UNEX_CONFIG`). Everything else is a record of the configuration provider every Station
+Every program reads what it needs before it reaches its configuration provider from one
+bootstrap file, `ai6.cfg` (`--config`, else `AI6_CONFIG`, else the user's then the system's
+configuration directory), each taking its own sections. Everything else is a record of the configuration provider every Station
 reads ([Configuration](https://jose-pr.github.io/ai6/configuration/)). `ai6ctl` reads
 `--server`, else `UNEX_URL`, else `ai6.cfg`'s `[unex] url` for the Universal Exports origin,
 and a user bearer from `UNEX_ACCESS_TOKEN`. A Station publishes to Universal Exports when

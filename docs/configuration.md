@@ -2,38 +2,37 @@
 
 AI6 keeps two kinds of configuration apart:
 
-- **A bootstrap file** on each host holds only what a process needs before it can reach
-  anything else: where the configuration provider and the Registry are, the passwords to
-  reach them, the host's own directories, its listener, and how it checks the provider
-  libraries it loads. A Station and the `ai6` command read `ai6.cfg`, Universal Exports
-  reads `unex.cfg`, and Outer Office reads `OO.cfg`.
+- **One bootstrap file, `ai6.cfg`,** on each host or for each user holds only what a process
+  needs before it can reach anything else: where the configuration provider and the Registry are,
+  the passwords to reach them, the host's own directories, its listeners, and how it checks the
+  provider libraries it loads. A Station, the `ai6` command, Universal Exports, `ai6ctl` and Outer
+  Office on the desktop all read it, each taking its own sections.
 - **A configuration provider** holds everything else as records: Operations, Agents and
   roles, covers, Theaters, loadouts and account pools, Cable settings, provider library
   pins, each Station's runtime settings and TLS policy, and Universal Exports' sign-in and
   role policy. Every Station of a deployment, and Universal Exports, read the same provider.
 
-## Bootstrap files
+## The bootstrap file
 
-### Where they are found
+### Where it is found
 
 The first place that has a file wins; files are never merged, and with none every key is at
 its default. The working directory is never searched: a daemon's working directory is
 arbitrary, and a checkout could plant a file there.
 
-| | `ai6.cfg` (Station, `ai6`, `ai6ctl`) | `unex.cfg` (`universal-exports`) |
-| --- | --- | --- |
-| 1 | `--config PATH`, which must exist | `--config PATH`, which must exist |
-| 2 | `AI6_CONFIG`, which must exist | `UNEX_CONFIG`, which must exist |
-| 3 | `ai6.cfg` in the user's configuration directory | `unex.cfg` there |
-| 4 | `/etc/ai6/ai6.cfg`, `%ProgramData%\ai6\ai6.cfg` on Windows | `unex.cfg` there |
+1. `--config PATH`, which must exist.
+2. `AI6_CONFIG`, which must exist.
+3. `ai6.cfg` in the user's configuration directory: `$XDG_CONFIG_HOME/ai6`, `%APPDATA%\ai6` on
+   Windows, else `~/.config/ai6`.
+4. `/etc/ai6/ai6.cfg`, `%ProgramData%\ai6\ai6.cfg` on Windows.
 
-The user's configuration directory is `$XDG_CONFIG_HOME/ai6`, `%APPDATA%\ai6` on Windows,
-else `~/.config/ai6`. `ai6 config path` prints the `ai6.cfg` in use, or `none (defaults)`.
+`ai6 config path` prints the file in use, or `none (defaults)`.
 
-A relative path in a bootstrap file is relative to the file's directory. A key a file does
-not know is refused, naming it. A command-line flag beats the file, which beats the default;
-the only environment variables are `AI6_CONFIG` and `UNEX_CONFIG`, and the ones a secret
-reference names.
+A relative path in the file is relative to the file's directory. A key nobody knows is refused by
+every program, naming it, in any section but `[oo]`, which only Outer Office reads and judges. Each
+program says when a key it needs is missing: `universal-exports` needs `[unex] public_origin` and
+`station_token`, and nothing else does. A command-line flag beats the file, which beats the
+default; the only environment variables are `AI6_CONFIG` and the ones a secret reference names.
 
 ### Formats
 
@@ -69,22 +68,18 @@ reader starts, and an inline value is copied and committed with the file, so bot
 limit looser than its default ([Limits](#limits)). They are allowed. A secret's value never
 appears in a message, a log or `Debug` output.
 
-### `ai6.cfg`
+### What it holds
 
 ```toml
-station = "hq-1"                      # default: made up once and kept in the state directory
-state_dir = "/var/lib/ai6"            # default: the platform's state directory
-listen = "127.0.0.1:7081"
-
-[provider]
+[provider]                            # shared: where the configuration provider is
 location = "."                        # a directory, sqlite:PATH or postgres://...
 password = { file = "db-password" }   # when a SQL location gives none
 poll = 5                              # seconds between checks for changes; 0 turns reloading off
 loadout_bytes = 1048576               # and the other limits under Limits below
 
-[registry]
+[registry]                            # shared: where the Registry is, and how much it keeps
 location = "postgres://db/ai6"        # default: the provider's database when it is SQL,
-                                      # else registry/ in the state directory
+                                      # else registry/ in the reading program's state directory
 password = { file = "db-password" }   # default: the provider's, when the Registry is its database
 headquarters_lease = 60               # seconds; also sets the SQL connections' timeouts
 sqlite_busy_timeout = 30              # seconds a SQLite connection waits for a lock
@@ -92,28 +87,57 @@ sqlite_busy_timeout = 30              # seconds a SQLite connection waits for a 
 [registry.limits.sessions]            # what the Registry keeps and accepts: Limits below
 records = 100000
 
-[identity]
-dir = "/var/lib/ai6"                  # identity.pem and peers/; default: the state directory
+[unex]                                # where Universal Exports is, and how it runs
+# Its clients: a Station, ai6ctl and Outer Office.
+url = "https://ai6.example"           # its origin; ai6ctl reads this and ca_file, nothing else here
+ca_file = "enterprise-ca.pem"         # certificate authorities to trust for it; default: the public roots alone
+# Both sides of the Station channel.
+station_token = { file = "station-token" }   # a Station publishes with it, and the gateway requires it
+# The gateway.
+listen = "127.0.0.1:7082"             # loopback, behind the HTTPS reverse proxy
+public_origin = "https://ai6.example" # required
+proxy_secret = { file = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
+state_dir = "/var/lib/unex"           # verified provider libraries, and a default Registry
 
-[plugins]
+[unex.plugins]                        # the gateway's provider libraries, as [station.plugins]
+
+[unex.access]                         # who is always chief, whatever the access policy says
+chief = ["account:root"]              # account:NAME, person:ID or group:NAME
+
+[unex.pages]                          # the pages Moneypenny publishes
+dir = "pages"                         # where they are kept (default: pages beside this file)
+origin = "https://pages.example.net"  # their own origin; omit to serve them under /pages/ here
+listen = "127.0.0.1:7083"             # the loopback listener of that origin
+
+[station]                             # a Station and the ai6 command
+id = "hq-1"                           # default: made up once and kept in the state directory
+state_dir = "/var/lib/ai6"            # default: the platform's state directory
+listen = "127.0.0.1:7081"
+
+[station.plugins]
 paths = ["/usr/lib/ai6"]              # directories or library files to scan for providers
 profile = "strict"                    # strict, report or off; default strict with pins, report without
 keep_verified = 8                     # verified copies kept besides those loaded; 0 keeps none of them, "none" means no limit
 
-[secrets]
+[station.identity]
+dir = "/var/lib/ai6"                  # identity.pem and peers/; default: the state directory
+
+[station.secrets]
 dir = "secrets"                       # where loadout secret files are read; default secrets/ beside this file
 
-[unex]
-url = "https://ai6.example"           # Universal Exports; ai6ctl reads this and ca_file, nothing else here
-token = { file = "unex-token" }       # the Station's credential; without it the Station publishes nothing
-ca_file = "enterprise-ca.pem"         # certificate authorities to trust for Universal Exports; default: the public roots alone
+[oo.appearance]                       # Outer Office: below
+theme = "night-ops"
 ```
+
+A Station publishes when the file has both `[unex] url` and `station_token`; a `url` alone is for
+`ai6ctl` and Outer Office. The Station's `[unex] station_token` and the gateway's are one value, so a
+host running both names it once.
 
 Universal Exports' certificate must chain to a public root unless `[unex] ca_file` names a PEM
 file of more authorities to trust. They are added to the public roots, for every request of the
 Station and of `ai6ctl` to Universal Exports. A relative path is beside this file. A file that
 cannot be read, holds no certificate or holds a broken one stops `ai6 serve` at start, naming the
-path, with or without a `token`. A set `ca_file` is reported as a weakening: more authorities can
+path, with or without a `station_token`. A set `ca_file` is reported as a weakening: more authorities can
 vouch for the gateway. A harness Moneypenny runs reaches the gateway's MCP endpoint on its own TLS
 stack, which does not read this file.
 
@@ -122,33 +146,11 @@ configuration directory. The platform's state directory is `%LOCALAPPDATA%\AI6` 
 else `$XDG_STATE_HOME/AI6` or `~/.local/state/AI6`.
 
 `ai6 serve` takes these flags over the file: `--config`, `--provider`, `--registry`,
-`--state-dir`, `--station`, `--listen`, `--plugin-path` (adds to `[plugins] paths`) and
+`--state-dir`, `--station`, `--listen`, `--plugin-path` (adds to `[station.plugins] paths`) and
 `--plugin-profile`. `ai6 identity`, `peer`, `sleeper`, `quarantine`, `theater provision` and
 `config` take `--config`. The bootstrap file is read at start only.
 
-### `unex.cfg`
-
-```toml
-listen = "127.0.0.1:7082"             # loopback, behind the HTTPS reverse proxy
-public_origin = "https://ai6.example" # required
-station_token = { file = "station-token" }   # required: the Stations' credential
-proxy_secret = { file = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
-state_dir = "/var/lib/unex"           # verified provider libraries, and a default Registry
-
-[provider]                            # as in ai6.cfg: the same provider the Stations read
-[registry]                            # as in ai6.cfg
-[plugins]                             # as in ai6.cfg
-
-[access]                              # who is always chief, whatever the access policy says
-chief = ["account:root"]              # account:NAME, person:ID or group:NAME
-
-[pages]                               # the pages Moneypenny publishes
-dir = "pages"                         # where they are kept (default: pages beside unex.cfg)
-origin = "https://pages.example.net"  # their own origin; omit to serve them under /pages/ here
-listen = "127.0.0.1:7083"             # the loopback listener of that origin
-```
-
-`[pages] origin` names a second listener that holds only page routes (no `/v1`); the API
+`[unex.pages] origin` names a second listener that holds only page routes (no `/v1`); the API
 listener then serves none. Pages on the API's own origin are by design and log nothing. A
 page is sandboxed either way (a CSP `sandbox` without `allow-same-origin`, so it is an opaque
 origin that cannot read the app's token or storage), but on the API's origin the address bar
@@ -163,8 +165,8 @@ shows another host. Quotas and options are the roster's `[assistant.pages]`
 
 How much the Registry keeps and accepts, and how much of a document the configuration
 provider reads, are bootstrap settings: both are needed before any provider record is read,
-by Stations and Universal Exports alike. `unex.cfg` takes the same `[provider]` and
-`[registry]` keys as `ai6.cfg`. Every key has a default, and a table may name only the keys it
+by Stations and Universal Exports alike, from the one `[provider]` and `[registry]`. Every key
+has a default, and a table may name only the keys it
 changes.
 
 A count or size is a whole number; `null`, or the string `"none"` in TOML, which has no
@@ -414,23 +416,40 @@ else `[unex] url` of the `ai6.cfg` found as above (`--config` included), else
 `http://127.0.0.1:7082`. Besides the public roots it trusts the authorities of `--ca-file`, else
 `UNEX_CA_FILE`, else `[unex] ca_file` of that `ai6.cfg`; one that cannot be read or holds no
 certificate is refused before any request, naming the path. Its user token comes only from
-`UNEX_ACCESS_TOKEN`; it never reads the Station's `[unex] token`.
+`UNEX_ACCESS_TOKEN`; it never reads `[unex] station_token`.
 
-### `OO.cfg`
+### Outer Office: `[unex]` and `[oo]`
 
-Outer Office on desktop reads `OO_CONFIG`, else `OO/OO.cfg` in the platform's configuration
-directory: `%APPDATA%\OO`, `~/Library/Application Support/OO` on macOS, `$XDG_CONFIG_HOME/OO`
-or `~/.config/OO`. On the web it reads `OO.cfg` beside `index.html`, as read-only deployment
-defaults; a missing or unreadable one is logged and the defaults apply.
+Outer Office on the desktop reads the same `ai6.cfg`, found the same way, and takes `[unex] url`,
+`[unex] ca_file` and `[oo]`; another section is another program's, so it is left alone. A missing
+or unreadable file is logged, by path and never quoting it, and the defaults apply. Saving an
+address in the app edits only the `url` line of `[unex]` and keeps everything else, comments
+included; a file spelled so that this cannot be done safely is refused and edited by hand.
+
+On the web a page can fetch only what is served, so what sits beside `index.html` is a public
+`ai6.cfg`, never a host's own, which names files and addresses that are not the public's business.
+`ai6 config public` writes it from a host's file:
+
+```console
+ai6 config public --config /etc/ai6/ai6.cfg --output /opt/ai6/web/ai6.cfg
+```
+
+It keeps an allow list, so a new key is private until someone says otherwise: `[unex] url`, and of
+`[oo]` its tables' numbers and booleans and the two words `[oo.appearance] theme` and `[oo.assets]
+cdn`. Any other text under `[oo]` is left out and named on standard error. A `url` holding a
+credential, a query or a fragment is refused. Without `--output` it prints to standard output; the
+host's file itself is refused as an output. A web build never bundles a host's file: copy the
+public one beside `index.html` after the build, and a missing one means the defaults.
 
 ```toml
 [unex]
 url = "https://ai6.example"           # desktop; on the web the page's own origin is the API
+ca_file = "enterprise-ca.pem"         # desktop: trusted as well as the system's roots, beside this file when relative
 
-[appearance]
+[oo.appearance]
 theme = "night-ops"                   # night-ops, black-ops, dusk, classic, light, red-file or system
 
-[chat]                                # Moneypenny's chat; logical pixels, every key optional
+[oo.chat]                             # Moneypenny's chat; logical pixels, every key optional
 min_width = 320                       # the docked chat's narrowest drag
 max_width = 720                       # and widest
 width = 400                           # its width until the person drags it
@@ -442,13 +461,13 @@ window_height = 760
 transition_ms = 200                   # how long the chat takes to move; 0 for none
 connect_timeout = 10                  # seconds her socket may take to say it is ready before the chat offers to try again
 
-[routes]
+[oo.routes]
 text_bytes = 128                      # the longest text filter a page link may carry, in bytes
 
-[art]
+[oo.art]
 max_width = 3840                      # the widest hero picture fetched, in pixels; a site on slow links sets 1920
 
-[refresh]                             # seconds between a page's asks; 0 turns that refresh off
+[oo.refresh]                          # seconds between a page's asks; 0 turns that refresh off
 sessions = 3                          # what the page shown displays from the board of Sessions, Stations and Missions
 overview = 10                         # the overview's recent activity
 timeline = 10                         # an Operation's timeline
@@ -460,29 +479,29 @@ silent_intervals = 3                  # a Station silent for this many `sessions
 renew_before = 600                    # how long before the access token ends the app renews it, and before the sign-in ends says so; 0 does neither
 renew_retry = 30                      # how soon a failed renewal is tried again when `sessions` is 0; else at `sessions`
 
-[controls]                            # following a Mission control until the Station reports
+[oo.controls]                         # following a Mission control until the Station reports
 wait = 10                             # seconds; 0 returns once the control is queued
 poll = 0.5                            # seconds between asks for its status
 confirming = 30                       # seconds a proposal of Moneypenny's may stay applying before its outcome reads unknown
 
-[pages]
+[oo.pages]
 timeline = 50                         # items in one page of the timeline
 audit = 100                           # records in the audit log
 summary = 5                           # recent activity, and Operations and Stations, a summary lists
 search = 24                           # results the top bar's search lists at once
 
-[terminal]                            # the live Session terminal
+[oo.terminal]                            # the live Session terminal
 scrollback_lines = 10000
 connect_timeout = 10                  # seconds the socket may take to open
 retry_delay = 1                       # seconds before the first reconnect; each next one doubles
 retry_max_delay = 16                  # seconds, the longest wait between reconnects
 
-[limits]                              # characters a text field takes; 0 takes the bound away
+[oo.limits]                              # characters a text field takes; 0 takes the bound away
 mission_title_chars = 512
 mission_prompt_chars = 65536
 reason_chars = 512                    # the reason for lowering an Agent's clearance
 
-[assets]
+[oo.assets]
 cdn = "none"                          # web only: none, fonts or all (read by the page's bootstrap)
 ```
 
@@ -578,7 +597,7 @@ weakening: name a file there instead.
 
 ### Universal Exports limits
 
-`unex.cfg` takes one more key, `proxy_secret_min_bytes` (default 32): the fewest bytes the
+`[unex]` takes one more key, `proxy_secret_min_bytes` (default 32): the fewest bytes the
 reverse-proxy secret may hold. A smaller value is a weakening.
 
 The `unex` record's tables bound and pace the gateway, and apply at restart. They follow the
@@ -1067,9 +1086,9 @@ decide what is kept.
 
 A directory holds one file per family, named for it: `operations.toml`, `agents.yaml`,
 `station.cfg`, and so on, with any of the five extensions. Two files for one family
-(`agents.toml` beside `agents.json`) are refused, naming both. `ai6.cfg` and `unex.cfg` in the
-same directory are bootstrap files, not family files, so the `unex` family is `unex.toml`,
-`.json`, `.yaml` or `.yml`. A Station's own records go in `stations/<id>/`:
+(`agents.toml` beside `agents.json`) are refused, naming both. `ai6.cfg` in the same directory
+is the bootstrap file, which no family is named for. A Station's own records go in
+`stations/<id>/`:
 
 ```text
 config/
@@ -1122,7 +1141,7 @@ hold a credential.
 ## Who can write the provider
 
 Whoever writes the provider decides which provider libraries every Station loads (`plugin`;
-each host still applies its own `[plugins] profile`), its TLS policy (`tls`), the programs a
+each host still applies its own `[station.plugins] profile`), its TLS policy (`tls`), the programs a
 Station starts on its own host (a `theater` runner), the files a Station reads secrets from
 (`secret`), and who signs in to Universal Exports and what they may do (`unex`, `access`).
 Treat the provider's write credentials as sensitive as the strongest role they grant. Every

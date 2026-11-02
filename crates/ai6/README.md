@@ -90,11 +90,7 @@ configuration directory (`XDG_CONFIG_HOME/ai6`, `%APPDATA%\ai6`, `~/.config/ai6`
 `ai6 config path` prints the file in use. A flag beats the file, which beats the default.
 
 ```toml
-# ai6.cfg: every key optional; relative paths are relative to this file.
-station = "hq-1"                 # default: kept in the state directory
-state_dir = "/var/lib/ai6"       # default: the platform's state directory
-listen = "127.0.0.1:7081"
-
+# ai6.cfg: every key optional here; relative paths are relative to this file.
 [provider]                       # where the configuration provider is
 location = "."                   # a directory, sqlite:PATH or postgres://...; default: this file's directory
 password = { file = "db-password" }   # or { env = "NAME" } or the value (a weakening)
@@ -104,22 +100,30 @@ poll = 5                         # seconds; 0 turns reloading off
 location = "postgres://db/ai6"   # default: the provider's database when SQL, else <state_dir>/registry
 headquarters_lease = 60          # seconds; also sets the SQL timeouts
 
-[identity]
+[unex]
+url = "https://ai6.example"      # Universal Exports; ai6ctl reads only this and ca_file
+station_token = { file = "station-token" }  # the Station publishes only with it
+ca_file = "enterprise-ca.pem"    # authorities to trust for it; default: the public roots alone
+
+[station]
+id = "hq-1"                      # default: kept in the state directory
+state_dir = "/var/lib/ai6"       # default: the platform's state directory
+listen = "127.0.0.1:7081"
+
+[station.identity]
 dir = "/var/lib/ai6"             # identity.pem and peers/; default: state_dir
 
-[plugins]
+[station.plugins]
 paths = ["/usr/lib/ai6"]
 profile = "strict"               # strict, report or off
 keep_verified = 8                # verified copies kept besides those loaded; 0: none, "none": no limit
 
-[secrets]
+[station.secrets]
 dir = "secrets"                  # where loadout secret files are read; default: secrets/ beside this file
-
-[unex]
-url = "https://ai6.example"      # Universal Exports; ai6ctl reads only this and ca_file
-token = { file = "unex-token" }  # the Station publishes only with a token
-ca_file = "enterprise-ca.pem"    # authorities to trust for it; default: the public roots alone
 ```
+
+The same file holds the gateway's part of `[unex]` and Outer Office's `[oo]`
+([Configuration](https://jose-pr.github.io/ai6/configuration/)).
 
 - `ai6 serve` runs the Station. Its runtime settings are the provider's `station` record
   ([Configuration](https://jose-pr.github.io/ai6/configuration/)). Harnesses run in an

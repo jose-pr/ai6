@@ -126,7 +126,7 @@ it is gone. A proposal from the earlier sign-in stays unconfirmable, as only the
 in may confirm it; the chat shows it as it stands.
 
 The gateway serves no web files. A reverse proxy serves the build and passes the API on one
-HTTPS origin, which `public_origin` in `unex.cfg` must name exactly, with its port unless that
+HTTPS origin, which `[unex] public_origin` in `ai6.cfg` must name exactly, with its port unless that
 is 443:
 
 | Path | Where it goes |
@@ -160,7 +160,7 @@ The policy has four built-in role names and two places to write more.
 
 | Role | What it holds | Written |
 | --- | --- | --- |
-| `chief` | every action, including any added later; not stored and not editable | only through the chief list (`chief = [...]` in the `access` record, `[access] chief` in `unex.cfg`) |
+| `chief` | every action, including any added later; not stored and not editable | only through the chief list (`chief = [...]` in the `access` record, `[unex.access] chief` in `ai6.cfg`) |
 | `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `access.manage`, `account.manage`, `audit.read` and `access.read` | seeded; ordinary data you may edit or delete |
 | `operator` | the read actions (`mission.read`, `session.read`, `agent.read`, `roster.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `session.input`, `cable.send`, `approval.decide`, `issue.link`, `issue.comment`, `issue.update`, `issue.create` | seeded |
 | `auditor` | the read actions, `audit.read` and `access.read` | seeded |
@@ -171,8 +171,8 @@ again, and a read-only configuration directory keeps them in memory. `assistant.
 is in none of them: only the chief holds it until a chief adds it to a role.
 
 The chief is the head of SIS (C): the owner. `chief` is never a stored role and no stored rule
-can bind or shadow it; its rules are evaluated before every other. `unex.cfg [access] chief`
-names subjects that are always chief, so a lost policy cannot lock everyone out; they cannot be
+can bind or shadow it; its rules are evaluated before every other. `[unex.access] chief` in
+`ai6.cfg` names subjects that are always chief, so a lost policy cannot lock everyone out; they cannot be
 removed through the API. A change that would leave no chief is refused, and only a chief changes
 the chief list or an account that is a chief.
 
@@ -182,7 +182,7 @@ A request is allowed when any tier allows it; within a tier the first matching r
 
 | Tier | Who writes it | What it can grant | What it can never do |
 | --- | --- | --- | --- |
-| Chief | `unex.cfg`, the chief list | every action, anywhere | be removed through the API, or shadowed |
+| Chief | `ai6.cfg`, the chief list | every action, anywhere | be removed through the API, or shadowed |
 | Global (`access`) | whoever holds `access.manage` at `config:access` | any action at any scope; a role bound at `operation:<id>` grants only its Operation actions there | grant what the writer does not hold |
 | Operation (`operation_access`) | whoever holds `access.manage` at that Operation | Operation roles within the global `delegable` cap, bound at the Operation or one under it | narrow or shadow a global grant, bind at `*`, `station:` or `config:`, or reuse a built-in role name |
 

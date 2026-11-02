@@ -1,5 +1,5 @@
 # The global access policy (the `access` record). A first start seeds these three roles; the
-# built-in `chief` holds every action and is named only in `chief` (and in unex.cfg).
+# built-in `chief` holds every action and is named only in `chief` (and in ai6.cfg).
 chief = ["account:root"]
 
 [role.controller]

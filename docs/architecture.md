@@ -68,7 +68,7 @@ It bundles its fonts, icons and web engine, and its web build serves the Noto fa
 fonts for other scripts and emoji (34.4 MiB, fetched only as text needs them), so by
 default it makes no request to any origin but its own; a web deployment opts in to
 Google Fonts or Flutter's CDN with
-`[assets] cdn = "fonts"` or `"all"` in the `OO.cfg` beside its `index.html` (the app's
+`[oo.assets] cdn = "fonts"` or `"all"` in the public `ai6.cfg` beside its `index.html` (the app's
 README has the details).
 
 ## How the directorates decouple

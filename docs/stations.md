@@ -129,7 +129,7 @@ PostgreSQL database for Stations that share no filesystem. The bootstrap file `a
 names it in `[registry] location` (or `ai6 serve --registry LOCATION`): a directory,
 `sqlite:PATH` or a `postgres://` URL. Without one the Station uses its configuration
 provider's database when that is SQL, else `registry` in its state directory; the `ai6`
-command reads the same file, and Universal Exports reads `unex.cfg` the same way. One SQL
+command reads the same file, and so does Universal Exports. One SQL
 location therefore configures a whole HA deployment:
 
 ```toml
@@ -431,7 +431,7 @@ and `pin --publisher` read such a key too.
 
 ### Profiles
 
-The **profile** (`--plugin-profile`, else `ai6.cfg`'s `[plugins] profile`; each host's own,
+The **profile** (`--plugin-profile`, else `ai6.cfg`'s `[station.plugins] profile`; each host's own,
 never the shared provider's) decides what loads:
 
 | Profile | Default when | What loads |
@@ -445,7 +445,7 @@ each library's digest and verdict, and published in the Station's check-in
 (`plugins_weakened`). Only the libraries that declare an AI6 provider kind are checked.
 
 After a `strict` scan the copies in `plugins/verified/` it did not load are removed, keeping the
-newest `[plugins] keep_verified` files by when each was written (default 8; `0` keeps none of
+newest `[station.plugins] keep_verified` files by when each was written (default 8; `0` keeps none of
 them; `"none"` means no limit, so every copy stays). A process keeps a shared lock on each copy it
 loaded for as long as it runs, so another process's scan leaves that copy, and a scan holds
 the directory's `.lock` from before its first copy until its last load, so no clearing removes a
@@ -456,7 +456,7 @@ removed. `verified_removed` lists what went.
 
 Every command that loads providers checks them the same way, with the same defaults:
 `ai6 theater provision`, Universal Exports for its access providers (the provider's `plugin`
-records, `unex.cfg`'s `[plugins] profile` or `--plugin-profile`), and the field runner
+records, `[unex.plugins] profile` or `--plugin-profile`), and the field runner
 (`ai6 runner serve --pins PATH --plugin-profile P --keep-verified N`, whose verified copies go
 under its own state directory; a Station starting one on its own host writes the pins it
 resolved into the runner's state directory and passes them with its own `keep_verified`). Each

@@ -11,7 +11,7 @@ fn ai6() -> Command {
 /// returns its path. Its directory is the configuration provider and holds the Registry.
 fn bootstrap(dir: &std::path::Path, extra: &str) -> std::path::PathBuf {
     let path = dir.join("ai6.cfg");
-    std::fs::write(&path, format!("state_dir = \"state\"\n{extra}")).unwrap();
+    std::fs::write(&path, format!("[station]\nstate_dir = \"state\"\n{extra}")).unwrap();
     path
 }
 
@@ -108,7 +108,7 @@ struct Signed {
 impl Signed {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
-        let config = bootstrap(root.path(), "[plugins]\npaths = [\"plugins\"]\n");
+        let config = bootstrap(root.path(), "[station.plugins]\npaths = [\"plugins\"]\n");
         let plugins = root.path().join("plugins");
         std::fs::create_dir(&plugins).unwrap();
         let library = plugins.join(library_name());
@@ -738,7 +738,7 @@ fn plugins_a_station_under_strict_loads_a_rebuilt_library_with_no_record_change(
     // Told to keep nothing else, the next start clears the old build and only that.
     std::fs::write(
         &signed.config,
-        "state_dir = \"state\"\n[plugins]\npaths = [\"plugins\"]\nkeep_verified = 0\n",
+        "[station]\nstate_dir = \"state\"\n[station.plugins]\npaths = [\"plugins\"]\nkeep_verified = 0\n",
     )
     .unwrap();
     let (third, summary) = station_plugins(&signed, &log);

@@ -13,7 +13,7 @@ use clap::{Args, Parser, Subcommand};
     name = "ai6",
     version,
     about = "The AI6 Mission daemon",
-    after_help = "Settings needed before the configuration provider is reached come from ai6.cfg: --config, else AI6_CONFIG, else ai6.cfg in the user's then the system's configuration directory. Universal Exports publication is its [unex] url and token."
+    after_help = "Settings needed before the configuration provider is reached come from ai6.cfg: --config, else AI6_CONFIG, else ai6.cfg in the user's then the system's configuration directory. Universal Exports publication is its [unex] url and station_token."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -182,7 +182,7 @@ enum PluginsCommand {
     Check {
         #[command(flatten)]
         bootstrap: BootstrapArg,
-        /// Libraries or directories to check (default: the bootstrap file's `[plugins] paths`).
+        /// Libraries or directories to check (default: the bootstrap file's `[station.plugins] paths`).
         paths: Vec<PathBuf>,
     },
 }
@@ -243,10 +243,10 @@ enum TheaterCommand {
         #[command(flatten)]
         bootstrap: BootstrapArg,
         /// A directory or library path to scan for the Theater's transport provider, besides
-        /// the bootstrap file's `[plugins] paths`.
+        /// the bootstrap file's `[station.plugins] paths`.
         #[arg(long = "plugin-path")]
         plugin_paths: Vec<PathBuf>,
-        /// How provider libraries are checked: strict, report or off (default: `[plugins]
+        /// How provider libraries are checked: strict, report or off (default: `[station.plugins]
         /// profile`, else strict with `plugin` records and report without).
         #[arg(long, value_name = "PROFILE")]
         plugin_profile: Option<ai6::PluginProfile>,
@@ -267,7 +267,7 @@ struct PinArgs {
     #[arg(long, value_name = "PROFILE")]
     plugin_profile: Option<ai6::PluginProfile>,
     /// Which verified copies a strict scan keeps besides those it loaded: a count, 0 for none of
-    /// them, or `none` for no limit (default: 8). A Station passes its own `[plugins]
+    /// them, or `none` for no limit (default: 8). A Station passes its own `[station.plugins]
     /// keep_verified`.
     #[arg(long, value_name = "N|none")]
     keep_verified: Option<ai6::KeepVerified>,
@@ -395,12 +395,12 @@ struct ServeArgs {
     #[arg(long)]
     listen: Option<SocketAddr>,
     /// A directory or library path to scan for Guatiao AgentHandler providers, besides the
-    /// bootstrap file's `[plugins] paths`.
+    /// bootstrap file's `[station.plugins] paths`.
     #[arg(long = "plugin-path")]
     plugin_paths: Vec<PathBuf>,
     /// How provider libraries are checked: strict (only pinned or signed ones load, from a
     /// verified copy), report (all load; unpinned ones are reported) or off (default:
-    /// `[plugins] profile`, else strict with `plugin` records and report without).
+    /// `[station.plugins] profile`, else strict with `plugin` records and report without).
     #[arg(long, value_name = "PROFILE")]
     plugin_profile: Option<ai6::PluginProfile>,
 }
@@ -577,11 +577,12 @@ async fn serve(args: ServeArgs) -> ExitCode {
     let settings = &mut located.value;
     settings.provider.location = provider.or(settings.provider.location.take());
     settings.registry.location = registry.or(settings.registry.location.take());
-    settings.state_dir = state_dir.or(settings.state_dir.take());
-    settings.station = station.or(settings.station.take());
-    settings.listen = listen.or(settings.listen);
-    settings.plugins.paths.extend(plugin_paths);
-    settings.plugins.profile = plugin_profile.or(settings.plugins.profile);
+    let own = &mut settings.station;
+    own.state_dir = state_dir.or(own.state_dir.take());
+    own.id = station.or(own.id.take());
+    own.listen = listen.or(own.listen);
+    own.plugins.paths.extend(plugin_paths);
+    own.plugins.profile = plugin_profile.or(own.plugins.profile);
     let opened = match open_station(&located) {
         Ok(opened) => opened,
         Err(error) => {
@@ -608,17 +609,17 @@ async fn serve(args: ServeArgs) -> ExitCode {
         .with_config_poll(located.value.provider.poll())
         .with_headquarters_lease(opened.lease);
     let mut config = ai6::ServeConfig::new(located.listen())
-        .with_plugin_paths(located.value.plugins.paths.clone())
+        .with_plugin_paths(located.value.station.plugins.paths.clone())
         .with_station_config(station_config)
         .with_config_dir(&opened.config_dir)
         .with_secrets_dir(&opened.secrets_dir)
         .with_config_provider(opened.provider)
         .with_registry(opened.registry);
-    if let Some(profile) = located.value.plugins.profile {
+    if let Some(profile) = located.value.station.plugins.profile {
         config = config.with_plugin_profile(profile);
     }
-    config = config.with_keep_verified(located.value.plugins.keep_verified());
-    if let Some(station) = &located.value.station {
+    config = config.with_keep_verified(located.value.station.plugins.keep_verified());
+    if let Some(station) = &located.value.station.id {
         config = config.with_station_id(station);
     }
     if let Some(publisher) = publisher {
@@ -760,7 +761,7 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
     }
 }
 
-/// The Station this command acts for: the bootstrap file's `station`, else the ID a Station
+/// The Station this command acts for: the bootstrap file's `[station] id`, else the ID a Station
 /// keeps in its state directory, else none (`""`, the global records).
 fn station_of(located: &Located<Bootstrap>, opened: &Opened) -> String {
     station_in(located, &opened.state_dir)
@@ -768,7 +769,7 @@ fn station_of(located: &Located<Bootstrap>, opened: &Opened) -> String {
 
 /// [`station_of`], given the state directory.
 fn station_in(located: &Located<Bootstrap>, state_dir: &Path) -> String {
-    if let Some(station) = &located.value.station {
+    if let Some(station) = &located.value.station.id {
         return station.clone();
     }
     std::fs::read_to_string(state_dir.join("station-id"))
@@ -818,7 +819,7 @@ fn open_registry(located: &Located<Bootstrap>) -> Result<Arc<dyn ai6::RegistryBa
 }
 
 /// The provider library policy of this host for `snapshot`: its `plugin` records, under
-/// `[plugins] profile` when set; verified copies under the state directory's
+/// `[station.plugins] profile` when set; verified copies under the state directory's
 /// `plugins/verified`.
 fn plugin_policy(
     located: &Located<Bootstrap>,
@@ -829,8 +830,8 @@ fn plugin_policy(
         snapshot.settings.pins.clone(),
         opened.state_dir.join("plugins").join("verified"),
     )
-    .with_keep_verified(located.value.plugins.keep_verified());
-    match located.value.plugins.profile {
+    .with_keep_verified(located.value.station.plugins.keep_verified());
+    match located.value.station.plugins.profile {
         Some(profile) => policy.with_profile(profile),
         None => policy,
     }
@@ -939,7 +940,7 @@ fn publisher_of(text: &str) -> Result<ai6::PublisherKey, String> {
         .map_err(|error| format!("not ed25519:HEX, nor a key file ({})", error.kind()))
 }
 
-/// Prints the verdict on each library named, or on `[plugins] paths`, against the `plugin` records
+/// Prints the verdict on each library named, or on `[station.plugins] paths`, against the `plugin` records
 /// of this host's Station. Opens the configuration provider and nothing else.
 fn plugins_check(bootstrap: &BootstrapArg, paths: Vec<PathBuf>) -> Result<ExitCode, String> {
     let located = load_bootstrap(bootstrap)?;
@@ -952,7 +953,7 @@ fn plugins_check(bootstrap: &BootstrapArg, paths: Vec<PathBuf>) -> Result<ExitCo
         .load(&station_in(&located, &state_dir))
         .map_err(|error| error.to_string())?;
     let paths = if paths.is_empty() {
-        located.value.plugins.paths.clone()
+        located.value.station.plugins.paths.clone()
     } else {
         paths
     };
@@ -1214,8 +1215,9 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    located.value.plugins.paths.extend(plugin_paths);
-    located.value.plugins.profile = plugin_profile.or(located.value.plugins.profile);
+    let plugins = &mut located.value.station.plugins;
+    plugins.paths.extend(plugin_paths);
+    plugins.profile = plugin_profile.or(plugins.profile);
     let opened = match open_station(&located) {
         Ok(opened) => opened,
         Err(error) => {
@@ -1236,7 +1238,8 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
         return ExitCode::FAILURE;
     };
     let policy = plugin_policy(&located, &opened, &snapshot);
-    let plugins = ai6::station::plugins::Plugins::scan_with(&located.value.plugins.paths, &policy);
+    let plugins =
+        ai6::station::plugins::Plugins::scan_with(&located.value.station.plugins.paths, &policy);
     ai6::station::plugins::log_scan(plugins.scan_summary());
     let client = match plugins.theater_transport(&declared.access) {
         Ok(client) => client,
@@ -1490,28 +1493,29 @@ fn peer_command(bootstrap: &BootstrapArg, command: PeerCommand) -> Result<String
     }
 }
 
-/// Publication to Universal Exports: `[unex] url` with its `token`, trusting `ca_file` as well as
-/// the public roots. A `url` alone is `ai6ctl`'s and publishes nothing; a bad `ca_file` is refused
-/// either way.
+/// Publication to Universal Exports: `[unex] url` with `station_token`, trusting `ca_file` as well
+/// as the public roots. Either alone is another program's and publishes nothing; a bad `ca_file` is
+/// refused either way.
 fn publisher_config(
     located: &Located<Bootstrap>,
 ) -> Result<Option<ai6::station::publisher::Config>, String> {
-    let Some(unex) = &located.value.unex else {
-        return Ok(None);
-    };
+    let unex = &located.value.unex;
     let certificates = unex
         .ca_file
         .as_deref()
         .map(ai6::bootstrap::read_ca_file)
         .transpose()
         .map_err(|error| format!("[unex] ca_file: {error}"))?;
-    let Some(token) = &unex.token else {
+    let (Some(url), Some(token)) = (&unex.url, &unex.station_token) else {
+        if unex.station_token.is_some() {
+            eprintln!("ai6: [unex] station_token is set and url is not, so nothing is published");
+        }
         return Ok(None);
     };
     let token = token
         .read()
-        .map_err(|error| format!("[unex] token: {error}"))?;
-    let config = ai6::station::publisher::Config::try_new(&unex.url, token.as_str())
+        .map_err(|error| format!("[unex] station_token: {error}"))?;
+    let config = ai6::station::publisher::Config::try_new(url, token.as_str())
         .map_err(|error| error.to_string())?;
     Ok(Some(match certificates {
         Some(certificates) => config.with_ca_certificates(&certificates),

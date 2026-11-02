@@ -1,19 +1,21 @@
 //! The bootstrap file: what a process needs before it can reach its configuration provider.
 //!
-//! A Station and the `ai6` command read `ai6.cfg` ([`Bootstrap`]); Universal Exports reads
-//! `unex.cfg` with the same loader and sections. A file holds only what starting needs:
-//! where the configuration provider and the Registry are, the passwords to reach them,
-//! this host's state, identity and secrets directories, its listener, and how it checks the
-//! provider libraries it loads. Everything else is a record in the configuration provider.
+//! One file, `ai6.cfg` ([`Bootstrap`]), serves every program on a host or for a user: a Station
+//! and the `ai6` command read `[station]`, Universal Exports its part of `[unex]`, `ai6ctl` and a
+//! Station the rest of `[unex]`, and they share `[provider]` and `[registry]`. Outer Office reads
+//! `[unex]` and `[oo]`, which no Rust program reads. A file holds only what starting needs: where
+//! the configuration provider and the Registry are, the passwords to reach them, this host's
+//! state, identity and secrets directories, its listeners, and how it checks the provider
+//! libraries it loads. Everything else is a record in the configuration provider.
 //!
-//! The file is found by [`SearchPath`]: a path given on the command line, else the
-//! environment variable naming one, else the user's then the system's configuration
-//! directory. The first file found is the only one read; files are never merged, and with
-//! none every key takes its default. The working directory is never searched.
+//! The file is found by [`SearchPath`]: a path given on the command line, else the environment
+//! variable naming one, else the user's then the system's configuration directory. The first file
+//! found is the only one read; files are never merged, and with none every key takes its default.
+//! The working directory is never searched.
 //!
-//! The format follows the extension ([`format`](mod@format)). Unknown keys are refused. A
-//! relative path in the file is relative to the file's directory. Secrets are [`SecretRef`]s,
-//! never values the file must hold.
+//! The format follows the extension ([`format`](mod@format)). Unknown keys are refused, by every
+//! program, and each program says when a key it needs is missing. A relative path in the file is
+//! relative to the file's directory. Secrets are [`SecretRef`]s, never values the file must hold.
 
 pub mod format;
 
@@ -24,9 +26,10 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use guatiao::schema::KindBuilder;
+use guatiao::{Alloc, FromValue, MapError, Schema, ToValue, Value, ValueError};
 use rustls_pki_types::CertificateDer;
 use rustls_pki_types::pem::PemObject;
-use serde::{Deserialize, Deserializer};
 use zeroize::Zeroizing;
 
 use crate::bounds::Limit;
@@ -37,9 +40,9 @@ use crate::directorates::registry::limits::RegistryLimits;
 
 use self::format::Format;
 
-/// The bootstrap file of a Station and the `ai6` command.
+/// The bootstrap file.
 pub const FILE_NAME: &str = "ai6.cfg";
-/// The environment variable naming the bootstrap file of a Station and the `ai6` command.
+/// The environment variable naming the bootstrap file.
 pub const CONFIG_ENV: &str = "AI6_CONFIG";
 /// The listener a Station uses when its bootstrap file names none.
 pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
@@ -49,11 +52,7 @@ pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::ne
 /// How often a Station checks its configuration provider for changes when the file says
 /// nothing.
 pub const DEFAULT_POLL: Duration = Duration::from_secs(5);
-/// The bootstrap file of Universal Exports (`universal-exports`).
-pub const UNEX_FILE_NAME: &str = "unex.cfg";
-/// The environment variable naming Universal Exports' bootstrap file.
-pub const UNEX_CONFIG_ENV: &str = "UNEX_CONFIG";
-/// The fewest bytes a reverse-proxy secret holds unless `unex.cfg` says otherwise.
+/// The fewest bytes a reverse-proxy secret holds unless the file says otherwise.
 pub const DEFAULT_PROXY_SECRET_MIN_BYTES: u64 = 32;
 /// The loopback listener Universal Exports uses when its bootstrap file names none.
 pub const DEFAULT_UNEX_LISTEN: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
@@ -213,38 +212,71 @@ impl SecretRef {
     }
 }
 
-impl<'de> Deserialize<'de> for SecretRef {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Written {
-            file: Option<PathBuf>,
-            env: Option<String>,
+/// How a file names a secret kept in a file.
+#[derive(ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+struct SecretInFile {
+    /// Its path, relative to the bootstrap file.
+    #[schema(title = "File")]
+    file: PathBuf,
+}
+
+/// How a file names a secret kept in an environment variable.
+#[derive(ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+struct SecretInVariable {
+    /// The variable's name.
+    #[schema(title = "Environment variable")]
+    env: String,
+}
+
+impl ToValue for SecretRef {
+    /// A file or a variable as a file names it. An inline secret is refused: nothing written
+    /// from a [`Bootstrap`] holds a value.
+    fn to_value_in(&self, alloc: Alloc) -> Result<Value, ValueError> {
+        match self {
+            Self::File(file) => SecretInFile { file: file.clone() }.to_value_in(alloc),
+            Self::Env(env) => SecretInVariable { env: env.clone() }.to_value_in(alloc),
+            Self::Inline(_) => Err(ValueError::Unrepresentable),
         }
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Form {
-            Inline(String),
-            Table(Written),
+    }
+}
+
+impl FromValue for SecretRef {
+    fn from_value(value: &Value) -> Result<Self, MapError> {
+        const WRITTEN: &str = "a secret: one non-empty { file = \"PATH\" }, one \
+                               { env = \"NAME\" } or the value itself";
+        if let Ok(text) = <&str>::try_from(value) {
+            return if text.is_empty() {
+                Err(MapError::bad_value(WRITTEN))
+            } else {
+                Ok(Self::Inline(Zeroizing::new(text.to_owned())))
+            };
         }
-        let refused = |message: &str| serde::de::Error::custom(message);
-        match Form::deserialize(deserializer).map_err(|_| {
-            refused("a secret is { file = \"PATH\" }, { env = \"NAME\" } or the value itself")
-        })? {
-            Form::Inline(value) if value.is_empty() => Err(refused("an inline secret is empty")),
-            Form::Inline(value) => Ok(Self::Inline(Zeroizing::new(value))),
-            Form::Table(Written {
-                file: Some(file),
-                env: None,
-            }) if !file.as_os_str().is_empty() => Ok(Self::File(file)),
-            Form::Table(Written {
-                file: None,
-                env: Some(env),
-            }) if is_variable_name(&env) => Ok(Self::Env(env)),
-            Form::Table(_) => Err(refused(
-                "a secret names one non-empty file or one environment variable",
-            )),
+        if let Ok(SecretInFile { file }) = SecretInFile::from_value(value)
+            && !file.as_os_str().is_empty()
+        {
+            return Ok(Self::File(file));
         }
+        if let Ok(SecretInVariable { env }) = SecretInVariable::from_value(value)
+            && is_variable_name(&env)
+        {
+            return Ok(Self::Env(env));
+        }
+        Err(MapError::bad_value(WRITTEN))
+    }
+}
+
+impl Schema for SecretRef {
+    fn kind(alloc: Alloc) -> KindBuilder {
+        KindBuilder::union_in(
+            alloc,
+            vec![
+                SecretInFile::kind(alloc),
+                SecretInVariable::kind(alloc),
+                KindBuilder::string_in(alloc),
+            ],
+        )
     }
 }
 
@@ -258,22 +290,30 @@ fn is_variable_name(name: &str) -> bool {
 
 /// `[provider]`: where the configuration provider is, and how much of a document it reads.
 #[non_exhaustive]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct ProviderSettings {
     /// A configuration directory, `sqlite:PATH` or a `postgres://` URL. Default: the
     /// directory holding the bootstrap file, else the user's configuration directory.
+    #[schema(title = "Where the configuration provider is")]
     pub location: Option<String>,
-    /// The database password, when the location needs one and gives none.
+    /// The database password, when the location needs one and gives none. Default: none.
+    #[schema(title = "Database password", sensitive)]
     pub password: Option<SecretRef>,
-    /// Seconds between checks for changes; 0 turns reloading off. Default 5.
+    /// Seconds between checks for changes; 0 turns reloading off. Default: 5.
+    #[schema(title = "Between checks for changes")]
     pub poll: Option<Seconds>,
-    /// Bytes of the loadout document ([`ConfigLimits::loadout_bytes`]). Default 1 MiB.
+    /// Bytes of the loadout document ([`ConfigLimits::loadout_bytes`]).
+    #[schema(title = "Loadout document", format = "bytes")]
+    #[map(default = ConfigLimits::default().loadout_bytes)]
     pub loadout_bytes: Limit,
     /// Characters of one loadout value ([`ConfigLimits::loadout_value_chars`]).
-    /// Default 4,096.
+    #[schema(title = "One loadout value, in characters")]
+    #[map(default = ConfigLimits::default().loadout_value_chars)]
     pub loadout_value_chars: Limit,
-    /// Bytes of the access policy ([`ConfigLimits::access_policy_bytes`]). Default 1 MiB.
+    /// Bytes of the access policy ([`ConfigLimits::access_policy_bytes`]).
+    #[schema(title = "Access policy", format = "bytes")]
+    #[map(default = ConfigLimits::default().access_policy_bytes)]
     pub access_policy_bytes: Limit,
 }
 
@@ -293,171 +333,131 @@ impl Default for ProviderSettings {
 
 /// `[registry]`: where the shared Registry is, and how much it keeps.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct RegistrySettings {
     /// A directory, `sqlite:PATH` or a `postgres://` URL. Default: the provider's database
-    /// when the provider is SQL, else `registry` in the state directory.
+    /// when the provider is SQL, else `registry` in the reading program's state directory.
+    #[schema(title = "Where the Registry is")]
     pub location: Option<String>,
-    /// The database password, when the location needs one and gives none.
+    /// The database password, when the location needs one and gives none. Default: the
+    /// provider's, when the Registry is the provider's database.
+    #[schema(title = "Database password", sensitive)]
     pub password: Option<SecretRef>,
     /// Seconds the Headquarters lease lasts between renewals; it also sets the SQL
-    /// connections' timeouts. Default 60.
+    /// connections' timeouts. Default: 60.
+    #[schema(title = "Headquarters lease")]
     pub headquarters_lease: Option<Seconds>,
-    /// Seconds a SQLite connection waits for another's lock. Default 30.
+    /// Seconds a SQLite connection waits for another's lock. Default: 30.
+    #[schema(title = "SQLite lock wait")]
     pub sqlite_busy_timeout: Option<Seconds>,
     /// `[registry.limits]`: what the Registry keeps and accepts.
+    #[schema(title = "What the Registry keeps and accepts")]
+    #[map(default)]
     pub limits: RegistryLimits,
 }
 
-/// `[identity]`: where this host keeps its certificate identity and pinned peers.
+/// `[station.identity]`: where this host keeps its certificate identity and pinned peers.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct IdentitySettings {
     /// The directory holding `identity.pem` and `peers/`. Default: the state directory.
+    #[schema(title = "Identity directory")]
     pub dir: Option<PathBuf>,
 }
 
-/// `[plugins]`: the provider libraries this host loads, and how it checks them.
+/// `[station.plugins]` and `[unex.plugins]`: the provider libraries a program loads, and how it
+/// checks them.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct PluginSettings {
     /// Directories or library files to scan for providers.
-    #[serde(default)]
+    #[schema(title = "Where to look for providers")]
+    #[map(default)]
     pub paths: Vec<PathBuf>,
-    /// `strict`, `report` or `off`. Default: `strict` with a pin set, `report` without.
+    /// How a library is checked. Default: `strict` with a pin set, `report` without.
+    #[schema(title = "How libraries are checked")]
     pub profile: Option<PluginProfile>,
     /// Which verified copies a `strict` scan keeps besides the ones it loaded: a count, `0` for
-    /// none of them, or `"none"` for no limit. Default [`KeepVerified::default`].
+    /// none of them, or `"none"` for no limit. Default: the newest 8.
+    #[schema(title = "Verified copies kept")]
     pub keep_verified: Option<KeepVerified>,
 }
 
-/// `[secrets]`: where the Station's own secret backend reads values.
+/// `[station.secrets]`: where the Station's own secret backend reads values.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct SecretSettings {
     /// The directory a relative secret file is read from. Default: `secrets` beside the
     /// bootstrap file, else in the user's configuration directory.
+    #[schema(title = "Secrets directory")]
     pub dir: Option<PathBuf>,
 }
 
-/// `[unex]`: Universal Exports, where a Station publishes and `ai6ctl` connects.
+/// `[station]`: what a Station and the `ai6` command need of this host.
 #[non_exhaustive]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct UnexSettings {
-    /// Universal Exports' origin.
-    pub url: String,
-    /// The Station's credential for publishing. `ai6ctl` never reads it.
-    pub token: Option<SecretRef>,
-    /// A PEM file of certificate authorities to trust for Universal Exports besides the public
-    /// roots; [`read_ca_file`] reads it. Default: the public roots alone.
-    pub ca_file: Option<PathBuf>,
-}
-
-/// `ai6.cfg`: what a Station and the `ai6` command need before they reach the configuration
-/// provider. Every key has a default, so no file at all is a working configuration.
-#[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Bootstrap {
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct StationSettings {
     /// The Station's ID in the shared Registry. Default: the one kept in the state directory,
     /// made up on first start.
-    pub station: Option<String>,
+    #[schema(title = "Station ID")]
+    pub id: Option<String>,
     /// Where the Station keeps its state. Default: the platform's state directory
     /// ([`platform_state_dir`]).
+    #[schema(title = "State directory")]
     pub state_dir: Option<PathBuf>,
-    /// The Station's private listener. Default [`DEFAULT_LISTEN`].
+    /// The Station's private listener. Default: 127.0.0.1:7081.
+    #[schema(title = "Listener")]
     pub listen: Option<SocketAddr>,
-    /// `[provider]`.
-    #[serde(default)]
-    pub provider: ProviderSettings,
-    /// `[registry]`.
-    #[serde(default)]
-    pub registry: RegistrySettings,
-    /// `[identity]`.
-    #[serde(default)]
-    pub identity: IdentitySettings,
-    /// `[plugins]`.
-    #[serde(default)]
+    /// `[station.plugins]`.
+    #[schema(title = "Provider libraries")]
+    #[map(default)]
     pub plugins: PluginSettings,
-    /// `[secrets]`.
-    #[serde(default)]
+    /// `[station.identity]`.
+    #[schema(title = "Certificate identity")]
+    #[map(default)]
+    pub identity: IdentitySettings,
+    /// `[station.secrets]`.
+    #[schema(title = "Secrets")]
+    #[map(default)]
     pub secrets: SecretSettings,
-    /// `[unex]`.
-    pub unex: Option<UnexSettings>,
 }
 
-/// `[access]` of `unex.cfg`: who is chief before any record is read.
+/// `[unex.access]`: who is chief before any record is read.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct AccessSettings {
     /// Subjects (`account:<name>`, `person:<id>`, `group:<name>`) that are always chief, whatever
     /// the access policy says: host access is already the trust root. None of them can be
     /// removed through the API.
-    #[serde(default)]
+    #[schema(title = "Always chief")]
+    #[map(default)]
     pub chief: Vec<String>,
 }
 
-/// `unex.cfg`: what Universal Exports needs before it reaches the configuration provider.
-/// The sign-in providers, login limits, access policy and assistant settings are records in
-/// the provider.
+/// `[unex.pages]`: pages are kept in a directory (so remembered ones outlive a restart) and
+/// served under `/pages/` on the API's origin unless they have an origin of their own. Quotas and
+/// options are the roster's `[assistant.pages]`.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct UnexBootstrap {
-    /// The loopback address it listens on, behind the HTTPS reverse proxy. Default
-    /// [`DEFAULT_UNEX_LISTEN`].
-    pub listen: Option<SocketAddr>,
-    /// The public HTTPS origin browsers reach it at. Required to serve.
-    pub public_origin: Option<String>,
-    /// The credential Stations publish with. Required to serve.
-    pub station_token: Option<SecretRef>,
-    /// What a trusted reverse proxy sends in `X-AI6-Proxy-Secret`, when it asserts who is
-    /// signed in.
-    pub proxy_secret: Option<SecretRef>,
-    /// The fewest bytes the reverse-proxy secret may hold. Default [`DEFAULT_PROXY_SECRET_MIN_BYTES`];
-    /// a smaller value is a weakening.
-    pub proxy_secret_min_bytes: Option<u64>,
-    /// Where it keeps its state: verified copies of provider libraries, and the Registry when
-    /// nothing else names one. Default: the platform's state directory.
-    pub state_dir: Option<PathBuf>,
-    /// `[provider]`, as in `ai6.cfg`.
-    #[serde(default)]
-    pub provider: ProviderSettings,
-    /// `[registry]`, as in `ai6.cfg`.
-    #[serde(default)]
-    pub registry: RegistrySettings,
-    /// `[plugins]`, as in `ai6.cfg`.
-    #[serde(default)]
-    pub plugins: PluginSettings,
-    /// `[access]`.
-    #[serde(default)]
-    pub access: AccessSettings,
-    /// `[pages]`: where the pages Moneypenny publishes are kept and served from.
-    #[serde(default)]
-    pub pages: PagesSettings,
-}
-
-/// `unex.cfg`'s `[pages]`: pages are kept in a directory (so remembered ones outlive a
-/// restart) and served under `/pages/` on the API's origin unless they have an origin of
-/// their own. Quotas and options are the roster's `[assistant.pages]`.
-#[non_exhaustive]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct PagesSettings {
-    /// Where pages are kept. Default `pages` beside `unex.cfg` (the working directory
+    /// Where pages are kept. Default: `pages` beside the bootstrap file (the working directory
     /// without one).
+    #[schema(title = "Pages directory")]
     pub dir: Option<PathBuf>,
     /// The pages' own origin, such as `https://pages.example.net`, served by a second
-    /// listener that holds only page routes. Without one, pages share the API's origin by
+    /// listener that holds only page routes. Default: none, so pages share the API's origin by
     /// design, and nothing is logged about it.
+    #[schema(title = "The pages' own origin")]
     pub origin: Option<String>,
-    /// The loopback address of that second listener. Default 127.0.0.1:7083.
+    /// The loopback address of that second listener. Default: 127.0.0.1:7083.
+    #[schema(title = "The pages' own listener")]
     pub listen: Option<SocketAddr>,
 }
 
@@ -465,47 +465,92 @@ pub struct PagesSettings {
 pub const DEFAULT_PAGES_LISTEN: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 7083);
 
-impl UnexBootstrap {
-    /// Finds `unex.cfg` ([`SearchPath`] for [`UNEX_FILE_NAME`] and [`UNEX_CONFIG_ENV`]) and
-    /// reads it; with none, every key at its default.
-    ///
-    /// # Errors
-    ///
-    /// As [`SearchPath::locate`] and [`UnexBootstrap::read`].
-    pub fn find(explicit: Option<&Path>) -> Result<Located<Self>, BootstrapError> {
-        match SearchPath::new(UNEX_FILE_NAME, UNEX_CONFIG_ENV, explicit).locate()? {
-            Some(path) => Ok(Located {
-                value: Self::read(&path)?,
-                path: Some(path),
-            }),
-            None => Ok(Located::default()),
-        }
-    }
-
-    /// Reads `unex.cfg` at `path`, resolving its relative paths against its directory.
-    ///
-    /// # Errors
-    ///
-    /// As [`read_file`].
-    pub fn read(path: &Path) -> Result<Self, BootstrapError> {
-        let mut value: Self = read_file(path)?;
-        let dir = path.parent().unwrap_or(Path::new("."));
-        value.state_dir = value.state_dir.map(|state| beside(dir, &state));
-        value.station_token = value.station_token.map(|token| token.relative_to(dir));
-        value.proxy_secret = value.proxy_secret.map(|secret| secret.relative_to(dir));
-        value.provider.resolve(dir);
-        value.registry.resolve(dir);
-        value.plugins.resolve(dir);
-        value.pages.dir = value.pages.dir.map(|pages| beside(dir, &pages));
-        Ok(value)
-    }
+/// `[unex]`: where Universal Exports is, for its clients, and how it runs, for itself.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct UnexSettings {
+    /// Universal Exports' origin, where a Station publishes and `ai6ctl` and Outer Office connect.
+    /// Default: none; a Station publishes nothing, and `ai6ctl` tries its loopback default.
+    #[schema(title = "Universal Exports' origin", format = "uri")]
+    pub url: Option<String>,
+    /// A PEM file of certificate authorities its clients trust for Universal Exports besides the
+    /// public roots; [`read_ca_file`] reads it. Default: the public roots alone.
+    #[schema(title = "More certificate authorities to trust")]
+    pub ca_file: Option<PathBuf>,
+    /// The credential of the Station channel: a Station publishes with it, and Universal Exports
+    /// accepts it. `ai6ctl` never reads it. Default: none; a Station publishes nothing, and
+    /// `universal-exports` refuses to start.
+    #[schema(title = "Station channel credential", sensitive)]
+    pub station_token: Option<SecretRef>,
+    /// The loopback address it listens on, behind the HTTPS reverse proxy. Default: 127.0.0.1:7082.
+    #[schema(title = "Gateway listener")]
+    pub listen: Option<SocketAddr>,
+    /// The public HTTPS origin browsers reach it at. Default: none; `universal-exports` refuses
+    /// to start.
+    #[schema(title = "Public origin", format = "uri")]
+    pub public_origin: Option<String>,
+    /// What a trusted reverse proxy sends in `X-AI6-Proxy-Secret`, when it asserts who is
+    /// signed in. Default: none, and no reverse-proxy identity is accepted.
+    #[schema(title = "Reverse-proxy secret", sensitive)]
+    pub proxy_secret: Option<SecretRef>,
+    /// The fewest bytes the reverse-proxy secret may hold; a smaller value is a weakening.
+    /// Default: 32.
+    #[schema(title = "Shortest reverse-proxy secret", format = "bytes")]
+    pub proxy_secret_min_bytes: Option<u64>,
+    /// Where it keeps its state: verified copies of provider libraries, and the Registry when
+    /// nothing else names one. Default: the platform's state directory.
+    #[schema(title = "Gateway state directory")]
+    pub state_dir: Option<PathBuf>,
+    /// `[unex.plugins]`.
+    #[schema(title = "Provider libraries")]
+    #[map(default)]
+    pub plugins: PluginSettings,
+    /// `[unex.access]`.
+    #[schema(title = "Host access")]
+    #[map(default)]
+    pub access: AccessSettings,
+    /// `[unex.pages]`: where the pages Moneypenny publishes are kept and served from.
+    #[schema(title = "Moneypenny's pages")]
+    #[map(default)]
+    pub pages: PagesSettings,
 }
 
-impl Located<UnexBootstrap> {
-    /// Where pages are kept: `[pages] dir`, else `pages` beside `unex.cfg`, else `pages` in
-    /// the working directory.
+/// `ai6.cfg`: what every program on a host or for a user needs before it reaches the
+/// configuration provider. Every key has a default, so no file at all is a working configuration
+/// for a program that needs no key.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct Bootstrap {
+    /// `[provider]`.
+    #[schema(title = "Configuration provider")]
+    #[map(default)]
+    pub provider: ProviderSettings,
+    /// `[registry]`.
+    #[schema(title = "Registry")]
+    #[map(default)]
+    pub registry: RegistrySettings,
+    /// `[unex]`.
+    #[schema(title = "Universal Exports")]
+    #[map(default)]
+    pub unex: UnexSettings,
+    /// `[station]`.
+    #[schema(title = "Station")]
+    #[map(default)]
+    pub station: StationSettings,
+    /// `[oo]`: Outer Office's settings, which the app reads and declares. No Rust program reads
+    /// them.
+    #[schema(title = "Outer Office")]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    pub oo: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Located<Bootstrap> {
+    /// Where the gateway keeps pages: `[unex.pages] dir`, else `pages` beside the bootstrap file,
+    /// else `pages` in the working directory.
     pub fn pages_dir(&self) -> PathBuf {
-        match &self.value.pages.dir {
+        match &self.value.unex.pages.dir {
             Some(dir) => dir.clone(),
             None => self
                 .dir()
@@ -513,69 +558,61 @@ impl Located<UnexBootstrap> {
         }
     }
 
-    /// The pages' own listener: `[pages] listen`, else [`DEFAULT_PAGES_LISTEN`].
+    /// The pages' own listener: `[unex.pages] listen`, else [`DEFAULT_PAGES_LISTEN`].
     pub fn pages_listen(&self) -> SocketAddr {
-        self.value.pages.listen.unwrap_or(DEFAULT_PAGES_LISTEN)
+        self.value.unex.pages.listen.unwrap_or(DEFAULT_PAGES_LISTEN)
     }
 
-    /// The state directory: the file's `state_dir`, else [`platform_state_dir`].
+    /// The gateway's state directory: `[unex] state_dir`, else [`platform_state_dir`].
     ///
     /// # Errors
     ///
     /// `NotFound` when neither is set and the platform's cannot be determined.
-    pub fn state_dir(&self) -> Result<PathBuf, BootstrapError> {
-        match &self.value.state_dir {
+    pub fn unex_state_dir(&self) -> Result<PathBuf, BootstrapError> {
+        match &self.value.unex.state_dir {
             Some(dir) => Ok(dir.clone()),
             None => platform_state_dir(),
         }
     }
 
-    /// The configuration provider's location, chosen as for `ai6.cfg`
-    /// ([`Located::provider_location`]).
+    /// The gateway's Registry, chosen as [`registry_location`](Self::registry_location) is, in
+    /// its own state directory.
     ///
     /// # Errors
     ///
-    /// `NotFound` when none can be determined.
-    pub fn provider_location(&self) -> Result<String, BootstrapError> {
-        provider_location(&self.value.provider, self.dir())
-    }
-
-    /// The Registry's location, chosen as for `ai6.cfg` ([`Located::registry_location`]).
-    ///
-    /// # Errors
-    ///
-    /// As [`state_dir`](Self::state_dir) and [`provider_location`](Self::provider_location).
-    pub fn registry_location(&self) -> Result<String, BootstrapError> {
+    /// As [`unex_state_dir`](Self::unex_state_dir) and
+    /// [`provider_location`](Self::provider_location).
+    pub fn unex_registry_location(&self) -> Result<String, BootstrapError> {
         registry_location(&self.value.registry, self.provider_location()?, || {
-            self.state_dir()
+            self.unex_state_dir()
         })
     }
 
-    /// The Registry's password, chosen as for `ai6.cfg` ([`Located::registry_password`]).
-    pub fn registry_password(&self) -> Option<&SecretRef> {
-        registry_password(&self.value.registry, &self.value.provider)
+    /// The gateway's listener: `[unex] listen`, else [`DEFAULT_UNEX_LISTEN`].
+    pub fn unex_listen(&self) -> SocketAddr {
+        self.value.unex.listen.unwrap_or(DEFAULT_UNEX_LISTEN)
     }
 
-    /// Its listener: `listen`, else [`DEFAULT_UNEX_LISTEN`].
-    pub fn listen(&self) -> SocketAddr {
-        self.value.listen.unwrap_or(DEFAULT_UNEX_LISTEN)
-    }
-
-    /// The fewest bytes the reverse-proxy secret may hold: `proxy_secret_min_bytes`, else
+    /// The fewest bytes the reverse-proxy secret may hold: `[unex] proxy_secret_min_bytes`, else
     /// [`DEFAULT_PROXY_SECRET_MIN_BYTES`].
     pub fn proxy_secret_min_bytes(&self) -> u64 {
         self.value
+            .unex
             .proxy_secret_min_bytes
             .unwrap_or(DEFAULT_PROXY_SECRET_MIN_BYTES)
     }
 
-    /// Each secret of the file that is read from the environment or written inline, and each
-    /// `[registry]` or `[provider]` limit looser than its default, worded for a log line.
-    pub fn weakenings(&self) -> Vec<String> {
+    /// What the file gives up against the defaults for the gateway, worded for a log line: each
+    /// of its secrets read from the environment or written inline, and each `[registry]` or
+    /// `[provider]` limit looser than its default.
+    pub fn unex_weakenings(&self) -> Vec<String> {
         let mut weakened = Vec::new();
         for (what, secret) in [
-            ("Station token", self.value.station_token.as_ref()),
-            ("reverse-proxy secret", self.value.proxy_secret.as_ref()),
+            ("Station token", self.value.unex.station_token.as_ref()),
+            (
+                "reverse-proxy secret",
+                self.value.unex.proxy_secret.as_ref(),
+            ),
             ("provider password", self.value.provider.password.as_ref()),
             ("Registry password", self.value.registry.password.as_ref()),
         ] {
@@ -712,14 +749,13 @@ impl SearchPath {
 ///
 /// `NotFound` or another I/O kind when the file cannot be read, `InvalidData` when it is not
 /// valid in its format or has a key `T` does not know (the error names the key).
-pub fn read_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, BootstrapError> {
+pub fn read_file<T: FromValue>(path: &Path) -> Result<T, BootstrapError> {
     Format::for_path(path)
         .map_err(|error| BootstrapError::new(io::ErrorKind::InvalidInput, error.to_string()))?;
     let text = std::fs::read_to_string(path).map_err(|error| {
         BootstrapError::new(error.kind(), format!("{}: {error}", path.display()))
     })?;
-    let value = format::parse(path, &text).map_err(|error| BootstrapError::invalid(path, error))?;
-    guatiao_serde::adapt::from_value(&value).map_err(|error| BootstrapError::invalid(path, error))
+    format::read(path, &text).map_err(|error| BootstrapError::invalid(path, error))
 }
 
 /// Reads a PEM file of certificate authorities (`[unex] ca_file`, `ai6ctl --ca-file`): the DER of
@@ -899,35 +935,45 @@ impl Bootstrap {
     ///
     /// # Errors
     ///
-    /// As [`read_file`]; and `InvalidData` when `[unex]` has a `url` that is empty.
+    /// As [`read_file`]; and `InvalidData` when `[unex] url` is empty.
     pub fn read(path: &Path) -> Result<Self, BootstrapError> {
         let mut value: Self = read_file(path)?;
         let dir = path.parent().unwrap_or(Path::new("."));
-        value.state_dir = value.state_dir.map(|state| beside(dir, &state));
-        value.identity.dir = value.identity.dir.map(|identity| beside(dir, &identity));
-        value.secrets.dir = value.secrets.dir.map(|secrets| beside(dir, &secrets));
         value.provider.resolve(dir);
         value.registry.resolve(dir);
-        value.plugins.resolve(dir);
-        if let Some(unex) = &mut value.unex {
-            if unex.url.trim().is_empty() {
-                return Err(BootstrapError::invalid(path, "[unex] url is empty"));
-            }
-            unex.token = unex.token.take().map(|token| token.relative_to(dir));
-            unex.ca_file = unex.ca_file.take().map(|file| beside(dir, &file));
+        let station = &mut value.station;
+        station.state_dir = station.state_dir.take().map(|state| beside(dir, &state));
+        station.identity.dir = station.identity.dir.take().map(|id| beside(dir, &id));
+        station.secrets.dir = station.secrets.dir.take().map(|kept| beside(dir, &kept));
+        station.plugins.resolve(dir);
+        let unex = &mut value.unex;
+        if unex.url.as_deref().is_some_and(|url| url.trim().is_empty()) {
+            return Err(BootstrapError::invalid(path, "[unex] url is empty"));
         }
+        unex.ca_file = unex.ca_file.take().map(|file| beside(dir, &file));
+        unex.station_token = unex
+            .station_token
+            .take()
+            .map(|token| token.relative_to(dir));
+        unex.proxy_secret = unex
+            .proxy_secret
+            .take()
+            .map(|secret| secret.relative_to(dir));
+        unex.state_dir = unex.state_dir.take().map(|state| beside(dir, &state));
+        unex.pages.dir = unex.pages.dir.take().map(|pages| beside(dir, &pages));
+        unex.plugins.resolve(dir);
         Ok(value)
     }
 }
 
 impl Located<Bootstrap> {
-    /// The state directory: the file's `state_dir`, else [`platform_state_dir`].
+    /// The Station's state directory: `[station] state_dir`, else [`platform_state_dir`].
     ///
     /// # Errors
     ///
     /// `NotFound` when neither is set and the platform's cannot be determined.
     pub fn state_dir(&self) -> Result<PathBuf, BootstrapError> {
-        match &self.value.state_dir {
+        match &self.value.station.state_dir {
             Some(dir) => Ok(dir.clone()),
             None => platform_state_dir(),
         }
@@ -961,26 +1007,26 @@ impl Located<Bootstrap> {
         registry_password(&self.value.registry, &self.value.provider)
     }
 
-    /// The identity directory: `[identity] dir`, else the state directory.
+    /// The identity directory: `[station.identity] dir`, else the state directory.
     ///
     /// # Errors
     ///
     /// As [`state_dir`](Self::state_dir).
     pub fn identity_dir(&self) -> Result<PathBuf, BootstrapError> {
-        match &self.value.identity.dir {
+        match &self.value.station.identity.dir {
             Some(dir) => Ok(dir.clone()),
             None => self.state_dir(),
         }
     }
 
-    /// The secrets directory: `[secrets] dir`, else `secrets` beside the bootstrap file, else
-    /// in [`platform_config_dir`].
+    /// The secrets directory: `[station.secrets] dir`, else `secrets` beside the bootstrap file,
+    /// else in [`platform_config_dir`].
     ///
     /// # Errors
     ///
     /// `NotFound` when none can be determined.
     pub fn secrets_dir(&self) -> Result<PathBuf, BootstrapError> {
-        if let Some(dir) = &self.value.secrets.dir {
+        if let Some(dir) = &self.value.station.secrets.dir {
             return Ok(dir.clone());
         }
         match self.dir() {
@@ -989,14 +1035,14 @@ impl Located<Bootstrap> {
         }
     }
 
-    /// The Station's listener: `listen`, else [`DEFAULT_LISTEN`].
+    /// The Station's listener: `[station] listen`, else [`DEFAULT_LISTEN`].
     pub fn listen(&self) -> SocketAddr {
-        self.value.listen.unwrap_or(DEFAULT_LISTEN)
+        self.value.station.listen.unwrap_or(DEFAULT_LISTEN)
     }
 
-    /// What the file gives up against the defaults, worded for a log line: each secret that
-    /// is read from the environment or written inline, and each `[registry]` or `[provider]`
-    /// limit looser than its default.
+    /// What the file gives up against the defaults for a Station and the `ai6` command, worded for
+    /// a log line: each secret that is read from the environment or written inline, and each
+    /// `[registry]` or `[provider]` limit looser than its default.
     pub fn weakenings(&self) -> Vec<String> {
         let mut weakened = Vec::new();
         let mut secret = |what: &str, secret: Option<&SecretRef>| {
@@ -1008,18 +1054,10 @@ impl Located<Bootstrap> {
         secret("Registry password", self.value.registry.password.as_ref());
         secret(
             "Universal Exports token",
-            self.value
-                .unex
-                .as_ref()
-                .and_then(|unex| unex.token.as_ref()),
+            self.value.unex.station_token.as_ref(),
         );
         weakened.extend(limit_weakenings(&self.value.registry, &self.value.provider));
-        if self
-            .value
-            .unex
-            .as_ref()
-            .is_some_and(|unex| unex.ca_file.is_some())
-        {
+        if self.value.unex.ca_file.is_some() {
             weakened.push(
                 "[unex] ca_file trusts its certificates for Universal Exports besides the public \
                  roots"
@@ -1100,27 +1138,35 @@ pub fn platform_state_dir() -> Result<PathBuf, BootstrapError> {
 mod tests {
     use super::*;
 
+    fn from_toml<T: FromValue>(text: &str) -> Result<T, String> {
+        format::read(Path::new("a.toml"), text).map_err(|error| error.to_string())
+    }
+
     #[test]
     fn a_secret_reference_reads_a_file_variable_or_inline_value_and_hides_it() {
+        #[derive(FromValue)]
+        struct Holder {
+            s: SecretRef,
+        }
+        let secret = |text: &str| from_toml::<Holder>(text).map(|holder| holder.s);
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("token"), "s3cret\r\n").unwrap();
-        let file: SecretRef = toml::from_str::<toml::Table>("s = { file = \"token\" }")
+        let file = secret("s = { file = \"token\" }")
             .unwrap()
-            .remove("s")
-            .unwrap()
-            .try_into()
-            .unwrap();
-        let file = file.relative_to(dir.path());
+            .relative_to(dir.path());
         assert_eq!(file.read().unwrap().as_str(), "s3cret");
         assert_eq!(file.weakening(), None);
 
-        let inline: SecretRef = serde_json::from_str("\"hunter2\"").unwrap();
+        let inline = secret("s = \"hunter2\"").unwrap();
         assert_eq!(format!("{inline:?}"), "Inline(***)");
         assert!(inline.weakening().unwrap().contains("inline"));
         assert_eq!(inline.read().unwrap().as_str(), "hunter2");
+        assert!(
+            inline.to_value().is_err(),
+            "an inline secret is never written out"
+        );
 
-        let env: SecretRef =
-            serde_json::from_str(r#"{"env": "AI6_TEST_NO_SUCH_VARIABLE"}"#).unwrap();
+        let env = secret("s = { env = \"AI6_TEST_NO_SUCH_VARIABLE\" }").unwrap();
         assert!(
             env.weakening()
                 .unwrap()
@@ -1129,55 +1175,153 @@ mod tests {
         assert_eq!(env.read().unwrap_err().kind(), io::ErrorKind::NotFound);
 
         for refused in [
-            r#"{"file": "a", "env": "B"}"#,
-            r#"{"env": "1X"}"#,
-            r#""""#,
-            "{}",
+            "s = { file = \"hunter2\", env = \"B\" }",
+            "s = { env = \"1hunter2\" }",
+            "s = \"\"",
+            "s = {}",
+            "s = 12345",
         ] {
-            assert!(
-                serde_json::from_str::<SecretRef>(refused).is_err(),
-                "{refused}"
-            );
+            let refusal = secret(refused).map(|_| ()).unwrap_err();
+            assert!(refusal.contains("'s'"), "{refused}: {refusal}");
+            assert!(!refusal.contains("hunter2"), "{refused}: {refusal}");
         }
     }
 
-    #[test]
-    fn unex_cfg_reports_its_loosened_limits() {
+    fn located(text: &str) -> Located<Bootstrap> {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("unex.cfg");
-        std::fs::write(
-            &path,
+        let path = dir.path().join(FILE_NAME);
+        std::fs::write(&path, text).unwrap();
+        Bootstrap::find(Some(&path)).unwrap()
+    }
+
+    #[test]
+    fn the_gateway_reports_its_loosened_limits() {
+        let located = located(
             "[provider]\naccess_policy_bytes = \"none\"\n[registry.limits.held]\nresults = 100\n",
-        )
-        .unwrap();
-        let located = UnexBootstrap::find(Some(&path)).unwrap();
+        );
         assert_eq!(located.value.registry.limits.held.results, Limit::at(100));
         assert_eq!(
-            located.weakenings(),
+            located.unex_weakenings(),
             ["provider.access_policy_bytes none is looser than the default 1048576"]
         );
     }
 
     #[test]
-    fn unex_cfg_reads_the_proxy_secret_floor_and_reports_a_lower_one() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("unex.cfg");
-        std::fs::write(&path, "").unwrap();
-        let located = UnexBootstrap::find(Some(&path)).unwrap();
-        assert_eq!(located.proxy_secret_min_bytes(), 32);
-        assert!(located.weakenings().is_empty());
-        std::fs::write(
-            &path,
-            "proxy_secret_min_bytes = 8
-",
-        )
-        .unwrap();
-        let located = UnexBootstrap::find(Some(&path)).unwrap();
-        assert_eq!(located.proxy_secret_min_bytes(), 8);
+    fn the_gateway_reads_the_proxy_secret_floor_and_reports_a_lower_one() {
+        let default = located("");
+        assert_eq!(default.proxy_secret_min_bytes(), 32);
+        assert!(default.unex_weakenings().is_empty());
+        let lowered = located("[unex]\nproxy_secret_min_bytes = 8\n");
+        assert_eq!(lowered.proxy_secret_min_bytes(), 8);
         assert_eq!(
-            located.weakenings(),
+            lowered.unex_weakenings(),
             ["proxy_secret_min_bytes 8 is looser than the default 32"]
         );
+    }
+
+    /// Every place a person writes a value, as `(path, its schema, whether it must be written)`.
+    fn writable<'a>(
+        path: &str,
+        node: &'a serde_json::Value,
+        found: &mut Vec<(String, &'a serde_json::Value, bool)>,
+    ) {
+        let required = |key: &str| {
+            node.get("required")
+                .and_then(|keys| keys.as_array())
+                .is_some_and(|keys| keys.iter().any(|name| name == key))
+        };
+        if let Some(properties) = node.get("properties").and_then(|p| p.as_object()) {
+            for (key, field) in properties {
+                let at = format!("{path}.{key}");
+                found.push((at.clone(), field, required(key)));
+                writable(&at, field, found);
+            }
+        }
+        if let Some(arms) = node.get("anyOf").and_then(|arms| arms.as_array()) {
+            for arm in arms {
+                writable(path, arm, found);
+            }
+        }
+    }
+
+    fn schema_of<T: Schema>() -> serde_json::Value {
+        let schema = T::schema().unwrap();
+        serde_json::to_value(guatiao_serde::Serializable::from(&schema)).unwrap()
+    }
+
+    /// The fields of `T` a person writes with no title, and those they may leave out with neither
+    /// a schema default nor a description saying what the default is.
+    fn undeclared<T: Schema>() -> Vec<String> {
+        let schema = schema_of::<T>();
+        let mut found = Vec::new();
+        writable("", &schema, &mut found);
+        found
+            .into_iter()
+            .filter(|(_, field, required)| {
+                let says = |key: &str, words: &str| {
+                    field
+                        .get(key)
+                        .and_then(|text| text.as_str())
+                        .is_some_and(|text| text.contains(words))
+                };
+                !says("title", "")
+                    || !(*required
+                        || field.get("default").is_some()
+                        || says("description", "Default:"))
+            })
+            .map(|(path, _, _)| path)
+            .collect()
+    }
+
+    #[test]
+    fn every_section_a_person_writes_declares_its_titles_and_defaults() {
+        let schema = schema_of::<Bootstrap>();
+        let mut found = Vec::new();
+        writable("", &schema, &mut found);
+        // [registry.limits] alone holds about a hundred; a walk that stopped early finds nothing.
+        assert!(found.len() > 150, "the walk reached {}", found.len());
+        assert_eq!(undeclared::<Bootstrap>(), Vec::<String>::new());
+
+        // The check itself, on one field of each kind it refuses.
+        #[derive(ToValue, FromValue, Schema)]
+        struct Undeclared {
+            /// Nothing says what this one defaults to.
+            #[schema(title = "Titled")]
+            no_default: Option<String>,
+            /// Default: it has one, and no title.
+            no_title: Option<String>,
+            /// Default: it has both.
+            #[schema(title = "Both")]
+            both: Option<String>,
+            /// It must be written, so it needs no default.
+            #[schema(title = "Written")]
+            written: String,
+        }
+        assert_eq!(
+            undeclared::<Undeclared>(),
+            [".no_default".to_owned(), ".no_title".to_owned()]
+        );
+    }
+
+    #[test]
+    fn no_setting_is_required_by_the_file_itself() {
+        let schema = schema_of::<Bootstrap>();
+        fn required(path: &str, node: &serde_json::Value, found: &mut Vec<String>) {
+            if node.get("required").is_some_and(|keys| {
+                keys.as_array().is_some_and(|keys| !keys.is_empty()) && !path.contains("oo")
+            }) {
+                found.push(path.to_owned());
+            }
+            if let Some(properties) = node.get("properties").and_then(|p| p.as_object()) {
+                for (key, field) in properties {
+                    required(&format!("{path}.{key}"), field, found);
+                }
+            }
+        }
+        let mut found = Vec::new();
+        required("", &schema, &mut found);
+        assert_eq!(found, Vec::<String>::new());
+        Bootstrap::from_value(&format::parse(Path::new("a.toml"), "").unwrap()).unwrap();
     }
 
     #[test]

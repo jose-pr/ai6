@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `PluginPolicy::with_keep_verified`, `ServeConfig::with_keep_verified`,
   `PluginScanSummary::verified_removed` and `verified_held`.
 
+- **One bootstrap file.** `ai6.cfg` serves every program on a host or for a user, and `unex.cfg`,
+  `UNEX_CONFIG`, `UnexBootstrap` and `UNEX_FILE_NAME` are gone. Shared: `[provider]` and `[registry]`.
+  `[station]` holds `id` (the old `station`), `state_dir`, `listen`, and `[station.plugins]`,
+  `.identity` and `.secrets`. `[unex]` holds the clients' `url` and `ca_file`, the gateway's `listen`,
+  `public_origin`, `proxy_secret`, `proxy_secret_min_bytes` and `state_dir`, and `[unex.plugins]`,
+  `.access` and `.pages`. The Station's `[unex] token` and the gateway's `station_token` are one key,
+  `[unex] station_token`. A key nobody knows is refused by every program, and each says when a key it
+  needs is missing. A file of the old layout is refused, naming the key: a deployment moves its
+  file with the binaries. Settings and `[registry.limits]` read through `FromValue` and declare a
+  title and a default in their schema (`Bootstrap::schema()`). A `unex.cfg` beside a directory
+  provider's family files is now the `unex` family's file.
 - Configuration documents are read through `anycfg` over guatiao's value, in one reader for
   bootstrap files and family files. A `.cfg` file now names its format on its first line (`#!json`,
   `#!yaml`, `#!toml`, or a document starting `%YAML`), else it is TOML. A refusal names the key or

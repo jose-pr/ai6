@@ -3,10 +3,10 @@
 ## Run a local Station
 
 Build AI6 and its providers, then start a Station on the sample configuration in
-`examples/config`: `ai6.cfg` (the bootstrap file, naming that directory as the configuration
-provider), the family files `agents.toml`, `operations.toml`, `theaters.yaml` and
-`station.json` in three formats, and `unex.cfg` and `OO.cfg` for Universal Exports and Outer
-Office ([Configuration](configuration.md)):
+`examples/config`: `ai6.cfg` (the one bootstrap file every program reads, naming that directory
+as the configuration provider, with Universal Exports' and Outer Office's sections) and the
+family files `agents.toml`, `operations.toml`, `theaters.yaml` and `station.json` in three
+formats ([Configuration](configuration.md)):
 
 ```console
 cargo build --workspace --all-features

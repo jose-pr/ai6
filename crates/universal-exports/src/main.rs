@@ -22,10 +22,10 @@ use universal_exports::{
 #[command(
     name = "universal-exports",
     about = "Serve the authenticated AI6 Universal Exports gateway",
-    after_help = "Settings needed before the configuration provider is reached come from unex.cfg: --config, else UNEX_CONFIG, else unex.cfg in the user's then the system's configuration directory. Its station_token is the Stations' credential. Sign-in, login limits and the assistant are the provider's unex record; the role policy is its access record."
+    after_help = "Settings needed before the configuration provider is reached come from ai6.cfg: --config, else AI6_CONFIG, else ai6.cfg in the user's then the system's configuration directory. Its [unex] station_token is the Stations' credential. Sign-in, login limits and the assistant are the provider's unex record; the role policy is its access record."
 )]
 struct Cli {
-    /// The bootstrap file, which must exist (default: UNEX_CONFIG, else unex.cfg in the user's,
+    /// The bootstrap file, which must exist (default: AI6_CONFIG, else ai6.cfg in the user's,
     /// then the system's configuration directory).
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
@@ -39,32 +39,32 @@ struct Cli {
     /// database when it is SQL, else `registry` in the state directory).
     #[arg(long, value_name = "LOCATION")]
     registry: Option<String>,
-    /// The loopback address used behind the trusted HTTPS reverse proxy (default: `listen`,
-    /// else 127.0.0.1:7082).
+    /// The loopback address used behind the trusted HTTPS reverse proxy (default: `[unex]
+    /// listen`, else 127.0.0.1:7082).
     #[arg(long, value_name = "ADDRESS")]
     listen: Option<std::net::SocketAddr>,
-    /// The public HTTPS origin used to validate browser requests (default: `public_origin`;
-    /// one of them is required).
+    /// The public HTTPS origin used to validate browser requests (default: `[unex]
+    /// public_origin`; one of them is required).
     #[arg(long)]
     public_origin: Option<String>,
-    /// A directory or library containing Guatiao providers, besides `[plugins] paths`; may be
-    /// repeated.
+    /// A directory or library containing Guatiao providers, besides `[unex.plugins] paths`; may
+    /// be repeated.
     #[arg(long = "plugin-path", value_name = "PATH")]
     plugin_paths: Vec<PathBuf>,
-    /// How provider libraries are checked: strict, report or off (default: `[plugins]
+    /// How provider libraries are checked: strict, report or off (default: `[unex.plugins]
     /// profile`, else strict with `plugin` records and report without).
     #[arg(long, value_name = "PROFILE")]
     plugin_profile: Option<ai6::PluginProfile>,
 }
 
-/// What the gateway reads from `unex.cfg` with the command line over it.
+/// What the gateway reads from `ai6.cfg` with the command line over it.
 struct Settings {
-    located: ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>,
+    located: ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>,
     state_dir: PathBuf,
 }
 
 fn settings(cli: &Cli) -> Result<Settings, String> {
-    let mut located = ai6::bootstrap::UnexBootstrap::find(cli.config.as_deref())
+    let mut located = ai6::bootstrap::Bootstrap::find(cli.config.as_deref())
         .map_err(|error| error.to_string())?;
     let value = &mut located.value;
     if let Some(provider) = &cli.provider {
@@ -73,11 +73,14 @@ fn settings(cli: &Cli) -> Result<Settings, String> {
     if let Some(registry) = &cli.registry {
         value.registry.location = Some(registry.clone());
     }
-    value.listen = cli.listen.or(value.listen);
-    value.public_origin = cli.public_origin.clone().or(value.public_origin.take());
-    value.plugins.paths.extend(cli.plugin_paths.iter().cloned());
-    value.plugins.profile = cli.plugin_profile.or(value.plugins.profile);
-    let state_dir = located.state_dir().map_err(|error| error.to_string())?;
+    let unex = &mut value.unex;
+    unex.listen = cli.listen.or(unex.listen);
+    unex.public_origin = cli.public_origin.clone().or(unex.public_origin.take());
+    unex.plugins.paths.extend(cli.plugin_paths.iter().cloned());
+    unex.plugins.profile = cli.plugin_profile.or(unex.plugins.profile);
+    let state_dir = located
+        .unex_state_dir()
+        .map_err(|error| error.to_string())?;
     Ok(Settings { located, state_dir })
 }
 
@@ -102,7 +105,7 @@ fn sql_options(
     }
 }
 
-/// Opens the configuration provider `unex.cfg` names.
+/// Opens the configuration provider `ai6.cfg` names.
 fn open_provider(settings: &Settings) -> Result<Arc<dyn ConfigProvider>, String> {
     let location = settings
         .located
@@ -139,29 +142,31 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli) -> Result<(), String> {
     let settings = settings(&cli)?;
-    for weakening in settings.located.weakenings() {
+    for weakening in settings.located.unex_weakenings() {
         eprintln!("universal-exports: warning: {weakening}");
     }
-    let listen = settings.located.listen();
+    let listen = settings.located.unex_listen();
     if listen.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
         return Err(format!(
-            "listen must be a 127.0.0.1 address behind the reverse proxy, not {listen}"
+            "[unex] listen must be a 127.0.0.1 address behind the reverse proxy, not {listen}"
         ));
     }
     let public_origin = settings
         .located
         .value
+        .unex
         .public_origin
         .clone()
-        .ok_or("public_origin is required (unex.cfg or --public-origin)")?;
+        .ok_or("[unex] public_origin is required (ai6.cfg or --public-origin)")?;
     let station_token = settings
         .located
         .value
+        .unex
         .station_token
         .as_ref()
-        .ok_or("station_token is required in unex.cfg")?
+        .ok_or("[unex] station_token is required in ai6.cfg")?
         .read()
-        .map_err(|error| format!("station_token: {error}"))?;
+        .map_err(|error| format!("[unex] station_token: {error}"))?;
     let provider = open_provider(&settings)?;
     let snapshot = provider
         .load("")
@@ -186,7 +191,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     .with_login_limits(login_limits(&record)?);
     let registry_location = settings
         .located
-        .registry_location()
+        .unex_registry_location()
         .map_err(|error| error.to_string())?;
     let registry = sql_options(&settings, settings.located.registry_password(), "Registry")
         .and_then(|options| {
@@ -200,11 +205,11 @@ async fn run(cli: Cli) -> Result<(), String> {
             ai6::directorates::registry::sql::redact(&registry_location)
         );
     }
-    let host_chiefs = settings.located.value.access.chief.clone();
+    let host_chiefs = settings.located.value.unex.access.chief.clone();
     for subject in &host_chiefs {
-        subject
-            .parse::<ai6::Subject>()
-            .map_err(|_| format!("unex.cfg [access] chief: {subject:?} is not account:<name>, person:<id> or group:<name>"))?;
+        subject.parse::<ai6::Subject>().map_err(|_| {
+            format!("[unex.access] chief: entry is not account:<name>, person:<id> or group:<name>")
+        })?;
     }
     let live = Arc::new(
         LiveAccess::new(provider.clone(), host_chiefs, record.authorizer.clone())
@@ -231,7 +236,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         .map_err(|error| format!("user access configuration failed: {error}"))?;
     if access.is_some() && live.has_no_chief() {
         eprintln!(
-            "universal-exports: access: no chief; nobody can change access; set [access] chief in unex.cfg"
+            "universal-exports: access: no chief; nobody can change access; set [unex.access] chief in ai6.cfg"
         );
     }
     let mut gateway = match access {
@@ -263,13 +268,13 @@ async fn run(cli: Cli) -> Result<(), String> {
                 assistant.with_route_text_bytes(usize::try_from(bytes).unwrap_or(usize::MAX));
         }
         gateway = gateway.with_assistant(assistant);
-        let pages = &settings.located.value.pages;
+        let pages = &settings.located.value.unex.pages;
         let mut config = universal_exports::PagesConfig::new(settings.located.pages_dir());
         if let Some(origin) = &pages.origin {
             let listen = settings.located.pages_listen();
             if listen.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
                 return Err(format!(
-                    "pages listen must be a 127.0.0.1 address behind the reverse proxy, not \
+                    "[unex.pages] listen must be a 127.0.0.1 address behind the reverse proxy, not \
                      {listen}"
                 ));
             }
@@ -457,7 +462,7 @@ fn login_limits(record: &UnexRecord) -> Result<LoginLimits, String> {
 }
 
 /// The provider library policy, chosen as a Station chooses its own: the provider's `plugin`
-/// records under `[plugins] profile`; verified copies under the state directory's
+/// records under `[unex.plugins] profile`; verified copies under the state directory's
 /// `plugins/verified`.
 fn plugin_policy(
     settings: &Settings,
@@ -467,8 +472,8 @@ fn plugin_policy(
         snapshot.settings.pins.clone(),
         settings.state_dir.join("plugins").join("verified"),
     )
-    .with_keep_verified(settings.located.value.plugins.keep_verified());
-    match settings.located.value.plugins.profile {
+    .with_keep_verified(settings.located.value.unex.plugins.keep_verified());
+    match settings.located.value.unex.plugins.profile {
         Some(profile) => policy.with_profile(profile),
         None => policy,
     }
@@ -539,7 +544,7 @@ fn configured_access(
         return Err("configure either the access record or unex.authorizer".to_owned());
     }
     let plugins = ai6::station::plugins::Plugins::scan_with(
-        &settings.located.value.plugins.paths,
+        &settings.located.value.unex.plugins.paths,
         &plugin_policy(settings, snapshot),
     );
     ai6::station::plugins::log_scan(plugins.scan_summary());
@@ -622,20 +627,21 @@ fn configured_access(
     Ok(Some((access, accounts)))
 }
 
-/// `unex.cfg`'s `proxy_secret_min_bytes`: the fewest bytes the proxy secret may hold.
+/// `[unex] proxy_secret_min_bytes`: the fewest bytes the proxy secret may hold.
 fn proxy_secret_min(settings: &Settings) -> usize {
     usize::try_from(settings.located.proxy_secret_min_bytes()).unwrap_or(usize::MAX)
 }
 
-/// `unex.cfg`'s `proxy_secret`, which the reverse proxy sends in `X-AI6-Proxy-Secret`.
+/// `[unex] proxy_secret`, which the reverse proxy sends in `X-AI6-Proxy-Secret`.
 fn proxy_secret(settings: &Settings) -> Result<String, String> {
     let secret = settings
         .located
         .value
+        .unex
         .proxy_secret
         .as_ref()
         .ok_or_else(|| {
-            "a reverse-proxy identity needs unex.cfg's proxy_secret, the secret the reverse proxy \
+            "a reverse-proxy identity needs [unex] proxy_secret, the secret the reverse proxy \
          sends in X-AI6-Proxy-Secret, so a client reaching the gateway's port directly cannot \
          assert an identity"
                 .to_owned()
@@ -643,7 +649,7 @@ fn proxy_secret(settings: &Settings) -> Result<String, String> {
     secret
         .read()
         .map(|value| value.as_str().to_owned())
-        .map_err(|error| format!("proxy_secret: {error}"))
+        .map_err(|error| format!("[unex] proxy_secret: {error}"))
 }
 
 fn json_to_provider_value(

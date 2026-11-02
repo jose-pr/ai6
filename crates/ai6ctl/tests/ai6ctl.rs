@@ -946,7 +946,7 @@ async fn the_origin_comes_from_the_flag_then_unex_url_then_ai6_cfg() {
     let config = dir.path().join("ai6.cfg");
     std::fs::write(
         &config,
-        format!("[unex]\nurl = \"{url}\"\ntoken = \"never-read\"\n"),
+        format!("[unex]\nurl = \"{url}\"\nstation_token = \"never-read\"\n"),
     )
     .unwrap();
     let health = |extra: Vec<String>, unex_url: Option<String>| {
@@ -1281,4 +1281,48 @@ fn a_ca_file_that_trusts_nothing_is_refused_naming_it_before_any_request() {
         assert!(said.contains(file.to_str().unwrap()), "{said}");
         assert!(!said.contains("could not contact"), "{said}");
     }
+}
+
+#[tokio::test]
+async fn ai6ctl_starts_from_the_one_file_every_program_shares_and_refuses_a_key_nobody_knows() {
+    let (url, stop) = health_stand_in().await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("ai6.cfg");
+    let text = include_str!("../../ai6/tests/one_file.cfg")
+        .replace("UNEX_URL", &url)
+        .replace("GATEWAY_LISTEN", "127.0.0.1:9")
+        .replace("STATION_LISTEN", "127.0.0.1:9");
+    let health = |document: String| {
+        let config = config.clone();
+        tokio::task::spawn_blocking(move || {
+            std::fs::write(&config, document).unwrap();
+            Command::new(env!("CARGO_BIN_EXE_ai6ctl"))
+                .arg("health")
+                .arg("--config")
+                .arg(&config)
+                .env_remove("UNEX_URL")
+                .env_remove("UNEX_ACCESS_TOKEN")
+                .output()
+                .unwrap()
+        })
+    };
+    let reached = health(text.clone()).await.unwrap();
+    assert!(reached.status.success(), "{reached:?}");
+    for (document, key) in [
+        (
+            format!("nobody_knows = \"pl4nted\"\n{text}"),
+            "nobody_knows",
+        ),
+        (
+            text.replace("[station]", "[station]\nnobody = \"pl4nted\""),
+            "station.nobody",
+        ),
+    ] {
+        let refused = health(document).await.unwrap();
+        let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+        assert_eq!(refused.status.code(), Some(1), "{said}");
+        assert!(said.contains(key), "names {key}: {said}");
+        assert!(!said.contains("pl4nted"), "{said}");
+    }
+    let _ = stop.send(());
 }

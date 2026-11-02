@@ -863,27 +863,27 @@ prints the manifest and its pin. Weakenings are printed at start.
 
 ## Bootstrap files (`ai6::bootstrap`, no feature)
 
-`ai6.cfg` (Station and `ai6` command) and `unex.cfg` (`universal-exports`) hold only what a
-process needs before it reaches its configuration provider. Found by `SearchPath`: `--config`
-(must exist), else the variable (`AI6_CONFIG` / `UNEX_CONFIG`, must exist), else the file in
-`platform_config_dir()`, else in `system_config_dir()`; the first found is the only one read,
-and none means every default. The working directory is never searched. The format follows
+One file, `ai6.cfg`, holds only what a process needs before it reaches its configuration
+provider, for every program: `[provider]` and `[registry]` are shared, `[station]` is a Station's
+and the `ai6` command's, `[unex]` is Universal Exports' and its clients', and `[oo]` is Outer
+Office's, which no Rust program reads. Found by `SearchPath`: `--config` (must exist), else
+`AI6_CONFIG` (must exist), else the file in `platform_config_dir()`, else in
+`system_config_dir()`; the first found is the only one read, and none means every default. The working directory is never searched. The format follows
 the extension (`toml`, `json`, `yaml`/`yml`); a `.cfg` names it on its first line (`#!json`,
 `#!yaml`, `#!toml`, the line's last word; a document starting `%YAML` is YAML), else it is TOML.
 A document becomes one `guatiao::Value`, and a refusal names the key or position and never the
-value. Unknown keys are refused, naming the
-key. A relative path in a file is relative to the file's directory.
+value. Unknown keys are refused by every program, naming the key; each program checks at start
+what it needs. A relative path in a file is relative to the file's directory.
 
 ```rust
 pub const FILE_NAME: &str = "ai6.cfg";       pub const CONFIG_ENV: &str = "AI6_CONFIG";
-pub const UNEX_FILE_NAME: &str = "unex.cfg"; pub const UNEX_CONFIG_ENV: &str = "UNEX_CONFIG";
 pub const DEFAULT_LISTEN: SocketAddr;        // 127.0.0.1:7081
 pub const DEFAULT_UNEX_LISTEN: SocketAddr;   // 127.0.0.1:7082
 pub const DEFAULT_POLL: Duration;            // 5 s
 
 #[non_exhaustive] #[derive(Clone, PartialEq, Eq)]   // Debug shows Inline(***)
 pub enum SecretRef { File(PathBuf), Env(String), Inline(Zeroizing<String>) }
-// written `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself
+// written `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself; FromValue, Schema; ToValue refuses Inline
 impl SecretRef {
     pub fn weakening(&self) -> Option<String>;      // Some for Env and Inline
     pub fn relative_to(self, dir: &Path) -> Self;
@@ -891,8 +891,8 @@ impl SecretRef {
     pub fn describe(&self) -> String;               // the file or variable, never the value
 }
 
-// every field Option or defaulted; #[non_exhaustive], Deserialize, deny_unknown_fields;
-// Seconds, Limit: crate::bounds
+// every field Option or defaulted; #[non_exhaustive], ToValue, FromValue, Schema, deny_unknown_fields;
+// each field has a title and a default in its schema (Bootstrap::schema()); Seconds, Limit: crate::bounds
 pub struct ProviderSettings { location: Option<String>, password: Option<SecretRef>, poll: Option<Seconds>,
     loadout_bytes: Limit, loadout_value_chars: Limit, access_policy_bytes: Limit }   // ConfigLimits defaults
 pub struct RegistrySettings { location: Option<String>, password: Option<SecretRef>, headquarters_lease: Option<Seconds>,
@@ -901,12 +901,16 @@ pub struct IdentitySettings { dir: Option<PathBuf> }
 pub struct PluginSettings { paths: Vec<PathBuf>, profile: Option<PluginProfile>, keep_verified: Option<KeepVerified> }
 impl PluginSettings { pub fn keep_verified(&self) -> KeepVerified; } // its default: the newest 8
 pub struct SecretSettings { dir: Option<PathBuf> }
-pub struct UnexSettings { url: String, token: Option<SecretRef>, ca_file: Option<PathBuf> }  // a url alone publishes nothing; ca_file resolved beside the file
-pub struct Bootstrap { station, state_dir, listen, provider, registry, identity, plugins, secrets: SecretSettings, unex: Option<UnexSettings> }
-pub struct UnexBootstrap { listen, public_origin: Option<String>, station_token: Option<SecretRef>,
-    proxy_secret: Option<SecretRef>, state_dir, provider, registry, plugins, pages: PagesSettings,
-    access: AccessSettings { chief: Vec<String> } }   // [access] chief: always-chief subjects
+pub struct StationSettings { id: Option<String>, state_dir: Option<PathBuf>, listen: Option<SocketAddr>,
+    plugins: PluginSettings, identity: IdentitySettings, secrets: SecretSettings }
+pub struct AccessSettings { chief: Vec<String> }   // [unex.access] chief: always-chief subjects
 pub struct PagesSettings { dir: Option<PathBuf>, origin: Option<String>, listen: Option<SocketAddr> }
+pub struct UnexSettings { url: Option<String>, ca_file: Option<PathBuf>, station_token: Option<SecretRef>,
+    listen: Option<SocketAddr>, public_origin: Option<String>, proxy_secret: Option<SecretRef>,
+    proxy_secret_min_bytes: Option<u64>, state_dir: Option<PathBuf>, plugins: PluginSettings,
+    access: AccessSettings, pages: PagesSettings }  // a Station publishes with url and station_token; paths resolved beside the file
+pub struct Bootstrap { provider: ProviderSettings, registry: RegistrySettings, unex: UnexSettings,
+    station: StationSettings, oo: serde_json::Map<String, serde_json::Value> }  // oo: unread here
 pub const DEFAULT_PAGES_LISTEN: SocketAddr;                              // 127.0.0.1:7083
 impl ProviderSettings { pub fn poll(&self) -> Duration;                    // DEFAULT_POLL; 0 turns reload off
                         pub fn limits(&self) -> ConfigLimits; }
@@ -920,23 +924,28 @@ impl Bootstrap {
     pub fn find_in(search: &SearchPath) -> Result<Located<Self>, BootstrapError>;
     pub fn read(path: &Path) -> Result<Self, BootstrapError>;
 }
-impl UnexBootstrap { pub fn find(..) ; pub fn read(..); }               // same shapes
 impl Located<Bootstrap> {
-    pub fn state_dir(&self) -> Result<PathBuf, BootstrapError>;          // state_dir, else platform_state_dir()
+    pub fn state_dir(&self) -> Result<PathBuf, BootstrapError>;          // [station] state_dir, else platform_state_dir()
     pub fn provider_location(&self) -> Result<String, BootstrapError>;   // [provider] location, else the file's dir, else platform_config_dir()
     pub fn registry_location(&self) -> Result<String, BootstrapError>;   // [registry] location, else a SQL provider, else <state_dir>/registry
     pub fn registry_password(&self) -> Option<&SecretRef>;               // the provider's when the Registry is its database
-    pub fn identity_dir(&self) -> Result<PathBuf, BootstrapError>;       // [identity] dir, else state_dir
-    pub fn secrets_dir(&self) -> Result<PathBuf, BootstrapError>;        // [secrets] dir, else secrets/ beside the file
-    pub fn listen(&self) -> SocketAddr;
+    pub fn identity_dir(&self) -> Result<PathBuf, BootstrapError>;       // [station.identity] dir, else state_dir
+    pub fn secrets_dir(&self) -> Result<PathBuf, BootstrapError>;        // [station.secrets] dir, else secrets/ beside the file
+    pub fn listen(&self) -> SocketAddr;                                  // [station] listen
     pub fn weakenings(&self) -> Vec<String>;                             // each Env or Inline secret, a set [unex] ca_file
+    // The gateway's own:
+    pub fn unex_state_dir(&self) -> Result<PathBuf, BootstrapError>;     // [unex] state_dir, else platform_state_dir()
+    pub fn unex_registry_location(&self) -> Result<String, BootstrapError>; // as registry_location, in unex_state_dir
+    pub fn unex_listen(&self) -> SocketAddr;                             // [unex] listen
+    pub fn proxy_secret_min_bytes(&self) -> u64;                         // [unex] proxy_secret_min_bytes, else 32
+    pub fn pages_dir(&self) -> PathBuf;                                  // [unex.pages] dir, else pages/ beside the file
+    pub fn pages_listen(&self) -> SocketAddr;                            // [unex.pages] listen
+    pub fn unex_weakenings(&self) -> Vec<String>;
 }
-// Located<UnexBootstrap>: state_dir, provider_location, registry_location, registry_password, listen, weakenings,
-//   pages_dir (else pages/ beside unex.cfg), pages_listen
 pub struct SearchPath { pub explicit: Option<PathBuf>, pub variable: Option<(String, PathBuf)>, pub candidates: Vec<PathBuf> }
 impl SearchPath { pub fn new(name: &str, variable: &str, explicit: Option<&Path>) -> Self;
     pub fn locate(&self) -> Result<Option<PathBuf>, BootstrapError>; }   // NotFound for a named file that is missing
-pub fn read_file<T: DeserializeOwned>(path: &Path) -> Result<T, BootstrapError>;
+pub fn read_file<T: FromValue>(path: &Path) -> Result<T, BootstrapError>;
 pub fn read_ca_file(path: &Path) -> Result<Vec<Vec<u8>>, BootstrapError>;  // the DER of each PEM certificate; refuses, naming path: unreadable, none in it, broken PEM, unparsable certificate
 pub fn is_sql_location(location: &str) -> bool;
 pub fn platform_config_dir() -> Result<PathBuf, BootstrapError>;  // XDG_CONFIG_HOME/ai6, %APPDATA%\ai6, ~/.config/ai6
@@ -1012,7 +1021,7 @@ impl UnexRecord { pub fn weakenings(&self) -> Vec<String>;   // inline credentia
 pub struct UnexLimits { pub gateway, pub controls, pub timeline, pub login, pub text }
 impl UnexLimits { pub fn validate(&self) -> Result<(), String>;   // zeros where nothing could pass
     pub fn weakenings(&self) -> Vec<String>; }
-// bootstrap: UnexBootstrap.proxy_secret_min_bytes (32, DEFAULT_PROXY_SECRET_MIN_BYTES), smaller is a weakening
+// bootstrap: UnexSettings.proxy_secret_min_bytes (32, DEFAULT_PROXY_SECRET_MIN_BYTES), smaller is a weakening
 #[non_exhaustive] #[derive(Clone)]
 pub struct ConfigSnapshot { pub revision: ConfigRevision, pub roster: Roster, pub settings: Settings }
 impl ConfigSnapshot {
@@ -1117,7 +1126,7 @@ holds: `operations` (`[operation.<id>]`), `agents` (`[agent.<codename>]`, `[role
 (`[loadout.*]`, `[sandbox.*]`, `[mcp.*]`, `[secret.*]`, `[pool.*]`); `plugins` is `[[library]]`
 entries keyed by `file`; `cables`, `station`, `tls`, `access` and `unex` are each one record,
 the whole file; `operation_access` (`[operation_access.<id>]`) is one record per Operation. Anything else is `Invalid`, naming the table, and two files for one family
-are `Invalid`, naming both. `ai6.cfg` and `unex.cfg` are never family files. A
+are `Invalid`, naming both. `ai6.cfg` is never a family file; no family has its stem. A
 relative skill path in `[assistant]` is relative to the directory. Its revision is a digest of
 every family file of the view (global and the Station's own) with their relative paths, taken
 before they are parsed, so `changes_since` reads them but parses nothing while they are
@@ -1678,8 +1687,8 @@ pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn Reg
 ## Registry limits (`ai6::directorates::registry::limits`, also at the crate root)
 
 ```rust
-// [registry.limits] of ai6.cfg and unex.cfg: one table per family, each
-// #[non_exhaustive] #[serde(default, deny_unknown_fields)], Default = the documented defaults
+// [registry.limits] of ai6.cfg: one table per family, each #[non_exhaustive],
+// ToValue, FromValue, Schema, deny_unknown_fields, Default = the documented defaults
 // (docs/configuration.md "Limits"). Counts and sizes are Limit, ages TimeLimit, days u32.
 pub struct RegistryLimits { pub accounts: AccountLimits, pub agents: AgentLimits, pub agent_roles: AgentRoleLimits,
     pub approvals: ApprovalLimits, pub audit: AuditLimits, pub briefs: BriefLimits, pub cables: CableLimits,
@@ -3326,7 +3335,7 @@ has proved its key, recorded under `peers/waiting` with the address it came from
 bounded per source address, in total, and by how often one peer is written down again (the
 policy's `waiting`: `per_source`, `total` and `rerecord`). An operator lists
 them with `ai6 peer waiting` (fingerprint and source address) and accepts one with
-`ai6 peer accept <fingerprint>`. Both work on `ai6.cfg`'s `[identity] dir` (default: its
+`ai6 peer accept <fingerprint>`. Both work on `ai6.cfg`'s `[station.identity] dir` (default: its
 state directory).
 `AccessTokenRecord` is the device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
@@ -4956,8 +4965,8 @@ that table, so a provider with a configuration of its own declares it too.
   only the 300-second probe), `safe_house_caches` (replacing `DEFAULT_CACHE_DIRS`) and
   `safe_house_cache_age`; seconds may be fractional, and an invalid value exits 1. The pins
   are the provider's `plugin` records (`ServeConfig::with_plugin_policy` overrides them in
-  code); the profile is `[plugins] profile` (`ServeConfig::with_plugin_profile`); verified
-  copies go to the state directory's `plugins/verified/`, and `[plugins] keep_verified`
+  code); the profile is `[station.plugins] profile` (`ServeConfig::with_plugin_profile`); verified
+  copies go to the state directory's `plugins/verified/`, and `[station.plugins] keep_verified`
   (`ServeConfig::with_keep_verified`) says which old ones stay.
 - `ai6 config show FAMILY [KEY] [--scope station:ID]` prints records as TOML;
   `ai6 config import DIR [--scope station:ID]` loads a configuration directory's records
@@ -4980,7 +4989,7 @@ that table, so a provider with a configuration of its own declares it too.
   that key signed, with its weakening on standard error; anything else is refused with a
   non-zero exit. The runner's `--pins PATH` must name an existing file.
 - `ai6 plugins check [--config PATH] [PATH...]` prints `PATH  DIGEST  VERDICT` per library named,
-  else on `[plugins] paths`, against the `plugin` records of this host's Station under `strict`
+  else on `[station.plugins] paths`, against the `plugin` records of this host's Station under `strict`
   (`check_libraries`); it opens only the configuration provider, loads nothing, writes no copy,
   and exits 1 on any refusal or when no library was checked.
 - `ai6 harness pin DIR` prints a working directory's harness manifest (`# sha256:..  PATH`

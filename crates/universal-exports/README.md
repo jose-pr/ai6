@@ -64,11 +64,11 @@ argument.
 `ai6ctl` crate.
 
 ```console
-universal-exports --config /etc/ai6/unex.cfg
+universal-exports --config /etc/ai6/ai6.cfg
 ```
 
-What it needs before it reaches the configuration provider is in its bootstrap file,
-`unex.cfg` ([Configuration](https://jose-pr.github.io/ai6/configuration/)): its loopback listener, the public
+What it needs before it reaches the configuration provider is in the bootstrap file,
+`ai6.cfg` ([Configuration](https://jose-pr.github.io/ai6/configuration/)): its loopback listener, the public
 origin, the Stations' token and the reverse proxy's secret as secret references, and the
 provider, Registry and provider libraries. Everything else is a record of the provider the
 Stations read: the `unex` record holds sign-in, login limits, the access cache and the
@@ -77,7 +77,7 @@ assistant, and the `access` record the role policy, which applies without a rest
 User access requires a Directory and an authorization policy. Login can use a Guatiao
 Authenticator or an identity asserted by the trusted reverse proxy. Providers are the
 loadable libraries of [`coqui-access`](https://github.com/Boriken-Dev/coqui-access)
-(`--plugin-path` or `[plugins] paths` names the directory they are in), checked against the
+(`--plugin-path` or `[unex.plugins] paths` names the directory they are in), checked against the
 provider's `plugin` records as a Station checks its own. Each provider's configuration is a
 JSON object in the `unex` record, validated against its Guatiao schema; password accounts use
 the same configuration for both provider kinds:
@@ -105,8 +105,8 @@ proxy_lookup_by = "name"
 ```
 
 The reverse proxy must overwrite `X-Forwarded-User` after authenticating the browser and
-remove any client-supplied value, and set `X-AI6-Proxy-Secret` to `unex.cfg`'s
-`proxy_secret` on every request it forwards: an asserted identity without that secret is
+remove any client-supplied value, and set `X-AI6-Proxy-Secret` to `[unex]
+proxy_secret` on every request it forwards: an asserted identity without that secret is
 refused, since anything reaching the loopback port directly (another local process) can set
 the identity header too. The Directory maps that asserted name to the authoritative person
 record; authorization still comes from the access policy.
@@ -210,7 +210,7 @@ Session tuple. A missing policy rule denies access. Provider calls run on Tokio'
 blocking pool. `Gateway::with_registry` enables M-issued access tokens but leaves
 user login and authorization endpoints unavailable. The `universal-exports` command accepts
 provider IDs and an access-policy path to enable user access; it uses the Registry
-`unex.cfg` names: a directory, `sqlite:PATH` or a `postgres://` URL
+`ai6.cfg` names: a directory, `sqlite:PATH` or a `postgres://` URL
 (`ai6::directorates::registry::backend::open_with`).
 
 A control goes to the Station holding the Mission's latest Session record, else the one
@@ -250,30 +250,30 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 
 ## Bootstrap file
 
-The command's bootstrap file is `unex.cfg`: `--config PATH`, else the file `UNEX_CONFIG`
-names, else `unex.cfg` in the user's then the system's configuration directory (as `ai6.cfg`,
-`ai6::bootstrap::UnexBootstrap`). Unknown keys are refused; relative paths are relative to
-the file; a secret is `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself, and the
+The command reads the one bootstrap file every program reads, `ai6.cfg`: `--config PATH`, else
+the file `AI6_CONFIG` names, else `ai6.cfg` in the user's then the system's configuration directory
+(`ai6::bootstrap::Bootstrap`). Unknown keys are refused; relative paths are relative to the file; a
+secret is `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself, and the
 last two are printed as a warning at start.
 
 | Key | Effect | Default |
 | --- | --- | --- |
-| `listen` | Loopback address behind the HTTPS reverse proxy (`127.0.0.1` only); `--listen`. | `127.0.0.1:7082` |
-| `public_origin` | Required browser HTTPS origin; `--public-origin`. | None |
-| `station_token` | Required secret: the Stations' channel bearer credential. | None |
-| `proxy_secret` | Secret the reverse proxy sends in `X-AI6-Proxy-Secret`; required with a proxy identity header, at least 32 characters. | None |
-| `state_dir` | Where verified provider libraries, and a default Registry, are kept. | The platform's state directory |
+| `[unex] listen` | Loopback address behind the HTTPS reverse proxy (`127.0.0.1` only); `--listen`. | `127.0.0.1:7082` |
+| `[unex] public_origin` | Required browser HTTPS origin; `--public-origin`. | None |
+| `[unex] station_token` | Required secret: the Stations' channel bearer credential. | None |
+| `[unex] proxy_secret` | Secret the reverse proxy sends in `X-AI6-Proxy-Secret`; required with a proxy identity header, at least 32 characters. | None |
+| `[unex] state_dir` | Where verified provider libraries, and a default Registry, are kept. | The platform's state directory |
 | `[provider] location`, `password`, `poll` | The configuration provider Stations read; its roster is served under `/v1/user/roster` (a directory read-only, SQL editable); `--provider`. | The file's directory |
-| `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `state_dir` |
-| `[plugins] paths`, `profile`, `keep_verified` | Provider libraries, how they are checked, and which old verified copies stay; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without; the newest 8 |
+| `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `[unex] state_dir` |
+| `[unex.plugins] paths`, `profile`, `keep_verified` | Provider libraries, how they are checked, and which old verified copies stay; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without; the newest 8 |
 
 ## Environment variables
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `UNEX_CONFIG` | The bootstrap file; must exist when set. | `unex.cfg` in the user's, then the system's configuration directory |
+| `AI6_CONFIG` | The bootstrap file; must exist when set. | `ai6.cfg` in the user's, then the system's configuration directory |
 
-Secret references in `unex.cfg` may name others (`{ env = "NAME" }`), which is reported as a
+Secret references in `ai6.cfg` may name others (`{ env = "NAME" }`), which is reported as a
 weakening. The `unex` record's keys are listed in [Configuration](https://jose-pr.github.io/ai6/configuration/).
 
 ## Exit status

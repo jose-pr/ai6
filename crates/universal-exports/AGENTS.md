@@ -119,7 +119,7 @@ impl AccessProviders {
         header: axum::http::HeaderName,
         lookup_by: impl Into<String>,
     ) -> Self;
-    // Err below `min_bytes` (unex.cfg's `proxy_secret_min_bytes`, 32) or without a proxy identity. Without a secret no
+    // Err below `min_bytes` (`[unex] proxy_secret_min_bytes`, 32) or without a proxy identity. Without a secret no
     // asserted identity is accepted: login with the identity header also needs
     // PROXY_SECRET_HEADER ("x-ai6-proxy-secret") equal to it, else 401.
     pub fn with_proxy_secret(self, secret: impl Into<String>, min_bytes: usize) -> Result<Self, String>;
@@ -127,7 +127,7 @@ impl AccessProviders {
 pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
 ```
 
-`universal-exports` reads the secret from `unex.cfg`'s `proxy_secret` and refuses to start
+`universal-exports` reads the secret from `[unex] proxy_secret` and refuses to start
 with the `unex` record's `proxy_user_header` but no secret.
 
 All fields are public; `AttachMode` is non-exhaustive. M is the authority that
@@ -685,7 +685,7 @@ pub struct Gateway { /* shared, bounded state */ }
 
 impl Gateway {
     pub fn new(config: GatewayConfig) -> Self;
-    /// Any Registry store; the command opens the one `unex.cfg` names.
+    /// Any Registry store; the command opens the one `ai6.cfg` names.
     pub fn with_registry(config: GatewayConfig, registry: Arc<dyn ai6::RegistryBackend>) -> Self;
     pub fn with_access(
         config: GatewayConfig,
@@ -693,7 +693,7 @@ impl Gateway {
         access: AccessProviders,
     ) -> Self;
     /// Serves `/v1/user/roster/...` from the roster the Stations read; without it those
-    /// routes answer 503. The command opens `unex.cfg`'s provider with ai6's config::open_with.
+    /// routes answer 503. The command opens `ai6.cfg`'s provider with ai6's config::open_with.
     #[must_use]
     pub fn with_roster(self, source: Arc<dyn ai6::ConfigProvider>) -> Self;
     /// How long a Station's assistant job poll is held while Moneypenny is not served
@@ -951,7 +951,7 @@ The optional `cli` feature builds the service command:
 
 - `universal-exports [--config <PATH>] [--provider <LOC>] [--registry <LOC>] [--listen <ADDR>]
   [--public-origin <HTTPS_ORIGIN>] [--plugin-path <PATH>]... [--plugin-profile P]` starts the
-  loopback gateway from `unex.cfg` (below) with these flags over it. Its `station_token` is
+  loopback gateway from `ai6.cfg` (below) with these flags over it. Its `[unex] station_token` is
   required and is never accepted as an argument. It opens the configuration provider and
   reads its `unex` record (`ai6::UnexRecord`: `authenticator`, `directory`, `authorizer`, their
   `*_config` JSON objects, `proxy_user_header`, `proxy_lookup_by` (default `name`),
@@ -963,7 +963,7 @@ The optional `cli` feature builds the service command:
   `directory` and either `authenticator` or `proxy_user_header`; `access` and `authorizer`
   are exclusive. Provider configurations are limited to 64 nested values and validated by
   Guatiao; an inline credential in one is printed as a weakening. Provider libraries are
-  checked against the provider's `plugin` records under `[plugins] profile`. The Directory and
+  checked against the provider's `plugin` records under `[unex.plugins] profile`. The Directory and
   a plugin Authorizer are loaded behind coqui-access-kit's cache; a lifetime past the default
   is printed as a warning. The gateway polls the provider every `[provider] poll` seconds and
   swaps in a changed `access` or `operation_access` record (a refused one keeps the last good policy); a changed
@@ -981,7 +981,7 @@ managed by authorizer ID`. `Gateway::with_access_admin(live)` and `with_accounts
 Accounts>)` serve the routes. Seeding: at start with user access and no `access` record, the
 built-in roles are written create-only and audited `access.seeded`; a read-only provider
 (`FileProvider`) keeps them in memory, a record that exists is never seeded again.
-`unex.cfg [access] chief` subjects are always chief and cannot be removed through the API;
+`[unex.access] chief` subjects are always chief and cannot be removed through the API;
 with none anywhere the start logs that nobody can change access.
 
 Every write takes the revision read, `If-Match: "<revision>"` or `?revision=` (`428` without,
@@ -1018,31 +1018,31 @@ the separate `ai6ctl` crate.
 
 ## Bootstrap file
 
-The command's bootstrap file is `unex.cfg`: `--config PATH`, else the file `UNEX_CONFIG`
-names, else `unex.cfg` in the user's then the system's configuration directory (as `ai6.cfg`,
-`ai6::bootstrap::UnexBootstrap`). Unknown keys are refused; relative paths are relative to
-the file; a secret is `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself, and the
+The command reads the one bootstrap file every program reads, `ai6.cfg`: `--config PATH`, else
+the file `AI6_CONFIG` names, else `ai6.cfg` in the user's then the system's configuration directory
+(`ai6::bootstrap::Bootstrap`). Unknown keys are refused; relative paths are relative to the file; a
+secret is `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself, and the
 last two are printed as a warning at start.
 
 | Key | Effect | Default |
 | --- | --- | --- |
-| `listen` | Loopback address behind the HTTPS reverse proxy (`127.0.0.1` only); `--listen`. | `127.0.0.1:7082` |
-| `public_origin` | Required browser HTTPS origin; `--public-origin`. | None |
-| `station_token` | Required secret: the Stations' channel bearer credential. | None |
-| `proxy_secret` | Secret the reverse proxy sends in `X-AI6-Proxy-Secret`; required with a proxy identity header, at least 32 characters. | None |
-| `state_dir` | Where verified provider libraries, and a default Registry, are kept. | The platform's state directory |
+| `[unex] listen` | Loopback address behind the HTTPS reverse proxy (`127.0.0.1` only); `--listen`. | `127.0.0.1:7082` |
+| `[unex] public_origin` | Required browser HTTPS origin; `--public-origin`. | None |
+| `[unex] station_token` | Required secret: the Stations' channel bearer credential. | None |
+| `[unex] proxy_secret` | Secret the reverse proxy sends in `X-AI6-Proxy-Secret`; required with a proxy identity header, at least 32 characters. | None |
+| `[unex] state_dir` | Where verified provider libraries, and a default Registry, are kept. | The platform's state directory |
 | `[provider] location`, `password`, `poll` | The configuration provider Stations read; its roster is served under `/v1/user/roster` (a directory read-only, SQL editable); `--provider`. | The file's directory |
-| `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `state_dir` |
-| `[plugins] paths`, `profile`, `keep_verified` | Provider libraries, how they are checked, and which old verified copies stay; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without; the newest 8 |
-| `[pages] dir`, `origin`, `listen` | Where pages are kept, their own origin (a second listener with page routes only), and its loopback address. | `pages` beside the file; the API's origin; `127.0.0.1:7083` |
+| `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `[unex] state_dir` |
+| `[unex.plugins] paths`, `profile`, `keep_verified` | Provider libraries, how they are checked, and which old verified copies stay; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without; the newest 8 |
+| `[unex.pages] dir`, `origin`, `listen` | Where pages are kept, their own origin (a second listener with page routes only), and its loopback address. | `pages` beside the file; the API's origin; `127.0.0.1:7083` |
 
 ## Environment variables
 
-The library reads no environment variables. The command reads `UNEX_CONFIG` (the bootstrap
+The library reads no environment variables. The command reads `AI6_CONFIG` (the bootstrap
 file; must exist when set) and the variables its secret references name. `ai6ctl` reads
 `UNEX_URL` and `UNEX_ACCESS_TOKEN` (its own header).
 
-`--help` lists the flag-backed variables and names `unex.cfg` and its `station_token`.
+`--help` lists the flag-backed variables and names `ai6.cfg` and its `station_token`.
 The command does not log the credential.
 
 ## Gotchas

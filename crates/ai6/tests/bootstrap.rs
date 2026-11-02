@@ -19,9 +19,10 @@ fn read(text: &str) -> Result<Bootstrap, String> {
 #[test]
 fn a_cfg_file_with_no_format_line_reads_as_toml() {
     let read =
-        read("station = \"hq-1\"\nlisten = \"127.0.0.1:7181\"\n[provider]\npoll = 0.5\n").unwrap();
-    assert_eq!(read.station.as_deref(), Some("hq-1"));
-    assert_eq!(read.listen, Some("127.0.0.1:7181".parse().unwrap()));
+        read("[station]\nid = \"hq-1\"\nlisten = \"127.0.0.1:7181\"\n[provider]\npoll = 0.5\n")
+            .unwrap();
+    assert_eq!(read.station.id.as_deref(), Some("hq-1"));
+    assert_eq!(read.station.listen, Some("127.0.0.1:7181".parse().unwrap()));
     assert_eq!(read.provider.poll().as_millis(), 500);
 }
 
@@ -29,13 +30,13 @@ fn a_cfg_file_with_no_format_line_reads_as_toml() {
 fn each_extension_reads_its_own_format() {
     let dir = tempfile::tempdir().unwrap();
     for (name, text) in [
-        ("ai6.toml", "station = \"hq-1\"\n"),
-        ("ai6.json", "{\"station\": \"hq-1\"}\n"),
-        ("ai6.yaml", "station: hq-1\n"),
-        ("ai6.yml", "station: hq-1\n"),
+        ("ai6.toml", "[station]\nid = \"hq-1\"\n"),
+        ("ai6.json", "{\"station\": {\"id\": \"hq-1\"}}\n"),
+        ("ai6.yaml", "station:\n  id: hq-1\n"),
+        ("ai6.yml", "station:\n  id: hq-1\n"),
     ] {
         let read = Bootstrap::read(&write(dir.path(), name, text)).unwrap();
-        assert_eq!(read.station.as_deref(), Some("hq-1"), "{name}");
+        assert_eq!(read.station.id.as_deref(), Some("hq-1"), "{name}");
     }
     let refused = Bootstrap::read(&write(dir.path(), "ai6.ini", "station = 1\n")).unwrap_err();
     assert!(
@@ -47,13 +48,13 @@ fn each_extension_reads_its_own_format() {
 #[test]
 fn a_first_line_names_the_format() {
     for text in [
-        "#!json\n{\"station\": \"hq-1\"}\n",
-        "#!/usr/bin/env yaml\nstation: hq-1\n",
-        "#!yml\nstation: hq-1\n",
-        "%YAML 1.2\n---\nstation: hq-1\n",
+        "#!json\n{\"station\": {\"id\": \"hq-1\"}}\n",
+        "#!/usr/bin/env yaml\nstation:\n  id: hq-1\n",
+        "#!yml\nstation:\n  id: hq-1\n",
+        "%YAML 1.2\n---\nstation:\n  id: hq-1\n",
     ] {
         assert_eq!(
-            read(text).unwrap().station.as_deref(),
+            read(text).unwrap().station.id.as_deref(),
             Some("hq-1"),
             "{text}"
         );
@@ -62,7 +63,7 @@ fn a_first_line_names_the_format() {
 
 #[test]
 fn an_unknown_format_name_lists_the_known_ones() {
-    let refused = read("#!ini\nstation = hq-1\n").unwrap_err();
+    let refused = read("#!ini\n[station]\nid = hq-1\n").unwrap_err();
     for format in ["json", "toml", "yaml"] {
         assert!(refused.contains(format), "{refused}");
     }
@@ -70,7 +71,7 @@ fn an_unknown_format_name_lists_the_known_ones() {
 
 #[test]
 fn nothing_is_guessed_from_content() {
-    let refused = read("{\"station\": \"hq-1\"}\n").unwrap_err();
+    let refused = read("{\"station\": {\"id\": \"hq-1\"}}\n").unwrap_err();
     assert!(
         refused.contains("toml"),
         "a brace does not make JSON: {refused}"
@@ -79,8 +80,10 @@ fn nothing_is_guessed_from_content() {
 
 #[test]
 fn an_unknown_key_is_refused_by_name() {
-    let refused = read("station = \"hq-1\"\nconfig_dir = \"/etc\"\n").unwrap_err();
+    let refused = read("config_dir = \"/etc\"\n").unwrap_err();
     assert!(refused.contains("config_dir"), "{refused}");
+    let refused = read("[station]\nid = \"hq-1\"\nconfig_dir = \"/etc\"\n").unwrap_err();
+    assert!(refused.contains("station.config_dir"), "{refused}");
     let refused = read("[provider]\nlocation = \"x\"\npassword_file = \"p\"\n").unwrap_err();
     assert!(refused.contains("password_file"), "{refused}");
 }
@@ -91,8 +94,8 @@ fn relative_paths_are_beside_the_file_and_defaults_follow_it() {
     let path = write(
         dir.path(),
         "ai6.cfg",
-        "state_dir = \"state\"\n[provider]\npassword = { file = \"db-password\" }\n\
-         [plugins]\npaths = [\"plugins\"]\n",
+        "[provider]\npassword = { file = \"db-password\" }\n\
+         [station]\nstate_dir = \"state\"\n[station.plugins]\npaths = [\"plugins\"]\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
     assert_eq!(located.state_dir().unwrap(), dir.path().join("state"));
@@ -111,7 +114,10 @@ fn relative_paths_are_beside_the_file_and_defaults_follow_it() {
     );
     assert_eq!(located.identity_dir().unwrap(), dir.path().join("state"));
     assert_eq!(located.secrets_dir().unwrap(), dir.path().join("secrets"));
-    assert_eq!(located.value.plugins.paths, [dir.path().join("plugins")]);
+    assert_eq!(
+        located.value.station.plugins.paths,
+        [dir.path().join("plugins")]
+    );
     assert_eq!(
         located.value.provider.password,
         Some(SecretRef::File(dir.path().join("db-password")))
@@ -146,7 +152,7 @@ fn an_inline_or_environment_secret_is_reported_as_a_weakening() {
         dir.path(),
         "ai6.cfg",
         "[provider]\nlocation = \"sqlite:ai6.db\"\npassword = \"hunter2\"\n\
-         [unex]\nurl = \"https://unex.example\"\ntoken = { env = \"UNEX_TOKEN\" }\n",
+         [unex]\nurl = \"https://unex.example\"\nstation_token = { env = \"UNEX_TOKEN\" }\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
     let weakenings = located.weakenings();
@@ -242,14 +248,21 @@ fn the_search_takes_the_first_place_that_has_a_file() {
     let [explicit, named, user, system] = ["explicit", "named", "user", "system"].map(|name| {
         let dir = dir.path().join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        write(&dir, "ai6.cfg", &format!("station = \"{name}\"\n"))
+        write(&dir, "ai6.cfg", &format!("[station]\nid = \"{name}\"\n"))
     });
     let search = |explicit: Option<&Path>, named: Option<&Path>| SearchPath {
         explicit: explicit.map(Path::to_path_buf),
         variable: named.map(|path| ("AI6_CONFIG".to_owned(), path.to_path_buf())),
         candidates: vec![user.clone(), system.clone()],
     };
-    let station = |search: SearchPath| Bootstrap::find_in(&search).unwrap().value.station.unwrap();
+    let station = |search: SearchPath| {
+        Bootstrap::find_in(&search)
+            .unwrap()
+            .value
+            .station
+            .id
+            .unwrap()
+    };
     assert_eq!(station(search(Some(&explicit), Some(&named))), "explicit");
     assert_eq!(station(search(None, Some(&named))), "named");
     assert_eq!(station(search(None, None)), "user");
@@ -257,7 +270,7 @@ fn the_search_takes_the_first_place_that_has_a_file() {
     assert_eq!(station(search(None, None)), "system");
     std::fs::remove_file(&system).unwrap();
     let none = Bootstrap::find_in(&search(None, None)).unwrap();
-    assert!(none.path.is_none() && none.value.station.is_none());
+    assert!(none.path.is_none() && none.value.station.id.is_none());
 
     let missing = dir.path().join("absent.cfg");
     for refused in [search(Some(&missing), None), search(None, Some(&missing))] {
@@ -296,8 +309,7 @@ fn a_ca_file_gives_each_certificate_and_is_a_weakening_only_when_set() {
         "[unex]\nurl = \"https://unex.example\"\nca_file = \"chain.pem\"\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
-    let unex = located.value.unex.as_ref().unwrap();
-    assert_eq!(unex.ca_file.as_deref(), Some(chain.as_path()));
+    assert_eq!(located.value.unex.ca_file.as_deref(), Some(chain.as_path()));
     assert!(
         located.weakenings().iter().any(|w| w.contains("ca_file")),
         "{:?}",
@@ -346,24 +358,24 @@ fn plugins_keep_verified_is_a_count_or_none_and_defaults_to_eight() {
     let dir = tempfile::tempdir().unwrap();
     let read = |text: &str| {
         let path = write(dir.path(), "ai6.cfg", text);
-        Bootstrap::find(Some(&path)).map(|located| located.value.plugins.keep_verified())
+        Bootstrap::find(Some(&path)).map(|located| located.value.station.plugins.keep_verified())
     };
     assert_eq!(read("").unwrap(), ai6::KeepVerified::Newest(8));
     assert_eq!(
-        read("[plugins]\nkeep_verified = 0\n").unwrap(),
+        read("[station.plugins]\nkeep_verified = 0\n").unwrap(),
         ai6::KeepVerified::Newest(0)
     );
     assert_eq!(
-        read("[plugins]\nkeep_verified = 3\n").unwrap(),
+        read("[station.plugins]\nkeep_verified = 3\n").unwrap(),
         ai6::KeepVerified::Newest(3)
     );
     assert_eq!(
-        read("[plugins]\nkeep_verified = \"none\"\n").unwrap(),
+        read("[station.plugins]\nkeep_verified = \"none\"\n").unwrap(),
         ai6::KeepVerified::All
     );
     for refused in ["-1", "\"all\""] {
         assert!(
-            read(&format!("[plugins]\nkeep_verified = {refused}\n")).is_err(),
+            read(&format!("[station.plugins]\nkeep_verified = {refused}\n")).is_err(),
             "{refused}"
         );
     }
@@ -375,7 +387,7 @@ fn a_station_with_a_bad_ca_file_does_not_start() {
     write(dir.path(), "empty.pem", "");
     for unex in [
         "url = \"https://unex.example\"\nca_file = \"empty.pem\"\n",
-        "url = \"https://unex.example\"\nca_file = \"missing.pem\"\ntoken = \"t\"\n",
+        "url = \"https://unex.example\"\nca_file = \"missing.pem\"\nstation_token = \"t\"\n",
     ] {
         let path = write(dir.path(), "ai6.cfg", &format!("[unex]\n{unex}"));
         let output = ai6()
@@ -447,4 +459,183 @@ fn serve_help_lists_none_of_the_removed_flags() {
     ] {
         assert!(help.contains(kept), "{kept}");
     }
+}
+
+/// A value a person could keep in a file, and what no message may repeat.
+const PLANTED: &str = "pl4nted-s3cret-value";
+
+/// Writes the one file every program starts from in `dir`, with the addresses it needs.
+fn one_file(dir: &Path, unex_url: &str, gateway: u16, station: u16) -> PathBuf {
+    std::fs::create_dir_all(dir.join("config")).unwrap();
+    std::fs::write(dir.join("station-token"), "t".repeat(48)).unwrap();
+    let text = include_str!("one_file.cfg")
+        .replace("UNEX_URL", unex_url)
+        .replace("GATEWAY_LISTEN", &format!("127.0.0.1:{gateway}"))
+        .replace("STATION_LISTEN", &format!("127.0.0.1:{station}"));
+    write(dir, "ai6.cfg", &text)
+}
+
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+#[test]
+fn a_station_starts_from_the_one_file_every_program_shares() {
+    let dir = tempfile::tempdir().unwrap();
+    let port = free_port();
+    // Publishing to the closed port goes on in the background and does not stop the Station.
+    let config = one_file(dir.path(), "http://127.0.0.1:9", free_port(), port);
+    let mut station = ai6()
+        .args(["serve", "--config"])
+        .arg(&config)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let mut listening = false;
+    while std::time::Instant::now() < deadline && station.try_wait().unwrap().is_none() {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            listening = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = station.kill();
+    let output = station.wait_with_output().unwrap();
+    assert!(
+        listening,
+        "the Station listens on [station] listen: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        dir.path().join("station-state").is_dir(),
+        "its state is under [station] state_dir"
+    );
+    assert!(
+        !dir.path().join("unex-state").exists(),
+        "the gateway's directory is not the Station's"
+    );
+}
+
+#[test]
+fn a_station_refuses_a_key_nobody_knows_and_does_not_repeat_its_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = one_file(dir.path(), "http://127.0.0.1:9", free_port(), free_port());
+    let text = std::fs::read_to_string(&config).unwrap();
+    for (document, key) in [
+        (
+            format!("nobody_knows = \"{PLANTED}\"\n{text}"),
+            "nobody_knows",
+        ),
+        (
+            text.replace(
+                "[unex.access]",
+                &format!("[unex.access]\nnobody = \"{PLANTED}\""),
+            ),
+            "unex.access.nobody",
+        ),
+        (
+            text.replace("[station]", &format!("[station]\nlisten2 = \"{PLANTED}\"")),
+            "station.listen2",
+        ),
+    ] {
+        std::fs::write(&config, document).unwrap();
+        let output = ai6()
+            .args(["serve", "--config"])
+            .arg(&config)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{said}");
+        assert!(said.contains(key), "names {key}: {said}");
+        assert!(!said.contains(PLANTED), "{said}");
+    }
+}
+
+/// `[oo]` is the app's: no Rust program asks what is in it.
+#[test]
+fn every_program_leaves_oo_unread() {
+    let read = read("[oo]\nanything = { at = \"all\" }\nnumber = 1\n").unwrap();
+    assert_eq!(read.oo["number"], 1);
+}
+
+#[test]
+fn a_secret_in_a_refused_document_appears_in_no_message_in_any_format() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, text) in [
+        (
+            "toml.cfg",
+            format!("[provider]\npassword = \"{PLANTED}\"\nunknown = 1\n"),
+        ),
+        (
+            "json.json",
+            format!(r#"{{"provider": {{"password": "{PLANTED}", "unknown": 1}}}}"#),
+        ),
+        (
+            "yaml.yaml",
+            format!("provider:\n  password: {PLANTED}\n  unknown: 1\n"),
+        ),
+        ("toml2.cfg", format!("[unex]\nlisten = \"{PLANTED}\"\n")),
+        (
+            "json2.cfg",
+            format!("#!json\n{{\"unex\": {{\"listen\": \"{PLANTED}\"}}}}\n"),
+        ),
+        ("yaml2.cfg", format!("#!yaml\nunex:\n  listen: {PLANTED}\n")),
+        ("broken.cfg", format!("[unex]\nurl = \"{PLANTED}\n")),
+        (
+            "brokenjson.cfg",
+            format!("#!json\n{{\"url\": \"{PLANTED}\n"),
+        ),
+        ("brokenyaml.yaml", format!("url: \"{PLANTED}\n")),
+    ] {
+        let path = write(dir.path(), name, &text);
+        let refused = Bootstrap::read(&path).unwrap_err();
+        let shown = format!("{refused} {refused:?}");
+        assert!(!shown.contains(PLANTED), "{name}: {shown}");
+        let output = ai6()
+            .args(["identity", "--config"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{name}: {said}");
+        assert!(!said.contains(PLANTED), "{name}: {said}");
+    }
+}
+
+#[test]
+fn a_file_of_the_old_layout_is_refused_and_says_where_the_key_is_wrong() {
+    for (text, key) in [
+        ("station = \"hq-1\"\n", "station"),
+        ("state_dir = \"state\"\n", "state_dir"),
+        ("[plugins]\npaths = []\n", "plugins"),
+        ("[identity]\ndir = \"x\"\n", "identity"),
+        ("[secrets]\ndir = \"x\"\n", "secrets"),
+        ("[unex]\nurl = \"https://u\"\ntoken = \"t\"\n", "unex.token"),
+    ] {
+        let refused = read(text).map(|_| ()).unwrap_err();
+        assert!(refused.contains(key), "{text}: {refused}");
+    }
+}
+
+#[test]
+fn the_token_is_one_key_for_both_sides_of_the_station_channel() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "station-token", "t");
+    let path = write(
+        dir.path(),
+        "ai6.cfg",
+        "[unex]\nurl = \"https://unex.example\"\nstation_token = { file = \"station-token\" }\n",
+    );
+    let located = Bootstrap::find(Some(&path)).unwrap();
+    assert_eq!(
+        located.value.unex.station_token,
+        Some(SecretRef::File(dir.path().join("station-token"))),
+        "relative to the file, whichever program reads it"
+    );
 }

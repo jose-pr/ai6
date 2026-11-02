@@ -831,7 +831,7 @@ with input fixed at publish, run when the page asks for `data/NAME` as whoever h
 so a viewer sees only what their own permissions allow and a revoked grant applies at once.
 Feeds read; they never propose or send. Options, set by an administrator for everyone:
 `scripts = false`, `network = "own"` (its own files and feeds) or `"none"` (its own files), `feeds
-= false`, and a separate origin for pages (`unex.cfg` `[pages] origin`). You may also open one
+= false`, and a separate origin for pages (`ai6.cfg`'s `[unex.pages] origin`). You may also open one
 page with the network off.
 
 The remaining risk, plainly: a dashboard she made after reading text someone else wrote can be
@@ -844,7 +844,7 @@ and a proxy that strips the sandbox header.
 
 ## In the app
 
-With `assistant = false` in `unex.cfg` she is not served: the profile says so
+With `assistant = false` in the `unex` record she is not served: the profile says so
 (`moneypenny: false`), the app offers no card, button or chat for her, and its Settings say she is
 off and who can change that. Otherwise **Ask Moneypenny** (top right on every page, or Ctrl+Alt+I;
 ⌃⌘I on macOS) opens the chat:

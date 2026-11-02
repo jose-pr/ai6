@@ -99,7 +99,7 @@ impl std::fmt::Debug for LiveAccess {
 }
 
 impl LiveAccess {
-    /// Policy over `provider`'s records, with `host_chiefs` (`unex.cfg [access] chief`) always
+    /// Policy over `provider`'s records, with `host_chiefs` (`[unex.access] chief`) always
     /// chief. With `managed_by` an authorizer plugin decides and only the chief tier is the
     /// gateway's own: the routes that change the policy answer 409.
     pub fn new(
@@ -519,7 +519,7 @@ struct DelegableView {
 #[derive(Serialize)]
 struct ChiefView {
     stored: Vec<String>,
-    /// From `unex.cfg`: always chief, never changed here.
+    /// From `ai6.cfg`: always chief, never changed here.
     host: Vec<String>,
 }
 

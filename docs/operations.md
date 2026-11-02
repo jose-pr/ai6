@@ -486,7 +486,7 @@ locations, Station ID, plugin paths, the Headquarters lease), and the command-li
 roles, labels, terminal, capacity and watchdog defaults.
 
 Universal Exports edits the roster for operators when it is started with the same
-location (`unex.cfg`'s `[provider] location`, or `--provider`): `roster.read` and `roster.manage` on the
+location (`ai6.cfg`'s `[provider] location`, or `--provider`): `roster.read` and `roster.manage` on the
 scope `config:roster` (for example `scope = "config:roster"` in `access.toml`) let a person
 list and change Operations, Agents, roles and covers from Outer Office's Roster page, and
 Operations and Agents from their own pages too, each in a form drawn from the record's own type:

@@ -808,7 +808,8 @@ fn origin(server: Option<&str>, config: Option<&std::path::Path>) -> Result<Stri
     Ok(located
         .value
         .unex
-        .map_or_else(|| DEFAULT_SERVER.to_owned(), |unex| unex.url))
+        .url
+        .unwrap_or_else(|| DEFAULT_SERVER.to_owned()))
 }
 
 /// The certificate authorities to trust besides the public roots: `flag` (the flag or
@@ -823,8 +824,7 @@ fn ca_certificates(
         Some(_) => None,
         None => ai6::bootstrap::Bootstrap::find(config)
             .ok()
-            .and_then(|located| located.value.unex)
-            .and_then(|unex| unex.ca_file),
+            .and_then(|located| located.value.unex.ca_file),
     };
     let Some(path) = flag.or(from_file.as_deref()) else {
         return Ok(Vec::new());

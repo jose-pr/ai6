@@ -7,7 +7,7 @@
 //! fails the write with `InvalidData` (or `InvalidInput` for a request), as without
 //! settings.
 
-use serde::{Deserialize, Serialize};
+use guatiao::{FromValue, Schema, ToValue};
 
 use crate::bounds::{Limit, Seconds, TimeLimit};
 
@@ -16,59 +16,101 @@ const MIB: u64 = 1024 * 1024;
 
 /// `[registry.limits]`: every bound the Registry applies, one table per record family.
 #[non_exhaustive]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct RegistryLimits {
     /// `[registry.limits.accounts]`: pool accounts.
+    #[schema(title = "Pool accounts")]
+    #[map(default)]
     pub accounts: AccountLimits,
     /// `[registry.limits.agents]`: Agent records.
+    #[schema(title = "Agent records")]
+    #[map(default)]
     pub agents: AgentLimits,
     /// `[registry.limits.agent_roles]`: Agent roles of an Operation.
+    #[schema(title = "Agent roles of an Operation")]
+    #[map(default)]
     pub agent_roles: AgentRoleLimits,
     /// `[registry.limits.approvals]`: green ink requests and class authorizations.
+    #[schema(title = "Green ink requests and class authorizations")]
+    #[map(default)]
     pub approvals: ApprovalLimits,
     /// `[registry.limits.audit]`: audit records.
+    #[schema(title = "Audit records")]
+    #[map(default)]
     pub audit: AuditLimits,
     /// `[registry.limits.briefs]`: the brief queue.
+    #[schema(title = "The brief queue")]
+    #[map(default)]
     pub briefs: BriefLimits,
     /// `[registry.limits.cables]`: Cables.
+    #[schema(title = "Cables")]
+    #[map(default)]
     pub cables: CableLimits,
     /// `[registry.limits.clearance]`: clearance grants.
+    #[schema(title = "Clearance grants")]
+    #[map(default)]
     pub clearance: ClearanceLimits,
     /// `[registry.limits.files]`: the file Registry's own waits.
+    #[schema(title = "The file Registry's own waits")]
+    #[map(default)]
     pub files: FileLimits,
     /// `[registry.limits.held]`: briefs held by vetting.
+    #[schema(title = "Briefs held by vetting")]
+    #[map(default)]
     pub held: HeldLimits,
     /// `[registry.limits.issues]`: linked issues and the outbox.
+    #[schema(title = "Linked issues and the outbox")]
+    #[map(default)]
     pub issues: IssueLimits,
     /// `[registry.limits.logbook]`: Station logbooks.
+    #[schema(title = "Station logbooks")]
+    #[map(default)]
     pub logbook: LogbookLimits,
     /// `[registry.limits.proposals]`: Mission proposals.
+    #[schema(title = "Mission proposals")]
+    #[map(default)]
     pub proposals: ProposalLimits,
     /// `[registry.limits.quarantine]`: quarantines and their incidents.
+    #[schema(title = "Quarantines and their incidents")]
+    #[map(default)]
     pub quarantine: QuarantineLimits,
     /// `[registry.limits.sessions]`: Session records.
+    #[schema(title = "Session records")]
+    #[map(default)]
     pub sessions: SessionLimits,
     /// `[registry.limits.sleepers]`: Sleepers.
+    #[schema(title = "Sleepers")]
+    #[map(default)]
     pub sleepers: SleeperLimits,
     /// `[registry.limits.sources]`: Source items and reports.
+    #[schema(title = "Source items and reports")]
+    #[map(default)]
     pub sources: SourceLimits,
     /// `[registry.limits.stations]`: Station records.
+    #[schema(title = "Station records")]
+    #[map(default)]
     pub stations: StationLimits,
     /// `[registry.limits.timeline]`: the activity timeline.
+    #[schema(title = "The activity timeline")]
+    #[map(default)]
     pub timeline: TimelineLimits,
     /// `[registry.limits.tokens]`: access tokens.
+    #[schema(title = "Access tokens")]
+    #[map(default)]
     pub tokens: TokenLimits,
     /// `[registry.limits.usage]`: the usage ledger.
+    #[schema(title = "The usage ledger")]
+    #[map(default)]
     pub usage: UsageLimits,
 }
 
 impl RegistryLimits {
     /// One line per limit looser than its default, for the bootstrap file's weakenings.
     pub fn weakenings(&self) -> Vec<String> {
-        let (Ok(current), Ok(default)) = (
-            serde_json::to_value(self),
-            serde_json::to_value(Self::default()),
+        let (Some(current), Some(default)) = (
+            crate::directorates::m::records::to_json(self),
+            crate::directorates::m::records::to_json(&Self::default()),
         ) else {
             return Vec::new();
         };
@@ -78,16 +120,24 @@ impl RegistryLimits {
 
 /// `[registry.limits.accounts]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct AccountLimits {
-    /// Bytes of one account's record. Default 256 KiB.
+    /// Bytes of one account's record.
+    #[schema(title = "Bytes of one account's record", format = "bytes")]
+    #[map(default = AccountLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Live claims on one account; past it the oldest is dropped. Default 1,024.
+    /// Live claims on one account; past it the oldest is dropped.
+    #[schema(title = "Live claims on one account")]
+    #[map(default = AccountLimits::default().claims)]
     pub claims: Limit,
-    /// Quota windows kept per account. Default 8.
+    /// Quota windows kept per account.
+    #[schema(title = "Quota windows kept per account")]
+    #[map(default = AccountLimits::default().windows)]
     pub windows: Limit,
-    /// Days of token counts kept per account. Default 8.
+    /// Days of token counts kept per account.
+    #[schema(title = "Days of token counts kept per account")]
+    #[map(default = AccountLimits::default().kept_days)]
     pub kept_days: u32,
 }
 
@@ -104,23 +154,39 @@ impl Default for AccountLimits {
 
 /// `[registry.limits.agents]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct AgentLimits {
-    /// Bytes of one Agent record. Default 1 MiB.
+    /// Bytes of one Agent record.
+    #[schema(title = "Bytes of one Agent record", format = "bytes")]
+    #[map(default = AgentLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Operations one Agent record tallies. Default 128.
+    /// Operations one Agent record tallies.
+    #[schema(title = "Operations one Agent record tallies")]
+    #[map(default = AgentLimits::default().operations)]
     pub operations: Limit,
-    /// Clearances one Operation of an Agent record tallies. Default 8.
+    /// Clearances one Operation of an Agent record tallies.
+    #[schema(title = "Clearances one Operation of an Agent record tallies")]
+    #[map(default = AgentLimits::default().clearances)]
     pub clearances: Limit,
     /// Mission outcomes remembered per Agent, so a repeated report is counted once.
-    /// Default 256.
+    #[schema(title = "Mission outcomes remembered per Agent")]
+    #[map(default = AgentLimits::default().counted)]
     pub counted: Limit,
-    /// Model changes kept per Agent. Default 16.
+    /// Model changes kept per Agent.
+    #[schema(title = "Model changes kept per Agent")]
+    #[map(default = AgentLimits::default().model_history)]
     pub model_history: Limit,
-    /// Bytes of an outcome report's key. Default 512.
+    /// Bytes of an outcome report's key.
+    #[schema(title = "Bytes of an outcome report's key", format = "bytes")]
+    #[map(default = AgentLimits::default().key_bytes)]
     pub key_bytes: Limit,
-    /// Bytes of an outcome report's Agent, Operation and model. Default 256.
+    /// Bytes of an outcome report's Agent, Operation and model.
+    #[schema(
+        title = "Bytes of an outcome report's Agent, Operation and model",
+        format = "bytes"
+    )]
+    #[map(default = AgentLimits::default().agent_bytes)]
     pub agent_bytes: Limit,
 }
 
@@ -140,12 +206,16 @@ impl Default for AgentLimits {
 
 /// `[registry.limits.agent_roles]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct AgentRoleLimits {
-    /// Bytes of one Agent role record. Default 32 KiB.
+    /// Bytes of one Agent role record.
+    #[schema(title = "Bytes of one Agent role record", format = "bytes")]
+    #[map(default = AgentRoleLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Agent roles per Operation. Default 256.
+    /// Agent roles per Operation.
+    #[schema(title = "Agent roles per Operation")]
+    #[map(default = AgentRoleLimits::default().records)]
     pub records: Limit,
 }
 
@@ -160,31 +230,58 @@ impl Default for AgentRoleLimits {
 
 /// `[registry.limits.approvals]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct ApprovalLimits {
-    /// Bytes of one approval record. Default 16 KiB.
+    /// Bytes of one approval record.
+    #[schema(title = "Bytes of one approval record", format = "bytes")]
+    #[map(default = ApprovalLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Pending approval requests. Default 1,000.
+    /// Pending approval requests.
+    #[schema(title = "Pending approval requests")]
+    #[map(default = ApprovalLimits::default().pending)]
     pub pending: Limit,
-    /// Class authorizations. Default 1,000.
+    /// Class authorizations.
+    #[schema(title = "Class authorizations")]
+    #[map(default = ApprovalLimits::default().class_authorizations)]
     pub class_authorizations: Limit,
-    /// Requests one Mission may have. Default 64.
+    /// Requests one Mission may have.
+    #[schema(title = "Requests one Mission may have")]
+    #[map(default = ApprovalLimits::default().mission_requests)]
     pub mission_requests: Limit,
-    /// Bytes of a request's reason. Default 2,048.
+    /// Bytes of a request's reason.
+    #[schema(title = "Bytes of a request's reason", format = "bytes")]
+    #[map(default = ApprovalLimits::default().reason_bytes)]
     pub reason_bytes: Limit,
-    /// Bytes of a decision's note. Default 1,024.
+    /// Bytes of a decision's note.
+    #[schema(title = "Bytes of a decision's note", format = "bytes")]
+    #[map(default = ApprovalLimits::default().note_bytes)]
     pub note_bytes: Limit,
-    /// Bytes of a signer's name. Default 256.
+    /// Bytes of a signer's name.
+    #[schema(title = "Bytes of a signer's name", format = "bytes")]
+    #[map(default = ApprovalLimits::default().signer_bytes)]
     pub signer_bytes: Limit,
-    /// Bytes of a request's idempotency key. Default 256.
+    /// Bytes of a request's idempotency key.
+    #[schema(title = "Bytes of a request's idempotency key", format = "bytes")]
+    #[map(default = ApprovalLimits::default().idempotency_key_bytes)]
     pub idempotency_key_bytes: Limit,
     /// Step kinds, Agents, roles and proposed roles each class authorization may name.
-    /// Default 64.
+    #[schema(title = "Class entries")]
+    #[map(default = ApprovalLimits::default().class_entries)]
     pub class_entries: Limit,
-    /// Bytes of a class authorization's target pattern. Default 256.
+    /// Bytes of a class authorization's target pattern.
+    #[schema(
+        title = "Bytes of a class authorization's target pattern",
+        format = "bytes"
+    )]
+    #[map(default = ApprovalLimits::default().pattern_bytes)]
     pub pattern_bytes: Limit,
-    /// Bytes of each Agent or role a class authorization names. Default 128.
+    /// Bytes of each Agent or role a class authorization names.
+    #[schema(
+        title = "Bytes of each Agent or role a class authorization names",
+        format = "bytes"
+    )]
+    #[map(default = ApprovalLimits::default().name_bytes)]
     pub name_bytes: Limit,
 }
 
@@ -208,14 +305,20 @@ impl Default for ApprovalLimits {
 
 /// `[registry.limits.audit]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct AuditLimits {
-    /// Bytes of one audit record. Default 16 KiB.
+    /// Bytes of one audit record.
+    #[schema(title = "Bytes of one audit record", format = "bytes")]
+    #[map(default = AuditLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Audit records kept. Default 10,000.
+    /// Audit records kept.
+    #[schema(title = "Audit records kept")]
+    #[map(default = AuditLimits::default().records)]
     pub records: Limit,
-    /// Records one listing may ask for. Default 500.
+    /// Records one listing may ask for.
+    #[schema(title = "Records one listing may ask for")]
+    #[map(default = AuditLimits::default().results)]
     pub results: Limit,
 }
 
@@ -231,18 +334,26 @@ impl Default for AuditLimits {
 
 /// `[registry.limits.briefs]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct BriefLimits {
-    /// Bytes of one brief. Default 1 MiB.
+    /// Bytes of one brief.
+    #[schema(title = "Bytes of one brief", format = "bytes")]
+    #[map(default = BriefLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Queued briefs. Default 1,000.
+    /// Queued briefs.
+    #[schema(title = "Queued briefs")]
+    #[map(default = BriefLimits::default().records)]
     pub records: Limit,
-    /// Bytes of a brief's provenance. Default 16 KiB.
+    /// Bytes of a brief's provenance.
+    #[schema(title = "Bytes of a brief's provenance", format = "bytes")]
+    #[map(default = BriefLimits::default().provenance_bytes)]
     pub provenance_bytes: Limit,
     /// Bytes of a Mission ID: a longer one keeps its start and adds a short hash. It is a file
-    /// name, so it stays under 240 bytes whatever this says. Default 120, which leaves a
-    /// run's attempt room within `[registry.limits.sessions] id_bytes`.
+    /// name, so it stays under 240 bytes whatever this says. Default 120, which leaves a run's
+    /// attempt room within `[registry.limits.sessions] id_bytes`.
+    #[schema(title = "Mission id bytes", format = "bytes")]
+    #[map(default = BriefLimits::default().mission_id_bytes)]
     pub mission_id_bytes: Limit,
 }
 
@@ -259,16 +370,24 @@ impl Default for BriefLimits {
 
 /// `[registry.limits.cables]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct CableLimits {
-    /// Bytes of one Cable record. Default 2 MiB.
+    /// Bytes of one Cable record.
+    #[schema(title = "Bytes of one Cable record", format = "bytes")]
+    #[map(default = CableLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Cable records the Registry holds. Default 10,000.
+    /// Cable records the Registry holds.
+    #[schema(title = "Cable records the Registry holds")]
+    #[map(default = CableLimits::default().records)]
     pub records: Limit,
-    /// UTF-8 bytes of a Cable's body. Default 16 KiB.
+    /// UTF-8 bytes of a Cable's body.
+    #[schema(title = "UTF-8 bytes of a Cable's body", format = "bytes")]
+    #[map(default = CableLimits::default().body_bytes)]
     pub body_bytes: Limit,
-    /// Seconds a Cable may live. Default 86,400 (a day).
+    /// Seconds a Cable may live.
+    #[schema(title = "Seconds a Cable may live")]
+    #[map(default = CableLimits::default().max_ttl)]
     pub max_ttl: TimeLimit,
 }
 
@@ -285,14 +404,23 @@ impl Default for CableLimits {
 
 /// `[registry.limits.clearance]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct ClearanceLimits {
-    /// Bytes of one clearance grant. Default 16 KiB.
+    /// Bytes of one clearance grant.
+    #[schema(title = "Bytes of one clearance grant", format = "bytes")]
+    #[map(default = ClearanceLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Clearance grants. Default 10,000.
+    /// Clearance grants.
+    #[schema(title = "Clearance grants")]
+    #[map(default = ClearanceLimits::default().grants)]
     pub grants: Limit,
-    /// Bytes of a grant's signer, approval, model and reason. Default 512.
+    /// Bytes of a grant's signer, approval, model and reason.
+    #[schema(
+        title = "Bytes of a grant's signer, approval, model and reason",
+        format = "bytes"
+    )]
+    #[map(default = ClearanceLimits::default().text_bytes)]
     pub text_bytes: Limit,
 }
 
@@ -308,13 +436,16 @@ impl Default for ClearanceLimits {
 
 /// `[registry.limits.files]`: how long the file Registry waits. The SQL Registry ignores it.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct FileLimits {
     /// Seconds a record write retries replacing a file another process holds open.
-    /// Default 2.
+    #[schema(title = "Rename retry")]
+    #[map(default = FileLimits::default().rename_retry)]
     pub rename_retry: TimeLimit,
-    /// Seconds a write waits for the Registry's directory lock. Default 30.
+    /// Seconds a write waits for the Registry's directory lock.
+    #[schema(title = "Seconds a write waits for the Registry's directory lock")]
+    #[map(default = FileLimits::default().lock_wait)]
     pub lock_wait: TimeLimit,
 }
 
@@ -330,20 +461,38 @@ impl Default for FileLimits {
 /// `[registry.limits.held]`. A held record may be 64 KiB, room for its verdict, larger than a
 /// brief's `[registry.limits.briefs] record_bytes`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct HeldLimits {
-    /// Briefs one Operation may hold. Default 1,000.
+    /// Briefs one Operation may hold.
+    #[schema(title = "Briefs one Operation may hold")]
+    #[map(default = HeldLimits::default().per_operation)]
     pub per_operation: Limit,
-    /// Briefs held across the Registry. Default 10,000.
+    /// Briefs held across the Registry.
+    #[schema(title = "Briefs held across the Registry")]
+    #[map(default = HeldLimits::default().records)]
     pub records: Limit,
-    /// Held briefs one listing may ask for. Default 500.
+    /// Held briefs one listing may ask for.
+    #[schema(title = "Held briefs one listing may ask for")]
+    #[map(default = HeldLimits::default().results)]
     pub results: Limit,
-    /// Bytes of a stored clearance, the finding kinds a brief was released from. Default 4,096.
+    /// Bytes of a stored clearance, the finding kinds a brief was released from.
+    #[schema(title = "Clearance bytes", format = "bytes")]
+    #[map(default = HeldLimits::default().clearance_bytes)]
     pub clearance_bytes: Limit,
-    /// Bytes of the reason a held brief is refused for. Default 1,024.
+    /// Bytes of the reason a held brief is refused for.
+    #[schema(
+        title = "Bytes of the reason a held brief is refused for",
+        format = "bytes"
+    )]
+    #[map(default = HeldLimits::default().reason_bytes)]
     pub reason_bytes: Limit,
-    /// Bytes of who released or refused a held brief. Default 256.
+    /// Bytes of who released or refused a held brief.
+    #[schema(
+        title = "Bytes of who released or refused a held brief",
+        format = "bytes"
+    )]
+    #[map(default = HeldLimits::default().actor_bytes)]
     pub actor_bytes: Limit,
 }
 
@@ -375,16 +524,24 @@ impl RegistryLimits {
 
 /// `[registry.limits.logbook]`. A whole logbook's size is bounded by these four.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct LogbookLimits {
-    /// Reports kept per logbook, and handed to the next round. Default 20.
+    /// Reports kept per logbook, and handed to the next round.
+    #[schema(title = "Reports kept per logbook, and handed to the next round")]
+    #[map(default = LogbookLimits::default().entries)]
     pub entries: Limit,
-    /// Bytes of a report's summary. Default 4 KiB.
+    /// Bytes of a report's summary.
+    #[schema(title = "Bytes of a report's summary", format = "bytes")]
+    #[map(default = LogbookLimits::default().summary_bytes)]
     pub summary_bytes: Limit,
-    /// Findings per report. Default 32.
+    /// Findings per report.
+    #[schema(title = "Findings per report")]
+    #[map(default = LogbookLimits::default().findings)]
     pub findings: Limit,
-    /// Bytes of one finding. Default 1,024.
+    /// Bytes of one finding.
+    #[schema(title = "Bytes of one finding", format = "bytes")]
+    #[map(default = LogbookLimits::default().finding_bytes)]
     pub finding_bytes: Limit,
 }
 
@@ -426,16 +583,24 @@ impl LogbookLimits {
 
 /// `[registry.limits.proposals]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct ProposalLimits {
-    /// Bytes of one Mission proposal. Default 1 MiB.
+    /// Bytes of one Mission proposal.
+    #[schema(title = "Bytes of one Mission proposal", format = "bytes")]
+    #[map(default = ProposalLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Pending Mission proposals per Operation. Default 1,000.
+    /// Pending Mission proposals per Operation.
+    #[schema(title = "Pending Mission proposals per Operation")]
+    #[map(default = ProposalLimits::default().records)]
     pub records: Limit,
-    /// Proposals one listing may ask for. Default 500.
+    /// Proposals one listing may ask for.
+    #[schema(title = "Proposals one listing may ask for")]
+    #[map(default = ProposalLimits::default().results)]
     pub results: Limit,
-    /// Bytes of a proposal's idempotency key. Default 256.
+    /// Bytes of a proposal's idempotency key.
+    #[schema(title = "Bytes of a proposal's idempotency key", format = "bytes")]
+    #[map(default = ProposalLimits::default().idempotency_key_bytes)]
     pub idempotency_key_bytes: Limit,
 }
 
@@ -452,16 +617,24 @@ impl Default for ProposalLimits {
 
 /// `[registry.limits.quarantine]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct QuarantineLimits {
-    /// Bytes of one quarantine record. Default 16 KiB.
+    /// Bytes of one quarantine record.
+    #[schema(title = "Bytes of one quarantine record", format = "bytes")]
+    #[map(default = QuarantineLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Quarantine records. Default 10,000.
+    /// Quarantine records.
+    #[schema(title = "Quarantine records")]
+    #[map(default = QuarantineLimits::default().records)]
     pub records: Limit,
-    /// Incidents kept per Agent. Default 256.
+    /// Incidents kept per Agent.
+    #[schema(title = "Incidents kept per Agent")]
+    #[map(default = QuarantineLimits::default().incidents)]
     pub incidents: Limit,
-    /// Seconds an incident is kept. Default 604,800 (a week).
+    /// Seconds an incident is kept.
+    #[schema(title = "Seconds an incident is kept")]
+    #[map(default = QuarantineLimits::default().keep_incidents)]
     pub keep_incidents: TimeLimit,
 }
 
@@ -491,23 +664,36 @@ impl QuarantineLimits {
 
 /// `[registry.limits.sessions]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct SessionLimits {
-    /// Bytes of one Session record. Default 64 KiB.
+    /// Bytes of one Session record.
+    #[schema(title = "Bytes of one Session record", format = "bytes")]
+    #[map(default = SessionLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Session records. Default 100,000.
+    /// Session records.
+    #[schema(title = "Session records")]
+    #[map(default = SessionLimits::default().records)]
     pub records: Limit,
-    /// Bytes of a Session ID. Default 128.
+    /// Bytes of a Session ID.
+    #[schema(title = "Bytes of a Session ID. Default 128", format = "bytes")]
+    #[map(default = SessionLimits::default().id_bytes)]
     pub id_bytes: Limit,
-    /// Exposures recorded per Session. Default 32.
+    /// Exposures recorded per Session.
+    #[schema(title = "Exposures recorded per Session")]
+    #[map(default = SessionLimits::default().exposures)]
     pub exposures: Limit,
-    /// Bytes of an exposure's source. Default 128.
+    /// Bytes of an exposure's source.
+    #[schema(title = "Bytes of an exposure's source", format = "bytes")]
+    #[map(default = SessionLimits::default().exposure_source_bytes)]
     pub exposure_source_bytes: Limit,
-    /// Recent event lines kept per Session. Default 20.
+    /// Recent event lines kept per Session.
+    #[schema(title = "Recent event lines kept per Session")]
+    #[map(default = SessionLimits::default().recent_events)]
     pub recent_events: Limit,
     /// Characters kept of each recent event line and of a lost Session's reason.
-    /// Default 300.
+    #[schema(title = "Recent event chars")]
+    #[map(default = SessionLimits::default().recent_event_chars)]
     pub recent_event_chars: Limit,
 }
 
@@ -527,15 +713,20 @@ impl Default for SessionLimits {
 
 /// `[registry.limits.sleepers]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct SleeperLimits {
     /// Seconds a scheduled window may be late and still fire; an older one is skipped.
-    /// Default 86,400 (a day).
+    #[schema(title = "Seconds a scheduled window may be late and still fire")]
+    #[map(default = SleeperLimits::default().window_age)]
     pub window_age: TimeLimit,
-    /// Bytes of a Sleeper's prompt. Default 16 KiB.
+    /// Bytes of a Sleeper's prompt.
+    #[schema(title = "Bytes of a Sleeper's prompt", format = "bytes")]
+    #[map(default = SleeperLimits::default().prompt_bytes)]
     pub prompt_bytes: Limit,
-    /// Days a schedule is searched back for its latest window. Default 366.
+    /// Days a schedule is searched back for its latest window.
+    #[schema(title = "Days a schedule is searched back for its latest window")]
+    #[map(default = SleeperLimits::default().lookback_days)]
     pub lookback_days: u32,
 }
 
@@ -551,19 +742,31 @@ impl Default for SleeperLimits {
 
 /// `[registry.limits.issues]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct IssueLimits {
-    /// Linked issues one Mission holds at once. Default 32.
+    /// Linked issues one Mission holds at once.
+    #[schema(title = "Linked issues one Mission holds at once")]
+    #[map(default = IssueLimits::default().links_per_mission)]
     pub links_per_mission: Limit,
-    /// Outbox entries kept, settled ones dropped oldest first. Default 1,000.
+    /// Outbox entries kept, settled ones dropped oldest first.
+    #[schema(title = "Outbox entries kept, settled ones dropped oldest first")]
+    #[map(default = IssueLimits::default().outbox_records)]
     pub outbox_records: Limit,
-    /// Bytes of one outbox entry's text and payload. Default 128 KiB.
+    /// Bytes of one outbox entry's text and payload.
+    #[schema(
+        title = "Bytes of one outbox entry's text and payload",
+        format = "bytes"
+    )]
+    #[map(default = IssueLimits::default().entry_bytes)]
     pub entry_bytes: Limit,
     /// Replies from a linked issue one Mission stores; delivered ones make room first.
-    /// Default 200.
+    #[schema(title = "Replies from a linked issue one Mission stores")]
+    #[map(default = IssueLimits::default().replies_per_mission)]
     pub replies_per_mission: Limit,
-    /// Bytes of one stored reply, cut past it. Default 64 KiB.
+    /// Bytes of one stored reply, cut past it.
+    #[schema(title = "Bytes of one stored reply, cut past it", format = "bytes")]
+    #[map(default = IssueLimits::default().reply_bytes)]
     pub reply_bytes: Limit,
 }
 
@@ -581,15 +784,20 @@ impl Default for IssueLimits {
 
 /// `[registry.limits.sources]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct SourceLimits {
-    /// Bytes of a Source item's text. Default 64 KiB.
+    /// Bytes of a Source item's text.
+    #[schema(title = "Bytes of a Source item's text", format = "bytes")]
+    #[map(default = SourceLimits::default().item_text_bytes)]
     pub item_text_bytes: Limit,
     /// Times reporting a finished brief to its Source is tried before it is dropped.
-    /// Default 5.
+    #[schema(title = "Report attempts")]
+    #[map(default = SourceLimits::default().report_attempts)]
     pub report_attempts: Limit,
-    /// Bytes of the name a brief shows beside its Mission ID. Default 256.
+    /// Bytes of the name a brief shows beside its Mission ID.
+    #[schema(title = "Name bytes", format = "bytes")]
+    #[map(default = SourceLimits::default().name_bytes)]
     pub name_bytes: Limit,
 }
 
@@ -605,18 +813,28 @@ impl Default for SourceLimits {
 
 /// `[registry.limits.stations]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct StationLimits {
-    /// Bytes of one Station record. Default 1 MiB.
+    /// Bytes of one Station record.
+    #[schema(title = "Bytes of one Station record", format = "bytes")]
+    #[map(default = StationLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Station records. Default 1,000.
+    /// Station records.
+    #[schema(title = "Station records")]
+    #[map(default = StationLimits::default().records)]
     pub records: Limit,
-    /// Bytes of a Station's settings record. Default 4,096.
+    /// Bytes of a Station's settings record.
+    #[schema(title = "Bytes of a Station's settings record", format = "bytes")]
+    #[map(default = StationLimits::default().settings_bytes)]
     pub settings_bytes: Limit,
-    /// Missions a Station's settings may let it run at once. Default 1,024.
+    /// Missions a Station's settings may let it run at once.
+    #[schema(title = "Missions a Station's settings may let it run at once")]
+    #[map(default = StationLimits::default().mission_capacity)]
     pub mission_capacity: Limit,
-    /// Seconds after its last check-in that a Station counts as dark. Default 45.
+    /// Seconds after its last check-in that a Station counts as dark.
+    #[schema(title = "Seconds after its last check-in that a Station counts as dark")]
+    #[map(default = StationLimits::default().gone_dark_after)]
     pub gone_dark_after: Seconds,
 }
 
@@ -634,21 +852,35 @@ impl Default for StationLimits {
 
 /// `[registry.limits.timeline]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct TimelineLimits {
-    /// Events kept; the oldest are dropped past it. Default 10,000.
+    /// Events kept; the oldest are dropped past it.
+    #[schema(title = "Events kept")]
+    #[map(default = TimelineLimits::default().records)]
     pub records: Limit,
-    /// Bytes of one event. Default 8,192.
+    /// Bytes of one event.
+    #[schema(title = "Bytes of one event", format = "bytes")]
+    #[map(default = TimelineLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Bytes of an event's ID. Default 128.
+    /// Bytes of an event's ID.
+    #[schema(title = "Bytes of an event's ID. Default 128", format = "bytes")]
+    #[map(default = TimelineLimits::default().id_bytes)]
     pub id_bytes: Limit,
-    /// Bytes of an event's kind, action and detail keys. Default 64.
+    /// Bytes of an event's kind, action and detail keys.
+    #[schema(
+        title = "Bytes of an event's kind, action and detail keys",
+        format = "bytes"
+    )]
+    #[map(default = TimelineLimits::default().name_bytes)]
     pub name_bytes: Limit,
     /// Bytes of an event's Operation, Station, Mission, Session, actor and detail values.
-    /// Default 256.
+    #[schema(title = "Text bytes", format = "bytes")]
+    #[map(default = TimelineLimits::default().text_bytes)]
     pub text_bytes: Limit,
-    /// Detail entries per event. Default 8.
+    /// Detail entries per event.
+    #[schema(title = "Detail entries per event")]
+    #[map(default = TimelineLimits::default().detail_entries)]
     pub detail_entries: Limit,
 }
 
@@ -667,10 +899,12 @@ impl Default for TimelineLimits {
 
 /// `[registry.limits.tokens]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct TokenLimits {
-    /// Bytes of one access token record. Default 16 KiB.
+    /// Bytes of one access token record.
+    #[schema(title = "Bytes of one access token record", format = "bytes")]
+    #[map(default = TokenLimits::default().record_bytes)]
     pub record_bytes: Limit,
 }
 
@@ -684,12 +918,16 @@ impl Default for TokenLimits {
 
 /// `[registry.limits.usage]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct UsageLimits {
-    /// Bytes of one Mission's usage ledger. Default 1 MiB.
+    /// Bytes of one Mission's usage ledger.
+    #[schema(title = "Bytes of one Mission's usage ledger", format = "bytes")]
+    #[map(default = UsageLimits::default().ledger_bytes)]
     pub ledger_bytes: Limit,
-    /// Days of usage kept. Default 8.
+    /// Days of usage kept.
+    #[schema(title = "Days of usage kept")]
+    #[map(default = UsageLimits::default().kept_days)]
     pub kept_days: u32,
 }
 
@@ -723,14 +961,21 @@ mod tests {
 
     #[test]
     fn a_table_reads_partially_and_names_what_it_loosens() {
-        let limits: RegistryLimits =
-            toml::from_str("[sessions]\nrecords = \"none\"\n[files]\nlock_wait = 5\n").unwrap();
+        let limits: RegistryLimits = crate::directorates::m::records::from_toml(
+            "[sessions]\nrecords = \"none\"\n[files]\nlock_wait = 5\n",
+        )
+        .unwrap();
         assert_eq!(limits.sessions.records, Limit::UNBOUNDED);
         assert_eq!(limits.sessions.id_bytes, Limit::at(128));
         assert_eq!(
             limits.weakenings(),
             ["registry.limits.sessions.records none is looser than the default 100000"]
         );
-        assert!(toml::from_str::<RegistryLimits>("[sessions]\nrecordz = 1\n").is_err());
+        assert!(
+            crate::directorates::m::records::from_toml::<RegistryLimits>(
+                "[sessions]\nrecordz = 1\n"
+            )
+            .is_err()
+        );
     }
 }

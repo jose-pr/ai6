@@ -97,7 +97,8 @@ impl Station {
         std::fs::write(
             &bootstrap,
             format!(
-                "station = '{name}'
+                "[station]
+id = '{name}'
 state_dir = '.'
                  [provider]
 location = '{location}'

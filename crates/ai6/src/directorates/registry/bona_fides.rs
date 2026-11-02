@@ -10,6 +10,8 @@
 
 use std::io;
 
+use guatiao::schema::KindBuilder;
+use guatiao::{Alloc, FromValue, MapError, Schema, ToValue, Value, ValueError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -235,14 +237,29 @@ pub(super) fn unseal(brief: &mut Brief, kept: Option<Provenance>) {
 
 /// How a Station treats the provider libraries it finds on its plugin path.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+)]
 #[serde(rename_all = "lowercase")]
+#[map(rename_all = "lowercase")]
 pub enum PluginProfile {
     /// Only a library a pin or publisher accepts loads, and from a copy the Station verified.
+    #[schema(label = "Strict: only a library a pin or publisher accepts")]
     Strict,
     /// Every library loads; each one no pin accepts is reported as a weakening.
+    #[schema(label = "Report: load all, and report each one no pin accepts")]
     Report,
     /// Libraries load unchecked.
+    #[schema(label = "Off: load unchecked")]
     Off,
 }
 
@@ -278,8 +295,12 @@ impl core::str::FromStr for PluginProfile {
     }
 }
 
+/// How [`KeepVerified::All`] is written.
+const KEEP_EVERY: &str = "none";
+
 /// Which verified copies of provider libraries a host keeps besides the ones it just loaded:
-/// `[plugins] keep_verified`. Default the newest 8 files, by when each was written.
+/// `keep_verified` of `[station.plugins]` and `[unex.plugins]`. Default the newest 8 files, by
+/// when each was written.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeepVerified {
@@ -299,7 +320,7 @@ impl core::fmt::Display for KeepVerified {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Newest(count) => write!(formatter, "{count}"),
-            Self::All => formatter.write_str("none"),
+            Self::All => formatter.write_str(KEEP_EVERY),
         }
     }
 }
@@ -308,7 +329,7 @@ impl core::str::FromStr for KeepVerified {
     type Err = String;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        if text == "none" {
+        if text == KEEP_EVERY {
             return Ok(Self::All);
         }
         text.parse()
@@ -317,31 +338,35 @@ impl core::str::FromStr for KeepVerified {
     }
 }
 
-impl<'de> Deserialize<'de> for KeepVerified {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct Visitor;
-        impl serde::de::Visitor<'_> for Visitor {
-            type Value = KeepVerified;
-
-            fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                formatter.write_str("a count or \"none\"")
-            }
-
-            fn visit_u64<E: serde::de::Error>(self, count: u64) -> Result<Self::Value, E> {
-                Ok(KeepVerified::Newest(count))
-            }
-
-            fn visit_i64<E: serde::de::Error>(self, count: i64) -> Result<Self::Value, E> {
-                u64::try_from(count)
-                    .map(KeepVerified::Newest)
-                    .map_err(|_| E::custom("keep_verified cannot be negative"))
-            }
-
-            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
-                text.parse().map_err(E::custom)
-            }
+impl ToValue for KeepVerified {
+    fn to_value_in(&self, alloc: Alloc) -> Result<Value, ValueError> {
+        match self {
+            Self::Newest(count) => count.to_value_in(alloc),
+            Self::All => KEEP_EVERY.to_owned().to_value_in(alloc),
         }
-        deserializer.deserialize_any(Visitor)
+    }
+}
+
+impl FromValue for KeepVerified {
+    fn from_value(value: &Value) -> Result<Self, MapError> {
+        if <&str>::try_from(value).is_ok_and(|text| text == KEEP_EVERY) {
+            return Ok(Self::All);
+        }
+        u64::from_value(value)
+            .map(Self::Newest)
+            .map_err(|_| MapError::bad_value("a count, 0 or more, or \"none\" for no limit"))
+    }
+}
+
+impl Schema for KeepVerified {
+    fn kind(alloc: Alloc) -> KindBuilder {
+        KindBuilder::union_in(
+            alloc,
+            vec![
+                KindBuilder::int_bounds_in(alloc, Some(0), None),
+                KindBuilder::enumeration_in(alloc, &[(KEEP_EVERY, "No limit")]),
+            ],
+        )
     }
 }
 
@@ -1007,11 +1032,14 @@ mod tests {
 
     #[test]
     fn keep_verified_reads_a_count_or_none_and_round_trips_through_its_text() {
-        #[derive(Deserialize)]
+        #[derive(guatiao::FromValue)]
         struct Table {
             keep_verified: KeepVerified,
         }
-        let read = |text: &str| toml::from_str::<Table>(text).map(|table| table.keep_verified);
+        let read = |text: &str| {
+            crate::directorates::m::records::from_toml::<Table>(text)
+                .map(|table| table.keep_verified)
+        };
         assert_eq!(KeepVerified::default(), KeepVerified::Newest(8));
         assert_eq!(read("keep_verified = 3").unwrap(), KeepVerified::Newest(3));
         assert_eq!(read("keep_verified = 0").unwrap(), KeepVerified::Newest(0));
