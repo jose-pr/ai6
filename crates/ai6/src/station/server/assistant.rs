@@ -46,7 +46,7 @@ mod workspace;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
@@ -99,7 +99,10 @@ fn roster_tables(state: &DaemonState) -> Tables {
 }
 
 /// A harness, shared by the desk (to send it messages) and its pump (to read it).
-type SharedSession = Arc<Mutex<Object<dyn AgentSession>>>;
+// A read lock serves the pump while it waits on the harness's output: an exclusive one, taken
+// again the moment it is let go, keeps a message or a Stop waiting for as long as the harness
+// is silent. Only replacing the harness takes the write lock.
+type SharedSession = Arc<RwLock<Object<dyn AgentSession>>>;
 
 /// What became of a report the desk's link sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1025,7 +1028,7 @@ impl Desk {
                         }
                     }
                     session
-                        .lock()
+                        .read()
                         .map_err(|_| "assistant Session lock failed".to_owned())?
                         .send_message(AgentMessage { text })
                         .map_err(|error| error.to_string())
@@ -1325,7 +1328,7 @@ impl Desk {
                 return Err(format!("the assistant harness did not start: {error}"));
             }
         };
-        let session = Arc::new(Mutex::new(session));
+        let session = Arc::new(RwLock::new(session));
         self.live
             .lock()
             .map_err(|_| "assistant lock failed")?
@@ -1730,7 +1733,7 @@ impl Desk {
         flags.interrupting.store(true, Ordering::Release);
         let interrupted = tokio::task::spawn_blocking(move || {
             session
-                .lock()
+                .read()
                 .map_err(|_| "assistant Session lock failed".to_owned())?
                 .interrupt()
                 .map_err(|error| error.to_string())
@@ -1853,7 +1856,7 @@ impl Pump {
             if self.stopping.load(Ordering::Acquire) {
                 break Some("the Station is stopping".to_owned());
             }
-            let read = match self.session.lock() {
+            let read = match self.session.read() {
                 Ok(session) => {
                     if session_id.is_none() {
                         session_id = session.session_id().ok().flatten();
@@ -1962,7 +1965,7 @@ impl Pump {
             }
         };
         self.flags.alive.store(false, Ordering::Release);
-        if let Ok(session) = self.session.lock() {
+        if let Ok(session) = self.session.read() {
             let _ = session.close();
         }
         // What the closed harness left is saved before its directory goes, and later commits
@@ -2002,7 +2005,7 @@ impl Pump {
         report_resume_failure(&self.conversation_id, &fallback.resumed, failure);
         let mut session = self
             .session
-            .lock()
+            .write()
             .map_err(|_| "assistant Session lock failed".to_owned())?;
         let _ = session.close();
         match fallback.harness.start(&fallback.handler, fallback.start) {
@@ -2805,6 +2808,8 @@ mod tests {
         resumes: Vec<AgentResume>,
         messages: Vec<String>,
         interrupts: usize,
+        /// A read of [`Script::ReadsLong`] ran out with no output.
+        read_ran_out: bool,
     }
 
     /// What a scripted harness does with a message.
@@ -2812,6 +2817,8 @@ mod tests {
     enum Script {
         /// Answers `answer: <message>` and completes.
         Answers,
+        /// As `Answers`, with each read waiting on the harness's output for as long as it takes.
+        ReadsLong,
         /// Exits, as its handler reports it.
         Dies,
         /// Never writes anything.
@@ -2890,7 +2897,7 @@ mod tests {
         fn answer(&self, message: &str) {
             let mut events = self.events.lock().unwrap();
             match self.script {
-                Script::Answers => {
+                Script::Answers | Script::ReadsLong => {
                     events.push_back(event("system", Some("init")));
                     events.push_back(event(EVENT_TEXT, Some(&format!("answer: {message}"))));
                     events.push_back(event("completed", Some(&format!("answer: {message}"))));
@@ -2989,11 +2996,21 @@ mod tests {
         }
 
         fn next_event(&self, _timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
-            let next = self.events.lock().unwrap().pop_front();
-            if next.is_none() {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                let next = self.events.lock().unwrap().pop_front();
+                if next.is_some() {
+                    return Ok(next);
+                }
                 std::thread::sleep(Duration::from_millis(5));
+                if self.script != Script::ReadsLong {
+                    return Ok(None);
+                }
+                if Instant::now() >= deadline {
+                    self.asked.lock().unwrap().read_ran_out = true;
+                    return Ok(None);
+                }
             }
-            Ok(next)
         }
 
         fn interrupt(&self) -> Result<(), ProviderError> {
@@ -3594,6 +3611,26 @@ mod tests {
         assert_eq!(a.parent(), b.parent());
         drop(asked);
         fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_message_reaches_a_harness_whose_output_is_being_waited_on() {
+        let fixture = scripted(true, IDLE, Script::ReadsLong, Script::ReadsLong);
+        fixture.desk.handle(job("c-1", "First")).await;
+        let completed = |want: usize| {
+            kinds(&fixture, "c-1")
+                .iter()
+                .filter(|kind| *kind == EVENT_COMPLETED)
+                .count()
+                == want
+        };
+        until(|| completed(1)).await;
+        fixture.desk.handle(job("c-1", "Second")).await;
+        until(|| completed(2)).await;
+        assert!(
+            !fixture.asked.lock().unwrap().read_ran_out,
+            "the message waited for the read to give up"
+        );
     }
 
     #[test]
