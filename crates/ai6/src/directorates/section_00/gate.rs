@@ -5,10 +5,11 @@
 //!
 //! The Station is reached through the Session's Cable endpoint (`AI6_CABLE_MCP_URL` and
 //! `AI6_CABLE_MCP_TOKEN` in the harness environment), so a gate works wherever the harness
-//! runs. Claude Code runs `ai6 green-ink gate` as a `PreToolUse` hook; the Codex handler calls
-//! [`gate`] for each command approval the app-server asks for; the Station's `theater_run`
-//! tool applies [`decide`] itself. Best effort only: a command that hides its arguments is not
-//! seen, so the guarantee is the credential, which Q leases only against an approval.
+//! runs. Claude Code and the Antigravity CLI run `ai6 green-ink gate` as a `PreToolUse` hook; the
+//! Codex handler calls [`gate`] for each command approval the app-server asks for; the Station's
+//! `theater_run` tool applies [`decide`] itself. Best effort only: a command that hides its
+//! arguments is not seen, so the guarantee is the credential, which Q leases only against an
+//! approval.
 //!
 //! [`classify`]: crate::directorates::m::approvals::classify
 //! [`gate`]: crate::directorates::section_00::gate::gate
@@ -479,16 +480,20 @@ mod client {
         ))
     }
 
-    /// Answers a Claude Code `PreToolUse` hook: `input` is the JSON the hook reads on standard
-    /// input. For a shell command [`gate`] holds, and for input that is not a hook call with a
-    /// command, the decision to print, which denies the call and gives Claude the reason;
-    /// `None` (print nothing, let the call go on) otherwise.
+    /// Answers a `PreToolUse` hook of Claude Code or the Antigravity CLI: `input` is the JSON the
+    /// hook reads on standard input. For a shell command [`gate`] holds, and for input that is not
+    /// a hook call with a command, the decision to print, which denies the call and gives the
+    /// harness the reason, in the form the harness's input shows it reads; `None` (print nothing,
+    /// let the call go on) otherwise.
     pub fn pre_tool_use(input: &str, client: Option<&GateClient>) -> Option<String> {
         let Ok(input) = serde_json::from_str::<Value>(input) else {
             return Some(deny(
                 "Green ink: the hook input could not be read, so the command is held.",
             ));
         };
+        if input.get("toolCall").is_some() {
+            return antigravity_pre_tool_use(&input, client);
+        }
         let Some(command) = input.pointer("/tool_input/command").and_then(Value::as_str) else {
             return Some(deny(
                 "Green ink: the hook input names no command, so the call is held.",
@@ -498,6 +503,30 @@ mod client {
         match gate(command, cwd, client) {
             GateVerdict::Allow => None,
             GateVerdict::Hold(reason) => Some(deny(&reason)),
+        }
+    }
+
+    /// The same for the Antigravity CLI 1.4.12, which names the command `toolCall.args.CommandLine`
+    /// and runs it in the first of `workspacePaths`, a list it keeps in path order. It reads a
+    /// denial as `decision` and `reason`, runs the call on empty output, and does not run it when
+    /// the hook fails or prints something else.
+    fn antigravity_pre_tool_use(input: &Value, client: Option<&GateClient>) -> Option<String> {
+        let deny = |reason: &str| {
+            Some(serde_json::json!({ "decision": "deny", "reason": reason }).to_string())
+        };
+        let Some(command) = input
+            .pointer("/toolCall/args/CommandLine")
+            .and_then(Value::as_str)
+        else {
+            return deny("Green ink: the hook input names no command, so the call is held.");
+        };
+        let cwd = input
+            .pointer("/workspacePaths/0")
+            .and_then(Value::as_str)
+            .map(Path::new);
+        match gate(command, cwd, client) {
+            GateVerdict::Allow => None,
+            GateVerdict::Hold(reason) => deny(&reason),
         }
     }
 
@@ -600,6 +629,50 @@ mod client {
             }
             let quiet = json!({ "cwd": PathBuf::from("."), "tool_input": { "command": "ls" } });
             assert_eq!(pre_tool_use(&quiet.to_string(), None), None);
+        }
+
+        /// The input as the Antigravity CLI 1.4.12 writes it for `run_command`.
+        fn antigravity_input(command: &str, workspace: &Path) -> String {
+            json!({
+                "artifactDirectoryPath": "/home/agent/.gemini/antigravity-cli/brain/c",
+                "conversationId": "c",
+                "lastUserInput": "go",
+                "modelName": "gemini-3.8-flash-low",
+                "stepIdx": 2,
+                "toolCall": {
+                    "args": {"CommandLine": command, "WaitMsBeforeAsync": 2000, "toolSummary": "t"},
+                    "name": "run_command"
+                },
+                "transcriptPath": "/home/agent/.gemini/antigravity-cli/brain/c/transcript.jsonl",
+                "workspacePaths": [workspace, "/after/it"],
+            })
+            .to_string()
+        }
+
+        #[test]
+        fn the_antigravity_clis_hook_is_answered_in_its_own_words() {
+            let repo = repository();
+            // No Station to ask, so the governed step is held; the first workspace is where the
+            // command runs, so `git push` finds that repository's refs.
+            let input = antigravity_input("git push origin v1", repo.path());
+            let output: Value =
+                serde_json::from_str(&pre_tool_use(&input, None).expect("held")).unwrap();
+            assert_eq!(output["decision"], "deny");
+            assert!(output["reason"].as_str().unwrap().contains("Green ink"));
+            assert!(output.get("hookSpecificOutput").is_none());
+
+            let quiet = antigravity_input("ls", repo.path());
+            assert_eq!(
+                pre_tool_use(&quiet, None),
+                None,
+                "empty output runs the call"
+            );
+
+            let nameless = json!({ "toolCall": { "name": "run_command", "args": {} } });
+            let output: Value =
+                serde_json::from_str(&pre_tool_use(&nameless.to_string(), None).expect("held"))
+                    .unwrap();
+            assert_eq!(output["decision"], "deny");
         }
     }
 }
