@@ -179,7 +179,7 @@ const fn is_true(value: &bool) -> bool {
     *value
 }
 
-fn url(server: &Url, segments: &[&str]) -> Result<Url, String> {
+pub(crate) fn url(server: &Url, segments: &[&str]) -> Result<Url, String> {
     let mut url = server.clone();
     url.path_segments_mut()
         .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
@@ -199,7 +199,7 @@ fn policy_path<'a>(operation: Option<&'a str>, tail: &[&'a str]) -> Vec<&'a str>
 }
 
 /// Sends one request; a refusal is the gateway's own reason.
-async fn exchange(
+pub(crate) async fn exchange(
     client: &Client,
     token: &str,
     method: Method,
@@ -230,11 +230,11 @@ async fn exchange(
     Err(format!("Universal Exports returned HTTP {status}{reason}"))
 }
 
-fn text(value: &Value) -> String {
+pub(crate) fn text(value: &Value) -> String {
     value.as_str().map_or_else(String::new, plain)
 }
 
-fn list(value: &Value) -> String {
+pub(crate) fn list(value: &Value) -> String {
     value
         .as_array()
         .map(|items| items.iter().map(text).collect::<Vec<_>>().join(","))

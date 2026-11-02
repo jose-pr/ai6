@@ -103,6 +103,21 @@ comma separated, or `-`. A Session state is free text from the board and include
 
 Mission lists include only Missions with a provider Session registered at the gateway.
 
+- `ai6ctl missions --compartment <ID>` keeps what that compartment covers;
+  `ai6ctl missions products <MISSION_ID>` prints a Mission's outcome, CX report and refs.
+
+### Compartments
+
+- `ai6ctl compartments` lists what the person may read: `COMPARTMENT ACTIONS COVERS READ_IN`.
+- `ai6ctl compartments show <ID>`.
+- `ai6ctl compartments set <ID> [--description TEXT] [--actions a,b] [--min-clearance LEVEL]
+  [--max-fanout N|none]` makes one or changes it; what is not named stays.
+- `ai6ctl compartments cover <ID> operation:<ID>|mission:<ID> [--no-propagate]`, `uncover`.
+- `ai6ctl compartments read-in <ID> <SUBJECT> [--no-propagate]`, `read-out`.
+- `ai6ctl compartments remove <ID>`.
+
+A refusal prints the gateway's reason and exits 1.
+
 ### Controls
 
 Each control needs `mission.control` on the Mission's Operation. It posts

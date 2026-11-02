@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod access;
+mod compartments;
 
 use clap::{Args, Parser, Subcommand};
 use reqwest::{Client, Method, StatusCode, Url};
@@ -97,7 +98,9 @@ enum Command {
         #[command(subcommand)]
         command: PagesCommand,
     },
-    /// List registered Missions, optionally filtered by Operation.
+    /// List registered Missions, optionally filtered by Operation or compartment; or read one's
+    /// products.
+    #[command(args_conflicts_with_subcommands = true)]
     Missions {
         /// Keep Missions from this Operation.
         #[arg(long)]
@@ -105,6 +108,16 @@ enum Command {
         /// With --operation, also keep Missions of every Operation under it.
         #[arg(long, requires = "operation")]
         subtree: bool,
+        /// Keep Missions this compartment covers.
+        #[arg(long)]
+        compartment: Option<String>,
+        #[command(subcommand)]
+        command: Option<MissionsCommand>,
+    },
+    /// List the compartments you may read, or show, change, cover or read into one.
+    Compartments {
+        #[command(subcommand)]
+        command: Option<compartments::CompartmentsCommand>,
     },
     /// List the Operations you may act on as a tree, each under its nearest Operation you
     /// may read, with your actions; or show one.
@@ -519,6 +532,15 @@ enum IssueProposalsCommand {
         operation: String,
         #[arg(long)]
         reason: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MissionsCommand {
+    /// Show what a Mission produced: its outcome, CX report and refs.
+    Products {
+        /// AI6 Mission ID.
+        mission_id: String,
     },
 }
 
@@ -960,10 +982,41 @@ async fn run() -> Result<(), String> {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             pages(&client, &server, &token, command).await?;
         }
-        Command::Missions { operation, subtree } => {
+        Command::Missions {
+            command: Some(MissionsCommand::Products { mission_id }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            compartments::products(&client, &server, &token, &mission_id).await?;
+        }
+        Command::Missions {
+            operation,
+            subtree,
+            compartment,
+            command: None,
+        } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let filter = operation.as_deref().map(|operation| (operation, subtree));
-            print_missions(missions(&client, &server, &token, filter).await?);
+            let listed = match compartment {
+                Some(compartment) => {
+                    let response = client
+                        .get(endpoint(&server, "/v1/missions"))
+                        .query(&[("compartment", compartment)])
+                        .bearer_auth(&token);
+                    let mut listed: Vec<BoardMission> =
+                        send(response, "a signed-in user", "Mission list").await?;
+                    if let Some(operation) = &operation {
+                        listed.retain(|mission| &mission.operation_id == operation);
+                    }
+                    listed
+                }
+                None => missions(&client, &server, &token, filter).await?,
+            };
+            print_missions(listed);
+        }
+        Command::Compartments { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            compartments::run(&client, &server, &token, command).await?;
         }
         Command::Access { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
