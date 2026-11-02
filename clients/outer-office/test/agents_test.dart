@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show DropdownButton, Tab, TextField;
+    show ActionChip, DropdownButton, Tab, TextField;
 import 'package:outer_office/agents/agents_page.dart' show AgentSummary;
 import 'package:outer_office/main.dart';
 
@@ -76,9 +76,74 @@ const _agents = [
   },
 ];
 
+const _scorecard = {
+  'window_days': 30,
+  'small_sample': 5,
+  'unattributed': 1,
+  'agents': [
+    {
+      'agent': '007',
+      'standing': {
+        'attempts': {
+          'done': [
+            {'mission_id': 'm-1', 'session_id': 'm-1.1'},
+            {'mission_id': 'm-2', 'session_id': 'm-2.1'},
+            {'mission_id': 'm-3', 'session_id': 'm-3.1'},
+          ],
+          'failed': [
+            {'mission_id': 'm-4', 'session_id': 'm-4.1'},
+          ],
+          'lost': [
+            {'mission_id': 'm-5', 'session_id': 'm-5.1'},
+          ],
+        },
+        'judged': 4,
+        'failure_rate': 0.25,
+        'small_sample': true,
+        'refused_tools': 2,
+        'usage': {'input': 1000, 'output': 500, 'cost_micro_usd': 1_230_000},
+        'wall_secs': 720.0,
+      },
+      'routes': [
+        {
+          'route': {'handler': 'claude', 'model': 'sonnet', 'pool': 'team'},
+          'standing': {
+            'attempts': {
+              'done': [
+                {'mission_id': 'm-1', 'session_id': 'm-1.1'},
+              ],
+            },
+            'judged': 1,
+            'failure_rate': 0.0,
+            'small_sample': true,
+            'usage': {'input': 0, 'output': 0, 'cost_micro_usd': 0},
+            'wall_secs': 0.0,
+          },
+        },
+      ],
+    },
+  ],
+  'models': [
+    {
+      'model': null,
+      'standing': {
+        'attempts': {},
+        'judged': 0,
+        'small_sample': true,
+        'usage': {'input': 0, 'output': 0, 'cost_micro_usd': 0},
+        'wall_secs': 0.0,
+      },
+    },
+  ],
+};
+
 /// A board whose person holds `actions` on Operation G, answering the Agents routes and
-/// recording every request in `requests`.
-MissionBoard signedIn(List<http.Request> requests, List<String> actions) {
+/// recording every request in `requests`. With `roster.read` the scorecard answers too.
+MissionBoard signedIn(
+  List<http.Request> requests,
+  List<String> actions, {
+  List<String> roster = const [],
+}) {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
@@ -88,6 +153,13 @@ MissionBoard signedIn(List<http.Request> requests, List<String> actions) {
       if (path == '/v1/user/operations/G/agents') {
         return http.Response(
           jsonEncode(_agents),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (path == '/v1/user/operations/G/agents/scorecard') {
+        return http.Response(
+          jsonEncode(_scorecard),
           200,
           headers: {'content-type': 'application/json'},
         );
@@ -117,6 +189,7 @@ MissionBoard signedIn(List<http.Request> requests, List<String> actions) {
     groups: const [],
     expiresAt: 1e12,
     operations: [UserOperationAccess(operationId: 'G', actions: actions)],
+    roster: roster,
   );
   return board;
 }
@@ -183,6 +256,51 @@ void main() {
         findsNothing,
         reason: 'agent.configure is needed',
       );
+    },
+  );
+
+  testWidgets(
+    'the scorecard needs the roster and opens the Missions behind a number',
+    (tester) async {
+      final without = <http.Request>[];
+      await openAgents(tester, signedIn(without, ['agent.read']));
+      expect(
+        find.text('Scorecard'),
+        findsNothing,
+        reason: 'roster.read is needed',
+      );
+      expect(
+        without.map((request) => request.url.path),
+        isNot(contains('/v1/user/operations/G/agents/scorecard')),
+      );
+
+      final requests = <http.Request>[];
+      await openAgents(
+        tester,
+        signedIn(requests, ['agent.read'], roster: ['roster.read']),
+      );
+      await tester.tap(find.text('Scorecard'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('4 judged · 25 % failed · small sample: not ranked'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(ActionChip, '3 done'), findsOneWidget);
+      expect(find.text('1 lost with a Station'), findsOneWidget);
+      expect(
+        find.text('\$1.23 · 1500 tokens · 2 tools refused · 12 min'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('claude · sonnet · pool team'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('1 attempts name no Agent'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(ActionChip, '3 done'));
+      await tester.pumpAndSettle();
+      expect(find.text('m-1'), findsOneWidget);
+      expect(find.text('m-3'), findsOneWidget);
     },
   );
 

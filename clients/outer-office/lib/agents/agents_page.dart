@@ -10,6 +10,7 @@ import '../settings/oo_config.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_link.dart';
 import '../theme/oo_icon.dart';
+import 'scorecard.dart';
 
 /// The clearances, lowest first.
 const clearances = ['desk', 'field', '00'];
@@ -597,6 +598,12 @@ class _AgentsPageState extends State<AgentsPage>
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   children: [
+                    if (widget.board.canReadScorecard(operation) &&
+                        named == null)
+                      ScorecardSection(
+                        board: widget.board,
+                        operation: operation,
+                      ),
                     for (final agent in agents)
                       _AgentTile(
                         agent: agent,

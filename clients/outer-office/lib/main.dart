@@ -17,6 +17,7 @@ import 'access/access_page.dart';
 import 'compartments/compartments_page.dart';
 import 'access/access_words.dart';
 import 'agents/agents_page.dart';
+import 'agents/scorecard.dart';
 import 'assistant/assistant_controller.dart';
 import 'assistant/chat_layout.dart';
 import 'assistant/chat_region.dart';
@@ -1692,6 +1693,50 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       for (final agent in jsonDecode(response.body) as List<dynamic>)
         AgentSummary.fromJson(agent as Map<String, dynamic>),
     ];
+  }
+
+  /// Whether this account may read an Operation's scorecard: `agent.read` there and
+  /// `roster.read`, since it shows which model each Agent ran on.
+  bool canReadScorecard(String operationId) =>
+      canReadRoster && agentOperations.contains(operationId);
+
+  /// How each Agent, route and model has run an Operation's Missions over its window.
+  Future<ScorecardSummary> loadScorecard(String operationId) async {
+    if (demo) {
+      return ScorecardSummary.fromJson({
+        'window_days': 30,
+        'small_sample': 5,
+        'agents': [
+          {
+            'agent': '007',
+            'standing': {
+              'judged': 13,
+              'failure_rate': 0.15,
+              'small_sample': false,
+              'attempts': {
+                'done': [
+                  {'mission_id': 'mission-007', 'session_id': 'mission-007.1'},
+                ],
+              },
+              'usage': {'input': 1200, 'output': 300, 'cost_micro_usd': 40000},
+              'wall_secs': 1800,
+            },
+            'routes': [],
+          },
+        ],
+        'models': [],
+      });
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/agents/scorecard',
+    );
+    if (response.statusCode != 200) {
+      throw _readRefused(response.statusCode, "the Operation's scorecard");
+    }
+    return ScorecardSummary.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
   }
 
   /// Holds an Agent at `clearance` or below in an Operation (`agent.configure`).
