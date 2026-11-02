@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::placement;
-use crate::directorates::medical::exposure::{ExposureGate, Restriction};
 use crate::directorates::q::{
     Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin, Loadout,
     LoadoutCatalog, PoolChoice, SecretBroker, SecretLease, SecretLeaseRequest, choose_pools,
@@ -202,7 +201,6 @@ pub(super) fn issue(
     broker: &SecretBroker,
     mission: &Mission,
     agent_id: &str,
-    exposure: &ExposureGate,
     site: Site,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<Option<SecretLease>, String> {
@@ -216,13 +214,6 @@ pub(super) fn issue(
         environment.remove(&variable);
     }
     let mission_id = mission.mission_id.as_str();
-    if exposure.restricts(Restriction::Secrets) {
-        eprintln!(
-            "ai6: Mission {mission_id:?} read untrusted input and its Operation restricts \
-             secrets, so its Session gets no pool account"
-        );
-        return Ok(None);
-    }
     let desk = &state.station.credentials.accounts;
     // A check-in during a slow hand-over (a Codex login) renews this claim too.
     lock(&desk.pending).insert(mission_id.to_owned());
@@ -1258,6 +1249,48 @@ operations = ["other-*"]
 kind = "anthropic-auth-token"
 secret = "env-gamma"
 "#;
+
+    /// Strict exposure takes an exposed Session's secrets, not the credential its harness reaches
+    /// its model with: without that one no Source Mission could run at all.
+    #[tokio::test]
+    async fn an_exposed_session_gets_its_harness_credential_and_no_other_secret() {
+        for (mission, loadouts, wanted) in [
+            (
+                "exposed-pooled",
+                format!("{ENV_POOLS}\n[loadout.007]\nsecrets = [\"forge\"]\n[secret.forge]\nenv = \"GH_TOKEN\"\n"),
+                "fake-env-alpha-0451",
+            ),
+            (
+                "exposed-loadout",
+                "[loadout.007]\nsecrets = [\"model\", \"forge\"]\n\
+                 [secret.model]\nenv = \"CLAUDE_CODE_OAUTH_TOKEN\"\n\
+                 [secret.forge]\nenv = \"GH_TOKEN\"\n"
+                    .to_owned(),
+                "fake-model-0451",
+            ),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let (state, _now, _) = pooled_state(root.path(), "", "", &loadouts);
+            declare(&state);
+            create_mission(&state, mission);
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .expose(mission, &["brief:source".to_owned()])
+                .unwrap();
+            start_mission_by_id(&state, mission).await;
+            wait_for_state(&state, mission, MissionState::Done).await;
+            let (_, _, environment, _) = calls(mission).remove(0);
+            assert_eq!(
+                environment.get("CLAUDE_CODE_OAUTH_TOKEN").map(String::as_str),
+                Some(wanted),
+                "{mission}"
+            );
+            assert!(!environment.contains_key("GH_TOKEN"), "{mission}");
+            until_released(&state).await;
+        }
+    }
 
     #[tokio::test]
     async fn a_session_gets_exactly_one_account_credential_and_frees_it_when_done() {

@@ -455,7 +455,8 @@ targets = ["tag v*", "origin:refs/tags/*"]   # globs on the approval's target; d
   that issues credentials of its own stops honouring it, while a value already in the
   harness's environment stays there.
 - A Session the Operation's [exposure](medical.md) policy restricts with `secrets` gets no
-  new leases.
+  new leases but its harness's model credential: a secret whose `env` is a provider credential
+  variable (below). A Mission from a Source is exposed from its start, so this is how it runs.
 - Each lease is on the Mission's timeline (`credential` / `leased`), naming the secrets and
   the approval, never a value.
 

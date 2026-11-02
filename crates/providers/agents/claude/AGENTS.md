@@ -112,6 +112,11 @@ and 1. `utilization` is in the published `SDKRateLimitInfo` type of
 from a live account, so another scale leaves `used_permille` as `None`. Other events carry
 no quota.
 
+A `result` with `is_error` true or an `error_*` subtype is an event of kind `failed`, never
+`completed`, with its `result` text or its `errors`: Claude Code 2.1.316 writes such a result when no
+login reached a model (`subtype: success`) and when a turn was interrupted
+(`error_during_execution`), and stays running in both.
+
 A `result` event also carries `AgentEvent::usage`: its `usage` block (`input_tokens`,
 `output_tokens`, `cache_creation_input_tokens` as cache writes, `cache_read_input_tokens`) and
 `total_cost_usd` in micro-dollars, marked `cumulative`. Whether `usage` is per turn or per

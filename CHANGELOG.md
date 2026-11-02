@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- A harness that reached no model no longer ends its Mission `done`: a Claude Code `result` with
+  `is_error` or an `error_*` subtype is a failed turn, whatever its subtype says. Under strict
+  exposure a Session keeps the credential its harness reaches its model with (its pool account, or
+  a loadout secret in a provider credential variable), so a Source Mission can run; every other
+  secret stays withheld.
 - A stalled Mission can be resumed: the stall closes its harness and keeps its safe house, which
   is finished when the Mission reaches a final state, also when that is a cancel with no live
   Session. A refused resume says why: the Station logs the cause, and the operator's answer

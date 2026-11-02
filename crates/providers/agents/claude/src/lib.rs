@@ -1538,7 +1538,9 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
         });
     }
     let tools = decode_tools(value);
+    let error_result = event_type == "result" && result_is_error(value);
     let kind = match event_type {
+        "result" if error_result => "failed",
         "result" => "completed",
         "error" => "failed",
         "assistant" if !tools.is_empty() => "tool",
@@ -1554,7 +1556,8 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
                 .and_then(Value::as_str)
         })
         .or_else(|| value.pointer("/event/delta/text").and_then(Value::as_str))
-        .map(str::to_string);
+        .map(str::to_string)
+        .or_else(|| error_result.then(|| result_errors(value)).flatten());
     Some(AgentEvent {
         kind: kind.to_string(),
         text,
@@ -1564,6 +1567,27 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
         tools,
         quota: decode_quota(value),
     })
+}
+
+/// Whether a `result` reports that the turn did not do its work: `is_error`, which Claude Code
+/// 2.1.316 sets with `subtype: success` when no login reached a model, or an `error_*` subtype.
+fn result_is_error(value: &Value) -> bool {
+    value.get("is_error").and_then(Value::as_bool) == Some(true)
+        || value
+            .get("subtype")
+            .and_then(Value::as_str)
+            .is_some_and(|subtype| subtype.starts_with("error"))
+}
+
+/// The `errors` of a `result` with no `result` text, one per line.
+fn result_errors(value: &Value) -> Option<String> {
+    let errors: Vec<&str> = value
+        .get("errors")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    (!errors.is_empty()).then(|| errors.join("\n"))
 }
 
 /// The tools an `assistant` message calls, one per tool-call content block: a `tool_use`
@@ -2642,8 +2666,48 @@ mod tests {
             "result": "Tool call failed"
         });
         let event = decode_event(&value, b"{}".to_vec()).unwrap();
-        assert_eq!(event.kind, "completed");
+        assert_eq!(event.kind, "failed");
+        assert_eq!(event.text.as_deref(), Some("Tool call failed"));
         assert_eq!(event.limit, None);
+    }
+
+    /// As Claude Code 2.1.316 writes them. One that never logged in reaches no model and still
+    /// says `success`; an interrupted turn has no `result` at all, only `errors`.
+    #[test]
+    fn a_result_reporting_an_error_does_not_complete_the_turn() {
+        let not_logged_in = json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": true,
+            "result": "Not logged in \u{b7} Please run /login",
+            "stop_reason": "stop_sequence",
+            "terminal_reason": "api_error",
+            "session_id": "c75d9e6e-f5fe-45d2-b05d-f2c88f0d132b",
+            "total_cost_usd": 0,
+        });
+        let event = decode_event(&not_logged_in, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, "failed");
+        assert_eq!(
+            event.text.as_deref(),
+            Some("Not logged in \u{b7} Please run /login")
+        );
+
+        let interrupted = json!({
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "result": null,
+            "errors": ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"],
+            "terminal_reason": "aborted_streaming",
+            "stop_reason": null,
+            "session_id": "b46e80da-b2eb-4336-b717-a18df95b965b",
+        });
+        let event = decode_event(&interrupted, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, "failed");
+        assert!(event.text.unwrap().contains("ede_diagnostic"));
+
+        let done = json!({"type": "result", "subtype": "success", "is_error": false, "result": "ok"});
+        assert_eq!(decode_event(&done, b"{}".to_vec()).unwrap().kind, "completed");
     }
 
     /// A harness that exits while its terminal keeps the output open (ConPTY) ends the Session

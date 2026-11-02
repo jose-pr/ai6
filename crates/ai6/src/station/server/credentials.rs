@@ -14,7 +14,7 @@ use std::time::Duration;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
 use crate::directorates::q::{
-    LoadoutCatalog, SecretBackend, SecretBroker, SecretDefinition, SecretLease, SecretLeaseRequest,
+    CREDENTIAL_VARIABLES, LoadoutCatalog, SecretBackend, SecretBroker, SecretDefinition, SecretLease, SecretLeaseRequest,
     StationSecrets,
 };
 use crate::directorates::registry::approvals::{Approval, ApprovalStatus};
@@ -206,7 +206,9 @@ impl SecretBackend for Shared {
 /// Claims a pool account for a Session of `mission` when its Agent draws from a pool, and
 /// leases the Agent's loadout secrets; puts each value in `environment` under its variable,
 /// replacing what the Mission held before. An Agent without a loadout or pool gets nothing;
-/// an exposed Session whose Operation restricts `secrets` gets no new leases.
+/// an exposed Session whose Operation restricts `secrets` gets only what its harness reaches its
+/// model with (a pool account, or a loadout secret in a provider credential variable): without
+/// it the harness could not run, and a Session that read untrusted text is the common case.
 ///
 /// Fails when the backend refuses an ordinary secret or no pool account can be had, so a
 /// Session never starts without the credentials its loadout and pools promise. Blocks on the
@@ -246,7 +248,6 @@ pub(super) fn issue(
         &broker,
         mission,
         agent,
-        exposure,
         site,
         environment,
     )? {
@@ -284,17 +285,21 @@ fn issue_loadout(
     for name in loadout.secret_names() {
         environment.remove(catalog.secret(name).env());
     }
-    if exposure.restricts(Restriction::Secrets) {
+    let restricted = exposure.restricts(Restriction::Secrets);
+    if restricted {
         eprintln!(
             "ai6: Mission {mission_id:?} read untrusted input and its Operation restricts \
-             secrets, so its Session gets no credentials"
+             secrets, so its Session gets only its harness's model credential"
         );
-        return Ok(());
     }
     let (ordinary, protected): (Vec<_>, Vec<_>) = loadout
         .secret_names()
         .iter()
         .map(|name| catalog.secret(name))
+        .filter(|definition| {
+            !restricted
+                || (!definition.green_ink() && CREDENTIAL_VARIABLES.contains(&definition.env()))
+        })
         .filter(|definition| {
             let kept = reserved.is_none_or(|reserved| !reserved.contains(definition.env()));
             if !kept {
