@@ -2385,6 +2385,8 @@ struct IssuedAccessToken {
     token_id: String,
     token: String,
     expires_at: f64,
+    /// Seconds it has left, so a client schedules by this rather than by its own clock.
+    expires_in: f64,
     /// When renewing stops ([`session_end`]).
     ends_at: Option<f64>,
 }
@@ -2394,6 +2396,8 @@ struct IssuedAccessToken {
 struct RenewedAccessToken {
     token_id: String,
     expires_at: f64,
+    /// Seconds it has left, so a client schedules by this rather than by its own clock.
+    expires_in: f64,
     /// When renewing stops ([`session_end`]).
     ends_at: Option<f64>,
 }
@@ -2624,6 +2628,7 @@ async fn renew(
     Ok(Json(RenewedAccessToken {
         token_id: extended.token_id().to_owned(),
         expires_at: extended.expires_at(),
+        expires_in: extended.expires_at() - unix_timestamp()?,
         ends_at: session_end(extended.issued_at(), extended.expires_at(), session_max),
     }))
 }
@@ -2697,6 +2702,7 @@ async fn issue_access_token_record(
         token_id,
         token,
         expires_at,
+        expires_in: expires_at - issued_at,
         ends_at: session_end(issued_at, expires_at, session_max),
     })
 }
@@ -5594,6 +5600,10 @@ mod tests {
         let expires_at = time_in(&signed_in, "expires_at");
         assert!(expires_at >= before + 3_600.0, "{signed_in}");
         assert!(
+            (time_in(&signed_in, "expires_in") - 3_600.0).abs() < 1e-3,
+            "{signed_in}"
+        );
+        assert!(
             (time_in(&signed_in, "ends_at") - (expires_at + 3_600.0)).abs() < 1e-3,
             "{signed_in}"
         );
@@ -5606,6 +5616,8 @@ mod tests {
         assert!(renewed.get("token").is_none(), "{renewed}");
         let renewed_until = time_in(&renewed, "expires_at");
         assert!(renewed_until >= before + 3_600.0, "{renewed}");
+        let left = time_in(&renewed, "expires_in");
+        assert!((3_590.0..=3_600.0).contains(&left), "{renewed}");
         assert!(
             (time_in(&renewed, "ends_at") - (before - 10.0 + 7_200.0)).abs() < 1e-3,
             "{renewed}"

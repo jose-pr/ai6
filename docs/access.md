@@ -110,7 +110,9 @@ chat, her tools and a proposal waiting for **Confirm** carry on. The app asks `[
 renew_before` (ten minutes) ahead, on its own timer, and tries again after a failure until the
 gateway answers; only a `401` ends the sign-in. Renewing stops `[gateway] session_max` (twelve
 hours) after signing in, with `ends_at` in the answer saying when, and `renew_before` ahead of that
-the app says so once. There is no idle sign-out: an open app renews until then.
+the app says so once. There is no idle sign-out: an open app renews until then. It schedules by
+`expires_in`, the seconds the gateway says are left, so a wrong clock on the person's machine does not
+change when it asks.
 
 `session_max` is a choice to weigh. A token copied out of memory stays usable until then rather
 than for an hour, renewing does not ask for the password again, and a directory that does not

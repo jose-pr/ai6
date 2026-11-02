@@ -2408,11 +2408,12 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     _tokenTimer = null;
     final before = limits.refresh.renewBefore;
     final expiresAt = _tokenExpiresAt;
-    if (before == null || expiresAt == null) return;
-    final ends = DateTime.fromMillisecondsSinceEpoch(
-      (expiresAt * 1000).round(),
-    );
-    final left = ends.difference(ooClock());
+    final seconds = (body['expires_in'] as num?)?.toDouble();
+    if (before == null || expiresAt == null || seconds == null) return;
+    // From what the gateway says is left, not `expires_at`: this machine's clock may be hours
+    // out, which would renew too late or ask again as soon as each answer came.
+    final left = Duration(milliseconds: (seconds * 1000).round());
+    final ends = ooClock().add(left);
     final wait = left - before;
     final endsAt = _tokenEndsAt;
     if (endsAt != null && expiresAt >= endsAt) {
@@ -2424,7 +2425,12 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     }
     // A lifetime shorter than `renew_before` is renewed halfway through: renewing at once would
     // ask again as soon as each answer came.
-    _tokenTimer = Timer(wait > Duration.zero ? wait : left ~/ 2, _renewToken);
+    _tokenTimer = Timer(
+      left > Duration.zero
+          ? (wait > Duration.zero ? wait : left ~/ 2)
+          : limits.refresh.sessions ?? limits.refresh.renewRetry,
+      _renewToken,
+    );
   }
 
   /// Asks for more time on the same token (`POST /v1/auth/renew`). Nothing bound to its value

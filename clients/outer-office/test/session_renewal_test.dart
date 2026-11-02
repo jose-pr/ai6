@@ -47,9 +47,15 @@ class FakeChannel implements AssistantChannel {
 /// A gateway whose clock is the test's: tokens last an hour from when they are asked for, up to
 /// [session] from sign-in.
 class FakeGateway {
-  FakeGateway({this.session = const Duration(hours: 12)});
+  FakeGateway({
+    this.session = const Duration(hours: 12),
+    this.clockAhead = Duration.zero,
+  });
 
   final Duration session;
+
+  /// How far the gateway's clock is ahead of the app's.
+  final Duration clockAhead;
   final renewals = <String>[];
   var person = 'ana';
   var moneypenny = false;
@@ -63,9 +69,11 @@ class FakeGateway {
   Map<String, Object?> _times() {
     final cap = _signedInAt.add(session);
     final wanted = ooClock().add(_hour);
+    final until = wanted.isAfter(cap) ? cap : wanted;
     return {
-      'expires_at': _unix(wanted.isAfter(cap) ? cap : wanted),
-      'ends_at': _unix(cap),
+      'expires_at': _unix(until.add(clockAhead)),
+      'expires_in': until.difference(ooClock()).inMilliseconds / 1000,
+      'ends_at': _unix(cap.add(clockAhead)),
     };
   }
 
@@ -195,6 +203,24 @@ void main() {
     expect(gateway.renewals, hasLength(1));
     await close(tester, board);
   });
+
+  for (final clockAhead in [
+    const Duration(hours: 3),
+    -const Duration(hours: 3),
+  ]) {
+    testWidgets('a clock off by $clockAhead still renews once, on time', (
+      tester,
+    ) async {
+      final gateway = FakeGateway(clockAhead: clockAhead);
+      final board = await signedIn(tester, gateway);
+      await tester.pump(const Duration(minutes: 49));
+      expect(gateway.renewals, isEmpty);
+      await tester.pump(const Duration(minutes: 2));
+      await settle(tester);
+      expect(gateway.renewals, hasLength(1));
+      await close(tester, board);
+    });
+  }
 
   testWidgets('renew_before 0 never renews', (tester) async {
     final gateway = FakeGateway();
