@@ -60,7 +60,7 @@ so a provider built for them for any host loads here.
 What AI6 adds:
 
 ```rust
-pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
+pub const SCOPE_KINDS: [&str; 5] = ["station", "operation", "theater", "config", "compartment"];
                               // "config:roster" is the roster every Station reads,
                               // "config:assistant" Moneypenny's repositories,
                               // CONFIG_ACCESS ("config:access") the global access policy,
@@ -68,8 +68,9 @@ pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"]
 pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.manage,
                               // agent.configure, agent.read, approval.class,
                               // approval.decide, assistant.memory.admin, audit.read,
-                              // cable.read, cable.send, mission.control, mission.create,
-                              // mission.read, pool.manage, pool.read, roster.manage,
+                              // cable.read, cable.send, compartment.cover, compartment.manage,
+                              // compartment.read, mission.control, mission.create, mission.read,
+                              // mission.status, pool.manage, pool.read, product.read, roster.manage,
                               // roster.read, session.input, session.read,
                               // station.configure, station.read; cable.* on operation:<id>
                               // bound Moneypenny's Cables for the person;
@@ -78,7 +79,8 @@ pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.man
                               // a policy at config:access (global) or operation:<id>
 pub const OPERATION_ACTIONS: &[&str];   // the ACTIONS that mean something on an Operation:
                               // agent.*, approval.*, cable.*, mission.*, pool.*, session.*,
-                              // audit.read, access.read, access.manage. A role bound at an
+                              // audit.read, access.read, access.manage, compartment.cover,
+                              // product.read. A role bound at an
                               // `operation:` scope grants only these there
 pub fn role_authorizer() -> RoleAuthorizerBuilder;   // builder limited to SCOPE_KINDS
 pub fn access_from_toml(source: &str, max_bytes: Limit) -> Result<EffectiveAccess, AccessPolicyError>;
@@ -92,7 +94,8 @@ pub fn load_policy(path: impl AsRef<Path>, max_bytes: Limit) -> Result<AccessPol
 `AccessPolicy` is the record `access`: `roles: BTreeMap<String, RoleDef { actions,
 description? }>`, `rules: Vec<RuleDef { subject, scope, role, propagate, editor?,
 changed_unix? }>` (order is meaning), `delegable: Option<Vec<String>>` (`None` is
-`default_delegable()`: every Operation action but `access.manage` and `approval.class`),
+`default_delegable()`: every Operation action but `access.manage`, `approval.class` and
+`compartment.cover`; a compartment grant never counts towards what an editor may hand out),
 `chief: Vec<String>` (subjects) and `limits`. `from_toml`,
 `from_json`, `to_json`; the file form is `[role.<name>]` / `[[rule]]` plus top-level `chief`
 and `delegable`. `seeded_policy()` is what a first start writes: `controller`, `operator`
@@ -272,6 +275,11 @@ stricter check a provider's `put` and a snapshot go through: an Operation a comp
 exist, past `RosterSettings::max_compartment_rules` (10 000 pairs per compartment; `none` for no
 bound) is refused. A cover or read-in of an Operation reaches down the tree unless `propagate =
 false`; nothing reaches upward. Union across compartments; first match inside one is any match.
+
+`directorates::registry::products`: `mission_status(&dyn RegistryBackend, &FiledBrief) -> Value`, the fields
+any holder of `mission.status` sees and nothing else, and `mission_product(.., limit)`, with the outcome's
+`state`, `reason`, `branch` and `summary`, the CX report and the refs, each text cut with `CUT_MARKER`. An
+outcome's other keys (Session IDs, who recovered it) are not part of a product.
 
 ## Station runtime limits (`ai6::station::limits`)
 
@@ -1148,7 +1156,7 @@ pub struct ConfigDefinitions {
     pub revision: ConfigRevision,
     pub records: Vec<(String, serde_json::Value)>,   // by key
     pub writable: bool,                              // the provider takes put/remove
-}
+}   // new(revision, records, writable), for a provider built outside this crate
 /// Check-in key `config` of every Station (serde; empty fields are omitted).
 #[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigStatus {
@@ -1716,7 +1724,8 @@ Exports can run on any store. `RegistryBackend` is all of them together, impleme
 every type that implements each family (a blanket impl: nothing to write for it).
 
 ```rust
-pub trait BriefStore;        // proposals, queued briefs, claims, leases, outcomes (store.rs)
+pub trait BriefStore;        // proposals, queued briefs, claims, leases, outcomes (store.rs);
+                             // filed_brief(key), filed_briefs(operation, limit) -> FiledBrief { brief, state, attempts, outcome }
 pub trait StationStore;      // check-ins, Station settings, Headquarters election (store.rs)
 pub trait AccessTokenStore;  // Universal Exports access tokens (store.rs)
 pub trait CableStore;        // Cables, their delivery state and send quotas (store.rs)
@@ -1776,6 +1785,7 @@ impl QuarantineLimits { pub fn history_bytes(&self) -> Limit; }   // 16 × recor
 pub struct Limit;       // u64 or no bound; reads a number, null or "none"; writes a number or null
 impl Limit { pub const UNBOUNDED: Self; pub const fn at(n: u64) -> Self; pub const fn get(self) -> Option<u64>;
     pub fn allows<N: TryInto<u64>>(self, n: N) -> bool; pub fn or_max(self) -> usize; }   // Display: n or "none"
+pub struct Rate;        // a number per second or no bound, same null / "none"; at(f64), get(), UNBOUNDED, Display
 pub struct Seconds(pub Duration);   // fractional seconds, finite and not negative; Serialize + Deserialize
 pub struct TimeLimit;   // Seconds or no bound, same null / "none" rule
 impl TimeLimit { pub const UNBOUNDED: Self; pub const fn at(d: Duration) -> Self; pub const fn secs(s: u64) -> Self;
@@ -3703,7 +3713,7 @@ it, never the Agent's other conversations (its `session_id` is required). Recipi
 both omitted from JSON when the Cable was not sent for a person. Its sender bucket is keyed
 by Agent and person (`sender:<agent>:person:<person>`), so each person has their own.
 
-`CableRelay::with_person_audit(write: impl Fn(&CableAuditRecord) -> Result<(), String>)`
+`CableRelay::with_durable_audit(write: impl Fn(&CableAuditRecord) -> Result<(), String>)`
 installs the durable log of Cables sent for a person: the relay calls it with the Cable's
 record (decision `accepted`, its ID) before `submit_cable`, also on an idempotent retry, and
 refuses the send (`Unavailable`, an `audit_failed` record to the sink) when it errs or none is

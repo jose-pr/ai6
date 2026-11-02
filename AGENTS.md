@@ -77,6 +77,10 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
   stores things.
   The host's tests build the access plugins as dev-dependencies and load them from beside the
   test binary: clean `target/` after a plugin is renamed, since the host loads every library.
+- Clearance is how far an Agent may act in its own work; a Compartment is what one may know of, and
+  say to, other Operations' work. A compartment carries no policy authority and its action list is
+  closed. Ask `compartments::current` for every decision: nothing that crosses an Operation answers
+  from memory, and each crossing is audited first.
 - A project's `.ai6/` configuration is read only for a registered Operation.
 - Names come from the Bond / SIS lore in `docs/organization.md`; use a field name only
   where the code has the thing.
