@@ -41,7 +41,20 @@ impl core::fmt::Display for ai6::bootstrap::format::FormatError
 pub fn ai6::bootstrap::format::FormatError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const ai6::bootstrap::format::EXTENSIONS: [&str; 5]
 pub fn ai6::bootstrap::format::from_str<T: serde_core::de::DeserializeOwned>(ai6::bootstrap::format::Format, &str) -> core::result::Result<T, ai6::bootstrap::format::FormatError>
+pub fn ai6::bootstrap::format::parse(&std::path::Path, &str) -> core::result::Result<guatiao::value::value::Value, ai6::bootstrap::format::FormatError>
+pub fn ai6::bootstrap::format::read<T: guatiao::value::convert::FromValue>(&std::path::Path, &str) -> core::result::Result<T, ai6::bootstrap::format::FormatError>
 pub fn ai6::bootstrap::format::to_string<T: serde_core::ser::Serialize>(ai6::bootstrap::format::Format, &T) -> core::result::Result<alloc::string::String, ai6::bootstrap::format::FormatError>
+pub mod ai6::bootstrap::public
+#[non_exhaustive] pub enum ai6::bootstrap::public::PublicError
+pub ai6::bootstrap::public::PublicError::Format(ai6::bootstrap::format::FormatError)
+pub ai6::bootstrap::public::PublicError::NotAnOrigin
+impl core::error::Error for ai6::bootstrap::public::PublicError
+impl core::fmt::Display for ai6::bootstrap::public::PublicError
+pub fn ai6::bootstrap::public::PublicError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::bootstrap::public::PublicFile
+pub ai6::bootstrap::public::PublicFile::left_out: alloc::vec::Vec<alloc::string::String>
+pub ai6::bootstrap::public::PublicFile::text: alloc::string::String
+pub fn ai6::bootstrap::public::public_file(&ai6::bootstrap::Bootstrap) -> core::result::Result<ai6::bootstrap::public::PublicFile, ai6::bootstrap::public::PublicError>
 #[non_exhaustive] pub enum ai6::bootstrap::SecretRef
 pub ai6::bootstrap::SecretRef::Env(alloc::string::String)
 pub ai6::bootstrap::SecretRef::File(std::path::PathBuf)
@@ -53,20 +66,20 @@ pub fn ai6::bootstrap::SecretRef::relative_to(self, &std::path::Path) -> Self
 pub fn ai6::bootstrap::SecretRef::weakening(&self) -> core::option::Option<alloc::string::String>
 impl core::fmt::Debug for ai6::bootstrap::SecretRef
 pub fn ai6::bootstrap::SecretRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'de> serde_core::de::Deserialize<'de> for ai6::bootstrap::SecretRef
-pub fn ai6::bootstrap::SecretRef::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+impl guatiao::schema::describe::Schema for ai6::bootstrap::SecretRef
+pub fn ai6::bootstrap::SecretRef::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bootstrap::SecretRef
+pub fn ai6::bootstrap::SecretRef::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bootstrap::SecretRef
+pub fn ai6::bootstrap::SecretRef::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 #[non_exhaustive] pub struct ai6::bootstrap::AccessSettings
 pub ai6::bootstrap::AccessSettings::chief: alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct ai6::bootstrap::Bootstrap
-pub ai6::bootstrap::Bootstrap::identity: ai6::bootstrap::IdentitySettings
-pub ai6::bootstrap::Bootstrap::listen: core::option::Option<core::net::socket_addr::SocketAddr>
-pub ai6::bootstrap::Bootstrap::plugins: ai6::bootstrap::PluginSettings
+pub ai6::bootstrap::Bootstrap::oo: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::bootstrap::Bootstrap::provider: ai6::bootstrap::ProviderSettings
 pub ai6::bootstrap::Bootstrap::registry: ai6::bootstrap::RegistrySettings
-pub ai6::bootstrap::Bootstrap::secrets: ai6::bootstrap::SecretSettings
-pub ai6::bootstrap::Bootstrap::state_dir: core::option::Option<std::path::PathBuf>
-pub ai6::bootstrap::Bootstrap::station: core::option::Option<alloc::string::String>
-pub ai6::bootstrap::Bootstrap::unex: core::option::Option<ai6::bootstrap::UnexSettings>
+pub ai6::bootstrap::Bootstrap::station: ai6::bootstrap::StationSettings
+pub ai6::bootstrap::Bootstrap::unex: ai6::bootstrap::UnexSettings
 impl ai6::bootstrap::Bootstrap
 pub fn ai6::bootstrap::Bootstrap::find(core::option::Option<&std::path::Path>) -> core::result::Result<ai6::bootstrap::Located<Self>, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Bootstrap::find_in(&ai6::bootstrap::SearchPath) -> core::result::Result<ai6::bootstrap::Located<Self>, ai6::bootstrap::BootstrapError>
@@ -93,16 +106,14 @@ pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::registry_password(&se
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::secrets_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
-impl ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::listen(&self) -> core::net::socket_addr::SocketAddr
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::pages_dir(&self) -> std::path::PathBuf
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::pages_listen(&self) -> core::net::socket_addr::SocketAddr
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::provider_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::proxy_secret_min_bytes(&self) -> u64
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::registry_password(&self) -> core::option::Option<&ai6::bootstrap::SecretRef>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::UnexBootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+impl ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_dir(&self) -> std::path::PathBuf
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_listen(&self) -> core::net::socket_addr::SocketAddr
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::proxy_secret_min_bytes(&self) -> u64
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_listen(&self) -> core::net::socket_addr::SocketAddr
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl<T> ai6::bootstrap::Located<T>
 pub fn ai6::bootstrap::Located<T>::dir(&self) -> core::option::Option<&std::path::Path>
 #[non_exhaustive] pub struct ai6::bootstrap::PagesSettings
@@ -145,25 +156,25 @@ pub fn ai6::bootstrap::SearchPath::locate(&self) -> core::result::Result<core::o
 pub fn ai6::bootstrap::SearchPath::new(&str, &str, core::option::Option<&std::path::Path>) -> Self
 #[non_exhaustive] pub struct ai6::bootstrap::SecretSettings
 pub ai6::bootstrap::SecretSettings::dir: core::option::Option<std::path::PathBuf>
-#[non_exhaustive] pub struct ai6::bootstrap::UnexBootstrap
-pub ai6::bootstrap::UnexBootstrap::access: ai6::bootstrap::AccessSettings
-pub ai6::bootstrap::UnexBootstrap::listen: core::option::Option<core::net::socket_addr::SocketAddr>
-pub ai6::bootstrap::UnexBootstrap::pages: ai6::bootstrap::PagesSettings
-pub ai6::bootstrap::UnexBootstrap::plugins: ai6::bootstrap::PluginSettings
-pub ai6::bootstrap::UnexBootstrap::provider: ai6::bootstrap::ProviderSettings
-pub ai6::bootstrap::UnexBootstrap::proxy_secret: core::option::Option<ai6::bootstrap::SecretRef>
-pub ai6::bootstrap::UnexBootstrap::proxy_secret_min_bytes: core::option::Option<u64>
-pub ai6::bootstrap::UnexBootstrap::public_origin: core::option::Option<alloc::string::String>
-pub ai6::bootstrap::UnexBootstrap::registry: ai6::bootstrap::RegistrySettings
-pub ai6::bootstrap::UnexBootstrap::state_dir: core::option::Option<std::path::PathBuf>
-pub ai6::bootstrap::UnexBootstrap::station_token: core::option::Option<ai6::bootstrap::SecretRef>
-impl ai6::bootstrap::UnexBootstrap
-pub fn ai6::bootstrap::UnexBootstrap::find(core::option::Option<&std::path::Path>) -> core::result::Result<ai6::bootstrap::Located<Self>, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::UnexBootstrap::read(&std::path::Path) -> core::result::Result<Self, ai6::bootstrap::BootstrapError>
+#[non_exhaustive] pub struct ai6::bootstrap::StationSettings
+pub ai6::bootstrap::StationSettings::id: core::option::Option<alloc::string::String>
+pub ai6::bootstrap::StationSettings::identity: ai6::bootstrap::IdentitySettings
+pub ai6::bootstrap::StationSettings::listen: core::option::Option<core::net::socket_addr::SocketAddr>
+pub ai6::bootstrap::StationSettings::plugins: ai6::bootstrap::PluginSettings
+pub ai6::bootstrap::StationSettings::secrets: ai6::bootstrap::SecretSettings
+pub ai6::bootstrap::StationSettings::state_dir: core::option::Option<std::path::PathBuf>
 #[non_exhaustive] pub struct ai6::bootstrap::UnexSettings
+pub ai6::bootstrap::UnexSettings::access: ai6::bootstrap::AccessSettings
 pub ai6::bootstrap::UnexSettings::ca_file: core::option::Option<std::path::PathBuf>
-pub ai6::bootstrap::UnexSettings::token: core::option::Option<ai6::bootstrap::SecretRef>
-pub ai6::bootstrap::UnexSettings::url: alloc::string::String
+pub ai6::bootstrap::UnexSettings::listen: core::option::Option<core::net::socket_addr::SocketAddr>
+pub ai6::bootstrap::UnexSettings::pages: ai6::bootstrap::PagesSettings
+pub ai6::bootstrap::UnexSettings::plugins: ai6::bootstrap::PluginSettings
+pub ai6::bootstrap::UnexSettings::proxy_secret: core::option::Option<ai6::bootstrap::SecretRef>
+pub ai6::bootstrap::UnexSettings::proxy_secret_min_bytes: core::option::Option<u64>
+pub ai6::bootstrap::UnexSettings::public_origin: core::option::Option<alloc::string::String>
+pub ai6::bootstrap::UnexSettings::state_dir: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::UnexSettings::station_token: core::option::Option<ai6::bootstrap::SecretRef>
+pub ai6::bootstrap::UnexSettings::url: core::option::Option<alloc::string::String>
 pub const ai6::bootstrap::CONFIG_ENV: &str
 pub const ai6::bootstrap::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::bootstrap::DEFAULT_PAGES_LISTEN: core::net::socket_addr::SocketAddr
@@ -171,13 +182,11 @@ pub const ai6::bootstrap::DEFAULT_POLL: core::time::Duration
 pub const ai6::bootstrap::DEFAULT_PROXY_SECRET_MIN_BYTES: u64
 pub const ai6::bootstrap::DEFAULT_UNEX_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::bootstrap::FILE_NAME: &str
-pub const ai6::bootstrap::UNEX_CONFIG_ENV: &str
-pub const ai6::bootstrap::UNEX_FILE_NAME: &str
 pub fn ai6::bootstrap::is_sql_location(&str) -> bool
 pub fn ai6::bootstrap::platform_config_dir() -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::platform_state_dir() -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::read_ca_file(&std::path::Path) -> core::result::Result<alloc::vec::Vec<alloc::vec::Vec<u8>>, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::read_file<T: serde_core::de::DeserializeOwned>(&std::path::Path) -> core::result::Result<T, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::read_file<T: guatiao::value::convert::FromValue>(&std::path::Path) -> core::result::Result<T, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::system_config_dir() -> core::option::Option<std::path::PathBuf>
 pub mod ai6::bounds
 pub struct ai6::bounds::Limit(_)
@@ -3521,8 +3530,12 @@ pub fn ai6::directorates::registry::bona_fides::KeepVerified::fmt(&self, &mut co
 impl core::str::traits::FromStr for ai6::directorates::registry::bona_fides::KeepVerified
 pub type ai6::directorates::registry::bona_fides::KeepVerified::Err = alloc::string::String
 pub fn ai6::directorates::registry::bona_fides::KeepVerified::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl<'de> serde_core::de::Deserialize<'de> for ai6::directorates::registry::bona_fides::KeepVerified
-pub fn ai6::directorates::registry::bona_fides::KeepVerified::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+impl guatiao::schema::describe::Schema for ai6::directorates::registry::bona_fides::KeepVerified
+pub fn ai6::directorates::registry::bona_fides::KeepVerified::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::directorates::registry::bona_fides::KeepVerified
+pub fn ai6::directorates::registry::bona_fides::KeepVerified::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::directorates::registry::bona_fides::KeepVerified
+pub fn ai6::directorates::registry::bona_fides::KeepVerified::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 #[non_exhaustive] pub enum ai6::directorates::registry::bona_fides::Origin
 pub ai6::directorates::registry::bona_fides::Origin::Operator
 pub ai6::directorates::registry::bona_fides::Origin::Proposal
@@ -6516,8 +6529,12 @@ pub fn ai6::directorates::registry::bona_fides::KeepVerified::fmt(&self, &mut co
 impl core::str::traits::FromStr for ai6::directorates::registry::bona_fides::KeepVerified
 pub type ai6::directorates::registry::bona_fides::KeepVerified::Err = alloc::string::String
 pub fn ai6::directorates::registry::bona_fides::KeepVerified::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl<'de> serde_core::de::Deserialize<'de> for ai6::directorates::registry::bona_fides::KeepVerified
-pub fn ai6::directorates::registry::bona_fides::KeepVerified::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+impl guatiao::schema::describe::Schema for ai6::directorates::registry::bona_fides::KeepVerified
+pub fn ai6::directorates::registry::bona_fides::KeepVerified::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::directorates::registry::bona_fides::KeepVerified
+pub fn ai6::directorates::registry::bona_fides::KeepVerified::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::directorates::registry::bona_fides::KeepVerified
+pub fn ai6::directorates::registry::bona_fides::KeepVerified::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 #[non_exhaustive] pub enum ai6::LeaseRecovery
 pub ai6::LeaseRecovery::Failed
 pub ai6::LeaseRecovery::Requeued
