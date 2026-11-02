@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- A Source issue's labels no longer become a brief's required Agent tags, so anyone able to label
+  an issue cannot fail its Mission, and AI6's own status labels cannot either. They stay readable
+  to the Agent inside the fenced brief. A brief that never became a Mission reports that, not an
+  empty Mission ID.
 - A harness that reached no model no longer ends its Mission `done`: a Claude Code `result` with
   `is_error` or an `error_*` subtype is a failed turn, whatever its subtype says. Under strict
   exposure a Session keeps the credential its harness reaches its model with (its pool account, or

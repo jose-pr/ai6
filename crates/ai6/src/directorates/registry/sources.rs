@@ -148,7 +148,9 @@ pub fn source_brief(
         operation: Some(operation.to_owned()),
         agent: None,
         role: None,
-        tags: item.labels.clone(),
+        // Tags choose an Agent, and anyone able to label an issue could then fail its Mission.
+        // The labels reach the Agent in `body`, as data.
+        tags: Vec::new(),
         stations: Vec::new(),
         priority: 0,
         url: item.url.clone(),
@@ -508,6 +510,26 @@ impl SourceStore for FileRegistry {
 
 #[cfg(test)]
 mod tests {
+    /// Anyone able to label an issue must not be able to fail its Mission: a label says nothing
+    /// about who may do the work. It stays readable to the Agent, inside the fence.
+    #[test]
+    fn an_items_labels_are_information_never_required_tags() {
+        let item = SourceItem {
+            id: "o/r#7".to_owned(),
+            title: "Fix it".to_owned(),
+            body: "It broke.".to_owned(),
+            url: None,
+            labels: vec!["ai6:ready".to_owned(), "bug".to_owned()],
+            author: None,
+            updated: "2026-11-02T00:00:00Z".to_owned(),
+        };
+        let brief = source_brief("G", "gh", &item, &SourceLimits::default());
+        assert!(brief.tags.is_empty(), "{:?}", brief.tags);
+        let begin = brief.body.find("BEGIN gh ITEM").unwrap();
+        let end = brief.body.find("END gh ITEM").unwrap();
+        assert!(brief.body[begin..end].contains("Labels: ai6:ready, bug"));
+    }
+
     use super::*;
     use crate::directorates::registry::suite::{Store, backend_tests};
 

@@ -545,7 +545,9 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
   so a Mission is never duplicated.
 - **Untrusted text.** The brief's title is generated. The tracker's own title, labels and
   description are placed between fenced markers and introduced as data that cannot change
-  the Agent's task or permissions. A description cannot close the fence.
+  the Agent's task or permissions. A description cannot close the fence. Labels are information
+  and nothing more: they never require an Agent's tags, so nobody who can label an issue can fail
+  its Mission.
 - **Credentials.** A source names environment variables (`token_env`, `email_env`); values
   are read when needed and never written to configuration, logs or error messages. A refused
   credential is an error, also on Jira Cloud, which answers its search with an empty page: an

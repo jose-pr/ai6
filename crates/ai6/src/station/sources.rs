@@ -432,7 +432,8 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
     };
     let outcome = outcome_text("state")
         .unwrap_or_else(|| if finished.ok { "done" } else { "failed" }.to_owned());
-    let mission_id = outcome_text("mission_id").unwrap_or_default();
+    // A brief that was never placed ended without a Mission.
+    let mission_id = outcome_text("mission_id").filter(|id| !id.is_empty());
     let branch = outcome_text("branch");
     let item_id = finished
         .brief
@@ -462,9 +463,14 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
                 }
                 .to_owned(),
             );
-            lines.push(format!("Mission: `{mission_id}`"));
+            if let Some(mission_id) = &mission_id {
+                lines.push(format!("Mission: `{mission_id}`"));
+            }
         }
-        _ => lines.push(format!("AI6 Mission `{mission_id}` ended: {outcome}.")),
+        _ => lines.push(match &mission_id {
+            Some(mission_id) => format!("AI6 Mission `{mission_id}` ended: {outcome}."),
+            None => "AI6 could not start a Mission for this item.".to_owned(),
+        }),
     }
     if let Some(branch) = &branch {
         lines.push(format!("Branch: `{branch}`"));
@@ -485,7 +491,7 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
     }
     CxReport {
         item_id,
-        mission_id,
+        mission_id: mission_id.unwrap_or_default(),
         outcome,
         body: lines.join("\n"),
         branch,
@@ -1550,6 +1556,39 @@ mod tests {
             }),
             ok,
         }
+    }
+
+    /// A brief no Mission ran for has no Mission to name.
+    #[test]
+    fn a_report_of_a_brief_that_never_became_a_mission_names_no_mission() {
+        let finished = FinishedSourceBrief {
+            brief: crate::directorates::registry::sources::source_brief(
+                "G",
+                "gh",
+                &crate::directorates::registry::sources::SourceItem {
+                    id: "o/r#7".to_owned(),
+                    title: "t".to_owned(),
+                    body: "b".to_owned(),
+                    url: None,
+                    labels: Vec::new(),
+                    author: None,
+                    updated: "u".to_owned(),
+                },
+                &Default::default(),
+            ),
+            outcome: serde_json::json!({
+                "state": "failed",
+                "error": "no available Agent matches role \"any role\"",
+            }),
+            ok: false,
+        };
+        for disclosure in [Disclosure::Hidden, Disclosure::Assisted, Disclosure::Full] {
+            let report = compose_report(disclosure, &finished);
+            assert!(!report.body.contains("``"), "{}", report.body);
+            assert!(!report.body.contains("Mission: "), "{}", report.body);
+        }
+        let full = compose_report(Disclosure::Full, &finished);
+        assert_eq!(full.body, "AI6 could not start a Mission for this item.");
     }
 
     #[test]
