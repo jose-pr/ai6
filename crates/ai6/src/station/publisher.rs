@@ -2049,6 +2049,7 @@ mod tests {
 
     fn brief() -> MissionPublication {
         MissionPublication {
+            name: None,
             prompt: "Inspect this change".to_owned(),
             agent_id: Some("analyst".to_owned()),
             role_id: None,
