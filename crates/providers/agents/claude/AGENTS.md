@@ -122,13 +122,15 @@ counter. An `assistant` message with tool-call blocks (above) becomes kind `tool
 
 When AI6 supplies both `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, the handler adds
 the authenticated Streamable HTTP Cable server through `--mcp-config`. The config contains
-environment placeholders; the bearer token never appears in argv. If either variable is
-absent, no AI6 MCP configuration is added.
+environment placeholders; the bearer token never appears in argv, and its tools are allowed by
+server (`--allowedTools mcp__ai6-cables`): under `-p` Claude Code 2.1.316 denies a tool no rule
+allows instead of asking. If either variable is absent, no AI6 MCP configuration is added.
 
 When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
 remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
 The handler then registers that server as `ai6-theater` (same placeholder scheme), allows
-its tools (`--allowedTools mcp__ai6-theater`) and denies Claude's own shell and file tools
+its tools (`--allowedTools` lists `mcp__ai6-theater` beside any other server of AI6's) and denies
+Claude's own shell and file tools
 (`--disallowedTools Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep`) so
 nothing it does lands on the Station. Both flags are variadic, so each is followed by another
 flag. This applies to resume as well.

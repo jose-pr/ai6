@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- A Claude Mission can call its AI6 tools: the handler allows exactly the `ai6-cables` and
+  `ai6-theater` servers with `--allowedTools`. Under `-p` Claude Code denied them, and the Mission
+  went on to end `done` having done nothing.
 - A Claude Mission's AI6 tools work from its first Session: the Cable endpoint is bound when the
   Session ID first appears in the harness's stream, and the ACP facade passes that ID on with the
   event that reported it. Until then every issue, Cable and green ink tool answered "Cable

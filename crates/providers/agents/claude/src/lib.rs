@@ -939,24 +939,29 @@ fn http_server(prefix: &str) -> Value {
 }
 
 /// Adds the Station's MCP servers: Cable tools, and, when the Station serves a Theater's
-/// tools (remote-hands mode), those in place of Claude's own shell and file tools.
+/// tools (remote-hands mode), those in place of Claude's own shell and file tools. Their tools,
+/// and no others, are allowed by server (`--allowedTools mcp__<name>`,
+/// code.claude.com/docs/en/permissions): under `-p` a tool no rule allows is denied, not asked.
 fn add_mcp(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
     let mut servers = serde_json::Map::new();
+    let mut allowed = Vec::new();
     if has_endpoint(environment, "AI6_CABLE_MCP") {
         servers.insert("ai6-cables".to_owned(), http_server("AI6_CABLE_MCP"));
+        allowed.push("mcp__ai6-cables");
     }
     if has_endpoint(environment, "AI6_THEATER_MCP") {
         servers.insert("ai6-theater".to_owned(), http_server("AI6_THEATER_MCP"));
-        argv.extend([
-            "--disallowedTools".to_owned(),
-            OWN_TOOLS.to_owned(),
-            "--allowedTools".to_owned(),
-            "mcp__ai6-theater".to_owned(),
-        ]);
+        allowed.push("mcp__ai6-theater");
+        argv.extend(["--disallowedTools".to_owned(), OWN_TOOLS.to_owned()]);
     }
     if !servers.is_empty() {
         let config = json!({ "mcpServers": servers });
-        argv.extend(["--mcp-config".to_owned(), config.to_string()]);
+        argv.extend([
+            "--allowedTools".to_owned(),
+            allowed.join(","),
+            "--mcp-config".to_owned(),
+            config.to_string(),
+        ]);
     }
 }
 
@@ -2714,11 +2719,45 @@ mod tests {
 
         add_mcp(&mut argv, &environment);
 
-        assert_eq!(argv[1], "--mcp-config");
-        assert!(argv[2].contains("${AI6_CABLE_MCP_URL}"));
-        assert!(argv[2].contains("${AI6_CABLE_MCP_TOKEN}"));
-        assert!(!argv[2].contains("session-secret-token"));
+        let position = |flag: &str| argv.iter().position(|argument| argument == flag).unwrap();
+        let config = &argv[position("--mcp-config") + 1];
+        assert!(config.contains("${AI6_CABLE_MCP_URL}"));
+        assert!(config.contains("${AI6_CABLE_MCP_TOKEN}"));
+        assert!(!config.contains("session-secret-token"));
         assert!(!argv.iter().any(|argument| argument == "--disallowedTools"));
+        // Under -p Claude Code denies a tool no rule allows, and an MCP tool is no exception.
+        assert_eq!(argv[position("--allowedTools") + 1], "mcp__ai6-cables");
+        assert!(position("--allowedTools") < position("--mcp-config"));
+    }
+
+    #[test]
+    fn a_session_with_both_servers_allows_exactly_their_tools() {
+        let environment = BTreeMap::from([
+            ("AI6_CABLE_MCP_URL".to_owned(), "http://a/mcp".to_owned()),
+            ("AI6_CABLE_MCP_TOKEN".to_owned(), "a".to_owned()),
+            ("AI6_THEATER_MCP_URL".to_owned(), "http://b/mcp".to_owned()),
+            ("AI6_THEATER_MCP_TOKEN".to_owned(), "b".to_owned()),
+        ]);
+        let mut argv = vec!["claude".to_owned()];
+        add_mcp(&mut argv, &environment);
+        let allowed = argv
+            .iter()
+            .position(|argument| argument == "--allowedTools")
+            .unwrap();
+        assert_eq!(argv[allowed + 1], "mcp__ai6-cables,mcp__ai6-theater");
+        assert_eq!(
+            argv.iter()
+                .filter(|argument| *argument == "--allowedTools")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_session_without_ai6_servers_allows_nothing_extra() {
+        let mut argv = vec!["claude".to_owned()];
+        add_mcp(&mut argv, &BTreeMap::new());
+        assert_eq!(argv, ["claude"]);
     }
 
     #[test]
