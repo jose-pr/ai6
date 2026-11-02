@@ -30,6 +30,9 @@ pub universal_exports::AgentInput::operation_id: ai6_diptel::OperationId
 pub universal_exports::AgentInput::session_id: ai6_diptel::SessionId
 impl core::fmt::Debug for universal_exports::AgentInput
 pub fn universal_exports::AgentInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct universal_exports::AgentRoute
+pub universal_exports::AgentRoute::handler: core::option::Option<alloc::string::String>
+pub universal_exports::AgentRoute::model: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::AgentView
 pub universal_exports::AgentView::agent: alloc::string::String
 pub universal_exports::AgentView::by_clearance: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::AgentTally>
@@ -44,6 +47,7 @@ pub universal_exports::AgentView::operation: ai6::directorates::registry::agent_
 pub universal_exports::AgentView::posted: bool
 pub universal_exports::AgentView::promotion: core::option::Option<ai6::directorates::registry::approvals::ApprovalRequest>
 pub universal_exports::AgentView::retirement: core::option::Option<universal_exports::RetirementNotice>
+pub universal_exports::AgentView::routes: alloc::vec::Vec<universal_exports::AgentRoute>
 pub struct universal_exports::AssistantConfig
 impl universal_exports::AssistantConfig
 pub fn universal_exports::AssistantConfig::agent_id(&self) -> &str

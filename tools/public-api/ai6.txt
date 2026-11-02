@@ -879,6 +879,13 @@ impl ai6::directorates::m::config::ConfigLimits
 pub fn ai6::directorates::m::config::ConfigLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::ConfigLimits
 pub fn ai6::directorates::m::config::ConfigLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::config::ConfigReference
+pub ai6::directorates::m::config::ConfigReference::key: alloc::string::String
+pub ai6::directorates::m::config::ConfigReference::path: alloc::string::String
+pub ai6::directorates::m::config::ConfigReference::record: ai6::directorates::m::config::ConfigRecord
+pub ai6::directorates::m::config::ConfigReference::scope: ai6::directorates::m::config::ConfigScope
+impl core::fmt::Display for ai6::directorates::m::config::ConfigReference
+pub fn ai6::directorates::m::config::ConfigReference::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::m::config::ConfigRevision(_)
 impl ai6::directorates::m::config::ConfigRevision
 pub const fn ai6::directorates::m::config::ConfigRevision::get(self) -> u64
@@ -907,6 +914,7 @@ pub fn ai6::FileProvider::put(&self, ai6::directorates::m::config::ConfigRecord,
 pub fn ai6::FileProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::FileProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 pub struct ai6::directorates::m::config::MemoryProvider
@@ -924,6 +932,7 @@ pub fn ai6::directorates::m::config::MemoryProvider::put(&self, ai6::directorate
 pub fn ai6::directorates::m::config::MemoryProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::config::MemoryProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::directorates::m::config::MemoryProvider
@@ -956,6 +965,7 @@ pub fn ai6::SqlProvider::put(&self, ai6::directorates::m::config::ConfigRecord, 
 pub fn ai6::SqlProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::SqlProvider
@@ -1041,6 +1051,7 @@ pub fn ai6::directorates::m::config::ConfigProvider::put(&self, ai6::directorate
 pub fn ai6::directorates::m::config::ConfigProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::config::ConfigProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigProvider for ai6::FileProvider
@@ -1051,6 +1062,7 @@ pub fn ai6::FileProvider::put(&self, ai6::directorates::m::config::ConfigRecord,
 pub fn ai6::FileProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::FileProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigProvider for ai6::SqlProvider
@@ -1061,6 +1073,7 @@ pub fn ai6::SqlProvider::put(&self, ai6::directorates::m::config::ConfigRecord, 
 pub fn ai6::SqlProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigProvider for ai6::directorates::m::config::MemoryProvider
@@ -1071,12 +1084,14 @@ pub fn ai6::directorates::m::config::MemoryProvider::put(&self, ai6::directorate
 pub fn ai6::directorates::m::config::MemoryProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::config::MemoryProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::export(&dyn ai6::directorates::m::config::ConfigProvider, &std::path::Path) -> core::result::Result<usize, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::family_document(ai6::directorates::m::config::ConfigRecord, impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, serde_json::value::Value)>) -> core::result::Result<alloc::string::String, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::open(&str) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>>
 pub fn ai6::directorates::m::config::open_with(&str, &ai6::directorates::registry::sql::SqlOptions, ai6::directorates::m::config::ConfigLimits) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>>
+pub fn ai6::directorates::m::config::references_to(&dyn ai6::directorates::m::config::ConfigProvider, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigReference>, ai6::directorates::m::roster::RosterError>
 pub mod ai6::directorates::m::cover
 #[non_exhaustive] pub enum ai6::directorates::m::cover::Disclosure
 pub ai6::directorates::m::cover::Disclosure::Assisted
@@ -1352,6 +1367,7 @@ pub fn ai6::directorates::m::placement::PlacementStrategy::as_str(self) -> &'sta
 #[non_exhaustive] pub struct ai6::directorates::m::placement::AgentFacts
 pub ai6::directorates::m::placement::AgentFacts::handler: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::AgentFacts::id: alloc::string::String
+pub ai6::directorates::m::placement::AgentFacts::model: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::AgentFacts::priority: i64
 pub ai6::directorates::m::placement::AgentFacts::roles: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::placement::AgentFacts::tags: alloc::vec::Vec<alloc::string::String>
@@ -2733,12 +2749,14 @@ pub fn ai6::CommandLogin::default() -> Self
 pub struct ai6::directorates::q::Loadout
 impl ai6::directorates::q::Loadout
 pub fn ai6::directorates::q::Loadout::agent(&self) -> &str
+pub fn ai6::directorates::q::Loadout::env(&self) -> &ai6::directorates::q::SessionEnv
 pub fn ai6::directorates::q::Loadout::for_account(&ai6::AccountPool, &ai6::Account) -> core::option::Option<Self>
 pub fn ai6::directorates::q::Loadout::mcp_names(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::Loadout::sandbox_name(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::q::Loadout::secret_names(&self) -> &[alloc::string::String]
 pub struct ai6::directorates::q::LoadoutCatalog
 impl ai6::directorates::q::LoadoutCatalog
+pub fn ai6::directorates::q::LoadoutCatalog::check_session_env(&self, &ai6::directorates::q::SessionEnv, ai6::bounds::Limit) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::q::LoadoutCatalog::for_agent(&self, &str) -> core::result::Result<&ai6::directorates::q::Loadout, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::load(impl core::convert::AsRef<std::path::Path>, &ai6::directorates::m::config::ConfigLimits) -> core::result::Result<Self, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::loadouts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::Loadout>
@@ -2846,6 +2864,11 @@ impl core::fmt::Debug for ai6::SecretValue
 pub fn ai6::SecretValue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::drop::Drop for ai6::SecretValue
 pub fn ai6::SecretValue::drop(&mut self)
+pub struct ai6::directorates::q::SessionEnv(_)
+impl ai6::directorates::q::SessionEnv
+pub fn ai6::directorates::q::SessionEnv::values(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl core::convert::From<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>> for ai6::directorates::q::SessionEnv
+pub fn ai6::directorates::q::SessionEnv::from(alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> Self
 pub struct ai6::directorates::q::StationSecrets
 impl ai6::StationSecrets
 pub fn ai6::StationSecrets::new(impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::q::SecretDefinition>) -> Self
@@ -7200,6 +7223,7 @@ pub ai6::AgentEvent::usage: core::option::Option<ai6::directorates::section_00::
 #[non_exhaustive] pub struct ai6::AgentFacts
 pub ai6::AgentFacts::handler: core::option::Option<alloc::string::String>
 pub ai6::AgentFacts::id: alloc::string::String
+pub ai6::AgentFacts::model: core::option::Option<alloc::string::String>
 pub ai6::AgentFacts::priority: i64
 pub ai6::AgentFacts::roles: alloc::vec::Vec<alloc::string::String>
 pub ai6::AgentFacts::tags: alloc::vec::Vec<alloc::string::String>
@@ -8282,6 +8306,7 @@ pub fn ai6::FileProvider::put(&self, ai6::directorates::m::config::ConfigRecord,
 pub fn ai6::FileProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::FileProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 pub struct ai6::FileRegistry
@@ -8612,12 +8637,14 @@ pub fn ai6::Lineage::subtree(&self, &str) -> alloc::vec::Vec<&str>
 pub struct ai6::Loadout
 impl ai6::directorates::q::Loadout
 pub fn ai6::directorates::q::Loadout::agent(&self) -> &str
+pub fn ai6::directorates::q::Loadout::env(&self) -> &ai6::directorates::q::SessionEnv
 pub fn ai6::directorates::q::Loadout::for_account(&ai6::AccountPool, &ai6::Account) -> core::option::Option<Self>
 pub fn ai6::directorates::q::Loadout::mcp_names(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::Loadout::sandbox_name(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::q::Loadout::secret_names(&self) -> &[alloc::string::String]
 pub struct ai6::LoadoutCatalog
 impl ai6::directorates::q::LoadoutCatalog
+pub fn ai6::directorates::q::LoadoutCatalog::check_session_env(&self, &ai6::directorates::q::SessionEnv, ai6::bounds::Limit) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::q::LoadoutCatalog::for_agent(&self, &str) -> core::result::Result<&ai6::directorates::q::Loadout, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::load(impl core::convert::AsRef<std::path::Path>, &ai6::directorates::m::config::ConfigLimits) -> core::result::Result<Self, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::loadouts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::Loadout>
@@ -8702,6 +8729,7 @@ pub fn ai6::directorates::m::config::MemoryProvider::put(&self, ai6::directorate
 pub fn ai6::directorates::m::config::MemoryProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::config::MemoryProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::directorates::m::config::MemoryProvider
@@ -9413,6 +9441,11 @@ pub fn ai6::station::server::ServeConfig::with_secrets_dir(self, impl core::conv
 pub fn ai6::station::server::ServeConfig::with_station_config(self, ai6::station::server::StationConfig) -> Self
 pub fn ai6::station::server::ServeConfig::with_station_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
+pub struct ai6::SessionEnv(_)
+impl ai6::directorates::q::SessionEnv
+pub fn ai6::directorates::q::SessionEnv::values(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl core::convert::From<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>> for ai6::directorates::q::SessionEnv
+pub fn ai6::directorates::q::SessionEnv::from(alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> Self
 pub struct ai6::SessionId(_)
 impl ai6::directorates::m::identity::SessionId
 pub fn ai6::directorates::m::identity::SessionId::as_str(&self) -> &str
@@ -9596,6 +9629,7 @@ pub fn ai6::SqlProvider::put(&self, ai6::directorates::m::config::ConfigRecord, 
 pub fn ai6::SqlProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::SqlProvider
@@ -10727,6 +10761,7 @@ pub fn ai6::ConfigProvider::put(&self, ai6::directorates::m::config::ConfigRecor
 pub fn ai6::ConfigProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::ConfigProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::ConfigProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::ConfigProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::ConfigProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::ConfigProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigProvider for ai6::FileProvider
@@ -10737,6 +10772,7 @@ pub fn ai6::FileProvider::put(&self, ai6::directorates::m::config::ConfigRecord,
 pub fn ai6::FileProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::FileProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigProvider for ai6::SqlProvider
@@ -10747,6 +10783,7 @@ pub fn ai6::SqlProvider::put(&self, ai6::directorates::m::config::ConfigRecord, 
 pub fn ai6::SqlProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::SqlProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl ai6::directorates::m::config::ConfigProvider for ai6::directorates::m::config::MemoryProvider
@@ -10757,6 +10794,7 @@ pub fn ai6::directorates::m::config::MemoryProvider::put(&self, ai6::directorate
 pub fn ai6::directorates::m::config::MemoryProvider::put_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::put_if(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str, core::option::Option<&serde_json::value::Value>, &serde_json::value::Value) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::remove(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::config::MemoryProvider::remove_on_host(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigRevision>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::revision(&self, &str) -> core::result::Result<ai6::directorates::m::config::ConfigRevision, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::MemoryProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 pub trait ai6::Limited
