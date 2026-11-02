@@ -513,8 +513,8 @@ key it does not know. Codex takes none. The Claude handler takes `allowed_tools`
 `denied_tools`, lists of Claude Code permission rules that change what a Mission may call: both
 empty by default, and a rule that adds to the list is reported as a weakening ([What a Claude Code
 Mission may call](agents.md#what-a-claude-code-mission-may-call)). The `acp` handler's keys (`command`,
-`args`, `env`, `meta`, `model_option`, `effort_option`, `protocol` and the timeouts
-`initialize_timeout_ms` 20000, `request_timeout_ms` 30000, `start_timeout_ms` 60000,
+`args`, `env`, `meta`, `model_option`, `effort_option`, `protocol`, `unconfined_desk` and the
+timeouts `initialize_timeout_ms` 20000, `request_timeout_ms` 30000, `start_timeout_ms` 60000,
 `close_grace_ms` 2000) are in [the Agent Client Protocol](acp.md#settings). A Theater's `runner`
 table bounds a Station's connection to its field runner with `connect_timeout_ms` 30000,
 `initialize_timeout_ms` 20000 and `request_timeout_ms` 30000

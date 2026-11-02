@@ -29,6 +29,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   /v1/station/assistant/cables` for the person's Cable permissions. A roster or database record
   that sets one of those settings is refused until it goes. Files already under
   `.moneypenny/outside-text/` in a person's repository are left there, unread.
+- A Mission's handler holds its Session to the Agent's clearance. At `desk`, or a clearance the
+  handler does not know: the `claude` handler offers reading, searching, editing inside the working
+  directory and AI6's MCP servers, and no `Bash` or `PowerShell`; on a remote Theater, no
+  `theater_run` or `theater_write`. The `codex` handler starts the thread with no command tool and
+  file changes inside the working directory, after its tool check, which refuses a release that
+  offers a command; Codex reads through commands, so that Session can read no file. The `acp` handler
+  refuses to start it, because AI6 does not choose an external agent's tools, unless
+  `unconfined_desk = true`, reported as a weakening. `field` and `00` keep what they had. Answer-only
+  and assistant Sessions do not change. On `claude`, `allowed_tools` can still add a command at
+  `desk`, reported as a weakening. See "Agents and clearance" in the guide.
+- A resume carries the clearance the Agent works at then (`AgentResume::clearance`), so a lowered
+  clearance reaches a harness at its next start or resume, and a resumed Session is offered what
+  the new clearance allows. A harness that is already running keeps its tools until then.
+- `ai6ctl mission` prints each Session's lifecycle reason, such as `permission-denied`.
 - A Mission on the `claude` handler can edit files and run commands. It runs under `--permission-mode
   dontAsk` with an explicit list: reading and searching, editing inside the working directory,
   `Bash` and `PowerShell`, a checklist and AI6's MCP servers; `WebFetch`, `WebSearch`, sub-agents and

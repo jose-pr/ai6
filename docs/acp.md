@@ -59,6 +59,7 @@ Unknown keys are refused when the handler loads; every number is a setting.
 | `close_grace_ms` | `2000` | How long close waits before the process is ended. |
 | `diagnostic_lines` | `20` | Non-protocol output lines kept to explain the agent's death. |
 | `poll_ms` | `200` | How often a silent agent's output is checked for a stop request. |
+| `unconfined_desk` | `false` | Starts a `desk` Session with whatever tools the agent has, in place of refusing it. A weakening. |
 
 ### Environment and accounts
 
@@ -80,6 +81,13 @@ kinds are allowed. In a restricted Session (answer-only review, Moneypenny) ever
 tool that edits, deletes, moves or executes is refused without asking, and a tool of those kinds
 that runs without a request ends the Session. Remote-hands mode, which replaces the harness's own
 tools, is refused: an ACP agent cannot be made to give them up.
+
+A Mission's Session at [`desk` clearance](agents.md#clearance), or a clearance the handler does not
+know, is refused at start and resume: `desk` allows no command tool, and AI6 does not choose an
+external agent's tools. Give the Agent `field` clearance, or set `unconfined_desk = true`, which
+starts it with whatever tools the agent has and is reported as a weakening (`Agent "009" is
+weakened: …`, `agents_weakened`). Green ink still decides what the agent asks permission for; a tool
+it runs without asking is not stopped.
 
 ### Resume
 

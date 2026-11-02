@@ -124,14 +124,16 @@ in the first two rows (`--tools`), so anything else is not there to call.
 | | By default |
 | --- | --- |
 | Allowed | Reading and searching: `Read`, `Glob`, `Grep`, anywhere the Station's user can read |
-| Allowed | Editing inside the working directory: `Edit`, `Write`, `NotebookEdit`, by the one rule `Edit(/**)`; `.git` and `.claude` stay refused to these tools. Commands: `Bash`, `PowerShell`. A checklist: `TodoWrite` and the `Task` tools that replace it. AI6's own MCP servers |
-| Not allowed | `WebFetch`, `WebSearch`, `Agent` sub-agents, skills, any other MCP server, every other built-in tool, and writing outside the working directory through the file tools |
+| Allowed | Editing inside the working directory: `Edit`, `Write`, `NotebookEdit`, by the one rule `Edit(/**)`; `.git` and `.claude` stay refused to these tools. A checklist: `TodoWrite` and the `Task` tools that replace it. AI6's own MCP servers. At `field` and `00` clearance, commands: `Bash`, `PowerShell` |
+| Not allowed | `WebFetch`, `WebSearch`, `Agent` sub-agents, skills, any other MCP server, every other built-in tool, and writing outside the working directory through the file tools. At `desk` clearance, or a clearance the handler does not know, `Bash` and `PowerShell` too |
 
 `PowerShell` is allowed but only there when Claude Code has it on: set
 `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` in the Agent's `env`. [Green ink](missions.md#green-ink) stays
 the check on commands: its hook decides each `Bash` and `PowerShell` call of a gated Session, under
 the same list. In remote-hands mode Claude's own shell and file tools are neither offered nor
-allowed, whatever the settings say, so that nothing lands on the Station. Answer-only Sessions and
+allowed, whatever the settings say, so that nothing lands on the Station; at `desk` it is also
+denied `theater_run`, a command, and `theater_write`, which takes any path on the Theater, so it
+reads the Theater with `theater_read` and `theater_list`. Answer-only Sessions and
 [Moneypenny](assistant.md) have lists of their own, which this does not change.
 
 **What this does not give.** `Bash` runs as the Theater's OS user. On a local Theater that is the
@@ -150,10 +152,12 @@ denied_tools = ["Bash(git push *)"]
 
 Each entry is a [Claude Code permission
 rule](https://code.claude.com/docs/en/permissions#permission-rule-syntax). A rule in `allowed_tools`
-offers its tool and lifts that tool's default denial, and a deny rule beats an allow rule. Each
-allowed rule beyond the default list is a weakening: the Station logs `Agent "007" is weakened:
-allowed_tools adds …` at start and when the roster changes and reports it at check-in
-(`agents_weakened`), and a field runner hosting the handler logs it at each launch. Three things
+offers its tool and lifts that tool's default denial, and a deny rule beats an allow rule: that is
+how a `desk` Agent is given a command, `allowed_tools = ["Bash(git status)"]` or all of `Bash`. Each
+allowed rule beyond the default list is a weakening, and so is a rule for what `desk` keeps out,
+however the Agent is configured, since any Agent can come to work at `desk`: the Station logs
+`Agent "007" is weakened: allowed_tools adds …` at start and when the roster changes and reports it
+at check-in (`agents_weakened`), and a field runner hosting the handler logs it at each launch. Three things
 the rules do not say for themselves: a bare `Write` or `Edit` reaches outside the working
 directory; with any `WebFetch` rule, Claude Code also fetches its own pre-approved documentation
 sites; and on Windows with Git Bash any deny rule on `Bash` turns `PowerShell` off unless
@@ -270,7 +274,7 @@ each release adds some: Codex 0.164 enables code mode (`functions.exec`, a JavaS
 whose nested tools include `apply_patch` and `view_image`), computer and browser use, a
 plugin's `mcp__cua_repl` tools, collaboration tools, `request_user_input`, `clock.sleep`,
 plugins, hooks and skills by default, and ignores a user's `features.unified_exec = false`.
-So before an answer-only or assistant Codex thread starts or resumes, the handler runs the
+So before an answer-only, assistant or `desk` Codex thread starts or resumes, the handler runs the
 same Codex with the same settings, environment and working directory:
 
 1. `codex features list`, then switches off every enabled feature except
@@ -297,12 +301,19 @@ added to the user's Codex configuration within those 15 minutes stays on until t
 
 The thread starts only when the tools offered are exactly those of its MCP servers
 (`mcp__<server>.<tool>`; none for answer-only) and every server offers at least one. **With
-Codex 0.164 no restricted thread passes in `strict`**: every model in its catalog is sent
-code mode's `functions.exec` and `functions.wait`, which no setting removes, so Chief of
-Staff reviews and Moneypenny on Codex are refused, and a review then holds its brief with a
-`review-error` finding. That is the safe outcome: `exec` runs JavaScript whose nested tools
-include `apply_patch`. Run the Chief of Staff and Moneypenny on Claude Code, or accept the
+Codex 0.164 no answer-only thread and no assistant without scripts passes in `strict`**: every model
+in its catalog is sent code mode's `functions.exec` and `functions.wait`, which no setting removes,
+so Chief of Staff reviews and such a Moneypenny on Codex are refused, and a review then holds its
+brief with a `review-error` finding. That is the safe outcome: `exec` runs JavaScript whose nested
+tools include `apply_patch`. Run the Chief of Staff and Moneypenny on Claude Code, or accept the
 weakening with `warn` below.
+
+A `desk` thread is allowed `functions.exec` and `functions.wait`, and `exec` may hold only
+`apply_patch`, the tools of the thread's MCP servers and those that list and read their resources,
+and the current time. Codex 0.164 passes: with `features.shell_tool` off it nests no command tool,
+a direct call of one is refused as unsupported, and `exec`'s JavaScript has no `require`, `process`,
+`fetch` or `import` of its own. A release that nests a command tool or offers another tool is
+refused, in `strict`, and the error names it.
 
 | `AI6_CODEX_TOOL_CHECK` in the Agent's environment | When the check fails |
 | --- | --- |
@@ -387,6 +398,29 @@ permission contract.
 | `field` | Change its worktree and run tests; irreversible actions require [green ink](missions.md#green-ink) |
 | `00` | Act unattended within the configured Operation policy (by default it still asks for green ink; `preset = "licensed"` lets it push and merge) |
 
+An Agent names its clearance in the roster, and `field` is what it gets when it names none. It
+works at `desk` when configured so, when an Operation's ceiling or a person's hold says so, on desk
+duty before retirement, and when its grant cannot be read.
+
+Each handler holds a Mission's Session to its clearance. A clearance a handler does not know counts
+as `desk`.
+
+| Handler | `desk` | `field` and `00` |
+| --- | --- | --- |
+| `claude` | Reading and searching, editing inside the working directory and AI6's MCP servers; no `Bash` or `PowerShell` ([the list](#what-a-claude-code-mission-may-call)). On a remote Theater, `theater_read` and `theater_list`, and no `theater_run` or `theater_write` | The whole list, with green ink on each command |
+| `codex` | File changes inside the working directory and AI6's MCP servers, and no command. Codex reads through commands, so such a Session can read no file: it has its prompt and its project's `AGENTS.md`. It starts only after the [tool check](#codex-tool-check) finds no command tool. On a remote Theater, as `claude` | Codex's own tools, with green ink on each command and file changes inside the working directory |
+| `acp` | Refused, at start and resume, because AI6 does not choose an external agent's tools; `unconfined_desk = true` in its `handler_settings` starts it with whatever tools the agent has, [reported as a weakening](acp.md#permissions-and-restricted-modes) | The agent's own tools, with green ink on each command |
+
+Answer-only Sessions and Moneypenny have limits of their own at any clearance. None of this
+isolates a command an Agent may run: [a command reaches what the Theater's OS user
+can](#what-a-claude-code-mission-may-call).
+
+The clearance is read when a harness starts and when it resumes, so a lowered one reaches the
+harness then, with a resumed Claude Code or Codex Session offered what the new clearance allows. A
+harness already running keeps the tools it started with until then, and so does one a field runner
+kept running that a Station attaches to again. AI6's own tools are not so late: a proposal, an issue
+tool and a request for green ink each look at the clearance when called.
+
 An Operation refuses an Agent above its clearance or outside its roster. M retains
 authorization authority; Agent role policy is guidance only. Q Branch controls which
 credentials are issued.
@@ -401,7 +435,8 @@ Agent's failure; Chief of Staff reviews are not counted. Outer Office's Agents v
 agents --operation ID` show an Operation's records (`agent.read`), nothing of other
 Operations'. Promotion counts only the Missions of the model that occupies the codename now.
 
-Autonomy is earned per Operation and signed by a person. When an Agent's record in an
+Autonomy is earned per Operation and signed by a person. An Agent configured at `desk` starts
+there and can be promoted. When an Agent's record in an
 Operation meets the next step, M files a [green ink](missions.md#green-ink) request of kind
 `clearance` for it, `007:field@G` for example, under Mission `promotion-007`; nothing is
 raised until a person with `approval.decide` **and** `agent.configure` approves it. The
@@ -409,7 +444,8 @@ approval is spent and becomes a clearance grant in that Operation only, never ab
 Operation's own clearance, for the model and configured clearance the Agent has: a new model
 in the codename, or another configured clearance, does not inherit it and earns its clearance
 afresh. Removing the grant, or revoking its approval, is final. A refused or expired request is asked
-again once the record has as many Missions more.
+again once the record has as many Missions more. A `desk` Agent's record grows only where its
+handler starts it: on `acp` without `unconfined_desk` it has no Missions to count.
 
 ```toml
 [operation.G.promotion.field]      # desk -> field; these are the defaults
