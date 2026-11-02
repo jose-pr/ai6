@@ -83,6 +83,25 @@ pub struct AcpSettings {
     /// refused. Reported as a weakening.
     #[serde(default)]
     pub unconfined_desk: bool,
+    /// What marks a failed turn as a provider's usage or rate limit, found in its error without
+    /// regard to case: such a Session stops as limited rather than failed, so its route or account
+    /// is passed over until the limit is likely over.
+    #[serde(default = "limit_phrases")]
+    pub limit_phrases: Vec<String>,
+}
+
+/// How the Grok CLI words a limit (`Rate limited`, with xAI's `subscription:free-usage-exhausted`)
+/// and how other agents commonly do.
+fn limit_phrases() -> Vec<String> {
+    [
+        "rate limited",
+        "rate limit exceeded",
+        "usage-exhausted",
+        "usage limit",
+        "quota exceeded",
+    ]
+    .map(str::to_owned)
+    .to_vec()
 }
 
 fn v1() -> String {
@@ -312,6 +331,7 @@ impl AcpHandler {
             )),
             close_on_drop: true,
             fail_on_disconnect: true,
+            limit_phrases: settings.limit_phrases.clone(),
             disconnect_detail: Some({
                 let (process, diagnostics) = (process.clone(), diagnostics.clone());
                 let exit_wait_ms = settings.exit_wait_ms;
@@ -344,6 +364,16 @@ impl AgentHandler for AcpHandler {
     /// An ACP agent speaks JSON-RPC on plain pipes.
     fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
         Ok(HarnessStdio::Json)
+    }
+
+    /// AI6 does not choose an ACP agent's tools, so it cannot keep commands from a `desk` Session.
+    fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
+        let settings = self.settings()?;
+        Ok((!clearance_runs_commands(&clearance) && !settings.unconfined_desk).then(|| {
+            "AI6 does not choose an ACP agent's tools, so it cannot keep commands from a Session \
+             at this clearance, and the route's unconfined_desk is not set"
+                .to_owned()
+        }))
     }
 
     /// `unconfined_desk`: a `desk` Session runs with the agent's own tools.
@@ -407,5 +437,52 @@ impl AgentHandler for AcpHandler {
             },
             terminal,
         )
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+
+    fn handler(settings: &str) -> AcpHandler {
+        AcpHandler::try_from(AcpConfig {
+            settings_toml: settings.to_owned(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn it_refuses_desk_unless_unconfined_and_keeps_its_limit_words() {
+        let confined = handler("command = \"grok\"\n");
+        assert!(
+            confined
+                .clearance_refusal("desk".to_owned())
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            confined.clearance_refusal("field".to_owned()).unwrap(),
+            None
+        );
+        let unconfined = handler("command = \"grok\"\nunconfined_desk = true\n");
+        assert_eq!(
+            unconfined.clearance_refusal("desk".to_owned()).unwrap(),
+            None
+        );
+        assert!(
+            confined
+                .settings()
+                .unwrap()
+                .limit_phrases
+                .iter()
+                .any(|phrase| phrase == "rate limited"),
+            "the Grok CLI's words count by default"
+        );
+        let own = handler("command = \"x\"\nlimit_phrases = [\"out of credits\"]\n");
+        assert_eq!(
+            own.settings().unwrap().limit_phrases,
+            ["out of credits"],
+            "a setting replaces them"
+        );
     }
 }

@@ -435,6 +435,8 @@ struct Script {
     cost: Option<f64>,
     stop: Option<&'static str>,
     fail_prompt: bool,
+    /// Answers a prompt as `grok agent stdio` 1.0 does past its free quota.
+    rate_limited: bool,
 }
 
 #[derive(Default)]
@@ -540,6 +542,20 @@ fn agent_request(
             let script = script.clone();
             let seen = seen.clone();
             std::thread::spawn(move || {
+                if script.rate_limited {
+                    responder
+                        .respond_with_error(
+                            agent_client_protocol::Error::new(-32003, "Rate limited").data(
+                                "API error (status 429 Too Many Requests): \
+                                 subscription:free-usage-exhausted: You've used all the included \
+                                 free usage for model grok-4.7 for now. Usage resets over a rolling \
+                                 24-hour window — tokens (actual/limit): 609418/600000. Upgrade to \
+                                 a Grok subscription for higher limits: https://grok.com/super",
+                            ),
+                        )
+                        .unwrap();
+                    return;
+                }
                 if script.fail_prompt {
                     responder
                         .respond_with_error(
@@ -673,6 +689,40 @@ fn an_external_agents_turn_becomes_text_cost_and_completion() {
         .find(|(method, _)| method == "session/prompt")
         .unwrap();
     assert_eq!(prompt.1["prompt"][0]["text"], "go");
+}
+
+#[test]
+fn an_agents_rate_limit_stops_the_session_as_limited_when_its_words_are_named() {
+    let script = || Script {
+        rate_limited: true,
+        ..Script::default()
+    };
+    let (session, _) = connect_agent(
+        script(),
+        AcpOptions {
+            limit_phrases: vec!["RATE LIMITED".to_owned()],
+            ..external("go")
+        },
+    );
+    let events = until(&session.unwrap(), &["failed", "completed", "limit"]);
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, "limit", "a limit, not a failure");
+    let limit = last.limit.as_ref().expect("the limit says what it knows");
+    assert_eq!(limit.resets_at, None, "Grok says no reset time");
+    assert!(
+        last.text
+            .as_deref()
+            .unwrap()
+            .contains("free-usage-exhausted"),
+        "its own words are kept"
+    );
+    let (unnamed, _) = connect_agent(script(), external("go"));
+    let events = until(&unnamed.unwrap(), &["failed", "completed", "limit"]);
+    assert_eq!(
+        events.last().unwrap().kind,
+        "failed",
+        "without its words it is an ordinary failure"
+    );
 }
 
 #[test]

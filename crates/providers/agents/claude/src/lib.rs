@@ -1674,9 +1674,12 @@ fn decode_limit(value: &Value) -> Option<(UsageLimit, Option<String>)> {
         "result" if value.get("is_error").and_then(Value::as_bool) == Some(true) => {
             let text = value.get("result").and_then(Value::as_str)?;
             let lower = text.to_lowercase();
-            let limited = ["usage limit", "limit reached", "hit your limit"]
-                .iter()
-                .any(|phrase| lower.contains(phrase));
+            // Past its retries Claude Code words a gateway's refusal `API Error: Request rejected
+            // (429)`, and says the status beside it (`api_error_status`, 2.1.316).
+            let limited = value.get("api_error_status").and_then(Value::as_i64) == Some(429)
+                || ["usage limit", "limit reached", "hit your limit"]
+                    .iter()
+                    .any(|phrase| lower.contains(phrase));
             if !limited {
                 return None;
             }
@@ -2912,6 +2915,33 @@ mod tests {
         let limit = decode_event(&value, b"{}".to_vec()).unwrap().limit.unwrap();
         assert_eq!(limit.resets_at, None);
         assert_eq!(limit.window.as_deref(), Some("five_hour"));
+    }
+
+    /// As Claude Code 2.1.316 reports a 429 from a LiteLLM gateway, past its retries.
+    #[test]
+    fn a_gateway_refusing_for_quota_is_a_limit_with_no_reset_time() {
+        let (limit, text) = decode_limit(&serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": true,
+            "api_error_status": 429,
+            "terminal_reason": "api_error",
+            "result": "API Error: Request rejected (429) · litellm.RateLimitError: GeminiException \
+                       - quota exceeded. Received Model Group=gemini-free",
+        }))
+        .expect("a limit");
+        assert_eq!(limit.resets_at, None);
+        assert!(text.unwrap().contains("Request rejected (429)"));
+        assert!(
+            decode_limit(&serde_json::json!({
+                "type": "result",
+                "is_error": true,
+                "api_error_status": 500,
+                "result": "API Error: 500 upstream",
+            }))
+            .is_none(),
+            "another status is no limit"
+        );
     }
 
     #[test]

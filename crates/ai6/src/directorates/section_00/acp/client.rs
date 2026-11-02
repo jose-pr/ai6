@@ -26,7 +26,7 @@ use std::time::Duration;
 use super::{EVENT_NOTIFICATION, EVENTS_CAPABILITY, RESTRICTED_KINDS, UNBOUNDED_MS};
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, AgentSession, LIMIT_EVENT, TURN_CANCELLED, TokenUsage,
+    AgentEvent, AgentMessage, AgentSession, LIMIT_EVENT, TURN_CANCELLED, TokenUsage, UsageLimit,
 };
 
 /// One way a permission request can be answered, as the agent offered it.
@@ -140,6 +140,9 @@ pub struct AcpOptions {
     /// Whether a connection that ends without being closed is a `failed` event. A runner's
     /// Session is not failed by its link dropping: the Station attaches again.
     pub fail_on_disconnect: bool,
+    /// What marks a failed prompt as a provider's usage or rate limit, found in its error without
+    /// regard to case. Empty counts no failure as a limit.
+    pub limit_phrases: Vec<String>,
     /// Says what became of the agent, for that `failed` event: an exit status, its last words.
     pub disconnect_detail: Option<DisconnectDetail>,
 }
@@ -170,6 +173,7 @@ impl Default for AcpOptions {
             close_on_drop: true,
             fail_on_disconnect: true,
             disconnect_detail: None,
+            limit_phrases: Vec::new(),
         }
     }
 }
@@ -202,6 +206,7 @@ struct Shared {
     servers: Vec<String>,
     close_on_drop: bool,
     fail_on_disconnect: bool,
+    limit_phrases: Vec<String>,
     closing: AtomicBool,
     inner: Mutex<Inner>,
 }
@@ -242,11 +247,30 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
     }
 }
 
+/// A turn stopped by a provider's limit, which names neither a reset time nor a window.
+fn limit_event(text: String) -> AgentEvent {
+    AgentEvent {
+        limit: Some(UsageLimit {
+            resets_at: None,
+            window: None,
+        }),
+        ..event(LIMIT_EVENT, Some(text))
+    }
+}
+
 fn is_terminal(kind: &str) -> bool {
     matches!(kind, "completed" | "failed" | LIMIT_EVENT | "blown")
 }
 
 impl Shared {
+    /// Whether a failed turn's error words a provider's limit, by [`AcpOptions::limit_phrases`].
+    fn is_limit(&self, text: &str) -> bool {
+        let text = text.to_lowercase();
+        self.limit_phrases
+            .iter()
+            .any(|phrase| text.contains(&phrase.to_lowercase()))
+    }
+
     fn emit(&self, event: AgentEvent) {
         if let Ok(mut inner) = self.inner.lock() {
             if is_terminal(&event.kind) {
@@ -351,10 +375,15 @@ impl Shared {
                 ),
             },
             Err(error) => {
+                let text = error_text(&error);
                 let _ = self
                     .lifecycle
-                    .unbounded_send(Lifecycle::PromptFailed(error_text(&error)));
-                event("failed", Some(error_text(&error)))
+                    .unbounded_send(Lifecycle::PromptFailed(text.clone()));
+                if self.is_limit(&text) {
+                    limit_event(text)
+                } else {
+                    event("failed", Some(text))
+                }
             }
         };
         self.emit(ended);
@@ -1304,6 +1333,7 @@ impl AcpSession {
                 .collect(),
             close_on_drop: options.close_on_drop,
             fail_on_disconnect: options.fail_on_disconnect,
+            limit_phrases: options.limit_phrases.clone(),
             closing: AtomicBool::new(false),
             inner: Mutex::new(Inner::default()),
         });
@@ -1531,6 +1561,7 @@ mod tests {
                 servers: Vec::new(),
                 close_on_drop: false,
                 fail_on_disconnect: false,
+                limit_phrases: Vec::new(),
                 closing: AtomicBool::new(false),
                 inner: Mutex::default(),
             }),
