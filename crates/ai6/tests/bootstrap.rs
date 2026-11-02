@@ -522,6 +522,24 @@ fn a_station_starts_from_the_one_file_every_program_shares() {
     );
 }
 
+/// What a program said as it stopped: its exit code and standard error. A program that goes on
+/// serving past the deadline is killed, and has no exit code to report.
+fn stopped(command: &mut Command) -> (Option<i32>, String) {
+    let mut child = command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while child.try_wait().unwrap().is_none() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let code = child.try_wait().unwrap().and_then(|status| status.code());
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+    (code, String::from_utf8_lossy(&output.stderr).into_owned())
+}
+
 #[test]
 fn a_station_refuses_a_key_nobody_knows_and_does_not_repeat_its_value() {
     let dir = tempfile::tempdir().unwrap();
@@ -545,13 +563,8 @@ fn a_station_refuses_a_key_nobody_knows_and_does_not_repeat_its_value() {
         ),
     ] {
         std::fs::write(&config, document).unwrap();
-        let output = ai6()
-            .args(["serve", "--config"])
-            .arg(&config)
-            .output()
-            .unwrap();
-        let said = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{said}");
+        let (code, said) = stopped(ai6().args(["serve", "--config"]).arg(&config));
+        assert_eq!(code, Some(1), "{said}");
         assert!(said.contains(key), "names {key}: {said}");
         assert!(!said.contains(PLANTED), "{said}");
     }
@@ -609,7 +622,7 @@ fn a_secret_in_a_refused_document_appears_in_no_message_in_any_format() {
 }
 
 #[test]
-fn a_file_of_the_old_layout_is_refused_and_says_where_the_key_is_wrong() {
+fn a_key_outside_its_section_is_refused_by_name() {
     for (text, key) in [
         ("station = \"hq-1\"\n", "station"),
         ("state_dir = \"state\"\n", "state_dir"),

@@ -165,6 +165,24 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// What a program said as it stopped: its exit code and standard error. A program that goes on
+/// serving past the deadline is killed, and has no exit code to report.
+fn stopped(command: &mut Command) -> (Option<i32>, String) {
+    let mut child = command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while child.try_wait().unwrap().is_none() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let code = child.try_wait().unwrap().and_then(|status| status.code());
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+    (code, String::from_utf8_lossy(&output.stderr).into_owned())
+}
+
 #[test]
 fn the_gateway_starts_from_the_one_file_every_program_shares() {
     let dir = tempfile::tempdir().unwrap();
@@ -219,9 +237,8 @@ fn the_gateway_refuses_a_key_nobody_knows_and_does_not_repeat_its_value() {
         ),
     ] {
         std::fs::write(&config, document).unwrap();
-        let output = gateway().arg("--config").arg(&config).output().unwrap();
-        let said = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{said}");
+        let (code, said) = stopped(gateway().arg("--config").arg(&config));
+        assert_eq!(code, Some(1), "{said}");
         assert!(said.contains(key), "names {key}: {said}");
         assert!(!said.contains("pl4nted"), "{said}");
     }
@@ -243,9 +260,8 @@ fn the_gateway_names_each_key_it_needs_and_the_file_does_not_hold() {
         ),
     ] {
         std::fs::write(&config, document).unwrap();
-        let output = gateway().arg("--config").arg(&config).output().unwrap();
-        let said = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{said}");
+        let (code, said) = stopped(gateway().arg("--config").arg(&config));
+        assert_eq!(code, Some(1), "{said}");
         assert!(said.contains(key), "names {key}: {said}");
     }
 }
