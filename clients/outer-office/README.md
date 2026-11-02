@@ -104,7 +104,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   the same control and never posts a second time. Requests are not kept across a reload.
 - Roster: the Operations, Agents, Agent roles, cover policies and Moneypenny's settings every
   Station reads, with the revision each Station runs and what any Station refused or waits to
-  restart for (`roster.read`), each row a summary in the fields' own titles and **As
+  restart for (`roster.read`), each row its name (an Agent, Operation or role opens its page), a
+  summary in the fields' own titles and **As
   configuration** for reading and copying what the files would hold; with `roster.manage` and a
   roster that takes edits (SQL), add, edit or remove a record in a form the gateway describes
   (below). The roster checks the whole roster first: a refused edit shows why on the field it

@@ -7,6 +7,7 @@ import '../main.dart';
 import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../shell/oo_link.dart';
 import 'record_editor.dart';
 
 /// The roster revision a Station runs, what it refused and which changed files wait for a
@@ -252,6 +253,28 @@ class _RosterPageState extends State<RosterPage> {
         : '$count setting${count == 1 ? '' : 's'}';
   }
 
+  /// A row's name, a link to what it names. A cover policy and Moneypenny's settings have no
+  /// page of their own. A roster record belongs to no Operation, so an Agent or role opens on
+  /// the first Operation the person may read.
+  Widget _name(String key) => switch (_kind) {
+    'agents' => OoLink(
+      key,
+      route: OoLinkTo.agent(key),
+      semanticLabel: 'Open Agent $key',
+    ),
+    'operations' => OoLink(
+      key,
+      route: OoLinkTo.operation(key),
+      semanticLabel: 'Open Operation $key',
+    ),
+    'roles' => OoLink(
+      key,
+      route: OoLinkTo.role(key),
+      semanticLabel: 'Open role $key',
+    ),
+    _ => Text(key),
+  };
+
   void _say(String text) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
@@ -437,7 +460,7 @@ class _RosterPageState extends State<RosterPage> {
                 for (final record in shown)
                   Card(
                     child: ListTile(
-                      title: Text(record.key),
+                      title: _name(record.key),
                       subtitle: Text(
                         _summary(record),
                         maxLines: 3,
