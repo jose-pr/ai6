@@ -208,6 +208,19 @@ impl serde_core::ser::Serialize for ai6::bounds::Limit
 pub fn ai6::bounds::Limit::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::bounds::Limit
 pub fn ai6::bounds::Limit::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct ai6::bounds::Rate(_)
+impl ai6::bounds::Rate
+pub const ai6::bounds::Rate::UNBOUNDED: Self
+pub const fn ai6::bounds::Rate::at(f64) -> Self
+pub const fn ai6::bounds::Rate::get(self) -> core::option::Option<f64>
+impl core::fmt::Display for ai6::bounds::Rate
+pub fn ai6::bounds::Rate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::schema::describe::Schema for ai6::bounds::Rate
+pub fn ai6::bounds::Rate::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bounds::Rate
+pub fn ai6::bounds::Rate::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bounds::Rate
+pub fn ai6::bounds::Rate::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 pub struct ai6::bounds::Seconds(pub core::time::Duration)
 impl ai6::bounds::Seconds
 pub const fn ai6::bounds::Seconds::new(u64) -> Self
@@ -358,10 +371,10 @@ pub const ai6::directorates::m::access::ACTIONS: &[&str]
 pub const ai6::directorates::m::access::CHIEF_ROLE: &str
 pub const ai6::directorates::m::access::CONFIG_ACCESS: &str
 pub const ai6::directorates::m::access::CONFIG_ACCOUNTS: &str
-pub const ai6::directorates::m::access::NOT_DELEGABLE: [&str; 2]
+pub const ai6::directorates::m::access::NOT_DELEGABLE: [&str; 3]
 pub const ai6::directorates::m::access::OPERATION_ACTIONS: &[&str]
 pub const ai6::directorates::m::access::RESERVED_ROLES: [&str; 4]
-pub const ai6::directorates::m::access::SCOPE_KINDS: [&str; 4]
+pub const ai6::directorates::m::access::SCOPE_KINDS: [&str; 5]
 pub fn ai6::directorates::m::access::access_from_toml(&str, ai6::bounds::Limit) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::directorates::m::access::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &ai6::EffectiveAccess, &ai6::Lineage) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::directorates::m::access::check_operation_change(&str, &ai6::OperationAccess, &ai6::OperationAccess, &ai6::Editor, &ai6::EffectiveAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
@@ -675,12 +688,144 @@ pub fn ai6::directorates::m::assistant::check_skill(&std::path::Path, &str, bool
 pub fn ai6::directorates::m::assistant::file_safe(&str) -> bool
 pub fn ai6::directorates::m::assistant::person_digest(&str) -> alloc::string::String
 pub fn ai6::directorates::m::assistant::skill_name(&str) -> bool
+pub mod ai6::directorates::m::compartments
+#[non_exhaustive] pub enum ai6::directorates::m::compartments::CompartmentAction
+pub ai6::directorates::m::compartments::CompartmentAction::CableRead
+pub ai6::directorates::m::compartments::CompartmentAction::CableSend
+pub ai6::directorates::m::compartments::CompartmentAction::MissionPropose
+pub ai6::directorates::m::compartments::CompartmentAction::MissionRead
+pub ai6::directorates::m::compartments::CompartmentAction::MissionStatus
+pub ai6::directorates::m::compartments::CompartmentAction::ProductRead
+impl ai6::directorates::m::compartments::CompartmentAction
+pub const ai6::directorates::m::compartments::CompartmentAction::ALL: [Self; 6]
+pub const fn ai6::directorates::m::compartments::CompartmentAction::as_str(self) -> &'static str
+pub fn ai6::directorates::m::compartments::CompartmentAction::parse(&str) -> core::option::Option<Self>
+impl core::fmt::Display for ai6::directorates::m::compartments::CompartmentAction
+pub fn ai6::directorates::m::compartments::CompartmentAction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::m::compartments::CompartmentResource
+pub ai6::directorates::m::compartments::CompartmentResource::Mission
+pub ai6::directorates::m::compartments::CompartmentResource::Mission::id: alloc::string::String
+pub ai6::directorates::m::compartments::CompartmentResource::Mission::operation: alloc::string::String
+pub ai6::directorates::m::compartments::CompartmentResource::Operation(alloc::string::String)
+impl core::fmt::Display for ai6::directorates::m::compartments::CompartmentResource
+pub fn ai6::directorates::m::compartments::CompartmentResource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::m::compartments::CoverTarget
+pub ai6::directorates::m::compartments::CoverTarget::Mission(alloc::string::String)
+pub ai6::directorates::m::compartments::CoverTarget::Operation(alloc::string::String)
+impl ai6::directorates::m::compartments::CoverTarget
+pub fn ai6::directorates::m::compartments::CoverTarget::parse(&str) -> core::option::Option<Self>
+impl core::fmt::Display for ai6::directorates::m::compartments::CoverTarget
+pub fn ai6::directorates::m::compartments::CoverTarget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::m::compartments::ReadInSubject
+pub ai6::directorates::m::compartments::ReadInSubject::Account(alloc::string::String)
+pub ai6::directorates::m::compartments::ReadInSubject::Agent(alloc::string::String)
+pub ai6::directorates::m::compartments::ReadInSubject::Group(alloc::string::String)
+pub ai6::directorates::m::compartments::ReadInSubject::Mission(alloc::string::String)
+pub ai6::directorates::m::compartments::ReadInSubject::Operation(alloc::string::String)
+pub ai6::directorates::m::compartments::ReadInSubject::Person(alloc::string::String)
+impl ai6::directorates::m::compartments::ReadInSubject
+pub const fn ai6::directorates::m::compartments::ReadInSubject::is_people(&self) -> bool
+pub fn ai6::directorates::m::compartments::ReadInSubject::parse(&str) -> core::option::Option<Self>
+impl core::fmt::Display for ai6::directorates::m::compartments::ReadInSubject
+pub fn ai6::directorates::m::compartments::ReadInSubject::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::compartments::Compartment
+pub ai6::directorates::m::compartments::Compartment::actions: alloc::collections::btree::set::BTreeSet<ai6::directorates::m::compartments::CompartmentAction>
+pub ai6::directorates::m::compartments::Compartment::covers: alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentCover>
+pub ai6::directorates::m::compartments::Compartment::description: alloc::string::String
+pub ai6::directorates::m::compartments::Compartment::id: alloc::string::String
+pub ai6::directorates::m::compartments::Compartment::limits: ai6::directorates::m::compartments::CompartmentLimits
+pub ai6::directorates::m::compartments::Compartment::min_clearance: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::compartments::Compartment::read_in: alloc::vec::Vec<ai6::directorates::m::compartments::ReadIn>
+impl ai6::directorates::m::compartments::Compartment
+pub fn ai6::directorates::m::compartments::Compartment::from_definition(impl core::convert::Into<alloc::string::String>, &serde_json::value::Value) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartment::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::to_definition(&self) -> serde_json::value::Value
+pub fn ai6::directorates::m::compartments::Compartment::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartment::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::compartments::Compartment::with_actions(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::compartments::CompartmentAction>) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_cover(self, ai6::directorates::m::compartments::CompartmentCover) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_description(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_limits(self, ai6::directorates::m::compartments::CompartmentLimits) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_min_clearance(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_read_in(self, ai6::directorates::m::compartments::ReadIn) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::compartments::CompartmentCover
+pub ai6::directorates::m::compartments::CompartmentCover::propagate: bool
+pub ai6::directorates::m::compartments::CompartmentCover::target: ai6::directorates::m::compartments::CoverTarget
+impl ai6::directorates::m::compartments::CompartmentCover
+pub fn ai6::directorates::m::compartments::CompartmentCover::new(ai6::directorates::m::compartments::CoverTarget) -> Self
+pub fn ai6::directorates::m::compartments::CompartmentCover::with_propagate(self, bool) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::compartments::CompartmentLimits
+pub ai6::directorates::m::compartments::CompartmentLimits::burst: ai6::bounds::Limit
+pub ai6::directorates::m::compartments::CompartmentLimits::max_fanout: ai6::bounds::Limit
+pub ai6::directorates::m::compartments::CompartmentLimits::max_product_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::compartments::CompartmentLimits::rate: ai6::bounds::Rate
+pub ai6::directorates::m::compartments::CompartmentLimits::sender_burst: ai6::bounds::Limit
+pub ai6::directorates::m::compartments::CompartmentLimits::sender_rate: ai6::bounds::Rate
+impl core::default::Default for ai6::directorates::m::compartments::CompartmentLimits
+pub fn ai6::directorates::m::compartments::CompartmentLimits::default() -> Self
+pub struct ai6::directorates::m::compartments::CompartmentSettings
+pub ai6::directorates::m::compartments::CompartmentSettings::actions: alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentAction>
+pub ai6::directorates::m::compartments::CompartmentSettings::description: alloc::string::String
+pub ai6::directorates::m::compartments::CompartmentSettings::limits: ai6::directorates::m::compartments::CompartmentLimits
+impl ai6::directorates::m::compartments::CompartmentSettings
+pub fn ai6::directorates::m::compartments::CompartmentSettings::apply(self, &str, core::option::Option<ai6::directorates::m::compartments::Compartment>) -> ai6::directorates::m::compartments::Compartment
+pub fn ai6::directorates::m::compartments::CompartmentSettings::from_json(&serde_json::value::Value) -> core::result::Result<Self, alloc::string::String>
+pub struct ai6::directorates::m::compartments::Compartments
+impl ai6::directorates::m::compartments::Compartments
+pub fn ai6::directorates::m::compartments::Compartments::compile(&self, &ai6::directorates::m::roster::Roster) -> core::result::Result<ai6::directorates::m::compartments::CompiledCompartments, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartments::from_records(impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, serde_json::value::Value)>) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartments::get(&self, &str) -> core::option::Option<&ai6::directorates::m::compartments::Compartment>
+pub fn ai6::directorates::m::compartments::Compartments::is_empty(&self) -> bool
+pub fn ai6::directorates::m::compartments::Compartments::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::compartments::Compartment>
+pub fn ai6::directorates::m::compartments::Compartments::new() -> Self
+pub fn ai6::directorates::m::compartments::Compartments::of(impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::compartments::Compartment>) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartments::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub struct ai6::directorates::m::compartments::CompiledCompartments
+impl ai6::directorates::m::compartments::CompiledCompartments
+pub fn ai6::directorates::m::compartments::CompiledCompartments::field_allows(&self, &ai6::directorates::m::compartments::FieldPrincipal, ai6::directorates::m::compartments::CompartmentAction, &ai6::directorates::m::compartments::CompartmentResource) -> core::option::Option<&str>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::field_allows_in(&self, &str, &ai6::directorates::m::compartments::FieldPrincipal, ai6::directorates::m::compartments::CompartmentAction, &ai6::directorates::m::compartments::CompartmentResource) -> bool
+pub fn ai6::directorates::m::compartments::CompiledCompartments::get(&self, &str) -> core::option::Option<&ai6::directorates::m::compartments::Compartment>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::held(&self, &ai6::directorates::m::compartments::FieldPrincipal) -> alloc::vec::Vec<ai6::directorates::m::compartments::HeldCompartment>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::compartments::Compartment>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::lineage(&self) -> &ai6::Lineage
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_allows(&self, &coqui_access::model::Person, ai6::directorates::m::compartments::CompartmentAction, &ai6::directorates::m::compartments::CompartmentResource) -> core::option::Option<&str>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_allows_in(&self, &str, &coqui_access::model::Person, ai6::directorates::m::compartments::CompartmentAction, &ai6::directorates::m::compartments::CompartmentResource) -> bool
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_compartments(&self, &coqui_access::model::Person, &str) -> alloc::vec::Vec<&str>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_holds(&self, &str, &coqui_access::model::Person) -> bool
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_reachable(&self, &coqui_access::model::Person, ai6::directorates::m::compartments::CompartmentAction) -> alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentResource>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::reachable(&self, &ai6::directorates::m::compartments::FieldPrincipal, ai6::directorates::m::compartments::CompartmentAction) -> alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentResource>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::refused(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl core::default::Default for ai6::directorates::m::compartments::CompiledCompartments
+pub fn ai6::directorates::m::compartments::CompiledCompartments::default() -> Self
+impl core::fmt::Debug for ai6::directorates::m::compartments::CompiledCompartments
+pub fn ai6::directorates::m::compartments::CompiledCompartments::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::compartments::FieldPrincipal
+pub ai6::directorates::m::compartments::FieldPrincipal::agent: alloc::string::String
+pub ai6::directorates::m::compartments::FieldPrincipal::clearance: alloc::string::String
+pub ai6::directorates::m::compartments::FieldPrincipal::mission: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::compartments::FieldPrincipal::operation: alloc::string::String
+impl ai6::directorates::m::compartments::FieldPrincipal
+pub fn ai6::directorates::m::compartments::FieldPrincipal::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::compartments::HeldCompartment
+pub ai6::directorates::m::compartments::HeldCompartment::actions: alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentAction>
+pub ai6::directorates::m::compartments::HeldCompartment::description: alloc::string::String
+pub ai6::directorates::m::compartments::HeldCompartment::id: alloc::string::String
+pub ai6::directorates::m::compartments::HeldCompartment::missions: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::compartments::HeldCompartment::operations: alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::compartments::ReadIn
+pub ai6::directorates::m::compartments::ReadIn::propagate: bool
+pub ai6::directorates::m::compartments::ReadIn::subject: ai6::directorates::m::compartments::ReadInSubject
+impl ai6::directorates::m::compartments::ReadIn
+pub fn ai6::directorates::m::compartments::ReadIn::new(ai6::directorates::m::compartments::ReadInSubject) -> Self
+pub fn ai6::directorates::m::compartments::ReadIn::with_propagate(self, bool) -> Self
+pub fn ai6::directorates::m::compartments::current(&dyn ai6::directorates::m::config::ConfigProvider) -> core::result::Result<ai6::directorates::m::compartments::CompiledCompartments, ai6::directorates::m::roster::RosterError>
 pub mod ai6::directorates::m::config
 #[non_exhaustive] pub enum ai6::directorates::m::config::ConfigRecord
 pub ai6::directorates::m::config::ConfigRecord::Access
 pub ai6::directorates::m::config::ConfigRecord::Agent
 pub ai6::directorates::m::config::ConfigRecord::Assistant
 pub ai6::directorates::m::config::ConfigRecord::Cables
+pub ai6::directorates::m::config::ConfigRecord::Compartment
 pub ai6::directorates::m::config::ConfigRecord::Cover
 pub ai6::directorates::m::config::ConfigRecord::Loadout
 pub ai6::directorates::m::config::ConfigRecord::Mcp
@@ -697,7 +842,7 @@ pub ai6::directorates::m::config::ConfigRecord::Theater
 pub ai6::directorates::m::config::ConfigRecord::Tls
 pub ai6::directorates::m::config::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 19]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 20]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -724,6 +869,8 @@ pub fn ai6::directorates::m::config::ConfigScope::fmt(&self, &mut core::fmt::For
 pub ai6::directorates::m::config::ConfigDefinitions::records: alloc::vec::Vec<(alloc::string::String, serde_json::value::Value)>
 pub ai6::directorates::m::config::ConfigDefinitions::revision: ai6::directorates::m::config::ConfigRevision
 pub ai6::directorates::m::config::ConfigDefinitions::writable: bool
+impl ai6::directorates::m::config::ConfigDefinitions
+pub fn ai6::directorates::m::config::ConfigDefinitions::new(ai6::directorates::m::config::ConfigRevision, alloc::vec::Vec<(alloc::string::String, serde_json::value::Value)>, bool) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::config::ConfigLimits
 pub ai6::directorates::m::config::ConfigLimits::access_policy_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::config::ConfigLimits::loadout_bytes: ai6::bounds::Limit
@@ -784,6 +931,7 @@ pub fn ai6::directorates::m::config::MemoryProvider::fmt(&self, &mut core::fmt::
 #[non_exhaustive] pub struct ai6::directorates::m::config::Settings
 pub ai6::directorates::m::config::Settings::access: core::option::Option<serde_json::value::Value>
 pub ai6::directorates::m::config::Settings::cables: ai6::CableConfig
+pub ai6::directorates::m::config::Settings::compartments: ai6::directorates::m::compartments::Compartments
 pub ai6::directorates::m::config::Settings::limits: ai6::directorates::m::config::ConfigLimits
 pub ai6::directorates::m::config::Settings::loadouts: ai6::directorates::q::LoadoutCatalog
 pub ai6::directorates::m::config::Settings::operation_access: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
@@ -884,7 +1032,7 @@ pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directora
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
-pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 19]
+pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 20]
 pub trait ai6::directorates::m::config::ConfigProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::definitions(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope) -> core::result::Result<ai6::directorates::m::config::ConfigDefinitions, ai6::directorates::m::roster::RosterError>
@@ -1479,6 +1627,7 @@ pub fn ai6::directorates::m::roster::RosterBuilder::agent(self, ai6::directorate
 pub fn ai6::directorates::m::roster::RosterBuilder::assistant(self, ai6::directorates::m::assistant::AssistantSettings) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::build(self) -> core::result::Result<ai6::directorates::m::roster::Roster, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterBuilder::cover(self, ai6::directorates::m::cover::Cover) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::max_compartment_rules(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directorates::m::roster::Operation) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
@@ -1486,15 +1635,18 @@ pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::director
 pub struct ai6::directorates::m::roster::RosterError
 impl ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::kind(&self) -> ai6::directorates::m::roster::RosterErrorKind
+pub fn ai6::directorates::m::roster::RosterError::unavailable(impl core::convert::Into<alloc::string::String>) -> Self
 impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::m::roster::RosterSettings
+pub ai6::directorates::m::roster::RosterSettings::max_compartment_rules: ai6::bounds::Limit
 pub ai6::directorates::m::roster::RosterSettings::max_operation_depth: ai6::bounds::Limit
 impl ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::roster::RosterSettings::with_max_compartment_rules(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
@@ -1509,6 +1661,7 @@ pub ai6::directorates::m::roster::Workspace::source: core::option::Option<std::p
 impl core::default::Default for ai6::directorates::m::roster::Workspace
 pub fn ai6::directorates::m::roster::Workspace::default() -> Self
 pub const ai6::directorates::m::roster::DEFAULT_CHECKPOINT_SECS: u64
+pub const ai6::directorates::m::roster::DEFAULT_MAX_COMPARTMENT_RULES: usize
 pub const ai6::directorates::m::roster::DEFAULT_MAX_OPERATION_DEPTH: usize
 pub const ai6::directorates::m::roster::DEFAULT_RETIRE_WARNING_DAYS: u32
 pub mod ai6::directorates::m::theaters
@@ -1690,6 +1843,7 @@ pub ai6::directorates::m::unex_limits::UnexGatewayLimits::attach_token_ttl: ai6:
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::client_slots: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::clients_per_session: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::compartment_audit: ai6::bounds::Seconds
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::fanout: u64
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::frame_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::input_frames_per_second: ai6::bounds::Limit
@@ -1858,15 +2012,18 @@ pub fn ai6::directorates::medical::exposure::ExposurePolicy::restricts(&self, ai
 pub fn ai6::directorates::medical::exposure::ExposurePolicy::tools(&self) -> &[alloc::string::String]
 impl core::default::Default for ai6::directorates::medical::exposure::ExposurePolicy
 pub fn ai6::directorates::medical::exposure::ExposurePolicy::default() -> Self
+pub const ai6::directorates::medical::exposure::BRIEF_COMPARTMENT: &str
 pub const ai6::directorates::medical::exposure::BRIEF_EXPOSURE_KEY: &str
 pub const ai6::directorates::medical::exposure::BRIEF_REGISTRY_DROP: &str
 pub const ai6::directorates::medical::exposure::BRIEF_SOURCE: &str
 pub const ai6::directorates::medical::exposure::DEFAULT_EXPOSING_TOOLS: [&str; 2]
+pub const ai6::directorates::medical::exposure::PRODUCT_PREFIX: &str
 pub const ai6::directorates::medical::exposure::REVIEW: &str
 pub const ai6::directorates::medical::exposure::STATION_LOGBOOK: &str
 pub const ai6::directorates::medical::exposure::STATION_REPORT: &str
 pub fn ai6::directorates::medical::exposure::cable_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::medical::exposure::issue_source(&str, ai6::bounds::Limit) -> alloc::string::String
+pub fn ai6::directorates::medical::exposure::product_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::medical::exposure::tool_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub mod ai6::directorates::medical::quarantine
 #[non_exhaustive] pub enum ai6::directorates::medical::quarantine::IncidentKind
@@ -3153,6 +3310,8 @@ pub fn ai6::directorates::registry::backend::BriefStore::claim_with_lease(&self,
 pub fn ai6::directorates::registry::backend::BriefStore::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::backend::BriefStore::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::backend::BriefStore::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::backend::BriefStore::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::backend::BriefStore::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::backend::BriefStore::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::BriefStore::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::backend::BriefStore::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -3174,6 +3333,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, co
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::sql::SqlRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -3195,6 +3356,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::store::FileRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -3640,6 +3803,7 @@ pub fn ai6::CableRelayError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::
 #[non_exhaustive] pub enum ai6::directorates::registry::cables::CableScope
 pub ai6::directorates::registry::cables::CableScope::Agent
 pub ai6::directorates::registry::cables::CableScope::Channel
+pub ai6::directorates::registry::cables::CableScope::Compartment
 pub ai6::directorates::registry::cables::CableScope::Global
 pub ai6::directorates::registry::cables::CableScope::Operation
 pub ai6::directorates::registry::cables::CableScope::Station
@@ -3652,6 +3816,9 @@ pub ai6::directorates::registry::cables::CableState::Failed
 pub ai6::directorates::registry::cables::CableState::Held
 pub ai6::directorates::registry::cables::CableState::Queued
 pub ai6::directorates::registry::cables::CableState::Refused
+#[non_exhaustive] pub enum ai6::directorates::registry::cables::CrossOperation
+pub ai6::directorates::registry::cables::CrossOperation::Compartments
+pub ai6::directorates::registry::cables::CrossOperation::StationGrants
 pub struct ai6::directorates::registry::cables::Cable
 impl ai6::directorates::registry::cables::Cable
 pub fn ai6::directorates::registry::cables::Cable::body(&self) -> &str
@@ -3679,6 +3846,7 @@ pub fn ai6::directorates::registry::cables::Cable::fmt(&self, &mut core::fmt::Fo
 pub ai6::directorates::registry::cables::CableAuditRecord::agent: alloc::string::String
 pub ai6::directorates::registry::cables::CableAuditRecord::at: f64
 pub ai6::directorates::registry::cables::CableAuditRecord::cable_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CableAuditRecord::crossing: core::option::Option<ai6::directorates::registry::cables::CableCrossing>
 pub ai6::directorates::registry::cables::CableAuditRecord::decision: &'static str
 pub ai6::directorates::registry::cables::CableAuditRecord::event: &'static str
 pub ai6::directorates::registry::cables::CableAuditRecord::mission_id: core::option::Option<alloc::string::String>
@@ -3692,13 +3860,18 @@ pub ai6::directorates::registry::cables::CableAuditRecord::theater: core::option
 pub struct ai6::directorates::registry::cables::CableConfig
 impl ai6::CableConfig
 pub fn ai6::CableConfig::channels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>
+pub fn ai6::CableConfig::cross_operation(&self) -> ai6::directorates::registry::cables::CrossOperation
 pub fn ai6::CableConfig::max_fanout(&self) -> usize
 pub fn ai6::CableConfig::message_limits(&self) -> (ai6::bounds::Limit, ai6::bounds::TimeLimit, ai6::bounds::Seconds)
 pub fn ai6::CableConfig::parse_toml(&str) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableConfig::policy(&self) -> core::result::Result<ai6::CablePolicy, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableConfig::quota_limits(&self) -> (f64, u32, f64, u32)
+pub fn ai6::CableConfig::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::CableConfig
 pub fn ai6::CableConfig::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::cables::CableCrossing
+pub ai6::directorates::registry::cables::CableCrossing::compartment: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CableCrossing::operation: alloc::string::String
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableDelivery
 pub ai6::directorates::registry::cables::CableDelivery::body: alloc::string::String
 pub ai6::directorates::registry::cables::CableDelivery::cable_id: alloc::string::String
@@ -3772,6 +3945,11 @@ pub ai6::directorates::registry::cables::CableHeldDelivery::target: ai6::directo
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableHeldRecipient
 pub ai6::directorates::registry::cables::CableHeldRecipient::agent: alloc::string::String
 pub ai6::directorates::registry::cables::CableHeldRecipient::session_id: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::registry::cables::CablePeer
+pub ai6::directorates::registry::cables::CablePeer::agent: alloc::string::String
+pub ai6::directorates::registry::cables::CablePeer::compartment: alloc::string::String
+pub ai6::directorates::registry::cables::CablePeer::mission_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CablePeer::operation: alloc::string::String
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CablePolicy
 impl ai6::CablePolicy
 pub fn ai6::CablePolicy::try_new(alloc::vec::Vec<ai6::CableGrant>, alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::CableInboundMode>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
@@ -3796,7 +3974,9 @@ pub struct ai6::directorates::registry::cables::CableRelay
 impl ai6::CableRelay
 pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::body_bytes(&self) -> ai6::bounds::Limit
+pub fn ai6::CableRelay::cross_operation(&self) -> ai6::directorates::registry::cables::CrossOperation
 pub fn ai6::CableRelay::discover(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::CableEndpoint>, ai6::CableRelayError>
+pub fn ai6::CableRelay::discover_through_compartments(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::cables::CablePeer>, ai6::CableRelayError>
 pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox_from(&self, &ai6::CablePrincipal, &str, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
@@ -3806,14 +3986,16 @@ pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::re
 pub fn ai6::CableRelay::release(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::CableRelease, ai6::CableRelayError>
 pub fn ai6::CableRelay::reply(&self, &ai6::CablePrincipal, &str, alloc::string::String, alloc::string::String) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 pub fn ai6::CableRelay::send(&self, &ai6::CablePrincipal, ai6::CableSendRequest) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
+pub fn ai6::CableRelay::set_compartments(&self, alloc::sync::Arc<dyn ai6::directorates::registry::cables::CableCompartments>)
 pub fn ai6::CableRelay::unregister_endpoint(&self, &ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn ai6::CableRelay::with_cross_operation(self, ai6::directorates::registry::cables::CrossOperation) -> Self
+pub fn ai6::CableRelay::with_durable_audit(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) -> core::result::Result<(), alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableRelay::with_lineage(self, impl core::ops::function::Fn(&str) -> alloc::vec::Vec<alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_message_limits(self, (ai6::bounds::Limit, ai6::bounds::TimeLimit, ai6::bounds::Seconds)) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
-pub fn ai6::CableRelay::with_person_audit(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) -> core::result::Result<(), alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableRelease
 pub ai6::directorates::registry::cables::CableRelease::delivered: usize
 pub ai6::directorates::registry::cables::CableRelease::refused: usize
@@ -3821,6 +4003,7 @@ pub ai6::directorates::registry::cables::CableRelease::refused: usize
 impl ai6::CableSendRequest
 pub fn ai6::CableSendRequest::new(ai6::directorates::registry::cables::CableTarget, alloc::string::String, alloc::string::String) -> Self
 pub fn ai6::CableSendRequest::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::CableSendRequest::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_ttl(self, f64) -> Self
 impl core::fmt::Debug for ai6::CableSendRequest
@@ -3831,6 +4014,9 @@ pub fn ai6::directorates::registry::cables::CableTarget::name(&self) -> core::op
 pub fn ai6::directorates::registry::cables::CableTarget::scope(&self) -> ai6::directorates::registry::cables::CableScope
 pub fn ai6::directorates::registry::cables::CableTarget::try_new(ai6::directorates::registry::cables::CableScope, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub const ai6::directorates::registry::cables::MAX_CABLE_FANOUT: usize
+pub trait ai6::directorates::registry::cables::CableCompartments: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::registry::cables::CableCompartments::clearance(&self, &str, &str) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::registry::cables::CableCompartments::current(&self) -> core::result::Result<ai6::directorates::m::compartments::CompiledCompartments, alloc::string::String>
 pub mod ai6::directorates::registry::clearance
 #[non_exhaustive] pub struct ai6::directorates::registry::clearance::ClearanceGrant
 pub ai6::directorates::registry::clearance::ClearanceGrant::agent: alloc::string::String
@@ -4363,6 +4549,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::mission_issues::outbox_counts(&[ai6::directorates::registry::mission_issues::OutboxEntry]) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, usize>
+pub mod ai6::directorates::registry::products
+pub const ai6::directorates::registry::products::CUT_MARKER: &str
+pub fn ai6::directorates::registry::products::mission_product(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::store::FiledBrief, ai6::bounds::Limit) -> serde_json::value::Value
+pub fn ai6::directorates::registry::products::mission_status(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::store::FiledBrief) -> serde_json::value::Value
 pub mod ai6::directorates::registry::quarantine
 #[non_exhaustive] pub struct ai6::directorates::registry::quarantine::Quarantine
 pub ai6::directorates::registry::quarantine::Quarantine::agent: alloc::string::String
@@ -4741,6 +4931,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, co
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::sql::SqlRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -4948,6 +5140,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::store::FileRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -4993,6 +5187,11 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_cleared(&self, 
 pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
+#[non_exhaustive] pub struct ai6::directorates::registry::store::FiledBrief
+pub ai6::directorates::registry::store::FiledBrief::attempts: u32
+pub ai6::directorates::registry::store::FiledBrief::brief: ai6::directorates::registry::store::Brief
+pub ai6::directorates::registry::store::FiledBrief::outcome: core::option::Option<serde_json::value::Value>
+pub ai6::directorates::registry::store::FiledBrief::state: alloc::string::String
 #[non_exhaustive] pub struct ai6::directorates::registry::store::HeadquartersLease
 impl ai6::directorates::registry::store::HeadquartersLease
 pub fn ai6::directorates::registry::store::HeadquartersLease::expires(&self) -> f64
@@ -5082,6 +5281,8 @@ pub fn ai6::directorates::registry::store::BriefStore::claim_with_lease(&self, c
 pub fn ai6::directorates::registry::store::BriefStore::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::BriefStore::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::BriefStore::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::store::BriefStore::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::store::BriefStore::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::store::BriefStore::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::BriefStore::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::BriefStore::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -5103,6 +5304,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, co
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::sql::SqlRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -5124,6 +5327,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::store::FileRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -6405,6 +6610,7 @@ pub fn ai6::CableRelayError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::
 #[non_exhaustive] pub enum ai6::CableScope
 pub ai6::CableScope::Agent
 pub ai6::CableScope::Channel
+pub ai6::CableScope::Compartment
 pub ai6::CableScope::Global
 pub ai6::CableScope::Operation
 pub ai6::CableScope::Station
@@ -6417,11 +6623,32 @@ pub ai6::CableState::Failed
 pub ai6::CableState::Held
 pub ai6::CableState::Queued
 pub ai6::CableState::Refused
+#[non_exhaustive] pub enum ai6::CompartmentAction
+pub ai6::CompartmentAction::CableRead
+pub ai6::CompartmentAction::CableSend
+pub ai6::CompartmentAction::MissionPropose
+pub ai6::CompartmentAction::MissionRead
+pub ai6::CompartmentAction::MissionStatus
+pub ai6::CompartmentAction::ProductRead
+impl ai6::directorates::m::compartments::CompartmentAction
+pub const ai6::directorates::m::compartments::CompartmentAction::ALL: [Self; 6]
+pub const fn ai6::directorates::m::compartments::CompartmentAction::as_str(self) -> &'static str
+pub fn ai6::directorates::m::compartments::CompartmentAction::parse(&str) -> core::option::Option<Self>
+impl core::fmt::Display for ai6::directorates::m::compartments::CompartmentAction
+pub fn ai6::directorates::m::compartments::CompartmentAction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::CompartmentResource
+pub ai6::CompartmentResource::Mission
+pub ai6::CompartmentResource::Mission::id: alloc::string::String
+pub ai6::CompartmentResource::Mission::operation: alloc::string::String
+pub ai6::CompartmentResource::Operation(alloc::string::String)
+impl core::fmt::Display for ai6::directorates::m::compartments::CompartmentResource
+pub fn ai6::directorates::m::compartments::CompartmentResource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum ai6::ConfigRecord
 pub ai6::ConfigRecord::Access
 pub ai6::ConfigRecord::Agent
 pub ai6::ConfigRecord::Assistant
 pub ai6::ConfigRecord::Cables
+pub ai6::ConfigRecord::Compartment
 pub ai6::ConfigRecord::Cover
 pub ai6::ConfigRecord::Loadout
 pub ai6::ConfigRecord::Mcp
@@ -6438,7 +6665,7 @@ pub ai6::ConfigRecord::Theater
 pub ai6::ConfigRecord::Tls
 pub ai6::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 19]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 20]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -6461,6 +6688,13 @@ pub fn ai6::directorates::m::config::ConfigScope::of_station(&str) -> Self
 pub fn ai6::directorates::m::config::ConfigScope::parse(&str) -> core::option::Option<Self>
 impl core::fmt::Display for ai6::directorates::m::config::ConfigScope
 pub fn ai6::directorates::m::config::ConfigScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::CoverTarget
+pub ai6::CoverTarget::Mission(alloc::string::String)
+pub ai6::CoverTarget::Operation(alloc::string::String)
+impl ai6::directorates::m::compartments::CoverTarget
+pub fn ai6::directorates::m::compartments::CoverTarget::parse(&str) -> core::option::Option<Self>
+impl core::fmt::Display for ai6::directorates::m::compartments::CoverTarget
+pub fn ai6::directorates::m::compartments::CoverTarget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum ai6::Decision
 pub ai6::Decision::Approved
 pub ai6::Decision::Expired
@@ -6624,6 +6858,18 @@ pub ai6::QErrorKind::Io
 pub ai6::QErrorKind::Parse
 pub ai6::QErrorKind::Schema
 pub ai6::QErrorKind::TooLarge
+#[non_exhaustive] pub enum ai6::ReadInSubject
+pub ai6::ReadInSubject::Account(alloc::string::String)
+pub ai6::ReadInSubject::Agent(alloc::string::String)
+pub ai6::ReadInSubject::Group(alloc::string::String)
+pub ai6::ReadInSubject::Mission(alloc::string::String)
+pub ai6::ReadInSubject::Operation(alloc::string::String)
+pub ai6::ReadInSubject::Person(alloc::string::String)
+impl ai6::directorates::m::compartments::ReadInSubject
+pub const fn ai6::directorates::m::compartments::ReadInSubject::is_people(&self) -> bool
+pub fn ai6::directorates::m::compartments::ReadInSubject::parse(&str) -> core::option::Option<Self>
+impl core::fmt::Display for ai6::directorates::m::compartments::ReadInSubject
+pub fn ai6::directorates::m::compartments::ReadInSubject::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum ai6::RepoKind
 pub ai6::RepoKind::Local
 pub ai6::RepoKind::Remote
@@ -7531,6 +7777,7 @@ pub fn ai6::directorates::registry::cables::Cable::fmt(&self, &mut core::fmt::Fo
 pub ai6::CableAuditRecord::agent: alloc::string::String
 pub ai6::CableAuditRecord::at: f64
 pub ai6::CableAuditRecord::cable_id: core::option::Option<alloc::string::String>
+pub ai6::CableAuditRecord::crossing: core::option::Option<ai6::directorates::registry::cables::CableCrossing>
 pub ai6::CableAuditRecord::decision: &'static str
 pub ai6::CableAuditRecord::event: &'static str
 pub ai6::CableAuditRecord::mission_id: core::option::Option<alloc::string::String>
@@ -7544,11 +7791,13 @@ pub ai6::CableAuditRecord::theater: core::option::Option<alloc::string::String>
 pub struct ai6::CableConfig
 impl ai6::CableConfig
 pub fn ai6::CableConfig::channels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>
+pub fn ai6::CableConfig::cross_operation(&self) -> ai6::directorates::registry::cables::CrossOperation
 pub fn ai6::CableConfig::max_fanout(&self) -> usize
 pub fn ai6::CableConfig::message_limits(&self) -> (ai6::bounds::Limit, ai6::bounds::TimeLimit, ai6::bounds::Seconds)
 pub fn ai6::CableConfig::parse_toml(&str) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableConfig::policy(&self) -> core::result::Result<ai6::CablePolicy, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableConfig::quota_limits(&self) -> (f64, u32, f64, u32)
+pub fn ai6::CableConfig::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::CableConfig
 pub fn ai6::CableConfig::default() -> Self
 #[non_exhaustive] pub struct ai6::CableDelivery
@@ -7655,7 +7904,9 @@ pub struct ai6::CableRelay
 impl ai6::CableRelay
 pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::body_bytes(&self) -> ai6::bounds::Limit
+pub fn ai6::CableRelay::cross_operation(&self) -> ai6::directorates::registry::cables::CrossOperation
 pub fn ai6::CableRelay::discover(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::CableEndpoint>, ai6::CableRelayError>
+pub fn ai6::CableRelay::discover_through_compartments(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::cables::CablePeer>, ai6::CableRelayError>
 pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox_from(&self, &ai6::CablePrincipal, &str, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
@@ -7665,14 +7916,16 @@ pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::re
 pub fn ai6::CableRelay::release(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::CableRelease, ai6::CableRelayError>
 pub fn ai6::CableRelay::reply(&self, &ai6::CablePrincipal, &str, alloc::string::String, alloc::string::String) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 pub fn ai6::CableRelay::send(&self, &ai6::CablePrincipal, ai6::CableSendRequest) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
+pub fn ai6::CableRelay::set_compartments(&self, alloc::sync::Arc<dyn ai6::directorates::registry::cables::CableCompartments>)
 pub fn ai6::CableRelay::unregister_endpoint(&self, &ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn ai6::CableRelay::with_cross_operation(self, ai6::directorates::registry::cables::CrossOperation) -> Self
+pub fn ai6::CableRelay::with_durable_audit(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) -> core::result::Result<(), alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableRelay::with_lineage(self, impl core::ops::function::Fn(&str) -> alloc::vec::Vec<alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_message_limits(self, (ai6::bounds::Limit, ai6::bounds::TimeLimit, ai6::bounds::Seconds)) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
-pub fn ai6::CableRelay::with_person_audit(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) -> core::result::Result<(), alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 #[non_exhaustive] pub struct ai6::CableRelease
 pub ai6::CableRelease::delivered: usize
 pub ai6::CableRelease::refused: usize
@@ -7680,6 +7933,7 @@ pub ai6::CableRelease::refused: usize
 impl ai6::CableSendRequest
 pub fn ai6::CableSendRequest::new(ai6::directorates::registry::cables::CableTarget, alloc::string::String, alloc::string::String) -> Self
 pub fn ai6::CableSendRequest::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::CableSendRequest::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_ttl(self, f64) -> Self
 impl core::fmt::Debug for ai6::CableSendRequest
@@ -7785,10 +8039,83 @@ impl ai6::AccountLogin for ai6::CommandLogin
 pub fn ai6::CommandLogin::login(&self, &ai6::AccountPool, &ai6::Account, &std::path::Path, &str) -> core::result::Result<(), alloc::string::String>
 impl core::default::Default for ai6::CommandLogin
 pub fn ai6::CommandLogin::default() -> Self
+#[non_exhaustive] pub struct ai6::Compartment
+pub ai6::Compartment::actions: alloc::collections::btree::set::BTreeSet<ai6::directorates::m::compartments::CompartmentAction>
+pub ai6::Compartment::covers: alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentCover>
+pub ai6::Compartment::description: alloc::string::String
+pub ai6::Compartment::id: alloc::string::String
+pub ai6::Compartment::limits: ai6::directorates::m::compartments::CompartmentLimits
+pub ai6::Compartment::min_clearance: core::option::Option<alloc::string::String>
+pub ai6::Compartment::read_in: alloc::vec::Vec<ai6::directorates::m::compartments::ReadIn>
+impl ai6::directorates::m::compartments::Compartment
+pub fn ai6::directorates::m::compartments::Compartment::from_definition(impl core::convert::Into<alloc::string::String>, &serde_json::value::Value) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartment::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::to_definition(&self) -> serde_json::value::Value
+pub fn ai6::directorates::m::compartments::Compartment::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartment::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::compartments::Compartment::with_actions(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::compartments::CompartmentAction>) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_cover(self, ai6::directorates::m::compartments::CompartmentCover) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_description(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_limits(self, ai6::directorates::m::compartments::CompartmentLimits) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_min_clearance(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::compartments::Compartment::with_read_in(self, ai6::directorates::m::compartments::ReadIn) -> Self
+#[non_exhaustive] pub struct ai6::CompartmentCover
+pub ai6::CompartmentCover::propagate: bool
+pub ai6::CompartmentCover::target: ai6::directorates::m::compartments::CoverTarget
+impl ai6::directorates::m::compartments::CompartmentCover
+pub fn ai6::directorates::m::compartments::CompartmentCover::new(ai6::directorates::m::compartments::CoverTarget) -> Self
+pub fn ai6::directorates::m::compartments::CompartmentCover::with_propagate(self, bool) -> Self
+#[non_exhaustive] pub struct ai6::CompartmentLimits
+pub ai6::CompartmentLimits::burst: ai6::bounds::Limit
+pub ai6::CompartmentLimits::max_fanout: ai6::bounds::Limit
+pub ai6::CompartmentLimits::max_product_bytes: ai6::bounds::Limit
+pub ai6::CompartmentLimits::rate: ai6::bounds::Rate
+pub ai6::CompartmentLimits::sender_burst: ai6::bounds::Limit
+pub ai6::CompartmentLimits::sender_rate: ai6::bounds::Rate
+impl core::default::Default for ai6::directorates::m::compartments::CompartmentLimits
+pub fn ai6::directorates::m::compartments::CompartmentLimits::default() -> Self
+pub struct ai6::CompartmentSettings
+pub ai6::CompartmentSettings::actions: alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentAction>
+pub ai6::CompartmentSettings::description: alloc::string::String
+pub ai6::CompartmentSettings::limits: ai6::directorates::m::compartments::CompartmentLimits
+impl ai6::directorates::m::compartments::CompartmentSettings
+pub fn ai6::directorates::m::compartments::CompartmentSettings::apply(self, &str, core::option::Option<ai6::directorates::m::compartments::Compartment>) -> ai6::directorates::m::compartments::Compartment
+pub fn ai6::directorates::m::compartments::CompartmentSettings::from_json(&serde_json::value::Value) -> core::result::Result<Self, alloc::string::String>
+pub struct ai6::Compartments
+impl ai6::directorates::m::compartments::Compartments
+pub fn ai6::directorates::m::compartments::Compartments::compile(&self, &ai6::directorates::m::roster::Roster) -> core::result::Result<ai6::directorates::m::compartments::CompiledCompartments, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartments::from_records(impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, serde_json::value::Value)>) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartments::get(&self, &str) -> core::option::Option<&ai6::directorates::m::compartments::Compartment>
+pub fn ai6::directorates::m::compartments::Compartments::is_empty(&self) -> bool
+pub fn ai6::directorates::m::compartments::Compartments::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::compartments::Compartment>
+pub fn ai6::directorates::m::compartments::Compartments::new() -> Self
+pub fn ai6::directorates::m::compartments::Compartments::of(impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::m::compartments::Compartment>) -> core::result::Result<Self, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::compartments::Compartments::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub struct ai6::CompiledCompartments
+impl ai6::directorates::m::compartments::CompiledCompartments
+pub fn ai6::directorates::m::compartments::CompiledCompartments::field_allows(&self, &ai6::directorates::m::compartments::FieldPrincipal, ai6::directorates::m::compartments::CompartmentAction, &ai6::directorates::m::compartments::CompartmentResource) -> core::option::Option<&str>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::field_allows_in(&self, &str, &ai6::directorates::m::compartments::FieldPrincipal, ai6::directorates::m::compartments::CompartmentAction, &ai6::directorates::m::compartments::CompartmentResource) -> bool
+pub fn ai6::directorates::m::compartments::CompiledCompartments::get(&self, &str) -> core::option::Option<&ai6::directorates::m::compartments::Compartment>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::held(&self, &ai6::directorates::m::compartments::FieldPrincipal) -> alloc::vec::Vec<ai6::directorates::m::compartments::HeldCompartment>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::compartments::Compartment>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::lineage(&self) -> &ai6::Lineage
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_allows(&self, &coqui_access::model::Person, ai6::directorates::m::compartments::CompartmentAction, &ai6::directorates::m::compartments::CompartmentResource) -> core::option::Option<&str>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_allows_in(&self, &str, &coqui_access::model::Person, ai6::directorates::m::compartments::CompartmentAction, &ai6::directorates::m::compartments::CompartmentResource) -> bool
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_compartments(&self, &coqui_access::model::Person, &str) -> alloc::vec::Vec<&str>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_holds(&self, &str, &coqui_access::model::Person) -> bool
+pub fn ai6::directorates::m::compartments::CompiledCompartments::person_reachable(&self, &coqui_access::model::Person, ai6::directorates::m::compartments::CompartmentAction) -> alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentResource>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::reachable(&self, &ai6::directorates::m::compartments::FieldPrincipal, ai6::directorates::m::compartments::CompartmentAction) -> alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentResource>
+pub fn ai6::directorates::m::compartments::CompiledCompartments::refused(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl core::default::Default for ai6::directorates::m::compartments::CompiledCompartments
+pub fn ai6::directorates::m::compartments::CompiledCompartments::default() -> Self
+impl core::fmt::Debug for ai6::directorates::m::compartments::CompiledCompartments
+pub fn ai6::directorates::m::compartments::CompiledCompartments::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::ConfigDefinitions
 pub ai6::ConfigDefinitions::records: alloc::vec::Vec<(alloc::string::String, serde_json::value::Value)>
 pub ai6::ConfigDefinitions::revision: ai6::directorates::m::config::ConfigRevision
 pub ai6::ConfigDefinitions::writable: bool
+impl ai6::directorates::m::config::ConfigDefinitions
+pub fn ai6::directorates::m::config::ConfigDefinitions::new(ai6::directorates::m::config::ConfigRevision, alloc::vec::Vec<(alloc::string::String, serde_json::value::Value)>, bool) -> Self
 #[non_exhaustive] pub struct ai6::ConfigLimits
 pub ai6::ConfigLimits::access_policy_bytes: ai6::bounds::Limit
 pub ai6::ConfigLimits::loadout_bytes: ai6::bounds::Limit
@@ -7927,6 +8254,13 @@ pub fn ai6::directorates::medical::exposure::ExposurePolicy::restricts(&self, ai
 pub fn ai6::directorates::medical::exposure::ExposurePolicy::tools(&self) -> &[alloc::string::String]
 impl core::default::Default for ai6::directorates::medical::exposure::ExposurePolicy
 pub fn ai6::directorates::medical::exposure::ExposurePolicy::default() -> Self
+#[non_exhaustive] pub struct ai6::FieldPrincipal
+pub ai6::FieldPrincipal::agent: alloc::string::String
+pub ai6::FieldPrincipal::clearance: alloc::string::String
+pub ai6::FieldPrincipal::mission: core::option::Option<alloc::string::String>
+pub ai6::FieldPrincipal::operation: alloc::string::String
+impl ai6::directorates::m::compartments::FieldPrincipal
+pub fn ai6::directorates::m::compartments::FieldPrincipal::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::FileData
 pub ai6::FileData::data: guatiao::value::convert::Bytes
 pub ai6::FileData::size: u64
@@ -8076,6 +8410,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::store::FileRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -8121,6 +8457,11 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_cleared(&self, 
 pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
+#[non_exhaustive] pub struct ai6::FiledBrief
+pub ai6::FiledBrief::attempts: u32
+pub ai6::FiledBrief::brief: ai6::directorates::registry::store::Brief
+pub ai6::FiledBrief::outcome: core::option::Option<serde_json::value::Value>
+pub ai6::FiledBrief::state: alloc::string::String
 #[non_exhaustive] pub struct ai6::Finding
 pub ai6::Finding::detail: alloc::string::String
 pub ai6::Finding::kind: ai6::directorates::m::vetting::FindingKind
@@ -8181,6 +8522,12 @@ pub ai6::HeldBrief::operation: alloc::string::String
 pub ai6::HeldBrief::vetting: ai6::directorates::m::vetting::Vetting
 impl ai6::directorates::registry::vetting::HeldBrief
 pub fn ai6::directorates::registry::vetting::HeldBrief::held_only_for_rate(&self) -> bool
+#[non_exhaustive] pub struct ai6::HeldCompartment
+pub ai6::HeldCompartment::actions: alloc::vec::Vec<ai6::directorates::m::compartments::CompartmentAction>
+pub ai6::HeldCompartment::description: alloc::string::String
+pub ai6::HeldCompartment::id: alloc::string::String
+pub ai6::HeldCompartment::missions: alloc::vec::Vec<alloc::string::String>
+pub ai6::HeldCompartment::operations: alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct ai6::HeldLimits
 pub ai6::HeldLimits::actor_bytes: ai6::bounds::Limit
 pub ai6::HeldLimits::clearance_bytes: ai6::bounds::Limit
@@ -8694,6 +9041,25 @@ pub fn ai6::directorates::registry::accounts::QuotaWindow::resets_at(self, f64) 
 pub fn ai6::directorates::registry::accounts::QuotaWindow::status(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::accounts::QuotaWindow::use_at(&self, f64, u16) -> u16
 pub fn ai6::directorates::registry::accounts::QuotaWindow::used_permille(self, u16) -> Self
+pub struct ai6::Rate(_)
+impl ai6::bounds::Rate
+pub const ai6::bounds::Rate::UNBOUNDED: Self
+pub const fn ai6::bounds::Rate::at(f64) -> Self
+pub const fn ai6::bounds::Rate::get(self) -> core::option::Option<f64>
+impl core::fmt::Display for ai6::bounds::Rate
+pub fn ai6::bounds::Rate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl guatiao::schema::describe::Schema for ai6::bounds::Rate
+pub fn ai6::bounds::Rate::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+impl guatiao::value::convert::FromValue for ai6::bounds::Rate
+pub fn ai6::bounds::Rate::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
+impl guatiao::value::convert::ToValue for ai6::bounds::Rate
+pub fn ai6::bounds::Rate::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+#[non_exhaustive] pub struct ai6::ReadIn
+pub ai6::ReadIn::propagate: bool
+pub ai6::ReadIn::subject: ai6::directorates::m::compartments::ReadInSubject
+impl ai6::directorates::m::compartments::ReadIn
+pub fn ai6::directorates::m::compartments::ReadIn::new(ai6::directorates::m::compartments::ReadInSubject) -> Self
+pub fn ai6::directorates::m::compartments::ReadIn::with_propagate(self, bool) -> Self
 pub struct ai6::ReadSpec
 pub ai6::ReadSpec::limit: u64
 pub ai6::ReadSpec::offset: u64
@@ -8838,6 +9204,7 @@ pub fn ai6::directorates::m::roster::RosterBuilder::agent(self, ai6::directorate
 pub fn ai6::directorates::m::roster::RosterBuilder::assistant(self, ai6::directorates::m::assistant::AssistantSettings) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::build(self) -> core::result::Result<ai6::directorates::m::roster::Roster, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterBuilder::cover(self, ai6::directorates::m::cover::Cover) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::max_compartment_rules(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directorates::m::roster::Operation) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
@@ -8845,15 +9212,18 @@ pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::director
 pub struct ai6::RosterError
 impl ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::kind(&self) -> ai6::directorates::m::roster::RosterErrorKind
+pub fn ai6::directorates::m::roster::RosterError::unavailable(impl core::convert::Into<alloc::string::String>) -> Self
 impl core::error::Error for ai6::directorates::m::roster::RosterError
 impl core::fmt::Display for ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::RosterSettings
+pub ai6::RosterSettings::max_compartment_rules: ai6::bounds::Limit
 pub ai6::RosterSettings::max_operation_depth: ai6::bounds::Limit
 impl ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::roster::RosterSettings::with_max_compartment_rules(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
@@ -9126,6 +9496,7 @@ pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::d
 #[non_exhaustive] pub struct ai6::Settings
 pub ai6::Settings::access: core::option::Option<serde_json::value::Value>
 pub ai6::Settings::cables: ai6::CableConfig
+pub ai6::Settings::compartments: ai6::directorates::m::compartments::Compartments
 pub ai6::Settings::limits: ai6::directorates::m::config::ConfigLimits
 pub ai6::Settings::loadouts: ai6::directorates::q::LoadoutCatalog
 pub ai6::Settings::operation_access: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
@@ -9354,6 +9725,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, co
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::sql::SqlRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -9763,6 +10136,7 @@ pub ai6::UnexGatewayLimits::attach_token_ttl: ai6::bounds::Seconds
 pub ai6::UnexGatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::client_slots: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::clients_per_session: ai6::bounds::Limit
+pub ai6::UnexGatewayLimits::compartment_audit: ai6::bounds::Seconds
 pub ai6::UnexGatewayLimits::fanout: u64
 pub ai6::UnexGatewayLimits::frame_bytes: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::input_frames_per_second: ai6::bounds::Limit
@@ -10028,7 +10402,7 @@ pub const ai6::HEAD_OF_STATION_ROLE: &str
 pub const ai6::LIMIT_EVENT: &str
 pub const ai6::LOCAL_THEATER: &str
 pub const ai6::MAX_CABLE_FANOUT: usize
-pub const ai6::NOT_DELEGABLE: [&str; 2]
+pub const ai6::NOT_DELEGABLE: [&str; 3]
 pub const ai6::NO_OPERATION: &str
 pub const ai6::OPERATION_ACTIONS: &[&str]
 pub const ai6::PROJECT_DIRECTORIES: [&str; 2]
@@ -10040,7 +10414,7 @@ pub const ai6::REVIEW: &str
 pub const ai6::REVIEW_DATA_KEY: &str
 pub const ai6::REVIEW_SOURCE: &str
 pub const ai6::SAFE_HOUSE_DELETE: &str
-pub const ai6::SCOPE_KINDS: [&str; 4]
+pub const ai6::SCOPE_KINDS: [&str; 5]
 pub const ai6::SCRIPT_ENVIRONMENT: [&str; 14]
 pub const ai6::SLEEPER_BRIEF_SOURCE: &str
 pub const ai6::SOURCE_BRIEF_PREFIX: &str
@@ -10238,6 +10612,8 @@ pub fn ai6::BriefStore::claim_with_lease(&self, core::option::Option<&str>, &str
 pub fn ai6::BriefStore::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::BriefStore::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::BriefStore::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::BriefStore::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::BriefStore::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::BriefStore::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::BriefStore::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::BriefStore::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -10259,6 +10635,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, co
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::sql::SqlRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
@@ -10280,6 +10658,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::entered_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::expired(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::Lease>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_brief(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::FiledBrief>>
+pub fn ai6::directorates::registry::store::FileRegistry::filed_briefs(&self, &str, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::FiledBrief>>
 pub fn ai6::directorates::registry::store::FileRegistry::finish(&self, &ai6::directorates::registry::store::Brief, &serde_json::value::Value, bool, core::option::Option<&[u8]>, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::hand_over(&self, &ai6::directorates::registry::store::Lease, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::lease(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
