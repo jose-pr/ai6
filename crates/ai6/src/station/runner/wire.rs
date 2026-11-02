@@ -5,7 +5,6 @@
 use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use agent_client_protocol::{
     Agent, Client, ConnectionTo, Error, Responder, UntypedMessage, on_receive_notification,
@@ -363,8 +362,9 @@ fn bind(connection: &Arc<Connection>, binding: Arc<Binding>) {
         }
         // The notice is written before the socket closes under it.
         let stream = old.stream.try_clone();
+        let close_wait = connection.runner.inner.limits.superseded_close_wait.0;
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(200));
+            std::thread::sleep(close_wait);
             if let Ok(stream) = stream {
                 let _ = stream.shutdown(Shutdown::Both);
             }

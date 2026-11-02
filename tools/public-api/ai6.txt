@@ -803,6 +803,7 @@ impl core::fmt::Debug for ai6::SqlProvider
 pub fn ai6::SqlProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::m::config::StationRuntime
 pub ai6::directorates::m::config::StationRuntime::accounts: ai6::station::limits::AccountLimits
+pub ai6::directorates::m::config::StationRuntime::api: ai6::station::limits::ApiLimits
 pub ai6::directorates::m::config::StationRuntime::approvals: ai6::station::limits::ApprovalLimits
 pub ai6::directorates::m::config::StationRuntime::audit: ai6::station::limits::AuditLimits
 pub ai6::directorates::m::config::StationRuntime::blocked_after: core::option::Option<f64>
@@ -5838,6 +5839,10 @@ pub ai6::station::limits::AccountLimits::reset_grace: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::unknown_use_permille: u16
 impl core::default::Default for ai6::station::limits::AccountLimits
 pub fn ai6::station::limits::AccountLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::station::limits::ApiLimits
+pub ai6::station::limits::ApiLimits::refused_body_drain_bytes: ai6::bounds::Limit
+impl core::default::Default for ai6::station::limits::ApiLimits
+pub fn ai6::station::limits::ApiLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::ApprovalLimits
 pub ai6::station::limits::ApprovalLimits::classify_nesting: usize
 pub ai6::station::limits::ApprovalLimits::kind_bytes: ai6::bounds::Limit
@@ -5904,10 +5909,13 @@ pub ai6::station::limits::RunnerLimits::feed_poll: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::keep_ended: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::pump_poll: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::read_wait: ai6::bounds::Seconds
-pub ai6::station::limits::RunnerLimits::refused_body_drain_bytes: ai6::bounds::Limit
 pub ai6::station::limits::RunnerLimits::replay_batch: usize
+pub ai6::station::limits::RunnerLimits::retry_pause: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::start_margin: ai6::bounds::Seconds
+pub ai6::station::limits::RunnerLimits::start_poll: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::start_wait: ai6::bounds::Seconds
+pub ai6::station::limits::RunnerLimits::superseded_close_wait: ai6::bounds::Seconds
+pub ai6::station::limits::RunnerLimits::terminal_poll: ai6::bounds::Seconds
 impl core::default::Default for ai6::station::limits::RunnerLimits
 pub fn ai6::station::limits::RunnerLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::SchedulerLimits
@@ -5939,6 +5947,7 @@ impl core::default::Default for ai6::station::limits::SourceLimits
 pub fn ai6::station::limits::SourceLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::StationLimits
 pub ai6::station::limits::StationLimits::accounts: ai6::station::limits::AccountLimits
+pub ai6::station::limits::StationLimits::api: ai6::station::limits::ApiLimits
 pub ai6::station::limits::StationLimits::approvals: ai6::station::limits::ApprovalLimits
 pub ai6::station::limits::StationLimits::audit: ai6::station::limits::AuditLimits
 pub ai6::station::limits::StationLimits::detached: ai6::station::limits::DetachedLimits
@@ -6121,7 +6130,7 @@ pub const ai6::station::runner::SETTINGS_FILE: &str
 pub fn ai6::station::runner::connect_stdio(&std::path::Path, &ai6::station::limits::RunnerLimits) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::station::runner::default_state_dir() -> core::io::error::Result<std::path::PathBuf>
 pub async fn ai6::station::runner::serve<F>(ai6::station::runner::RunnerConfig, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
-pub fn ai6::station::runner::spawn_detached(&std::path::Path, &[std::ffi::os_str::OsString], &std::path::Path, core::time::Duration) -> core::io::error::Result<ai6::station::runner::RunnerInfo>
+pub fn ai6::station::runner::spawn_detached(&std::path::Path, &[std::ffi::os_str::OsString], &std::path::Path, &ai6::station::limits::RunnerLimits) -> core::io::error::Result<ai6::station::runner::RunnerInfo>
 pub mod ai6::station::safehouse
 pub struct ai6::station::safehouse::SafeHouse
 impl ai6::station::safehouse::SafeHouse
@@ -9325,6 +9334,7 @@ pub fn ai6::directorates::registry::logbook::StationReport::with_findings(self, 
 pub fn ai6::directorates::registry::logbook::StationReport::worst(&self) -> core::option::Option<ai6::directorates::registry::logbook::Severity>
 #[non_exhaustive] pub struct ai6::StationRuntime
 pub ai6::StationRuntime::accounts: ai6::station::limits::AccountLimits
+pub ai6::StationRuntime::api: ai6::station::limits::ApiLimits
 pub ai6::StationRuntime::approvals: ai6::station::limits::ApprovalLimits
 pub ai6::StationRuntime::audit: ai6::station::limits::AuditLimits
 pub ai6::StationRuntime::blocked_after: core::option::Option<f64>

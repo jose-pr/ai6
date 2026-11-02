@@ -1035,7 +1035,7 @@ fn api(state: DaemonState, token: String) -> Router {
         );
     #[cfg(feature = "publisher")]
     let app = app.route("/internal/publisher", get(publisher_health));
-    let bearer = crate::station::runner::Bearer::new(token, &state.station.limits().runner);
+    let bearer = crate::station::runner::Bearer::new(token, &state.station.limits().api);
     app.route_layer(axum::middleware::from_fn_with_state(
         bearer,
         crate::station::runner::authorize,

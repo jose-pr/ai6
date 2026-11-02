@@ -210,7 +210,7 @@ impl RunnerLink {
                     .try_clone()
                     .map_err(|error| not_running(error.to_string()))?;
                 Ok(Connection {
-                    lines: lines_over_io(reader, stream, 20).0,
+                    lines: lines_over_io(reader, stream, 0).0,
                     authenticate: Some(token_auth(&token)),
                     on_close: None,
                 })
@@ -237,12 +237,14 @@ impl RunnerLink {
                         .map_err(|error| Unreachable(describe(&error)))?,
                 );
                 let timeout = Duration::from_millis(self.timeouts.connect_ms);
-                if let Err(why) = await_ready(&process, timeout) {
+                let poll_ms =
+                    i64::try_from(millis(self.settings.runner.terminal_poll.0)).unwrap_or(i64::MAX);
+                if let Err(why) = await_ready(&process, timeout, poll_ms) {
                     let _ = process.kill();
                     return Err(Unreachable(why));
                 }
-                let io = TerminalIo::new(process.clone(), 200);
-                let (lines, _) = lines_over_io(io.clone(), io.clone(), 20);
+                let io = TerminalIo::new(process.clone(), poll_ms);
+                let (lines, _) = lines_over_io(io.clone(), io.clone(), 0);
                 let stopper = io;
                 Ok(Connection {
                     lines,
@@ -318,13 +320,10 @@ impl RunnerLink {
                         profile.as_str().into(),
                     ]);
                 }
-                super::spawn_detached(
-                    command,
-                    &arguments,
-                    state_dir,
-                    self.settings.runner.start_wait.0,
-                )
-                .map_err(|error| format!("the runner could not start ({not_running}): {error}"))?;
+                super::spawn_detached(command, &arguments, state_dir, &self.settings.runner)
+                    .map_err(|error| {
+                        format!("the runner could not start ({not_running}): {error}")
+                    })?;
             }
             Reach::Transport {
                 client,
@@ -525,16 +524,18 @@ fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-/// Reads the terminal until `ai6 runner connect` says it is ready, or `timeout` passes.
+/// Reads the terminal until `ai6 runner connect` says it is ready, or `timeout` passes, each
+/// read waiting up to `poll_ms`.
 fn await_ready(
     process: &Arc<Object<dyn TerminalSession>>,
     timeout: Duration,
+    poll_ms: i64,
 ) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     let mut seen = Vec::new();
     let mut chunk = vec![0u8; 4096];
     while Instant::now() < deadline {
-        match process.read(&mut chunk, 200) {
+        match process.read(&mut chunk, poll_ms) {
             Ok(crate::directorates::q::terminal::READ_TIMED_OUT) => {}
             Ok(0) => {
                 let said = String::from_utf8_lossy(&seen).trim().to_owned();
@@ -751,7 +752,9 @@ impl AgentSession for RemoteSession {
                     );
                 }
                 drop(inner);
-                std::thread::sleep(Duration::from_millis(wait.max(100)));
+                std::thread::sleep(Duration::from_millis(
+                    wait.max(millis(self.link.settings.runner.retry_pause.0)),
+                ));
             }
         }
         Ok(None)
@@ -849,4 +852,87 @@ pub fn connect_stdio(state_dir: &Path, limits: &RunnerLimits) -> Result<(), Stri
     }
     drop(input);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Says it is ready on the first read, and records how long each read may wait.
+    struct RecordingTerminal {
+        waits: Arc<Mutex<Vec<i64>>>,
+    }
+
+    impl TerminalSession for RecordingTerminal {
+        fn pid(&self) -> i64 {
+            0
+        }
+
+        fn read(&self, dst: &mut [u8], timeout_ms: i64) -> Result<i64, ProviderError> {
+            self.waits.lock().unwrap().push(timeout_ms);
+            let line = format!("{READY_LINE}\n");
+            dst[..line.len()].copy_from_slice(line.as_bytes());
+            Ok(i64::try_from(line.len()).unwrap())
+        }
+
+        fn write(&self, _data: &[u8]) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn resize(&self, _rows: i64, _cols: i64) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn kill(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn exit_status(&self, _timeout_ms: i64) -> Result<guatiao::Value, ProviderError> {
+            Err(refuse("not used"))
+        }
+    }
+
+    #[test]
+    fn the_ready_line_is_read_at_the_terminal_poll() {
+        let waits = Arc::new(Mutex::new(Vec::new()));
+        let terminal = RecordingTerminal {
+            waits: waits.clone(),
+        };
+        await_ready(
+            &Arc::new(terminal.into_object()),
+            Duration::from_secs(30),
+            1234,
+        )
+        .unwrap();
+        assert_eq!(*waits.lock().unwrap(), [1234]);
+    }
+
+    #[test]
+    fn an_unreachable_runner_is_tried_again_after_the_retry_pause() {
+        let dir = tempfile::tempdir().unwrap();
+        let pause = Duration::from_secs(2);
+        let link = RunnerLink::local(dir.path().join("none"), PathBuf::from("no-such-program"))
+            .with_settings(RunnerHandoff::new(
+                RunnerLimits {
+                    retry_pause: crate::bounds::Seconds(pause),
+                    ..RunnerLimits::default()
+                },
+                std::collections::BTreeMap::new(),
+            ));
+        let session = RemoteSession::drive(
+            Arc::new(link),
+            "k",
+            None,
+            None,
+            Arc::new(AtomicBool::new(false)),
+            ReachWatch::default(),
+        );
+        let started = Instant::now();
+        assert!(session.next_event(0).unwrap().is_none());
+        assert!(
+            started.elapsed() >= pause,
+            "tried again after {:?}",
+            started.elapsed()
+        );
+    }
 }

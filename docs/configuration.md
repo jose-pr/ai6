@@ -836,13 +836,22 @@ provider applied before it was a key; the provider's API header lists them with 
 | `feed_poll` | 0.05 | Seconds between a runner connection's looks for spooled events to send |
 | `replay_batch` | 256 | Spooled events a runner connection takes from the spool at once |
 | `keep_ended` | 604,800 (a week) | Seconds an ended Session is kept by its runner |
-| `refused_body_drain_bytes` | 64 KiB | Bytes of a refused request's body the Station's own API reads before it answers |
 | `cable_request_bytes` | 4 MiB | Bytes of one request through a runner's Cable relay |
 | `cable_connect_timeout` | 10 | Seconds a runner's Cable relay may take to reach the Station |
 | `read_wait` | 1 | Seconds one read by the Station of a runner's Session waits for an event |
 | `connect_timeout` | 5 | Seconds `ai6 runner connect` may take to reach the runner's loopback port |
 | `start_wait` | 30 | Seconds a started runner has to answer |
 | `start_margin` | 30 | Seconds starting a runner over a transport may take past `start_wait` |
+| `start_poll` | 0.05 | Seconds between looks at whether a runner started on this host serves yet |
+| `terminal_poll` | 0.2 | Seconds one read of `ai6 runner connect`'s terminal waits before it checks whether to stop or give up |
+| `superseded_close_wait` | 0.2 | Seconds a connection another one took a Session from stays open, so the notice saying so is written first |
+| `retry_pause` | 0.1 | Seconds at least between the Station's tries at a runner it cannot reach |
+
+`[api]`: the Station's own HTTP API.
+
+| Key | Default | What |
+| --- | --- | --- |
+| `refused_body_drain_bytes` | 64 KiB | Bytes of a refused request's body the Station's own API reads before it answers |
 
 `[audit]`
 

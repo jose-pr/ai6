@@ -52,6 +52,8 @@ pub struct StationLimits {
     pub detached: DetachedLimits,
     /// `[runner]`: field runners, the Station's client of them and `ai6 runner serve`.
     pub runner: RunnerLimits,
+    /// `[api]`: the Station's own HTTP API.
+    pub api: ApiLimits,
     /// `[audit]`: audit record details.
     pub audit: AuditLimits,
     /// `[theaters]`: ephemeral Theaters.
@@ -534,9 +536,6 @@ pub struct RunnerLimits {
     pub replay_batch: usize,
     /// Seconds an ended Session is kept by its runner. Default 604,800 (a week).
     pub keep_ended: Seconds,
-    /// Bytes of a refused request's body the Station's own API reads before it answers.
-    /// Default 64 KiB.
-    pub refused_body_drain_bytes: Limit,
     /// Bytes of one request through a runner's Cable relay. Default 4 MiB.
     pub cable_request_bytes: Limit,
     /// Seconds a runner's Cable relay may take to reach the Station. Default 10.
@@ -549,6 +548,16 @@ pub struct RunnerLimits {
     pub start_wait: Seconds,
     /// Seconds starting a runner over a transport may take past `start_wait`. Default 30.
     pub start_margin: Seconds,
+    /// Seconds between looks at whether a runner started on this host serves yet. Default 0.05.
+    pub start_poll: Seconds,
+    /// Seconds one read of `ai6 runner connect`'s terminal waits before it checks whether to
+    /// stop or give up. Default 0.2.
+    pub terminal_poll: Seconds,
+    /// Seconds a connection another one took a Session from stays open, so the notice saying so
+    /// is written before the socket closes under it. Default 0.2.
+    pub superseded_close_wait: Seconds,
+    /// Seconds at least between the Station's tries at a runner it cannot reach. Default 0.1.
+    pub retry_pause: Seconds,
 }
 
 impl Default for RunnerLimits {
@@ -558,13 +567,34 @@ impl Default for RunnerLimits {
             feed_poll: Seconds(std::time::Duration::from_millis(50)),
             replay_batch: 256,
             keep_ended: Seconds::new(7 * DAY),
-            refused_body_drain_bytes: Limit::at(64 * KIB),
             cable_request_bytes: Limit::at(4 * MIB),
             cable_connect_timeout: Seconds::new(10),
             read_wait: Seconds::new(1),
             connect_timeout: Seconds::new(5),
             start_wait: Seconds::new(30),
             start_margin: Seconds::new(30),
+            start_poll: Seconds(std::time::Duration::from_millis(50)),
+            terminal_poll: Seconds(std::time::Duration::from_millis(200)),
+            superseded_close_wait: Seconds(std::time::Duration::from_millis(200)),
+            retry_pause: Seconds(std::time::Duration::from_millis(100)),
+        }
+    }
+}
+
+/// `[api]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ApiLimits {
+    /// Bytes of a refused request's body the Station's own API reads before it answers.
+    /// Default 64 KiB.
+    pub refused_body_drain_bytes: Limit,
+}
+
+impl Default for ApiLimits {
+    fn default() -> Self {
+        Self {
+            refused_body_drain_bytes: Limit::at(64 * KIB),
         }
     }
 }

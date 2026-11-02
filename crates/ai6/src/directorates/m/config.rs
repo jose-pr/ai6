@@ -539,6 +539,9 @@ pub struct StationRuntime {
     /// `[runner]`.
     #[serde(default)]
     pub runner: limits::RunnerLimits,
+    /// `[api]`.
+    #[serde(default)]
+    pub api: limits::ApiLimits,
     /// `[audit]`.
     #[serde(default)]
     pub audit: limits::AuditLimits,
@@ -624,6 +627,7 @@ impl StationRuntime {
             green_ink: self.green_ink.clone(),
             detached: self.detached.clone(),
             runner: self.runner.clone(),
+            api: self.api.clone(),
             audit: self.audit.clone(),
             theaters: self.theaters.clone(),
             theater_tools: self.theater_tools.clone(),

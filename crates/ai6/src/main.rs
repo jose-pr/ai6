@@ -939,7 +939,7 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                         &program,
                         &arguments,
                         &state_dir,
-                        settings.runner.start_wait.0,
+                        &settings.runner,
                     )
                 });
                 return match started {

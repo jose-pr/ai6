@@ -45,7 +45,7 @@ use crate::directorates::section_00::acp::HandlerSpec;
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
 };
-use crate::station::limits::RunnerLimits;
+use crate::station::limits::{ApiLimits, RunnerLimits};
 use crate::station::plugins::Plugins;
 
 #[cfg(feature = "cables-mcp")]
@@ -365,8 +365,8 @@ where
 }
 
 /// Starts `program runner serve <arguments>` in the background, detached from the caller's
-/// terminal and session, and answers once it serves `state_dir`, giving up after
-/// `start_wait`.
+/// terminal and session, and answers once it serves `state_dir`, looking every
+/// `limits.start_poll` and giving up after `limits.start_wait`.
 ///
 /// Its output goes to `runner.log` in the state directory. On Windows it also inherits the
 /// caller's inheritable handles, such as an output pipe, and holds them while it runs.
@@ -374,7 +374,7 @@ pub fn spawn_detached(
     program: &Path,
     arguments: &[std::ffi::OsString],
     state_dir: &Path,
-    start_wait: Duration,
+    limits: &RunnerLimits,
 ) -> io::Result<RunnerInfo> {
     fs::create_dir_all(state_dir)?;
     let log = OpenOptions::new()
@@ -403,6 +403,7 @@ pub fn spawn_detached(
         command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
     let mut child = command.spawn()?;
+    let start_wait = limits.start_wait.0;
     let deadline = std::time::Instant::now() + start_wait;
     loop {
         if let Ok(info) = RunnerInfo::read(state_dir)
@@ -426,7 +427,7 @@ pub fn spawn_detached(
                 ),
             ));
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(limits.start_poll.0);
     }
 }
 
@@ -774,7 +775,7 @@ pub(crate) struct Bearer {
 
 impl Bearer {
     /// `token`, draining refused bodies up to `limits.refused_body_drain_bytes`.
-    pub(crate) fn new(token: String, limits: &RunnerLimits) -> Self {
+    pub(crate) fn new(token: String, limits: &ApiLimits) -> Self {
         Self {
             token,
             drain: limits.refused_body_drain_bytes.or_max(),
@@ -1138,10 +1139,14 @@ mod tests {
 
     impl Serving {
         async fn start() -> Self {
+            Self::start_within(RunnerLimits::default()).await
+        }
+
+        async fn start_within(limits: RunnerLimits) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
             let task = tokio::spawn(serve_with_plugins(
-                RunnerConfig::new(dir.path()),
+                RunnerConfig::new(dir.path()).with_limits(limits),
                 Arc::new(crate::station::plugins::testing::terminal_choice(true)),
                 async move {
                     let _ = stopped.await;
@@ -1409,6 +1414,79 @@ mod tests {
         .await
         .unwrap();
         serving.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_superseded_connection_stays_open_for_its_close_wait() {
+        const CLOSE_WAIT_SECS: u64 = 3;
+        let serving = Serving::start_within(RunnerLimits {
+            superseded_close_wait: crate::bounds::Seconds::new(CLOSE_WAIT_SECS),
+            ..RunnerLimits::default()
+        })
+        .await;
+        let (options, attach, first, second) = (
+            serving.options("k5"),
+            serving.attach_options("k5", 0),
+            serving.transport(),
+            serving.transport(),
+        );
+        tokio::task::spawn_blocking(move || {
+            let older = AcpSession::connect(first, options, None).unwrap();
+            assert_eq!(texts(&events_until(&older, 1)), ["hello work"]);
+            let _newer = AcpSession::connect(second, attach, None).unwrap();
+            assert_eq!(events_until(&older, 1)[0].kind, "detached");
+            let told = std::time::Instant::now();
+            let deadline = told + Duration::from_secs(20);
+            while !older.connection_lost() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the older stays connected"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            // A second less, for how late the test may have read the notice.
+            assert!(
+                told.elapsed() >= Duration::from_secs(CLOSE_WAIT_SECS - 1),
+                "closed {:?} after the notice",
+                told.elapsed()
+            );
+        })
+        .await
+        .unwrap();
+        serving.stop().await;
+    }
+
+    #[test]
+    fn a_starting_runner_is_looked_for_at_the_start_poll() {
+        let dir = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let program = {
+            use std::os::unix::fs::PermissionsExt;
+            let program = dir.path().join("stay");
+            fs::write(&program, "#!/bin/sh\nexec sleep 5\n").unwrap();
+            fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+            program
+        };
+        #[cfg(windows)]
+        let program = {
+            let program = dir.path().join("stay.cmd");
+            fs::write(&program, "@ping -n 5 127.0.0.1 >nul\r\n").unwrap();
+            program
+        };
+        let poll = Duration::from_secs(2);
+        let limits = RunnerLimits {
+            start_wait: crate::bounds::Seconds(Duration::from_millis(100)),
+            start_poll: crate::bounds::Seconds(poll),
+            ..RunnerLimits::default()
+        };
+        let started = std::time::Instant::now();
+        let error = spawn_detached(&program, &[], dir.path(), &limits).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut, "{error}");
+        assert!(
+            started.elapsed() >= poll,
+            "gave up {:?} in",
+            started.elapsed()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

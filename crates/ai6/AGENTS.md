@@ -241,8 +241,10 @@ pub struct StationLimits {
     pub green_ink: GreenInkLimits,        // gate_timeout
     pub detached: DetachedLimits,         // poll, script_timeout, name_chars
     pub runner: RunnerLimits,             // pump_poll, feed_poll, replay_batch: usize, keep_ended,
-                                          // refused_body_drain_bytes, cable_request_bytes, cable_connect_timeout,
-                                          // read_wait, connect_timeout, start_wait, start_margin
+                                          // cable_request_bytes, cable_connect_timeout, read_wait, connect_timeout,
+                                          // start_wait, start_margin, start_poll, terminal_poll,
+                                          // superseded_close_wait, retry_pause
+    pub api: ApiLimits,                   // refused_body_drain_bytes
     pub audit: AuditLimits,               // names_detail_chars, target_bytes
     pub theaters: TheaterLimits,          // ephemeral_name_bytes
     pub theater_tools: TheaterToolLimits, // output_bytes, read_bytes, timeout, max_timeout: TimeLimit, git_timeout
@@ -986,7 +988,7 @@ pub struct StationRuntime { max_concurrent_missions, stall_timeout, loop_timeout
     partial_line_bytes: Option<Limit>,
     // the tables, each #[serde(default)]: see "Station runtime limits"
     scheduler, publisher, sources, transports, recovery, vetting, accounts, approvals, harness,
-    provision, secrets, terminal_output, green_ink, detached, runner, audit, theaters,
+    provision, secrets, terminal_output, green_ink, detached, runner, api, audit, theaters,
     theater_tools, head_of_station,
     providers: BTreeMap<String, serde_json::Value> }   // [providers.<id>], each a table
 impl StationRuntime { pub fn validate(&self) -> Result<(), String>;   // includes StationLimits::validate
@@ -4379,7 +4381,7 @@ impl RunnerHandoff {
 pub fn default_state_dir() -> io::Result<PathBuf>;           // `<AI6 state>/runner`
 pub async fn serve<F>(config: RunnerConfig, shutdown: F) -> io::Result<()>;  // F: Future<Output = ()> + Send + 'static
 pub fn connect_stdio(state_dir: &Path, limits: &RunnerLimits) -> Result<(), String>;  // `ai6 runner connect`
-pub fn spawn_detached(program: &Path, arguments: &[OsString], state_dir: &Path, start_wait: Duration)
+pub fn spawn_detached(program: &Path, arguments: &[OsString], state_dir: &Path, limits: &RunnerLimits)
     -> io::Result<RunnerInfo>;
 ```
 
