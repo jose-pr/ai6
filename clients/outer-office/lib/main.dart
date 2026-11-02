@@ -119,6 +119,8 @@ Future<void> _startWeb() async {
     pollInterval: config.limits.refresh.sessions,
     limits: config.limits,
   );
+  // Only here: the session cookie is a browser's, and the desktop app's sign-in stays in memory.
+  unawaited(board.resumeSignIn());
   try {
     await appearance.restore(board);
   } on Object {
@@ -503,6 +505,10 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   }
 
   String? accessToken;
+
+  /// Whether the app is asking the gateway to resume a sign-in, so nothing asks for a password
+  /// yet.
+  bool resuming = false;
 
   /// When [accessToken] stops being accepted and when renewing it stops, Unix seconds, as the
   /// gateway last said; with no end, renewing never stops.
@@ -2400,11 +2406,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
         notifyListeners();
         return;
       }
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      accessToken = body['token'] as String;
-      _tokenTimes(body);
-      loading = true;
-      await refresh();
+      await _signedIn(jsonDecode(response.body) as Map<String, dynamic>);
     } on Object {
       _tokenTimer?.cancel();
       accessToken = null;
@@ -2412,6 +2414,35 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       loading = false;
       notifyListeners();
     }
+  }
+
+  /// Comes back from a page reload: asks the gateway for a token on the strength of the session
+  /// cookie, which the browser sends and this code cannot read. Anything but a token means
+  /// nobody is signed in, which is no error to tell anyone about.
+  Future<void> resumeSignIn() async {
+    if (demo || accessToken != null) return;
+    resuming = true;
+    notifyListeners();
+    try {
+      final response = await _client.post(apiOrigin.resolve('/v1/auth/resume'));
+      if (response.statusCode == 201) {
+        await _signedIn(jsonDecode(response.body) as Map<String, dynamic>);
+      }
+    } on Object {
+      _tokenTimer?.cancel();
+      accessToken = null;
+    } finally {
+      resuming = false;
+      notifyListeners();
+    }
+  }
+
+  /// Takes the token of a gateway's answer and reads the board with it.
+  Future<void> _signedIn(Map<String, dynamic> body) async {
+    accessToken = body['token'] as String;
+    _tokenTimes(body);
+    loading = true;
+    await refresh();
   }
 
   /// Takes the token's times from a gateway's answer and sets its next step.
@@ -3906,7 +3937,9 @@ class _AccessGateState extends State<_AccessGate> {
       final board = widget.board;
       final chat = _chatFor(board);
       if (!board.demo && board.accessToken == null) {
-        return SignInPage(board: board);
+        return board.resuming
+            ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+            : SignInPage(board: board);
       }
       return MissionBoardPage(
         board: board,

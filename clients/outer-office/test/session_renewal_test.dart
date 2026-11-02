@@ -61,6 +61,17 @@ class FakeGateway {
   var moneypenny = false;
   var signIns = 0;
 
+  /// The browser holds a session cookie, as far as this gateway can tell.
+  var hasCookie = true;
+  var resumes = 0;
+  var signOuts = <String>[];
+
+  /// Held until the test says, so it can look at the app while it waits.
+  Completer<void>? resumeHeld;
+
+  /// Answers a resume in place of the gateway's, when set.
+  http.Response Function()? resumeAnswer;
+
   /// Answers a renewal in place of the gateway's, when set.
   http.Response Function()? renewAnswer;
 
@@ -87,6 +98,20 @@ class FakeGateway {
           201,
           headers: _json,
         );
+      case '/v1/auth/resume':
+        resumes++;
+        await resumeHeld?.future;
+        if (resumeAnswer case final answer?) return answer();
+        if (!hasCookie) return http.Response('{}', 401, headers: _json);
+        return http.Response(
+          jsonEncode({'token': 'resumed-$resumes', ..._times()}),
+          201,
+          headers: _json,
+        );
+      case '/v1/auth/logout':
+        signOuts.add(request.headers['authorization']!);
+        hasCookie = false;
+        return http.Response('', 204);
       case '/v1/auth/renew':
         renewals.add(request.headers['authorization']!);
         if (renewAnswer case final answer?) return answer();
@@ -137,6 +162,23 @@ Future<MissionBoard> signedIn(
   await board.login('ana', 'secret');
   await tester.pump();
   await tester.pump();
+  return board;
+}
+
+/// The app as a page reload starts it: a new board, no token, asking to resume.
+Future<MissionBoard> reloaded(
+  WidgetTester tester,
+  FakeGateway gateway, {
+  AssistantChannel Function()? channel,
+}) async {
+  final board = MissionBoard(
+    apiOrigin: Uri.parse('https://oo.example'),
+    pollInterval: null,
+    client: gateway.client,
+    assistantChannel: channel,
+  );
+  unawaited(board.resumeSignIn());
+  await tester.pumpWidget(app(board));
   return board;
 }
 
@@ -375,6 +417,122 @@ void main() {
     expect(channels.last.hello['token'], 'token-1');
     expect(channels.last.hello.containsKey('conversation'), isFalse);
     await tester.pump(ChatSettings.defaultConnectTimeout);
+  });
+
+  testWidgets(
+    'a reload resumes the sign-in with no password and its last conversation',
+    (tester) async {
+      final channels = <FakeChannel>[];
+      AssistantChannel channel() {
+        final channel = FakeChannel();
+        channels.add(channel);
+        return channel;
+      }
+
+      final gateway = FakeGateway()..moneypenny = true;
+      final first = await signedIn(tester, gateway, channel: channel);
+      await settle(tester);
+      expect(gateway.resumes, 0, reason: 'signing in does not ask');
+      channels.last.ready();
+      await settle(tester);
+      await close(tester, first);
+
+      gateway.resumeHeld = Completer();
+      final board = await reloaded(tester, gateway, channel: channel);
+      await tester.pump();
+      expect(board.resuming, isTrue);
+      expect(
+        find.byType(SignInPage),
+        findsNothing,
+        reason: 'no flash of the sign-in page while it asks',
+      );
+      gateway.resumeHeld!.complete();
+      await settle(tester);
+      await settle(tester);
+
+      expect(gateway.signIns, 1, reason: 'no new sign-in');
+      expect(board.accessToken, 'resumed-1');
+      expect(board.resuming, isFalse);
+      expect(board.loginError, isNull);
+      expect(find.byType(SignInPage), findsNothing);
+      expect(channels.last.hello['token'], 'resumed-1');
+      expect(channels.last.hello['conversation'], 'conversation-1');
+
+      // It is a sign-in like any other: renewed on time, with the token it was given.
+      await tester.pump(_hour);
+      await settle(tester);
+      expect(gateway.renewals, ['Bearer resumed-1']);
+      await close(tester, board);
+    },
+  );
+
+  testWidgets('no session cookie shows the sign-in page and no error', (
+    tester,
+  ) async {
+    final gateway = FakeGateway()..hasCookie = false;
+    final board = await reloaded(tester, gateway);
+    await settle(tester);
+    expect(gateway.resumes, 1);
+    expect(board.accessToken, isNull);
+    expect(board.resuming, isFalse);
+    expect(board.loginError, isNull);
+    expect(find.byType(SignInPage), findsOneWidget);
+    await close(tester, board);
+  });
+
+  for (final (what, answer) in [
+    ('too many refusals', http.Response('{}', 429, headers: _json)),
+    ('another site', http.Response('{}', 403, headers: _json)),
+    ('a failing gateway', http.Response('{}', 500, headers: _json)),
+    ('an unreadable answer', http.Response('nonsense', 201, headers: _json)),
+  ]) {
+    testWidgets('$what shows the sign-in page and no error', (tester) async {
+      final gateway = FakeGateway()..resumeAnswer = () => answer;
+      final board = await reloaded(tester, gateway);
+      await settle(tester);
+      expect(board.accessToken, isNull);
+      expect(board.resuming, isFalse);
+      expect(board.loginError, isNull);
+      expect(find.byType(SignInPage), findsOneWidget);
+      await close(tester, board);
+    });
+  }
+
+  testWidgets('a gateway out of reach shows the sign-in page and no error', (
+    tester,
+  ) async {
+    final gateway = FakeGateway()
+      ..resumeAnswer = () => throw http.ClientException('no route');
+    final board = await reloaded(tester, gateway);
+    await settle(tester);
+    expect(board.accessToken, isNull);
+    expect(board.loginError, isNull);
+    expect(find.byType(SignInPage), findsOneWidget);
+    await close(tester, board);
+  });
+
+  testWidgets('signing out after a resume leaves nothing to resume', (
+    tester,
+  ) async {
+    final gateway = FakeGateway();
+    final first = await signedIn(tester, gateway);
+    await close(tester, first);
+    final board = await reloaded(tester, gateway);
+    await settle(tester);
+    expect(board.accessToken, 'resumed-1');
+
+    await board.logout();
+    await settle(tester);
+    expect(gateway.signOuts, ['Bearer resumed-1']);
+    expect(find.byType(SignInPage), findsOneWidget);
+    await close(tester, board);
+
+    final again = await reloaded(tester, gateway);
+    await settle(tester);
+    expect(again.accessToken, isNull);
+    expect(again.loginError, isNull);
+    expect(find.byType(SignInPage), findsOneWidget);
+    await close(tester, again);
   });
 
   testWidgets('a new sign-in says hello with the stored conversation', (
