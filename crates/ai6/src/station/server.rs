@@ -7951,21 +7951,27 @@ queue = 1
         mission_id: &str,
         wanted: MissionState,
     ) {
+        let mut last = None;
         // Long enough for a machine busy with other builds; a passing test never waits this long.
-        tokio::time::timeout(Duration::from_secs(60), async {
-            while state
-                .missions
-                .lock()
-                .unwrap()
-                .get(mission_id)
-                .map(|mission| mission.state)
-                != Some(wanted)
-            {
+        let reached = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                last = state
+                    .missions
+                    .lock()
+                    .unwrap()
+                    .get(mission_id)
+                    .map(|mission| (mission.state, mission.blocked_reason.clone()));
+                if last.as_ref().is_some_and(|(seen, _)| *seen == wanted) {
+                    return;
+                }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
-        .await
-        .unwrap_or_else(|_| panic!("Mission {mission_id} never reached {wanted:?}"));
+        .await;
+        assert!(
+            reached.is_ok(),
+            "Mission {mission_id} never reached {wanted:?}; it was last (state, reason) {last:?}"
+        );
     }
 
     #[tokio::test]
