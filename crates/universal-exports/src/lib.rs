@@ -113,6 +113,8 @@ pub struct GatewayLimits {
     pub station_token_min_bytes: usize,
     /// The most bytes the public origin may hold.
     pub origin_bytes: ai6::Limit,
+    /// Bytes the write buffer of a browser's socket holds at least.
+    pub socket_buffer_bytes: usize,
 }
 
 /// User identity providers used to authenticate and authorize Universal Exports requests.
@@ -227,19 +229,7 @@ impl fmt::Debug for AccessProviders {
 
 impl Default for GatewayLimits {
     fn default() -> Self {
-        Self {
-            max_sessions: 16,
-            max_clients_per_session: 12,
-            scrollback_events: 64,
-            max_frame_bytes: 256 * 1024,
-            max_input_frames_per_second: 40,
-            input_queue_capacity: 64,
-            fanout_capacity: 8,
-            buffer_budget_bytes: ai6::Limit::at(512 * 1024 * 1024),
-            client_slots: ai6::Limit::at(100_000),
-            station_token_min_bytes: 32,
-            origin_bytes: ai6::Limit::at(2048),
-        }
+        Self::from(&ai6::UnexGatewayLimits::default())
     }
 }
 
@@ -259,6 +249,7 @@ impl From<&ai6::UnexGatewayLimits> for GatewayLimits {
             fanout_capacity: usize::try_from(table.fanout).unwrap_or(usize::MAX),
             buffer_budget_bytes: table.buffer_budget_bytes,
             client_slots: table.client_slots,
+            socket_buffer_bytes: table.socket_buffer_bytes.or_max(),
             station_token_min_bytes: usize::try_from(table.station_token_min_bytes)
                 .unwrap_or(usize::MAX),
             origin_bytes: table.origin_bytes,
@@ -294,7 +285,7 @@ impl GatewayConfig {
         let socket_buffer = limits
             .max_frame_bytes
             .checked_mul(2)
-            .map(|bytes| bytes.max(256 * 1024));
+            .map(|bytes| bytes.max(limits.socket_buffer_bytes));
         let socket_budget =
             client_slots_or_max(limits).checked_mul(socket_buffer.unwrap_or(usize::MAX));
         let over_budget = |bytes: Option<usize>| match limits.buffer_budget_bytes.get() {
@@ -2040,6 +2031,20 @@ async fn mission_detail(
     Ok(Json(mission))
 }
 
+/// Whether a title and instructions are written, and within `[text]`.
+fn mission_text_fits(title: &str, prompt: &str, limits: &ai6::TextLimits) -> bool {
+    !title.trim().is_empty()
+        && limits.mission_title_chars.allows(title.chars().count())
+        && !prompt.trim().is_empty()
+        && limits.mission_prompt_bytes.allows(prompt.len())
+}
+
+/// How many audit records a request gets: what it asks for, within `[timeline]`.
+fn audit_page(asked: Option<usize>, pages: &ai6::UnexTimelineLimits) -> Option<usize> {
+    let limit = asked.unwrap_or(usize::try_from(pages.audit_page).unwrap_or(usize::MAX));
+    (limit != 0 && pages.max_audit_page.allows(limit)).then_some(limit)
+}
+
 async fn create_user_mission(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -2048,10 +2053,7 @@ async fn create_user_mission(
 ) -> Result<(StatusCode, Json<CreateUserMissionResponse>), ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
-    if request.title.trim().is_empty()
-        || request.title.chars().count() > 512
-        || request.prompt.trim().is_empty()
-        || request.prompt.len() > 64 * 1024
+    if !mission_text_fits(&request.title, &request.prompt, &gateway.config.unex().text)
         || request
             .agent_id
             .as_ref()
@@ -3886,10 +3888,8 @@ async fn user_audit(
                 .map_err(|_| ApiError::bad_request())
         })
         .transpose()?;
-    let limit = query.limit.unwrap_or(100);
-    if limit == 0 || limit > 500 {
-        return Err(ApiError::bad_request());
-    }
+    let limit = audit_page(query.limit, &gateway.config.unex().timeline)
+        .ok_or_else(ApiError::bad_request)?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let authorizer = gateway.authorizer()?;
     let tree = operation_tree(&gateway).await?;
@@ -4686,7 +4686,7 @@ async fn websocket_attach(
         .limits
         .max_frame_bytes
         .saturating_mul(2)
-        .max(256 * 1024);
+        .max(gateway.config.limits.socket_buffer_bytes);
     Ok(upgrade
         .max_message_size(gateway.config.limits.max_frame_bytes)
         .max_frame_size(gateway.config.limits.max_frame_bytes)
@@ -6159,6 +6159,59 @@ mod tests {
         fn drop(&mut self) {
             self.server.abort();
         }
+    }
+
+    #[test]
+    fn what_a_gateway_accepts_of_a_mission_and_an_audit_page_are_settings() {
+        let text = ai6::TextLimits::default();
+        assert!(mission_text_fits(
+            &"t".repeat(512),
+            &"p".repeat(65_536),
+            &text
+        ));
+        assert!(!mission_text_fits(&"t".repeat(513), "p", &text));
+        assert!(!mission_text_fits("t", &"p".repeat(65_537), &text));
+        assert!(!mission_text_fits(" ", "p", &text));
+        let mut wider = text.clone();
+        wider.mission_title_chars = ai6::Limit::UNBOUNDED;
+        wider.mission_prompt_bytes = ai6::Limit::at(1);
+        assert!(mission_text_fits(&"t".repeat(5_000), "p", &wider));
+        assert!(!mission_text_fits("t", "pp", &wider));
+
+        let mut pages = ai6::UnexTimelineLimits::default();
+        assert_eq!(audit_page(None, &pages), Some(100));
+        assert_eq!(audit_page(Some(500), &pages), Some(500));
+        assert_eq!(audit_page(Some(501), &pages), None);
+        assert_eq!(audit_page(Some(0), &pages), None);
+        pages.audit_page = 7;
+        pages.max_audit_page = ai6::Limit::UNBOUNDED;
+        assert_eq!(audit_page(None, &pages), Some(7));
+        assert_eq!(audit_page(Some(9_000), &pages), Some(9_000));
+    }
+
+    #[test]
+    fn the_gateway_s_own_limits_default_to_the_record_s() {
+        let limits = GatewayLimits::default();
+        assert_eq!(limits.max_sessions, 16);
+        assert_eq!(limits.max_clients_per_session, 12);
+        assert_eq!(limits.scrollback_events, 64);
+        assert_eq!(limits.max_frame_bytes, 256 * 1024);
+        assert_eq!(limits.max_input_frames_per_second, 40);
+        assert_eq!(limits.input_queue_capacity, 64);
+        assert_eq!(limits.fanout_capacity, 8);
+        assert_eq!(
+            limits.buffer_budget_bytes,
+            ai6::Limit::at(512 * 1024 * 1024)
+        );
+        assert_eq!(limits.client_slots, ai6::Limit::at(100_000));
+        assert_eq!(limits.socket_buffer_bytes, 256 * 1024);
+        assert_eq!(limits.station_token_min_bytes, 32);
+        assert_eq!(limits.origin_bytes, ai6::Limit::at(2048));
+        let login = LoginLimits::default();
+        assert_eq!(login.name_bytes, 64);
+        assert_eq!(login.forget_every, 256);
+        assert_eq!(login.address_window, Duration::from_secs(60));
+        assert_eq!(login.name_window, Duration::from_secs(600));
     }
 
     impl Signing {

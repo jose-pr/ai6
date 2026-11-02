@@ -69,8 +69,6 @@ pub(super) struct NewIssue {
     pub(super) priority: Option<String>,
 }
 
-/// How long a title stays a duplicate of an issue AI6 created: 30 days.
-const DUPLICATE_WINDOW_SECS: f64 = 30.0 * 86_400.0;
 /// The fields of an issue a mirror never carries over.
 const NEVER_MIRRORED: [&str; 7] = [
     "assignees",
@@ -239,7 +237,7 @@ impl IssueDesk {
             .into_iter()
             .filter(|reply| reply.tracker == link.tracker && reply.item == link.item)
             .rev()
-            .take(10)
+            .take(self.state.station.limits().sources.replies_read.or_max())
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -595,12 +593,13 @@ impl IssueDesk {
         if children.is_empty() {
             return Err("name at least one child".to_owned());
         }
-        if children.len() > MAX_CHILDREN_PER_SPLIT {
+        let policy = self.policy(caller)?.clone();
+        if !policy.max_split_children.allows(children.len()) {
             return Err(format!(
-                "a split names at most {MAX_CHILDREN_PER_SPLIT} children"
+                "a split names at most {} children",
+                policy.max_split_children
             ));
         }
-        let policy = self.policy(caller)?.clone();
         let depth = self.depth_of(&link.name()) + 1;
         if policy
             .max_split_depth
@@ -873,6 +872,11 @@ impl IssueDesk {
         all: &[IssueProposal],
         now: f64,
     ) -> Vec<String> {
+        let window = self
+            .policy(caller)
+            .map_or(IssuePolicy::default().duplicate_window_secs, |policy| {
+                policy.duplicate_window_secs
+            }) as f64;
         let open_issues: Vec<(String, String)> = self
             .state
             .intake
@@ -893,7 +897,7 @@ impl IssueDesk {
             }) || all.iter().any(|proposal| {
                 proposal.operation == caller.operation
                     && proposal.state != ProposalState::Rejected
-                    && now - proposal.at < DUPLICATE_WINDOW_SECS
+                    && now - proposal.at < window
                     && proposal
                         .specs
                         .iter()
@@ -933,7 +937,10 @@ impl IssueDesk {
             &state.intake.limits().approvals,
         )
         .ok()?
-        .expiring(self.now().max(1.0), std::time::Duration::from_secs(3600));
+        .expiring(
+            self.now().max(1.0),
+            std::time::Duration::from_secs(self.policy(caller).ok()?.creation_approval_secs),
+        );
         let approval = state
             .intake
             .approve_by_class(&request, mission.role_id.as_deref(), clearance, self.now())
@@ -1091,7 +1098,10 @@ impl IssueDesk {
                 }
             }
         }
-        SecretSet::new(values)
+        SecretSet::new(
+            values,
+            self.state.station.limits().secrets.min_matched_bytes,
+        )
     }
 
     fn audit_refusal(&self, caller: &Caller, link: &IssueLink, rule: &str) {
@@ -1265,9 +1275,6 @@ enum Gate {
     Free,
     Pending(String),
 }
-
-/// The most children one `issue_split` may ask for.
-const MAX_CHILDREN_PER_SPLIT: usize = 10;
 
 fn proposal_answer(proposal: &IssueProposal) -> serde_json::Value {
     let (status, next) = match proposal.state {
@@ -2743,6 +2750,20 @@ mod tests {
             .create(&me, "gh", &new_issue("next"), "t2")
             .unwrap_err();
         assert!(error.contains("a day"), "{error}");
+    }
+
+    #[test]
+    fn how_many_children_a_split_may_ask_for_is_the_operation_s() {
+        let root = tempfile::tempdir().unwrap();
+        let (_state, mission, desk) = station(root.path(), "two", "max_split_children = 2");
+        let me = caller(&mission, "007");
+        let three: Vec<NewIssue> = (0..3).map(|n| new_issue(&format!("n{n}"))).collect();
+        let error = desk.split(&me, "gh:o/r#1", &three, "s1").unwrap_err();
+        assert!(error.contains("at most 2 children"), "{error}");
+        assert_eq!(
+            desk.split(&me, "gh:o/r#1", &three[..2], "s2").unwrap()["status"],
+            "proposed"
+        );
     }
 
     #[test]

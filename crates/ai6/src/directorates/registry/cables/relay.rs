@@ -1269,7 +1269,11 @@ impl CableRelay {
             .cable_inbox(
                 &principal.agent,
                 principal.session_id.as_deref(),
-                if operation.is_some() { 1_000 } else { limit },
+                if operation.is_some() {
+                    self.registry.limits().cables.page.or_max()
+                } else {
+                    limit
+                },
                 Some(now),
             )
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
@@ -1368,7 +1372,7 @@ impl CableRelay {
         principal: &CablePrincipal,
         limit: usize,
     ) -> Result<Vec<CableHeldDelivery>, CableRelayError> {
-        if !(1..=1_000).contains(&limit) {
+        if limit == 0 || !self.registry.limits().cables.page.allows(limit) {
             return Err(CableRelayError::InvalidRequest);
         }
         let now = (self.now)();
@@ -1381,7 +1385,7 @@ impl CableRelay {
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let cables = self
             .registry
-            .held_cables(1_000, Some(now))
+            .held_cables(self.registry.limits().cables.page.or_max(), Some(now))
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let mut held = Vec::new();
         for cable in cables {

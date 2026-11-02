@@ -170,6 +170,18 @@ pub struct IssuePolicy {
     #[schema(title = "Depth of a split")]
     #[map(default = IssuePolicy::default().max_split_depth)]
     pub max_split_depth: Limit,
+    /// Children one split may ask for.
+    #[schema(title = "Children of a split")]
+    #[map(default = IssuePolicy::default().max_split_children)]
+    pub max_split_children: Limit,
+    /// Seconds a title stays a duplicate of an issue AI6 created. Shorter is looser.
+    #[schema(title = "A title stays a duplicate for", format = "seconds")]
+    #[map(default = IssuePolicy::default().duplicate_window_secs)]
+    pub duplicate_window_secs: u64,
+    /// Seconds the approval a class authorisation gives an issue creation lasts. Longer is looser.
+    #[schema(title = "A creation's approval lasts", format = "seconds")]
+    #[map(default = IssuePolicy::default().creation_approval_secs)]
+    pub creation_approval_secs: u64,
 }
 
 impl Default for IssuePolicy {
@@ -192,6 +204,9 @@ impl Default for IssuePolicy {
             max_created: Limit::at(10),
             max_created_per_day: Limit::at(50),
             max_split_depth: Limit::at(2),
+            max_split_children: Limit::at(10),
+            duplicate_window_secs: 30 * 24 * 3600,
+            creation_approval_secs: 3600,
         }
     }
 }
@@ -259,6 +274,11 @@ impl IssuePolicy {
                 self.max_split_depth,
                 strict.max_split_depth,
             ),
+            (
+                "max_split_children",
+                self.max_split_children,
+                strict.max_split_children,
+            ),
         ] {
             let looser = match (value.get(), default.get()) {
                 (None, Some(_)) => true,
@@ -274,6 +294,20 @@ impl IssuePolicy {
                 "status_interval_secs",
                 &self.status_interval_secs.to_string(),
                 &strict.status_interval_secs.to_string(),
+            );
+        }
+        if self.duplicate_window_secs < strict.duplicate_window_secs {
+            note(
+                "duplicate_window_secs",
+                &self.duplicate_window_secs.to_string(),
+                &strict.duplicate_window_secs.to_string(),
+            );
+        }
+        if self.creation_approval_secs > strict.creation_approval_secs {
+            note(
+                "creation_approval_secs",
+                &self.creation_approval_secs.to_string(),
+                &strict.creation_approval_secs.to_string(),
             );
         }
         if self.reply_ttl_secs > strict.reply_ttl_secs {
@@ -356,84 +390,9 @@ pub fn compose_status(disclosure: Disclosure, phase: &str) -> String {
     }
 }
 
-/// A reference table of a settings struct, from its one declaration: each key's title,
-/// description and default.
-#[cfg(test)]
-pub(crate) fn schema_table<T: Schema + ToValue + Default>() -> String {
-    let json = |value: guatiao::Value| {
-        serde_json::to_value(guatiao_serde::Serializable::from(&value)).unwrap()
-    };
-    let schema = json(T::schema().unwrap());
-    let defaults = json(T::default().to_value().unwrap());
-    let shown = |value: Option<&serde_json::Value>| match value {
-        None | Some(serde_json::Value::Null) => "none".to_owned(),
-        Some(serde_json::Value::String(text)) => format!("`{text}`"),
-        Some(serde_json::Value::Array(list)) if list.is_empty() => "none".to_owned(),
-        Some(serde_json::Value::Object(map)) if map.is_empty() => "none".to_owned(),
-        Some(serde_json::Value::Object(map)) if map.values().all(serde_json::Value::is_null) => {
-            "none".to_owned()
-        }
-        Some(other) => format!("`{other}`"),
-    };
-    let mut table = String::from("| Key | Default | Meaning |\n| --- | --- | --- |\n");
-    for (key, field) in schema["properties"].as_object().unwrap() {
-        let description = field["description"]
-            .as_str()
-            .unwrap_or_default()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let title = field["title"].as_str().unwrap_or_default();
-        table.push_str(&format!(
-            "| `{key}` | {} | **{title}.** {description} |\n",
-            shown(defaults.get(key))
-        ));
-    }
-    table
-}
-
-/// Checks the table between `<!-- schema:NAME:begin -->` and its end in `docs/operations.md`, or
-/// writes it when `AI6_WRITE_SCHEMA_TABLES` is set.
-#[cfg(test)]
-pub(crate) fn check_schema_table(name: &str, table: &str) {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/operations.md");
-    let text = std::fs::read_to_string(&path).unwrap();
-    let (begin, end) = (
-        format!("<!-- schema:{name}:begin -->\n"),
-        format!("<!-- schema:{name}:end -->"),
-    );
-    let start = text.find(&begin).expect("the begin marker") + begin.len();
-    let stop = text.find(&end).expect("the end marker");
-    if std::env::var_os("AI6_WRITE_SCHEMA_TABLES").is_some() {
-        std::fs::write(&path, format!("{}{table}{}", &text[..start], &text[stop..])).unwrap();
-        return;
-    }
-    assert_eq!(
-        &text[start..stop],
-        table,
-        "the {name} table in docs/operations.md is not its struct's: run this test with \
-         AI6_WRITE_SCHEMA_TABLES=1"
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_table_in_the_docs_is_the_structs() {
-        check_schema_table("issues", &schema_table::<IssuePolicy>());
-    }
-
-    #[test]
-    fn the_table_comes_from_the_declaration() {
-        let table = schema_table::<IssuePolicy>();
-        assert!(
-            table.contains("| `create` | `propose` | **Creating issues.** `propose`: a person"),
-            "{table}"
-        );
-        assert!(table.contains("| `posts_per_hour` | `6` |"), "{table}");
-    }
 
     fn resolve(text: &str) -> Result<IssuePolicy, String> {
         let policy: IssuePolicy = crate::directorates::m::records::from_toml(text)?;

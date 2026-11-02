@@ -771,7 +771,7 @@ fn promote_by_class(
     proposal: &MissionProposal,
     now: f64,
 ) {
-    if !medical::brief_exposure(&proposal.brief).is_empty()
+    if !medical::brief_exposure(&proposal.brief, &state.intake.limits().sessions).is_empty()
         || proposal.created_at
             + state
                 .station

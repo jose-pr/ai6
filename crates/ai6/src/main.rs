@@ -1243,12 +1243,10 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                 if args.settings.is_some() {
                     // Settings read from standard input reach the detached runner as a file.
                     let path = state_dir.join(ai6::station::runner::SETTINGS_FILE);
-                    let written = serde_json::to_vec_pretty(&settings)
-                        .map_err(std::io::Error::other)
-                        .and_then(|bytes| {
-                            std::fs::create_dir_all(&state_dir)?;
-                            std::fs::write(&path, bytes)
-                        });
+                    let written = settings.to_json_bytes().and_then(|bytes| {
+                        std::fs::create_dir_all(&state_dir)?;
+                        std::fs::write(&path, bytes)
+                    });
                     if let Err(error) = written {
                         eprintln!("ai6: runner settings {}: {error}", path.display());
                         return ExitCode::FAILURE;

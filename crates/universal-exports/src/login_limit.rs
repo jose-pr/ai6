@@ -43,14 +43,15 @@ pub struct LoginLimits {
 
 impl Default for LoginLimits {
     fn default() -> Self {
+        let table = ai6::LoginTable::default();
         Self {
             per_address: NonZeroU32::new(5).unwrap_or(NonZeroU32::MIN),
             per_name: NonZeroU32::new(10).unwrap_or(NonZeroU32::MIN),
             address_header: None,
-            name_bytes: 64,
-            forget_every: 256,
-            address_window: Duration::from_secs(60),
-            name_window: Duration::from_secs(600),
+            name_bytes: table.name_bytes.or_max(),
+            forget_every: u32::try_from(table.forget_every).unwrap_or(u32::MAX),
+            address_window: table.address_window.0,
+            name_window: table.name_window.0,
         }
     }
 }

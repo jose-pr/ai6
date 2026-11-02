@@ -3,6 +3,7 @@ use guatiao::schema::validate::validate_map;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::directorates::m::config::{StationRuntime, UnexRecord};
 
 const KINDS: [ConfigRecord; 7] = [
     ConfigRecord::Operation,
@@ -33,7 +34,10 @@ fn issue_policy_example() -> Value {
         "create": "off",
         "max_created": 5,
         "max_created_per_day": 20,
-        "max_split_depth": 1
+        "max_split_depth": 1,
+        "max_split_children": 3,
+        "duplicate_window_secs": 86400,
+        "creation_approval_secs": 600,
     })
 }
 
@@ -463,6 +467,157 @@ fn a_record_written_by_toml_reads_as_the_json_record_does() {
     }))
     .unwrap();
     assert_eq!(to_json(&from_file), to_json(&from_record));
+}
+
+/// A record as a provider holds it: every key, `null` for an unset option and for a lifted bound,
+/// seconds as floats.
+fn stored(name: &str) -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// `definitions` as the one record of each singleton family, through the checks a provider runs.
+fn loaded(definitions: Vec<(ConfigRecord, Value)>) -> crate::ConfigSnapshot {
+    let layer: crate::directorates::m::config::Layer = definitions
+        .into_iter()
+        .map(|(family, definition)| {
+            (
+                family,
+                [(ConfigRecord::SINGLETON_KEY.to_owned(), definition)].into(),
+            )
+        })
+        .collect();
+    crate::directorates::m::config::assemble(
+        crate::ConfigRevision::new(1),
+        &layer,
+        None,
+        &"the fixture",
+        &crate::ConfigLimits::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn stored_records_at_their_defaults_read_as_the_defaults() {
+    let snapshot = loaded(vec![
+        (ConfigRecord::Station, stored("station_record_bare.json")),
+        (ConfigRecord::Unex, stored("unex_record_bare.json")),
+    ]);
+    assert_eq!(snapshot.settings.station, StationRuntime::default());
+    assert_eq!(snapshot.settings.unex, UnexRecord::default());
+}
+
+#[test]
+fn stored_records_keep_their_values_nulls_and_lifted_bounds() {
+    let snapshot = loaded(vec![
+        (
+            ConfigRecord::Station,
+            stored("station_record_as_stored.json"),
+        ),
+        (ConfigRecord::Unex, stored("unex_record_as_stored.json")),
+    ]);
+    let station = &snapshot.settings.station;
+    assert_eq!(station.scheduler.event_queue, crate::Limit::UNBOUNDED);
+    assert_eq!(station.secrets.max_lease_ttl, crate::TimeLimit::UNBOUNDED);
+    assert_eq!(station.stall_timeout, Some(600.0));
+    assert_eq!(station.blocked_after, Some(12.5));
+    assert_eq!(station.partial_line_bytes, None);
+    assert_eq!(
+        station.roles.as_deref(),
+        Some(&["execution".to_owned()][..])
+    );
+    assert_eq!(station.labels["site"], "asgard");
+    assert_eq!(
+        station.providers["pty"],
+        serde_json::json!({
+            "scrollback": 10, "shell": null, "ratio": 1.5,
+            "nested": {"list": [1, "two", true]}
+        })
+    );
+    let unex = &snapshot.settings.unex;
+    assert_eq!(unex.authenticator.as_deref(), Some("password"));
+    assert_eq!(
+        Value::Object(unex.authenticator_config.clone().unwrap().0),
+        serde_json::json!({"file": "accounts.toml", "rounds": 12, "ratio": 0.5, "note": null})
+    );
+    assert!(unex.directory_config.as_ref().unwrap().is_empty());
+    assert_eq!(unex.accounts_config, None);
+    assert_eq!(unex.access_cache_ttl, Some(5.0));
+    assert_eq!(unex.gateway.frame_bytes, crate::Limit::UNBOUNDED);
+    assert_eq!(unex.gateway.session_max, crate::TimeLimit::UNBOUNDED);
+    assert_eq!(unex.provider_config_depth, crate::Limit::UNBOUNDED);
+    assert!(
+        unex.weakenings()
+            .iter()
+            .any(|line| line.starts_with("unex.gateway.frame_bytes none")),
+        "{:?}",
+        unex.weakenings()
+    );
+}
+
+#[test]
+fn what_a_record_writes_reads_back_as_itself() {
+    let snapshot = loaded(vec![
+        (
+            ConfigRecord::Station,
+            stored("station_record_as_stored.json"),
+        ),
+        (ConfigRecord::Unex, stored("unex_record_as_stored.json")),
+    ]);
+    let station = &snapshot.settings.station;
+    let written = crate::directorates::m::records::to_json(station).unwrap();
+    assert_eq!(&from_json::<StationRuntime>(&written).unwrap(), station);
+    let unex = &snapshot.settings.unex;
+    let written = crate::directorates::m::records::to_json(unex).unwrap();
+    assert_eq!(&from_json::<UnexRecord>(&written).unwrap(), unex);
+}
+
+#[test]
+fn a_refused_setting_names_its_key_and_never_its_value() {
+    for (document, key) in [
+        (
+            serde_json::json!({"gateway": {"sessions": "hunter2"}}),
+            "gateway.sessions",
+        ),
+        (serde_json::json!({"gateway": {"hunter2": 1}}), "hunter2"),
+        (serde_json::json!({"directory": ["hunter2"]}), "directory"),
+        (
+            serde_json::json!({"authenticator_config": "hunter2"}),
+            "authenticator_config",
+        ),
+        (
+            serde_json::json!({"login": {"name_window": "hunter2"}}),
+            "login.name_window",
+        ),
+    ] {
+        let refusal = from_json::<UnexRecord>(&document).unwrap_err();
+        assert!(refusal.contains(key), "{document}: {refusal}");
+        if key != "hunter2" {
+            assert!(!refusal.contains("hunter2"), "{document}: {refusal}");
+        }
+    }
+    for (document, key) in [
+        (
+            serde_json::json!({"scheduler": {"interval": "hunter2"}}),
+            "scheduler.interval",
+        ),
+        (
+            serde_json::json!({"secrets": {"lease_ttl": -1}}),
+            "secrets.lease_ttl",
+        ),
+        (serde_json::json!({"labels": {"site": 12345}}), "labels"),
+        (
+            serde_json::json!({"stall_timeout": "hunter2"}),
+            "stall_timeout",
+        ),
+    ] {
+        let refusal = from_json::<StationRuntime>(&document).unwrap_err();
+        assert!(refusal.contains(key), "{document}: {refusal}");
+        assert!(!refusal.contains("hunter2"), "{document}: {refusal}");
+        assert!(!refusal.contains("12345"), "{document}: {refusal}");
+    }
 }
 
 /// The forms as the app's preview and tests read them: the routes' answers, generated here.

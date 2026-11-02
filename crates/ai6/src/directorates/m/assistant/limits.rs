@@ -26,15 +26,16 @@ pub struct AssistantLimits {
     #[schema(title = "Operations with Cables in one job")]
     #[map(default = AssistantLimits::default().cable_grants)]
     pub cable_grants: Limit,
-    /// Bytes of one job's message.
+    /// Bytes of one job's message; Universal Exports refuses a person's longer message.
     #[schema(title = "Longest message", format = "bytes")]
     #[map(default = AssistantLimits::default().message_bytes)]
     pub message_bytes: Limit,
-    /// Bytes of one job's standing context and recap together.
+    /// Bytes of a job's standing context and recap together; a recap stays under half.
     #[schema(title = "Standing context and recap", format = "bytes")]
     #[map(default = AssistantLimits::default().context_bytes)]
     pub context_bytes: Limit,
-    /// Bytes of one reported event's text; longer text is cut.
+    /// Bytes of one reported event's text; longer text is cut, and a memory change whose diff is
+    /// longer is not kept.
     #[schema(title = "Longest reported event", format = "bytes")]
     #[map(default = AssistantLimits::default().event_bytes)]
     pub event_bytes: Limit,
@@ -42,7 +43,7 @@ pub struct AssistantLimits {
     #[schema(title = "Events in one report")]
     #[map(default = AssistantLimits::default().events)]
     pub events: Limit,
-    /// Bytes of file content in one memory change, commit or memory write.
+    /// Bytes of file content in one memory change, commit, memory write or memory read.
     #[schema(title = "File content in one memory change", format = "bytes")]
     #[map(default = AssistantLimits::default().change_bytes)]
     pub change_bytes: Limit,
@@ -91,15 +92,15 @@ pub struct AssistantLimits {
     #[schema(title = "Files looked at per turn")]
     #[map(default = AssistantLimits::default().memory_walk)]
     pub memory_walk: Limit,
-    /// Bytes of one file the Station reads to publish a page. Default 8 MiB.
+    /// Bytes of one file the Station reads to publish a page.
     #[schema(title = "Largest file read for a page", format = "bytes")]
     #[map(default = AssistantLimits::default().page_file_bytes)]
     pub page_file_bytes: Limit,
-    /// Files the Station reads to publish one page. Default 200.
+    /// Files the Station reads to publish one page.
     #[schema(title = "Files read for a page")]
     #[map(default = AssistantLimits::default().page_files)]
     pub page_files: Limit,
-    /// Bytes over all the files of one page the Station reads. Default 16 MiB.
+    /// Bytes over all the files of one page the Station reads.
     #[schema(title = "All the files read for a page", format = "bytes")]
     #[map(default = AssistantLimits::default().page_bytes)]
     pub page_bytes: Limit,
@@ -139,16 +140,18 @@ impl Default for AssistantLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 pub struct AssistantDeskLimits {
-    /// Seconds a harness waits for the next message, or writes nothing while answering, before
-    /// it is closed.
+    /// Seconds a harness waits for the next message, or writes nothing while answering, before it is
+    /// closed; `"none"` keeps it.
     #[schema(title = "Close an idle harness after")]
     #[map(default = AssistantDeskLimits::default().idle)]
     pub idle: TimeLimit,
-    /// Harnesses a Station runs at once.
+    /// Harnesses a Station runs or starts at once; past it a message is refused and another Station
+    /// is asked.
     #[schema(title = "Harnesses on one Station")]
     #[map(default = AssistantDeskLimits::default().live)]
     pub live: Limit,
-    /// Seconds before its token expires that a running harness is restarted with the job's.
+    /// Seconds before its tool token expires that a running harness is restarted with the job's; a
+    /// job with another token restarts it whatever is left.
     #[schema(title = "Restart before a token expires")]
     #[map(default = AssistantDeskLimits::default().token_margin)]
     pub token_margin: Seconds,
@@ -164,7 +167,8 @@ pub struct AssistantDeskLimits {
     #[schema(title = "Extra time for a request")]
     #[map(default = AssistantDeskLimits::default().call_margin)]
     pub call_margin: Seconds,
-    /// Seconds before a failed job poll is tried again.
+    /// Seconds before a failed job poll is tried again, and the least between polls when Universal
+    /// Exports answers early.
     #[schema(title = "Retry a failed job poll after")]
     #[map(default = AssistantDeskLimits::default().job_retry)]
     pub job_retry: Seconds,
@@ -203,15 +207,17 @@ pub struct AssistantDeskLimits {
     #[schema(title = "Sweep abandoned directories after")]
     #[map(default = AssistantDeskLimits::default().unlocked_stale)]
     pub unlocked_stale: Seconds,
-    /// Seconds a clone of one of her repositories may take.
+    /// Seconds a clone of one of her repositories may take; a memory request's clone also stops at
+    /// its deadline.
     #[schema(title = "Longest clone")]
     #[map(default = AssistantDeskLimits::default().clone_timeout)]
     pub clone_timeout: Seconds,
-    /// Bytes a clone of one of her repositories may hold on disk.
+    /// Bytes a clone of one of her repositories may hold on disk, then it is given up and removed.
     #[schema(title = "Largest clone", format = "bytes")]
     #[map(default = AssistantDeskLimits::default().clone_bytes)]
     pub clone_bytes: Limit,
-    /// Bytes one save of her work in her personal folder may commit; past it nothing is saved.
+    /// Bytes one save of her work in her personal folder may commit; past it nothing is saved and she
+    /// is told.
     #[schema(title = "Largest save of her work", format = "bytes")]
     #[map(default = AssistantDeskLimits::default().save_bytes)]
     pub save_bytes: Limit,
@@ -219,6 +225,19 @@ pub struct AssistantDeskLimits {
     #[schema(title = "Memory requests at once")]
     #[map(default = AssistantDeskLimits::default().memory_requests)]
     pub memory_requests: Limit,
+    /// Cables one conversation holds for the person's confirmation; past it a send is refused,
+    /// and nothing the person has not seen to is dropped to make room.
+    #[schema(title = "Cables held per conversation")]
+    #[map(default = AssistantDeskLimits::default().held_cables)]
+    pub held_cables: Limit,
+    /// Seconds a Cable held for the person's confirmation waits before it is dropped.
+    #[schema(title = "A held Cable waits")]
+    #[map(default = AssistantDeskLimits::default().held_cable_ttl)]
+    pub held_cable_ttl: TimeLimit,
+    /// Seconds sending one file of a page to Universal Exports may take.
+    #[schema(title = "Longest page file upload")]
+    #[map(default = AssistantDeskLimits::default().page_upload_timeout)]
+    pub page_upload_timeout: Seconds,
 }
 
 impl Default for AssistantDeskLimits {
@@ -243,6 +262,9 @@ impl Default for AssistantDeskLimits {
             clone_bytes: Limit::at(512 * MIB),
             save_bytes: Limit::at(16 * MIB),
             memory_requests: Limit::at(4),
+            held_cables: Limit::at(32),
+            held_cable_ttl: TimeLimit::secs(3_600),
+            page_upload_timeout: Seconds::new(60),
         }
     }
 }
@@ -269,15 +291,16 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Entries per conversation")]
     #[map(default = AssistantGatewayLimits::default().conversation_entries)]
     pub conversation_entries: Limit,
-    /// Bytes of entries kept per conversation.
+    /// Bytes of entries kept per conversation; the oldest go first.
     #[schema(title = "Entries kept per conversation, in size", format = "bytes")]
     #[map(default = AssistantGatewayLimits::default().conversation_bytes)]
     pub conversation_bytes: Limit,
-    /// Bytes of entries kept per person.
+    /// Bytes of entries kept per person; a person's views go first.
     #[schema(title = "Entries kept per person, in size", format = "bytes")]
     #[map(default = AssistantGatewayLimits::default().person_bytes)]
     pub person_bytes: Limit,
-    /// One person's conversations with a harness running or a message being answered at once.
+    /// One person's conversations with a harness running or an answer pending; the least recently
+    /// used idle harness is closed to make room.
     #[schema(title = "Live conversations per person")]
     #[map(default = AssistantGatewayLimits::default().live_per_person)]
     pub live_per_person: Limit,
@@ -285,7 +308,7 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Tool calls a minute")]
     #[map(default = AssistantGatewayLimits::default().tool_calls_per_minute)]
     pub tool_calls_per_minute: Limit,
-    /// The app's memory requests waiting for a Station for one person.
+    /// The app's memory requests waiting for a Station for one person; `429` past it.
     #[schema(title = "Memory requests waiting per person")]
     #[map(default = AssistantGatewayLimits::default().memory_requests_per_person)]
     pub memory_requests_per_person: Limit,
@@ -293,11 +316,13 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Memory requests waiting in all")]
     #[map(default = AssistantGatewayLimits::default().memory_requests)]
     pub memory_requests: Limit,
-    /// Seconds a token given to a harness for its tools is accepted.
+    /// Seconds a tool token given to a harness is accepted; past it, while that harness's answer runs
+    /// and its Station was heard from within `answer_deadline`, until the person stops it.
     #[schema(title = "A tool token lasts")]
     #[map(default = AssistantGatewayLimits::default().token_ttl)]
     pub token_ttl: Seconds,
-    /// Seconds a running harness's token must still have to be kept for the next message.
+    /// Seconds a token must still have to be given to the next message; kept above `[assistant.desk]
+    /// token_margin`.
     #[schema(title = "Keep a token if it still has")]
     #[map(default = AssistantGatewayLimits::default().token_reuse_margin)]
     pub token_reuse_margin: Seconds,
@@ -305,7 +330,7 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "A Station takes up a message within")]
     #[map(default = AssistantGatewayLimits::default().answer_timeout)]
     pub answer_timeout: Seconds,
-    /// Seconds an accepted message may go without word from its Station.
+    /// Seconds an accepted message may go without word from its Station before it is given up.
     #[schema(title = "Give up on a silent answer after")]
     #[map(default = AssistantGatewayLimits::default().answer_deadline)]
     pub answer_deadline: Seconds,
@@ -333,7 +358,7 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Longest shared change message")]
     #[map(default = AssistantGatewayLimits::default().change_message_chars)]
     pub change_message_chars: Limit,
-    /// Bytes of the recap a resumed conversation starts with.
+    /// Bytes of the recap a conversation's new harness starts with.
     #[schema(title = "Longest recap", format = "bytes")]
     #[map(default = AssistantGatewayLimits::default().recap_bytes)]
     pub recap_bytes: Limit,
@@ -342,7 +367,7 @@ pub struct AssistantGatewayLimits {
     #[map(default = AssistantGatewayLimits::default().ready_entries)]
     pub ready_entries: Limit,
     /// Bytes of entries the app is sent when it opens a conversation.
-    #[schema(title = "Size of those entries", format = "bytes")]
+    #[schema(title = "Size of the entries sent then", format = "bytes")]
     #[map(default = AssistantGatewayLimits::default().ready_bytes)]
     pub ready_bytes: Limit,
     /// Bytes of one message on the app's socket.
@@ -353,15 +378,15 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "The app's socket says hello within")]
     #[map(default = AssistantGatewayLimits::default().hello_timeout)]
     pub hello_timeout: Seconds,
-    /// Seconds a Station's job poll may be held open.
+    /// Seconds a Station's job poll may be held open, also while `assistant = false`.
     #[schema(title = "Longest job poll")]
     #[map(default = AssistantGatewayLimits::default().max_wait)]
     pub max_wait: Seconds,
-    /// Seconds between sweeps of expired answers and proposals.
+    /// Seconds between an open conversation's looks for jobs no Station took up.
     #[schema(title = "Look for jobs nobody took every")]
     #[map(default = AssistantGatewayLimits::default().sweep_every)]
     pub sweep_every: Seconds,
-    /// Seconds a shared change waits for its base from the Station.
+    /// Seconds a shared change waits for its Station's report of what it was made from.
     #[schema(title = "A shared change waits for its base")]
     #[map(default = AssistantGatewayLimits::default().shared_base_wait)]
     pub shared_base_wait: Seconds,
@@ -488,88 +513,87 @@ impl PageNetwork {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 pub struct AssistantPageLimits {
-    /// Bytes of one file of a page. Default 8 MiB.
+    /// Bytes of one file of a page.
     #[schema(title = "Largest file of a page", format = "bytes")]
     #[map(default = AssistantPageLimits::default().max_file_bytes)]
     pub max_file_bytes: Limit,
-    /// Bytes of one page. Default 16 MiB.
+    /// Bytes of one page.
     #[schema(title = "Largest page", format = "bytes")]
     #[map(default = AssistantPageLimits::default().max_page_bytes)]
     pub max_page_bytes: Limit,
-    /// Files of one page. Default 200.
+    /// Files of one page.
     #[schema(title = "Files in a page")]
     #[map(default = AssistantPageLimits::default().max_page_files)]
     pub max_page_files: Limit,
-    /// Pages one person keeps. Default 50.
+    /// Pages one person keeps.
     #[schema(title = "Pages per person")]
     #[map(default = AssistantPageLimits::default().max_pages)]
     pub max_pages: Limit,
-    /// Bytes of all one person's pages. Default 64 MiB.
+    /// Bytes of all one person's pages.
     #[schema(title = "All of one person's pages", format = "bytes")]
     #[map(default = AssistantPageLimits::default().max_person_bytes)]
     pub max_person_bytes: Limit,
-    /// Bytes of all pages on one gateway. Default 2 GiB.
+    /// Bytes of all pages on one gateway.
     #[schema(title = "All pages on this gateway", format = "bytes")]
     #[map(default = AssistantPageLimits::default().max_total_bytes)]
     pub max_total_bytes: Limit,
-    /// Bytes of an inline page's content. Default 192 KiB.
+    /// Bytes of an inline page's content.
     #[schema(title = "Largest inline page", format = "bytes")]
     #[map(default = AssistantPageLimits::default().inline_bytes)]
     pub inline_bytes: Limit,
-    /// Characters of a page's title. Default 120.
+    /// Characters of a page's title.
     #[schema(title = "Longest page title")]
     #[map(default = AssistantPageLimits::default().title_chars)]
     pub title_chars: Limit,
-    /// Feeds one dashboard declares. Default 8.
+    /// Feeds one dashboard declares.
     #[schema(title = "Feeds in a dashboard")]
     #[map(default = AssistantPageLimits::default().max_feeds)]
     pub max_feeds: Limit,
-    /// Feed reads one link makes in a minute. Default 60.
+    /// Feed reads one link makes in a minute.
     #[schema(title = "Feed reads a minute, per link")]
     #[map(default = AssistantPageLimits::default().feed_reads_per_minute)]
     pub feed_reads_per_minute: Limit,
-    /// Pages Universal Exports keeps staged from Stations at once. Default 64.
+    /// Pages Universal Exports keeps staged from Stations at once.
     #[schema(title = "Uploads held from Stations")]
     #[map(default = AssistantPageLimits::default().staged_uploads)]
     pub staged_uploads: Limit,
-    /// Seconds a page lives unless remembered. Default 1 day.
+    /// Seconds a page lives unless remembered.
     #[schema(title = "Keep a page for")]
     #[map(default = AssistantPageLimits::default().default_ttl)]
     pub default_ttl: Seconds,
-    /// Seconds a link to a page is valid. Default 1 hour.
+    /// Seconds a link to a page is valid.
     #[schema(title = "A link to a page lasts")]
     #[map(default = AssistantPageLimits::default().open_ttl)]
     pub open_ttl: Seconds,
-    /// Seconds a publish waits for the Station's files. Default 30.
+    /// Seconds a publish waits for the Station's files.
     #[schema(title = "Wait for a Station's files")]
     #[map(default = AssistantPageLimits::default().upload_wait)]
     pub upload_wait: Seconds,
-    /// Seconds a staged upload no call claims is kept. Default 300.
+    /// Seconds a staged upload no call claims is kept.
     #[schema(title = "Keep an unclaimed upload for")]
     #[map(default = AssistantPageLimits::default().stage_ttl)]
     pub stage_ttl: Seconds,
-    /// Seconds between sweeps of expired pages, links and staged uploads. Default 60.
+    /// Seconds between sweeps of expired pages, links and staged uploads.
     #[schema(title = "Sweep expired pages every")]
     #[map(default = AssistantPageLimits::default().sweep_every)]
     pub sweep_every: Seconds,
-    /// Whether a page's scripts run. Default true.
+    /// Whether a page's scripts run.
     #[schema(title = "Run pages' scripts")]
     #[map(default = AssistantPageLimits::default().scripts)]
     pub scripts: bool,
-    /// What a page may reach from the browser. Default `open`.
+    /// What a page may reach from the browser.
     #[schema(title = "What a page may reach")]
     #[map(default = AssistantPageLimits::default().network)]
     pub network: PageNetwork,
-    /// Whether dashboards may read live feeds. Default true.
+    /// Whether dashboards may read live feeds.
     #[schema(title = "Dashboards read live feeds")]
     #[map(default = AssistantPageLimits::default().feeds)]
     pub feeds: bool,
-    /// Whether a page is shown in the gateway's frame with the classification bar. Default
-    /// true.
+    /// Whether a page is shown in the gateway's frame with the classification bar.
     #[schema(title = "Show pages in the gateway's frame")]
     #[map(default = AssistantPageLimits::default().frame)]
     pub frame: bool,
-    /// Whether a person may share a page. Default true.
+    /// Whether a person may share a page.
     #[schema(title = "People may share pages")]
     #[map(default = AssistantPageLimits::default().sharing)]
     pub sharing: bool,
@@ -650,6 +674,7 @@ const DESK_PACE: &[&str] = &[
     "close_wait",
     "remove_retry",
     "unlocked_stale",
+    "page_upload_timeout",
 ];
 const GATEWAY_PACE: &[&str] = &["token_reuse_margin", "sweep_every", "shared_base_wait"];
 

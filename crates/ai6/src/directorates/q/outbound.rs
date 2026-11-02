@@ -15,21 +15,18 @@ use regex::Regex;
 use crate::bounds::Limit;
 use crate::directorates::m::issues::OnSecret;
 
-/// Secrets shorter than this are never matched as exact values: a short one would refuse
-/// ordinary words.
-const MIN_SECRET_BYTES: usize = 6;
-
 /// The exact secret values the Station holds for a Mission.
 #[derive(Debug, Clone, Default)]
 pub struct SecretSet(BTreeSet<String>);
 
 impl SecretSet {
-    /// A set of values; empty and very short ones are left out.
-    pub fn new(values: impl IntoIterator<Item = String>) -> Self {
+    /// A set of values; empty ones, and those shorter than `min_bytes`
+    /// (`[secrets] min_matched_bytes`), are left out.
+    pub fn new(values: impl IntoIterator<Item = String>, min_bytes: u64) -> Self {
         Self(
             values
                 .into_iter()
-                .filter(|value| value.len() >= MIN_SECRET_BYTES)
+                .filter(|value| !value.is_empty() && value.len() as u64 >= min_bytes)
                 .collect(),
         )
     }
@@ -272,7 +269,7 @@ mod tests {
     fn check_default(text: &str) -> Result<String, Refusal> {
         check(
             text,
-            &SecretSet::new(["s3cr3t-value-123".to_owned()]),
+            &SecretSet::new(["s3cr3t-value-123".to_owned()], 6),
             &LinkRule::hosts(["github.com".to_owned(), "example.atlassian.net".to_owned()]),
             Limit::at(200),
             OnSecret::Refuse,
@@ -299,7 +296,7 @@ mod tests {
         );
         let redacted = check(
             "the key is s3cr3t-value-123",
-            &SecretSet::new(["s3cr3t-value-123".to_owned()]),
+            &SecretSet::new(["s3cr3t-value-123".to_owned()], 6),
             &LinkRule::any(),
             Limit::at(200),
             OnSecret::Redact,
@@ -382,8 +379,26 @@ mod tests {
     }
 
     #[test]
+    fn how_short_a_secret_is_looked_for_is_a_setting() {
+        let found = |min_bytes| {
+            let set = SecretSet::new(["abc".to_owned(), String::new()], min_bytes);
+            check(
+                "abc and more",
+                &set,
+                &LinkRule::any(),
+                Limit::at(100),
+                OnSecret::Refuse,
+            )
+            .is_err()
+        };
+        assert!(found(3));
+        assert!(found(0), "an empty value is still never looked for");
+        assert!(!found(4));
+    }
+
+    #[test]
     fn short_secrets_are_not_matched_as_values() {
-        let set = SecretSet::new(["abc".to_owned(), String::new()]);
+        let set = SecretSet::new(["abc".to_owned(), String::new()], 6);
         assert!(
             check(
                 "abc",

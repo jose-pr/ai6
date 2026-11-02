@@ -72,6 +72,11 @@ impl Desk {
         Self { state }
     }
 
+    /// `[approvals] checked_steps`.
+    pub(super) fn checked_steps(&self) -> crate::bounds::Limit {
+        self.state.station.limits().approvals.checked_steps
+    }
+
     /// Whether `agent` may propose Missions in `operation` now: it works at `00` there.
     pub(super) fn may_propose(&self, operation: &str, agent: &str) -> bool {
         super::agents::effective(&self.state, Some(operation), agent)

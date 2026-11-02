@@ -928,6 +928,44 @@
               "title": "Depth of a split",
               "description": "How deep a split may go (a child of a child is depth 2).",
               "default": 2
+            },
+            "max_split_children": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Children of a split",
+              "description": "Children one split may ask for.",
+              "default": 10
+            },
+            "duplicate_window_secs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "seconds",
+              "title": "A title stays a duplicate for",
+              "description": "Seconds a title stays a duplicate of an issue AI6 created. Shorter is looser.",
+              "default": 2592000
+            },
+            "creation_approval_secs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "seconds",
+              "title": "A creation's approval lasts",
+              "description": "Seconds the approval a class authorisation gives an issue creation lasts. Longer is looser.",
+              "default": 3600
             }
           },
           "additionalProperties": false,
@@ -952,7 +990,10 @@
             "create": "propose",
             "max_created": 10,
             "max_created_per_day": 50,
-            "max_split_depth": 2
+            "max_split_depth": 2,
+            "max_split_children": 10,
+            "duplicate_window_secs": 2592000,
+            "creation_approval_secs": 3600
           }
         },
         "vetting": {
@@ -2079,7 +2120,7 @@
             "null"
           ],
           "title": "Personal repository",
-          "description": "Where each person's memory and work is kept: a repository address with {person} or {person_digest} in it. Leave it empty to keep nothing.",
+          "description": "Where each person's memory and work is kept: a repository address with {person} or {person_digest} in it. Leave it empty to keep nothing. Default: none.",
           "x-section": "memory"
         },
         "shared": {
@@ -2133,7 +2174,7 @@
             "repo"
           ],
           "title": "Repository everyone shares",
-          "description": "A repository everyone shares with her.",
+          "description": "A repository everyone shares with her. Default: none.",
           "x-section": "memory",
           "x-advanced": true
         },
@@ -2711,7 +2752,7 @@
               ],
               "format": "bytes",
               "title": "Longest message",
-              "description": "Bytes of one job's message.",
+              "description": "Bytes of one job's message; Universal Exports refuses a person's longer message.",
               "default": 32768
             },
             "context_bytes": {
@@ -2732,7 +2773,7 @@
               ],
               "format": "bytes",
               "title": "Standing context and recap",
-              "description": "Bytes of one job's standing context and recap together.",
+              "description": "Bytes of a job's standing context and recap together; a recap stays under half.",
               "default": 24576
             },
             "event_bytes": {
@@ -2753,7 +2794,7 @@
               ],
               "format": "bytes",
               "title": "Longest reported event",
-              "description": "Bytes of one reported event's text; longer text is cut.",
+              "description": "Bytes of one reported event's text; longer text is cut, and a memory change whose diff is longer is not kept.",
               "default": 65536
             },
             "events": {
@@ -2794,7 +2835,7 @@
               ],
               "format": "bytes",
               "title": "File content in one memory change",
-              "description": "Bytes of file content in one memory change, commit or memory write.",
+              "description": "Bytes of file content in one memory change, commit, memory write or memory read.",
               "default": 65536
             },
             "change_files": {
@@ -3040,7 +3081,7 @@
               ],
               "format": "bytes",
               "title": "Largest file read for a page",
-              "description": "Bytes of one file the Station reads to publish a page. Default 8 MiB.",
+              "description": "Bytes of one file the Station reads to publish a page.",
               "default": 8388608
             },
             "page_files": {
@@ -3060,7 +3101,7 @@
                 }
               ],
               "title": "Files read for a page",
-              "description": "Files the Station reads to publish one page. Default 200.",
+              "description": "Files the Station reads to publish one page.",
               "default": 200
             },
             "page_bytes": {
@@ -3081,7 +3122,7 @@
               ],
               "format": "bytes",
               "title": "All the files read for a page",
-              "description": "Bytes over all the files of one page the Station reads. Default 16 MiB.",
+              "description": "Bytes over all the files of one page the Station reads.",
               "default": 16777216
             }
           },
@@ -3135,7 +3176,7 @@
               ],
               "format": "seconds",
               "title": "Close an idle harness after",
-              "description": "Seconds a harness waits for the next message, or writes nothing while answering, before it is closed.",
+              "description": "Seconds a harness waits for the next message, or writes nothing while answering, before it is closed; `\"none\"` keeps it.",
               "default": 600.0
             },
             "live": {
@@ -3155,7 +3196,7 @@
                 }
               ],
               "title": "Harnesses on one Station",
-              "description": "Harnesses a Station runs at once.",
+              "description": "Harnesses a Station runs or starts at once; past it a message is refused and another Station is asked.",
               "default": 4
             },
             "token_margin": {
@@ -3163,7 +3204,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Restart before a token expires",
-              "description": "Seconds before its token expires that a running harness is restarted with the job's.",
+              "description": "Seconds before its tool token expires that a running harness is restarted with the job's; a job with another token restarts it whatever is left.",
               "default": 120.0
             },
             "job_wait": {
@@ -3208,7 +3249,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Retry a failed job poll after",
-              "description": "Seconds before a failed job poll is tried again.",
+              "description": "Seconds before a failed job poll is tried again, and the least between polls when Universal Exports answers early.",
               "default": 0.5
             },
             "report_queue": {
@@ -3316,7 +3357,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Longest clone",
-              "description": "Seconds a clone of one of her repositories may take.",
+              "description": "Seconds a clone of one of her repositories may take; a memory request's clone also stops at its deadline.",
               "default": 120.0
             },
             "clone_bytes": {
@@ -3337,7 +3378,7 @@
               ],
               "format": "bytes",
               "title": "Largest clone",
-              "description": "Bytes a clone of one of her repositories may hold on disk.",
+              "description": "Bytes a clone of one of her repositories may hold on disk, then it is given up and removed.",
               "default": 536870912
             },
             "save_bytes": {
@@ -3358,7 +3399,7 @@
               ],
               "format": "bytes",
               "title": "Largest save of her work",
-              "description": "Bytes one save of her work in her personal folder may commit; past it nothing is saved.",
+              "description": "Bytes one save of her work in her personal folder may commit; past it nothing is saved and she is told.",
               "default": 16777216
             },
             "memory_requests": {
@@ -3380,6 +3421,56 @@
               "title": "Memory requests at once",
               "description": "The app's memory requests a Station makes at once; past it the next is refused.",
               "default": 4
+            },
+            "held_cables": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Cables held per conversation",
+              "description": "Cables one conversation holds for the person's confirmation; past it a send is refused, and nothing the person has not seen to is dropped to make room.",
+              "default": 32
+            },
+            "held_cable_ttl": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "A held Cable waits",
+              "description": "Seconds a Cable held for the person's confirmation waits before it is dropped.",
+              "default": 3600.0
+            },
+            "page_upload_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest page file upload",
+              "description": "Seconds sending one file of a page to Universal Exports may take.",
+              "default": 60.0
             }
           },
           "additionalProperties": false,
@@ -3406,7 +3497,10 @@
             "clone_timeout": 120.0,
             "clone_bytes": 536870912,
             "save_bytes": 16777216,
-            "memory_requests": 4
+            "memory_requests": 4,
+            "held_cables": 32,
+            "held_cable_ttl": 3600.0,
+            "page_upload_timeout": 60.0
           }
         },
         "gateway": {
@@ -3512,7 +3606,7 @@
               ],
               "format": "bytes",
               "title": "Entries kept per conversation, in size",
-              "description": "Bytes of entries kept per conversation.",
+              "description": "Bytes of entries kept per conversation; the oldest go first.",
               "default": 1048576
             },
             "person_bytes": {
@@ -3533,7 +3627,7 @@
               ],
               "format": "bytes",
               "title": "Entries kept per person, in size",
-              "description": "Bytes of entries kept per person.",
+              "description": "Bytes of entries kept per person; a person's views go first.",
               "default": 4194304
             },
             "live_per_person": {
@@ -3553,7 +3647,7 @@
                 }
               ],
               "title": "Live conversations per person",
-              "description": "One person's conversations with a harness running or a message being answered at once.",
+              "description": "One person's conversations with a harness running or an answer pending; the least recently used idle harness is closed to make room.",
               "default": 2
             },
             "tool_calls_per_minute": {
@@ -3593,7 +3687,7 @@
                 }
               ],
               "title": "Memory requests waiting per person",
-              "description": "The app's memory requests waiting for a Station for one person.",
+              "description": "The app's memory requests waiting for a Station for one person; `429` past it.",
               "default": 2
             },
             "memory_requests": {
@@ -3621,7 +3715,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "A tool token lasts",
-              "description": "Seconds a token given to a harness for its tools is accepted.",
+              "description": "Seconds a tool token given to a harness is accepted; past it, while that harness's answer runs and its Station was heard from within `answer_deadline`, until the person stops it.",
               "default": 3600.0
             },
             "token_reuse_margin": {
@@ -3629,7 +3723,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Keep a token if it still has",
-              "description": "Seconds a running harness's token must still have to be kept for the next message.",
+              "description": "Seconds a token must still have to be given to the next message; kept above `[assistant.desk] token_margin`.",
               "default": 600.0
             },
             "answer_timeout": {
@@ -3645,7 +3739,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Give up on a silent answer after",
-              "description": "Seconds an accepted message may go without word from its Station.",
+              "description": "Seconds an accepted message may go without word from its Station before it is given up.",
               "default": 600.0
             },
             "memory_timeout": {
@@ -3764,7 +3858,7 @@
               ],
               "format": "bytes",
               "title": "Longest recap",
-              "description": "Bytes of the recap a resumed conversation starts with.",
+              "description": "Bytes of the recap a conversation's new harness starts with.",
               "default": 8192
             },
             "ready_entries": {
@@ -3804,7 +3898,7 @@
                 }
               ],
               "format": "bytes",
-              "title": "Size of those entries",
+              "title": "Size of the entries sent then",
               "description": "Bytes of entries the app is sent when it opens a conversation.",
               "default": 524288
             },
@@ -3842,7 +3936,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Longest job poll",
-              "description": "Seconds a Station's job poll may be held open.",
+              "description": "Seconds a Station's job poll may be held open, also while `assistant = false`.",
               "default": 25.0
             },
             "sweep_every": {
@@ -3850,7 +3944,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Look for jobs nobody took every",
-              "description": "Seconds between sweeps of expired answers and proposals.",
+              "description": "Seconds between an open conversation's looks for jobs no Station took up.",
               "default": 1.0
             },
             "shared_base_wait": {
@@ -3858,7 +3952,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "A shared change waits for its base",
-              "description": "Seconds a shared change waits for its base from the Station.",
+              "description": "Seconds a shared change waits for its Station's report of what it was made from.",
               "default": 5.0
             },
             "event_buffer": {
@@ -4035,7 +4129,7 @@
               ],
               "format": "bytes",
               "title": "Largest file of a page",
-              "description": "Bytes of one file of a page. Default 8 MiB.",
+              "description": "Bytes of one file of a page.",
               "default": 8388608
             },
             "max_page_bytes": {
@@ -4056,7 +4150,7 @@
               ],
               "format": "bytes",
               "title": "Largest page",
-              "description": "Bytes of one page. Default 16 MiB.",
+              "description": "Bytes of one page.",
               "default": 16777216
             },
             "max_page_files": {
@@ -4076,7 +4170,7 @@
                 }
               ],
               "title": "Files in a page",
-              "description": "Files of one page. Default 200.",
+              "description": "Files of one page.",
               "default": 200
             },
             "max_pages": {
@@ -4096,7 +4190,7 @@
                 }
               ],
               "title": "Pages per person",
-              "description": "Pages one person keeps. Default 50.",
+              "description": "Pages one person keeps.",
               "default": 50
             },
             "max_person_bytes": {
@@ -4117,7 +4211,7 @@
               ],
               "format": "bytes",
               "title": "All of one person's pages",
-              "description": "Bytes of all one person's pages. Default 64 MiB.",
+              "description": "Bytes of all one person's pages.",
               "default": 67108864
             },
             "max_total_bytes": {
@@ -4138,7 +4232,7 @@
               ],
               "format": "bytes",
               "title": "All pages on this gateway",
-              "description": "Bytes of all pages on one gateway. Default 2 GiB.",
+              "description": "Bytes of all pages on one gateway.",
               "default": 2147483648
             },
             "inline_bytes": {
@@ -4159,7 +4253,7 @@
               ],
               "format": "bytes",
               "title": "Largest inline page",
-              "description": "Bytes of an inline page's content. Default 192 KiB.",
+              "description": "Bytes of an inline page's content.",
               "default": 196608
             },
             "title_chars": {
@@ -4179,7 +4273,7 @@
                 }
               ],
               "title": "Longest page title",
-              "description": "Characters of a page's title. Default 120.",
+              "description": "Characters of a page's title.",
               "default": 120
             },
             "max_feeds": {
@@ -4199,7 +4293,7 @@
                 }
               ],
               "title": "Feeds in a dashboard",
-              "description": "Feeds one dashboard declares. Default 8.",
+              "description": "Feeds one dashboard declares.",
               "default": 8
             },
             "feed_reads_per_minute": {
@@ -4219,7 +4313,7 @@
                 }
               ],
               "title": "Feed reads a minute, per link",
-              "description": "Feed reads one link makes in a minute. Default 60.",
+              "description": "Feed reads one link makes in a minute.",
               "default": 60
             },
             "staged_uploads": {
@@ -4239,7 +4333,7 @@
                 }
               ],
               "title": "Uploads held from Stations",
-              "description": "Pages Universal Exports keeps staged from Stations at once. Default 64.",
+              "description": "Pages Universal Exports keeps staged from Stations at once.",
               "default": 64
             },
             "default_ttl": {
@@ -4247,7 +4341,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Keep a page for",
-              "description": "Seconds a page lives unless remembered. Default 1 day.",
+              "description": "Seconds a page lives unless remembered.",
               "default": 86400.0
             },
             "open_ttl": {
@@ -4255,7 +4349,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "A link to a page lasts",
-              "description": "Seconds a link to a page is valid. Default 1 hour.",
+              "description": "Seconds a link to a page is valid.",
               "default": 3600.0
             },
             "upload_wait": {
@@ -4263,7 +4357,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Wait for a Station's files",
-              "description": "Seconds a publish waits for the Station's files. Default 30.",
+              "description": "Seconds a publish waits for the Station's files.",
               "default": 30.0
             },
             "stage_ttl": {
@@ -4271,7 +4365,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Keep an unclaimed upload for",
-              "description": "Seconds a staged upload no call claims is kept. Default 300.",
+              "description": "Seconds a staged upload no call claims is kept.",
               "default": 300.0
             },
             "sweep_every": {
@@ -4279,13 +4373,13 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Sweep expired pages every",
-              "description": "Seconds between sweeps of expired pages, links and staged uploads. Default 60.",
+              "description": "Seconds between sweeps of expired pages, links and staged uploads.",
               "default": 60.0
             },
             "scripts": {
               "type": "boolean",
               "title": "Run pages' scripts",
-              "description": "Whether a page's scripts run. Default true.",
+              "description": "Whether a page's scripts run.",
               "default": true
             },
             "network": {
@@ -4301,25 +4395,25 @@
                 "none": "Its own files only"
               },
               "title": "What a page may reach",
-              "description": "What a page may reach from the browser. Default `open`.",
+              "description": "What a page may reach from the browser.",
               "default": "open"
             },
             "feeds": {
               "type": "boolean",
               "title": "Dashboards read live feeds",
-              "description": "Whether dashboards may read live feeds. Default true.",
+              "description": "Whether dashboards may read live feeds.",
               "default": true
             },
             "frame": {
               "type": "boolean",
               "title": "Show pages in the gateway's frame",
-              "description": "Whether a page is shown in the gateway's frame with the classification bar. Default true.",
+              "description": "Whether a page is shown in the gateway's frame with the classification bar.",
               "default": true
             },
             "sharing": {
               "type": "boolean",
               "title": "People may share pages",
-              "description": "Whether a person may share a page. Default true.",
+              "description": "Whether a person may share a page.",
               "default": true
             }
           },

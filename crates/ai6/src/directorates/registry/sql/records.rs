@@ -469,7 +469,7 @@ impl CableStore for SqlRegistry {
         limit: usize,
         now: Option<f64>,
     ) -> io::Result<Vec<Cable>> {
-        if agent.trim().is_empty() || limit == 0 || limit > 1_000 {
+        if agent.trim().is_empty() || limit == 0 || !self.limits.cables.page.allows(limit) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "agent must be non-empty and limit must be between 1 and 1000",
@@ -497,10 +497,10 @@ impl CableStore for SqlRegistry {
     }
 
     fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>> {
-        if limit == 0 || limit > 1_000 {
+        if limit == 0 || !self.limits.cables.page.allows(limit) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "held Cable limit must be between 1 and 1000",
+                "held Cable limit is outside [registry.limits.cables] page",
             ));
         }
         let now = check_now(now, "held Cable")?;

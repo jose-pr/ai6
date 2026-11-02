@@ -1310,7 +1310,9 @@ mod tests {
     fn a_station_record_provider_table_configures_a_provider_built_with_none() {
         assert!(mock_x().terminal("mock-x", None).unwrap().tty());
         let record: BTreeMap<String, serde_json::Value> =
-            toml::from_str::<crate::station::limits::StationLimits>(
+            crate::directorates::m::records::from_toml::<
+                crate::directorates::m::config::StationRuntime,
+            >(
                 "[providers.mock-x]
 tty = false
 ",

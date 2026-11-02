@@ -334,7 +334,10 @@ fn remove_with_green_ink(
                 agent,
                 kind: scope.kind.clone(),
                 target: scope.target.clone(),
-                reason: bounded(reason.trim(), 2_000),
+                reason: bounded(
+                    reason.trim(),
+                    state.station.limits().head_of_station.reason_bytes.or_max(),
+                ),
                 idempotency_key: scope.target.clone(),
                 // Never a class authorisation: a person of the owning Operation decides.
                 exposed: true,

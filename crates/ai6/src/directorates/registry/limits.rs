@@ -124,19 +124,19 @@ impl RegistryLimits {
 #[map(deny_unknown_fields)]
 pub struct AccountLimits {
     /// Bytes of one account's record.
-    #[schema(title = "Bytes of one account's record", format = "bytes")]
+    #[schema(title = "Largest account record", format = "bytes")]
     #[map(default = AccountLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Live claims on one account; past it the oldest is dropped.
-    #[schema(title = "Live claims on one account")]
+    #[schema(title = "Live claims per account")]
     #[map(default = AccountLimits::default().claims)]
     pub claims: Limit,
     /// Quota windows kept per account.
-    #[schema(title = "Quota windows kept per account")]
+    #[schema(title = "Quota windows per account")]
     #[map(default = AccountLimits::default().windows)]
     pub windows: Limit,
     /// Days of token counts kept per account.
-    #[schema(title = "Days of token counts kept per account")]
+    #[schema(title = "Days of token counts per account")]
     #[map(default = AccountLimits::default().kept_days)]
     pub kept_days: u32,
 }
@@ -158,15 +158,15 @@ impl Default for AccountLimits {
 #[map(deny_unknown_fields)]
 pub struct AgentLimits {
     /// Bytes of one Agent record.
-    #[schema(title = "Bytes of one Agent record", format = "bytes")]
+    #[schema(title = "Largest Agent record", format = "bytes")]
     #[map(default = AgentLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Operations one Agent record tallies.
-    #[schema(title = "Operations one Agent record tallies")]
+    #[schema(title = "Operations per Agent record")]
     #[map(default = AgentLimits::default().operations)]
     pub operations: Limit,
     /// Clearances one Operation of an Agent record tallies.
-    #[schema(title = "Clearances one Operation of an Agent record tallies")]
+    #[schema(title = "Clearances per Operation of an Agent record")]
     #[map(default = AgentLimits::default().clearances)]
     pub clearances: Limit,
     /// Mission outcomes remembered per Agent, so a repeated report is counted once.
@@ -178,12 +178,12 @@ pub struct AgentLimits {
     #[map(default = AgentLimits::default().model_history)]
     pub model_history: Limit,
     /// Bytes of an outcome report's key.
-    #[schema(title = "Bytes of an outcome report's key", format = "bytes")]
+    #[schema(title = "Longest outcome report key", format = "bytes")]
     #[map(default = AgentLimits::default().key_bytes)]
     pub key_bytes: Limit,
     /// Bytes of an outcome report's Agent, Operation and model.
     #[schema(
-        title = "Bytes of an outcome report's Agent, Operation and model",
+        title = "Longest Agent, Operation or model in a report",
         format = "bytes"
     )]
     #[map(default = AgentLimits::default().agent_bytes)]
@@ -210,7 +210,7 @@ impl Default for AgentLimits {
 #[map(deny_unknown_fields)]
 pub struct AgentRoleLimits {
     /// Bytes of one Agent role record.
-    #[schema(title = "Bytes of one Agent role record", format = "bytes")]
+    #[schema(title = "Largest Agent role record", format = "bytes")]
     #[map(default = AgentRoleLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Agent roles per Operation.
@@ -234,7 +234,7 @@ impl Default for AgentRoleLimits {
 #[map(deny_unknown_fields)]
 pub struct ApprovalLimits {
     /// Bytes of one approval record.
-    #[schema(title = "Bytes of one approval record", format = "bytes")]
+    #[schema(title = "Largest approval record", format = "bytes")]
     #[map(default = ApprovalLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Pending approval requests.
@@ -246,41 +246,35 @@ pub struct ApprovalLimits {
     #[map(default = ApprovalLimits::default().class_authorizations)]
     pub class_authorizations: Limit,
     /// Requests one Mission may have.
-    #[schema(title = "Requests one Mission may have")]
+    #[schema(title = "Requests per Mission")]
     #[map(default = ApprovalLimits::default().mission_requests)]
     pub mission_requests: Limit,
     /// Bytes of a request's reason.
-    #[schema(title = "Bytes of a request's reason", format = "bytes")]
+    #[schema(title = "Longest request reason", format = "bytes")]
     #[map(default = ApprovalLimits::default().reason_bytes)]
     pub reason_bytes: Limit,
     /// Bytes of a decision's note.
-    #[schema(title = "Bytes of a decision's note", format = "bytes")]
+    #[schema(title = "Longest decision note", format = "bytes")]
     #[map(default = ApprovalLimits::default().note_bytes)]
     pub note_bytes: Limit,
     /// Bytes of a signer's name.
-    #[schema(title = "Bytes of a signer's name", format = "bytes")]
+    #[schema(title = "Longest signer name", format = "bytes")]
     #[map(default = ApprovalLimits::default().signer_bytes)]
     pub signer_bytes: Limit,
     /// Bytes of a request's idempotency key.
-    #[schema(title = "Bytes of a request's idempotency key", format = "bytes")]
+    #[schema(title = "Longest idempotency key", format = "bytes")]
     #[map(default = ApprovalLimits::default().idempotency_key_bytes)]
     pub idempotency_key_bytes: Limit,
     /// Step kinds, Agents, roles and proposed roles each class authorization may name.
-    #[schema(title = "Class entries")]
+    #[schema(title = "Entries per class authorization")]
     #[map(default = ApprovalLimits::default().class_entries)]
     pub class_entries: Limit,
     /// Bytes of a class authorization's target pattern.
-    #[schema(
-        title = "Bytes of a class authorization's target pattern",
-        format = "bytes"
-    )]
+    #[schema(title = "Longest target pattern", format = "bytes")]
     #[map(default = ApprovalLimits::default().pattern_bytes)]
     pub pattern_bytes: Limit,
     /// Bytes of each Agent or role a class authorization names.
-    #[schema(
-        title = "Bytes of each Agent or role a class authorization names",
-        format = "bytes"
-    )]
+    #[schema(title = "Longest name in a class authorization", format = "bytes")]
     #[map(default = ApprovalLimits::default().name_bytes)]
     pub name_bytes: Limit,
 }
@@ -309,7 +303,7 @@ impl Default for ApprovalLimits {
 #[map(deny_unknown_fields)]
 pub struct AuditLimits {
     /// Bytes of one audit record.
-    #[schema(title = "Bytes of one audit record", format = "bytes")]
+    #[schema(title = "Largest audit record", format = "bytes")]
     #[map(default = AuditLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Audit records kept.
@@ -317,7 +311,7 @@ pub struct AuditLimits {
     #[map(default = AuditLimits::default().records)]
     pub records: Limit,
     /// Records one listing may ask for.
-    #[schema(title = "Records one listing may ask for")]
+    #[schema(title = "Most records in one listing")]
     #[map(default = AuditLimits::default().results)]
     pub results: Limit,
 }
@@ -338,7 +332,7 @@ impl Default for AuditLimits {
 #[map(deny_unknown_fields)]
 pub struct BriefLimits {
     /// Bytes of one brief.
-    #[schema(title = "Bytes of one brief", format = "bytes")]
+    #[schema(title = "Largest brief", format = "bytes")]
     #[map(default = BriefLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Queued briefs.
@@ -346,13 +340,13 @@ pub struct BriefLimits {
     #[map(default = BriefLimits::default().records)]
     pub records: Limit,
     /// Bytes of a brief's provenance.
-    #[schema(title = "Bytes of a brief's provenance", format = "bytes")]
+    #[schema(title = "Longest brief provenance", format = "bytes")]
     #[map(default = BriefLimits::default().provenance_bytes)]
     pub provenance_bytes: Limit,
-    /// Bytes of a Mission ID: a longer one keeps its start and adds a short hash. It is a file
-    /// name, so it stays under 240 bytes whatever this says. Default 120, which leaves a run's
-    /// attempt room within `[registry.limits.sessions] id_bytes`.
-    #[schema(title = "Mission id bytes", format = "bytes")]
+    /// Bytes of a Mission ID: a longer one keeps its start and adds a short hash. It is a file name,
+    /// so it stays under 240 bytes whatever this says. The default leaves a run's attempt room within
+    /// `[registry.limits.sessions] id_bytes`.
+    #[schema(title = "Longest Mission ID", format = "bytes")]
     #[map(default = BriefLimits::default().mission_id_bytes)]
     pub mission_id_bytes: Limit,
 }
@@ -374,21 +368,25 @@ impl Default for BriefLimits {
 #[map(deny_unknown_fields)]
 pub struct CableLimits {
     /// Bytes of one Cable record.
-    #[schema(title = "Bytes of one Cable record", format = "bytes")]
+    #[schema(title = "Largest Cable record", format = "bytes")]
     #[map(default = CableLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Cable records the Registry holds.
-    #[schema(title = "Cable records the Registry holds")]
+    #[schema(title = "Cable records kept")]
     #[map(default = CableLimits::default().records)]
     pub records: Limit,
-    /// UTF-8 bytes of a Cable's body.
-    #[schema(title = "UTF-8 bytes of a Cable's body", format = "bytes")]
+    /// UTF-8 bytes of a Cable's body the Registry stores.
+    #[schema(title = "Longest Cable body", format = "bytes")]
     #[map(default = CableLimits::default().body_bytes)]
     pub body_bytes: Limit,
-    /// Seconds a Cable may live.
-    #[schema(title = "Seconds a Cable may live")]
+    /// Seconds a Cable the Registry stores may live.
+    #[schema(title = "Longest a Cable lives")]
     #[map(default = CableLimits::default().max_ttl)]
     pub max_ttl: TimeLimit,
+    /// Cables one read of an inbox or of the held Cables takes.
+    #[schema(title = "Cables in one read")]
+    #[map(default = CableLimits::default().page)]
+    pub page: Limit,
 }
 
 impl Default for CableLimits {
@@ -398,6 +396,7 @@ impl Default for CableLimits {
             records: Limit::at(10_000),
             body_bytes: Limit::at(16 * KIB),
             max_ttl: TimeLimit::secs(24 * 60 * 60),
+            page: Limit::at(1_000),
         }
     }
 }
@@ -408,7 +407,7 @@ impl Default for CableLimits {
 #[map(deny_unknown_fields)]
 pub struct ClearanceLimits {
     /// Bytes of one clearance grant.
-    #[schema(title = "Bytes of one clearance grant", format = "bytes")]
+    #[schema(title = "Largest clearance grant", format = "bytes")]
     #[map(default = ClearanceLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Clearance grants.
@@ -416,10 +415,7 @@ pub struct ClearanceLimits {
     #[map(default = ClearanceLimits::default().grants)]
     pub grants: Limit,
     /// Bytes of a grant's signer, approval, model and reason.
-    #[schema(
-        title = "Bytes of a grant's signer, approval, model and reason",
-        format = "bytes"
-    )]
+    #[schema(title = "Longest signer, approval, model or reason", format = "bytes")]
     #[map(default = ClearanceLimits::default().text_bytes)]
     pub text_bytes: Limit,
 }
@@ -440,11 +436,11 @@ impl Default for ClearanceLimits {
 #[map(deny_unknown_fields)]
 pub struct FileLimits {
     /// Seconds a record write retries replacing a file another process holds open.
-    #[schema(title = "Rename retry")]
+    #[schema(title = "Retry replacing a held file for")]
     #[map(default = FileLimits::default().rename_retry)]
     pub rename_retry: TimeLimit,
     /// Seconds a write waits for the Registry's directory lock.
-    #[schema(title = "Seconds a write waits for the Registry's directory lock")]
+    #[schema(title = "Wait for the directory lock")]
     #[map(default = FileLimits::default().lock_wait)]
     pub lock_wait: TimeLimit,
 }
@@ -465,33 +461,27 @@ impl Default for FileLimits {
 #[map(deny_unknown_fields)]
 pub struct HeldLimits {
     /// Briefs one Operation may hold.
-    #[schema(title = "Briefs one Operation may hold")]
+    #[schema(title = "Held briefs per Operation")]
     #[map(default = HeldLimits::default().per_operation)]
     pub per_operation: Limit,
     /// Briefs held across the Registry.
-    #[schema(title = "Briefs held across the Registry")]
+    #[schema(title = "Held briefs in all")]
     #[map(default = HeldLimits::default().records)]
     pub records: Limit,
     /// Held briefs one listing may ask for.
-    #[schema(title = "Held briefs one listing may ask for")]
+    #[schema(title = "Most held briefs in one listing")]
     #[map(default = HeldLimits::default().results)]
     pub results: Limit,
     /// Bytes of a stored clearance, the finding kinds a brief was released from.
-    #[schema(title = "Clearance bytes", format = "bytes")]
+    #[schema(title = "Largest stored clearance", format = "bytes")]
     #[map(default = HeldLimits::default().clearance_bytes)]
     pub clearance_bytes: Limit,
     /// Bytes of the reason a held brief is refused for.
-    #[schema(
-        title = "Bytes of the reason a held brief is refused for",
-        format = "bytes"
-    )]
+    #[schema(title = "Longest refusal reason", format = "bytes")]
     #[map(default = HeldLimits::default().reason_bytes)]
     pub reason_bytes: Limit,
     /// Bytes of who released or refused a held brief.
-    #[schema(
-        title = "Bytes of who released or refused a held brief",
-        format = "bytes"
-    )]
+    #[schema(title = "Longest name of who decided", format = "bytes")]
     #[map(default = HeldLimits::default().actor_bytes)]
     pub actor_bytes: Limit,
 }
@@ -528,11 +518,11 @@ impl RegistryLimits {
 #[map(deny_unknown_fields)]
 pub struct LogbookLimits {
     /// Reports kept per logbook, and handed to the next round.
-    #[schema(title = "Reports kept per logbook, and handed to the next round")]
+    #[schema(title = "Reports per logbook")]
     #[map(default = LogbookLimits::default().entries)]
     pub entries: Limit,
     /// Bytes of a report's summary.
-    #[schema(title = "Bytes of a report's summary", format = "bytes")]
+    #[schema(title = "Longest report summary", format = "bytes")]
     #[map(default = LogbookLimits::default().summary_bytes)]
     pub summary_bytes: Limit,
     /// Findings per report.
@@ -540,7 +530,7 @@ pub struct LogbookLimits {
     #[map(default = LogbookLimits::default().findings)]
     pub findings: Limit,
     /// Bytes of one finding.
-    #[schema(title = "Bytes of one finding", format = "bytes")]
+    #[schema(title = "Longest finding", format = "bytes")]
     #[map(default = LogbookLimits::default().finding_bytes)]
     pub finding_bytes: Limit,
 }
@@ -587,19 +577,19 @@ impl LogbookLimits {
 #[map(deny_unknown_fields)]
 pub struct ProposalLimits {
     /// Bytes of one Mission proposal.
-    #[schema(title = "Bytes of one Mission proposal", format = "bytes")]
+    #[schema(title = "Largest Mission proposal", format = "bytes")]
     #[map(default = ProposalLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Pending Mission proposals per Operation.
-    #[schema(title = "Pending Mission proposals per Operation")]
+    #[schema(title = "Pending proposals per Operation")]
     #[map(default = ProposalLimits::default().records)]
     pub records: Limit,
     /// Proposals one listing may ask for.
-    #[schema(title = "Proposals one listing may ask for")]
+    #[schema(title = "Most proposals in one listing")]
     #[map(default = ProposalLimits::default().results)]
     pub results: Limit,
     /// Bytes of a proposal's idempotency key.
-    #[schema(title = "Bytes of a proposal's idempotency key", format = "bytes")]
+    #[schema(title = "Longest idempotency key", format = "bytes")]
     #[map(default = ProposalLimits::default().idempotency_key_bytes)]
     pub idempotency_key_bytes: Limit,
 }
@@ -621,7 +611,7 @@ impl Default for ProposalLimits {
 #[map(deny_unknown_fields)]
 pub struct QuarantineLimits {
     /// Bytes of one quarantine record.
-    #[schema(title = "Bytes of one quarantine record", format = "bytes")]
+    #[schema(title = "Largest quarantine record", format = "bytes")]
     #[map(default = QuarantineLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Quarantine records.
@@ -629,11 +619,11 @@ pub struct QuarantineLimits {
     #[map(default = QuarantineLimits::default().records)]
     pub records: Limit,
     /// Incidents kept per Agent.
-    #[schema(title = "Incidents kept per Agent")]
+    #[schema(title = "Incidents per Agent")]
     #[map(default = QuarantineLimits::default().incidents)]
     pub incidents: Limit,
     /// Seconds an incident is kept.
-    #[schema(title = "Seconds an incident is kept")]
+    #[schema(title = "Keep an incident for")]
     #[map(default = QuarantineLimits::default().keep_incidents)]
     pub keep_incidents: TimeLimit,
 }
@@ -668,7 +658,7 @@ impl QuarantineLimits {
 #[map(deny_unknown_fields)]
 pub struct SessionLimits {
     /// Bytes of one Session record.
-    #[schema(title = "Bytes of one Session record", format = "bytes")]
+    #[schema(title = "Largest Session record", format = "bytes")]
     #[map(default = SessionLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Session records.
@@ -676,25 +666,29 @@ pub struct SessionLimits {
     #[map(default = SessionLimits::default().records)]
     pub records: Limit,
     /// Bytes of a Session ID.
-    #[schema(title = "Bytes of a Session ID. Default 128", format = "bytes")]
+    #[schema(title = "Longest Session ID", format = "bytes")]
     #[map(default = SessionLimits::default().id_bytes)]
     pub id_bytes: Limit,
     /// Exposures recorded per Session.
-    #[schema(title = "Exposures recorded per Session")]
+    #[schema(title = "Exposures per Session")]
     #[map(default = SessionLimits::default().exposures)]
     pub exposures: Limit,
     /// Bytes of an exposure's source.
-    #[schema(title = "Bytes of an exposure's source", format = "bytes")]
+    #[schema(title = "Longest exposure source", format = "bytes")]
     #[map(default = SessionLimits::default().exposure_source_bytes)]
     pub exposure_source_bytes: Limit,
     /// Recent event lines kept per Session.
-    #[schema(title = "Recent event lines kept per Session")]
+    #[schema(title = "Recent event lines per Session")]
     #[map(default = SessionLimits::default().recent_events)]
     pub recent_events: Limit,
     /// Characters kept of each recent event line and of a lost Session's reason.
-    #[schema(title = "Recent event chars")]
+    #[schema(title = "Longest recent event line")]
     #[map(default = SessionLimits::default().recent_event_chars)]
     pub recent_event_chars: Limit,
+    /// Sources of exposure one Session's brief records; the rest are not kept.
+    #[schema(title = "Sources of exposure per brief")]
+    #[map(default = SessionLimits::default().exposure_sources)]
+    pub exposure_sources: Limit,
 }
 
 impl Default for SessionLimits {
@@ -707,6 +701,7 @@ impl Default for SessionLimits {
             exposure_source_bytes: Limit::at(128),
             recent_events: Limit::at(20),
             recent_event_chars: Limit::at(300),
+            exposure_sources: Limit::at(32),
         }
     }
 }
@@ -717,15 +712,15 @@ impl Default for SessionLimits {
 #[map(deny_unknown_fields)]
 pub struct SleeperLimits {
     /// Seconds a scheduled window may be late and still fire; an older one is skipped.
-    #[schema(title = "Seconds a scheduled window may be late and still fire")]
+    #[schema(title = "A late window still fires within")]
     #[map(default = SleeperLimits::default().window_age)]
     pub window_age: TimeLimit,
     /// Bytes of a Sleeper's prompt.
-    #[schema(title = "Bytes of a Sleeper's prompt", format = "bytes")]
+    #[schema(title = "Longest Sleeper prompt", format = "bytes")]
     #[map(default = SleeperLimits::default().prompt_bytes)]
     pub prompt_bytes: Limit,
     /// Days a schedule is searched back for its latest window.
-    #[schema(title = "Days a schedule is searched back for its latest window")]
+    #[schema(title = "Days searched back for a window")]
     #[map(default = SleeperLimits::default().lookback_days)]
     pub lookback_days: u32,
 }
@@ -745,27 +740,24 @@ impl Default for SleeperLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct IssueLimits {
-    /// Linked issues one Mission holds at once.
-    #[schema(title = "Linked issues one Mission holds at once")]
+    /// Linked issues one Mission holds at once; unlinked ones do not count.
+    #[schema(title = "Linked issues per Mission")]
     #[map(default = IssueLimits::default().links_per_mission)]
     pub links_per_mission: Limit,
-    /// Outbox entries kept, settled ones dropped oldest first.
-    #[schema(title = "Outbox entries kept, settled ones dropped oldest first")]
+    /// Outbox entries kept; settled ones are dropped oldest first.
+    #[schema(title = "Outbox entries kept")]
     #[map(default = IssueLimits::default().outbox_records)]
     pub outbox_records: Limit,
     /// Bytes of one outbox entry's text and payload.
-    #[schema(
-        title = "Bytes of one outbox entry's text and payload",
-        format = "bytes"
-    )]
+    #[schema(title = "Largest outbox entry", format = "bytes")]
     #[map(default = IssueLimits::default().entry_bytes)]
     pub entry_bytes: Limit,
     /// Replies from a linked issue one Mission stores; delivered ones make room first.
-    #[schema(title = "Replies from a linked issue one Mission stores")]
+    #[schema(title = "Stored replies per Mission")]
     #[map(default = IssueLimits::default().replies_per_mission)]
     pub replies_per_mission: Limit,
     /// Bytes of one stored reply, cut past it.
-    #[schema(title = "Bytes of one stored reply, cut past it", format = "bytes")]
+    #[schema(title = "Longest stored reply", format = "bytes")]
     #[map(default = IssueLimits::default().reply_bytes)]
     pub reply_bytes: Limit,
 }
@@ -788,15 +780,15 @@ impl Default for IssueLimits {
 #[map(deny_unknown_fields)]
 pub struct SourceLimits {
     /// Bytes of a Source item's text.
-    #[schema(title = "Bytes of a Source item's text", format = "bytes")]
+    #[schema(title = "Longest Source item text", format = "bytes")]
     #[map(default = SourceLimits::default().item_text_bytes)]
     pub item_text_bytes: Limit,
     /// Times reporting a finished brief to its Source is tried before it is dropped.
-    #[schema(title = "Report attempts")]
+    #[schema(title = "Tries to report a finished brief")]
     #[map(default = SourceLimits::default().report_attempts)]
     pub report_attempts: Limit,
     /// Bytes of the name a brief shows beside its Mission ID.
-    #[schema(title = "Name bytes", format = "bytes")]
+    #[schema(title = "Longest name beside a Mission ID", format = "bytes")]
     #[map(default = SourceLimits::default().name_bytes)]
     pub name_bytes: Limit,
 }
@@ -817,7 +809,7 @@ impl Default for SourceLimits {
 #[map(deny_unknown_fields)]
 pub struct StationLimits {
     /// Bytes of one Station record.
-    #[schema(title = "Bytes of one Station record", format = "bytes")]
+    #[schema(title = "Largest Station record", format = "bytes")]
     #[map(default = StationLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Station records.
@@ -825,15 +817,15 @@ pub struct StationLimits {
     #[map(default = StationLimits::default().records)]
     pub records: Limit,
     /// Bytes of a Station's settings record.
-    #[schema(title = "Bytes of a Station's settings record", format = "bytes")]
+    #[schema(title = "Largest Station settings record", format = "bytes")]
     #[map(default = StationLimits::default().settings_bytes)]
     pub settings_bytes: Limit,
     /// Missions a Station's settings may let it run at once.
-    #[schema(title = "Missions a Station's settings may let it run at once")]
+    #[schema(title = "Most Missions a Station may run at once")]
     #[map(default = StationLimits::default().mission_capacity)]
     pub mission_capacity: Limit,
     /// Seconds after its last check-in that a Station counts as dark.
-    #[schema(title = "Seconds after its last check-in that a Station counts as dark")]
+    #[schema(title = "A Station goes dark after")]
     #[map(default = StationLimits::default().gone_dark_after)]
     pub gone_dark_after: Seconds,
 }
@@ -860,26 +852,23 @@ pub struct TimelineLimits {
     #[map(default = TimelineLimits::default().records)]
     pub records: Limit,
     /// Bytes of one event.
-    #[schema(title = "Bytes of one event", format = "bytes")]
+    #[schema(title = "Largest event", format = "bytes")]
     #[map(default = TimelineLimits::default().record_bytes)]
     pub record_bytes: Limit,
     /// Bytes of an event's ID.
-    #[schema(title = "Bytes of an event's ID. Default 128", format = "bytes")]
+    #[schema(title = "Longest event ID", format = "bytes")]
     #[map(default = TimelineLimits::default().id_bytes)]
     pub id_bytes: Limit,
     /// Bytes of an event's kind, action and detail keys.
-    #[schema(
-        title = "Bytes of an event's kind, action and detail keys",
-        format = "bytes"
-    )]
+    #[schema(title = "Longest kind, action or detail key", format = "bytes")]
     #[map(default = TimelineLimits::default().name_bytes)]
     pub name_bytes: Limit,
     /// Bytes of an event's Operation, Station, Mission, Session, actor and detail values.
-    #[schema(title = "Text bytes", format = "bytes")]
+    #[schema(title = "Longest event text", format = "bytes")]
     #[map(default = TimelineLimits::default().text_bytes)]
     pub text_bytes: Limit,
     /// Detail entries per event.
-    #[schema(title = "Detail entries per event")]
+    #[schema(title = "Details per event")]
     #[map(default = TimelineLimits::default().detail_entries)]
     pub detail_entries: Limit,
 }
@@ -903,7 +892,7 @@ impl Default for TimelineLimits {
 #[map(deny_unknown_fields)]
 pub struct TokenLimits {
     /// Bytes of one access token record.
-    #[schema(title = "Bytes of one access token record", format = "bytes")]
+    #[schema(title = "Largest access token record", format = "bytes")]
     #[map(default = TokenLimits::default().record_bytes)]
     pub record_bytes: Limit,
 }
@@ -922,7 +911,7 @@ impl Default for TokenLimits {
 #[map(deny_unknown_fields)]
 pub struct UsageLimits {
     /// Bytes of one Mission's usage ledger.
-    #[schema(title = "Bytes of one Mission's usage ledger", format = "bytes")]
+    #[schema(title = "Largest usage ledger", format = "bytes")]
     #[map(default = UsageLimits::default().ledger_bytes)]
     pub ledger_bytes: Limit,
     /// Days of usage kept.

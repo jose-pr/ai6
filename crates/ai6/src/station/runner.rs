@@ -114,12 +114,14 @@ impl RunnerInfo {
 /// tables of its `station` record. `ai6 runner serve --settings PATH` reads it as JSON; a key
 /// it does not name keeps its default.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue)]
+#[map(deny_unknown_fields)]
 pub struct RunnerHandoff {
     /// How the runner serves.
+    #[map(default)]
     pub runner: RunnerLimits,
     /// The Guatiao configuration each provider is built with when a request gives none.
+    #[map(with = guatiao_serde::adapt::object, default)]
     pub providers: BTreeMap<String, serde_json::Value>,
 }
 
@@ -127,6 +129,17 @@ impl RunnerHandoff {
     /// The settings `runner` and `providers`.
     pub fn new(runner: RunnerLimits, providers: BTreeMap<String, serde_json::Value>) -> Self {
         Self { runner, providers }
+    }
+
+    /// The settings as the JSON [`parse`](Self::parse) reads.
+    ///
+    /// # Errors
+    ///
+    /// A provider's configuration has no JSON form.
+    pub fn to_json_bytes(&self) -> io::Result<Vec<u8>> {
+        let document = crate::directorates::m::records::to_json(self)
+            .ok_or_else(|| io::Error::other("the runner's settings have no JSON form"))?;
+        serde_json::to_vec_pretty(&document).map_err(io::Error::other)
     }
 
     /// Reads the settings in `path`.
@@ -144,8 +157,11 @@ impl RunnerHandoff {
     ///
     /// `InvalidData` for anything but settings JSON with acceptable values.
     pub fn parse(bytes: &[u8]) -> io::Result<Self> {
-        let settings: Self = serde_json::from_slice(bytes)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let invalid = |reason: String| io::Error::new(io::ErrorKind::InvalidData, reason);
+        let document: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|error| invalid(error.to_string()))?;
+        let settings: Self =
+            crate::directorates::m::records::from_json(&document).map_err(invalid)?;
         if settings.runner.replay_batch == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -292,7 +308,7 @@ where
     let token = ensure_token(&config.state_dir)?;
     write_atomically(
         &config.state_dir.join(SETTINGS_FILE),
-        &serde_json::to_vec_pretty(&config.settings).map_err(io::Error::other)?,
+        &config.settings.to_json_bytes()?,
     )?;
     let limits = config.settings.runner;
     let runner = Runner {
@@ -1008,6 +1024,34 @@ mod tests {
         };
         fs::write(dir.join(SESSION_FILE), serde_json::to_vec(&file).unwrap()).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_settings_file_a_station_wrote_keeps_loading_and_what_is_written_reads_back() {
+        let settings = RunnerHandoff::parse(
+            br#"{"runner": {"pump_poll": 0.25, "replay_batch": 8, "cable_request_bytes": null},
+                "providers": {"pty": {"scrollback": 10, "shell": null}}}"#,
+        )
+        .unwrap();
+        assert_eq!(settings.runner.replay_batch, 8);
+        assert_eq!(
+            settings.runner.cable_request_bytes,
+            crate::bounds::Limit::UNBOUNDED
+        );
+        assert_eq!(
+            settings.runner.keep_ended,
+            RunnerLimits::default().keep_ended
+        );
+        assert_eq!(settings.providers["pty"]["shell"], serde_json::Value::Null);
+        assert_eq!(
+            RunnerHandoff::parse(&settings.to_json_bytes().unwrap()).unwrap(),
+            settings
+        );
+        let refusal = RunnerHandoff::parse(br#"{"runner": {"pump_poll": "hunter2"}}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("runner.pump_poll"), "{refusal}");
+        assert!(!refusal.contains("hunter2"), "{refusal}");
     }
 
     #[test]

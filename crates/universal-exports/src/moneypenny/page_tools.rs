@@ -5,7 +5,6 @@
 //! audit means no page.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use ai6::{AssistantPageFile, AssistantPageLimits, PageNetwork, page_call_digest};
 use axum::Json;
@@ -576,10 +575,10 @@ pub(crate) async fn sweep_once(gateway: &Gateway) -> usize {
     let Some(store) = gateway.pages.clone() else {
         return 0;
     };
-    let stage = assistant_settings(gateway)
-        .await
-        .map(|settings| settings.pages().stage_ttl.0)
-        .unwrap_or(Duration::from_secs(300));
+    let stage = assistant_settings(gateway).await.map_or_else(
+        |_| ai6::AssistantPageLimits::default().stage_ttl.0,
+        |settings| settings.pages().stage_ttl.0,
+    );
     let gone = store.sweep(now(), stage);
     for page in &gone {
         let person = ai6::Person {
@@ -603,10 +602,10 @@ pub(crate) async fn sweep_once(gateway: &Gateway) -> usize {
 /// Sweeps every `[assistant.pages] sweep_every`, for as long as the gateway lives.
 pub(crate) async fn sweeper(gateway: Gateway) {
     loop {
-        let every = assistant_settings(&gateway)
-            .await
-            .map(|settings| settings.pages().sweep_every.0)
-            .unwrap_or(Duration::from_secs(60));
+        let every = assistant_settings(&gateway).await.map_or_else(
+            |_| ai6::AssistantPageLimits::default().sweep_every.0,
+            |settings| settings.pages().sweep_every.0,
+        );
         tokio::time::sleep(every).await;
         sweep_once(&gateway).await;
     }

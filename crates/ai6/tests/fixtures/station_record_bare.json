@@ -1,0 +1,149 @@
+{
+  "accounts": {
+    "claim_ttl": 60.0,
+    "limit_horizon": 691200.0,
+    "login_timeout": 60.0,
+    "reset_grace": 15.0,
+    "unknown_use_permille": 500
+  },
+  "api": {
+    "refused_body_drain_bytes": 65536
+  },
+  "approvals": {
+    "classify_nesting": 4,
+    "kind_bytes": 32,
+    "target_bytes": 256
+  },
+  "audit": {
+    "names_detail_chars": 240,
+    "target_bytes": 512
+  },
+  "blocked_after": null,
+  "detached": {
+    "name_chars": 64,
+    "poll": 0.2,
+    "script_timeout": 30.0
+  },
+  "green_ink": {
+    "gate_timeout": 30.0
+  },
+  "harness": {
+    "manifest_bytes": 16777216,
+    "manifest_file_bytes": 1048576,
+    "manifest_files": 4096
+  },
+  "head_of_station": {
+    "listed_changes": 20,
+    "survey_entries": 500000
+  },
+  "history": null,
+  "loop_min_lines": null,
+  "loop_timeout": null,
+  "max_concurrent_missions": null,
+  "max_runtime": null,
+  "normalize_digits": null,
+  "partial_line_bytes": null,
+  "provision": {
+    "command_timeout": 120.0,
+    "name_bytes": 64,
+    "probe_timeout": 60.0,
+    "version_chars": 200
+  },
+  "publisher": {
+    "control_queue": 16,
+    "control_report_attempts": 3,
+    "control_wait": 1.0,
+    "input_retry_delay": 0.1,
+    "input_wait": 20.0,
+    "pre_bind_terminal_bytes": 1048576,
+    "publish_retry_delay": 0.5,
+    "queue": 64,
+    "refresh_every": 15.0,
+    "request_timeout": 2.0,
+    "retry_max_delay": 30.0,
+    "terminal_bytes": 196608
+  },
+  "recovery": {
+    "first_reattach_delay": 5.0,
+    "give_up_tries": 10,
+    "max_reattach_delay": 60.0,
+    "notes_every": 15.0
+  },
+  "resources_every": null,
+  "roles": null,
+  "runner": {
+    "answer_wait": 10.0,
+    "cable_connect_timeout": 10.0,
+    "cable_request_bytes": 4194304,
+    "connect_timeout": 5.0,
+    "feed_poll": 0.05,
+    "keep_ended": 604800.0,
+    "pump_poll": 0.25,
+    "read_wait": 1.0,
+    "replay_batch": 256,
+    "retry_pause": 0.1,
+    "start_margin": 30.0,
+    "start_poll": 0.05,
+    "start_wait": 30.0,
+    "superseded_close_wait": 0.2,
+    "terminal_poll": 0.2
+  },
+  "safe_house_cache_age": null,
+  "safe_house_caches": null,
+  "scheduler": {
+    "check_in": 15.0,
+    "event_queue": 256,
+    "intake_attempts": 3,
+    "interval": 0.5,
+    "retry_delay": 5.0,
+    "role_catalog_bytes": 524288,
+    "shutdown_wait": 2.0
+  },
+  "secrets": {
+    "lease_ttl": 3600.0,
+    "max_lease_ttl": 3600.0
+  },
+  "sources": {
+    "min_poll": 10.0,
+    "outbox_batch": 20,
+    "outbox_every": 5.0,
+    "poll": 60.0,
+    "reply_every": 60.0,
+    "report_every": 15.0,
+    "retry_backoff": 30.0,
+    "send_attempts": 5,
+    "sleeper_every": 20.0
+  },
+  "stall_timeout": null,
+  "terminal": null,
+  "terminal_output": {
+    "csi_bytes": 64,
+    "json_line_bytes": 67108864
+  },
+  "theater_tools": {
+    "git_timeout": 30.0,
+    "max_timeout": 3600.0,
+    "output_bytes": 262144,
+    "read_bytes": 262144,
+    "timeout": 120.0
+  },
+  "theaters": {
+    "ephemeral_name_bytes": 100
+  },
+  "transports": {
+    "report_every": 300.0,
+    "reprobe_after": 60.0
+  },
+  "vetting": {
+    "detail_bytes": 256,
+    "expiry_sweep": 60.0,
+    "findings": 16,
+    "phrase_bytes": 256,
+    "phrases": 256,
+    "proposal_request_ttl": 3600.0,
+    "proposal_settle": 30.0,
+    "proposals": 500,
+    "rate_window": 3600.0,
+    "review_work": 50
+  }
+}

@@ -1708,14 +1708,6 @@ mod tests {
         assert!(full.body.contains("sess-9") && full.body.contains("007"));
     }
 
-    #[test]
-    fn the_table_in_the_docs_is_the_structs() {
-        crate::directorates::m::issues::check_schema_table(
-            "instance",
-            &crate::directorates::m::issues::schema_table::<InstanceKeys>(),
-        );
-    }
-
     fn roster_issues(sources: &str, issues: &str) -> (tempfile::TempDir, Roster) {
         let dir = tempfile::tempdir().unwrap();
         fs::write(

@@ -359,6 +359,7 @@ fn reason_for(state: &DaemonState, mission: &Mission, error: ApiErrorResponse) -
                     .any(|word| name.contains(word))
             })
             .map(|(_, value)| value),
+        state.station.limits().secrets.min_matched_bytes,
     );
     match outbound::check(
         cause,

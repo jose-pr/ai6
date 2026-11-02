@@ -417,11 +417,12 @@ fn probe_harness(state: &DaemonState, mission_id: &str) -> Option<Result<(), Str
         Ok(client) => client,
         Err(why) => return Some(Err(why)),
     };
+    let limit = state.station.limits().recovery.probe_timeout.0;
     Some(
         client
             .run(&crate::directorates::q::transport::RunSpec {
                 argv: vec!["true".to_owned()],
-                timeout_ms: 30_000,
+                timeout_ms: u64::try_from(limit.as_millis()).unwrap_or(u64::MAX),
                 ..Default::default()
             })
             .map_err(|error| crate::directorates::q::transport::describe(&error))

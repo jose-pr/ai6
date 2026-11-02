@@ -13,6 +13,7 @@ use crate::directorates::medical::usage::{
     Budget, BudgetBreach, BudgetLevel, BudgetScope, MissionUsage, UsageTotals, UsageTracker,
 };
 use crate::directorates::registry::agent_records::AgentOutcome;
+use crate::directorates::registry::limits::SessionLimits;
 use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::sessions::SessionUpdate;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
@@ -235,7 +236,7 @@ pub(super) fn open_gate(state: &DaemonState, mission: &Mission) -> ExposureGate 
 
 /// What a Mission made from `brief` has already read: the Source item's text, or the
 /// exposure the proposing Session carried into the proposal.
-pub(super) fn brief_exposure(brief: &Brief) -> Vec<String> {
+pub(super) fn brief_exposure(brief: &Brief, limits: &SessionLimits) -> Vec<String> {
     let mut sources = Vec::new();
     if brief.source.starts_with(SOURCE_BRIEF_PREFIX) {
         sources.push(BRIEF_SOURCE.to_owned());
@@ -249,11 +250,13 @@ pub(super) fn brief_exposure(brief: &Brief) -> Vec<String> {
             inherited
                 .iter()
                 .filter_map(serde_json::Value::as_str)
-                .filter(|source| !source.is_empty() && source.len() <= 128)
+                .filter(|source| {
+                    !source.is_empty() && limits.exposure_source_bytes.allows(source.len())
+                })
                 .map(str::to_owned),
         );
     }
-    sources.truncate(32);
+    sources.truncate(limits.exposure_sources.or_max());
     sources
 }
 

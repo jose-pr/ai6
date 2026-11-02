@@ -307,8 +307,10 @@ impl RunnerLink {
                     arguments.into_iter().map(Into::into).collect();
                 arguments.extend(["--state-dir".into(), state_dir.as_os_str().to_owned()]);
                 let settings = state_dir.join(SETTINGS_FILE);
-                let text =
-                    serde_json::to_vec_pretty(&self.settings).map_err(|error| error.to_string())?;
+                let text = self
+                    .settings
+                    .to_json_bytes()
+                    .map_err(|error| error.to_string())?;
                 std::fs::create_dir_all(state_dir)
                     .and_then(|()| std::fs::write(&settings, text))
                     .map_err(|error| format!("{}: {error}", settings.display()))?;
@@ -351,8 +353,10 @@ impl RunnerLink {
                 // The settings go over standard input, so nothing is written on the Theater
                 // before the runner itself records them in its state directory.
                 argv.extend(["--settings".to_owned(), "-".to_owned()]);
-                let settings =
-                    serde_json::to_vec(&self.settings).map_err(|error| error.to_string())?;
+                let settings = self
+                    .settings
+                    .to_json_bytes()
+                    .map_err(|error| error.to_string())?;
                 let output = client
                     .run(&RunSpec {
                         argv,

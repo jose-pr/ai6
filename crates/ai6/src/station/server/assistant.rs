@@ -1527,6 +1527,7 @@ impl Desk {
                 person,
             },
             job.cables.clone(),
+            &(self.tables)().1,
             reporter,
             Arc::new(ExportsGate(self.exports.clone())),
             // A job with a new token starts the harness again, and this with it; a turn that
@@ -2613,7 +2614,7 @@ impl Exports for Link {
         bytes: Vec<u8>,
     ) -> Result<(), String> {
         let endpoint = self.page_endpoint(conversation, digest, Some(path))?;
-        self.agent(Duration::from_secs(60))
+        self.agent((self.tables)().1.page_upload_timeout.0)
             .put(endpoint.as_str())
             .header("Authorization", &format!("Bearer {}", self.token))
             .send(&bytes[..])

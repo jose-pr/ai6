@@ -2441,7 +2441,7 @@ impl CableStore for FileRegistry {
         limit: usize,
         now: Option<f64>,
     ) -> io::Result<Vec<Cable>> {
-        if agent.trim().is_empty() || limit == 0 || limit > 1_000 {
+        if agent.trim().is_empty() || limit == 0 || !self.limits.cables.page.allows(limit) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "agent must be non-empty and limit must be between 1 and 1000",
@@ -2478,10 +2478,10 @@ impl CableStore for FileRegistry {
     }
 
     fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>> {
-        if limit == 0 || limit > 1_000 {
+        if limit == 0 || !self.limits.cables.page.allows(limit) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "held Cable limit must be between 1 and 1000",
+                "held Cable limit is outside [registry.limits.cables] page",
             ));
         }
         let now = now.map_or_else(unix_time, Ok)?;
@@ -3439,6 +3439,23 @@ pub(super) fn invalid_data(message: impl Into<String>) -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn how_many_cables_one_read_takes_is_a_setting() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut limits = RegistryLimits::default();
+        assert_eq!(limits.cables.page, Limit::at(1_000));
+        limits.cables.page = Limit::at(2);
+        let registry = FileRegistry::open(dir.path()).with_limits(limits.clone());
+        assert!(registry.held_cables(2, Some(1.0)).is_ok());
+        let refused = registry.held_cables(3, Some(1.0)).unwrap_err();
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+        assert!(registry.cable_inbox("008", None, 3, Some(1.0)).is_err());
+        limits.cables.page = Limit::UNBOUNDED;
+        let registry = FileRegistry::open(dir.path()).with_limits(limits);
+        assert!(registry.held_cables(5_000, Some(1.0)).is_ok());
+        assert!(registry.cable_inbox("008", None, 5_000, Some(1.0)).is_ok());
+    }
+
     use super::*;
     use crate::directorates::registry::cables::{
         CableDraft, CableRecipient, CableScope, CableTarget,

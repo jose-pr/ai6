@@ -94,7 +94,7 @@ pub const ORG_SHARED: &str = "org";
 )]
 pub struct AssistantSettings {
     /// Where each person's memory and work is kept: a repository address with {person} or
-    /// {person_digest} in it. Leave it empty to keep nothing.
+    /// {person_digest} in it. Leave it empty to keep nothing. Default: none.
     #[schema(title = "Personal repository", section = "memory")]
     #[form(placeholder = "/srv/moneypenny/{person_digest}.git")]
     personal_repo: Option<String>,
@@ -103,7 +103,7 @@ pub struct AssistantSettings {
     #[map(default)]
     #[form(form = SharedRepo)]
     shared: BTreeMap<String, SharedRepo>,
-    /// A repository everyone shares with her.
+    /// A repository everyone shares with her. Default: none.
     #[schema(title = "Repository everyone shares", section = "memory", advanced)]
     #[form(form = SharedRepo)]
     org: Option<SharedRepo>,

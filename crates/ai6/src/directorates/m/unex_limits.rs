@@ -6,7 +6,7 @@
 //! `"none"` in TOML) takes the bound away. Other durations are [`Seconds`], whole or
 //! fractional.
 
-use serde::{Deserialize, Serialize};
+use guatiao::{FromValue, Schema, ToValue};
 
 use crate::bounds::{Limit, Seconds, TimeLimit};
 
@@ -16,8 +16,7 @@ const DAY: u64 = 24 * 60 * 60;
 
 /// Every table of the `unex` record that bounds or paces the gateway.
 #[non_exhaustive]
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct UnexLimits {
     /// `[gateway]`: live Sessions, connections and frames.
     pub gateway: UnexGatewayLimits,
@@ -33,52 +32,92 @@ pub struct UnexLimits {
 
 /// `[gateway]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct UnexGatewayLimits {
-    /// Live provider Sessions. Default 16.
+    /// Live provider Sessions.
+    #[schema(title = "Live Sessions")]
+    #[map(default = UnexGatewayLimits::default().sessions)]
     pub sessions: Limit,
-    /// Simultaneous browser connections to one provider Session. Default 12.
+    /// Simultaneous browser connections to one provider Session.
+    #[schema(title = "Browser connections per Session")]
+    #[map(default = UnexGatewayLimits::default().clients_per_session)]
     pub clients_per_session: Limit,
-    /// Value frames kept per provider Session for a client that joins late. Default 64.
+    /// Value frames kept per provider Session for a client that joins late.
+    #[schema(title = "Frames kept for a late client")]
+    #[map(default = UnexGatewayLimits::default().scrollback_events)]
     pub scrollback_events: Limit,
-    /// Bytes of one WebSocket or ingress frame. Default 256 KiB.
+    /// Bytes of one WebSocket or ingress frame. A Station is told at registration how much terminal
+    /// output that leaves room for, and splits longer output to fit.
+    #[schema(title = "Largest frame", format = "bytes")]
+    #[map(default = UnexGatewayLimits::default().frame_bytes)]
     pub frame_bytes: Limit,
-    /// Browser input frames accepted per connection per second. Default 40.
+    /// Browser input frames accepted per connection per second.
+    #[schema(title = "Browser input frames a second")]
+    #[map(default = UnexGatewayLimits::default().input_frames_per_second)]
     pub input_frames_per_second: Limit,
-    /// Capacity of the queue between the gateway and its Stations, at least 1. Default 64.
+    /// Capacity of the queue between the gateway and its Stations, at least 1.
+    #[schema(title = "Queue to the Stations")]
+    #[map(default = UnexGatewayLimits::default().input_queue)]
     pub input_queue: u64,
-    /// Capacity of each per-Session viewer queue, at least 1. Default 8.
+    /// Capacity of each per-Session viewer queue, at least 1.
+    #[schema(title = "Queue per Session viewer")]
+    #[map(default = UnexGatewayLimits::default().fanout)]
     pub fanout: u64,
-    /// Bytes the gateway may hold in buffers across every Session and connection; the
-    /// configuration is refused when its limits could exceed it. Default 512 MiB.
+    /// Bytes the gateway may hold in buffers across every Session and connection; the configuration
+    /// is refused when its limits could exceed it.
+    #[schema(title = "All the gateway's buffers", format = "bytes")]
+    #[map(default = UnexGatewayLimits::default().buffer_budget_bytes)]
     pub buffer_budget_bytes: Limit,
     /// Browser connections the gateway keeps slots for; the configuration is refused when its
-    /// Sessions times connections per Session could exceed it. Default 100,000.
+    /// Sessions times connections per Session could exceed it.
+    #[schema(title = "Browser connection slots")]
+    #[map(default = UnexGatewayLimits::default().client_slots)]
     pub client_slots: Limit,
-    /// Seconds an attach token lives, more than 0. Default 300.
+    /// Seconds an attach token lives, more than 0.
+    #[schema(title = "An attach token lasts")]
+    #[map(default = UnexGatewayLimits::default().attach_token_ttl)]
     pub attach_token_ttl: Seconds,
-    /// Seconds a terminal write lease lives, more than 0. Default 30.
+    /// Seconds a terminal write lease lives, more than 0.
+    #[schema(title = "A terminal write lease lasts")]
+    #[map(default = UnexGatewayLimits::default().write_lease_ttl)]
     pub write_lease_ttl: Seconds,
-    /// Characters the Station token holds at least; a smaller value is looser. Default 32.
+    /// Characters the Station token holds at least; a smaller value is looser.
+    #[schema(title = "Shortest Station token", format = "bytes")]
+    #[map(default = UnexGatewayLimits::default().station_token_min_bytes)]
     pub station_token_min_bytes: u64,
-    /// Bytes of the public origin. Default 2,048.
+    /// Bytes of the public origin.
+    #[schema(title = "Longest public origin", format = "bytes")]
+    #[map(default = UnexGatewayLimits::default().origin_bytes)]
     pub origin_bytes: Limit,
-    /// Seconds a sign-in that names no lifetime gets, and each renewal gives from then, more
-    /// than 0 and within `access_token_max_ttl`; longer is looser. Default 3,600.
+    /// Seconds a sign-in that names no lifetime gets, and each renewal gives from then, more than 0
+    /// and within `access_token_max_ttl`; longer is looser.
+    #[schema(title = "A sign-in lasts")]
+    #[map(default = UnexGatewayLimits::default().access_token_ttl)]
     pub access_token_ttl: Seconds,
-    /// The longest lifetime a request for a token may name, in seconds. Default 86,400.
+    /// The longest lifetime a request for a token may name, in seconds.
+    #[schema(title = "Longest token a request may ask for")]
+    #[map(default = UnexGatewayLimits::default().access_token_max_ttl)]
     pub access_token_max_ttl: TimeLimit,
-    /// How long renewing keeps a sign-in going, in seconds from when it was made; the password
-    /// is not asked again until then. `0` turns renewal off. Default 43,200.
+    /// How long renewing keeps a sign-in going, in seconds from when it was made; the password is not
+    /// asked again until then. `0` turns renewal off, `"none"` lets it run on.
+    #[schema(title = "Longest renewed sign-in")]
+    #[map(default = UnexGatewayLimits::default().session_max)]
     pub session_max: TimeLimit,
     /// Whether a browser's sign-in also gets an HttpOnly cookie, so a reload signs it back in up
     /// to `session_max` after signing in; with `false`, or `session_max` at `0`, a sign-in lives
     /// in the app's memory alone. Default true.
     pub session_cookie: bool,
     /// Seconds between audit records of one person's reads of one resource allowed only by one
-    /// compartment; the app polls, so `0` writes one for every read. Default 60.
+    /// compartment; the app polls, so `0` writes one for every read.
+    #[schema(title = "Between audit records of a compartment read")]
+    #[map(default = UnexGatewayLimits::default().compartment_audit)]
     pub compartment_audit: Seconds,
+    /// Bytes the write buffer of a browser's socket holds at least, whatever `frame_bytes`
+    /// (it holds twice that when that is more).
+    #[schema(title = "Smallest socket write buffer", format = "bytes")]
+    #[map(default = UnexGatewayLimits::default().socket_buffer_bytes)]
+    pub socket_buffer_bytes: Limit,
 }
 
 impl Default for UnexGatewayLimits {
@@ -102,29 +141,44 @@ impl Default for UnexGatewayLimits {
             session_max: TimeLimit::secs(43_200),
             session_cookie: true,
             compartment_audit: Seconds::new(60),
+            socket_buffer_bytes: Limit::at(256 * KIB),
         }
     }
 }
 
 /// `[controls]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct ControlLimits {
-    /// Controls held at once; past it the oldest closed one goes, or the control is refused.
-    /// Default 1,024.
+    /// Controls held for status reads and replays; past it the oldest closed one goes, or the control
+    /// is refused.
+    #[schema(title = "Controls held")]
+    #[map(default = ControlLimits::default().controls)]
     pub controls: Limit,
-    /// Controls one Station may have open. Default 64.
+    /// Controls one Station may have open.
+    #[schema(title = "Open controls per Station")]
+    #[map(default = ControlLimits::default().pending_per_station)]
     pub pending_per_station: Limit,
-    /// Seconds an open control waits for its Station before it expires. Default 120.
+    /// Seconds an open control waits for its Station before it expires.
+    #[schema(title = "An open control waits")]
+    #[map(default = ControlLimits::default().ttl)]
     pub ttl: Seconds,
-    /// Seconds a Station's poll waits for a control when it names no wait. Default 1.
+    /// Seconds a Station's poll waits for a control when it names no wait.
+    #[schema(title = "A Station's poll waits")]
+    #[map(default = ControlLimits::default().poll_wait)]
     pub poll_wait: Seconds,
-    /// The longest wait a Station's poll may ask for, in seconds. Default 25.
+    /// The longest wait a Station's poll may ask for, in seconds.
+    #[schema(title = "Longest poll a Station may ask for")]
+    #[map(default = ControlLimits::default().max_poll_wait)]
     pub max_poll_wait: TimeLimit,
-    /// Bytes of an idempotency key. Default 128.
+    /// Bytes of an idempotency key.
+    #[schema(title = "Longest idempotency key", format = "bytes")]
+    #[map(default = ControlLimits::default().idempotency_key_bytes)]
     pub idempotency_key_bytes: Limit,
-    /// Characters of an operator's reason; longer text is cut. Default 512.
+    /// Characters of an operator's reason; longer text is cut.
+    #[schema(title = "Longest operator reason")]
+    #[map(default = ControlLimits::default().reason_chars)]
     pub reason_chars: Limit,
 }
 
@@ -144,15 +198,29 @@ impl Default for ControlLimits {
 
 /// `[timeline]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct UnexTimelineLimits {
-    /// Items in a page when the request names no limit, at least 1. Default 50.
+    /// Items in a page when the request names no limit, at least 1.
+    #[schema(title = "Items in a page")]
+    #[map(default = UnexTimelineLimits::default().page)]
     pub page: u64,
-    /// The most items a page may ask for. Default 200.
+    /// The most items a page may ask for.
+    #[schema(title = "Most items a page may ask for")]
+    #[map(default = UnexTimelineLimits::default().max_page)]
     pub max_page: Limit,
-    /// Characters of one item's text; longer text is cut. Default 256.
+    /// Characters of one item's text; longer text is cut.
+    #[schema(title = "Longest item text")]
+    #[map(default = UnexTimelineLimits::default().text_chars)]
     pub text_chars: Limit,
+    /// Records in a page of the audit log when the request names no limit, at least 1.
+    #[schema(title = "Audit records in a page")]
+    #[map(default = UnexTimelineLimits::default().audit_page)]
+    pub audit_page: u64,
+    /// The most records a page of the audit log may ask for.
+    #[schema(title = "Most audit records a page may ask for")]
+    #[map(default = UnexTimelineLimits::default().max_audit_page)]
+    pub max_audit_page: Limit,
 }
 
 impl Default for UnexTimelineLimits {
@@ -161,6 +229,8 @@ impl Default for UnexTimelineLimits {
             page: 50,
             max_page: Limit::at(200),
             text_chars: Limit::at(256),
+            audit_page: 100,
+            max_audit_page: Limit::at(500),
         }
     }
 }
@@ -168,16 +238,24 @@ impl Default for UnexTimelineLimits {
 /// `[login]`. The tries allowed are the flat `login_tries_per_address` and
 /// `login_tries_per_name`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct LoginTable {
-    /// Bytes of an account name the tries are counted under; longer names are cut. Default 64.
+    /// Bytes of an account name the tries are counted under; longer names are cut.
+    #[schema(title = "Longest account name counted", format = "bytes")]
+    #[map(default = LoginTable::default().name_bytes)]
     pub name_bytes: Limit,
-    /// Tries between sweeps that forget old counters, at least 1. Default 256.
+    /// Tries between sweeps that forget old counters, at least 1.
+    #[schema(title = "Tries between sweeps of old counters")]
+    #[map(default = LoginTable::default().forget_every)]
     pub forget_every: u64,
-    /// Seconds one client address's tries are counted over. Default 60.
+    /// Seconds one client address's tries are counted over.
+    #[schema(title = "One address's tries are counted over")]
+    #[map(default = LoginTable::default().address_window)]
     pub address_window: Seconds,
-    /// Seconds one account name's tries are counted over. Default 600.
+    /// Seconds one account name's tries are counted over.
+    #[schema(title = "One account name's tries are counted over")]
+    #[map(default = LoginTable::default().name_window)]
     pub name_window: Seconds,
 }
 
@@ -194,24 +272,45 @@ impl Default for LoginTable {
 
 /// `[text]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct TextLimits {
-    /// Characters of the reason that lowers an Agent's clearance. Default 512.
+    /// Characters of the reason that lowers an Agent's clearance.
+    #[schema(title = "Longest reason for lowering a clearance")]
+    #[map(default = TextLimits::default().agent_reason_chars)]
     pub agent_reason_chars: Limit,
-    /// The longest a green ink grant or a clearance may last, in seconds. Default one year.
+    /// The longest a green ink grant or a clearance may last, in seconds.
+    #[schema(title = "Longest green ink grant or clearance")]
+    #[map(default = TextLimits::default().green_ink_max_grant)]
     pub green_ink_max_grant: TimeLimit,
-    /// Characters of a green ink note. Default 1,024.
+    /// Characters of a green ink note.
+    #[schema(title = "Longest green ink note")]
+    #[map(default = TextLimits::default().green_ink_note_chars)]
     pub green_ink_note_chars: Limit,
-    /// Characters of the reason for a held brief's decision. Default 1,024.
+    /// Characters of the reason for a held brief's decision.
+    #[schema(title = "Longest reason for a held brief's decision")]
+    #[map(default = TextLimits::default().held_reason_chars)]
     pub held_reason_chars: Limit,
-    /// Bytes of a roster record's target line; longer text is cut. Default 512.
+    /// Bytes of a roster record's target line; longer text is cut.
+    #[schema(title = "Longest roster target line", format = "bytes")]
+    #[map(default = TextLimits::default().roster_target_bytes)]
     pub roster_target_bytes: Limit,
-    /// Bytes of a roster record's key. Default 128.
+    /// Bytes of a roster record's key.
+    #[schema(title = "Longest roster key", format = "bytes")]
+    #[map(default = TextLimits::default().roster_key_bytes)]
     pub roster_key_bytes: Limit,
-    /// Bytes of a role name, an Operation ID or an account name in the access and account
-    /// routes. Default 128.
+    /// Bytes of a role name, an Operation ID or an account name in the access and account routes.
+    #[schema(title = "Longest role, Operation or account name", format = "bytes")]
+    #[map(default = TextLimits::default().access_name_bytes)]
     pub access_name_bytes: Limit,
+    /// Characters of the title of a Mission a person starts.
+    #[schema(title = "Longest Mission title")]
+    #[map(default = TextLimits::default().mission_title_chars)]
+    pub mission_title_chars: Limit,
+    /// Bytes of the instructions of a Mission a person starts.
+    #[schema(title = "Longest Mission instructions", format = "bytes")]
+    #[map(default = TextLimits::default().mission_prompt_bytes)]
+    pub mission_prompt_bytes: Limit,
 }
 
 impl Default for TextLimits {
@@ -224,6 +323,8 @@ impl Default for TextLimits {
             roster_target_bytes: Limit::at(512),
             roster_key_bytes: Limit::at(128),
             access_name_bytes: Limit::at(128),
+            mission_title_chars: Limit::at(512),
+            mission_prompt_bytes: Limit::at(64 * KIB),
         }
     }
 }
@@ -239,13 +340,15 @@ const PACE: &[&str] = &[
     "write_lease_ttl",
     "input_queue",
     "fanout",
+    "socket_buffer_bytes",
+    "audit_page",
 ];
 
 /// One line per bound of `current` looser than its default, its pace keys left out.
-fn looser<T: Serialize + Default>(prefix: &str, current: &T) -> Vec<String> {
-    let (Ok(mut current), Ok(default)) = (
-        serde_json::to_value(current),
-        serde_json::to_value(T::default()),
+fn looser<T: ToValue + Default>(prefix: &str, current: &T) -> Vec<String> {
+    let (Some(mut current), Some(default)) = (
+        crate::directorates::m::records::to_json(current),
+        crate::directorates::m::records::to_json(&T::default()),
     ) else {
         return Vec::new();
     };
@@ -307,6 +410,9 @@ impl UnexLimits {
         if self.timeline.page == 0 {
             return Err("timeline.page: at least 1".to_owned());
         }
+        if self.timeline.audit_page == 0 {
+            return Err("timeline.audit_page: at least 1".to_owned());
+        }
         at_least_one("timeline", &[("max_page", self.timeline.max_page)])?;
         if self.login.forget_every == 0 {
             return Err("login.forget_every: at least 1".to_owned());
@@ -329,6 +435,7 @@ impl UnexLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::m::config::UnexRecord;
 
     #[test]
     fn defaults_have_no_weakening_and_a_looser_bound_is_one() {
@@ -373,15 +480,17 @@ mod tests {
 
     #[test]
     fn tables_read_numbers_none_and_refuse_nonsense() {
-        let limits: UnexLimits = toml::from_str(
+        let read = crate::directorates::m::records::from_toml::<UnexRecord>;
+        let limits = read(
             "[gateway]\nframe_bytes = \"none\"\nattach_token_ttl = 600\n[controls]\npending_per_station = 1\n",
         )
-        .unwrap();
+        .unwrap()
+        .limits();
         assert_eq!(limits.gateway.frame_bytes, Limit::UNBOUNDED);
         assert_eq!(limits.gateway.attach_token_ttl, Seconds::new(600));
         assert_eq!(limits.controls.pending_per_station, Limit::at(1));
         assert!(limits.validate().is_ok());
-        assert!(toml::from_str::<UnexLimits>("[gateway]\nno_such = 1\n").is_err());
+        assert!(read("[gateway]\nno_such = 1\n").is_err());
         let mut zero = UnexLimits::default();
         zero.gateway.sessions = Limit::at(0);
         assert_eq!(

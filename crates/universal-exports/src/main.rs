@@ -549,11 +549,15 @@ fn configured_access(
         &plugin_policy(settings, snapshot),
     );
     ai6::station::plugins::log_scan(plugins.scan_summary());
-    let config = |value: &Option<serde_json::Map<String, JsonValue>>| {
+    let config = |value: &Option<ai6::ProviderConfig>| {
         value
             .clone()
             .map(|object| {
-                json_to_provider_value(JsonValue::Object(object), 0, record.provider_config_depth)
+                json_to_provider_value(
+                    JsonValue::Object(object.into_inner()),
+                    0,
+                    record.provider_config_depth,
+                )
             })
             .transpose()
     };
@@ -713,8 +717,9 @@ mod tests {
 
     #[test]
     fn the_access_cache_defaults_to_seconds_and_reads_fractions_or_none() {
-        let record =
-            |json: serde_json::Value| -> UnexRecord { serde_json::from_value(json).unwrap() };
+        let record = |json: serde_json::Value| -> UnexRecord {
+            ai6::directorates::m::records::from_json(&json).unwrap()
+        };
         assert_eq!(
             access_cache(&record(serde_json::json!({}))).unwrap(),
             CacheOptions::default()
@@ -814,7 +819,7 @@ mod tests {
 
     #[test]
     fn an_inline_credential_in_a_provider_config_is_a_weakening() {
-        let record: UnexRecord = serde_json::from_value(serde_json::json!({
+        let record: UnexRecord = ai6::directorates::m::records::from_json(&serde_json::json!({
             "directory_config": {"url": "ldaps://dc", "bind_password": "hunter2",
                                  "ca_file": "ca.pem", "password_file": "/run/pw"},
         }))

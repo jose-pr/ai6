@@ -3262,7 +3262,10 @@ fn create_intake_mission(
         )
         .map_err(|error| format!("could not record the Mission's name: {error:?}"))?;
     missions
-        .expose(mission_id.as_str(), &medical::brief_exposure(brief))
+        .expose(
+            mission_id.as_str(),
+            &medical::brief_exposure(brief, &state.intake.limits().sessions),
+        )
         .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))?;
     bona_fides::record_origin(state, &mut missions, mission_id.as_str(), brief)
 }
@@ -11077,13 +11080,13 @@ queue = 1
             version: 1,
             provenance: None,
         };
-        assert!(medical::brief_exposure(&brief).is_empty());
+        assert!(medical::brief_exposure(&brief, &Default::default()).is_empty());
         brief.data.insert(
             "exposure".to_owned(),
             serde_json::json!(["brief:source", "cable:008"]),
         );
         assert_eq!(
-            medical::brief_exposure(&brief),
+            medical::brief_exposure(&brief, &Default::default()),
             ["brief:source", "cable:008"]
         );
     }

@@ -845,12 +845,12 @@ struct ReviewFinding {
 /// the answer) holds with a `review-error` finding: an answer that is not plainly a clear
 /// never admits a brief.
 pub fn read_review(text: &str, limits: &VettingLimits) -> Vetting {
-    read_answer(text).within(limits)
+    read_answer(text, limits.answer_tail_bytes).within(limits)
 }
 
-fn read_answer(text: &str) -> Vetting {
+fn read_answer(text: &str, tail: crate::bounds::Limit) -> Vetting {
     // The answer ends the message; only its tail is searched.
-    let mut start = text.len().saturating_sub(16 * 1024);
+    let mut start = text.len().saturating_sub(tail.or_max());
     while !text.is_char_boundary(start) {
         start += 1;
     }
@@ -1713,6 +1713,20 @@ mod tests {
             review.data[crate::directorates::medical::exposure::BRIEF_EXPOSURE_KEY],
             serde_json::json!(["brief:source"])
         );
+    }
+
+    #[test]
+    fn only_the_tail_of_a_review_answer_is_searched() {
+        let answer = "Looks fine.\n{\"verdict\": \"clear\"}";
+        let short = VettingLimits {
+            answer_tail_bytes: Limit::at(8),
+            ..VettingLimits::default()
+        };
+        assert_eq!(
+            read_review(answer, &VettingLimits::default()),
+            Vetting::pass()
+        );
+        assert_ne!(read_review(answer, &short), Vetting::pass());
     }
 
     #[test]

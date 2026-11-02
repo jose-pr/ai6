@@ -304,15 +304,16 @@ pub struct ProviderSettings {
     /// Seconds between checks for changes; 0 turns reloading off. Default: 5.
     #[schema(title = "Between checks for changes")]
     pub poll: Option<Seconds>,
-    /// Bytes of the loadout document ([`ConfigLimits::loadout_bytes`]).
+    /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool` records
+    /// together).
     #[schema(title = "Loadout document", format = "bytes")]
     #[map(default = ConfigLimits::default().loadout_bytes)]
     pub loadout_bytes: Limit,
-    /// Characters of one loadout value ([`ConfigLimits::loadout_value_chars`]).
+    /// Characters of one text value in the loadout document.
     #[schema(title = "One loadout value, in characters")]
     #[map(default = ConfigLimits::default().loadout_value_chars)]
     pub loadout_value_chars: Limit,
-    /// Bytes of the access policy ([`ConfigLimits::access_policy_bytes`]).
+    /// Bytes of the access policy (the `access` record).
     #[schema(title = "Access policy", format = "bytes")]
     #[map(default = ConfigLimits::default().access_policy_bytes)]
     pub access_policy_bytes: Limit,
@@ -345,8 +346,9 @@ pub struct RegistrySettings {
     /// provider's, when the Registry is the provider's database.
     #[schema(title = "Database password", sensitive)]
     pub password: Option<SecretRef>,
-    /// Seconds the Headquarters lease lasts between renewals; it also sets the SQL
-    /// connections' timeouts. Default: 60.
+    /// Seconds the Headquarters lease lasts between renewals; a PostgreSQL statement, lock wait
+    /// and idle transaction end after a quarter of it, a connection attempt after a sixth.
+    /// Default: 60.
     #[schema(title = "Headquarters lease")]
     pub headquarters_lease: Option<Seconds>,
     /// Seconds a SQLite connection waits for another's lock. Default: 30.
@@ -407,8 +409,7 @@ pub struct StationSettings {
     /// made up on first start.
     #[schema(title = "Station ID")]
     pub id: Option<String>,
-    /// Where the Station keeps its state. Default: the platform's state directory
-    /// ([`platform_state_dir`]).
+    /// Where the Station keeps its state. Default: the platform's state directory.
     #[schema(title = "State directory")]
     pub state_dir: Option<PathBuf>,
     /// The Station's private listener. Default: 127.0.0.1:7081.
@@ -476,7 +477,7 @@ pub struct UnexSettings {
     #[schema(title = "Universal Exports' origin", format = "uri")]
     pub url: Option<String>,
     /// A PEM file of certificate authorities its clients trust for Universal Exports besides the
-    /// public roots; [`read_ca_file`] reads it. Default: the public roots alone.
+    /// public roots. Default: the public roots alone.
     #[schema(title = "More certificate authorities to trust")]
     pub ca_file: Option<PathBuf>,
     /// The credential of the Station channel: a Station publishes with it, and Universal Exports
@@ -1138,6 +1139,9 @@ pub fn platform_state_dir() -> Result<PathBuf, BootstrapError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::m::assistant::AssistantSettings;
+    use crate::directorates::m::config::{StationRuntime, UnexRecord};
+    use crate::directorates::m::roster::RosterSettings;
 
     fn from_toml<T: FromValue>(text: &str) -> Result<T, String> {
         format::read(Path::new("a.toml"), text).map_err(|error| error.to_string())
@@ -1282,6 +1286,15 @@ mod tests {
         // [registry.limits] alone holds about a hundred; a walk that stopped early finds nothing.
         assert!(found.len() > 150, "the walk reached {}", found.len());
         assert_eq!(undeclared::<Bootstrap>(), Vec::<String>::new());
+        assert_eq!(undeclared::<StationRuntime>(), Vec::<String>::new());
+        assert_eq!(undeclared::<UnexRecord>(), Vec::<String>::new());
+        assert_eq!(undeclared::<AssistantSettings>(), Vec::<String>::new());
+        assert_eq!(undeclared::<RosterSettings>(), Vec::<String>::new());
+        let mut station = Vec::new();
+        let station_schema = schema_of::<StationRuntime>();
+        writable("", &station_schema, &mut station);
+        // Twenty tables of a few keys each; a walk that stopped at the record's own keys is short.
+        assert!(station.len() > 130, "the walk reached {}", station.len());
 
         // The check itself, on one field of each kind it refuses.
         #[derive(ToValue, FromValue, Schema)]

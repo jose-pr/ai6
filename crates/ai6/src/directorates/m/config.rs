@@ -38,6 +38,7 @@ use crate::bounds::Limit;
 use crate::directorates::m::access::{AccessPolicy, OperationAccess, compile};
 use crate::directorates::m::compartments::Compartments;
 use crate::directorates::m::cover::{Covers, cover_from};
+use crate::directorates::m::records;
 use crate::directorates::m::roster::{
     Roster, RosterDefinitions, RosterError, RosterErrorKind, error, error_of,
     roster_from_definitions,
@@ -377,15 +378,14 @@ impl ConfigRevision {
 /// file. Each default is the value the provider applies when the file says nothing; `null`
 /// (or `"none"` in TOML) takes the bound away.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, guatiao::ToValue)]
 pub struct ConfigLimits {
     /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool`
-    /// records together). Default 1 MiB.
+    /// records together).
     pub loadout_bytes: Limit,
-    /// Characters of one text value in a loadout document. Default 4,096.
+    /// Characters of one text value in a loadout document.
     pub loadout_value_chars: Limit,
-    /// Bytes of the access policy (the `access` record). Default 1 MiB.
+    /// Bytes of the access policy (the `access` record).
     pub access_policy_bytes: Limit,
 }
 
@@ -402,10 +402,9 @@ impl Default for ConfigLimits {
 impl ConfigLimits {
     /// One line per limit looser than its default, for the bootstrap file's weakenings.
     pub fn weakenings(&self) -> Vec<String> {
-        let (Ok(current), Ok(default)) = (
-            serde_json::to_value(self),
-            serde_json::to_value(Self::default()),
-        ) else {
+        let (Some(current), Some(default)) =
+            (records::to_json(self), records::to_json(&Self::default()))
+        else {
             return Vec::new();
         };
         crate::bounds::looser("provider", &current, &default, &[])
@@ -484,105 +483,145 @@ impl Settings {
 /// A Station's runtime settings, the `station` record: each key a Station applies at start
 /// in place of its built-in default.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(
+    Debug, Clone, Default, PartialEq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
+)]
+#[map(deny_unknown_fields)]
 pub struct StationRuntime {
-    /// Agent Sessions it runs at once.
+    /// Agent Sessions it runs at once. Default: 4.
+    #[schema(title = "Sessions at once")]
     pub max_concurrent_missions: Option<usize>,
-    /// Seconds without provider or terminal activity before a Session stalls.
+    /// Seconds without provider or terminal activity before a Session stalls. Default: 300.
+    #[schema(title = "Stall a silent Session after", format = "seconds")]
     pub stall_timeout: Option<f64>,
     /// Seconds without novel terminal output before repeated output stalls a Session.
+    /// Default: 300.
+    #[schema(title = "Stall a repeating Session after", format = "seconds")]
     pub loop_timeout: Option<f64>,
-    /// Repeated terminal lines required before loop detection applies.
+    /// Repeated terminal lines required before loop detection applies. Default: 50.
+    #[schema(title = "Repeated lines before a loop counts")]
     pub loop_min_lines: Option<usize>,
-    /// Quiet seconds before a prompt-shaped terminal tail marks a Session blocked.
+    /// Quiet seconds before a prompt-shaped terminal tail marks a Session blocked. Default: 10.
+    #[schema(title = "Mark a Session blocked after", format = "seconds")]
     pub blocked_after: Option<f64>,
-    /// Longest a Session runs, in seconds.
+    /// Longest a Session runs, in seconds. Default: none.
+    #[schema(title = "Longest a Session runs", format = "seconds")]
     pub max_runtime: Option<f64>,
-    /// Distinct terminal lines kept for repeated-output detection.
+    /// Distinct terminal lines kept for repeated-output detection. Default: 4096.
+    #[schema(title = "Lines remembered for loop detection")]
     pub history: Option<usize>,
-    /// Whether digit runs are normalized when comparing terminal lines for loops.
+    /// Whether digit runs are normalized when comparing terminal lines for loops. Default: false.
+    #[schema(title = "Ignore digits when comparing lines")]
     pub normalize_digits: Option<bool>,
-    /// `control` (elects Headquarters) and `execution` (runs assigned Missions); both by
-    /// default.
+    /// `control` (elects Headquarters) and `execution` (runs assigned Missions). Default: both.
+    #[schema(title = "What this Station does")]
     pub roles: Option<Vec<String>>,
     /// Placement labels.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schema(title = "Placement labels")]
+    #[map(default)]
     pub labels: BTreeMap<String, String>,
-    /// The terminal provider harnesses run in; by default one that suits the handler.
+    /// The terminal provider harnesses run in. Default: one that suits the handler.
+    #[schema(title = "Terminal provider")]
     pub terminal: Option<String>,
     /// Seconds between samples of each remote Theater's resources; 0 leaves only the
-    /// requirements probe.
+    /// requirements probe. Default: 60.
+    #[schema(title = "Sample a Theater's resources every", format = "seconds")]
     pub resources_every: Option<f64>,
     /// Directory names the Head of Station may remove from a finished Mission's safe house.
+    /// Default: `target`, `node_modules` and `.dart_tool`.
+    #[schema(title = "Rebuildable cache directories")]
     pub safe_house_caches: Option<Vec<String>>,
     /// Seconds a finished Mission's safe house is left alone before its caches may go.
+    /// Default: 604800.
+    #[schema(title = "Leave a finished safe house alone for", format = "seconds")]
     pub safe_house_cache_age: Option<f64>,
-    /// `[scheduler]`.
-    #[serde(default)]
+    /// `[scheduler]`: the scheduler and its check-ins.
+    #[schema(title = "The scheduler")]
+    #[map(default)]
     pub scheduler: limits::SchedulerLimits,
-    /// `[publisher]`.
-    #[serde(default)]
+    /// `[publisher]`: publication to Universal Exports.
+    #[schema(title = "Publishing to Universal Exports")]
+    #[map(default)]
     pub publisher: limits::PublisherLimits,
-    /// `[sources]`.
-    #[serde(default)]
+    /// `[sources]`: Source polling, Sleepers and the tracker outbox.
+    #[schema(title = "Sources and Sleepers")]
+    #[map(default)]
     pub sources: limits::SourceLimits,
-    /// `[transports]`.
-    #[serde(default)]
+    /// `[transports]`: how often Theaters are looked over.
+    #[schema(title = "Looking over Theaters")]
+    #[map(default)]
     pub transports: limits::TransportLimits,
-    /// `[recovery]`.
-    #[serde(default)]
+    /// `[recovery]`: re-attaching to Sessions after a restart.
+    #[schema(title = "Re-attaching to Sessions")]
+    #[map(default)]
     pub recovery: limits::RecoveryLimits,
-    /// `[vetting]`.
-    #[serde(default)]
+    /// `[vetting]`: vetting briefs and Mission proposals.
+    #[schema(title = "Vetting")]
+    #[map(default)]
     pub vetting: limits::VettingLimits,
-    /// `[accounts]`.
-    #[serde(default)]
+    /// `[accounts]`: pool accounts.
+    #[schema(title = "Pool accounts")]
+    #[map(default)]
     pub accounts: limits::AccountLimits,
-    /// `[approvals]`.
-    #[serde(default)]
+    /// `[approvals]`: green ink steps.
+    #[schema(title = "Green ink steps")]
+    #[map(default)]
     pub approvals: limits::ApprovalLimits,
-    /// `[harness]`.
-    #[serde(default)]
+    /// `[harness]`: a working directory's harness configuration.
+    #[schema(title = "Harness configuration")]
+    #[map(default)]
     pub harness: limits::HarnessLimits,
-    /// `[provision]`.
-    #[serde(default)]
+    /// `[provision]`: probing and provisioning Theaters.
+    #[schema(title = "Probing and provisioning Theaters")]
+    #[map(default)]
     pub provision: limits::ProvisionLimits,
-    /// `[secrets]`.
-    #[serde(default)]
+    /// `[secrets]`: loadout secret leases.
+    #[schema(title = "Secret leases")]
+    #[map(default)]
     pub secrets: limits::SecretLimits,
-    /// `[terminal_output]`.
-    #[serde(default)]
+    /// `[terminal_output]`: decoding harness output.
+    #[schema(title = "Harness output")]
+    #[map(default)]
     pub terminal_output: limits::TerminalOutputLimits,
-    /// `[green_ink]`.
-    #[serde(default)]
+    /// `[green_ink]`: the harness gate.
+    #[schema(title = "The harness gate")]
+    #[map(default)]
     pub green_ink: limits::GreenInkLimits,
-    /// `[detached]`.
-    #[serde(default)]
+    /// `[detached]`: harnesses run detached over a transport.
+    #[schema(title = "Detached harnesses")]
+    #[map(default)]
     pub detached: limits::DetachedLimits,
-    /// `[runner]`.
-    #[serde(default)]
+    /// `[runner]`: field runners, the Station's client of them and `ai6 runner serve`.
+    #[schema(title = "Field runners")]
+    #[map(default)]
     pub runner: limits::RunnerLimits,
-    /// `[api]`.
-    #[serde(default)]
+    /// `[api]`: the Station's own HTTP API.
+    #[schema(title = "The Station's own API")]
+    #[map(default)]
     pub api: limits::ApiLimits,
-    /// `[audit]`.
-    #[serde(default)]
+    /// `[audit]`: audit record details.
+    #[schema(title = "Audit details")]
+    #[map(default)]
     pub audit: limits::AuditLimits,
-    /// `[theaters]`.
-    #[serde(default)]
+    /// `[theaters]`: ephemeral Theaters.
+    #[schema(title = "Ephemeral Theaters")]
+    #[map(default)]
     pub theaters: limits::TheaterLimits,
-    /// `[theater_tools]`.
-    #[serde(default)]
+    /// `[theater_tools]`: the `theater_*` tools of remote-hands Sessions.
+    #[schema(title = "Remote-hands tools")]
+    #[map(default)]
     pub theater_tools: limits::TheaterToolLimits,
-    /// `[head_of_station]`.
-    #[serde(default)]
+    /// `[head_of_station]`: the Head of Station's rounds.
+    #[schema(title = "The Head of Station's rounds")]
+    #[map(default)]
     pub head_of_station: limits::HeadOfStationLimits,
-    /// Bytes of a terminal line the watchdog holds before it ends.
+    /// Bytes of a terminal line the watchdog holds before it counts as a line. Default: 4096.
+    #[schema(title = "Longest partial terminal line", format = "bytes")]
     pub partial_line_bytes: Option<Limit>,
-    /// `[providers.<id>]`: provider `<id>`'s Guatiao configuration when the Station builds
-    /// it with none of its own.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    /// `[providers.<id>]`: provider `<id>`'s Guatiao configuration when the Station builds it with
+    /// none of its own (handlers, terminals and safe houses).
+    #[schema(title = "Provider configurations")]
+    #[map(with = guatiao_serde::adapt::object, default)]
     pub providers: BTreeMap<String, serde_json::Value>,
 }
 
@@ -666,75 +705,102 @@ impl StationRuntime {
     }
 }
 
-/// Universal Exports' settings that are not host-local, the `unex` record. Provider
-/// configurations are JSON objects handed to the Guatiao provider as they are; a credential
-/// inside one names a file, never a value.
+/// A provider's configuration: a JSON object handed to its Guatiao provider as it is. A
+/// credential inside one names a file, never a value.
+pub type ProviderConfig =
+    guatiao_serde::Serde<serde_json::Map<String, serde_json::Value>, guatiao::Map>;
+
+/// Universal Exports' settings that are not host-local, the `unex` record.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+#[map(deny_unknown_fields)]
 pub struct UnexRecord {
-    /// The Authenticator provider ID for user sign-in.
+    /// The Authenticator provider ID for user sign-in. Default: none; nobody signs in.
+    #[schema(title = "Sign-in provider")]
     pub authenticator: Option<String>,
-    /// The Authenticator's configuration.
-    pub authenticator_config: Option<serde_json::Map<String, serde_json::Value>>,
-    /// The Directory provider ID; required when user access is configured.
+    /// The Authenticator's configuration. Default: none.
+    #[schema(title = "Sign-in provider's configuration", sensitive)]
+    pub authenticator_config: Option<ProviderConfig>,
+    /// The Directory provider ID; required when user access is configured. Default: none.
+    #[schema(title = "Directory provider")]
     pub directory: Option<String>,
-    /// The Directory's configuration.
-    pub directory_config: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The Directory's configuration. Default: none.
+    #[schema(title = "Directory provider's configuration", sensitive)]
+    pub directory_config: Option<ProviderConfig>,
     /// A custom Authorizer provider ID, in place of the `access` record's role policy; the
-    /// gateway's chief tier still applies beside it.
+    /// gateway's chief tier still applies beside it. Default: none.
+    #[schema(title = "Custom authorizer")]
     pub authorizer: Option<String>,
-    /// The custom Authorizer's configuration.
-    pub authorizer_config: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The custom Authorizer's configuration. Default: none.
+    #[schema(title = "Custom authorizer's configuration", sensitive)]
+    pub authorizer_config: Option<ProviderConfig>,
     /// The Accounts provider ID that keeps the accounts people sign in with, for the account
-    /// routes; unset is the Authenticator when it offers accounts too.
+    /// routes. Default: the Authenticator when it offers accounts too.
+    #[schema(title = "Accounts provider")]
     pub accounts: Option<String>,
-    /// The Accounts provider's configuration.
-    pub accounts_config: Option<serde_json::Map<String, serde_json::Value>>,
-    /// The sanitized header a trusted reverse proxy sets to the signed-in user.
+    /// The Accounts provider's configuration. Default: none.
+    #[schema(title = "Accounts provider's configuration", sensitive)]
+    pub accounts_config: Option<ProviderConfig>,
+    /// The sanitized header a trusted reverse proxy sets to the signed-in user. Default: none.
+    #[schema(title = "Reverse proxy's user header")]
     pub proxy_user_header: Option<String>,
     /// The Directory attribute that resolves the reverse proxy's user.
-    #[serde(default = "UnexRecord::default_lookup_by")]
+    #[schema(title = "Directory attribute of the proxy's user")]
+    #[map(default = UnexRecord::default_lookup_by())]
     pub proxy_lookup_by: String,
-    /// Password or key tries a minute from one client address.
+    /// Password or key tries a minute from one client address. Default: 5.
+    #[schema(title = "Tries a minute per client address")]
     pub login_tries_per_address: Option<u32>,
-    /// Tries in ten minutes for one account name, from anywhere.
+    /// Tries in ten minutes for one account name, from anywhere. Default: 10.
+    #[schema(title = "Tries in ten minutes per account name")]
     pub login_tries_per_name: Option<u32>,
-    /// The header a trusted proxy sets to the client address.
+    /// The header a trusted proxy sets to the client address. Default: none.
+    #[schema(title = "Reverse proxy's client address header")]
     pub client_address_header: Option<String>,
-    /// Seconds a found person or a granted action is kept; 0 keeps none.
+    /// Seconds a found person or a granted action is kept; 0 keeps none. Default: 5.
+    #[schema(title = "Keep a found person or a grant for", format = "seconds")]
     pub access_cache_ttl: Option<f64>,
-    /// Seconds "no such person" or a denial is kept; 0 keeps none.
+    /// Seconds "no such person" or a denial is kept; 0 keeps none. Default: 1.
+    #[schema(title = "Keep a miss or a denial for", format = "seconds")]
     pub access_cache_negative_ttl: Option<f64>,
-    /// The most lookups, and decisions, kept; 0 keeps none.
+    /// The most lookups, and decisions, kept; 0 keeps none. Default: 10000.
+    #[schema(title = "Lookups and decisions kept")]
     pub access_cache_entries: Option<u64>,
     /// Whether Moneypenny is served.
-    #[serde(default = "UnexRecord::default_assistant")]
+    #[schema(title = "Serve Moneypenny")]
+    #[map(default = UnexRecord::default_assistant())]
     pub assistant: bool,
     /// The roster Agent that is Moneypenny.
-    #[serde(default = "UnexRecord::default_assistant_agent")]
+    #[schema(title = "The Agent that is Moneypenny")]
+    #[map(default = UnexRecord::default_assistant_agent())]
     pub assistant_agent: String,
     /// The longest `text` filter an Outer Office route may carry, in bytes: in Moneypenny's
-    /// links and cards, and in the page a message was sent from. Unset is 128; 0 reads as 1.
+    /// links and cards, and in the page a message was sent from. 0 reads as 1. Default: 128.
+    #[schema(title = "Longest route text filter", format = "bytes")]
     pub route_text_bytes: Option<u64>,
-    /// How deeply nested a provider configuration may be. Default 64; `null` or `"none"` for
-    /// no bound.
-    #[serde(default = "UnexRecord::default_provider_config_depth")]
+    /// How deeply nested a provider configuration may be.
+    #[schema(title = "Deepest provider configuration")]
+    #[map(default = UnexRecord::default_provider_config_depth())]
     pub provider_config_depth: crate::bounds::Limit,
-    /// `[gateway]`.
-    #[serde(default)]
+    /// `[gateway]`: live Sessions, connections and frames.
+    #[schema(title = "The gateway")]
+    #[map(default)]
     pub gateway: super::unex_limits::UnexGatewayLimits,
-    /// `[controls]`.
-    #[serde(default)]
+    /// `[controls]`: the operator controls waiting for a Station.
+    #[schema(title = "Operator controls")]
+    #[map(default)]
     pub controls: super::unex_limits::ControlLimits,
-    /// `[timeline]`.
-    #[serde(default)]
+    /// `[timeline]`: a Mission's timeline pages.
+    #[schema(title = "Timeline pages")]
+    #[map(default)]
     pub timeline: super::unex_limits::UnexTimelineLimits,
-    /// `[login]`.
-    #[serde(default)]
+    /// `[login]`: how password and key tries are told apart and counted.
+    #[schema(title = "Counting sign-in tries")]
+    #[map(default)]
     pub login: super::unex_limits::LoginTable,
-    /// `[text]`.
-    #[serde(default)]
+    /// `[text]`: the longest single request fields.
+    #[schema(title = "Longest request fields")]
+    #[map(default)]
     pub text: super::unex_limits::TextLimits,
 }
 
@@ -811,7 +877,11 @@ impl UnexRecord {
             ("accounts_config", &self.accounts_config),
         ] {
             if let Some(config) = config {
-                inline(name, &serde_json::Value::Object(config.clone()), &mut found);
+                inline(
+                    name,
+                    &serde_json::Value::Object(config.0.clone()),
+                    &mut found,
+                );
             }
         }
         found.extend(self.limits().weakenings());
@@ -1524,7 +1594,7 @@ pub(crate) fn assemble(
     };
     let station = match family(ConfigRecord::Station).into_iter().next() {
         Some((_, definition)) => {
-            let station = StationRuntime::deserialize(definition)
+            let station = records::from_json::<StationRuntime>(&definition)
                 .map_err(|reason| error(format!("{source}: station: {reason}")))?;
             station
                 .validate()
@@ -1561,7 +1631,7 @@ pub(crate) fn assemble(
         operation_access.insert(operation, record);
     }
     let unex = match family(ConfigRecord::Unex).into_iter().next() {
-        Some((_, definition)) => UnexRecord::deserialize(definition)
+        Some((_, definition)) => records::from_json::<UnexRecord>(&definition)
             .map_err(|reason| error(format!("{source}: unex: {reason}")))?,
         None => UnexRecord::default(),
     };

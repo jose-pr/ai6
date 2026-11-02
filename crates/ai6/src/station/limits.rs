@@ -6,10 +6,13 @@
 //! Counts and sizes are [`Limit`]s and ceilings on durations are [`TimeLimit`]s: `null` (or
 //! `"none"` in TOML) takes the bound away. Other durations are [`Seconds`], whole or
 //! fractional. A queue is a plain count of at least one, since it is allocated up front.
+//!
+//! Each table's fields are declared once here, with their title and default: the schema, the
+//! reference tables in `docs/configuration.md` and `ai6 config schema` read them.
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use guatiao::{FromValue, Schema, ToValue};
 
 use crate::bounds::{Limit, Seconds, TimeLimit};
 
@@ -19,8 +22,7 @@ const DAY: u64 = 24 * 60 * 60;
 
 /// Every table of the `station` record, as a Station keeps them while it runs.
 #[non_exhaustive]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StationLimits {
     /// `[scheduler]`: the scheduler and its check-ins.
     pub scheduler: SchedulerLimits,
@@ -123,23 +125,40 @@ impl StationLimits {
 
 /// `[scheduler]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct SchedulerLimits {
     /// Events of one Session queued for its event pump; past it the oldest is dropped.
-    /// Default 256.
+    #[schema(title = "Events queued per Session")]
+    #[map(default = SchedulerLimits::default().event_queue)]
     pub event_queue: Limit,
-    /// Seconds between scheduler rounds. Default 0.5.
+    /// Seconds between scheduler rounds.
+    #[schema(title = "Between scheduler rounds")]
+    #[map(default = SchedulerLimits::default().interval)]
     pub interval: Seconds,
-    /// Seconds before a Mission whose start failed is tried again. Default 5.
+    /// Seconds before a Mission whose start failed is tried again.
+    #[schema(title = "Retry a failed Mission start after")]
+    #[map(default = SchedulerLimits::default().retry_delay)]
     pub retry_delay: Seconds,
-    /// Seconds between the Station's check-ins with the Registry. Default 15.
+    /// Seconds between the Station's check-ins with the Registry.
+    #[schema(title = "Between check-ins with the Registry")]
+    #[map(default = SchedulerLimits::default().check_in)]
     pub check_in: Seconds,
-    /// Times a brief is placed before it is filed as failed. Default 3.
+    /// Times a brief is placed before it is filed as failed.
+    #[schema(title = "Tries to place a brief")]
+    #[map(default = SchedulerLimits::default().intake_attempts)]
     pub intake_attempts: u32,
-    /// Bytes of the Agent role catalog the Station publishes. Default 512 KiB.
+    /// Bytes of the Agent role catalog and of the placement policies a check-in carries; past it,
+    /// each is left out.
+    #[schema(
+        title = "Largest role catalog and placement policies",
+        format = "bytes"
+    )]
+    #[map(default = SchedulerLimits::default().role_catalog_bytes)]
     pub role_catalog_bytes: Limit,
-    /// Seconds the Station waits for each of its loops when it stops. Default 2.
+    /// Seconds the Station waits for each of its loops when it stops.
+    #[schema(title = "Wait for each loop when stopping")]
+    #[map(default = SchedulerLimits::default().shutdown_wait)]
     pub shutdown_wait: Seconds,
 }
 
@@ -159,42 +178,67 @@ impl Default for SchedulerLimits {
 
 /// `[publisher]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct PublisherLimits {
-    /// Seconds one request to Universal Exports may take. Default 2.
+    /// Seconds one request to Universal Exports may take.
+    #[schema(title = "Longest request to Universal Exports")]
+    #[map(default = PublisherLimits::default().request_timeout)]
     pub request_timeout: Seconds,
-    /// Events waiting for Universal Exports; past it output gives way, oldest first, and a
-    /// Session's latest state is kept. Default 64.
+    /// Events waiting for Universal Exports; past it output gives way, oldest first, and a Session's
+    /// latest state is kept.
+    #[schema(title = "Events waiting to publish")]
+    #[map(default = PublisherLimits::default().queue)]
     pub queue: usize,
-    /// Bytes of terminal output in one published frame; what Universal Exports states at
-    /// registration lowers it. Default 192 KiB, which with room for its header is the gateway's
-    /// default `frame_bytes`.
+    /// Bytes of terminal output in one published frame. Longer output goes as several, and what
+    /// Universal Exports states at registration lowers it. With room for its header, the default is
+    /// the gateway's default `frame_bytes`.
+    #[schema(title = "Terminal output in one frame", format = "bytes")]
+    #[map(default = PublisherLimits::default().terminal_bytes)]
     pub terminal_bytes: Limit,
-    /// Bytes of terminal output kept for a Session not yet bound to its Mission; past it the
-    /// oldest goes. Default 1 MiB.
+    /// Bytes of terminal output kept for a Session not yet bound to its Mission; past it the oldest
+    /// goes.
+    #[schema(
+        title = "Terminal output kept before a Mission binds",
+        format = "bytes"
+    )]
+    #[map(default = PublisherLimits::default().pre_bind_terminal_bytes)]
     pub pre_bind_terminal_bytes: Limit,
     /// Seconds before a failed publication is tried again; each try doubles it, up to
-    /// `retry_max_delay`. Default 0.5.
+    /// `retry_max_delay`.
+    #[schema(title = "Retry a failed publication after")]
+    #[map(default = PublisherLimits::default().publish_retry_delay)]
     pub publish_retry_delay: Seconds,
     /// The longest pause between tries, of a publication or of an input or control poll.
-    /// Default 30.
+    #[schema(title = "Longest pause between tries")]
+    #[map(default = PublisherLimits::default().retry_max_delay)]
     pub retry_max_delay: Seconds,
-    /// Seconds between registering every live Session again, which is how a gateway restarted
-    /// during a quiet spell learns of them. Default 15.
+    /// Seconds between registering every live Session again, which is how a gateway restarted during
+    /// a quiet spell learns of them.
+    #[schema(title = "Register live Sessions again every")]
+    #[map(default = PublisherLimits::default().refresh_every)]
     pub refresh_every: Seconds,
-    /// Seconds before a failed input or control poll is tried again; each try doubles it, up
-    /// to `retry_max_delay`. Default 0.1.
+    /// Seconds before a failed input or control poll is tried again; each try doubles it, up to
+    /// `retry_max_delay`.
+    #[schema(title = "Retry a failed input or control poll after")]
+    #[map(default = PublisherLimits::default().input_retry_delay)]
     pub input_retry_delay: Seconds,
     /// Seconds Universal Exports holds a control poll open; kept under `request_timeout`.
-    /// Default 1.
+    #[schema(title = "Control poll held open")]
+    #[map(default = PublisherLimits::default().control_wait)]
     pub control_wait: Seconds,
-    /// Seconds Universal Exports holds an input poll open; a keystroke ends it at once, so
-    /// a long wait costs no delay. The gateway's `max_poll_wait` bounds it. Default 20.
+    /// Seconds Universal Exports holds an input poll open; a keystroke ends it at once, so a long
+    /// wait costs no delay. The gateway's `max_poll_wait` bounds it.
+    #[schema(title = "Input poll held open")]
+    #[map(default = PublisherLimits::default().input_wait)]
     pub input_wait: Seconds,
-    /// Mission controls queued for the scheduler. Default 16.
+    /// Mission controls queued for the scheduler.
+    #[schema(title = "Mission controls queued")]
+    #[map(default = PublisherLimits::default().control_queue)]
     pub control_queue: usize,
-    /// Times the outcome of a control is reported. Default 3.
+    /// Times the outcome of a control is reported.
+    #[schema(title = "Tries to report a control's outcome")]
+    #[map(default = PublisherLimits::default().control_report_attempts)]
     pub control_report_attempts: u32,
 }
 
@@ -219,29 +263,50 @@ impl Default for PublisherLimits {
 
 /// `[sources]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct SourceLimits {
-    /// Seconds between polls of a Source that names no interval. Default 60.
+    /// Seconds between polls of a Source whose `interval_secs` is not set.
+    #[schema(title = "Between polls of a Source")]
+    #[map(default = SourceLimits::default().poll)]
     pub poll: Seconds,
-    /// The shortest interval a Source may ask for, in seconds; a smaller value is looser.
-    /// Default 10.
+    /// The shortest interval a Source is polled at, in seconds; a smaller `interval_secs` is raised
+    /// to it, and 0 takes the floor away.
+    #[schema(title = "Shortest poll of a Source")]
+    #[map(default = SourceLimits::default().min_poll)]
     pub min_poll: Seconds,
-    /// Seconds between rounds reporting finished briefs to their Sources. Default 15.
+    /// Seconds between rounds reporting finished briefs to their Sources.
+    #[schema(title = "Report finished briefs every")]
+    #[map(default = SourceLimits::default().report_every)]
     pub report_every: Seconds,
-    /// Seconds between rounds firing Sleepers. Default 20.
+    /// Seconds between rounds firing Sleepers.
+    #[schema(title = "Fire Sleepers every")]
+    #[map(default = SourceLimits::default().sleeper_every)]
     pub sleeper_every: Seconds,
-    /// Seconds between rounds sending the outbox of tracker writes. Default 5.
+    /// Seconds between rounds sending the outbox of tracker writes.
+    #[schema(title = "Send the tracker outbox every")]
+    #[map(default = SourceLimits::default().outbox_every)]
     pub outbox_every: Seconds,
     /// Seconds between rounds reading new comments on the issues Missions are linked to.
-    /// Default 60.
+    #[schema(title = "Read new issue comments every")]
+    #[map(default = SourceLimits::default().reply_every)]
     pub reply_every: Seconds,
-    /// Outbox entries sent in one round. Default 20.
+    /// Outbox entries sent in one round.
+    #[schema(title = "Outbox entries sent per round")]
+    #[map(default = SourceLimits::default().outbox_batch)]
     pub outbox_batch: Limit,
-    /// Sends tried before an outbox entry fails. Default 5.
+    /// Sends tried before an outbox entry fails.
+    #[schema(title = "Tries to send an outbox entry")]
+    #[map(default = SourceLimits::default().send_attempts)]
     pub send_attempts: Limit,
-    /// Seconds before a failed send is tried again; each attempt doubles it. Default 30.
+    /// Seconds before a failed send is tried again; each attempt doubles it.
+    #[schema(title = "Retry a failed send after")]
+    #[map(default = SourceLimits::default().retry_backoff)]
     pub retry_backoff: Seconds,
+    /// Stored replies `issue_read` shows of a linked issue, newest first.
+    #[schema(title = "Replies shown of a linked issue")]
+    #[map(default = SourceLimits::default().replies_read)]
+    pub replies_read: Limit,
 }
 
 impl Default for SourceLimits {
@@ -256,19 +321,23 @@ impl Default for SourceLimits {
             outbox_batch: Limit::at(20),
             send_attempts: Limit::at(5),
             retry_backoff: Seconds::new(30),
+            replies_read: Limit::at(10),
         }
     }
 }
 
 /// `[transports]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct TransportLimits {
-    /// Seconds before a Theater whose probe failed is probed again. Default 60.
+    /// Seconds before a Theater the Station could not reach is probed again.
+    #[schema(title = "Probe a failed Theater again after")]
+    #[map(default = TransportLimits::default().reprobe_after)]
     pub reprobe_after: Seconds,
     /// Seconds between looks over a Theater for its requirements and ambient credentials.
-    /// Default 300.
+    #[schema(title = "Look a Theater over every")]
+    #[map(default = TransportLimits::default().report_every)]
     pub report_every: Seconds,
 }
 
@@ -283,18 +352,29 @@ impl Default for TransportLimits {
 
 /// `[recovery]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct RecoveryLimits {
-    /// Seconds before the first try to re-attach to a Session; each try doubles it.
-    /// Default 5.
+    /// Seconds before the first try to re-attach to a Session; each failed try doubles it.
+    #[schema(title = "First re-attach try after")]
+    #[map(default = RecoveryLimits::default().first_reattach_delay)]
     pub first_reattach_delay: Seconds,
-    /// The longest wait between tries, in seconds. Default 60.
+    /// The longest wait between tries, in seconds.
+    #[schema(title = "Longest wait between re-attach tries")]
+    #[map(default = RecoveryLimits::default().max_reattach_delay)]
     pub max_reattach_delay: Seconds,
-    /// Tries before the Station gives a Session up as lost. Default 10.
+    /// Tries at a Registry step a concurrent renewal can refuse, when the Station gives a lease up.
+    #[schema(title = "Tries to give a lease up")]
+    #[map(default = RecoveryLimits::default().give_up_tries)]
     pub give_up_tries: u32,
-    /// Seconds between notes on a Session being recovered. Default 15.
+    /// Seconds between writes of a Session's recent events to its record.
+    #[schema(title = "Write a Session's recent events every")]
+    #[map(default = RecoveryLimits::default().notes_every)]
     pub notes_every: Seconds,
+    /// Seconds the look at whether a Session's Theater still answers may take.
+    #[schema(title = "Longest look at a Theater")]
+    #[map(default = RecoveryLimits::default().probe_timeout)]
+    pub probe_timeout: Seconds,
 }
 
 impl Default for RecoveryLimits {
@@ -304,36 +384,63 @@ impl Default for RecoveryLimits {
             max_reattach_delay: Seconds::new(60),
             give_up_tries: 10,
             notes_every: Seconds::new(15),
+            probe_timeout: Seconds::new(30),
         }
     }
 }
 
 /// `[vetting]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct VettingLimits {
-    /// Findings kept per verdict. Default 16.
+    /// Findings kept per verdict.
+    #[schema(title = "Findings kept per verdict")]
+    #[map(default = VettingLimits::default().findings)]
     pub findings: Limit,
-    /// Other work a review brief lists for the reviewer. Default 50.
+    /// Other work a review brief lists for the reviewer.
+    #[schema(title = "Other work a review brief lists")]
+    #[map(default = VettingLimits::default().review_work)]
     pub review_work: Limit,
-    /// Bytes of a finding's detail. Default 256.
+    /// Bytes of a finding's detail, of the lines a review brief quotes, and of a vetting timeline
+    /// detail.
+    #[schema(title = "Longest finding detail", format = "bytes")]
+    #[map(default = VettingLimits::default().detail_bytes)]
     pub detail_bytes: Limit,
-    /// Manipulation phrases an Operation may screen for; past it a brief is held.
-    /// Default 256.
+    /// Manipulation phrases an Operation may screen for; past it, or past `phrase_bytes`, screened
+    /// briefs are held.
+    #[schema(title = "Manipulation phrases per Operation")]
+    #[map(default = VettingLimits::default().phrases)]
     pub phrases: Limit,
-    /// Bytes of one such phrase. Default 256.
+    /// Bytes of one such phrase.
+    #[schema(title = "Longest manipulation phrase", format = "bytes")]
+    #[map(default = VettingLimits::default().phrase_bytes)]
     pub phrase_bytes: Limit,
-    /// Seconds of the rolling window rates are counted over. Default 3,600.
+    /// Seconds of the rolling window hourly rates are counted over.
+    #[schema(title = "Rates are counted over")]
+    #[map(default = VettingLimits::default().rate_window)]
     pub rate_window: Seconds,
-    /// Mission proposals Headquarters keeps track of. Default 500.
+    /// Pending Mission proposals looked at per Operation each round, within
+    /// `[registry.limits.proposals] results`.
+    #[schema(title = "Proposals looked at per round")]
+    #[map(default = VettingLimits::default().proposals)]
     pub proposals: Limit,
-    /// Seconds a proposal's approval request waits for a decision. Default 3,600.
+    /// Seconds the green ink request a class authorisation approves for a proposal lasts.
+    #[schema(title = "A proposal's green ink request lasts")]
+    #[map(default = VettingLimits::default().proposal_request_ttl)]
     pub proposal_request_ttl: Seconds,
-    /// Seconds a proposal waits for its brief to settle before it is vetted. Default 30.
+    /// Seconds a proposal waits before M promotes it on its own.
+    #[schema(title = "A proposal waits before it is promoted")]
+    #[map(default = VettingLimits::default().proposal_settle)]
     pub proposal_settle: Seconds,
-    /// Seconds between sweeps for expired proposal requests. Default 60.
+    /// Seconds between looks at rate holds for expiry.
+    #[schema(title = "Look at rate holds every")]
+    #[map(default = VettingLimits::default().expiry_sweep)]
     pub expiry_sweep: Seconds,
+    /// Bytes at the end of a review's answer searched for its verdict; the answer ends the message.
+    #[schema(title = "Review answer searched", format = "bytes")]
+    #[map(default = VettingLimits::default().answer_tail_bytes)]
+    pub answer_tail_bytes: Limit,
 }
 
 impl Default for VettingLimits {
@@ -349,25 +456,36 @@ impl Default for VettingLimits {
             proposal_request_ttl: Seconds::new(3_600),
             proposal_settle: Seconds::new(30),
             expiry_sweep: Seconds::new(60),
+            answer_tail_bytes: Limit::at(16 * KIB),
         }
     }
 }
 
 /// `[accounts]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct AccountLimits {
-    /// Seconds past a reported reset before a limited account is used again. Default 15.
+    /// Seconds past a reported reset before a Session parked on a limit resumes.
+    #[schema(title = "Wait past a reported reset")]
+    #[map(default = AccountLimits::default().reset_grace)]
     pub reset_grace: Seconds,
-    /// The use, in thousandths, assumed of an account that reports none. Default 500.
+    /// Thousandths used an account whose provider reported nothing counts as, 0 to 1,000.
+    #[schema(title = "Use assumed when none is reported")]
+    #[map(default = AccountLimits::default().unknown_use_permille)]
     pub unknown_use_permille: u16,
-    /// Seconds a claim on a pool account lasts between renewals. Default 60.
+    /// Seconds a claim on an account lasts unless the Station renews it at check-in.
+    #[schema(title = "A claim on an account lasts")]
+    #[map(default = AccountLimits::default().claim_ttl)]
     pub claim_ttl: Seconds,
-    /// The longest a limited account is kept out, in seconds, whatever reset time its
-    /// provider reports. Default 691,200 (8 days).
+    /// The longest a limited account is kept out, in seconds, whatever reset time its provider
+    /// reports.
+    #[schema(title = "Longest a limited account stays out")]
+    #[map(default = AccountLimits::default().limit_horizon)]
     pub limit_horizon: Seconds,
-    /// Seconds a pool account's login may take. Default 60.
+    /// Seconds a pool account's login command may take.
+    #[schema(title = "Longest account login")]
+    #[map(default = AccountLimits::default().login_timeout)]
     pub login_timeout: Seconds,
 }
 
@@ -385,16 +503,26 @@ impl Default for AccountLimits {
 
 /// `[approvals]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct ApprovalLimits {
-    /// Bytes of a green ink step's kind. Default 32.
+    /// Bytes of the kind of a step an Agent asks about.
+    #[schema(title = "Longest green ink step kind", format = "bytes")]
+    #[map(default = ApprovalLimits::default().kind_bytes)]
     pub kind_bytes: Limit,
-    /// Bytes of a green ink step's target. Default 256.
+    /// Bytes of the target of a step an Agent asks about.
+    #[schema(title = "Longest green ink step target", format = "bytes")]
+    #[map(default = ApprovalLimits::default().target_bytes)]
     pub target_bytes: Limit,
-    /// How deep `sh -c "sh -c ..."` and git aliases are followed when a command is
-    /// classified. Default 4.
+    /// How deep nested shells (`sh -c "sh -c ..."`) and git aliases are followed when a command is
+    /// read; the harness gate gets it in `AI6_GREEN_INK_NESTING`.
+    #[schema(title = "Nesting followed when classifying a command")]
+    #[map(default = ApprovalLimits::default().classify_nesting)]
     pub classify_nesting: usize,
+    /// Steps one `check_approval` call may ask about.
+    #[schema(title = "Steps checked at once")]
+    #[map(default = ApprovalLimits::default().checked_steps)]
+    pub checked_steps: Limit,
 }
 
 impl Default for ApprovalLimits {
@@ -403,20 +531,27 @@ impl Default for ApprovalLimits {
             kind_bytes: Limit::at(32),
             target_bytes: Limit::at(256),
             classify_nesting: 4,
+            checked_steps: Limit::at(64),
         }
     }
 }
 
 /// `[harness]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct HarnessLimits {
-    /// Bytes of one file of a project's harness configuration. Default 1 MiB.
+    /// Bytes of one file of a project's harness configuration.
+    #[schema(title = "Largest harness configuration file", format = "bytes")]
+    #[map(default = HarnessLimits::default().manifest_file_bytes)]
     pub manifest_file_bytes: Limit,
-    /// Bytes of the whole configuration. Default 16 MiB.
+    /// Bytes of the whole configuration.
+    #[schema(title = "Largest harness configuration", format = "bytes")]
+    #[map(default = HarnessLimits::default().manifest_bytes)]
     pub manifest_bytes: Limit,
-    /// Files in the configuration. Default 4,096.
+    /// Files in the configuration.
+    #[schema(title = "Files in a harness configuration")]
+    #[map(default = HarnessLimits::default().manifest_files)]
     pub manifest_files: Limit,
 }
 
@@ -432,16 +567,24 @@ impl Default for HarnessLimits {
 
 /// `[provision]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct ProvisionLimits {
-    /// Seconds the requirements probe may take. Default 60.
+    /// Seconds the requirements probe, and a resources sample, may take.
+    #[schema(title = "Longest requirements probe")]
+    #[map(default = ProvisionLimits::default().probe_timeout)]
     pub probe_timeout: Seconds,
-    /// Seconds one provisioning command may take. Default 120.
+    /// Seconds one provisioning command may take.
+    #[schema(title = "Longest provisioning command")]
+    #[map(default = ProvisionLimits::default().command_timeout)]
     pub command_timeout: Seconds,
-    /// Bytes of a required program's name. Default 64.
+    /// Bytes of a required program's name; a longer one fails the probe.
+    #[schema(title = "Longest required program name", format = "bytes")]
+    #[map(default = ProvisionLimits::default().name_bytes)]
     pub name_bytes: Limit,
-    /// Characters of a program's version kept from the probe. Default 200.
+    /// Characters of a program's version kept from the probe.
+    #[schema(title = "Longest program version kept")]
+    #[map(default = ProvisionLimits::default().version_chars)]
     pub version_chars: Limit,
 }
 
@@ -458,14 +601,23 @@ impl Default for ProvisionLimits {
 
 /// `[secrets]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct SecretLimits {
-    /// Seconds the leases of a Session's loadout and pool account secrets last. Default 3,600.
+    /// Seconds the leases of a Session's loadout and pool account secrets last.
+    #[schema(title = "A secret's lease lasts")]
+    #[map(default = SecretLimits::default().lease_ttl)]
     pub lease_ttl: Seconds,
-    /// The longest lease, in seconds; a green ink secret's lease lasts as long as its
-    /// approval, up to it. Default 3,600.
+    /// The longest lease, in seconds; a green ink secret's lease lasts as long as its approval, up to
+    /// it.
+    #[schema(title = "Longest secret lease")]
+    #[map(default = SecretLimits::default().max_lease_ttl)]
     pub max_lease_ttl: TimeLimit,
+    /// Secrets shorter than this are not looked for in what an Agent writes outward: a short
+    /// one would refuse ordinary words. Smaller is looser.
+    #[schema(title = "Shortest secret looked for", format = "bytes")]
+    #[map(default = SecretLimits::default().min_matched_bytes)]
+    pub min_matched_bytes: u64,
 }
 
 impl Default for SecretLimits {
@@ -473,18 +625,23 @@ impl Default for SecretLimits {
         Self {
             lease_ttl: Seconds::new(3_600),
             max_lease_ttl: TimeLimit::secs(3_600),
+            min_matched_bytes: 6,
         }
     }
 }
 
 /// `[terminal_output]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct TerminalOutputLimits {
-    /// Bytes of one line of a JSON harness's output. Default 64 MiB.
+    /// Bytes of one line of a JSON harness's output held while the rest arrives.
+    #[schema(title = "Longest line of JSON output", format = "bytes")]
+    #[map(default = TerminalOutputLimits::default().json_line_bytes)]
     pub json_line_bytes: Limit,
-    /// Bytes of one terminal control sequence before it is dropped. Default 64.
+    /// Bytes of one terminal control sequence before it is read as text.
+    #[schema(title = "Longest terminal control sequence", format = "bytes")]
+    #[map(default = TerminalOutputLimits::default().csi_bytes)]
     pub csi_bytes: Limit,
 }
 
@@ -499,10 +656,13 @@ impl Default for TerminalOutputLimits {
 
 /// `[green_ink]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct GreenInkLimits {
-    /// Seconds the harness gate's exchange with the Station may take. Default 30.
+    /// Seconds the harness gate's exchange with the Station may take; the gate gets it in
+    /// `AI6_GREEN_INK_TIMEOUT`.
+    #[schema(title = "Longest harness gate exchange")]
+    #[map(default = GreenInkLimits::default().gate_timeout)]
     pub gate_timeout: Seconds,
 }
 
@@ -516,14 +676,20 @@ impl Default for GreenInkLimits {
 
 /// `[detached]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct DetachedLimits {
-    /// Seconds between reads of a detached harness's output. Default 0.2.
+    /// Seconds between reads of a detached harness's output.
+    #[schema(title = "Read a detached harness's output every")]
+    #[map(default = DetachedLimits::default().poll)]
     pub poll: Seconds,
-    /// Seconds one of the wrapper's scripts may take over the transport. Default 30.
+    /// Seconds one of the wrapper's scripts may take over the transport.
+    #[schema(title = "Longest wrapper script")]
+    #[map(default = DetachedLimits::default().script_timeout)]
     pub script_timeout: Seconds,
-    /// Characters of the Session's name in the wrapper's file names. Default 64.
+    /// Characters of the Session's name in the wrapper's file names.
+    #[schema(title = "Session name in the wrapper's files")]
+    #[map(default = DetachedLimits::default().name_chars)]
     pub name_chars: Limit,
 }
 
@@ -540,42 +706,70 @@ impl Default for DetachedLimits {
 /// `[runner]`: the Station hands it to every field runner it starts, which applies the keys
 /// a runner serves by.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct RunnerLimits {
     /// Seconds a runner waits for a harness's next event before it checks whether to stop.
-    /// Default 0.25.
+    #[schema(title = "Check whether to stop after waiting")]
+    #[map(default = RunnerLimits::default().pump_poll)]
     pub pump_poll: Seconds,
-    /// Seconds between a runner connection's looks for spooled events to send. Default 0.05.
+    /// Seconds between a runner connection's looks for spooled events to send.
+    #[schema(title = "Look for spooled events every")]
+    #[map(default = RunnerLimits::default().feed_poll)]
     pub feed_poll: Seconds,
-    /// Spooled events a runner connection takes from the spool at once. Default 256.
+    /// Spooled events a runner connection takes from the spool at once.
+    #[schema(title = "Spooled events taken at once")]
+    #[map(default = RunnerLimits::default().replay_batch)]
     pub replay_batch: usize,
-    /// Seconds an ended Session is kept by its runner. Default 604,800 (a week).
+    /// Seconds an ended Session is kept by its runner.
+    #[schema(title = "Keep an ended Session for")]
+    #[map(default = RunnerLimits::default().keep_ended)]
     pub keep_ended: Seconds,
-    /// Bytes of one request through a runner's Cable relay. Default 4 MiB.
+    /// Bytes of one request through a runner's Cable relay.
+    #[schema(title = "Largest request through the Cable relay", format = "bytes")]
+    #[map(default = RunnerLimits::default().cable_request_bytes)]
     pub cable_request_bytes: Limit,
-    /// Seconds a runner's Cable relay may take to reach the Station. Default 10.
+    /// Seconds a runner's Cable relay may take to reach the Station.
+    #[schema(title = "The Cable relay reaches the Station within")]
+    #[map(default = RunnerLimits::default().cable_connect_timeout)]
     pub cable_connect_timeout: Seconds,
-    /// Seconds one read by the Station of a runner's Session waits for an event. Default 1.
+    /// Seconds one read by the Station of a runner's Session waits for an event.
+    #[schema(title = "One read of a Session waits")]
+    #[map(default = RunnerLimits::default().read_wait)]
     pub read_wait: Seconds,
-    /// Seconds `ai6 runner connect` may take to reach the runner's loopback port. Default 5.
+    /// Seconds `ai6 runner connect` may take to reach the runner's loopback port.
+    #[schema(title = "`ai6 runner connect` reaches the runner within")]
+    #[map(default = RunnerLimits::default().connect_timeout)]
     pub connect_timeout: Seconds,
     /// Seconds a runner that accepted `ai6 runner connect` has to answer its authentication.
-    /// Default 10.
+    #[schema(title = "A runner answers its authentication within")]
+    #[map(default = RunnerLimits::default().answer_wait)]
     pub answer_wait: Seconds,
-    /// Seconds a started runner has to answer. Default 30.
+    /// Seconds a started runner has to answer.
+    #[schema(title = "A started runner answers within")]
+    #[map(default = RunnerLimits::default().start_wait)]
     pub start_wait: Seconds,
-    /// Seconds starting a runner over a transport may take past `start_wait`. Default 30.
+    /// Seconds starting a runner over a transport may take past `start_wait`.
+    #[schema(title = "Extra time to start over a transport")]
+    #[map(default = RunnerLimits::default().start_margin)]
     pub start_margin: Seconds,
-    /// Seconds between looks at whether a runner started on this host serves yet. Default 0.05.
+    /// Seconds between looks at whether a runner started on this host serves yet.
+    #[schema(title = "Look at whether a started runner serves every")]
+    #[map(default = RunnerLimits::default().start_poll)]
     pub start_poll: Seconds,
-    /// Seconds one read of `ai6 runner connect`'s terminal waits before it checks whether to
-    /// stop or give up. Default 0.2.
+    /// Seconds one read of `ai6 runner connect`'s terminal waits before it checks whether to stop or
+    /// give up.
+    #[schema(title = "One read of the connect terminal waits")]
+    #[map(default = RunnerLimits::default().terminal_poll)]
     pub terminal_poll: Seconds,
-    /// Seconds a connection another one took a Session from stays open, so the notice saying so
-    /// is written before the socket closes under it. Default 0.2.
+    /// Seconds a connection another one took a Session from stays open, so the notice saying so is
+    /// written before the socket closes under it.
+    #[schema(title = "Keep a superseded connection open for")]
+    #[map(default = RunnerLimits::default().superseded_close_wait)]
     pub superseded_close_wait: Seconds,
-    /// Seconds at least between the Station's tries at a runner it cannot reach. Default 0.1.
+    /// Seconds at least between the Station's tries at a runner it cannot reach.
+    #[schema(title = "Shortest pause between tries at a runner")]
+    #[map(default = RunnerLimits::default().retry_pause)]
     pub retry_pause: Seconds,
 }
 
@@ -603,11 +797,12 @@ impl Default for RunnerLimits {
 
 /// `[api]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct ApiLimits {
     /// Bytes of a refused request's body the Station's own API reads before it answers.
-    /// Default 64 KiB.
+    #[schema(title = "Refused request body read", format = "bytes")]
+    #[map(default = ApiLimits::default().refused_body_drain_bytes)]
     pub refused_body_drain_bytes: Limit,
 }
 
@@ -621,12 +816,16 @@ impl Default for ApiLimits {
 
 /// `[audit]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct AuditLimits {
-    /// Characters of the secret names an audit record lists. Default 240.
+    /// Characters of the secret names a credential timeline event lists.
+    #[schema(title = "Secret names a credential event lists")]
+    #[map(default = AuditLimits::default().names_detail_chars)]
     pub names_detail_chars: Limit,
-    /// Bytes of a configuration change's audit target. Default 512.
+    /// Bytes of a refused configuration's audit target.
+    #[schema(title = "Longest refused configuration target", format = "bytes")]
+    #[map(default = AuditLimits::default().target_bytes)]
     pub target_bytes: Limit,
 }
 
@@ -641,11 +840,12 @@ impl Default for AuditLimits {
 
 /// `[theaters]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct TheaterLimits {
     /// Bytes of an ephemeral Theater's name; a longer one is cut and given a digest.
-    /// Default 100.
+    #[schema(title = "Longest ephemeral Theater name", format = "bytes")]
+    #[map(default = TheaterLimits::default().ephemeral_name_bytes)]
     pub ephemeral_name_bytes: Limit,
 }
 
@@ -659,18 +859,28 @@ impl Default for TheaterLimits {
 
 /// `[theater_tools]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct TheaterToolLimits {
-    /// Bytes of a command's output `theater_run` returns. Default 256 KiB.
+    /// Bytes of each stream of a command's output `theater_run` returns.
+    #[schema(title = "Output `theater_run` returns", format = "bytes")]
+    #[map(default = TheaterToolLimits::default().output_bytes)]
     pub output_bytes: Limit,
-    /// Bytes `theater_read` returns. Default 256 KiB.
+    /// Bytes `theater_read` returns.
+    #[schema(title = "What `theater_read` returns", format = "bytes")]
+    #[map(default = TheaterToolLimits::default().read_bytes)]
     pub read_bytes: Limit,
-    /// Seconds a `theater_run` command may take unless it asks for another. Default 120.
+    /// Seconds a `theater_run` command may take unless it asks for another.
+    #[schema(title = "A command may take")]
+    #[map(default = TheaterToolLimits::default().timeout)]
     pub timeout: Seconds,
-    /// The longest a command may ask for, in seconds. Default 3,600.
+    /// The longest a command may ask for, in seconds.
+    #[schema(title = "Longest a command may ask for")]
+    #[map(default = TheaterToolLimits::default().max_timeout)]
     pub max_timeout: TimeLimit,
-    /// Seconds the git commands the tools run may take. Default 30.
+    /// Seconds each git command the tools run for green ink may take.
+    #[schema(title = "A git command may take")]
+    #[map(default = TheaterToolLimits::default().git_timeout)]
     pub git_timeout: Seconds,
 }
 
@@ -688,13 +898,25 @@ impl Default for TheaterToolLimits {
 
 /// `[head_of_station]`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
 pub struct HeadOfStationLimits {
-    /// Changes of a safe house listed in one report. Default 20.
+    /// Changes of a kept safe house listed in one report.
+    #[schema(title = "Safe house changes in one report")]
+    #[map(default = HeadOfStationLimits::default().listed_changes)]
     pub listed_changes: Limit,
-    /// Directory entries one disk survey walks. Default 500,000.
+    /// Directory entries one survey of a safe house walks before it reports a partial size.
+    #[schema(title = "Directory entries one survey walks")]
+    #[map(default = HeadOfStationLimits::default().survey_entries)]
     pub survey_entries: Limit,
+    /// Bytes of the reason a round gives when it asks to delete a safe house; longer is cut.
+    #[schema(title = "Longest reason for a safe house deletion", format = "bytes")]
+    #[map(default = HeadOfStationLimits::default().reason_bytes)]
+    pub reason_bytes: Limit,
+    /// Bytes of what a provisioning round's audit record names; longer is cut.
+    #[schema(title = "Longest provisioning audit target", format = "bytes")]
+    #[map(default = HeadOfStationLimits::default().audit_target_bytes)]
+    pub audit_target_bytes: Limit,
 }
 
 impl Default for HeadOfStationLimits {
@@ -702,6 +924,8 @@ impl Default for HeadOfStationLimits {
         Self {
             listed_changes: Limit::at(20),
             survey_entries: Limit::at(500_000),
+            reason_bytes: Limit::at(2_000),
+            audit_target_bytes: Limit::at(500),
         }
     }
 }
@@ -709,10 +933,31 @@ impl Default for HeadOfStationLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directorates::m::config::StationRuntime;
+    use crate::directorates::m::records::from_toml;
+
+    fn read(text: &str) -> Result<StationLimits, String> {
+        from_toml::<StationRuntime>(text).map(|record| record.limits())
+    }
+
+    #[test]
+    fn what_was_written_in_the_code_defaults_to_the_same_value() {
+        assert_eq!(ApprovalLimits::default().checked_steps, Limit::at(64));
+        assert_eq!(SourceLimits::default().replies_read, Limit::at(10));
+        assert_eq!(
+            VettingLimits::default().answer_tail_bytes,
+            Limit::at(16_384)
+        );
+        assert_eq!(RecoveryLimits::default().probe_timeout, Seconds::new(30));
+        let rounds = HeadOfStationLimits::default();
+        assert_eq!(rounds.reason_bytes, Limit::at(2_000));
+        assert_eq!(rounds.audit_target_bytes, Limit::at(500));
+        assert_eq!(SecretLimits::default().min_matched_bytes, 6);
+    }
 
     #[test]
     fn tables_read_a_few_keys_over_their_defaults() {
-        let limits: StationLimits = toml::from_str(
+        let limits = read(
             "[scheduler]\ncheck_in = 0.2\n\
              [publisher]\nqueue = 1\n[secrets]\nmax_lease_ttl = \"none\"\n\
              [providers.pty]\nscrollback = 10\n",
@@ -730,10 +975,10 @@ mod tests {
         assert_eq!(limits.secrets.max_lease_ttl, TimeLimit::UNBOUNDED);
         assert_eq!(limits.providers["pty"]["scrollback"], 10);
         limits.validate().unwrap();
-        assert!(toml::from_str::<StationLimits>("[scheduler]\nunknown = 1\n").is_err());
-        let zero: StationLimits = toml::from_str("[publisher]\nqueue = 0\n").unwrap();
+        assert!(read("[scheduler]\nunknown = 1\n").is_err());
+        let zero = read("[publisher]\nqueue = 0\n").unwrap();
         assert!(zero.validate().unwrap_err().contains("publisher.queue"));
-        let zero: StationLimits = toml::from_str("[runner]\nreplay_batch = 0\n").unwrap();
+        let zero = read("[runner]\nreplay_batch = 0\n").unwrap();
         assert!(zero.validate().unwrap_err().contains("runner.replay_batch"));
     }
 }

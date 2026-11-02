@@ -46,8 +46,8 @@ pub use directorates::m::compartments::{
 pub use directorates::m::config::SqlProvider;
 pub use directorates::m::config::{
     ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
-    ConfigSnapshot, ConfigStatus, FileProvider, MemoryProvider, Settings, StationRuntime,
-    UnexRecord,
+    ConfigSnapshot, ConfigStatus, FileProvider, MemoryProvider, ProviderConfig, Settings,
+    StationRuntime, UnexRecord,
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::harness::{

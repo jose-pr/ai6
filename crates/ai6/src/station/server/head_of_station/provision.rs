@@ -128,7 +128,8 @@ fn working_on(state: &DaemonState, id: &str) -> Vec<String> {
 }
 
 fn audit(state: &DaemonState, round: &Mission, target: &str) {
-    let mut end = target.len().min(500);
+    let bound = state.station.limits().head_of_station.audit_target_bytes;
+    let mut end = target.len().min(bound.or_max());
     while !target.is_char_boundary(end) {
         end -= 1;
     }
