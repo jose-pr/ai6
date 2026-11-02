@@ -1268,6 +1268,39 @@ mod tests {
     }
 
     #[test]
+    fn a_routed_agent_is_placed_where_any_route_can_run_and_ruled_out_where_none_can() {
+        let mut policy = OperationPolicy::new("G");
+        policy.agents.push(AgentFacts {
+            handler: None,
+            routes: vec![
+                RouteRef::new("acp", Some("grok-4.7".to_owned()), None),
+                RouteRef::new("claude", Some("gemini-free".to_owned()), None),
+            ],
+            ..agent("moneypenny", "x", 1)
+        });
+        let request = PlacementRequest::default();
+
+        let mut second_only = station("a", 0);
+        second_only.handlers = Some(vec!["claude".to_owned()]);
+        let placement = place(&policy, &request, &[second_only]);
+        assert_eq!(
+            placement.best().unwrap().handler.as_deref(),
+            Some("claude"),
+            "the route a handler here can run"
+        );
+        assert!(placement.rejections.is_empty());
+
+        let mut neither = station("a", 0);
+        neither.handlers = Some(vec!["codex".to_owned()]);
+        let placement = place(&policy, &request, &[neither]);
+        assert!(placement.choices.is_empty());
+        assert_eq!(
+            placement.rejections[0].reason,
+            "none of its routes' handlers (acp, claude) is available on this Station"
+        );
+    }
+
+    #[test]
     fn a_backup_agent_stands_in_where_the_first_handler_is_missing() {
         let mut codex_only = station("a", 0);
         codex_only.handlers = Some(vec!["codex".to_owned()]);
