@@ -248,6 +248,10 @@ pub struct AgentMessage {
 /// resets. The event carries the details in [`AgentEvent::limit`].
 pub const LIMIT_EVENT: &str = "limit";
 
+/// The text of the `blocked` event for a turn the agent itself ended as cancelled, as the Grok CLI
+/// does when one of its tools is refused. No `completed` event follows it.
+pub const TURN_CANCELLED: &str = "the agent cancelled the turn";
+
 /// The event kind a handler emits, before a turn's `completed` or `failed` event, when the harness
 /// refused calls in that turn by its permission rules. The event's text names the tools, separated
 /// by `, `; [`AgentEvent::tools`] stays empty, since these calls did not run.

@@ -64,7 +64,7 @@ use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    LIMIT_EVENT,
+    LIMIT_EVENT, TURN_CANCELLED,
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
@@ -1900,12 +1900,16 @@ impl Pump {
                         self.publish_pages(&event);
                     }
                     let ended = matches!(event.kind.as_str(), "failed" | LIMIT_EVENT);
+                    // An agent that ends a turn itself sends no `completed`, and the person
+                    // would wait for one until the harness is closed for silence.
+                    let cancelled =
+                        event.kind == "blocked" && event.text.as_deref() == Some(TURN_CANCELLED);
                     let mut stopped = false;
                     let mut events: Vec<AssistantEvent> = std::mem::take(&mut self.notices)
                         .into_iter()
                         .map(|notice| AssistantEvent::new(EVENT_NOTICE, Some(notice)))
                         .collect();
-                    if event.kind == "completed" {
+                    if event.kind == "completed" || cancelled {
                         // The work is saved before the turn is reported over, so the next
                         // message's turn starts from it.
                         events.extend(self.end_turn(false));
@@ -1917,6 +1921,16 @@ impl Pump {
                     }
                     let shown = if stopped {
                         Some(AssistantEvent::new(EVENT_INTERRUPTED, None))
+                    } else if cancelled {
+                        events.push(AssistantEvent::new(
+                            EVENT_NOTICE,
+                            Some(
+                                "Moneypenny's agent ended this answer early, as some agents do \
+                                 when a tool they asked for is refused."
+                                    .to_owned(),
+                            ),
+                        ));
+                        Some(AssistantEvent::new(EVENT_COMPLETED, None))
                     } else {
                         translate(&event)
                     };
@@ -2819,6 +2833,8 @@ mod tests {
         Answers,
         /// As `Answers`, with each read waiting on the harness's output for as long as it takes.
         ReadsLong,
+        /// Ends the turn as cancelled, as the Grok CLI does when a tool is refused.
+        CancelsTurn,
         /// Exits, as its handler reports it.
         Dies,
         /// Never writes anything.
@@ -2901,6 +2917,9 @@ mod tests {
                     events.push_back(event("system", Some("init")));
                     events.push_back(event(EVENT_TEXT, Some(&format!("answer: {message}"))));
                     events.push_back(event("completed", Some(&format!("answer: {message}"))));
+                }
+                Script::CancelsTurn => {
+                    events.push_back(event("blocked", Some(TURN_CANCELLED)));
                 }
                 Script::Dies => {
                     events.push_back(event("output", Some("Error: the stored login has expired")));
@@ -3611,6 +3630,20 @@ mod tests {
         assert_eq!(a.parent(), b.parent());
         drop(asked);
         fixture.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_turn_the_agent_cancels_ends_and_the_next_message_reaches_it_warm() {
+        let fixture = scripted(true, IDLE, Script::CancelsTurn, Script::CancelsTurn);
+        fixture.desk.handle(job("c-1", "Run this")).await;
+        until(|| kinds(&fixture, "c-1").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert_eq!(
+            kinds(&fixture, "c-1"),
+            [EVENT_ACCEPTED, EVENT_NOTICE, EVENT_COMPLETED]
+        );
+        fixture.desk.handle(job("c-1", "And now?")).await;
+        assert_eq!(fixture.asked.lock().unwrap().messages, ["And now?"]);
+        assert_eq!(fixture.asked.lock().unwrap().starts.len(), 1);
     }
 
     #[tokio::test]

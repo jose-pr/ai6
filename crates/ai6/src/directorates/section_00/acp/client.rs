@@ -26,7 +26,7 @@ use std::time::Duration;
 use super::{EVENT_NOTIFICATION, EVENTS_CAPABILITY, RESTRICTED_KINDS, UNBOUNDED_MS};
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, AgentSession, LIMIT_EVENT, TokenUsage,
+    AgentEvent, AgentMessage, AgentSession, LIMIT_EVENT, TURN_CANCELLED, TokenUsage,
 };
 
 /// One way a permission request can be answered, as the agent offered it.
@@ -342,7 +342,7 @@ impl Shared {
                 // An interrupted turn ends as a native handler's does; one the agent gave up
                 // by itself is another matter.
                 Some("cancelled") if self.cancelling() => event("completed", None),
-                Some("cancelled") => event("blocked", Some("the turn was cancelled".to_owned())),
+                Some("cancelled") => event("blocked", Some(TURN_CANCELLED.to_owned())),
                 other => event(
                     "failed",
                     Some(format!("the agent ended the turn with {other:?}")),
