@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `ca_file` on a GitHub or Jira Source or tracker instance: a PEM file of certificate authorities
+  added to the public roots, by absolute path, for a site under a company's own authority. A bad file
+  is refused naming its path, and a set one is reported as a weakening at start and at check-in.
 - `ai6 config public [--output PATH]` writes the public `ai6.cfg` a web page reads beside
   `index.html`: `[unex] url` and what the page needs of `[oo]`, from an allow list, so a new key is
   private until someone says otherwise. Text under `[oo]` other than `[oo.appearance] theme` and

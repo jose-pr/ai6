@@ -46,6 +46,7 @@ as TOML, in `SourceConfig::settings_toml`.
 | `assignee` | none | only issues assigned to this login |
 | `token_env` | `GITHUB_TOKEN` | environment variable holding the token |
 | `api_url` | `https://api.github.com` | REST root; `https`, or `http` on loopback only |
+| `ca_file` | none | absolute path of a PEM file of certificate authorities trusted besides the public roots; a file that cannot be read or holds no certificate is refused, and a set one is reported as a weakening |
 | `request_timeout_secs` | 30 | seconds one request may take; 0 is refused |
 | `page_size` | 100 | issues asked for per page; 0 is refused |
 | `max_pages` | 5 | pages one poll reads at most; 0 is refused |

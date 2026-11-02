@@ -188,6 +188,11 @@ intake = false                                              # never polled for w
 status_transitions = { done = "In Review" }
 ```
 
+A company's own certificate authority goes in the instance's `ca_file`, by absolute path, for
+either provider, as a Source and as a tracker: a PEM file added to the public roots, as `[unex]
+ca_file` is. A file that cannot be read or holds no certificate is refused when the instance is built,
+with the path in the reason, and a set `ca_file` is reported as a weakening at start and at check-in.
+
 Keys the Station reads of a tracker instance; it passes the rest to the provider, whose page
 lists its own (`reply_authors` and `labels` on both, `issue_type`, `subtask_type` and `link_type`
 on Jira):

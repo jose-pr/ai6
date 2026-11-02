@@ -2124,6 +2124,21 @@ Branch: `agent/br-1`"
     }
 
     #[test]
+    fn a_source_s_ca_file_is_a_start_up_weakening() {
+        let (_dir, roster) = roster_issues(
+            "{ fake = { ids = [], ca_file = \"/etc/ai6/enterprise.pem\" } }",
+            "",
+        );
+        let lines = crate::station::issues::weakenings(&roster);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].contains("Operation \"G\" source \"fake\""),
+            "{lines:?}"
+        );
+        assert!(lines[0].contains("/etc/ai6/enterprise.pem"), "{lines:?}");
+    }
+
+    #[test]
     fn replies_from_permitted_authors_are_stored_once_others_ignored_and_own_skipped() {
         let plugins = plugins();
         let (_dir, roster) = roster_with("covert", "{ fake = { ids = [\"rp-1\"] } }");

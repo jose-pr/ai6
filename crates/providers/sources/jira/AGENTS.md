@@ -42,6 +42,7 @@ as TOML, in `SourceConfig::settings_toml`.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `site` | required | site root; `https`, or `http` on loopback only |
+| `ca_file` | none | absolute path of a PEM file of certificate authorities trusted besides the public roots; a file that cannot be read or holds no certificate is refused, and a set one is reported as a weakening |
 | `project` (alias `target`) | none | project key; a bare string under `sources` is this |
 | `jql` | none | extra JQL condition, ANDed in parentheses; one of `project`/`jql` is required |
 | `labels` | `["ai6-ready"]` | an issue needs all of them; `[]` drops the label filter |

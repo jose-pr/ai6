@@ -11,6 +11,7 @@ ai6::guatiao::providers!(Jira);
 
 mod adf;
 
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -21,6 +22,7 @@ use ai6::{
     SourceItem, SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
     TrackerUpdate, settings_from_table, settled_cursor,
 };
+use ureq::tls::{Certificate, TlsConfig};
 use url::Url;
 
 /// The provider ID an Operation names under `sources`.
@@ -62,6 +64,10 @@ struct Settings {
     /// The site root, for example `https://example.atlassian.net`.
     #[schema(title = "Site")]
     site: String,
+    /// A PEM file of certificate authorities to trust besides the public roots, by absolute path.
+    /// A set one is reported as a weakening: more authorities can vouch for this service.
+    #[schema(title = "Certificate authorities")]
+    ca_file: Option<PathBuf>,
     /// The project key; a bare string under `sources` is this value.
     #[schema(title = "Project")]
     project: Option<String>,
@@ -134,6 +140,27 @@ struct Discovered {
     subtask_type: Option<String>,
 }
 
+/// The public roots and the authorities in `ca_file`: ureq takes either its built-in roots or a
+/// whole list, so the list repeats the same roots as certificates.
+fn trusting(ca_file: &Path) -> Result<TlsConfig, String> {
+    if !ca_file.is_absolute() {
+        return Err(format!(
+            "ca_file must be an absolute path, since Stations share this record: {}",
+            ca_file.display()
+        ));
+    }
+    let added = ai6::bootstrap::read_ca_file(ca_file).map_err(|e| format!("ca_file: {e}"))?;
+    let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .map(|root| Certificate::from_der(root.as_ref()))
+        .chain(
+            added
+                .iter()
+                .map(|der| Certificate::from_der(der).to_owned()),
+        );
+    Ok(TlsConfig::builder().root_certs(roots.into()).build())
+}
+
 /// Jira issues as an AI6 Source and Tracker.
 #[derive(Debug, Provider)]
 #[provider(
@@ -197,12 +224,14 @@ impl Jira {
                 return Err(format!("{name} must be at least 1"));
             }
         }
-        let agent = ureq::Agent::config_builder()
+        let mut agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(settings.request_timeout_secs)))
             .max_redirects(0)
-            .http_status_as_error(false)
-            .build()
-            .into();
+            .http_status_as_error(false);
+        if let Some(ca_file) = &settings.ca_file {
+            agent = agent.tls_config(trusting(ca_file)?);
+        }
+        let agent = agent.build().into();
         Ok(Self {
             settings,
             site,

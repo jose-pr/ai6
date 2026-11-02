@@ -152,12 +152,19 @@ pub(crate) fn weakenings(roster: &Roster) -> Vec<String> {
     roster
         .operations()
         .flat_map(|operation| {
-            operation
+            let issues = operation
                 .issues
                 .weakenings()
                 .into_iter()
-                .map(|line| format!("Operation {:?} issues is weakened: {line}", operation.id))
-                .collect::<Vec<_>>()
+                .map(|line| format!("Operation {:?} issues is weakened: {line}", operation.id));
+            let trusted = operation.sources.iter().filter_map(|(name, source)| {
+                let file = source.get("ca_file")?;
+                Some(format!(
+                    "Operation {:?} source {name:?} trusts ca_file {file} besides the public roots",
+                    operation.id
+                ))
+            });
+            issues.chain(trusted).collect::<Vec<_>>()
         })
         .collect()
 }
