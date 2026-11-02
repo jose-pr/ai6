@@ -29,7 +29,7 @@ use ai6_diptel::{
 };
 
 /// Room for a frame's header past the terminal bytes it carries.
-const FRAME_MARGIN: u64 = 64 * 1024;
+pub(crate) const FRAME_MARGIN: u64 = 64 * 1024;
 
 /// Universal Exports gateway credentials and origin for the daemon's event publisher.
 pub struct Config {
@@ -393,6 +393,7 @@ impl Publisher {
             pause: limits.publish_retry_delay.0,
             away: false,
             next_refresh: Instant::now() + limits.refresh_every.0,
+            sent: 0,
         };
         let worker = thread::Builder::new()
             .name("ai6-publisher".to_owned())
@@ -1109,6 +1110,8 @@ struct Published {
     hole: bool,
     /// How many telemetries hold it; a resume can take a Session over before the old one lets go.
     holders: usize,
+    /// The most output one event may carry, as the gateway last said or showed.
+    terminal_bytes: Option<usize>,
 }
 
 /// Publishes one command at a time, holding it until the gateway has it or refuses it.
@@ -1125,6 +1128,9 @@ struct Worker {
     /// Whether the last try found the gateway away.
     away: bool,
     next_refresh: Instant,
+    /// How much of the command in hand has gone out, across its tries: a burst goes as several
+    /// events, each with its own sequence, and those already out are not sent again.
+    sent: usize,
 }
 
 impl Worker {
@@ -1132,6 +1138,7 @@ impl Worker {
         while self.running.load(Ordering::Acquire) {
             if let Some((command, lost)) = self.outbox.next(Duration::from_millis(100)) {
                 self.take_in(&command);
+                self.sent = 0;
                 if lost && let Some(session) = self.sessions.get_mut(command.session_id()) {
                     session.hole = true;
                 }
@@ -1165,6 +1172,7 @@ impl Worker {
                             lifecycle_due: false,
                             hole: false,
                             holders: 0,
+                            terminal_bytes: None,
                         });
                 session.holders += 1;
                 session.mission.clone_from(mission);
@@ -1204,7 +1212,8 @@ impl Worker {
                     self.answered();
                     self.report(reason);
                     if let Command::Terminal { session_id, bytes } = command {
-                        self.outbox.lost(session_id.clone(), bytes.len());
+                        self.outbox
+                            .lost(session_id.clone(), bytes.len().saturating_sub(self.sent));
                     }
                     return;
                 }
@@ -1258,7 +1267,7 @@ impl Worker {
             .sessions
             .get(session_id)
             .ok_or(Failure::Refused("Session was not registered"))?;
-        let next = register(
+        let (next, stated) = register(
             &self.agent,
             &self.config,
             &session.operation_id,
@@ -1271,6 +1280,7 @@ impl Worker {
             .get_mut(session_id)
             .ok_or(Failure::Refused("Session was not registered"))?;
         let forgotten = next < session.next_sequence;
+        session.terminal_bytes = stated;
         session.next_sequence = session.next_sequence.max(next);
         session.registered = true;
         if forgotten {
@@ -1337,10 +1347,35 @@ impl Worker {
         self.settle(session_id, sequence, sent)
     }
 
+    /// Sends what is left of `bytes`, within what this Station and the gateway allow in one event.
     fn post_output(&mut self, session_id: &SessionId, bytes: &[u8]) -> Result<(), Failure> {
-        let sequence = self.sequence(session_id)?;
-        let sent = publish_terminal(&self.agent, &self.config, session_id, sequence, bytes);
-        self.settle(session_id, sequence, sent)
+        while self.sent < bytes.len() {
+            let stated = self
+                .sessions
+                .get(session_id)
+                .and_then(|session| session.terminal_bytes)
+                .unwrap_or(usize::MAX);
+            let most = stated.min(self.config.limits.terminal_bytes.or_max());
+            let left = &bytes[self.sent..];
+            let chunk = &left[..left.len().min(most.max(1))];
+            let sequence = self.sequence(session_id)?;
+            let sent = publish_terminal(&self.agent, &self.config, session_id, sequence, chunk);
+            if matches!(sent, Err(Publish::TooLarge)) {
+                // Its limit came down since it last said, or it says one it does not keep.
+                if chunk.len() == 1 {
+                    return Err(Failure::Refused(
+                        "gateway refused terminal output as too large",
+                    ));
+                }
+                if let Some(session) = self.sessions.get_mut(session_id) {
+                    session.terminal_bytes = Some(chunk.len() / 2);
+                }
+                continue;
+            }
+            self.settle(session_id, sequence, sent)?;
+            self.sent += chunk.len();
+        }
+        Ok(())
     }
 
     /// What the gateway's answer to `sequence` means: a Session it does not hold is registered
@@ -1354,6 +1389,9 @@ impl Worker {
         match sent {
             Ok(()) => self.advance(session_id, sequence),
             Err(Publish::Failed(failure)) => Err(failure),
+            Err(Publish::TooLarge) => {
+                Err(Failure::Refused("gateway refused an event as too large"))
+            }
             Err(Publish::Unknown) => {
                 for session in self.sessions.values_mut() {
                     session.registered = false;
@@ -1447,6 +1485,8 @@ struct Registration<'a> {
 #[derive(Deserialize)]
 struct RegistrationResponse {
     next_sequence: u64,
+    /// The most terminal output the gateway takes in one event of this Session.
+    terminal_bytes: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -1475,7 +1515,7 @@ fn register(
     mission_id: &str,
     session_id: &SessionId,
     mission: Option<&MissionPublication>,
-) -> Result<u64, Failure> {
+) -> Result<(u64, Option<usize>), Failure> {
     let url = config
         .origin
         .join("v1/station/sessions")
@@ -1506,7 +1546,12 @@ fn register(
     if registration.next_sequence == 0 {
         return Err(Failure::Away("gateway returned an invalid event sequence"));
     }
-    Ok(registration.next_sequence)
+    Ok((
+        registration.next_sequence,
+        registration
+            .terminal_bytes
+            .and_then(|stated| usize::try_from(stated).ok()),
+    ))
 }
 
 /// Why one event's request did not land.
@@ -1516,6 +1561,8 @@ enum Publish {
     Unknown,
     /// The gateway holds a sequence at or past this one.
     Conflict,
+    /// The event is longer than the gateway takes.
+    TooLarge,
     Failed(Failure),
 }
 
@@ -1534,6 +1581,7 @@ fn published(
         Ok(_) => Err(Publish::Failed(Failure::Away(refused))),
         Err(ureq::Error::StatusCode(404)) => Err(Publish::Unknown),
         Err(ureq::Error::StatusCode(409)) => Err(Publish::Conflict),
+        Err(ureq::Error::StatusCode(413)) => Err(Publish::TooLarge),
         Err(error) => Err(Publish::Failed(failure_of(&error, away, refused))),
     }
 }
@@ -2695,6 +2743,85 @@ mod tests {
             gateway.lifecycle("session-b").is_some()
         });
         assert_eq!(gateway.lifecycle("session-a"), None);
+    }
+
+    #[test]
+    fn a_burst_longer_than_the_gateway_takes_arrives_split_within_what_it_states() {
+        let gateway = Restartable::start();
+        *gateway.stated.lock().unwrap() = Some(1000);
+        let publisher = Publisher::start(
+            Config::try_new(&gateway.origin(), "t")
+                .unwrap()
+                .with_limits(quick()),
+        )
+        .unwrap();
+        let telemetry = telemetry_of(&publisher, "mission-a");
+        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        let burst: Vec<u8> = (0..4500_u32).map(|at| (at % 251) as u8).collect();
+        telemetry.publish_terminal(&burst);
+        until("the whole burst arrives", || {
+            gateway.output("session-a") == burst
+        });
+        assert_eq!(gateway.sequences("session-a"), [1, 2, 3, 4, 5]);
+        let health = publisher.health();
+        assert!(health.healthy, "{:?}", health.error);
+        assert_eq!(health.lost_terminal_bytes, 0);
+    }
+
+    #[test]
+    fn a_gateway_that_lowers_its_limit_unannounced_gets_smaller_frames() {
+        let gateway = Restartable::start();
+        let publisher = Publisher::start(
+            Config::try_new(&gateway.origin(), "t")
+                .unwrap()
+                .with_limits(quick()),
+        )
+        .unwrap();
+        let telemetry = telemetry_of(&publisher, "mission-a");
+        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.publish_lifecycle("working");
+        until("the Session is registered", || {
+            gateway.lifecycle("session-a").is_some()
+        });
+        *gateway.stated.lock().unwrap() = Some(100);
+        telemetry.publish_terminal(&[7; 950]);
+        until("the output arrives", || {
+            gateway.output("session-a") == [7; 950]
+        });
+        assert_eq!(publisher.health().lost_terminal_bytes, 0);
+    }
+
+    #[test]
+    fn output_the_gateway_refuses_at_any_size_is_dropped_and_counted() {
+        let gateway = Restartable::start();
+        *gateway.stated.lock().unwrap() = Some(0);
+        let publisher = Publisher::start(
+            Config::try_new(&gateway.origin(), "t")
+                .unwrap()
+                .with_limits(quick()),
+        )
+        .unwrap();
+        let telemetry = telemetry_of(&publisher, "mission-a");
+        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.publish_terminal(b"nothing fits");
+        until("the output is written off", || {
+            publisher.health().lost_terminal_bytes == 12
+        });
+        telemetry.publish_lifecycle("working");
+        until("what follows still goes out", || {
+            gateway.lifecycle("session-a").is_some()
+        });
+    }
+
+    #[test]
+    fn the_default_frame_fits_the_gateways_default_frame() {
+        let frame = crate::UnexLimits::default().gateway.frame_bytes;
+        let publisher = PublisherLimits::default().terminal_bytes;
+        assert_eq!(
+            publisher.get().unwrap() + FRAME_MARGIN,
+            frame.get().unwrap(),
+            "the output of a default frame, with room for its header, is the gateway's default"
+        );
     }
 
     #[test]

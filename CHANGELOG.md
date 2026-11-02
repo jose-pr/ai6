@@ -106,6 +106,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Terminal output longer than the gateway takes in one frame arrives whole. `[publisher]
+  terminal_bytes` defaulted to 1 MiB against the gateway's `frame_bytes` of 256 KiB, and the gateway's
+  refusal ended publishing. It now defaults to 192 KiB, which with room for a frame's header is that
+  256 KiB; registering a Session (`POST /v1/station/sessions`) answers `terminal_bytes`, what its
+  frames may carry; the Station splits output to fit, and halves a frame the gateway still refuses.
 - A Station keeps publishing through a gateway outage. One failed publication or one full queue used
   to end its publish thread until the Station restarted; a single `desk` Codex start could do it, its
   tool check's output filling the queue. Now it tries again with growing pauses (`[publisher]

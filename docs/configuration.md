@@ -601,7 +601,7 @@ pending_per_station = 8
 | `sessions` | 16 | Live provider Sessions |
 | `clients_per_session` | 12 | Simultaneous browser connections to one Session |
 | `scrollback_events` | 64 | Value frames kept per Session for a client that joins late |
-| `frame_bytes` | 256 KiB | Bytes of one WebSocket or ingress frame |
+| `frame_bytes` | 256 KiB | Bytes of one WebSocket or ingress frame. A Station is told at registration how much terminal output that leaves room for, and splits longer output to fit |
 | `input_frames_per_second` | 40 | Browser input frames accepted per connection per second |
 | `input_queue` | 64 | Capacity of the queue between the gateway and its Stations, at least 1 |
 | `fanout` | 8 | Capacity of each per-Session viewer queue, at least 1 |
@@ -722,7 +722,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | --- | --- | --- |
 | `request_timeout` | 2 | Seconds one request may take |
 | `queue` | 64 | Events waiting for Universal Exports. Past it output gives way, oldest first; a Session's latest state is kept |
-| `terminal_bytes` | 1 MiB | Bytes of terminal output in one published frame |
+| `terminal_bytes` | 192 KiB | Bytes of terminal output in one published frame. Longer output goes as several, and what Universal Exports states at registration lowers it. With room for its header, the default is the gateway's default `frame_bytes` |
 | `pre_bind_terminal_bytes` | 1 MiB | Bytes of terminal output held for a Session not yet bound to its Mission; past it the oldest goes |
 | `publish_retry_delay` | 0.5 | Seconds before a failed publication is tried again; each try doubles it, up to `retry_max_delay` |
 | `retry_max_delay` | 30 | The longest pause between tries, of a publication or of an input or control poll |

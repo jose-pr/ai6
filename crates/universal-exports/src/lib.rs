@@ -68,6 +68,9 @@ pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{TimelineItem, TimelinePage};
 
+/// Bytes a frame's length field can grow by past an empty frame's.
+const LENGTH_GROWTH: usize = 10;
+
 /// Limits and trusted origin for one gateway instance.
 ///
 /// The Station token is deliberately omitted from `Debug`; callers should load it
@@ -900,6 +903,27 @@ impl Gateway {
         self.ingest(station_token, &session_id, 0, schema).await?;
         self.ingest(station_token, &session_id, sequence, value)
             .await
+    }
+
+    /// The most terminal output that fits one frame of `session_id` at any sequence, and that the
+    /// wire contract allows: what a Station is told, so that it splits longer output itself.
+    pub fn terminal_bytes(&self, session_id: &SessionId) -> usize {
+        let header = TerminalData::new(
+            session_id.clone(),
+            u64::MAX,
+            TerminalDirection::Output,
+            Vec::new(),
+        )
+        .ok()
+        .and_then(|empty| terminal_frames(&empty).ok())
+        .map_or(usize::MAX, |(_, frame)| {
+            frame.len().saturating_add(LENGTH_GROWTH)
+        });
+        self.config
+            .limits
+            .max_frame_bytes
+            .saturating_sub(header)
+            .min(ai6_diptel::MAX_TERMINAL_BYTES)
     }
 
     /// Mints an opaque, short-lived, single-use token for an existing Session.
@@ -4059,15 +4083,21 @@ async fn register_session(
             .await?;
     }
     let next_sequence = gateway.next_sequence(token, &session_id).await?;
+    let terminal_bytes = gateway.terminal_bytes(&session_id);
     Ok((
         StatusCode::CREATED,
-        Json(RegisterSessionResponse { next_sequence }),
+        Json(RegisterSessionResponse {
+            next_sequence,
+            terminal_bytes,
+        }),
     ))
 }
 
 #[derive(Serialize)]
 struct RegisterSessionResponse {
     next_sequence: u64,
+    /// The most terminal output one event of this Session may carry.
+    terminal_bytes: usize,
 }
 
 async fn publish_lifecycle(
@@ -5013,6 +5043,57 @@ mod tests {
             Err(broadcast::error::TryRecvError::Empty)
         ));
         gateway.disconnect(attachment).await;
+    }
+
+    #[tokio::test]
+    async fn what_a_station_is_told_fits_one_frame_at_any_sequence() {
+        let gateway = gateway();
+        let longest = SessionId::new("s".repeat(ai6_diptel::MAX_ID_BYTES)).unwrap();
+        let token = "m-token-that-is-long-enough-for-testing";
+        gateway
+            .register_session(
+                token,
+                OperationId::new("station-a").unwrap(),
+                MissionId::new("mission-a").unwrap(),
+                longest.clone(),
+            )
+            .await
+            .unwrap();
+        let stated = gateway.terminal_bytes(&longest);
+        assert!(stated > 0, "the test's frames hold more than a header");
+        gateway
+            .publish_terminal_output(token, longest.clone(), u64::MAX, vec![7; stated])
+            .await
+            .expect("as much as it states fits, at the longest sequence");
+        // A frame's length field grows by at most this much, so this is past the frame.
+        let over = stated + LENGTH_GROWTH + 1;
+        assert!(matches!(
+            gateway
+                .publish_terminal_output(token, longest, u64::MAX, vec![7; over])
+                .await,
+            Err(GatewayError::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn the_wire_limit_caps_what_a_station_is_told() {
+        let gateway = Gateway::new(
+            GatewayConfig::new(
+                "https://localhost",
+                "m-token-that-is-long-enough-for-testing",
+                GatewayLimits {
+                    max_frame_bytes: 4 * ai6_diptel::MAX_TERMINAL_BYTES,
+                    ..test_limits()
+                },
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            gateway.terminal_bytes(&SessionId::new("session").unwrap()),
+            ai6_diptel::MAX_TERMINAL_BYTES
+        );
     }
 
     #[tokio::test]

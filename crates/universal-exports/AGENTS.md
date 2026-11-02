@@ -715,6 +715,7 @@ impl Gateway {
         station_token: &str,
         event: LifecycleEvent,
     ) -> Result<(), GatewayError>;
+    pub fn terminal_bytes(&self, session_id: &SessionId) -> usize;
     pub async fn publish_terminal_output(
         &self,
         station_token: &str,
@@ -796,6 +797,8 @@ monotonic sequence and match their Station/Mission/Session identity and terminal
 direction. Frames are bounded before fanout. Socket write buffers are bounded
 too, and their configured capacity counts toward the aggregate budget.
 
+`terminal_bytes` is the most terminal output one event of the Session may carry, at any sequence;
+`POST /v1/station/sessions` answers it beside `next_sequence`, and a Station splits longer output.
 `publish_lifecycle` and `publish_terminal_output` are the higher-level M path:
 they construct guatiao values with the shared protocol crate, announce each
 channel schema on first use, then submit the value through the same validation

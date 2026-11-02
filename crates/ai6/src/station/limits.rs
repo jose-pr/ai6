@@ -167,7 +167,9 @@ pub struct PublisherLimits {
     /// Events waiting for Universal Exports; past it output gives way, oldest first, and a
     /// Session's latest state is kept. Default 64.
     pub queue: usize,
-    /// Bytes of terminal output in one published frame. Default 1 MiB.
+    /// Bytes of terminal output in one published frame; what Universal Exports states at
+    /// registration lowers it. Default 192 KiB, which with room for its header is the gateway's
+    /// default `frame_bytes`.
     pub terminal_bytes: Limit,
     /// Bytes of terminal output kept for a Session not yet bound to its Mission; past it the
     /// oldest goes. Default 1 MiB.
@@ -201,7 +203,7 @@ impl Default for PublisherLimits {
         Self {
             request_timeout: Seconds::new(2),
             queue: 64,
-            terminal_bytes: Limit::at(MIB),
+            terminal_bytes: Limit::at(192 * 1024),
             pre_bind_terminal_bytes: Limit::at(MIB),
             publish_retry_delay: Seconds(std::time::Duration::from_millis(500)),
             retry_max_delay: Seconds::new(30),
