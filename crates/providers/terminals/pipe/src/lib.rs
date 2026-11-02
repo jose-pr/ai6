@@ -33,7 +33,7 @@ mod process_tree;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{PipeReader, PipeWriter, Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -170,6 +170,8 @@ struct PipeSession {
     stdin: Mutex<PipeWriter>,
     child: Mutex<Process>,
     tree: ProcessTree,
+    /// Dropped after the child is reaped, which ends the thread that started it.
+    _starter: Sender<()>,
     exit: Mutex<Option<ExitInfo>>,
     /// With [`StderrMode::Tail`], the end of standard error, until the output has ended.
     errors: Option<Arc<Mutex<ErrorTail>>>,
@@ -289,18 +291,39 @@ impl PipeSession {
             StderrMode::Merge => (ErrorOutput::Stdout, None),
             StderrMode::Drop => (ErrorOutput::Null, None),
         };
-        let launch = Launch {
-            program,
-            args,
-            env: spec.env.as_ref(),
-            cwd: spec.cwd.as_deref(),
-            stdin,
-            stdout: writer,
-            stderr: error_output,
-            swept_fds: config.swept_fds,
-            tree_scans: usize::try_from(config.tree_scans).unwrap_or(usize::MAX),
-        };
-        let (child, tree) = os::spawn(launch)
+        // A program may ask to be signalled when the thread that started it ends (Linux's
+        // PR_SET_PDEATHSIG, which the Grok CLI sets), and the caller's thread can end at any
+        // time, so the start happens on a thread of its own that lasts as long as the session.
+        let (started, start) = channel();
+        let (starter, keep) = channel::<()>();
+        let owned = (
+            program.clone(),
+            args.to_vec(),
+            spec.env.clone(),
+            spec.cwd.clone(),
+        );
+        std::thread::Builder::new()
+            .name("pipe-start".to_owned())
+            .spawn(move || {
+                let (program, args, env, cwd) = &owned;
+                let launch = Launch {
+                    program,
+                    args,
+                    env: env.as_ref(),
+                    cwd: cwd.as_deref(),
+                    stdin,
+                    stdout: writer,
+                    stderr: error_output,
+                    swept_fds: config.swept_fds,
+                    tree_scans: usize::try_from(config.tree_scans).unwrap_or(usize::MAX),
+                };
+                let _ = started.send(os::spawn(launch));
+                let _ = keep.recv();
+            })
+            .map_err(internal)?;
+        let (child, tree) = start
+            .recv()
+            .map_err(internal)?
             .map_err(|error| internal(format!("cannot start {program:?}: {error}")))?;
         let pid = i64::from(child.id());
         let stdin = input;
@@ -361,6 +384,7 @@ impl PipeSession {
             stdin: Mutex::new(stdin),
             child: Mutex::new(child),
             tree,
+            _starter: starter,
             exit: Mutex::new(None),
             errors,
             last_byte: AtomicU8::new(b'\n'),

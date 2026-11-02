@@ -680,3 +680,44 @@ fn the_configured_tail_and_chunk_are_observed() {
         .is_err()
     );
 }
+
+/// Asks for SIGTERM when the thread that started this process ends, as the Grok CLI does, and
+/// answers each line of its input.
+#[cfg(target_os = "linux")]
+#[test]
+fn pipe_parent_death_child() {
+    if std::env::var_os("PIPE_PARENT_DEATH_CHILD").is_none() {
+        return;
+    }
+    // SAFETY: prctl with PR_SET_PDEATHSIG takes plain integers and touches no memory.
+    assert_eq!(
+        unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) },
+        0
+    );
+    println!("asked");
+    for line in std::io::stdin().lock().lines() {
+        println!("heard {}", line.unwrap());
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_program_that_asks_for_parent_death_outlives_the_thread_that_started_it() {
+    let session = std::thread::spawn(|| {
+        let session = start_child(
+            Pipe::default(),
+            "pipe_parent_death_child",
+            &[("PIPE_PARENT_DEATH_CHILD", "1".to_owned())],
+        );
+        read_until(&session, b"asked");
+        session
+    })
+    .join()
+    .unwrap();
+    // The signal follows the end of the thread by however long the kernel takes: too short a
+    // wait lets a broken terminal pass, never a sound one fail.
+    std::thread::sleep(Duration::from_millis(500));
+    session.write(b"still there\n").unwrap();
+    read_until(&session, b"heard still there");
+    assert!(exit_now(&session).running);
+}
