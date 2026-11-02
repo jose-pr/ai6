@@ -265,7 +265,7 @@ last two are printed as a warning at start.
 | `state_dir` | Where verified provider libraries, and a default Registry, are kept. | The platform's state directory |
 | `[provider] location`, `password`, `poll` | The configuration provider Stations read; its roster is served under `/v1/user/roster` (a directory read-only, SQL editable); `--provider`. | The file's directory |
 | `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `state_dir` |
-| `[plugins] paths`, `profile` | Provider libraries and how they are checked; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without |
+| `[plugins] paths`, `profile`, `keep_verified` | Provider libraries, how they are checked, and which old verified copies stay; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without; the newest 8 |
 
 ## Environment variables
 

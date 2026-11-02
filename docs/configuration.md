@@ -97,6 +97,7 @@ dir = "/var/lib/ai6"                  # identity.pem and peers/; default: the st
 [plugins]
 paths = ["/usr/lib/ai6"]              # directories or library files to scan for providers
 profile = "strict"                    # strict, report or off; default strict with pins, report without
+keep_verified = 8                     # verified copies kept besides those loaded; 0 keeps none of them, "none" means no limit
 
 [secrets]
 dir = "secrets"                       # where loadout secret files are read; default secrets/ beside this file

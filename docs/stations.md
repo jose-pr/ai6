@@ -359,11 +359,65 @@ publisher = "ed25519:..."        # or: whoever holds this key signed it
 # require = "both"               # with pin and publisher together: both must hold
 ```
 
-`ai6 plugins pin PATH...` prints the entry that pins each AI6 provider library it is given.
-A publisher signs, with Ed25519, the tag `ai6-provider-library-v1`, a NUL, the library's
-file name, a NUL and the library's 32-byte SHA-256, and ships the 64-byte signature beside
-it as `FILE.sig`. The name is part of what is signed, so a library signed for one slot does
-not load in another. With OpenSSL and a POSIX shell:
+### Signing libraries
+
+Signing is the normal path. A digest pin changes with every build; a signature travels with
+the build, so a rebuild changes no record and one entry serves every architecture and both
+sides of a rolling upgrade, which a digest cannot:
+
+```console
+ai6 plugins keygen --out publisher.key              # once, on the host that builds
+ai6 plugins pin --publisher publisher.key lib/*.dll # once for each file name: the plugin records
+ai6 plugins sign --key publisher.key lib/*.dll      # in every build: FILE.sig beside each library
+ai6 plugins check --config ai6.cfg lib/             # before a restart
+```
+
+`keygen` prints the `publisher = "ed25519:..."` line and nothing of the key, and refuses a file
+that exists. `pin --publisher` takes that `ed25519:...` text or the key's file. `sign` reads the
+key only from its file. `check` says what a `strict` scan would say about each library against
+the `plugin` records of this host's Station, printing its path, digest and verdict; it loads
+nothing and writes no copy, and exits 1 on any refusal or when it found no library to check.
+A pin set's `plugin` family applies at restart, so run it after importing and before restarting.
+
+Copy `FILE.sig` with its library wherever libraries are copied, field runners included. A new
+library name still takes one record, once: naming what may load is the policy.
+
+### What a publisher entry gives up
+
+**A publisher entry is weaker than a digest pin, and the compromise of its key matters more.**
+Against a digest pin it gives up:
+
+- **Exact bytes.** Any file that key signed for that name loads, an older vulnerable build
+  included: nothing in a signature binds a version, so a signed old build can be put back.
+- **Revocation.** A stolen key signs anything until the record changes and each host restarts.
+  There is no key server and no revocation list: removing the `publisher` line, or the entry,
+  is how a key or a library stops being accepted.
+- **Holding no secret.** The key sits on whatever signs, where a digest pin needs none.
+
+So each publisher whose signature alone is enough is listed as a weakening,
+`publisher ed25519:... alone admits N libraries: anything it signed loads, older builds
+included`, printed at start, in `GET /internal/plugins` and in the check-in's
+`plugins_weakened`. An entry with a pin and a publisher accepts either one, so it is listed
+too, unless it says `require = "both"`. With `require = "both"` the library must be those exact
+bytes and carry the signature: it gives none of this up and is not listed, and every rebuild
+is a change to its record, as with a digest pin.
+
+Keep the key on the host that builds, never on a Station, which needs only the public half. On
+Unix `keygen` writes it `0600`; on Windows the file takes its directory's access list, so put it
+in a directory only you can read. A CI system should get it only for release builds, as a
+repository secret. To rotate, sign everything with the new key, copy the signatures out and
+change the records together, then restart; one key per entry is the whole model, with no list
+of keys to overlap them, so a host restarted between the two steps refuses what does not match.
+
+For development `profile = "report"` is the setting: everything loads from where it was found
+and needs no signature, and each library no entry accepts is listed.
+
+### The signature's format
+
+What `sign` writes, for anything that signs without `ai6`: Ed25519 over the tag
+`ai6-provider-library-v1`, a NUL, the library's file name, a NUL and the library's 32-byte
+SHA-256, shipped as the 64 bytes of `FILE.sig`. The name is part of what is signed, so a library
+signed for one slot does not load in another. With OpenSSL and a POSIX shell:
 
 ```console
 { printf 'ai6-provider-library-v1\0%s\0' ai6_agent_codex.dll
@@ -372,10 +426,10 @@ openssl pkeyutl -sign -rawin -inkey publisher.pem -in message.bin -out ai6_agent
 openssl pkey -in publisher.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n'
 ```
 
-The last line prints the key's 64 hex digits for `publisher = "ed25519:..."`. A rebuilt
-library signed with the same key loads on every Station without re-pinning; removing the
-`publisher` line, or the entry, is how a key or a library stops being accepted. There is no
-key server and no revocation list.
+The last line prints the key's 64 hex digits for `publisher = "ed25519:..."`. `ai6 plugins sign`
+and `pin --publisher` read such a key too.
+
+### Profiles
 
 The **profile** (`--plugin-profile`, else `ai6.cfg`'s `[plugins] profile`; each host's own,
 never the shared provider's) decides what loads:
@@ -390,13 +444,23 @@ Every weakening is printed when the Station starts, listed by `GET /internal/plu
 each library's digest and verdict, and published in the Station's check-in
 (`plugins_weakened`). Only the libraries that declare an AI6 provider kind are checked.
 
+After a `strict` scan the copies in `plugins/verified/` it did not load are removed, keeping the
+newest `[plugins] keep_verified` files by when each was written (default 8; `0` keeps none of
+them; `"none"` means no limit, so every copy stays). A process keeps a shared lock on each copy it
+loaded for as long as it runs, so another process's scan leaves that copy, and a scan holds
+the directory's `.lock` from before its first copy until its last load, so no clearing removes a
+copy between the two: clearing happens only when no other scan is under way, and otherwise waits
+for the next one. A copy that cannot be removed is left and listed (`verified_held` in
+`GET /internal/plugins`); it never fails the scan. On a file system that takes no locks nothing is
+removed. `verified_removed` lists what went.
+
 Every command that loads providers checks them the same way, with the same defaults:
 `ai6 theater provision`, Universal Exports for its access providers (the provider's `plugin`
 records, `unex.cfg`'s `[plugins] profile` or `--plugin-profile`), and the field runner
-(`ai6 runner serve --pins PATH --plugin-profile P`, whose verified copies go under its own
-state directory; a Station starting one on its own host writes the pins it resolved into the
-runner's state directory and passes them). Each prints what it refused and every weakening
-when it starts. A Station hands every runner it starts its record's `[runner]` and
+(`ai6 runner serve --pins PATH --plugin-profile P --keep-verified N`, whose verified copies go
+under its own state directory; a Station starting one on its own host writes the pins it
+resolved into the runner's state directory and passes them with its own `keep_verified`). Each
+prints what it refused and every weakening when it starts. A Station hands every runner it starts its record's `[runner]` and
 `[providers.<id>]` tables (`--settings`, [The field runner](theaters.md#the-field-runner)).
 
 What a pin covers is the library file. A library that imports another non-system library

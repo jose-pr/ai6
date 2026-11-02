@@ -63,9 +63,12 @@ ai6 serve [--config PATH] [--provider LOCATION] [--registry LOCATION] [--state-d
           [--station ID] [--listen 127.0.0.1:7081] [--plugin-path PATH]...
           [--plugin-profile strict|report|off]
 ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH]
-          [--plugin-profile strict|report|off] [--terminal ID] [--detach]
+          [--plugin-profile strict|report|off] [--keep-verified N|none] [--terminal ID] [--detach]
 ai6 runner connect [--state-dir PATH]
-ai6 plugins pin PATH...
+ai6 plugins keygen --out PATH
+ai6 plugins sign --key PATH FILE...
+ai6 plugins pin [--publisher KEY] FILE...
+ai6 plugins check [--config PATH] [PATH...]
 ai6 harness pin DIR
 ai6 identity [--config PATH]
 ai6 peer [--config PATH] waiting
@@ -107,6 +110,7 @@ dir = "/var/lib/ai6"             # identity.pem and peers/; default: state_dir
 [plugins]
 paths = ["/usr/lib/ai6"]
 profile = "strict"               # strict, report or off
+keep_verified = 8                # verified copies kept besides those loaded; 0: none, "none": no limit
 
 [secrets]
 dir = "secrets"                  # where loadout secret files are read; default: secrets/ beside this file

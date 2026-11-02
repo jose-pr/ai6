@@ -896,7 +896,8 @@ pub struct ProviderSettings { location: Option<String>, password: Option<SecretR
 pub struct RegistrySettings { location: Option<String>, password: Option<SecretRef>, headquarters_lease: Option<Seconds>,
     sqlite_busy_timeout: Option<Seconds>, limits: RegistryLimits }   // [registry.limits.*]
 pub struct IdentitySettings { dir: Option<PathBuf> }
-pub struct PluginSettings { paths: Vec<PathBuf>, profile: Option<PluginProfile> }
+pub struct PluginSettings { paths: Vec<PathBuf>, profile: Option<PluginProfile>, keep_verified: Option<KeepVerified> }
+impl PluginSettings { pub fn keep_verified(&self) -> KeepVerified; } // its default: the newest 8
 pub struct SecretSettings { dir: Option<PathBuf> }
 pub struct UnexSettings { url: String, token: Option<SecretRef>, ca_file: Option<PathBuf> }  // a url alone publishes nothing; ca_file resolved beside the file
 pub struct Bootstrap { station, state_dir, listen, provider, registry, identity, plugins, secrets: SecretSettings, unex: Option<UnexSettings> }
@@ -4872,27 +4873,41 @@ impl PluginPolicy {
     pub fn load(pins: Option<&Path>, default_pins: Option<&Path>, profile: Option<PluginProfile>,
                 verified_dir: impl Into<PathBuf>) -> io::Result<Self>; // a named pin set must exist
     pub fn with_profile(self, profile: PluginProfile) -> Self;
+    pub fn with_keep_verified(self, keep: KeepVerified) -> Self;
     pub fn profile(&self) -> PluginProfile;  pub fn pins(&self) -> &PinSet;
+    pub fn keep_verified(&self) -> KeepVerified;
 }
 pub struct PluginScanSummary { pub profile: String, pub loaded, skipped, failed, unreadable: Vec<String>,
-    pub checked: Vec<LibraryCheck>, pub refused: Vec<String>, pub weakened: Vec<String> }
+    pub checked: Vec<LibraryCheck>, pub refused: Vec<String>, pub weakened: Vec<String>,
+    pub verified_removed: Vec<String>, pub verified_held: Vec<String> /* left, with why */ }
 pub struct LibraryCheck { pub path: String, pub digest: String /* sha256:HEX */,
     pub verdict: String /* accepted: ... | unpinned | refused: ... */, pub loaded_from: Option<String> }
 pub fn pin_entry(path: &Path) -> io::Result<LibraryPin>;  // the digest entry for an AI6 provider library
-pub fn log_scan(summary: &PluginScanSummary);           // refusals and weakenings to stderr
+pub fn publisher_entry(path: &Path, publisher: PublisherKey) -> io::Result<LibraryPin>; // the same, by publisher
+pub fn check_libraries(paths: &[PathBuf], pins: &PinSet) -> PluginScanSummary; // strict verdicts; loads and writes nothing
+pub struct PublisherSigner;                               // Debug shows the public key only
+impl PublisherSigner {
+    pub fn generate(path: &Path) -> io::Result<Self>;     // PKCS#8 DER, 0600 on Unix, the directory's ACL on Windows; AlreadyExists when path exists
+    pub fn read(path: &Path) -> io::Result<Self>;         // PKCS#8 DER or PEM, v1 or v2; no error holds the file's text
+    pub fn public_key(&self) -> PublisherKey;
+    pub fn sign(&self, path: &Path) -> io::Result<PathBuf>; // writes FILE.sig beside an AI6 provider library
+}
+pub fn log_scan(summary: &PluginScanSummary);           // refusals, weakenings and copies cleared, to stderr
 
 // ai6::directorates::registry::bona_fides
 pub enum PluginProfile { Strict, Report, Off }           // lowercase; FromStr; default_for(pins: bool)
+pub enum KeepVerified { Newest(u64), All }               // default Newest(8); FromStr/Display/TOML: a count or "none" (All)
 pub struct PublisherKey;                                 // "ed25519:" + 64 hex; from_bytes, as_bytes
 pub enum Require { Either /* default */, Both }
 pub struct LibraryPin { pub file: String, pub pin: Option<coqui_peer::PeerId>, pub publisher: Option<PublisherKey>, pub require: Require }
 impl LibraryPin { digest(file, pin) / publisher(file, key) / with_pin / with_publisher / requiring_both }
-pub struct PinSet { pub profile: Option<PluginProfile>, pub libraries: Vec<LibraryPin> /* [[library]] */ }
+pub struct PinSet { pub libraries: Vec<LibraryPin> /* [[library]] */ }
 impl PinSet {
-    pub fn new() -> Self;  with_profile;  with_library;
+    pub fn new() -> Self;  with_library;
     pub fn from_toml(text: &str) -> Result<Self, String>;
     pub fn load(path: &Path) -> io::Result<Option<Self>>;   // None when the file is absent
-    pub fn validate(&self) -> Result<(), String>;  pub fn weakenings(&self) -> Vec<String>; // SHA-1 pins
+    pub fn validate(&self) -> Result<(), String>;
+    pub fn weakenings(&self) -> Vec<String>; // SHA-1 pins; a publisher whose signature alone is enough, one line per key
     pub fn check(&self, file: &str, bytes: &[u8], signature: Option<&[u8]>,
                  verify: &SignatureCheck<'_>) -> PinCheck;
 }
@@ -4908,7 +4923,14 @@ checked against the pin set by its file name, and handed to Guatiao as a copy
 `verified_dir/sha256-HEX.EXT`; anything else is skipped without reaching the loader. A
 publisher entry needs `FILE.sig` beside the library: the 64-byte Ed25519 signature of
 `publisher_message(FILE, sha256)`, so a signature is valid only under the file name it was
-made for. A pin covers the library file only: a non-system library it imports is found by
+made for. A publisher entry without `require = "both"` admits anything that key signed for the
+name, older builds included, with no revocation; `PinSet::weakenings` lists each such key. A
+`strict` scan then removes the copies it did not hand to Guatiao, past the newest
+`KeepVerified`: it holds `verified_dir/.lock` shared from before its first copy until its last
+load, takes it exclusive to clear (not at all while another scan holds it), and keeps a shared
+lock on each copy it loaded for the life of the process, which clearing asks about first. A
+copy left is listed in `verified_held`; it never fails the scan. A pin covers the library file
+only: a non-system library it imports is found by
 the operating system's loader (on Windows also beside the executable, in the current
 directory and on `PATH`). Under `report` libraries load from where they were found and each
 unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-in carries
@@ -4932,22 +4954,32 @@ that table, so a provider with a configuration of its own declares it too.
   `safe_house_cache_age`; seconds may be fractional, and an invalid value exits 1. The pins
   are the provider's `plugin` records (`ServeConfig::with_plugin_policy` overrides them in
   code); the profile is `[plugins] profile` (`ServeConfig::with_plugin_profile`); verified
-  copies go to the state directory's `plugins/verified/`.
+  copies go to the state directory's `plugins/verified/`, and `[plugins] keep_verified`
+  (`ServeConfig::with_keep_verified`) says which old ones stay.
 - `ai6 config show FAMILY [KEY] [--scope station:ID]` prints records as TOML;
   `ai6 config import DIR [--scope station:ID]` loads a configuration directory's records
   into a writable provider with `ConfigProvider::put_all` (checked whole, one transaction on
   SQL); `ai6 config export DIR` writes every family of every scope as TOML family files
   (`config::export`, owner-only on Unix).
-- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH] [--plugin-profile P] [--terminal ID] [--settings PATH] [--detach]`:
+- `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH] [--plugin-profile P] [--keep-verified N|none] [--terminal ID] [--settings PATH] [--detach]`:
   run the field runner on this host until Ctrl-C or SIGTERM (provider libraries checked as
   the Station's, verified copies under its state directory); `--detach` starts it in the
   background and prints its `runner.json`. `ai6 runner connect [--state-dir PATH]` relays
   standard input and output to it over ACP, authenticated; exit 3 means no runner answered.
 - `ai6 green-ink gate`: Claude Code's `PreToolUse` hook for shell commands (see Harness
   gate); the Claude handler passes it through `--settings`. Always exits 0.
-- `ai6 plugins pin PATH...` prints the `plugins.toml` entries that pin AI6 provider
-  libraries by SHA-256; anything else is refused with a non-zero exit. The runner's `--pins
-  PATH` must name an existing file.
+- `ai6 plugins keygen --out PATH` writes a new publisher key (`PublisherSigner::generate`) and
+  prints only its `publisher = "ed25519:..."` line, refusing a file that exists.
+  `ai6 plugins sign --key PATH FILE...` writes `FILE.sig` beside each AI6 provider library and
+  prints each path; the key comes only from a file.
+- `ai6 plugins pin [--publisher KEY] FILE...` prints the `plugins.toml` entries that pin AI6
+  provider libraries by SHA-256, or with `--publisher` (`ed25519:HEX` or a key file) accept what
+  that key signed, with its weakening on standard error; anything else is refused with a
+  non-zero exit. The runner's `--pins PATH` must name an existing file.
+- `ai6 plugins check [--config PATH] [PATH...]` prints `PATH  DIGEST  VERDICT` per library named,
+  else on `[plugins] paths`, against the `plugin` records of this host's Station under `strict`
+  (`check_libraries`); it opens only the configuration provider, loads nothing, writes no copy,
+  and exits 1 on any refusal or when no library was checked.
 - `ai6 harness pin DIR` prints a working directory's harness manifest (`# sha256:..  PATH`
   per file) and the `pin = "sha256:..."` line for `[operation.ID.harness]`.
 - `ai6 assistant pin-skill DIR` prints a skill directory's manifest

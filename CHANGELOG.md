@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Provider libraries can be signed with no tooling but `ai6`, so a rebuild needs no record change:
+  `ai6 plugins keygen --out PATH` once on the build host, `ai6 plugins sign --key PATH FILE...` in
+  every build (`FILE.sig` beside each library, valid for that file name alone), and `ai6 plugins pin
+  --publisher KEY FILE...` once for each name. `ai6 plugins check [--config PATH] [PATH...]` says what
+  a `strict` scan would, with nothing loaded and no copy written, and exits 1 on any refusal.
+  **A publisher entry is weaker than a digest pin, and a stolen key matters more.** Anything that key
+  signed for that name loads, an older vulnerable build included, since nothing binds a version; a
+  stolen key signs anything until the record changes, with no revocation list; and the key sits on
+  whatever signs, where a digest pin needs no secret. So `PinSet::weakenings` adds a line per key whose
+  signature alone is enough, `publisher ed25519:... alone admits N libraries`, which reaches the log,
+  `GET /internal/plugins` and `plugins_weakened`, and a Station with such an entry now reports it.
+  `require = "both"` gives up none of this and gets no line. New: `PublisherSigner`,
+  `publisher_entry`, `check_libraries`.
+- A `strict` scan removes old verified copies of provider libraries, which were never removed: it
+  keeps what it loaded and the newest `[plugins] keep_verified` files (default 8; `0` keeps none of
+  them; `"none"` means no limit). A copy another process loaded or is about to load is left, and a copy
+  that cannot be removed is listed and never fails the scan. This covers the Station, Universal
+  Exports and the field runner (`ai6 runner serve --keep-verified`). New: `KeepVerified`,
+  `PluginPolicy::with_keep_verified`, `ServeConfig::with_keep_verified`,
+  `PluginScanSummary::verified_removed` and `verified_held`.
+
 - A Mission ID names its Operation and a number or the tracker's code, not a random one: `ai6-42`,
   `ai6-gh-63`, `ai6-AI6-64`, `ai6-backend-63`, `ai6-nightly-43`. It is chosen once, where the brief
   enters, and stays through a retry, a return to the queue, a resume and a restart. Numbers
