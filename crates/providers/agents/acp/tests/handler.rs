@@ -7,8 +7,9 @@ use ai6::MissionId;
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, TerminalBridge};
 use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentResume, AgentSession, AgentStart,
+    AgentEvent, AgentHandler, AgentResume, AgentSession, AgentStart, AssistantMode,
 };
+use ai6::directorates::section_00::assistant::{ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV};
 use ai6::guatiao::library::Object;
 use ai6::station::plugins::Plugins;
 use ai6_agent_acp::{AcpConfig, AcpHandler};
@@ -208,6 +209,37 @@ fn an_answer_only_session_refuses_an_edit_and_ends_when_one_runs_unasked() {
     let last = events.last().unwrap();
     assert_eq!(last.kind, "failed");
     assert!(last.text.as_deref().unwrap().contains("without leave"));
+}
+
+/// What an assistant Session's agent is told when it asks with this kind and input, as the Grok
+/// CLI words them.
+fn assistant_asks(kind: &str, input: &str) -> String {
+    let mut request = start(environment(&[
+        ("FAKE_ASK", kind),
+        ("FAKE_ASK_INPUT", input),
+        (ASSISTANT_MCP_URL_ENV, "http://127.0.0.1:1/mcp"),
+        (ASSISTANT_MCP_TOKEN_ENV, "token"),
+    ]));
+    request.assistant = Some(AssistantMode::moneypenny());
+    let session = handler("")
+        .start(request, terminal())
+        .expect("the agent starts");
+    text(&until(&session, &["completed", "failed"]))
+}
+
+#[test]
+fn an_assistant_session_lets_the_agent_have_reading_and_its_own_mcp_tools_alone() {
+    let her_tool = r#"{"variant": "UseTool", "tool_name": "moneypenny__board", "tool_input": {}}"#;
+    assert!(assistant_asks("other", her_tool).contains("asked:yes"));
+    assert!(assistant_asks("read", "{}").contains("asked:yes"));
+
+    let monitor = r#"{"variant": "Monitor", "command": "echo ran", "description": "x"}"#;
+    assert!(assistant_asks("other", monitor).contains("asked:no"));
+    let subagent = r#"{"variant": "Task", "prompt": "x", "description": "moneypenny__board"}"#;
+    assert!(assistant_asks("other", subagent).contains("asked:no"));
+    let another = r#"{"variant": "UseTool", "tool_name": "other__board", "tool_input": {}}"#;
+    assert!(assistant_asks("other", another).contains("asked:no"));
+    assert!(assistant_asks("fetch", r#"{"url": "https://example.com"}"#).contains("asked:no"));
 }
 
 #[test]

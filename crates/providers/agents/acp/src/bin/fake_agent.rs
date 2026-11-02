@@ -110,7 +110,9 @@ fn handle(
                         json!({
                             "sessionId": "fake-1",
                             "toolCall": {"toolCallId": "t1", "title": "Use a tool", "kind": kind,
-                                         "status": "pending", "rawInput": {"command": "git push origin main"}},
+                                         "status": "pending", "rawInput": var("FAKE_ASK_INPUT")
+                                             .and_then(|input| serde_json::from_str::<Value>(&input).ok())
+                                             .unwrap_or_else(|| json!({"command": "git push origin main"}))},
                             "options": [
                                 {"optionId": "yes", "name": "Allow", "kind": "allow_once"},
                                 {"optionId": "no", "name": "Reject", "kind": "reject_once"},

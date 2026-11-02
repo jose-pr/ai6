@@ -198,6 +198,8 @@ struct Shared {
     lifecycle: async_mpsc::UnboundedSender<Lifecycle>,
     decider: Arc<dyn PermissionDecider>,
     restricted: bool,
+    /// The names of the Session's MCP servers, whose tools a restricted Session may use.
+    servers: Vec<String>,
     close_on_drop: bool,
     fail_on_disconnect: bool,
     closing: AtomicBool,
@@ -514,6 +516,41 @@ fn error_text(error: &Error) -> String {
     }
 }
 
+/// Whether a restricted Session lets the agent have what it asked for: reading, and the tools of
+/// the Session's own MCP servers. Nothing else, whatever its kind: the Grok CLI reports `monitor`,
+/// which runs any command, as `other`.
+fn restricted_allows(asked: &PermissionRequest, servers: &[String]) -> bool {
+    if matches!(asked.kind.as_deref(), Some("read" | "search" | "think")) {
+        return true;
+    }
+    let of_a_server = |name: &str, prefix: &str| {
+        servers
+            .iter()
+            .any(|server| name.starts_with(&format!("{prefix}{server}__")))
+    };
+    // The Grok CLI names the tool in the input of its `UseTool`, and lets the model write the title
+    // of a subagent; another agent has no such input and names it in the title.
+    match asked
+        .raw_input
+        .as_ref()
+        .and_then(|input| input.get("variant"))
+    {
+        Some(Value::String(variant)) => {
+            variant == "UseTool"
+                && asked
+                    .raw_input
+                    .as_ref()
+                    .and_then(|input| input.get("tool_name"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| of_a_server(name, ""))
+        }
+        _ => asked
+            .title
+            .as_deref()
+            .is_some_and(|title| of_a_server(title, "mcp__")),
+    }
+}
+
 /// Starts `work` on a thread of its own.
 type StartDecider = fn(Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
 
@@ -569,14 +606,10 @@ async fn permission(
             })
             .collect(),
     };
-    let decision = if shared.restricted
-        && kind
-            .as_deref()
-            .is_some_and(|kind| RESTRICTED_KINDS.contains(&kind))
-    {
+    let decision = if shared.restricted && !restricted_allows(&asked, &shared.servers) {
         PermissionDecision::Deny(format!(
-            "a restricted Session may not use a tool that does {}",
-            kind.as_deref().unwrap_or("this")
+            "a restricted Session may not use a tool of the kind {}",
+            kind.as_deref().unwrap_or("unknown")
         ))
     } else {
         let (answer, decided) = oneshot::channel();
@@ -1263,6 +1296,12 @@ impl AcpSession {
             lifecycle: lifecycle_tx,
             decider: options.decider.clone(),
             restricted: options.restricted,
+            servers: options
+                .mcp_servers
+                .iter()
+                .filter_map(|server| server.get("name").and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect(),
             close_on_drop: options.close_on_drop,
             fail_on_disconnect: options.fail_on_disconnect,
             closing: AtomicBool::new(false),
@@ -1489,6 +1528,7 @@ mod tests {
                 lifecycle,
                 decider,
                 restricted: false,
+                servers: Vec::new(),
                 close_on_drop: false,
                 fail_on_disconnect: false,
                 closing: AtomicBool::new(false),
