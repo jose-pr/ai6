@@ -394,7 +394,7 @@ void main() {
     );
     expect(
       configPathFor(
-        {'USERPROFILE': r'C:\Users\a', 'ProgramData': r'C:\ProgramData'},
+        {'USERPROFILE': r'D:\Profiles\a', 'ProgramData': r'C:\ProgramData'},
         'windows',
         exists: (path) => path == r'C:\ProgramData\ai6\ai6.cfg',
       ),
