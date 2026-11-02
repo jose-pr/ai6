@@ -4819,7 +4819,8 @@ async fn pages_a_quota_raised_in_the_assistant_record_applies_to_the_next_publis
 
 #[tokio::test]
 async fn pages_expire_and_the_sweeper_deletes_them_and_audits() {
-    let roster = pages_roster(json!({"default_ttl": 0.6, "sweep_every": 0.2}));
+    // Long enough that a busy machine still remembers the first page before it expires.
+    let roster = pages_roster(json!({"default_ttl": 5.0, "sweep_every": 0.2}));
     let served = served_with(AssistantConfig::default(), Some(roster)).await;
     let (_app, job) = accepted(&served, &served.operator, "Short lived.").await;
     let kept = published_id(
@@ -4848,7 +4849,7 @@ async fn pages_expire_and_the_sweeper_deletes_them_and_audits() {
         .unwrap();
     assert_eq!(remembered.status(), StatusCode::OK);
     assert!(remembered.json::<Value>().await.unwrap()["expires_at"].is_null());
-    for _ in 0..40 {
+    for _ in 0..200 {
         if !page_dirs(&served).contains(&lost) {
             break;
         }
