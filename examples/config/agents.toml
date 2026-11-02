@@ -95,3 +95,15 @@ command = "npx"
 args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
 # Codex:  command = "npx", args = ["-y", "@agentclientprotocol/codex-acp@2.5.0"]
 # Gemini: command = "gemini", args = ["--acp"]
+
+# The Antigravity CLI (`agy`) signed in once for the Station's user, its login under HOME. A model
+# name carries its effort; `agy models` lists them. docs/agents.md, "What an Antigravity CLI Mission
+# may call". With no roles, no Mission is placed on it until you give it some.
+# [agent.0010]
+# handler = "antigravity"
+# model = "gemini-3.8-flash-low"
+# clearance = "field"
+# priority = 5
+# [agent.0010.env]
+# HOME = "/var/lib/ai6"
+# PATH = "/var/lib/ai6/.local/bin:/usr/local/bin:/usr/bin:/bin"

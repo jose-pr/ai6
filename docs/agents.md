@@ -22,6 +22,10 @@ Claude and Codex adapters, `gemini --acp`, or your own. An Agent configures it w
 handler's settings reach its provider as TOML, which the provider validates and refuses unknown
 keys in. See [the Agent Client Protocol](acp.md).
 
+The `antigravity` handler (`ai6-agent-antigravity`) runs the [Antigravity
+CLI](https://antigravity.google/docs/cli/headless), `agy`, through its stream-json mode; see
+[What an Antigravity CLI Mission may call](#what-an-antigravity-cli-mission-may-call).
+
 A handler declares how its harness talks over standard input and output
 (`AgentHandler::stdio`), never which terminal provider it runs in. Claude Code
 (`claude -p --input-format stream-json`) and Codex (`codex app-server`) speak JSON, so both
@@ -173,6 +177,50 @@ naming the tools, the Mission's `denied_tools` until it works again, the reason
 the Operation's cover hides it, a line in the report on its source issue. A log line on the Station
 says the same. A command the green ink gate held is listed too, since the harness refuses it the
 same way; a resume clears the list, so a held command that later ran is not in the report.
+
+## What an Antigravity CLI Mission may call
+
+The `antigravity` handler holds a Session to a list the same way, with agy's own means, measured on
+agy 1.4.12 on x86-64 Linux. agy is closed source and updates itself, so the handler turns its updater
+off during a Session (`auto_update = true` in `handler_settings` lets it run), and its crate's
+`AGENTS.md` says what a new version could break. `HOME` in the Agent's `env` is where its login is.
+
+| | By default |
+| --- | --- |
+| Offered and allowed | `read_file`, `grep_search`, `find_by_name`, `list_dir` in the working directory. `write_file` and `edit_file` inside it, by the one rule `write_file(<working directory>)`; `.git`, `.agents` and `.agent` stay refused to them. AI6's own MCP servers. At `field` and `00` clearance, `run_command` |
+| Not offered | `search_web`, which no rule gates, sub-agents, `schedule`, `send_message` and every other built-in tool. At `desk` clearance, or one the handler does not know, `run_command`, and `command(*)` is denied by rule too |
+
+Each launch gets a directory of its own beside the working directory, `<working
+directory>.ai6-agy-<unique>`, with what agy has no flag for: a custom agent fixing the tools and
+carrying the standing context as its system prompt, the MCP config and the green ink hook. So that
+directory's parent must be writable. It is removed when the Session closes. It holds the Session's MCP
+tokens, since agy expands no variable in that file: it is private to the OS user and denied to the
+file tools, and a command can read it, as a command can read the harness's environment.
+
+- **A conversation keeps its first launch's tools and system prompt.** A clearance that narrows on a
+  resume is held by a deny rule, which is read at each launch; one that widens adds no tool.
+- **A checkout's own agy files.** agy runs `.agents/hooks.json` and `.agent/hooks.json` and connects
+  `.agents/mcp_config.json` in any working directory, trusted or not, and no flag keeps them out. A
+  Session in a checkout that carries them is refused unless the Operation allows its project settings
+  ([`harness.project_settings`](operations.md#harness-project-settings)), and they are in the manifest
+  a pin covers.
+- **A refused call.** With no rule for it agy ends the turn there and still says `SUCCESS`, exit code
+  0; a deny rule's or a hook's refusal goes back to the model. Either way it is a `denied` event and
+  `permission-denied` on the Mission, as above.
+- **A limit** is a `limit` event, for now from words seen only against a stand-in model and in agy's
+  binary: `handler_settings` `limit_phrases` changes them. The stream gives no reset time.
+- **Model names** carry their effort (`gemini-3.8-flash-low`), and agy refuses a different `--effort`
+  beside one, so such a name wins over the Agent's `effort`.
+- **Interrupting** ends the process, since a pipe carries no signal; the next message resumes the
+  conversation.
+- **Moneypenny** on this handler has `read_file` and her own MCP tools. A mode asking for scripts,
+  directories to write, skills or a network is refused by name. A model reads an MCP tool's schema
+  from agy's data directory with `read_file` before calling it, so she keeps that tool.
+
+`handler_settings` takes `allowed_tools` and `denied_tools` as above, each entry an agy [permission
+rule](https://antigravity.google/docs/permissions?tab=cli) (`command(git status)`) or a tool's name
+(`search_web`), weakenings reported the same way, and `settings`, further `settings.json` keys for the
+Session (`modelProvider`), never those that decide what it may do.
 
 ## 00 coordination
 

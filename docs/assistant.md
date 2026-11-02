@@ -39,7 +39,9 @@ recap.
 On an [ACP agent](acp.md#the-acp-handler) AI6 does not choose her tools. It refuses what the agent
 asks leave for beyond reading and her own MCP tools, and the rest is the agent's to give up: she
 is not restricted on Grok without the [agent profile](acp.md#grok) that takes its own tools away.
-An answer whose tool was refused may end there, which Grok does; the conversation says so.
+An answer whose tool was refused may end there, which Grok does; the conversation says so. On the
+[`antigravity` handler](agents.md#what-an-antigravity-cli-mission-may-call) she has `read_file` and
+her own MCP tools, and a read it refuses ends the answer there, which the conversation also says.
 
 ### Routes and quota
 
