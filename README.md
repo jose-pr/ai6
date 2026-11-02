@@ -1,9 +1,13 @@
 # AI6 build dependencies
 
 This branch holds no AI6 source. `pub/` is a Dart pub cache with every package the Outer Office
-Flutter app in `clients/outer-office` needs, so the app can be built for Windows, Linux, macOS and the
-web without reaching pub.dev or GitHub. `cdn/` holds every file the Outer Office web app would
-otherwise fetch from a CDN (below).
+Flutter app in `clients/outer-office` needs, so the app can be built for Linux, Windows and the web
+without reaching pub.dev or GitHub. `cdn/` holds every file the Outer Office web app would
+otherwise fetch from a CDN (below). `containers/` holds Dockerfiles for an image that builds the
+app, on any base and any Flutter (its README).
+
+`tools/sdk/sdk.lock` on `main` names the commit of this branch a build uses, so a new commit here
+reaches nobody until the lock moves to it.
 
 It holds the packages from `pub.dev` (`pub/hosted/`, with their hashes in
 `pub/hosted-hashes/`) and a bare clone of the `guatiao` Dart binding's repository
@@ -16,7 +20,7 @@ Built from `main` at `5cc1796e` with Flutter `main` (Dart 3.15 dev).
 ## Use it
 
 ```sh
-git clone --branch deps --depth 1 https://github.com/jose-pr/ai6 ai6-deps
+git clone --branch deps --depth 1 --single-branch https://github.com/jose-pr/ai6 ai6-deps
 cd ai6/clients/outer-office
 PUB_CACHE=/path/to/ai6-deps/pub flutter pub get --offline
 ```
@@ -37,6 +41,7 @@ rm -rf /tmp/ai6-pub/_temp /tmp/ai6-pub/active_roots /tmp/ai6-pub/git/guatiao-*
 ```
 
 Then replace `pub/` on this branch with `/tmp/ai6-pub`, update the commit named above, and
+commit. Point `app deps` in `tools/sdk/sdk.lock` on `main` and `DEPS_REF` in `containers/` at that
 commit.
 
 The packages keep their own licences, which are in each package's directory.
