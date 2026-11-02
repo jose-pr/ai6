@@ -197,15 +197,13 @@ Keys the Station reads of a tracker instance; it passes the rest to the provider
 lists its own (`reply_authors` and `labels` on both, `issue_type`, `subtask_type` and `link_type`
 on Jira):
 
-<!-- schema:instance:begin -->
+<!-- schema:record.source:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `status_labels` | none | **Status labels.** The labels a Mission's milestones write. |
-| `status_transitions` | none | **Status transitions.** The workflow transitions a Mission's milestones make. |
 | `agent_labels` | none | **Labels Agents may touch.** The only labels an Agent may add or remove on a linked issue. |
 | `agent_transitions` | none | **Transitions Agents may make.** The workflow transitions an Agent may make without green ink. |
 | `priority_map` | none | **Priority map.** The priority a mirrored issue takes here, by the priority it has where it comes from. |
-<!-- schema:instance:end -->
+<!-- schema:record.source:end -->
 
 `status_labels` and `status_transitions` name a label or a workflow transition for `working`,
 `waiting`, `paused`, `done` and `failed`.
@@ -226,27 +224,30 @@ updates = "milestones"        # outcome | milestones | all
 posts_per_hour = 6
 ```
 
-<!-- schema:issues:begin -->
+<!-- schema:record.operation.issues:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `preset` | `strict` | **Preset.** `strict`, or `licensed`, which lets `00` Agents close and reopen without green ink. |
 | `updates` | `milestones` | **Automatic updates.** `outcome`: only the report when the Mission ends; `milestones`: one status comment kept current on the source issue (working, waiting, paused) plus the report; `all`: also on every other linked issue. |
-| `max_body_bytes` | `8192` | **Size of a post.** Bytes of one posted comment. |
-| `posts_per_hour` | `6` | **Posts an hour, per Mission.** Agent and person posts per hour per Mission (the bucket's refill). |
-| `post_burst` | `3` | **Burst of posts.** Posts a Mission may make in a burst. |
-| `posts_per_mission` | `40` | **Posts per Mission.** Posts one Mission may make in all. |
-| `operation_posts_per_hour` | `60` | **Posts an hour, per Operation.** Agent and person posts per hour for the whole Operation. |
-| `tracker_posts_per_hour` | `300` | **Writes an hour, per tracker.** Writes per hour to one tracker instance, every kind counted. |
-| `status_interval_secs` | `60` | **Between status writes.** Seconds at least between two status writes to one issue. |
-| `reply_ttl_secs` | `259200` | **A question waits.** Seconds a question waits for an answer. |
+| `max_body_bytes` | 8 KiB | **Size of a post.** Bytes of one posted comment. |
+| `posts_per_hour` | 6 | **Posts an hour, per Mission.** Agent and person posts per hour per Mission (the bucket's refill). |
+| `post_burst` | 3 | **Burst of posts.** Posts a Mission may make in a burst. |
+| `posts_per_mission` | 40 | **Posts per Mission.** Posts one Mission may make in all. |
+| `operation_posts_per_hour` | 60 | **Posts an hour, per Operation.** Agent and person posts per hour for the whole Operation. |
+| `tracker_posts_per_hour` | 300 | **Writes an hour, per tracker.** Writes per hour to one tracker instance, every kind counted. |
+| `status_interval_secs` | 60 | **Between status writes.** Seconds at least between two status writes to one issue. |
+| `reply_ttl_secs` | 259,200 (3 days) | **A question waits.** Seconds a question waits for an answer. |
 | `on_timeout` | `resume` | **When nobody answers.** `resume` tells the Agent nobody answered; `fail` fails the Mission; `wait` keeps waiting. |
 | `on_secret` | `refuse` | **When a post holds a secret.** `refuse` refuses a post holding a secret; `redact` replaces it and posts the rest. |
 | `links` | `tracker` | **Links in Agent text.** `tracker`: links and images in Agent text only to the tracker's host and the Operation's git remote host; `any`: every host. |
 | `create` | `propose` | **Creating issues.** `propose`: a person approves each creation, or a class authorisation `issue-create` one from an unexposed Session with no findings; `direct`: the Agent creates at once; `off`: Agents cannot ask. |
-| `max_created` | `10` | **Issues per Mission.** Issues one Mission may create, those waiting for a person included. |
-| `max_created_per_day` | `50` | **Issues a day, per Operation.** Issues an Operation's Agents may create per day. |
-| `max_split_depth` | `2` | **Depth of a split.** How deep a split may go (a child of a child is depth 2). |
-<!-- schema:issues:end -->
+| `max_created` | 10 | **Issues per Mission.** Issues one Mission may create, those waiting for a person included. |
+| `max_created_per_day` | 50 | **Issues a day, per Operation.** Issues an Operation's Agents may create per day. |
+| `max_split_depth` | 2 | **Depth of a split.** How deep a split may go (a child of a child is depth 2). |
+| `max_split_children` | 10 | **Children of a split.** Children one split may ask for. |
+| `duplicate_window_secs` | 2,592,000 (30 days) | **A title stays a duplicate for.** Seconds a title stays a duplicate of an issue AI6 created. Shorter is looser. |
+| `creation_approval_secs` | 3,600 | **A creation's approval lasts.** Seconds the approval a class authorisation gives an issue creation lasts. Longer is looser. |
+<!-- schema:record.operation.issues:end -->
 
 These tables are generated from the settings' own declaration, and a test fails when they
 differ. Any count may be `"none"`. `posts_per_hour = 600` or `create = "direct"` is a weakening.

@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `ca_file` on a GitHub or Jira Source or tracker instance: a PEM file of certificate authorities
   added to the public roots, by absolute path, for a site under a company's own authority. A bad file
   is refused naming its path, and a set one is reported as a weakening at start and at check-in.
+- `ai6 config schema [SECTION]` prints the JSON Schema of a section of `ai6.cfg` or of a record kind,
+  or lists every section with its title. The settings tables in the docs are generated from the same
+  declarations, and `cargo run -p ai6 --features cli --example settings_reference -- --check` fails
+  when one differs.
+- What was written in the code is now a setting, at the same value: `[assistant.desk] held_cables`,
+  `held_cable_ttl` and `page_upload_timeout`; `[registry.limits.cables] page`;
+  `[registry.limits.sessions] exposure_sources`; the `station` record's `[approvals] checked_steps`,
+  `[sources] replies_read`, `[vetting] answer_tail_bytes`, `[recovery] probe_timeout`,
+  `[secrets] min_matched_bytes` and `[head_of_station] reason_bytes` and `audit_target_bytes`; the
+  `unex` record's `[gateway] socket_buffer_bytes`, `[timeline] audit_page` and `max_audit_page`, and
+  `[text] mission_title_chars` and `mission_prompt_bytes`; an Operation's `[issues]`
+  `max_split_children`, `duplicate_window_secs` and `creation_approval_secs`.
+
 - `ai6 config public [--output PATH]` writes the public `ai6.cfg` a web page reads beside
   `index.html`: `[unex] url` and what the page needs of `[oo]`, from an allow list, so a new key is
   private until someone says otherwise. Text under `[oo]` other than `[oo.appearance] theme` and
@@ -37,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The `station` and `unex` records and their tables read through the type's one declaration instead
+  of serde's derives. A stored record keeps loading as it was written; a refusal names the key and
+  never the value. `UnexRecord`'s `*_config` fields are `ai6::ProviderConfig`.
 - **A Cable no longer crosses an Operation on a Station grant alone.** A recipient in another Operation
   needs a compartment giving the sender `cable.send` there, as well as the grants; `cross_operation =
   "station_grants"` in the `cables` record keeps the grants alone, logged and reported at check-in as

@@ -31,7 +31,11 @@ cargo clippy -p ai6 --no-default-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 pwsh -File tools/public-api.ps1 -Mode check
+cargo run -p ai6 --features cli --example settings_reference -- --check
 ```
+
+The settings tables in `docs/` and Outer Office's copy of `[oo]` are generated from the settings'
+structs; that command fails when one differs, and without `--check` it writes them.
 
 `sh tools/sdk/bootstrap.sh` (`pwsh -File tools/sdk/bootstrap.ps1` on Windows) installs every SDK
 at the versions `tools/sdk/sdk.lock` names; `tools/sdk/README.md` has the flags. The Flutter app

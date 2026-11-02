@@ -281,47 +281,39 @@ any holder of `mission.status` sees and nothing else, and `mission_product(.., l
 `state`, `reason`, `branch` and `summary`, the CX report and the refs, each text cut with `CUT_MARKER`. An
 outcome's other keys (Session IDs, who recovered it) are not part of a product.
 
+## Settings (`ai6::settings`)
+
+```rust
+pub fn schema(section: &str) -> Option<serde_json::Value>;   // a dotted path: provider, registry.limits.sessions, record.station.scheduler
+pub fn sections() -> Vec<(String, String)>;                  // every table's path and title
+pub mod reference {
+    pub const DOCS: [&str; 2];                               // the docs holding generated tables
+    pub fn table(section: &str) -> Result<String, String>;   // one section's Markdown table
+    pub fn rewritten(text: &str) -> Result<String, String>;  // a doc with each marked table written anew
+    pub fn write(root: &Path) -> Result<(), String>;         // every generated file under a checkout
+    pub fn stale(root: &Path) -> Result<Vec<String>, String>; // the ones that differ
+}
+```
+
+A setting is declared once, on its struct: a doc comment, `#[schema(title = "..")]`, a unit
+(`format = "bytes"`; `Seconds` and `TimeLimit` carry theirs), and a default (`#[map(default = ..)]`
+reading the type's `Default`, or for an `Option` a closing `Default: ..` in the doc comment). A test
+refuses a field with no title or no stated default. Everything else reads it: `ai6 config schema`,
+the record forms, and the tables between `<!-- schema:SECTION:begin -->` and its end, which
+`cargo run -p ai6 --features cli --example settings_reference` writes and `-- --check` verifies.
+
 ## Station runtime limits (`ai6::station::limits`)
 
 The `station` record's tables, kept by a Station as it starts (they apply at restart). Each
-table is `#[non_exhaustive]`, `#[serde(default, deny_unknown_fields)]`, `Clone, Debug,
-PartialEq, Eq`, with a `Default` of the documented values (`docs/configuration.md`, "Station
-runtime limits"). Counts and sizes are `Limit`, ceilings on durations `TimeLimit`, other
-durations `Seconds`; a queue, page or attempt count is a plain integer. Not re-exported at the
-crate root: several table names repeat the Registry's (`AccountLimits`, `ApprovalLimits`,
+table derives `ToValue`, `FromValue` and `Schema` with `deny_unknown_fields`; its keys, titles,
+defaults and units are its declaration, which `ai6 config schema record.station.<table>` prints and
+`docs/configuration.md` renders. Counts and sizes are `Limit`, ceilings on durations `TimeLimit`,
+other durations `Seconds`; a queue, page or attempt count is a plain integer. Not re-exported at
+the crate root: several table names repeat the Registry's (`AccountLimits`, `ApprovalLimits`,
 `AuditLimits`, `SourceLimits`, `StationLimits`).
 
 ```rust
-pub struct StationLimits {
-    pub scheduler: SchedulerLimits,       // event_queue: Limit, interval, retry_delay, check_in: Seconds,
-                                          // intake_attempts: u32, role_catalog_bytes: Limit, shutdown_wait: Seconds
-    pub publisher: PublisherLimits,       // request_timeout, queue: usize, terminal_bytes, pre_bind_terminal_bytes,
-                                          // publish_retry_delay, retry_max_delay, refresh_every,
-                                          // input_retry_delay, control_wait, input_wait, control_queue: usize, control_report_attempts: u32
-    pub sources: SourceLimits,            // poll, min_poll (smaller is looser), report_every, sleeper_every
-    pub transports: TransportLimits,      // reprobe_after, report_every
-    pub recovery: RecoveryLimits,         // first_reattach_delay, max_reattach_delay, give_up_tries: u32, notes_every
-    pub vetting: VettingLimits,           // findings, review_work, detail_bytes, phrases, phrase_bytes: Limit,
-                                          // rate_window, proposals: Limit, proposal_request_ttl, proposal_settle, expiry_sweep
-    pub accounts: AccountLimits,          // reset_grace, unknown_use_permille: u16, claim_ttl, limit_horizon, login_timeout
-    pub approvals: ApprovalLimits,        // kind_bytes, target_bytes: Limit, classify_nesting: usize
-    pub harness: HarnessLimits,           // manifest_file_bytes, manifest_bytes, manifest_files: Limit
-    pub provision: ProvisionLimits,       // probe_timeout, command_timeout, name_bytes, version_chars
-    pub secrets: SecretLimits,            // lease_ttl: Seconds, max_lease_ttl: TimeLimit
-    pub terminal_output: TerminalOutputLimits,   // json_line_bytes, csi_bytes
-    pub green_ink: GreenInkLimits,        // gate_timeout
-    pub detached: DetachedLimits,         // poll, script_timeout, name_chars
-    pub runner: RunnerLimits,             // pump_poll, feed_poll, replay_batch: usize, keep_ended,
-                                          // cable_request_bytes, cable_connect_timeout, read_wait, connect_timeout, answer_wait,
-                                          // start_wait, start_margin, start_poll, terminal_poll,
-                                          // superseded_close_wait, retry_pause
-    pub api: ApiLimits,                   // refused_body_drain_bytes
-    pub audit: AuditLimits,               // names_detail_chars, target_bytes
-    pub theaters: TheaterLimits,          // ephemeral_name_bytes
-    pub theater_tools: TheaterToolLimits, // output_bytes, read_bytes, timeout, max_timeout: TimeLimit, git_timeout
-    pub head_of_station: HeadOfStationLimits,    // listed_changes, survey_entries
-    pub providers: BTreeMap<String, serde_json::Value>,   // [providers.<id>]
-}
+pub struct StationLimits { /* one field per table, and */ pub providers: BTreeMap<String, serde_json::Value> }
 impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero queues/pages/attempts, a non-table provider
 ```
 

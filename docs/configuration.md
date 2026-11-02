@@ -169,7 +169,9 @@ by Stations and Universal Exports alike, from the one `[provider]` and `[registr
 has a default, and a table may name only the keys it
 changes.
 
-A count or size is a whole number; `null`, or the string `"none"` in TOML, which has no
+The tables on this page are generated from the settings' own declarations, so they cannot
+disagree with them; `ai6 config schema SECTION` prints the same as JSON Schema. A count or size is
+a whole number; `null`, or the string `"none"` in TOML, which has no
 null, takes the bound away. A number of seconds may be fractional. Only nonsense is refused:
 a negative number, or a word other than `none`. A value looser than its default (larger, or
 no bound) is a weakening, reported like an inline secret:
@@ -191,18 +193,27 @@ records = "none"                      # keep every audit record; reported as a w
 
 `[provider]`:
 
-| Key | Default | What |
+<!-- schema:provider:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `loadout_bytes` | 1 MiB | Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool` records together) |
-| `loadout_value_chars` | 4,096 | Characters of one text value in the loadout document |
-| `access_policy_bytes` | 1 MiB | Bytes of the access policy (the `access` record) |
+| `location` | see meaning | **Where the configuration provider is.** A configuration directory, `sqlite:PATH` or a `postgres://` URL. Default: the directory holding the bootstrap file, else the user's configuration directory. |
+| `password` | none | **Database password.** The database password, when the location needs one and gives none. |
+| `poll` | 5 | **Between checks for changes.** Seconds between checks for changes; 0 turns reloading off. |
+| `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool` records together). |
+| `loadout_value_chars` | 4,096 | **One loadout value, in characters.** Characters of one text value in the loadout document. |
+| `access_policy_bytes` | 1 MiB | **Access policy.** Bytes of the access policy (the `access` record). |
+<!-- schema:provider:end -->
 
 `[registry]`:
 
-| Key | Default | What |
+<!-- schema:registry:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `headquarters_lease` | 60 | Seconds the Headquarters lease lasts between renewals; a PostgreSQL statement, lock wait and idle transaction end after a quarter of it, a connection attempt after a sixth |
-| `sqlite_busy_timeout` | 30 | Seconds a SQLite connection waits for a lock another holds |
+| `location` | see meaning | **Where the Registry is.** A directory, `sqlite:PATH` or a `postgres://` URL. Default: the provider's database when the provider is SQL, else `registry` in the reading program's state directory. |
+| `password` | see meaning | **Database password.** The database password, when the location needs one and gives none. Default: the provider's, when the Registry is the provider's database. |
+| `headquarters_lease` | 60 | **Headquarters lease.** Seconds the Headquarters lease lasts between renewals; a PostgreSQL statement, lock wait and idle transaction end after a quarter of it, a connection attempt after a sixth. |
+| `sqlite_busy_timeout` | 30 | **SQLite lock wait.** Seconds a SQLite connection waits for another's lock. |
+<!-- schema:registry:end -->
 
 Each `[registry.limits.*]` table bounds one record family. A Station's
 `max_concurrent_missions` setting is refused past `[registry.limits.stations]
@@ -210,73 +221,88 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 
 `[registry.limits.accounts]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.accounts:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 256 KiB | Bytes of one account's record |
-| `claims` | 1,024 | Live claims on one account; past it the oldest is dropped |
-| `windows` | 8 | Quota windows kept per account |
-| `kept_days` | 8 | Days of token counts kept per account |
+| `record_bytes` | 256 KiB | **Largest account record.** Bytes of one account's record. |
+| `claims` | 1,024 | **Live claims per account.** Live claims on one account; past it the oldest is dropped. |
+| `windows` | 8 | **Quota windows per account.** Quota windows kept per account. |
+| `kept_days` | 8 | **Days of token counts per account.** Days of token counts kept per account. |
+<!-- schema:registry.limits.accounts:end -->
 
 `[registry.limits.agents]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.agents:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 1 MiB | Bytes of one Agent record |
-| `operations` | 128 | Operations one Agent record tallies |
-| `clearances` | 8 | Clearances one Operation of an Agent record tallies |
-| `counted` | 256 | Mission outcomes remembered per Agent, so a repeated report is counted once |
-| `model_history` | 16 | Model changes kept per Agent |
-| `key_bytes` | 512 | Bytes of an outcome report's key |
-| `agent_bytes` | 256 | Bytes of an outcome report's Agent, Operation and model |
+| `record_bytes` | 1 MiB | **Largest Agent record.** Bytes of one Agent record. |
+| `operations` | 128 | **Operations per Agent record.** Operations one Agent record tallies. |
+| `clearances` | 8 | **Clearances per Operation of an Agent record.** Clearances one Operation of an Agent record tallies. |
+| `counted` | 256 | **Mission outcomes remembered per Agent.** Mission outcomes remembered per Agent, so a repeated report is counted once. |
+| `model_history` | 16 | Model changes kept per Agent. |
+| `key_bytes` | 512 | **Longest outcome report key.** Bytes of an outcome report's key. |
+| `agent_bytes` | 256 | **Longest Agent, Operation or model in a report.** Bytes of an outcome report's Agent, Operation and model. |
+<!-- schema:registry.limits.agents:end -->
 
 `[registry.limits.agent_roles]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.agent_roles:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 32 KiB | Bytes of one Agent role record |
-| `records` | 256 | Agent roles per Operation |
+| `record_bytes` | 32 KiB | **Largest Agent role record.** Bytes of one Agent role record. |
+| `records` | 256 | Agent roles per Operation. |
+<!-- schema:registry.limits.agent_roles:end -->
 
 `[registry.limits.approvals]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.approvals:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 16 KiB | Bytes of one approval record |
-| `pending` | 1,000 | Pending approval requests |
-| `class_authorizations` | 1,000 | Class authorizations |
-| `mission_requests` | 64 | Requests one Mission may have |
-| `reason_bytes` | 2,048 | Bytes of a request's reason |
-| `note_bytes` | 1,024 | Bytes of a decision's note |
-| `signer_bytes` | 256 | Bytes of a signer's name |
-| `idempotency_key_bytes` | 256 | Bytes of a request's idempotency key |
-| `class_entries` | 64 | Step kinds, Agents, roles and proposed roles each class authorization may name |
-| `pattern_bytes` | 256 | Bytes of a class authorization's target pattern |
-| `name_bytes` | 128 | Bytes of each Agent or role a class authorization names |
+| `record_bytes` | 16 KiB | **Largest approval record.** Bytes of one approval record. |
+| `pending` | 1,000 | Pending approval requests. |
+| `class_authorizations` | 1,000 | Class authorizations. |
+| `mission_requests` | 64 | **Requests per Mission.** Requests one Mission may have. |
+| `reason_bytes` | 2 KiB | **Longest request reason.** Bytes of a request's reason. |
+| `note_bytes` | 1 KiB | **Longest decision note.** Bytes of a decision's note. |
+| `signer_bytes` | 256 | **Longest signer name.** Bytes of a signer's name. |
+| `idempotency_key_bytes` | 256 | **Longest idempotency key.** Bytes of a request's idempotency key. |
+| `class_entries` | 64 | **Entries per class authorization.** Step kinds, Agents, roles and proposed roles each class authorization may name. |
+| `pattern_bytes` | 256 | **Longest target pattern.** Bytes of a class authorization's target pattern. |
+| `name_bytes` | 128 | **Longest name in a class authorization.** Bytes of each Agent or role a class authorization names. |
+<!-- schema:registry.limits.approvals:end -->
 
 `[registry.limits.audit]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.audit:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 16 KiB | Bytes of one audit record |
-| `records` | 10,000 | Audit records kept |
-| `results` | 500 | Records one listing may ask for |
+| `record_bytes` | 16 KiB | **Largest audit record.** Bytes of one audit record. |
+| `records` | 10,000 | Audit records kept. |
+| `results` | 500 | **Most records in one listing.** Records one listing may ask for. |
+<!-- schema:registry.limits.audit:end -->
 
 `[registry.limits.briefs]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.briefs:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 1 MiB | Bytes of one brief |
-| `records` | 1,000 | Queued briefs |
-| `provenance_bytes` | 16 KiB | Bytes of a brief's provenance |
-| `mission_id_bytes` | 120 | Bytes of a Mission ID, under 240 whatever this says; a longer one keeps its start and adds a short hash |
+| `record_bytes` | 1 MiB | **Largest brief.** Bytes of one brief. |
+| `records` | 1,000 | Queued briefs. |
+| `provenance_bytes` | 16 KiB | **Longest brief provenance.** Bytes of a brief's provenance. |
+| `mission_id_bytes` | 120 | **Longest Mission ID.** Bytes of a Mission ID: a longer one keeps its start and adds a short hash. It is a file name, so it stays under 240 bytes whatever this says. The default leaves a run's attempt room within `[registry.limits.sessions] id_bytes`. |
+<!-- schema:registry.limits.briefs:end -->
 
 `[registry.limits.cables]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.cables:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 2 MiB | Bytes of one Cable record |
-| `records` | 10,000 | Cable records the Registry holds |
-| `body_bytes` | 16 KiB | UTF-8 bytes of a Cable's body the Registry stores |
-| `max_ttl` | 86,400 (a day) | Seconds a Cable the Registry stores may live |
+| `record_bytes` | 2 MiB | **Largest Cable record.** Bytes of one Cable record. |
+| `records` | 10,000 | **Cable records kept.** Cable records the Registry holds. |
+| `body_bytes` | 16 KiB | **Longest Cable body.** UTF-8 bytes of a Cable's body the Registry stores. |
+| `max_ttl` | 86,400 (a day) | **Longest a Cable lives.** Seconds a Cable the Registry stores may live. |
+| `page` | 1,000 | **Cables in one read.** Cables one read of an inbox or of the held Cables takes. |
+<!-- schema:registry.limits.cables:end -->
 
 What a Station's relay accepts from a sender is the `cables` record's
 ([Families](#families)); the Registry's bounds above apply to what is stored, whoever wrote
@@ -284,128 +310,157 @@ it.
 
 `[registry.limits.clearance]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.clearance:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 16 KiB | Bytes of one clearance grant |
-| `grants` | 10,000 | Clearance grants |
-| `text_bytes` | 512 | Bytes of a grant's signer, approval, model and reason |
+| `record_bytes` | 16 KiB | **Largest clearance grant.** Bytes of one clearance grant. |
+| `grants` | 10,000 | Clearance grants. |
+| `text_bytes` | 512 | **Longest signer, approval, model or reason.** Bytes of a grant's signer, approval, model and reason. |
+<!-- schema:registry.limits.clearance:end -->
 
 `[registry.limits.files]`: how long the file Registry waits. The SQL Registry ignores it.
 
-| Key | Default | What |
+<!-- schema:registry.limits.files:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `rename_retry` | 2 | Seconds a record write retries replacing a file another process holds open |
-| `lock_wait` | 30 | Seconds a write waits for the Registry's directory lock |
+| `rename_retry` | 2 | **Retry replacing a held file for.** Seconds a record write retries replacing a file another process holds open. |
+| `lock_wait` | 30 | **Wait for the directory lock.** Seconds a write waits for the Registry's directory lock. |
+<!-- schema:registry.limits.files:end -->
 
 `[registry.limits.held]`: A held record may be 64 KiB, room for its verdict, larger than a brief's `[registry.limits.briefs] record_bytes`.
 
-| Key | Default | What |
+<!-- schema:registry.limits.held:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `per_operation` | 1,000 | Briefs one Operation may hold |
-| `records` | 10,000 | Briefs held across the Registry |
-| `results` | 500 | Held briefs one listing may ask for |
-| `clearance_bytes` | 4,096 | Bytes of a stored clearance, the finding kinds a brief was released from |
-| `reason_bytes` | 1,024 | Bytes of the reason a held brief is refused for |
-| `actor_bytes` | 256 | Bytes of who released or refused a held brief |
+| `per_operation` | 1,000 | **Held briefs per Operation.** Briefs one Operation may hold. |
+| `records` | 10,000 | **Held briefs in all.** Briefs held across the Registry. |
+| `results` | 500 | **Most held briefs in one listing.** Held briefs one listing may ask for. |
+| `clearance_bytes` | 4 KiB | **Largest stored clearance.** Bytes of a stored clearance, the finding kinds a brief was released from. |
+| `reason_bytes` | 1 KiB | **Longest refusal reason.** Bytes of the reason a held brief is refused for. |
+| `actor_bytes` | 256 | **Longest name of who decided.** Bytes of who released or refused a held brief. |
+<!-- schema:registry.limits.held:end -->
 
 `[registry.limits.logbook]`: A whole logbook's size is bounded by these four.
 
-| Key | Default | What |
+<!-- schema:registry.limits.logbook:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `entries` | 20 | Reports kept per logbook, and handed to the next round |
-| `summary_bytes` | 4 KiB | Bytes of a report's summary |
-| `findings` | 32 | Findings per report |
-| `finding_bytes` | 1,024 | Bytes of one finding |
+| `entries` | 20 | **Reports per logbook.** Reports kept per logbook, and handed to the next round. |
+| `summary_bytes` | 4 KiB | **Longest report summary.** Bytes of a report's summary. |
+| `findings` | 32 | Findings per report. |
+| `finding_bytes` | 1 KiB | **Longest finding.** Bytes of one finding. |
+<!-- schema:registry.limits.logbook:end -->
 
 `[registry.limits.proposals]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.proposals:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 1 MiB | Bytes of one Mission proposal |
-| `records` | 1,000 | Pending Mission proposals per Operation |
-| `results` | 500 | Proposals one listing may ask for |
-| `idempotency_key_bytes` | 256 | Bytes of a proposal's idempotency key |
+| `record_bytes` | 1 MiB | **Largest Mission proposal.** Bytes of one Mission proposal. |
+| `records` | 1,000 | **Pending proposals per Operation.** Pending Mission proposals per Operation. |
+| `results` | 500 | **Most proposals in one listing.** Proposals one listing may ask for. |
+| `idempotency_key_bytes` | 256 | **Longest idempotency key.** Bytes of a proposal's idempotency key. |
+<!-- schema:registry.limits.proposals:end -->
 
 `[registry.limits.quarantine]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.quarantine:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 16 KiB | Bytes of one quarantine record |
-| `records` | 10,000 | Quarantine records |
-| `incidents` | 256 | Incidents kept per Agent |
-| `keep_incidents` | 604,800 (a week) | Seconds an incident is kept |
+| `record_bytes` | 16 KiB | **Largest quarantine record.** Bytes of one quarantine record. |
+| `records` | 10,000 | Quarantine records. |
+| `incidents` | 256 | **Incidents per Agent.** Incidents kept per Agent. |
+| `keep_incidents` | 604,800 (7 days) | **Keep an incident for.** Seconds an incident is kept. |
+<!-- schema:registry.limits.quarantine:end -->
 
 `[registry.limits.sessions]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.sessions:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 64 KiB | Bytes of one Session record |
-| `records` | 100,000 | Session records |
-| `id_bytes` | 128 | Bytes of a Session ID |
-| `exposures` | 32 | Exposures recorded per Session |
-| `exposure_source_bytes` | 128 | Bytes of an exposure's source |
-| `recent_events` | 20 | Recent event lines kept per Session |
-| `recent_event_chars` | 300 | Characters kept of each recent event line and of a lost Session's reason |
+| `record_bytes` | 64 KiB | **Largest Session record.** Bytes of one Session record. |
+| `records` | 100,000 | Session records. |
+| `id_bytes` | 128 | **Longest Session ID.** Bytes of a Session ID. |
+| `exposures` | 32 | **Exposures per Session.** Exposures recorded per Session. |
+| `exposure_source_bytes` | 128 | **Longest exposure source.** Bytes of an exposure's source. |
+| `recent_events` | 20 | **Recent event lines per Session.** Recent event lines kept per Session. |
+| `recent_event_chars` | 300 | **Longest recent event line.** Characters kept of each recent event line and of a lost Session's reason. |
+| `exposure_sources` | 32 | **Sources of exposure per brief.** Sources of exposure one Session's brief records; the rest are not kept. |
+<!-- schema:registry.limits.sessions:end -->
 
 `[registry.limits.sleepers]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.sleepers:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `window_age` | 86,400 (a day) | Seconds a scheduled window may be late and still fire; an older one is skipped |
-| `prompt_bytes` | 16 KiB | Bytes of a Sleeper's prompt |
-| `lookback_days` | 366 | Days a schedule is searched back for its latest window |
+| `window_age` | 86,400 (a day) | **A late window still fires within.** Seconds a scheduled window may be late and still fire; an older one is skipped. |
+| `prompt_bytes` | 16 KiB | **Longest Sleeper prompt.** Bytes of a Sleeper's prompt. |
+| `lookback_days` | 366 | **Days searched back for a window.** Days a schedule is searched back for its latest window. |
+<!-- schema:registry.limits.sleepers:end -->
 
 `[registry.limits.issues]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.issues:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `links_per_mission` | 32 | Linked issues one Mission holds at once (unlinked ones do not count) |
-| `outbox_records` | 1,000 | Outbox entries kept; settled ones are dropped oldest first |
-| `entry_bytes` | 128 KiB | Bytes of one outbox entry's text and payload |
-| `replies_per_mission` | 200 | Replies from a linked issue one Mission stores; delivered ones make room first |
-| `reply_bytes` | 64 KiB | Bytes of one stored reply, cut past it |
+| `links_per_mission` | 32 | **Linked issues per Mission.** Linked issues one Mission holds at once; unlinked ones do not count. |
+| `outbox_records` | 1,000 | **Outbox entries kept.** Outbox entries kept; settled ones are dropped oldest first. |
+| `entry_bytes` | 128 KiB | **Largest outbox entry.** Bytes of one outbox entry's text and payload. |
+| `replies_per_mission` | 200 | **Stored replies per Mission.** Replies from a linked issue one Mission stores; delivered ones make room first. |
+| `reply_bytes` | 64 KiB | **Longest stored reply.** Bytes of one stored reply, cut past it. |
+<!-- schema:registry.limits.issues:end -->
 
 `[registry.limits.sources]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.sources:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `item_text_bytes` | 64 KiB | Bytes of a Source item's text |
-| `report_attempts` | 5 | Times reporting a finished brief to its Source is tried before it is dropped |
-| `name_bytes` | 256 | Bytes of the name a brief shows beside its Mission ID |
+| `item_text_bytes` | 64 KiB | **Longest Source item text.** Bytes of a Source item's text. |
+| `report_attempts` | 5 | **Tries to report a finished brief.** Times reporting a finished brief to its Source is tried before it is dropped. |
+| `name_bytes` | 256 | **Longest name beside a Mission ID.** Bytes of the name a brief shows beside its Mission ID. |
+<!-- schema:registry.limits.sources:end -->
 
 `[registry.limits.stations]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.stations:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 1 MiB | Bytes of one Station record |
-| `records` | 1,000 | Station records |
-| `settings_bytes` | 4,096 | Bytes of a Station's settings record |
-| `mission_capacity` | 1,024 | Missions a Station's settings may let it run at once |
-| `gone_dark_after` | 45 | Seconds after its last check-in that a Station counts as dark |
+| `record_bytes` | 1 MiB | **Largest Station record.** Bytes of one Station record. |
+| `records` | 1,000 | Station records. |
+| `settings_bytes` | 4 KiB | **Largest Station settings record.** Bytes of a Station's settings record. |
+| `mission_capacity` | 1,024 | **Most Missions a Station may run at once.** Missions a Station's settings may let it run at once. |
+| `gone_dark_after` | 45 | **A Station goes dark after.** Seconds after its last check-in that a Station counts as dark. |
+<!-- schema:registry.limits.stations:end -->
 
 `[registry.limits.timeline]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.timeline:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `records` | 10,000 | Events kept; the oldest are dropped past it |
-| `record_bytes` | 8,192 | Bytes of one event |
-| `id_bytes` | 128 | Bytes of an event's ID |
-| `name_bytes` | 64 | Bytes of an event's kind, action and detail keys |
-| `text_bytes` | 256 | Bytes of an event's Operation, Station, Mission, Session, actor and detail values |
-| `detail_entries` | 8 | Detail entries per event |
+| `records` | 10,000 | **Events kept.** Events kept; the oldest are dropped past it. |
+| `record_bytes` | 8 KiB | **Largest event.** Bytes of one event. |
+| `id_bytes` | 128 | **Longest event ID.** Bytes of an event's ID. |
+| `name_bytes` | 64 | **Longest kind, action or detail key.** Bytes of an event's kind, action and detail keys. |
+| `text_bytes` | 256 | **Longest event text.** Bytes of an event's Operation, Station, Mission, Session, actor and detail values. |
+| `detail_entries` | 8 | **Details per event.** Detail entries per event. |
+<!-- schema:registry.limits.timeline:end -->
 
 `[registry.limits.tokens]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.tokens:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 16 KiB | Bytes of one access token record |
+| `record_bytes` | 16 KiB | **Largest access token record.** Bytes of one access token record. |
+<!-- schema:registry.limits.tokens:end -->
 
 `[registry.limits.usage]`
 
-| Key | Default | What |
+<!-- schema:registry.limits.usage:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `ledger_bytes` | 1 MiB | Bytes of one Mission's usage ledger |
-| `kept_days` | 8 | Days of usage kept |
+| `ledger_bytes` | 1 MiB | **Largest usage ledger.** Bytes of one Mission's usage ledger. |
+| `kept_days` | 8 | Days of usage kept. |
+<!-- schema:registry.limits.usage:end -->
 
 ### `ai6ctl`
 
@@ -577,36 +632,70 @@ started with. A changed family that applies at restart is logged and listed at c
 `config.needs_restart` by name. A revision that fails its checks is refused once: logged,
 audited as `config.refused`, and reported at check-in.
 
-The `station` record takes `max_concurrent_missions`, `stall_timeout`, `loop_timeout`,
-`loop_min_lines`, `blocked_after`, `max_runtime`, `history`, `normalize_digits`, `roles`
-(`control`, `execution`), `labels`, `terminal`, `resources_every`, `safe_house_caches`,
-`safe_house_cache_age` and `partial_line_bytes` (bytes of a terminal line the watchdog holds
-before it counts as a line, default 4,096); seconds may be fractional. Its tables bound
-and pace the Station's work ([Station runtime limits](#station-runtime-limits)), and its
-`[providers.<id>]` tables configure providers. The `tls` record is a coqui-peer-tls policy
-document (`profile = "modern" | "intermediate" | "legacy"`, `cipher_profiles`, `tls_versions`
-and the rest), read over the library's default; whatever it gives up against that default is
-logged and sent at check-in as `tls_weakened`. The `unex` record takes `authenticator`,
-`directory`, `authorizer`, `accounts` (the provider that keeps the accounts the account routes manage) and their `*_config` objects (handed to the provider as they are),
-`proxy_user_header`, `proxy_lookup_by`, `login_tries_per_address`, `login_tries_per_name`,
-`client_address_header`, `access_cache_ttl`, `access_cache_negative_ttl`,
-`access_cache_entries`, `assistant` (default `true`), `assistant_agent` (default
-`moneypenny`), `route_text_bytes` (default 128, the longest `text` filter of an Outer
-Office page link Moneypenny's views and page context may carry), `provider_config_depth` and the
-tables `[gateway]`, `[controls]`, `[timeline]`, `[login]` and `[text]`
-([Universal Exports limits](#universal-exports-limits)). A credential written inline in one of those configurations is reported as a
-weakening: name a file there instead.
+The `station` record's own keys; seconds may be fractional. Its tables bound and pace the
+Station's work ([Station runtime limits](#station-runtime-limits)), and its `[providers.<id>]`
+tables configure providers.
+
+<!-- schema:record.station:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_concurrent_missions` | 4 | **Sessions at once.** Agent Sessions it runs at once. |
+| `stall_timeout` | 300 | **Stall a silent Session after.** Seconds without provider or terminal activity before a Session stalls. |
+| `loop_timeout` | 300 | **Stall a repeating Session after.** Seconds without novel terminal output before repeated output stalls a Session. |
+| `loop_min_lines` | 50 | **Repeated lines before a loop counts.** Repeated terminal lines required before loop detection applies. |
+| `blocked_after` | 10 | **Mark a Session blocked after.** Quiet seconds before a prompt-shaped terminal tail marks a Session blocked. |
+| `max_runtime` | none | **Longest a Session runs.** Longest a Session runs, in seconds. |
+| `history` | 4,096 | **Lines remembered for loop detection.** Distinct terminal lines kept for repeated-output detection. |
+| `normalize_digits` | `false` | **Ignore digits when comparing lines.** Whether digit runs are normalized when comparing terminal lines for loops. |
+| `roles` | both | **What this Station does.** `control` (elects Headquarters) and `execution` (runs assigned Missions). |
+| `labels` | none | Placement labels. |
+| `terminal` | see meaning | **Terminal provider.** The terminal provider harnesses run in. Default: one that suits the handler. |
+| `resources_every` | 60 | **Sample a Theater's resources every.** Seconds between samples of each remote Theater's resources; 0 leaves only the requirements probe. |
+| `safe_house_caches` | see meaning | **Rebuildable cache directories.** Directory names the Head of Station may remove from a finished Mission's safe house. Default: `target`, `node_modules` and `.dart_tool`. |
+| `safe_house_cache_age` | 604,800 (7 days) | **Leave a finished safe house alone for.** Seconds a finished Mission's safe house is left alone before its caches may go. |
+| `partial_line_bytes` | 4 KiB | **Longest partial terminal line.** Bytes of a terminal line the watchdog holds before it counts as a line. |
+| `providers` | none | **Provider configurations.** `[providers.<id>]`: provider `<id>`'s Guatiao configuration when the Station builds it with none of its own (handlers, terminals and safe houses). |
+<!-- schema:record.station:end -->
+
+The `tls` record is a coqui-peer-tls policy document (`profile = "modern" | "intermediate" |
+"legacy"`, `cipher_profiles`, `tls_versions` and the rest), read over the library's default;
+whatever it gives up against that default is logged and sent at check-in as `tls_weakened`.
+
+The `unex` record's own keys, and its tables `[gateway]`, `[controls]`, `[timeline]`, `[login]`
+and `[text]` ([Universal Exports limits](#universal-exports-limits)). A credential written inline
+in a provider's configuration is reported as a weakening: name a file there instead.
+
+<!-- schema:record.unex:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `authenticator` | none | **Sign-in provider.** The Authenticator provider ID for user sign-in. Nobody signs in. |
+| `authenticator_config` | none | **Sign-in provider's configuration.** The Authenticator's configuration. |
+| `directory` | none | **Directory provider.** The Directory provider ID; required when user access is configured. |
+| `directory_config` | none | **Directory provider's configuration.** The Directory's configuration. |
+| `authorizer` | none | **Custom authorizer.** A custom Authorizer provider ID, in place of the `access` record's role policy; the gateway's chief tier still applies beside it. |
+| `authorizer_config` | none | **Custom authorizer's configuration.** The custom Authorizer's configuration. |
+| `accounts` | see meaning | **Accounts provider.** The Accounts provider ID that keeps the accounts people sign in with, for the account routes. Default: the Authenticator when it offers accounts too. |
+| `accounts_config` | none | **Accounts provider's configuration.** The Accounts provider's configuration. |
+| `proxy_user_header` | none | **Reverse proxy's user header.** The sanitized header a trusted reverse proxy sets to the signed-in user. |
+| `proxy_lookup_by` | `name` | **Directory attribute of the proxy's user.** The Directory attribute that resolves the reverse proxy's user. |
+| `login_tries_per_address` | 5 | **Tries a minute per client address.** Password or key tries a minute from one client address. |
+| `login_tries_per_name` | 10 | **Tries in ten minutes per account name.** Tries in ten minutes for one account name, from anywhere. |
+| `client_address_header` | none | **Reverse proxy's client address header.** The header a trusted proxy sets to the client address. |
+| `access_cache_ttl` | 5 | **Keep a found person or a grant for.** Seconds a found person or a granted action is kept; 0 keeps none. |
+| `access_cache_negative_ttl` | 1 | **Keep a miss or a denial for.** Seconds "no such person" or a denial is kept; 0 keeps none. |
+| `access_cache_entries` | 10,000 | **Lookups and decisions kept.** The most lookups, and decisions, kept; 0 keeps none. |
+| `assistant` | `true` | **Serve Moneypenny.** Whether Moneypenny is served. |
+| `assistant_agent` | `moneypenny` | **The Agent that is Moneypenny.** The roster Agent that is Moneypenny. |
+| `route_text_bytes` | 128 | **Longest route text filter.** The longest `text` filter an Outer Office route may carry, in bytes: in Moneypenny's links and cards, and in the page a message was sent from. 0 reads as 1. |
+| `provider_config_depth` | 64 | **Deepest provider configuration.** How deeply nested a provider configuration may be. |
+<!-- schema:record.unex:end -->
 
 ### Universal Exports limits
-
-`[unex]` takes one more key, `proxy_secret_min_bytes` (default 32): the fewest bytes the
-reverse-proxy secret may hold. A smaller value is a weakening.
 
 The `unex` record's tables bound and pace the gateway, and apply at restart. They follow the
 [Limits](#limits) rules: a count or size is a whole number and `null` or `"none"` takes the
 bound away, seconds may be fractional, a value looser than its default is reported at start,
-and only a zero where nothing could pass is refused. Flat keys: `provider_config_depth`
-(default 64) is how deeply nested a provider configuration may be.
+and only a zero where nothing could pass is refused.
 
 ```toml
 [gateway]
@@ -619,7 +708,8 @@ pending_per_station = 8
 
 `[gateway]`
 
-| Key | Default | What |
+<!-- schema:record.unex.gateway:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
 | `sessions` | 16 | Live provider Sessions |
 | `clients_per_session` | 12 | Simultaneous browser connections to one Session |
@@ -639,47 +729,78 @@ pending_per_station = 8
 | `session_max` | 43,200 | How long renewing keeps a sign-in going, in seconds from when it was made; `0` turns renewal off, `"none"` lets it run on |
 | `session_cookie` | `true` | Whether a browser's sign-in also gets an HttpOnly cookie, so a reload [signs it back in](access.md#staying-signed-in) up to `session_max` after signing in; `false`, or `session_max = 0`, keeps a sign-in in the tab's memory alone |
 | `compartment_audit` | 60 | Seconds between audit records of one person's reads of one resource that only one [compartment](compartments.md#what-is-checked-and-when) allows; `0` writes one for every read |
+| `sessions` | 16 | **Live Sessions.** Live provider Sessions. |
+| `clients_per_session` | 12 | **Browser connections per Session.** Simultaneous browser connections to one provider Session. |
+| `scrollback_events` | 64 | **Frames kept for a late client.** Value frames kept per provider Session for a client that joins late. |
+| `frame_bytes` | 256 KiB | **Largest frame.** Bytes of one WebSocket or ingress frame. A Station is told at registration how much terminal output that leaves room for, and splits longer output to fit. |
+| `input_frames_per_second` | 40 | **Browser input frames a second.** Browser input frames accepted per connection per second. |
+| `input_queue` | 64 | **Queue to the Stations.** Capacity of the queue between the gateway and its Stations, at least 1. |
+| `fanout` | 8 | **Queue per Session viewer.** Capacity of each per-Session viewer queue, at least 1. |
+| `buffer_budget_bytes` | 512 MiB | **All the gateway's buffers.** Bytes the gateway may hold in buffers across every Session and connection; the configuration is refused when its limits could exceed it. |
+| `client_slots` | 100,000 | **Browser connection slots.** Browser connections the gateway keeps slots for; the configuration is refused when its Sessions times connections per Session could exceed it. |
+| `attach_token_ttl` | 300 | **An attach token lasts.** Seconds an attach token lives, more than 0. |
+| `write_lease_ttl` | 30 | **A terminal write lease lasts.** Seconds a terminal write lease lives, more than 0. |
+| `station_token_min_bytes` | 32 | **Shortest Station token.** Characters the Station token holds at least; a smaller value is looser. |
+| `origin_bytes` | 2 KiB | **Longest public origin.** Bytes of the public origin. |
+| `access_token_ttl` | 3,600 | **A sign-in lasts.** Seconds a sign-in that names no lifetime gets, and each renewal gives from then, more than 0 and within `access_token_max_ttl`; longer is looser. |
+| `access_token_max_ttl` | 86,400 (a day) | **Longest token a request may ask for.** The longest lifetime a request for a token may name, in seconds. |
+| `session_max` | 43,200 | **Longest renewed sign-in.** How long renewing keeps a sign-in going, in seconds from when it was made; the password is not asked again until then. `0` turns renewal off, `"none"` lets it run on. |
+| `compartment_audit` | 60 | **Between audit records of a compartment read.** Seconds between audit records of one person's reads of one resource allowed only by one compartment; the app polls, so `0` writes one for every read. |
+| `socket_buffer_bytes` | 256 KiB | **Smallest socket write buffer.** Bytes the write buffer of a browser's socket holds at least, whatever `frame_bytes` (it holds twice that when that is more). |
+<!-- schema:record.unex.gateway:end -->
 
 `[controls]`
 
-| Key | Default | What |
+<!-- schema:record.unex.controls:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `controls` | 1,024 | Controls held for status reads and replays; the oldest finished goes first |
-| `pending_per_station` | 64 | Controls one Station may have open |
-| `ttl` | 120 | Seconds an open control waits for its Station before it expires |
-| `poll_wait` | 1 | Seconds a Station's poll waits when it names no wait |
-| `max_poll_wait` | 25 | The longest wait a Station's poll may ask for, in seconds |
-| `idempotency_key_bytes` | 128 | Bytes of an idempotency key |
-| `reason_chars` | 512 | Characters of an operator's reason; longer text is cut |
+| `controls` | 1,024 | **Controls held.** Controls held for status reads and replays; past it the oldest closed one goes, or the control is refused. |
+| `pending_per_station` | 64 | **Open controls per Station.** Controls one Station may have open. |
+| `ttl` | 120 | **An open control waits.** Seconds an open control waits for its Station before it expires. |
+| `poll_wait` | 1 | **A Station's poll waits.** Seconds a Station's poll waits for a control when it names no wait. |
+| `max_poll_wait` | 25 | **Longest poll a Station may ask for.** The longest wait a Station's poll may ask for, in seconds. |
+| `idempotency_key_bytes` | 128 | **Longest idempotency key.** Bytes of an idempotency key. |
+| `reason_chars` | 512 | **Longest operator reason.** Characters of an operator's reason; longer text is cut. |
+<!-- schema:record.unex.controls:end -->
 
 `[timeline]`
 
-| Key | Default | What |
+<!-- schema:record.unex.timeline:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `page` | 50 | Items in a page when the request names no limit, at least 1 |
-| `max_page` | 200 | The most items a page may ask for |
-| `text_chars` | 256 | Characters of one item's text; longer text is cut |
+| `page` | 50 | **Items in a page.** Items in a page when the request names no limit, at least 1. |
+| `max_page` | 200 | **Most items a page may ask for.** The most items a page may ask for. |
+| `text_chars` | 256 | **Longest item text.** Characters of one item's text; longer text is cut. |
+| `audit_page` | 100 | **Audit records in a page.** Records in a page of the audit log when the request names no limit, at least 1. |
+| `max_audit_page` | 500 | **Most audit records a page may ask for.** The most records a page of the audit log may ask for. |
+<!-- schema:record.unex.timeline:end -->
 
 `[login]` (the tries allowed are the flat `login_tries_per_address` and `login_tries_per_name`)
 
-| Key | Default | What |
+<!-- schema:record.unex.login:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `name_bytes` | 64 | Bytes of an account name the tries are counted under |
-| `forget_every` | 256 | Tries between sweeps that forget old counters, at least 1 |
-| `address_window` | 60 | Seconds one client address's tries are counted over |
-| `name_window` | 600 | Seconds one account name's tries are counted over |
+| `name_bytes` | 64 | **Longest account name counted.** Bytes of an account name the tries are counted under; longer names are cut. |
+| `forget_every` | 256 | **Tries between sweeps of old counters.** Tries between sweeps that forget old counters, at least 1. |
+| `address_window` | 60 | **One address's tries are counted over.** Seconds one client address's tries are counted over. |
+| `name_window` | 600 | **One account name's tries are counted over.** Seconds one account name's tries are counted over. |
+<!-- schema:record.unex.login:end -->
 
 `[text]`
 
-| Key | Default | What |
+<!-- schema:record.unex.text:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `agent_reason_chars` | 512 | Characters of the reason that lowers an Agent's clearance |
-| `green_ink_max_grant` | one year | The longest a green ink grant or a clearance may last, in seconds |
-| `green_ink_note_chars` | 1,024 | Characters of a green ink note |
-| `held_reason_chars` | 1,024 | Characters of the reason for a held brief's decision |
-| `roster_target_bytes` | 512 | Bytes of a roster record's target line; longer text is cut |
-| `roster_key_bytes` | 128 | Bytes of a roster record's key |
-| `access_name_bytes` | 128 | Bytes of a role name, an Operation ID or an account name in the access and account routes |
+| `agent_reason_chars` | 512 | **Longest reason for lowering a clearance.** Characters of the reason that lowers an Agent's clearance. |
+| `green_ink_max_grant` | 31,536,000 (365 days) | **Longest green ink grant or clearance.** The longest a green ink grant or a clearance may last, in seconds. |
+| `green_ink_note_chars` | 1,024 | **Longest green ink note.** Characters of a green ink note. |
+| `held_reason_chars` | 1,024 | **Longest reason for a held brief's decision.** Characters of the reason for a held brief's decision. |
+| `roster_target_bytes` | 512 | **Longest roster target line.** Bytes of a roster record's target line; longer text is cut. |
+| `roster_key_bytes` | 128 | **Longest roster key.** Bytes of a roster record's key. |
+| `access_name_bytes` | 128 | **Longest role, Operation or account name.** Bytes of a role name, an Operation ID or an account name in the access and account routes. |
+| `mission_title_chars` | 512 | **Longest Mission title.** Characters of the title of a Mission a person starts. |
+| `mission_prompt_bytes` | 64 KiB | **Longest Mission instructions.** Bytes of the instructions of a Mission a person starts. |
+<!-- schema:record.unex.text:end -->
 
 ### Station runtime limits
 
@@ -731,197 +852,244 @@ provider applied before it was a key; the provider's API header lists them with 
 
 `[scheduler]`
 
-| Key | Default | What |
+<!-- schema:record.station.scheduler:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `event_queue` | 256 | Events of one Session queued for its event pump; past it the oldest is dropped |
-| `interval` | 0.5 | Seconds between scheduler rounds |
-| `retry_delay` | 5 | Seconds before a Mission whose start failed is tried again |
-| `check_in` | 15 | Seconds between the Station's check-ins with the Registry |
-| `intake_attempts` | 3 | Times a brief is placed before it is filed as failed |
-| `role_catalog_bytes` | 512 KiB | Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out |
-| `shutdown_wait` | 2 | Seconds a stopping Station waits for each of its loops |
+| `event_queue` | 256 | **Events queued per Session.** Events of one Session queued for its event pump; past it the oldest is dropped. |
+| `interval` | 0.5 | **Between scheduler rounds.** Seconds between scheduler rounds. |
+| `retry_delay` | 5 | **Retry a failed Mission start after.** Seconds before a Mission whose start failed is tried again. |
+| `check_in` | 15 | **Between check-ins with the Registry.** Seconds between the Station's check-ins with the Registry. |
+| `intake_attempts` | 3 | **Tries to place a brief.** Times a brief is placed before it is filed as failed. |
+| `role_catalog_bytes` | 512 KiB | **Largest role catalog and placement policies.** Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out. |
+| `shutdown_wait` | 2 | **Wait for each loop when stopping.** Seconds the Station waits for each of its loops when it stops. |
+<!-- schema:record.station.scheduler:end -->
 
 `[publisher]`: publication to Universal Exports.
 
-| Key | Default | What |
+<!-- schema:record.station.publisher:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `request_timeout` | 2 | Seconds one request may take |
-| `queue` | 64 | Events waiting for Universal Exports. Past it output gives way, oldest first; a Session's latest state is kept |
-| `terminal_bytes` | 192 KiB | Bytes of terminal output in one published frame. Longer output goes as several, and what Universal Exports states at registration lowers it. With room for its header, the default is the gateway's default `frame_bytes` |
-| `pre_bind_terminal_bytes` | 1 MiB | Bytes of terminal output held for a Session not yet bound to its Mission; past it the oldest goes |
-| `publish_retry_delay` | 0.5 | Seconds before a failed publication is tried again; each try doubles it, up to `retry_max_delay` |
-| `retry_max_delay` | 30 | The longest pause between tries, of a publication or of an input or control poll |
-| `refresh_every` | 15 | Seconds between registering every live Session again, which is how a gateway restarted during a quiet spell learns of them |
-| `input_retry_delay` | 0.1 | Seconds before a failed input or control poll is tried again; each try doubles it, up to `retry_max_delay` |
-| `control_wait` | 1 | Seconds Universal Exports holds a control poll open |
-| `input_wait` | 20 | Seconds Universal Exports holds an input poll open; a keystroke ends it at once |
-| `control_queue` | 16 | Mission controls queued for the scheduler |
-| `control_report_attempts` | 3 | Times the outcome of a control is reported |
+| `request_timeout` | 2 | **Longest request to Universal Exports.** Seconds one request to Universal Exports may take. |
+| `queue` | 64 | **Events waiting to publish.** Events waiting for Universal Exports; past it output gives way, oldest first, and a Session's latest state is kept. |
+| `terminal_bytes` | 192 KiB | **Terminal output in one frame.** Bytes of terminal output in one published frame. Longer output goes as several, and what Universal Exports states at registration lowers it. With room for its header, the default is the gateway's default `frame_bytes`. |
+| `pre_bind_terminal_bytes` | 1 MiB | **Terminal output kept before a Mission binds.** Bytes of terminal output kept for a Session not yet bound to its Mission; past it the oldest goes. |
+| `publish_retry_delay` | 0.5 | **Retry a failed publication after.** Seconds before a failed publication is tried again; each try doubles it, up to `retry_max_delay`. |
+| `retry_max_delay` | 30 | **Longest pause between tries.** The longest pause between tries, of a publication or of an input or control poll. |
+| `refresh_every` | 15 | **Register live Sessions again every.** Seconds between registering every live Session again, which is how a gateway restarted during a quiet spell learns of them. |
+| `input_retry_delay` | 0.1 | **Retry a failed input or control poll after.** Seconds before a failed input or control poll is tried again; each try doubles it, up to `retry_max_delay`. |
+| `control_wait` | 1 | **Control poll held open.** Seconds Universal Exports holds a control poll open; kept under `request_timeout`. |
+| `input_wait` | 20 | **Input poll held open.** Seconds Universal Exports holds an input poll open; a keystroke ends it at once, so a long wait costs no delay. The gateway's `max_poll_wait` bounds it. |
+| `control_queue` | 16 | **Mission controls queued.** Mission controls queued for the scheduler. |
+| `control_report_attempts` | 3 | **Tries to report a control's outcome.** Times the outcome of a control is reported. |
+<!-- schema:record.station.publisher:end -->
 
 `[sources]`
 
-| Key | Default | What |
+<!-- schema:record.station.sources:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `poll` | 60 | Seconds between polls of a Source whose `interval_secs` is not set |
-| `min_poll` | 10 | The shortest interval a Source is polled at, in seconds; a smaller `interval_secs` is raised to it, and 0 takes the floor away |
-| `report_every` | 15 | Seconds between rounds reporting finished briefs to their Sources |
-| `sleeper_every` | 20 | Seconds between rounds firing Sleepers |
-| `outbox_every` | 5 | Seconds between rounds sending the outbox of tracker writes |
-| `reply_every` | 60 | Seconds between rounds reading new comments on the issues Missions are linked to |
-| `outbox_batch` | 20 | Outbox entries sent in one round |
-| `send_attempts` | 5 | Sends tried before an outbox entry fails |
-| `retry_backoff` | 30 | Seconds before a failed send is tried again; each attempt doubles it |
+| `poll` | 60 | **Between polls of a Source.** Seconds between polls of a Source whose `interval_secs` is not set. |
+| `min_poll` | 10 | **Shortest poll of a Source.** The shortest interval a Source is polled at, in seconds; a smaller `interval_secs` is raised to it, and 0 takes the floor away. |
+| `report_every` | 15 | **Report finished briefs every.** Seconds between rounds reporting finished briefs to their Sources. |
+| `sleeper_every` | 20 | **Fire Sleepers every.** Seconds between rounds firing Sleepers. |
+| `outbox_every` | 5 | **Send the tracker outbox every.** Seconds between rounds sending the outbox of tracker writes. |
+| `reply_every` | 60 | **Read new issue comments every.** Seconds between rounds reading new comments on the issues Missions are linked to. |
+| `outbox_batch` | 20 | **Outbox entries sent per round.** Outbox entries sent in one round. |
+| `send_attempts` | 5 | **Tries to send an outbox entry.** Sends tried before an outbox entry fails. |
+| `retry_backoff` | 30 | **Retry a failed send after.** Seconds before a failed send is tried again; each attempt doubles it. |
+| `replies_read` | 10 | **Replies shown of a linked issue.** Stored replies `issue_read` shows of a linked issue, newest first. |
+<!-- schema:record.station.sources:end -->
 
 `[transports]`
 
-| Key | Default | What |
+<!-- schema:record.station.transports:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `reprobe_after` | 60 | Seconds before a Theater the Station could not reach is probed again |
-| `report_every` | 300 | Seconds between looks over a Theater for its requirements and ambient credentials |
+| `reprobe_after` | 60 | **Probe a failed Theater again after.** Seconds before a Theater the Station could not reach is probed again. |
+| `report_every` | 300 | **Look a Theater over every.** Seconds between looks over a Theater for its requirements and ambient credentials. |
+<!-- schema:record.station.transports:end -->
 
 `[recovery]`
 
-| Key | Default | What |
+<!-- schema:record.station.recovery:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `first_reattach_delay` | 5 | Seconds before the first try to re-attach to a Session; each failed try doubles it |
-| `max_reattach_delay` | 60 | The longest wait between tries, in seconds |
-| `give_up_tries` | 10 | Tries at a Registry step a concurrent renewal can refuse, when the Station gives a lease up |
-| `notes_every` | 15 | Seconds between writes of a Session's recent events to its record |
+| `first_reattach_delay` | 5 | **First re-attach try after.** Seconds before the first try to re-attach to a Session; each failed try doubles it. |
+| `max_reattach_delay` | 60 | **Longest wait between re-attach tries.** The longest wait between tries, in seconds. |
+| `give_up_tries` | 10 | **Tries to give a lease up.** Tries at a Registry step a concurrent renewal can refuse, when the Station gives a lease up. |
+| `notes_every` | 15 | **Write a Session's recent events every.** Seconds between writes of a Session's recent events to its record. |
+| `probe_timeout` | 30 | **Longest look at a Theater.** Seconds the look at whether a Session's Theater still answers may take. |
+<!-- schema:record.station.recovery:end -->
 
 `[vetting]`
 
-| Key | Default | What |
+<!-- schema:record.station.vetting:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `findings` | 16 | Findings a verdict keeps |
-| `review_work` | 50 | Other work a review brief lists for the reviewer |
-| `detail_bytes` | 256 | Bytes of a finding's detail, of the lines a review brief quotes, and of a vetting timeline detail |
-| `phrases` | 256 | Manipulation phrases an Operation may screen for; past it, or past `phrase_bytes`, screened briefs are held |
-| `phrase_bytes` | 256 | Bytes of one such phrase |
-| `rate_window` | 3,600 | Seconds of the rolling window hourly rates are counted over |
-| `proposals` | 500 | Pending Mission proposals looked at per Operation each round, within the Registry's `[registry.limits.proposals] results` |
-| `proposal_request_ttl` | 3,600 | Seconds the green ink request a class authorisation approves for a proposal lasts |
-| `proposal_settle` | 30 | Seconds a proposal waits before M promotes it on its own |
-| `expiry_sweep` | 60 | Seconds between looks at rate holds for expiry |
+| `findings` | 16 | Findings kept per verdict. |
+| `review_work` | 50 | **Other work a review brief lists.** Other work a review brief lists for the reviewer. |
+| `detail_bytes` | 256 | **Longest finding detail.** Bytes of a finding's detail, of the lines a review brief quotes, and of a vetting timeline detail. |
+| `phrases` | 256 | **Manipulation phrases per Operation.** Manipulation phrases an Operation may screen for; past it, or past `phrase_bytes`, screened briefs are held. |
+| `phrase_bytes` | 256 | **Longest manipulation phrase.** Bytes of one such phrase. |
+| `rate_window` | 3,600 | **Rates are counted over.** Seconds of the rolling window hourly rates are counted over. |
+| `proposals` | 500 | **Proposals looked at per round.** Pending Mission proposals looked at per Operation each round, within `[registry.limits.proposals] results`. |
+| `proposal_request_ttl` | 3,600 | **A proposal's green ink request lasts.** Seconds the green ink request a class authorisation approves for a proposal lasts. |
+| `proposal_settle` | 30 | **A proposal waits before it is promoted.** Seconds a proposal waits before M promotes it on its own. |
+| `expiry_sweep` | 60 | **Look at rate holds every.** Seconds between looks at rate holds for expiry. |
+| `answer_tail_bytes` | 16 KiB | **Review answer searched.** Bytes at the end of a review's answer searched for its verdict; the answer ends the message. |
+<!-- schema:record.station.vetting:end -->
 
 `[accounts]`: pool accounts.
 
-| Key | Default | What |
+<!-- schema:record.station.accounts:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `reset_grace` | 15 | Seconds past a reported reset before a Session parked on a limit resumes |
-| `unknown_use_permille` | 500 | Thousandths used an account whose provider reported nothing counts as, 0 to 1,000 |
-| `claim_ttl` | 60 | Seconds a claim on an account lasts unless the Station renews it at check-in |
-| `limit_horizon` | 691,200 (8 days) | The longest a limited account is kept out, in seconds, whatever reset time its provider reports |
-| `login_timeout` | 60 | Seconds a pool account's login command may take |
+| `reset_grace` | 15 | **Wait past a reported reset.** Seconds past a reported reset before a Session parked on a limit resumes. |
+| `unknown_use_permille` | 500 | **Use assumed when none is reported.** Thousandths used an account whose provider reported nothing counts as, 0 to 1,000. |
+| `claim_ttl` | 60 | **A claim on an account lasts.** Seconds a claim on an account lasts unless the Station renews it at check-in. |
+| `limit_horizon` | 691,200 (8 days) | **Longest a limited account stays out.** The longest a limited account is kept out, in seconds, whatever reset time its provider reports. |
+| `login_timeout` | 60 | **Longest account login.** Seconds a pool account's login command may take. |
+<!-- schema:record.station.accounts:end -->
 
 `[approvals]`: green ink steps.
 
-| Key | Default | What |
+<!-- schema:record.station.approvals:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `kind_bytes` | 32 | Bytes of the kind of a step an Agent asks about |
-| `target_bytes` | 256 | Bytes of its target |
-| `classify_nesting` | 4 | How deep nested shells (`sh -c "sh -c ..."`) and git aliases are followed when a command is read; the harness gate gets it in `AI6_GREEN_INK_NESTING` |
+| `kind_bytes` | 32 | **Longest green ink step kind.** Bytes of the kind of a step an Agent asks about. |
+| `target_bytes` | 256 | **Longest green ink step target.** Bytes of the target of a step an Agent asks about. |
+| `classify_nesting` | 4 | **Nesting followed when classifying a command.** How deep nested shells (`sh -c "sh -c ..."`) and git aliases are followed when a command is read; the harness gate gets it in `AI6_GREEN_INK_NESTING`. |
+| `checked_steps` | 64 | **Steps checked at once.** Steps one `check_approval` call may ask about. |
+<!-- schema:record.station.approvals:end -->
 
 `[harness]`: a working directory's harness configuration under `harness.project_settings =
 "pinned"`, and a skill Moneypenny's desk installs.
 
-| Key | Default | What |
+<!-- schema:record.station.harness:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `manifest_file_bytes` | 1 MiB | Bytes of one file |
-| `manifest_bytes` | 16 MiB | Bytes of all of them |
-| `manifest_files` | 4,096 | Files |
+| `manifest_file_bytes` | 1 MiB | **Largest harness configuration file.** Bytes of one file of a project's harness configuration. |
+| `manifest_bytes` | 16 MiB | **Largest harness configuration.** Bytes of the whole configuration. |
+| `manifest_files` | 4,096 | **Files in a harness configuration.** Files in the configuration. |
+<!-- schema:record.station.harness:end -->
 
 `[provision]`: probing and provisioning Theaters.
 
-| Key | Default | What |
+<!-- schema:record.station.provision:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `probe_timeout` | 60 | Seconds the requirements probe, and a resources sample, may take |
-| `command_timeout` | 120 | Seconds one provisioning command may take |
-| `name_bytes` | 64 | Bytes of a required program's name; a longer one fails the probe |
-| `version_chars` | 200 | Characters of a program's version kept from the probe |
+| `probe_timeout` | 60 | **Longest requirements probe.** Seconds the requirements probe, and a resources sample, may take. |
+| `command_timeout` | 120 | **Longest provisioning command.** Seconds one provisioning command may take. |
+| `name_bytes` | 64 | **Longest required program name.** Bytes of a required program's name; a longer one fails the probe. |
+| `version_chars` | 200 | **Longest program version kept.** Characters of a program's version kept from the probe. |
+<!-- schema:record.station.provision:end -->
 
 `[secrets]`
 
-| Key | Default | What |
+<!-- schema:record.station.secrets:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `lease_ttl` | 3,600 | Seconds the leases of a Session's loadout and pool account secrets last |
-| `max_lease_ttl` | 3,600 | The longest lease, in seconds; a green ink secret's lease lasts as long as its approval, up to it |
+| `lease_ttl` | 3,600 | **A secret's lease lasts.** Seconds the leases of a Session's loadout and pool account secrets last. |
+| `max_lease_ttl` | 3,600 | **Longest secret lease.** The longest lease, in seconds; a green ink secret's lease lasts as long as its approval, up to it. |
+| `min_matched_bytes` | 6 | **Shortest secret looked for.** Secrets shorter than this are not looked for in what an Agent writes outward: a short one would refuse ordinary words. Smaller is looser. |
+<!-- schema:record.station.secrets:end -->
 
 `[terminal_output]`
 
-| Key | Default | What |
+<!-- schema:record.station.terminal_output:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `json_line_bytes` | 64 MiB | Bytes of one line of a JSON harness's output held while the rest arrives |
-| `csi_bytes` | 64 | Bytes of one terminal control sequence before it is read as text |
+| `json_line_bytes` | 64 MiB | **Longest line of JSON output.** Bytes of one line of a JSON harness's output held while the rest arrives. |
+| `csi_bytes` | 64 | **Longest terminal control sequence.** Bytes of one terminal control sequence before it is read as text. |
+<!-- schema:record.station.terminal_output:end -->
 
 `[green_ink]`
 
-| Key | Default | What |
+<!-- schema:record.station.green_ink:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `gate_timeout` | 30 | Seconds the harness gate's exchange with the Station may take; the gate gets it in `AI6_GREEN_INK_TIMEOUT` |
+| `gate_timeout` | 30 | **Longest harness gate exchange.** Seconds the harness gate's exchange with the Station may take; the gate gets it in `AI6_GREEN_INK_TIMEOUT`. |
+<!-- schema:record.station.green_ink:end -->
 
 `[detached]`: harnesses run detached on another host, over its transport.
 
-| Key | Default | What |
+<!-- schema:record.station.detached:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `poll` | 0.2 | Seconds between reads of the harness's output |
-| `script_timeout` | 30 | Seconds one of the wrapper's scripts may take |
-| `name_chars` | 64 | Characters of the Mission's name in the wrapper's file names |
+| `poll` | 0.2 | **Read a detached harness's output every.** Seconds between reads of a detached harness's output. |
+| `script_timeout` | 30 | **Longest wrapper script.** Seconds one of the wrapper's scripts may take over the transport. |
+| `name_chars` | 64 | **Session name in the wrapper's files.** Characters of the Session's name in the wrapper's file names. |
+<!-- schema:record.station.detached:end -->
 
 `[runner]`: field runners, and the Station's side of them.
 
-| Key | Default | What |
+<!-- schema:record.station.runner:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `pump_poll` | 0.25 | Seconds a runner waits for a harness's next event before it checks whether to stop |
-| `feed_poll` | 0.05 | Seconds between a runner connection's looks for spooled events to send |
-| `replay_batch` | 256 | Spooled events a runner connection takes from the spool at once |
-| `keep_ended` | 604,800 (a week) | Seconds an ended Session is kept by its runner |
-| `cable_request_bytes` | 4 MiB | Bytes of one request through a runner's Cable relay |
-| `cable_connect_timeout` | 10 | Seconds a runner's Cable relay may take to reach the Station |
-| `read_wait` | 1 | Seconds one read by the Station of a runner's Session waits for an event |
-| `connect_timeout` | 5 | Seconds `ai6 runner connect` may take to reach the runner's loopback port |
-| `answer_wait` | 10 | Seconds a runner that accepted `ai6 runner connect` has to answer its authentication |
-| `start_wait` | 30 | Seconds a started runner has to answer |
-| `start_margin` | 30 | Seconds starting a runner over a transport may take past `start_wait` |
-| `start_poll` | 0.05 | Seconds between looks at whether a runner started on this host serves yet |
-| `terminal_poll` | 0.2 | Seconds one read of `ai6 runner connect`'s terminal waits before it checks whether to stop or give up |
-| `superseded_close_wait` | 0.2 | Seconds a connection another one took a Session from stays open, so the notice saying so is written first |
-| `retry_pause` | 0.1 | Seconds at least between the Station's tries at a runner it cannot reach |
+| `pump_poll` | 0.25 | **Check whether to stop after waiting.** Seconds a runner waits for a harness's next event before it checks whether to stop. |
+| `feed_poll` | 0.05 | **Look for spooled events every.** Seconds between a runner connection's looks for spooled events to send. |
+| `replay_batch` | 256 | **Spooled events taken at once.** Spooled events a runner connection takes from the spool at once. |
+| `keep_ended` | 604,800 (7 days) | **Keep an ended Session for.** Seconds an ended Session is kept by its runner. |
+| `cable_request_bytes` | 4 MiB | **Largest request through the Cable relay.** Bytes of one request through a runner's Cable relay. |
+| `cable_connect_timeout` | 10 | **The Cable relay reaches the Station within.** Seconds a runner's Cable relay may take to reach the Station. |
+| `read_wait` | 1 | **One read of a Session waits.** Seconds one read by the Station of a runner's Session waits for an event. |
+| `connect_timeout` | 5 | **`ai6 runner connect` reaches the runner within.** Seconds `ai6 runner connect` may take to reach the runner's loopback port. |
+| `answer_wait` | 10 | **A runner answers its authentication within.** Seconds a runner that accepted `ai6 runner connect` has to answer its authentication. |
+| `start_wait` | 30 | **A started runner answers within.** Seconds a started runner has to answer. |
+| `start_margin` | 30 | **Extra time to start over a transport.** Seconds starting a runner over a transport may take past `start_wait`. |
+| `start_poll` | 0.05 | **Look at whether a started runner serves every.** Seconds between looks at whether a runner started on this host serves yet. |
+| `terminal_poll` | 0.2 | **One read of the connect terminal waits.** Seconds one read of `ai6 runner connect`'s terminal waits before it checks whether to stop or give up. |
+| `superseded_close_wait` | 0.2 | **Keep a superseded connection open for.** Seconds a connection another one took a Session from stays open, so the notice saying so is written before the socket closes under it. |
+| `retry_pause` | 0.1 | **Shortest pause between tries at a runner.** Seconds at least between the Station's tries at a runner it cannot reach. |
+<!-- schema:record.station.runner:end -->
 
 `[api]`: the Station's own HTTP API.
 
-| Key | Default | What |
+<!-- schema:record.station.api:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `refused_body_drain_bytes` | 64 KiB | Bytes of a refused request's body the Station's own API reads before it answers |
+| `refused_body_drain_bytes` | 64 KiB | **Refused request body read.** Bytes of a refused request's body the Station's own API reads before it answers. |
+<!-- schema:record.station.api:end -->
 
 `[audit]`
 
-| Key | Default | What |
+<!-- schema:record.station.audit:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `names_detail_chars` | 240 | Characters of the secret names a credential timeline event lists |
-| `target_bytes` | 512 | Bytes of a refused configuration's audit target |
+| `names_detail_chars` | 240 | **Secret names a credential event lists.** Characters of the secret names a credential timeline event lists. |
+| `target_bytes` | 512 | **Longest refused configuration target.** Bytes of a refused configuration's audit target. |
+<!-- schema:record.station.audit:end -->
 
 `[theaters]`
 
-| Key | Default | What |
+<!-- schema:record.station.theaters:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `ephemeral_name_bytes` | 100 | Bytes of an ephemeral Theater's name; a longer one is cut and given a digest |
+| `ephemeral_name_bytes` | 100 | **Longest ephemeral Theater name.** Bytes of an ephemeral Theater's name; a longer one is cut and given a digest. |
+<!-- schema:record.station.theaters:end -->
 
 `[theater_tools]`: the `theater_*` tools of a remote-hands Session.
 
-| Key | Default | What |
+<!-- schema:record.station.theater_tools:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `output_bytes` | 256 KiB | Bytes of each stream of a command's output `theater_run` returns |
-| `read_bytes` | 256 KiB | Bytes `theater_read` returns |
-| `timeout` | 120 | Seconds a `theater_run` command may take unless it asks for another |
-| `max_timeout` | 3,600 | The longest a command may ask for, in seconds |
-| `git_timeout` | 30 | Seconds each git command the tools run for green ink may take |
+| `output_bytes` | 256 KiB | **Output `theater_run` returns.** Bytes of each stream of a command's output `theater_run` returns. |
+| `read_bytes` | 256 KiB | **What `theater_read` returns.** Bytes `theater_read` returns. |
+| `timeout` | 120 | **A command may take.** Seconds a `theater_run` command may take unless it asks for another. |
+| `max_timeout` | 3,600 | **Longest a command may ask for.** The longest a command may ask for, in seconds. |
+| `git_timeout` | 30 | **A git command may take.** Seconds each git command the tools run for green ink may take. |
+<!-- schema:record.station.theater_tools:end -->
 
 `[head_of_station]`
 
-| Key | Default | What |
+<!-- schema:record.station.head_of_station:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `listed_changes` | 20 | Changes of a kept safe house listed in one report |
-| `survey_entries` | 500,000 | Directory entries one survey of a safe house walks before it reports a partial size |
+| `listed_changes` | 20 | **Safe house changes in one report.** Changes of a kept safe house listed in one report. |
+| `survey_entries` | 500,000 | **Directory entries one survey walks.** Directory entries one survey of a safe house walks before it reports a partial size. |
+| `reason_bytes` | 2,000 | **Longest reason for a safe house deletion.** Bytes of the reason a round gives when it asks to delete a safe house; longer is cut. |
+| `audit_target_bytes` | 500 | **Longest provisioning audit target.** Bytes of what a provisioning round's audit record names; longer is cut. |
+<!-- schema:record.station.head_of_station:end -->
 
 The `cables` record takes `grants`, `inbound` and `channels`, and the relay's limits:
 `max_fanout` (Agent Sessions one broadcast may reach, default 100), `sender_rate` and
@@ -968,91 +1136,103 @@ token_ttl = 1800
 and what a Station reads of her memory. A Station reads it for each job and harness start;
 Universal Exports when it starts.
 
-| Key | Default | What |
+<!-- schema:record.assistant.limits:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `message_bytes` | 32 KiB | Bytes of one job's message; Universal Exports refuses a person's longer message |
-| `context_bytes` | 24 KiB | Bytes of a job's standing context and recap together; a recap stays under half |
-| `cable_grants` | 64 | Operations one job grants Cable actions in |
-| `skills` | 64 | Skills one job gives her |
-| `event_bytes` | 64 KiB | Bytes of one reported event's text; longer text is cut, and a memory change whose diff is longer is not kept |
-| `events` | 64 | Events in one report |
-| `change_bytes` | 64 KiB | Bytes of file content in one memory change, commit, memory write or memory read |
-| `change_files` | 32 | Files in one memory change or commit |
-| `commit_message_bytes` | 4,096 | Bytes of one commit's message |
-| `shared_bases` | 32 | Shared-change bases one event carries, and Universal Exports keeps per conversation |
-| `memory_list_files` | 1,000 | Files one memory listing names |
-| `memory_list_bytes` | 128 KiB | Bytes of paths one memory listing names |
-| `inlined_memory_bytes` | 32 KiB | Bytes of `MEMORY.md` inlined into her standing context |
-| `memory_file_bytes` | 256 KiB | Bytes of one memory file the desk reads; a longer one is read to this length |
-| `memory_files` | 1,024 | Memory files the desk reads at a turn's edge |
-| `memory_bytes` | 8 MiB | Bytes over all of them |
-| `memory_walk` | 10,000 | Files of `personal/` looked at to name what a turn changed |
+| `cable_grants` | 64 | **Operations with Cables in one job.** Operations one job grants Cable actions in. |
+| `message_bytes` | 32 KiB | **Longest message.** Bytes of one job's message; Universal Exports refuses a person's longer message. |
+| `context_bytes` | 24 KiB | **Standing context and recap.** Bytes of a job's standing context and recap together; a recap stays under half. |
+| `event_bytes` | 64 KiB | **Longest reported event.** Bytes of one reported event's text; longer text is cut, and a memory change whose diff is longer is not kept. |
+| `events` | 64 | Events in one report. |
+| `change_bytes` | 64 KiB | **File content in one memory change.** Bytes of file content in one memory change, commit, memory write or memory read. |
+| `change_files` | 32 | **Files in one memory change.** Files in one memory change or commit. |
+| `commit_message_bytes` | 4 KiB | **Longest commit message.** Bytes of one commit's message. |
+| `shared_bases` | 32 | **Shared change bases.** Shared-change bases one event carries, and Universal Exports keeps for one conversation until their calls arrive. |
+| `memory_list_files` | 1,000 | **Files in a memory listing.** Files one memory listing names. |
+| `memory_list_bytes` | 128 KiB | **Paths in a memory listing.** Bytes of paths one memory listing names. |
+| `skills` | 64 | **Skills in one job.** Skills one job gives her. |
+| `inlined_memory_bytes` | 32 KiB | **MEMORY.md in her context.** Bytes of MEMORY.md inlined into her standing context. |
+| `memory_file_bytes` | 256 KiB | **Longest memory file read.** Bytes of one memory file the desk reads; a longer file is read to this length. |
+| `memory_files` | 1,024 | **Memory files read per turn.** Memory files the desk reads at a turn's edge. |
+| `memory_bytes` | 8 MiB | **All memory read per turn.** Bytes over all the memory files the desk reads at a turn's edge. |
+| `memory_walk` | 10,000 | **Files looked at per turn.** Files of her personal folder looked at to name what a turn changed. |
+| `page_file_bytes` | 8 MiB | **Largest file read for a page.** Bytes of one file the Station reads to publish a page. |
+| `page_files` | 200 | **Files read for a page.** Files the Station reads to publish one page. |
+| `page_bytes` | 16 MiB | **All the files read for a page.** Bytes over all the files of one page the Station reads. |
+<!-- schema:record.assistant.limits:end -->
 
 `[assistant.desk]`: how each Station's desk runs her harnesses. Read for each job, harness
 start and memory request; `known`, `parked` and `report_queue` at each use; `job_wait`,
 `job_bytes`, `job_retry`, `call_margin`, `report_attempts` and `report_retry` at each poll or
 report; `unlocked_stale` when the desk starts.
 
-| Key | Default | What |
+<!-- schema:record.assistant.desk:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `idle` | 600 | Seconds a harness waits for the next message, or writes nothing while answering, before it is closed; `"none"` keeps it |
-| `live` | 4 | Harnesses a Station runs or starts at once; past it a message is refused and another Station is asked |
-| `token_margin` | 120 | Seconds before its tool token expires that a running harness is restarted with the job's; a job with another token restarts it whatever is left |
-| `job_wait` | 1 | Seconds Universal Exports holds a job poll open |
-| `job_bytes` | 256 KiB | Bytes of one job as Universal Exports sends it |
-| `call_margin` | 2 | Seconds a request to Universal Exports may take past what it waits for |
-| `job_retry` | 0.5 | Seconds before a failed job poll is tried again, and the least between polls when Universal Exports answers early |
-| `report_queue` | 256 | Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are dropped |
-| `report_attempts` | 3 | Times a report is sent before it counts as lost |
-| `report_retry` | 0.2 | Seconds between tries of a report that did not arrive |
-| `parked` | 64 | Memory changes kept on the Station because they could not be delivered; past it the oldest is dropped |
-| `known` | 1,024 | Conversations whose provider Session the desk remembers for a resume |
-| `close_wait` | 10 | Seconds a message waits for its conversation's closing harness |
-| `remove_retry` | 2 | Seconds removing a closed harness's directory is tried again |
-| `unlocked_stale` | 3,600 | Seconds before a working directory left by a desk that is gone, without its lock, is swept |
-| `clone_timeout` | 120 | Seconds a clone of one of her repositories may take; a memory request's clone also stops at its deadline |
-| `clone_bytes` | 512 MiB | Bytes a clone may hold on disk, then it is given up and removed |
-| `save_bytes` | 16 MiB | Bytes one save of her work in `personal/` may commit; past it nothing is saved and she is told |
-| `memory_requests` | 4 | The app's memory requests a Station makes at once; the next is refused |
+| `idle` | 600 | **Close an idle harness after.** Seconds a harness waits for the next message, or writes nothing while answering, before it is closed; `"none"` keeps it. |
+| `live` | 4 | **Harnesses on one Station.** Harnesses a Station runs or starts at once; past it a message is refused and another Station is asked. |
+| `token_margin` | 120 | **Restart before a token expires.** Seconds before its tool token expires that a running harness is restarted with the job's; a job with another token restarts it whatever is left. |
+| `job_wait` | 1 | **Job poll held open.** Seconds Universal Exports holds a job poll open. |
+| `job_bytes` | 256 KiB | **Largest job.** Bytes of one job as Universal Exports sends it. |
+| `call_margin` | 2 | **Extra time for a request.** Seconds a request to Universal Exports may take past what it waits for. |
+| `job_retry` | 0.5 | **Retry a failed job poll after.** Seconds before a failed job poll is tried again, and the least between polls when Universal Exports answers early. |
+| `report_queue` | 256 | **Reports waiting to be sent.** Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are dropped. |
+| `report_attempts` | 3 | **Tries to send a report.** Times a report is sent before it counts as lost. |
+| `report_retry` | 0.2 | **Retry a report after.** Seconds between tries of a report that did not reach Universal Exports. |
+| `parked` | 64 | **Memory changes kept undelivered.** Memory changes kept on the Station because they could not be delivered; past it the oldest is dropped. |
+| `known` | 1,024 | **Conversations remembered for a resume.** Conversations whose provider Session the desk remembers for a resume. |
+| `close_wait` | 10 | **Wait for a closing harness.** Seconds a message waits for the conversation's closing harness. |
+| `remove_retry` | 2 | **Retry removing a directory for.** Seconds removing a closed harness's directory is tried again. |
+| `unlocked_stale` | 3,600 | **Sweep abandoned directories after.** Seconds before a directory of working directories left without its lock, or a lock without its directory, is swept. |
+| `clone_timeout` | 120 | **Longest clone.** Seconds a clone of one of her repositories may take; a memory request's clone also stops at its deadline. |
+| `clone_bytes` | 512 MiB | **Largest clone.** Bytes a clone of one of her repositories may hold on disk, then it is given up and removed. |
+| `save_bytes` | 16 MiB | **Largest save of her work.** Bytes one save of her work in her personal folder may commit; past it nothing is saved and she is told. |
+| `memory_requests` | 4 | **Memory requests at once.** The app's memory requests a Station makes at once; past it the next is refused. |
+| `held_cables` | 32 | **Cables held per conversation.** Cables one conversation holds for the person's confirmation; past it a send is refused, and nothing the person has not seen to is dropped to make room. |
+| `held_cable_ttl` | 3,600 | **A held Cable waits.** Seconds a Cable held for the person's confirmation waits before it is dropped. |
+| `page_upload_timeout` | 60 | **Longest page file upload.** Seconds sending one file of a page to Universal Exports may take. |
+<!-- schema:record.assistant.desk:end -->
 
 `[assistant.gateway]`: how Universal Exports keeps her conversations. Read when it starts.
 
-| Key | Default | What |
+<!-- schema:record.assistant.gateway:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `conversations_per_person` | 20 | Conversations kept for one person; the oldest goes first |
-| `conversations` | 2,000 | Conversations kept in all |
-| `conversation_age` | 604,800 (7 days) | Seconds a conversation is kept untouched |
-| `conversation_entries` | 500 | Entries kept per conversation |
-| `conversation_bytes` | 1 MiB | Bytes of entries kept per conversation; the oldest go first |
-| `person_bytes` | 4 MiB | Bytes of entries kept per person; a person's views go first |
-| `live_per_person` | 2 | One person's conversations with a harness running or an answer pending; the least recently used idle harness is closed to make room |
-| `tool_calls_per_minute` | 120 | Tool calls one conversation makes in a minute |
-| `memory_requests_per_person` | 2 | The app's memory requests waiting for a Station, for one person; `429` past it |
-| `memory_requests` | 16 | The same, for everyone |
-| `token_ttl` | 3,600 | Seconds a tool token given to a harness is accepted; past it, while that harness's answer runs and its Station was heard from within `answer_deadline`, until the person stops it |
-| `token_reuse_margin` | 600 | Seconds a token must still have to be given to the next message; kept above `[assistant.desk] token_margin` |
-| `answer_timeout` | 60 | Seconds a Station has to take up a message before another is asked |
-| `answer_deadline` | 600 | Seconds an accepted message may go without word from its Station before it is given up |
-| `memory_timeout` | 30 | Seconds a Station has to answer a memory request |
-| `proposal_ttl` | 3,600 | Seconds a proposal waits for the person's confirmation |
-| `proposals` | 32 | Proposals waiting in one conversation |
-| `message_bytes` | 16 KiB | Bytes of one message the person writes |
-| `memory_message_bytes` | 1,024 | Bytes of a commit message the person writes for a memory change |
-| `change_message_chars` | 200 | Characters of the one-line message of a shared change she proposes |
-| `recap_bytes` | 8 KiB | Bytes of the recap a conversation's new harness starts with |
-| `ready_entries` | 100 | Entries the app is sent when it opens a conversation |
-| `ready_bytes` | 512 KiB | Bytes of those entries |
-| `socket_message_bytes` | 64 KiB | Bytes of one message on the app's socket |
-| `hello_timeout` | 10 | Seconds the app's socket has to say hello |
-| `max_wait` | 25 | Seconds a Station's job poll may be held open, also while `assistant = false` |
-| `sweep_every` | 1 | Seconds between an open conversation's looks for jobs no Station took up |
-| `shared_base_wait` | 5 | Seconds a shared change waits for its Station's report of what it was made from |
-| `event_buffer` | 256 | Events queued for a conversation's open sockets; one further behind is closed |
-| `route_bytes` | 4 MiB | Bytes of an AI6 route's answer to one of her tools |
-| `result_chars` | 200,000 | Characters of one tool's answer she is given; longer is cut |
-| `author_chars` | 200 | Characters of a person's name and email on her commits |
-| `proposal_reads` | 16 | Read tool calls of one turn a proposal lists as what she had read |
-| `audit_target_bytes` | 512 | Bytes of the target of an audit record of her actions |
+| `conversations_per_person` | 20 | **Conversations per person.** Conversations kept for one person; the oldest goes first. |
+| `conversations` | 2,000 | **Conversations in all.** Conversations kept in all. |
+| `conversation_age` | 604,800 (7 days) | **Keep an untouched conversation for.** Seconds a conversation is kept untouched. |
+| `conversation_entries` | 500 | **Entries per conversation.** Entries kept per conversation. |
+| `conversation_bytes` | 1 MiB | **Entries kept per conversation, in size.** Bytes of entries kept per conversation; the oldest go first. |
+| `person_bytes` | 4 MiB | **Entries kept per person, in size.** Bytes of entries kept per person; a person's views go first. |
+| `live_per_person` | 2 | **Live conversations per person.** One person's conversations with a harness running or an answer pending; the least recently used idle harness is closed to make room. |
+| `tool_calls_per_minute` | 120 | **Tool calls a minute.** Tool calls one conversation makes in a minute. |
+| `memory_requests_per_person` | 2 | **Memory requests waiting per person.** The app's memory requests waiting for a Station for one person; `429` past it. |
+| `memory_requests` | 16 | **Memory requests waiting in all.** The app's memory requests waiting for a Station in all. |
+| `token_ttl` | 3,600 | **A tool token lasts.** Seconds a tool token given to a harness is accepted; past it, while that harness's answer runs and its Station was heard from within `answer_deadline`, until the person stops it. |
+| `token_reuse_margin` | 600 | **Keep a token if it still has.** Seconds a token must still have to be given to the next message; kept above `[assistant.desk] token_margin`. |
+| `answer_timeout` | 60 | **A Station takes up a message within.** Seconds a Station has to take up a message before another is asked. |
+| `answer_deadline` | 600 | **Give up on a silent answer after.** Seconds an accepted message may go without word from its Station before it is given up. |
+| `memory_timeout` | 30 | **A Station answers a memory request within.** Seconds a Station has to answer a memory request. |
+| `proposal_ttl` | 3,600 | **A proposal waits.** Seconds a proposal waits for the person's confirmation. |
+| `proposals` | 32 | **Proposals waiting per conversation.** Proposals waiting for the person in one conversation. |
+| `message_bytes` | 16 KiB | **Longest message a person writes.** Bytes of one message the person writes. |
+| `memory_message_bytes` | 1 KiB | **Longest memory commit message.** Bytes of a commit message the person writes for a memory change. |
+| `change_message_chars` | 200 | **Longest shared change message.** Characters of the one-line message of a shared change she proposes. |
+| `recap_bytes` | 8 KiB | **Longest recap.** Bytes of the recap a conversation's new harness starts with. |
+| `ready_entries` | 100 | **Entries sent when a conversation opens.** Entries the app is sent when it opens a conversation. |
+| `ready_bytes` | 512 KiB | **Size of the entries sent then.** Bytes of entries the app is sent when it opens a conversation. |
+| `socket_message_bytes` | 64 KiB | **Longest message on the app's socket.** Bytes of one message on the app's socket. |
+| `hello_timeout` | 10 | **The app's socket says hello within.** Seconds the app's socket has to say hello. |
+| `max_wait` | 25 | **Longest job poll.** Seconds a Station's job poll may be held open, also while `assistant = false`. |
+| `sweep_every` | 1 | **Look for jobs nobody took every.** Seconds between an open conversation's looks for jobs no Station took up. |
+| `shared_base_wait` | 5 | **A shared change waits for its base.** Seconds a shared change waits for its Station's report of what it was made from. |
+| `event_buffer` | 256 | **Events queued for open sockets.** Events queued for one conversation's open sockets; a socket that falls further behind is closed. |
+| `route_bytes` | 4 MiB | **Largest route answer to her tools.** Bytes of an AI6 route's answer to one of her tools. |
+| `result_chars` | 200,000 | **Longest tool answer she is given.** Characters of one tool's answer she is given; longer is cut. |
+| `author_chars` | 200 | **Longest name and email on her commits.** Characters of a person's name and email on her commits. |
+| `audit_target_bytes` | 512 | **Longest audit record target.** Bytes of an audit record's target. |
+| `proposal_reads` | 16 | **Reads a proposal lists.** Read tool calls of one turn a proposal lists as what she had read. |
+<!-- schema:record.assistant.gateway:end -->
 
 `[assistant.pages]`: the pages she publishes and how they are served, read at each use, so a
 change applies to the next publish. A quota changed in either direction is a plain change,
@@ -1133,6 +1313,8 @@ checkout while the Registry lives in PostgreSQL.
 ## `ai6 config`
 
 ```console
+ai6 config schema                          # every section of ai6.cfg and of the records, with its title
+ai6 config schema record.station.scheduler # one section's JSON Schema: titles, defaults, units
 ai6 config path                            # the ai6.cfg in use
 ai6 config public --output web/ai6.cfg     # the public file a web page reads
 ai6 config show agent 007                  # one record, as TOML

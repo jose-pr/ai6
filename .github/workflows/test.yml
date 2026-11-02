@@ -112,6 +112,7 @@ jobs:
           echo "AI6_TEST_POSTGRES_URL=postgres://postgres:ci@localhost:5432/postgres?sslmode=disable" >> "$GITHUB_ENV"
           echo "AI6_TEST_POSTGRES_TLS_URL=postgres://postgres:ci@localhost:5433/postgres?sslrootcert=$tls/ca.pem" >> "$GITHUB_ENV"
       - run: cargo test --workspace --all-features
+      - run: cargo run -p ai6 --features cli --example settings_reference -- --check
       - run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
