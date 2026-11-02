@@ -15,7 +15,10 @@ ACP is the wire between the Station and the harness.
 
 AI6 implements ACP version 1 (stable). It does not use ACP's HTTP or WebSocket transports,
 proxies or unstable features, and speaks no `fs/*` or `terminal/*` methods: an agent works in its
-own working directory.
+own working directory. The client is the [`coqui-acp`](https://github.com/Boriken-Dev/coqui-acp)
+library, which refuses an agent that answers `initialize` with another protocol version; AI6 adds
+its launch extension, the event stream of its own facade and runner, and what a restricted Session
+may use. A line an agent writes is not capped.
 
 ## The `acp` handler
 

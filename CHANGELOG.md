@@ -82,6 +82,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The ACP client is the `coqui-acp` library, pinned by revision, with AI6's launch extension, the
+  event stream of its own facade and runner, runner sequence numbers and acknowledgements, restricted
+  Sessions and the words of `limit`, `blocked` and `failed` kept on top. What changes for a caller:
+  an agent that answers `initialize` with a protocol version other than 1 is refused; `exchange` takes
+  `Option<Duration>` (none waits without limit) in place of milliseconds; `lines_over_io`, `IoLines` and
+  `Diagnostics` are `coqui_acp::lines::over_io` and its types, taking a longest line (`UNBOUNDED_LINE_BYTES`
+  sets none); a restricted Session's agent that runs an edit, delete, move or execute tool is ended with
+  `the agent ran a … tool without leave; the session was ended`; an unreadable permission request is
+  refused in the words of the library. A façade whose start does not come before its connection ends is
+  a start failure at once, not after the start timeout.
 - The `station` and `unex` records and their tables read through the type's one declaration instead
   of serde's derives. A stored record keeps loading as it was written; a refusal names the key and
   never the value. `UnexRecord`'s `*_config` fields are `ai6::ProviderConfig`.
