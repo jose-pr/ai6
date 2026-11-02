@@ -1448,6 +1448,9 @@ fn spawn(
     Ok((terminal.spawn(&value)?, weakening))
 }
 
+/// The app server of a Mission, with AI6's servers its environment names, their tools approved
+/// without asking: Codex otherwise asks about each MCP call, which fails it under approval `never`
+/// and leaves it unanswered under `untrusted`. The Station checks what those tools do.
 fn app_server_argv(
     executable: &str,
     environment: &std::collections::BTreeMap<String, String>,
@@ -1465,6 +1468,8 @@ fn app_server_argv(
                 format!("mcp_servers.{server}.url=\"{url}\""),
                 "-c".to_owned(),
                 format!("mcp_servers.{server}.bearer_token_env_var=\"{prefix}_TOKEN\""),
+                "-c".to_owned(),
+                format!("mcp_servers.{server}.default_tools_approval_mode=\"approve\""),
             ]);
         }
     }
@@ -2983,6 +2988,9 @@ mod tests {
         assert!(argv.iter().any(|argument| {
             argument == "mcp_servers.ai6-theater.bearer_token_env_var=\"AI6_THEATER_MCP_TOKEN\""
         }));
+        assert!(argv.iter().any(|argument| {
+            argument == "mcp_servers.ai6-theater.default_tools_approval_mode=\"approve\""
+        }));
         assert!(
             argv.iter()
                 .all(|argument| !argument.contains("theater-secret-token"))
@@ -4130,6 +4138,9 @@ mod tests {
         }));
         assert!(argv.iter().any(|argument| {
             argument == "mcp_servers.ai6-cables.bearer_token_env_var=\"AI6_CABLE_MCP_TOKEN\""
+        }));
+        assert!(argv.iter().any(|argument| {
+            argument == "mcp_servers.ai6-cables.default_tools_approval_mode=\"approve\""
         }));
         assert!(
             argv.iter()

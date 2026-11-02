@@ -1207,6 +1207,8 @@ mod tests {
             "GIT_TRACE=1 git push origin main",
             "sudo -E git push origin main",
             "bash -lc 'git push origin main'",
+            "/bin/bash -lc 'git push origin main'",
+            "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -Command 'git push origin main'",
             "sh -c \"cd /work && git push origin \\\"main\\\"\"",
             "pwsh -NoProfile -Command git push origin main",
             "cmd /c git push origin main",

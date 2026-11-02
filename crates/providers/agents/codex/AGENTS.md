@@ -76,15 +76,21 @@ bytes each), and `None` after that; a pending request (`initialize`, `thread/sta
 `thread/resume`) fails with the same text. `close` kills the terminal and waits up to 2 s for
 its exit status, so the working directory is free when it returns.
 When AI6 supplies `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, app-server receives
-per-process config overrides for the Cable endpoint and token environment-variable name.
+per-process config overrides for the Cable endpoint and token environment-variable name,
+with `default_tools_approval_mode="approve"`.
 The bearer token itself is not placed in process arguments.
+Without that key, Codex 0.164.0 asks about each MCP call (measured on Windows and Linux through
+a loopback stand-in for the model): under approval `never` the call fails with "MCP tool call
+requires approval, but approval policy is never", and under `untrusted` it sends
+`mcpServer/elicitation/request`, which this handler does not answer. With it the call completes
+under both.
 When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
 remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
-App-server then also receives overrides for an `ai6-theater` server, and `thread/start` and
-`thread/resume` carry `sandbox = "read-only"` and `approvalPolicy = "never"`, because Codex's
-shell tool cannot be switched off: the sandbox keeps anything from being written on the
-Station. The two parameter names follow the app-server protocol and are not exercised against
-a live Codex.
+App-server then also receives overrides for an `ai6-theater` server, its tools approved the
+same way, and `thread/start` and `thread/resume` carry `sandbox = "read-only"` and
+`approvalPolicy = "never"`, because Codex's shell tool cannot be switched off: the sandbox keeps
+anything from being written on the Station. Codex 0.164.0 reports both back from `thread/start`
+(same measurement).
 The handler answers every `item/commandExecution/requestApproval` server request (params
 `threadId`, `turnId`, `command`, `cwd`, `kind`) with the green ink gate
 (`ai6::directorates::section_00::gate::gate`, asking the Station through the Cable endpoint):
@@ -96,13 +102,20 @@ are declined without asking it, and also printed on standard error and queued as
 kind `declined`: a request whose line was `rebuilt` (`StreamLine::Json::rebuilt`: rejoined
 from a line the terminal broke, or with a control other than SGR removed from inside it),
 and one whose `itemId` names no earlier `item/started` commandExecution item with the same
-`command` (so a subcommand approval sharing a parent item is declined). That the app server
-starts the item before asking is read from its protocol, not seen in a live turn. A Session
-without a
+`command` (so a subcommand approval sharing a parent item is declined). A Session without a
 Cable endpoint cannot ask for green ink, so it has no gate and everything is accepted, as with
 the Claude handler. With a gate, `thread/start` and `thread/resume` carry
 `approvalPolicy = "untrusted"`, so Codex asks before every command outside its own list of
-safe reads; in remote-hands mode it stays `never`, and the Station gates `theater_run`. These shapes follow the app-server protocol schema, not a live Codex.
+safe reads; in remote-hands mode it stays `never`, and the Station gates `theater_run`.
+Codex's documentation calls `untrusted` unsupported, but Codex 0.164.0 honours it (same
+measurement, app server only): `thread/start` answers `approvalPolicy: "untrusted"`; a command
+started through `exec_command` announces `item/started` first, then asks with that item's id and
+the same `command`, which is the shell wrapper Codex runs (`/bin/bash -lc '…'`, `"…\\pwsh.exe"
+-Command '…'`); `decline` ends the item as `declined` and nothing runs; `accept` runs it, with
+writes in the working directory, though the thread reports a `readOnly` sandbox on Windows and
+`workspaceWrite` on Linux when the user's configuration names none; and a `turn/steer` after a
+decline reaches the model's next request. `git status`, `git log -1`, `ls`, `dir`, `cat` and
+`echo` all asked, so in that release none of them is a safe read through `exec_command`.
 When `AgentStart::project_settings` (or `AgentResume::project_settings`) is `false`, the
 default, app-server also receives `-c projects={"<working directory>"={trust_level="untrusted"}}`:
 an untrusted project skips its `.codex/` layer (project config, hooks and rules), while the
