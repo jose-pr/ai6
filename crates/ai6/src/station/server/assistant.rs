@@ -449,10 +449,11 @@ pub(super) trait Harness: Send + Sync {
     /// Starts a harness with `handler`.
     fn start(&self, handler: &str, request: AgentStart)
     -> Result<Object<dyn AgentSession>, String>;
-    /// Resumes a provider Session with `handler`.
+    /// Resumes a provider Session of `agent` with `handler`.
     fn resume(
         &self,
         handler: &str,
+        agent: &str,
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String>;
     /// Why `handler`'s harness, started with `environment`, cannot run scripts in its own
@@ -491,12 +492,9 @@ fn log_start(session: &MissionId, how: &str, handler: &str, terminal: &str) {
 }
 
 impl StationHarness {
-    /// `handler`, and a terminal that suits what it declares.
-    fn handler(&self, handler: &str, agent: Option<&str>) -> Result<Launch, String> {
-        // A handler that needs settings (the `acp` one) gets its Agent's; a resume knows no
-        // Agent and builds the handler with its defaults.
-        let settings = agent
-            .and_then(|agent| super::agents::effective(&self.0, None, agent).ok())
+    /// `handler` with `agent`'s settings, and a terminal that suits what it declares.
+    fn handler(&self, handler: &str, agent: &str) -> Result<Launch, String> {
+        let settings = super::agents::effective(&self.0, None, agent)
             .map(|agent| agent.handler_settings)
             .unwrap_or_default();
         let handler = self
@@ -527,7 +525,7 @@ impl Harness for StationHarness {
         handler: &str,
         request: AgentStart,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let (launch, terminal, provider) = self.handler(handler, Some(&request.agent_id))?;
+        let (launch, terminal, provider) = self.handler(handler, &request.agent_id)?;
         let session = request.mission_id.clone();
         let started = crate::station::acp::start(launch, terminal, request)
             .map_err(|error| error.to_string())?;
@@ -538,9 +536,10 @@ impl Harness for StationHarness {
     fn resume(
         &self,
         handler: &str,
+        agent: &str,
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let (launch, terminal, provider) = self.handler(handler, None)?;
+        let (launch, terminal, provider) = self.handler(handler, agent)?;
         let session = request.mission_id.clone();
         let resumed = crate::station::acp::resume(launch, terminal, request)
             .map_err(|error| error.to_string())?;
@@ -1295,7 +1294,7 @@ impl Desk {
                     .map(|session| (session, None));
             };
             let resumed = resume.session_id.as_str().to_owned();
-            match harness.resume(&handler, resume) {
+            match harness.resume(&handler, &start.agent_id, resume) {
                 // A resumed harness can still fail before it confirms the Session (Claude Code
                 // reads the message first): the pump then starts afresh with `start`.
                 Ok(session) => Ok((
@@ -3040,6 +3039,7 @@ mod tests {
         fn resume(
             &self,
             _handler: &str,
+            _agent: &str,
             request: AgentResume,
         ) -> Result<Object<dyn AgentSession>, String> {
             if !self.resumable {
@@ -3594,6 +3594,48 @@ mod tests {
         assert_eq!(a.parent(), b.parent());
         drop(asked);
         fixture.desk.close_all();
+    }
+
+    #[test]
+    fn a_resumed_harness_gets_its_agents_handler_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.moneypenny]\nhandler = \"mock-denied\"\n\
+             [agent.moneypenny.handler_settings]\ncommand = \"the-agent\"\n",
+        );
+        let session = StationHarness(state)
+            .resume(
+                "mock-denied",
+                "moneypenny",
+                AgentResume {
+                    mission_id: MissionId::try_new("assistant--a").unwrap(),
+                    session_id: SessionId::try_new("provider-session").unwrap(),
+                    message: None,
+                    working_directory: root.path().to_string_lossy().into_owned(),
+                    clearance: "desk".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let told = loop {
+            assert!(Instant::now() < deadline, "the handler said nothing");
+            if let Some(event) = session.next_event(100).unwrap() {
+                break event;
+            }
+        };
+        assert_eq!(told.kind, "notice");
+        assert!(told.text.unwrap().contains("the-agent"));
     }
 
     #[tokio::test]

@@ -7700,7 +7700,21 @@ queue = 1
             request: AgentResume,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            Ok(MockSession::new(request.session_id, "completed").into_object())
+            let mut session = MockSession::new(request.session_id, "completed");
+            if let Ok(events) = session.events.get_mut()
+                && !self.settings_toml.is_empty()
+            {
+                events.push_front(AgentEvent {
+                    kind: "notice".to_owned(),
+                    text: Some(self.settings_toml.clone()),
+                    data: None,
+                    limit: None,
+                    usage: None,
+                    tools: Vec::new(),
+                    quota: Vec::new(),
+                });
+            }
+            Ok(session.into_object())
         }
 
         fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
