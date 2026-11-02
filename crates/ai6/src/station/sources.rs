@@ -1802,7 +1802,7 @@ mod tests {
                 .body
                 .clone()
         };
-        let named = status("source_fake--br-1", Some("agent/br-1"));
+        let named = status("G-fake-br-1", Some("agent/br-1"));
         assert!(
             named.ends_with(
                 "
@@ -1810,7 +1810,7 @@ Branch: `agent/br-1`"
             ),
             "{named}"
         );
-        let none = status("source_fake--br-2", None);
+        let none = status("G-fake-br-2", None);
         assert!(!none.contains("Branch"), "{none}");
     }
 
