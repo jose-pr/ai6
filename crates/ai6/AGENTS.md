@@ -1116,6 +1116,8 @@ pub trait ConfigProvider: Send + Sync {
     fn put_if(&self, record: ConfigRecord, scope: &ConfigScope, key: &str,
         expected: Option<&serde_json::Value>, definition: &serde_json::Value)
         -> Result<ConfigRevision, RosterError>;
+    fn remove_on_host(&self, record: ConfigRecord, scope: &ConfigScope, key: &str)
+        -> Result<Option<ConfigRevision>, RosterError>;   // for someone on the host: `remove` by default; FileProvider edits its files, Universal Exports never does
     fn remove(&self, record: ConfigRecord, scope: &ConfigScope, key: &str)
         -> Result<Option<ConfigRevision>, RosterError>;   // None: there was none
     /// Several records as one change: all or none (default: put one by one).
@@ -5064,7 +5066,11 @@ that table, so a provider with a configuration of its own declares it too.
   `ai6 config import DIR [--scope station:ID]` loads a configuration directory's records
   into a writable provider with `ConfigProvider::put_all` (checked whole, one transaction on
   SQL); `ai6 config export DIR` writes every family of every scope as TOML family files
-  (`config::export`, owner-only on Unix).
+  (`config::export`, owner-only on Unix). `ai6 config rm FAMILY KEY [--scope station:ID] [--force]`
+  removes one record through `ConfigProvider::remove_on_host`: `config::references_to` reads every
+  family at every scope first (a read error removes nothing) and refuses, listing them, what another
+  record still names unless `--force`; audited `roster.remove`/`roster.refused`, `cli:<user>`, before
+  the removal. `--force` is reported; the provider's own checks still apply.
 - `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH] [--plugin-profile P] [--keep-verified N|none] [--terminal ID] [--settings PATH] [--detach]`:
   run the field runner on this host until Ctrl-C or SIGTERM (provider libraries checked as
   the Station's, verified copies under its state directory); `--detach` starts it in the

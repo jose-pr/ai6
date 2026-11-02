@@ -1138,12 +1138,30 @@ ai6 config show agent 007                  # one record, as TOML
 ai6 config show theater --scope station:hq-1
 ai6 config import ./config                 # a directory's records into a SQL provider
 ai6 config import ./hq-1 --scope station:hq-1
+ai6 config rm agent 007                    # one record; refused while another names it
 ai6 config export ./backup                 # every family and Station scope as TOML files
 ```
 
 `import` checks the whole directory first and stores its records in one transaction: all of
 them or none. `export` writes files readable by their owner only on Unix, since a family may
 hold a credential.
+
+`rm` deletes from the configuration every Station reads, so it is careful:
+
+- It reads every family at every scope first. If anything cannot be read, nothing is removed.
+- While another record names this one it refuses and lists them, with where in each the name is. Any
+  whole string or table key equal to the name counts (`handler`, `provider`, `model` and `effort`
+  name something else), so a field that only happens to hold the same text is listed too, and a
+  person judges. `--force` removes it anyway and says what still names it. The provider's own checks
+  still apply: the removal is refused if the configuration it leaves is not acceptable, such as an
+  Agent another `extends`.
+- Each removal and refusal is an audit record in the Registry, `roster.remove` or `roster.refused`
+  under `config:roster`, actor `cli:<user>`, written before the removal: a removal the Registry
+  cannot record does not happen. A forced one names what still named it.
+- On a directory of files, the record leaves its family file and the rest stays as it was, comments
+  included, for a TOML file of `[family.key]` tables; a table written another way, a JSON or YAML file
+  and a `[[library]]` entry mean the file is written again, without its comments. Universal Exports
+  still takes no edit of a directory of files.
 
 ## Who can write the provider
 

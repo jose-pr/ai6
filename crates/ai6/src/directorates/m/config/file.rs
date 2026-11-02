@@ -4,18 +4,24 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
 use super::{
     ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
-    ConfigSnapshot, Layer, assemble, check_placement, merged,
+    ConfigSnapshot, Layer, assemble, check_placement, conflict, merged,
 };
-use crate::bootstrap::format::{self, EXTENSIONS};
+use crate::bootstrap::format::{self, EXTENSIONS, Format};
+use crate::bounds::TimeLimit;
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
+use crate::directorates::registry::store::replace_file;
 
 /// The directory of a Station's own family files under the provider's root.
 const STATIONS_DIR: &str = "stations";
+
+/// How long a replacement waits for a reader that has the file open, which Windows refuses.
+const REPLACE_RETRY: TimeLimit = TimeLimit::at(Duration::from_secs(2));
 
 /// Configuration in a directory, one file per family ([`ConfigRecord::file`]), each with the
 /// extension `cfg`, `toml`, `json`, `yaml` or `yml` ([`format`](crate::bootstrap::format)). A
@@ -25,7 +31,8 @@ const STATIONS_DIR: &str = "stations";
 /// Its revision is a digest of every family file of the view, global and the Station's own,
 /// with their relative paths, so asking for changes reads them but parses nothing until one
 /// differs. The files are edited by hand or through version control, so the provider takes no
-/// [`put`](ConfigProvider::put).
+/// [`put`](ConfigProvider::put) and no [`remove`](ConfigProvider::remove), and of who edits
+/// them only someone on this host ([`remove_on_host`](ConfigProvider::remove_on_host)).
 #[derive(Debug, Clone)]
 pub struct FileProvider {
     root: PathBuf,
@@ -234,7 +241,218 @@ fn read_family(
     Ok(())
 }
 
+/// `path` of a TOML header line, as its dotted keys, quotes taken off; `None` for another line.
+fn toml_header(line: &str) -> Option<Vec<String>> {
+    let line = line.trim();
+    if !line.starts_with('[') {
+        return None;
+    }
+    let body = line.trim_start_matches('[');
+    let end = body.find(']').filter(|_| !line.starts_with("[]"))?;
+    let mut parts = Vec::new();
+    let mut part = String::new();
+    let mut quote = None;
+    for c in body[..end].chars() {
+        match (quote, c) {
+            (Some(open), _) if open == c => quote = None,
+            (Some(_), _) => part.push(c),
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '.') => parts.push(std::mem::take(&mut part)),
+            (None, c) if c.is_whitespace() => {}
+            (None, c) => part.push(c),
+        }
+    }
+    parts.push(part);
+    Some(parts)
+}
+
+/// `text` without the tables at `target` and under it. A comment just above the next table
+/// stays with that table. Good only for the common shape of a file: the caller checks the result
+/// by reading it.
+fn without_toml_table(text: &str, target: &[String]) -> String {
+    let mut kept: Vec<&str> = Vec::new();
+    let mut dropping = false;
+    let mut pending: Vec<&str> = Vec::new();
+    for line in text.split_inclusive('\n') {
+        if let Some(header) = toml_header(line) {
+            let inside = header.len() >= target.len() && header[..target.len()] == *target;
+            if dropping && !inside {
+                kept.append(&mut pending);
+            }
+            pending.clear();
+            dropping = inside;
+        }
+        if !dropping {
+            kept.push(line);
+        } else {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') || trimmed.is_empty() {
+                pending.push(line);
+            } else {
+                pending.clear();
+            }
+        }
+    }
+    kept.append(&mut pending);
+    kept.concat()
+}
+
+/// A document's table of records with those that hold nothing taken away, so `[agent]` left with
+/// no Agent reads the same as no `[agent]` at all.
+fn without_empty_families(
+    document: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let empty = |value: &serde_json::Value| {
+        value.as_object().is_some_and(serde_json::Map::is_empty)
+            || value.as_array().is_some_and(Vec::is_empty)
+    };
+    document
+        .iter()
+        .filter(|(_, value)| !empty(value))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
+impl FileProvider {
+    /// The text of a family file without one record, checked by reading it back: a comment-keeping
+    /// edit of a TOML file when that comes out right, else the document written again, which
+    /// loses its comments.
+    fn text_without(
+        path: &Path,
+        text: &str,
+        record: ConfigRecord,
+        key: &str,
+    ) -> Result<String, RosterError> {
+        let in_file =
+            |reason: &dyn std::fmt::Display| error(format!("{}: {reason}", path.display()));
+        let read = |text: &str| -> Result<serde_json::Map<String, serde_json::Value>, RosterError> {
+            let document = format::parse(path, text).map_err(|reason| in_file(&reason))?;
+            let mut document = serde_json::to_value(guatiao_serde::Serializable::from(&document))
+                .map_err(|reason| in_file(&reason))?;
+            document.sort_all_objects();
+            match document {
+                serde_json::Value::Object(document) => Ok(document),
+                _ => Err(in_file(&"the document is not a table")),
+            }
+        };
+        let mut wanted = read(text)?;
+        let name = if record == ConfigRecord::Plugin {
+            "library"
+        } else {
+            record.name()
+        };
+        let mut target = vec![name.to_owned()];
+        if record == ConfigRecord::Plugin {
+            if let Some(serde_json::Value::Array(libraries)) = wanted.get_mut(name) {
+                libraries
+                    .retain(|library| library.get("file").and_then(|f| f.as_str()) != Some(key));
+            }
+        } else if record.is_singleton() {
+            wanted.remove(name);
+        } else {
+            if let Some(serde_json::Value::Object(records)) = wanted.get_mut(name) {
+                records.remove(key);
+            }
+            target.push(key.to_owned());
+        }
+        let wanted = without_empty_families(&wanted);
+        let same = |candidate: &str| {
+            read(candidate).is_ok_and(|document| without_empty_families(&document) == wanted)
+        };
+        let format = Format::for_path(path).map_err(|reason| in_file(&reason))?;
+        // A `.cfg` file may name its format on its first line, which stays where it is.
+        let (first, named) = match text.split_once('\n') {
+            Some((first, _)) if first.starts_with("#!") => (
+                format!("{first}\n"),
+                first
+                    .rsplit(|c: char| !c.is_ascii_alphanumeric())
+                    .next()
+                    .and_then(Format::for_extension),
+            ),
+            _ => (String::new(), None),
+        };
+        let format = named.unwrap_or(format);
+        if format == Format::Toml && record != ConfigRecord::Plugin {
+            let edited = without_toml_table(text, &target);
+            if same(&edited) {
+                return Ok(edited);
+            }
+        }
+        let rewritten = format::to_string(format, &serde_json::Value::Object(wanted.clone()))
+            .map_err(|reason| in_file(&reason))?;
+        let rewritten = format!("{first}{rewritten}");
+        if same(&rewritten) {
+            Ok(rewritten)
+        } else {
+            Err(in_file(
+                &"could not be written without the record; edit it by hand",
+            ))
+        }
+    }
+}
+
 impl ConfigProvider for FileProvider {
+    /// Takes the record out of its family file, or removes the file of a whole-file family, once
+    /// every view it leaves is acceptable. Another program's edit in the meantime is refused
+    /// ([`RosterErrorKind::Conflict`]).
+    fn remove_on_host(
+        &self,
+        record: ConfigRecord,
+        scope: &ConfigScope,
+        key: &str,
+    ) -> Result<Option<ConfigRevision>, RosterError> {
+        let dir = self.scope_dir(scope)?;
+        let Some(path) = Self::found(&dir)?.remove(record.file()) else {
+            return Ok(None);
+        };
+        let mut layer = self.layer(scope)?;
+        let held = layer
+            .get_mut(&record)
+            .and_then(|records| records.remove(key));
+        if held.is_none() {
+            return Ok(None);
+        }
+        let revision = self.digest("")?;
+        let source = self.root.display();
+        match scope {
+            ConfigScope::Global => {
+                let base = Some(self.root.as_path());
+                assemble(revision, &layer, base, &source, &self.limits)?;
+                for station in self.scopes()? {
+                    if station != ConfigScope::Global {
+                        let view = merged(&layer, &self.layer(&station)?);
+                        assemble(revision, &view, base, &source, &self.limits)?;
+                    }
+                }
+            }
+            ConfigScope::Station(_) => {
+                let view = merged(&self.layer(&ConfigScope::Global)?, &layer);
+                let base = Some(self.root.as_path());
+                assemble(revision, &view, base, &source, &self.limits)?;
+            }
+        }
+        let text = fs::read_to_string(&path).map_err(|failure| unavailable(&path, &failure))?;
+        let edited = if record.is_whole_file() {
+            None
+        } else {
+            Some(Self::text_without(&path, &text, record, key)?)
+        };
+        let now = fs::read_to_string(&path).map_err(|failure| unavailable(&path, &failure))?;
+        if now != text {
+            return Err(conflict(record, key));
+        }
+        match edited {
+            Some(edited) => replace_file(&path, edited.as_bytes(), REPLACE_RETRY),
+            None => fs::remove_file(&path),
+        }
+        .map_err(|failure| unavailable(&path, &failure))?;
+        self.digest(match scope {
+            ConfigScope::Global => "",
+            ConfigScope::Station(id) => id,
+        })
+        .map(Some)
+    }
+
     fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
         // The revision is taken before the files are parsed, so a file changed in between
         // shows up as a change on the next poll rather than being missed.
@@ -394,6 +612,77 @@ mod tests {
             .put(ConfigRecord::Agent, &global, "008", &serde_json::json!({}))
             .unwrap_err();
         assert_eq!(refused.kind(), RosterErrorKind::ReadOnly);
+        let refused = provider
+            .remove(ConfigRecord::Agent, &global, "007")
+            .unwrap_err();
+        assert_eq!(
+            refused.kind(),
+            RosterErrorKind::ReadOnly,
+            "the gateway's edit; `remove_on_host` is the host's"
+        );
+    }
+
+    #[test]
+    fn what_names_a_record_is_found_wherever_it_is_and_not_by_a_program_of_that_name() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = FileProvider::new(root.path());
+        write(
+            root.path(),
+            "agents.toml",
+            "[agent.claude]\nhandler = \"claude\"\nmodel = \"claude\"\n\
+             [agent.008]\nhandler = \"mock-agent\"\npool = \"team\"\n\
+             [agent.009]\nhandler = \"mock-agent\"\n",
+        );
+        write(
+            root.path(),
+            "loadouts.toml",
+            "[pool.team]\nhandler = \"claude\"\n\
+             [pool.team.account.alice]\nkind = \"anthropic-api-key\"\n\
+             [secret.alice]\nenv = \"ALICE_KEY\"\n",
+        );
+        let own = root.path().join("stations").join("hq");
+        write(&own, "operations.toml", "");
+        write(&own, "theaters.toml", "");
+        let global = ConfigScope::Global;
+        let named = |record, key: &str| -> Vec<String> {
+            super::super::references_to(&provider, record, &global, key)
+                .unwrap()
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        };
+        assert!(
+            named(ConfigRecord::Agent, "claude").is_empty(),
+            "`handler` and `model` name a program and a model, not this Agent"
+        );
+        assert_eq!(
+            named(ConfigRecord::Pool, "team"),
+            ["agent 008 (global): pool"],
+            "a table's value"
+        );
+        assert_eq!(
+            named(ConfigRecord::Secret, "alice"),
+            ["pool team (global): account.alice"],
+            "an account with no `secret` reads the one of its own name"
+        );
+        let missing = super::super::references_to(&provider, ConfigRecord::Pool, &global, "nobody");
+        assert_eq!(missing.unwrap_err().kind(), RosterErrorKind::Invalid);
+    }
+
+    #[test]
+    fn a_table_s_neighbours_and_their_comments_stay_when_it_goes() {
+        let text = "# top\n[agent.a]\nx = 1\n\n# about b\n[agent.b]\ny = 2\n[agent.b.env]\nZ = \"1\"\n\
+                    # about c\n[agent.c]\nz = 3\n";
+        let target = ["agent".to_owned(), "b".to_owned()];
+        assert_eq!(
+            without_toml_table(text, &target),
+            "# top\n[agent.a]\nx = 1\n\n# about b\n# about c\n[agent.c]\nz = 3\n"
+        );
+        let quoted = "[agent.\"a.b\"]\nx = 1\n[agent.a]\ny = 2\n";
+        assert_eq!(
+            without_toml_table(quoted, &["agent".to_owned(), "a.b".to_owned()]),
+            "[agent.a]\ny = 2\n"
+        );
     }
 
     #[test]

@@ -1021,6 +1021,22 @@ pub trait ConfigProvider: Send + Sync {
         Err(read_only())
     }
 
+    /// [`remove`](ConfigProvider::remove) for someone who runs this host (`ai6 config rm`). The
+    /// default is `remove`; a provider whose files people keep by hand takes no edit from
+    /// Universal Exports, and takes this one.
+    ///
+    /// # Errors
+    ///
+    /// As [`remove`](ConfigProvider::remove).
+    fn remove_on_host(
+        &self,
+        record: ConfigRecord,
+        scope: &ConfigScope,
+        key: &str,
+    ) -> Result<Option<ConfigRevision>, RosterError> {
+        self.remove(record, scope, key)
+    }
+
     /// Stores every record of `records` at `scope`, checked as one change: all of them are
     /// kept, or none. The default stores them one by one with [`put`](ConfigProvider::put),
     /// which a provider that has transactions overrides.
@@ -1049,6 +1065,116 @@ pub trait ConfigProvider: Send + Sync {
     fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError> {
         Ok(vec![ConfigScope::Global])
     }
+}
+
+/// One record that names another, as [`references_to`] finds it.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigReference {
+    /// The family of the record that names it.
+    pub record: ConfigRecord,
+    /// Where that record is held.
+    pub scope: ConfigScope,
+    /// That record's key.
+    pub key: String,
+    /// Where in it the name is, dotted; empty when its own key is the name.
+    pub path: String,
+}
+
+impl fmt::Display for ConfigReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} {} ({})", self.record, self.key, self.scope)?;
+        if !self.path.is_empty() {
+            write!(formatter, ": {}", self.path)?;
+        }
+        Ok(())
+    }
+}
+
+/// Settings whose value names a program or a model, which a record of the same name is not.
+const NOT_RECORD_NAMES: [&str; 4] = ["handler", "provider", "model", "effort"];
+
+/// Every place in `value` that holds `key` as a whole string or as a table's key.
+fn places_naming(value: &serde_json::Value, key: &str, path: &str, found: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) if text == key => {
+            let field = path.rsplit('.').next().unwrap_or(path);
+            if !NOT_RECORD_NAMES.contains(&field) {
+                found.push(path.to_owned());
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                places_naming(item, key, path, found);
+            }
+        }
+        serde_json::Value::Object(table) => {
+            for (field, inner) in table {
+                let deeper = if path.is_empty() {
+                    field.clone()
+                } else {
+                    format!("{path}.{field}")
+                };
+                if field == key {
+                    found.push(deeper.clone());
+                }
+                places_naming(inner, key, &deeper, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// What still names the record `key` of `record` at `scope`, in every family at every scope. Any
+/// whole string or table key equal to its name counts, since a new setting is found with no list
+/// to update: a field that only happens to hold the same text is shown too, and a person judges.
+///
+/// # Errors
+///
+/// [`RosterErrorKind::Invalid`] when there is no such record, and as
+/// [`definitions`](ConfigProvider::definitions) when anything cannot be read: an answer from part
+/// of the configuration is no answer.
+pub fn references_to(
+    provider: &dyn ConfigProvider,
+    record: ConfigRecord,
+    scope: &ConfigScope,
+    key: &str,
+) -> Result<Vec<ConfigReference>, RosterError> {
+    // A record that is its family's only one has no name for another to use.
+    let named = !record.is_singleton() && !record.is_whole_file();
+    let mut exists = false;
+    let mut references = Vec::new();
+    for held in provider.scopes()? {
+        for family in ConfigRecord::ALL {
+            for (other, definition) in provider.definitions(family, &held)?.records {
+                if family == record && held == *scope && other == key {
+                    exists = true;
+                    continue;
+                }
+                if !named {
+                    continue;
+                }
+                let mut places = Vec::new();
+                // A loadout belongs to the Agent its key names.
+                if record == ConfigRecord::Agent && family == ConfigRecord::Loadout && other == key
+                {
+                    places.push(String::new());
+                }
+                places_naming(&definition, key, "", &mut places);
+                places.dedup();
+                references.extend(places.into_iter().map(|path| ConfigReference {
+                    record: family,
+                    scope: held.clone(),
+                    key: other.clone(),
+                    path,
+                }));
+            }
+        }
+    }
+    if !exists {
+        return Err(error(format!("no {record} record {key:?} at {scope}")));
+    }
+    Ok(references)
 }
 
 /// The families in the order an import stores them, so each refers only to records already

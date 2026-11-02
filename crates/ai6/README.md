@@ -81,6 +81,7 @@ ai6 config path [--config PATH]
 ai6 config public [--output PATH] [--config PATH]
 ai6 config show FAMILY [KEY] [--scope station:ID] [--config PATH]
 ai6 config import DIR [--scope station:ID] [--config PATH]
+ai6 config rm FAMILY KEY [--scope station:ID] [--force] [--config PATH]
 ai6 config export DIR [--config PATH]
 ```
 

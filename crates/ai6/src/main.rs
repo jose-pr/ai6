@@ -127,6 +127,23 @@ enum ConfigCommand {
         #[command(flatten)]
         bootstrap: BootstrapArg,
     },
+    /// Remove one record. Refused, listing them, while another record still names it; with
+    /// --force it goes anyway, and the output and the audit record say what still names it.
+    /// A file provider's comments are kept in the common shape of a TOML file.
+    Rm {
+        /// The family, as for show.
+        family: String,
+        /// The record's key.
+        key: String,
+        /// `station:<id>` for one Station's own record (default: the global one).
+        #[arg(long, default_value = "")]
+        scope: String,
+        /// Remove it though another record names it. The provider's own checks still apply.
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+    },
     /// Write the public ai6.cfg a web page reads beside index.html, from this host's file: its
     /// [unex] url and what the page needs of [oo], and nothing else.
     Public {
@@ -433,6 +450,7 @@ async fn main() -> ExitCode {
             command:
                 command @ (ConfigCommand::Show { .. }
                 | ConfigCommand::Import { .. }
+                | ConfigCommand::Rm { .. }
                 | ConfigCommand::Public { .. }
                 | ConfigCommand::Export { .. }),
         } => match config_command(command) {
@@ -690,7 +708,112 @@ fn open_station(located: &Located<Bootstrap>) -> Result<Opened, String> {
     })
 }
 
-/// Runs `ai6 config show|import|export`.
+/// Runs `ai6 config rm`. Everything is read first, so a record that cannot be judged stays, and
+/// the audit record is written before the removal, so no removal goes unrecorded; a refusal
+/// after that is recorded too.
+fn remove_config_record(
+    (family, key, scope): (&str, &str, &ai6::ConfigScope),
+    force: bool,
+    bootstrap: &BootstrapArg,
+) -> Result<String, String> {
+    let record = ai6::ConfigRecord::from_name(family)
+        .ok_or_else(|| format!("{family:?} is not a configuration family"))?;
+    let located = load_bootstrap(bootstrap)?;
+    let location = located
+        .provider_location()
+        .map_err(|error| error.to_string())?;
+    let provider = open_provider(&location, &located.value)?;
+    let names = ai6::directorates::m::config::references_to(provider.as_ref(), record, scope, key)
+        .map_err(|error| error.to_string())?;
+    let registry = open_registry(&located)?;
+    let audit = |action: &str, target: String| {
+        registry
+            .record_audit(&cli_audit(action, target))
+            .map_err(|error| format!("the audit record could not be written: {error}"))
+    };
+    let what = format!("{family} {key} at {scope}");
+    let listed = names
+        .iter()
+        .map(|name| format!("  {name}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let joined = names
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !names.is_empty() && !force {
+        audit("roster.refused", format!("{what}: still named by {joined}"))?;
+        return Err(format!(
+            "{what} is still named by:\n{listed}\nchange those first, or pass --force"
+        ));
+    }
+    let target = if names.is_empty() {
+        what.clone()
+    } else {
+        format!("{what}, forced: still named by {joined}")
+    };
+    audit("roster.remove", target)?;
+    match provider.remove_on_host(record, scope, key) {
+        Ok(Some(_)) if names.is_empty() => Ok(format!("Removed {what}\n")),
+        Ok(Some(_)) => {
+            eprintln!("ai6: weakening: {what} removed by --force though still named");
+            Ok(format!(
+                "Removed {what}, by --force, though these still name it:\n{listed}\n"
+            ))
+        }
+        Ok(None) => {
+            audit("roster.refused", format!("{what}: gone already"))?;
+            Err(format!("no {what}"))
+        }
+        Err(error) => {
+            let reason = error.to_string();
+            audit("roster.refused", format!("{what}: {reason}"))?;
+            Err(reason)
+        }
+    }
+}
+
+/// An audit record of a roster edit made on this host, by the user running the command.
+fn cli_audit(action: &str, target: String) -> ai6::AuditRecord {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default();
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+    ai6::AuditRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        actor: format!("cli:{user}"),
+        action: action.to_owned(),
+        operation: String::new(),
+        resource: Some("config:roster".to_owned()),
+        target: bounded_line(&target, CLI_AUDIT_TARGET_BYTES),
+        at,
+    }
+}
+
+/// What an audit record's target takes.
+const CLI_AUDIT_TARGET_BYTES: usize = 512;
+
+/// `text` on one line, cut at a character boundary to fit `bytes`.
+fn bounded_line(text: &str, bytes: usize) -> String {
+    let mut line: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if line.len() > bytes {
+        let mut end = bytes - '…'.len_utf8();
+        while !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        line.truncate(end);
+        line.push('…');
+    }
+    line
+}
+
+/// Runs `ai6 config show|import|rm|export`.
 fn config_command(command: ConfigCommand) -> Result<String, String> {
     use ai6::{ConfigProvider as _, ConfigRecord, ConfigScope};
     let scope_of = |text: &str| {
@@ -706,6 +829,13 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
     match command {
         ConfigCommand::Path { .. } => Ok(String::new()),
         ConfigCommand::Public { output, bootstrap } => public_config(output.as_deref(), &bootstrap),
+        ConfigCommand::Rm {
+            family,
+            key,
+            scope,
+            force,
+            bootstrap,
+        } => remove_config_record((&family, &key, &scope_of(&scope)?), force, &bootstrap),
         ConfigCommand::Show {
             family,
             key,

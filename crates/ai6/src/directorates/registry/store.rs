@@ -3076,12 +3076,32 @@ pub(super) fn cable_error(error: CableError) -> io::Error {
     invalid_data(error.to_string())
 }
 
+/// Replaces the file at `path` with `bytes` in one step, keeping its permissions, which another
+/// program reading it depends on.
+pub(crate) fn replace_file(path: &Path, bytes: &[u8], retry: TimeLimit) -> io::Result<()> {
+    let permissions = fs::metadata(path)?.permissions();
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(bytes)?;
+    temporary.as_file().sync_all()?;
+    fs::set_permissions(temporary.path(), permissions)?;
+    persist_within(temporary, path, retry)
+}
+
 fn write_atomic_within(path: &Path, bytes: &[u8], retry: TimeLimit) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(bytes)?;
     temporary.as_file().sync_all()?;
+    persist_within(temporary, path, retry)
+}
+
+fn persist_within(
+    mut temporary: tempfile::NamedTempFile,
+    path: &Path,
+    retry: TimeLimit,
+) -> io::Result<()> {
     // Windows refuses to replace a file while a reader has it open ("Access is denied");
     // readers hold it only for a read, so the rename is tried again for a short while.
     let deadline = retry

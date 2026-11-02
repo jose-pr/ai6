@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `ai6 config rm FAMILY KEY [--scope station:ID] [--force]` removes one record, from a directory of
+  files, SQLite or PostgreSQL. It reads every family at every scope first, so a read error removes
+  nothing; while another record names it, it refuses and lists them. `--force` goes ahead, says what
+  still names it, and the audit record does too, though the provider's own checks still apply. Each
+  removal or refusal is audited as a roster edit is, in the Registry; a removal the Registry cannot
+  record does not happen. A TOML file keeps its comments in its common shape; any other form is written
+  again and loses them. Universal Exports still takes no edit of a directory of files.
 - `env` on a loadout: non-secret values a Session is given, which exposure does not take away, so a
   Mission from a Source under `strict` finds its `PATH`. A name that is a provider credential's, a
   secret's or a pool account's variable, or AI6's own, is refused at load, and a value is shown to

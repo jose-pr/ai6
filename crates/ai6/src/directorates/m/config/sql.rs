@@ -422,6 +422,7 @@ impl ConfigProvider for SqlProvider {
 
 #[cfg(test)]
 mod tests {
+    use super::super::references_to;
     use super::*;
     use serde_json::json;
 
@@ -871,6 +872,31 @@ mod tests {
                 crate::directorates::registry::suite::POSTGRES_URL_ENV
             ),
         }
+    }
+
+    /// A record that cannot be read may be the one that names what is being removed.
+    fn a_record_that_cannot_be_read_stops_the_search(location: &str) {
+        let provider = SqlProvider::open(location).unwrap();
+        seed(&provider);
+        assert_eq!(
+            references_to(&provider, ConfigRecord::Agent, &GLOBAL, "007")
+                .unwrap()
+                .len(),
+            2,
+            "008 extends it and G holds it"
+        );
+        provider
+            .db
+            .write(Clock::Config, |tx, _| {
+                tx.execute("UPDATE ai6_config_role SET definition = 'not json'", &[])
+            })
+            .unwrap();
+        assert!(references_to(&provider, ConfigRecord::Agent, &GLOBAL, "007").is_err());
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_read_stops_the_search_on_every_database() {
+        run(a_record_that_cannot_be_read_stops_the_search);
     }
 
     #[test]

@@ -50,6 +50,11 @@ path = "tests/bootstrap.rs"
 required-features = ["cli"]
 
 [[test]]
+name = "config_rm"
+path = "tests/config_rm.rs"
+required-features = ["cli"]
+
+[[test]]
 name = "ha"
 path = "tests/ha.rs"
 required-features = ["cli"]
