@@ -101,9 +101,13 @@ fn stream_event(kind: &str, text: Option<&str>) -> AgentEvent {
     }
 }
 
+/// How long after reading a message the harness writes its first line, which the Station's
+/// answer to a start or resume does not wait for; real Claude Code takes about 0.4 s.
+const FIRST_LINE_AFTER: Duration = Duration::from_millis(200);
+
 #[derive(Default)]
 struct Stream {
-    read_message: bool,
+    read_at: Option<Instant>,
     initialized: bool,
     session_id: Option<SessionId>,
     queue: VecDeque<AgentEvent>,
@@ -133,7 +137,11 @@ impl StreamSession {
     }
 
     fn read_message(&self) {
-        self.stream.lock().unwrap().read_message = true;
+        self.stream
+            .lock()
+            .unwrap()
+            .read_at
+            .get_or_insert_with(Instant::now);
     }
 }
 
@@ -150,7 +158,7 @@ impl AgentSession for StreamSession {
                 .queue
                 .push_back(stream_event("completed", Some(&message.text)));
         }
-        stream.read_message = true;
+        stream.read_at.get_or_insert_with(Instant::now);
         Ok(())
     }
 
@@ -158,7 +166,10 @@ impl AgentSession for StreamSession {
         let waited = Duration::from_millis(u64::try_from(timeout_ms).unwrap_or(0).min(10));
         {
             let mut stream = self.stream.lock().unwrap();
-            if stream.read_message && !stream.initialized {
+            let first_line_due = stream
+                .read_at
+                .is_some_and(|read| read.elapsed() >= FIRST_LINE_AFTER);
+            if first_line_due && !stream.initialized {
                 stream.initialized = true;
                 stream.session_id = Some(SessionId::try_new(self.reports.clone()).map_err(
                     |error| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string()),
@@ -279,6 +290,108 @@ async fn a_fresh_session_is_bound_to_its_cable_endpoint_when_its_stream_reports_
             == Some("stream-bind")
     })
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_resume_is_accepted_before_the_stream_reports_its_session() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(root.path(), "", &agent("resume", "", ""));
+    let _stop = StopOnDrop(state.clone());
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-resume").await;
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition("mission-1", MissionState::Blocked)
+        .unwrap();
+
+    let (status, Json(started)) = resume(&state, "mission-1", Some("go on"))
+        .await
+        .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        started.provider_session_id.as_ref().map(SessionId::as_str),
+        Some("stream-resume")
+    );
+    wait_for_state(&state, "mission-1", MissionState::Done).await;
+    assert_eq!(log_of("resume").resumed, vec![Some("go on".to_owned())]);
+}
+
+/// With no message Claude Code writes nothing at all: the resume cannot wait for its stream, and
+/// the first message starts it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_resume_with_no_message_runs_once_a_message_reaches_the_silent_harness() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(root.path(), "", &agent("silent", "", ""));
+    let _stop = StopOnDrop(state.clone());
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-silent").await;
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition("mission-1", MissionState::Blocked)
+        .unwrap();
+    let _ = resume(&state, "mission-1", None)
+        .await
+        .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
+    assert_eq!(
+        mission_state(&state, "mission-1").state,
+        MissionState::Working
+    );
+    send_message(
+        State(state.clone()),
+        axum::extract::Path("mission-1".to_owned()),
+        Json(SendMessage {
+            text: "now".to_owned(),
+        }),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("the message was refused: {:?}", error.1.0.error));
+    wait_for_state(&state, "mission-1", MissionState::Done).await;
+}
+
+/// A harness that resumes another Session than the one asked for is refused when it says so: no
+/// final state, nothing recorded, and the harness stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_resume_that_reports_another_session_is_refused_when_it_appears() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(
+        root.path(),
+        "",
+        &agent("other", "MOCK_STREAM_RESUMES_AS = \"someone-else\"\n", ""),
+    );
+    let _stop = StopOnDrop(state.clone());
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-other").await;
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition("mission-1", MissionState::Blocked)
+        .unwrap();
+    let _ = resume(&state, "mission-1", Some("go on"))
+        .await
+        .unwrap_or_else(|error| panic!("the resume was refused early: {:?}", error.1.0.error));
+    wait_for_state(&state, "mission-1", MissionState::Blocked).await;
+    wait_until("the refused harness is stopped", || {
+        !has_live_session(&state, "mission-1")
+    })
+    .await;
+    let mission = mission_state(&state, "mission-1");
+    assert_eq!(mission.state, MissionState::Blocked);
+    assert_eq!(
+        mission
+            .session_ids
+            .iter()
+            .map(SessionId::as_str)
+            .collect::<Vec<_>>(),
+        ["stream-other"],
+        "the other Session is not the Mission's"
+    );
+    // The Mission can be resumed again.
+    assert!(log_of("other").closes >= 1);
 }
 
 async fn interrupt(state: &DaemonState, mission_id: &str) -> Mission {

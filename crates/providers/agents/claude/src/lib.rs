@@ -1287,17 +1287,18 @@ impl ClaudeSession {
         if let Some(id) = value.get("session_id").and_then(Value::as_str) {
             let session_id = SessionId::try_from(id.to_string())
                 .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
-            if self
+            let different = self
                 .expected_session_id
                 .as_ref()
-                .is_some_and(|expected| expected != &session_id)
-            {
+                .is_some_and(|expected| expected != &session_id);
+            // Kept even when it is the wrong one: `session_id` is how the Station learns that.
+            *lock(&self.session_id)? = Some(session_id);
+            if different {
                 return Err(refuse(
                     Status::GUATIAO_ERR_BAD_VALUE,
                     "Claude resumed a different Session than requested",
                 ));
             }
-            *lock(&self.session_id)? = Some(session_id);
         }
         let kind = value.get("type").and_then(Value::as_str);
         if kind == Some("control_response") {
@@ -2415,7 +2416,14 @@ mod tests {
             Err(error) => error.to_string(),
         };
         assert!(error.contains("different Session"), "{error}");
-        assert_eq!(session.session_id().unwrap(), None);
+        assert_eq!(
+            session
+                .session_id()
+                .unwrap()
+                .as_ref()
+                .map(SessionId::as_str),
+            Some("different-session")
+        );
     }
 
     /// Claude Code with stream-json input writes nothing until it has read a message, so a

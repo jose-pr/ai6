@@ -3368,6 +3368,9 @@ struct AgentOperation {
     exposure: ExposureGate,
     gate: SessionGate,
     session_id: Option<SessionId>,
+    /// Whether `session_id` is the Session this harness was asked to resume, which what its stream
+    /// reports must match.
+    resumed: bool,
     /// Set when a runner on the Theater supervises the harness.
     runner: Option<RunnerAttachment>,
     /// Whether a harness on another host can still be reached, and why it was lost if not.
@@ -4548,6 +4551,7 @@ async fn start_mission(
             exposure,
             gate: SessionGate::default(),
             session_id: session_id.clone(),
+            resumed: false,
             runner: attachment,
             reach,
             #[cfg(feature = "cables-mcp")]
@@ -5034,12 +5038,10 @@ async fn resume_mission(
                 let expected_session_id = resume_request.session_id.clone();
                 let resumed = crate::station::acp::resume(handler, terminal_handle, resume_request)
                     .map_err(|error| error.to_string())?;
-                let resumed_session_id = resumed.session_id().map_err(|error| error.to_string())?;
-                if resumed_session_id.as_ref() != Some(&expected_session_id) {
+                let reported = resumed.session_id().map_err(|error| error.to_string())?;
+                if another_session(reported.as_ref(), &expected_session_id) {
                     let _ = resumed.close();
-                    return Err(
-                        "AgentHandler resume did not retain the provider Session ID".to_owned()
-                    );
+                    return Err(RESUME_NOT_RETAINED.to_owned());
                 }
                 close_replaced(old_session)?;
                 Ok::<_, String>(resumed)
@@ -5080,11 +5082,9 @@ async fn resume_mission(
                     let (report, started) =
                         link.launch(&key, &handler, Launch::Resume(resume_request))?;
                     record_runner_session(&worker_state, &worker_mission, &report);
-                    if report.session_id.as_ref() != Some(&expected_session_id) {
+                    if another_session(report.session_id.as_ref(), &expected_session_id) {
                         let _ = link.close_session(&key);
-                        return Err(
-                            "AgentHandler resume did not retain the provider Session ID".to_owned()
-                        );
+                        return Err(RESUME_NOT_RETAINED.to_owned());
                     }
                     resumed_over = Some(started);
                 }
@@ -5154,6 +5154,7 @@ async fn resume_mission(
             exposure,
             gate: SessionGate::default(),
             session_id: Some(session_id.clone()),
+            resumed: true,
             runner: attachment,
             reach,
             #[cfg(feature = "cables-mcp")]
@@ -5186,6 +5187,19 @@ async fn resume_mission(
             provider_session_id: Some(session_id),
         }),
     ))
+}
+
+/// Why a resume is refused when the harness reports another Session than it was asked for.
+const RESUME_NOT_RETAINED: &str = "AgentHandler resume did not retain the provider Session ID";
+
+/// Why a Mission is blocked after its harness turned out to have resumed another Session.
+const RESUME_REFUSED_REASON: &str = "resume-refused";
+
+/// Whether a harness has reported a Session other than `expected`. Not having reported one is not
+/// that: a harness may say nothing until it has read a message, so what it resumed is checked
+/// again each time its Session is read, in the event pump.
+fn another_session(reported: Option<&SessionId>, expected: &SessionId) -> bool {
+    reported.is_some_and(|reported| reported != expected)
 }
 
 /// Stops the Session a resume replaces, once the new one runs.
@@ -5412,6 +5426,12 @@ fn spawn_event_pump_with_monitor(
             if !is_current_session(&state, &mission_id, &session) {
                 break;
             }
+            if let Ok((_, Some(reported))) = &result
+                && resumed_another_session(&state, &mission_id, reported)
+            {
+                refuse_resumed_session(&state, &mission_id, &session);
+                break;
+            }
             match result {
                 Ok((Some(event), session_id)) => {
                     monitor.record_activity();
@@ -5620,6 +5640,76 @@ fn is_current_session(
                 .map(|operation| Arc::ptr_eq(&operation.session, session))
         })
         .unwrap_or(false)
+}
+
+/// Whether the live Session of `mission_id` was resumed on another Session than `reported`.
+fn resumed_another_session(state: &DaemonState, mission_id: &str, reported: &SessionId) -> bool {
+    state.sessions.lock().is_ok_and(|sessions| {
+        sessions.get(mission_id).is_some_and(|operation| {
+            operation.resumed
+                && operation
+                    .session_id
+                    .as_ref()
+                    .is_some_and(|expected| another_session(Some(reported), expected))
+        })
+    })
+}
+
+/// Stops a harness that resumed another Session than it was asked for. The Mission gets no final
+/// state from it and records nothing of that Session: it waits, blocked, for another resume.
+fn refuse_resumed_session(
+    state: &DaemonState,
+    mission_id: &str,
+    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+) {
+    eprintln!("ai6: Mission {mission_id:?}: {RESUME_NOT_RETAINED}; the resume is refused");
+    stop_session_keeping_mission(state, mission_id, session);
+    let blocked = state.missions.lock().is_ok_and(|mut missions| {
+        missions
+            .block_for(mission_id, RESUME_REFUSED_REASON)
+            .is_ok()
+    });
+    if blocked {
+        sync_session_record(state, mission_id);
+        publish_lifecycle(state, mission_id, MissionState::Blocked);
+    }
+    queue_event(
+        state,
+        mission_id,
+        AgentEvent {
+            kind: "blocked".to_owned(),
+            text: Some(RESUME_NOT_RETAINED.to_owned()),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+            quota: Vec::new(),
+        },
+    );
+}
+
+/// Stops a Session whose Mission goes on waiting: its harness is closed and its credentials
+/// released, while the Mission's state and safe house stay for the resume that continues it.
+fn stop_session_keeping_mission(
+    state: &DaemonState,
+    mission_id: &str,
+    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+) {
+    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
+        sessions
+            .get(mission_id)
+            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
+            .then(|| sessions.remove(mission_id))
+            .flatten()
+            .inspect(|operation| operation.gate.close())
+    });
+    let Some(operation) = operation else {
+        return;
+    };
+    credentials::release(state, mission_id);
+    if let Ok(session) = operation.session.lock() {
+        let _ = session.close();
+    }
 }
 
 fn attach_observed_session(
@@ -6777,6 +6867,7 @@ queue = 1
                     exposure: ExposureGate::default(),
                     gate: SessionGate::default(),
                     session_id: Some(session),
+                    resumed: false,
                     runner: None,
                     reach: ReachWatch::default(),
                     #[cfg(feature = "cables-mcp")]
@@ -9074,6 +9165,7 @@ queue = 1
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                resumed: false,
                 runner: None,
                 reach: ReachWatch::default(),
                 #[cfg(feature = "cables-mcp")]
@@ -9183,6 +9275,7 @@ queue = 1
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                resumed: false,
                 runner: None,
                 reach: ReachWatch::default(),
                 #[cfg(feature = "cables-mcp")]
@@ -9372,6 +9465,7 @@ queue = 1
                 exposure: ExposureGate::default(),
                 gate,
                 session_id: Some(session_id),
+                resumed: false,
                 runner: None,
                 reach: ReachWatch::default(),
                 #[cfg(feature = "cables-mcp")]
@@ -9767,6 +9861,7 @@ queue = 1
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                resumed: false,
                 runner: None,
                 reach: ReachWatch::default(),
                 #[cfg(feature = "cables-mcp")]
