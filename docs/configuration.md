@@ -459,7 +459,9 @@ text_width = 960                      # expanded: her text keeps to a column thi
 window_width = 520                    # desktop: her own window's size when popped out
 window_height = 760
 transition_ms = 200                   # how long the chat takes to move; 0 for none
-connect_timeout = 10                  # seconds her socket may take to say it is ready before the chat offers to try again
+connect_timeout = 10                  # seconds her socket may take to say it is ready before it counts as failed
+retry_delay = 1                       # seconds before her socket's first reconnect; each next one doubles
+retry_max_delay = 16                  # seconds, the longest wait between reconnects
 
 [oo.routes]
 text_bytes = 128                      # the longest text filter a page link may carry, in bytes

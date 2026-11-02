@@ -10,6 +10,7 @@ import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/assistant/assistant_view.dart';
 import 'package:outer_office/routes/oo_route.dart';
+import 'package:outer_office/settings/oo_config.dart' show ChatSettings;
 import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/terminal/session_connection.dart'
     show sessionSocketUri;
@@ -67,6 +68,9 @@ class FakeChannel implements AssistantChannel {
   @override
   void send(String frame) =>
       sent.add((jsonDecode(frame) as Map).cast<String, Object?>());
+
+  /// The socket ends without the app having closed it.
+  void dropped() => unawaited(_incoming.close());
 
   @override
   Future<void> close() => _incoming.close();
@@ -777,6 +781,187 @@ void main() {
       sessionSocketUri(Uri.parse('http://127.0.0.1:7082'), 's', 0).toString(),
       'ws://127.0.0.1:7082/v1/socket/s?after=0',
     );
+  });
+
+  group('a socket that drops', () {
+    late List<FakeChannel> channels;
+    late AssistantController controller;
+
+    Future<void> panel(WidgetTester tester) async {
+      channels = [];
+      controller = AssistantController(
+        token: 'user-token',
+        connect: () {
+          final channel = FakeChannel();
+          channels.add(channel);
+          return channel;
+        },
+        retryDelay: const Duration(seconds: 1),
+        retryMaxDelay: const Duration(seconds: 4),
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: AssistantPanel(controller: controller)),
+        ),
+      );
+      await tester.pump();
+    }
+
+    void ready(FakeChannel channel) => channel.answer({
+      'type': 'ready',
+      'conversation': 'c-1',
+      'entries': const <Object>[],
+    });
+
+    testWidgets('comes back after a wait that doubles to its cap, and the '
+        'panel says it is reconnecting', (tester) async {
+      await panel(tester);
+      ready(channels.last);
+      await tester.pump();
+      expect(controller.connected, isTrue);
+
+      channels.last.dropped();
+      await tester.pump();
+      expect(find.text('Reconnecting…'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 999));
+      expect(channels, hasLength(1));
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(channels, hasLength(2));
+      expect(channels.last.sent.single['conversation'], 'c-1');
+
+      for (final wait in [2, 4, 4]) {
+        channels.last.dropped();
+        await tester.pump();
+        final before = channels.length;
+        await tester.pump(
+          Duration(seconds: wait) - const Duration(milliseconds: 1),
+        );
+        expect(channels, hasLength(before), reason: 'still waiting $wait s');
+        await tester.pump(const Duration(milliseconds: 1));
+        expect(channels, hasLength(before + 1));
+      }
+
+      ready(channels.last);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Reconnecting…'), findsNothing);
+      channels.last.dropped();
+      await tester.pump();
+      final before = channels.length;
+      await tester.pump(const Duration(seconds: 1));
+      expect(channels, hasLength(before + 1), reason: 'ready starts over');
+    });
+
+    testWidgets('a socket that never says ready counts as dropped', (
+      tester,
+    ) async {
+      await panel(tester);
+      await tester.pump(ChatSettings.defaultConnectTimeout);
+      expect(find.text('Reconnecting…'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      expect(channels, hasLength(2));
+    });
+
+    testWidgets('a refused sign-in does not come back', (tester) async {
+      await panel(tester);
+      channels.last.answer({
+        'type': 'error',
+        'code': 'unauthorized',
+        'message': 'Sign in again to talk to Moneypenny.',
+      });
+      await tester.pump();
+      channels.last.dropped();
+      await tester.pump();
+      expect(find.text('Reconnecting…'), findsNothing);
+      expect(find.text('Sign in again to talk to Moneypenny.'), findsOneWidget);
+      await tester.pump(const Duration(hours: 1));
+      expect(channels, hasLength(1));
+      await tester.tap(find.text('Try again'));
+      await tester.pump();
+      expect(channels, hasLength(2), reason: 'the person may still ask');
+    });
+
+    testWidgets('another refusal does not stop it', (tester) async {
+      await panel(tester);
+      ready(channels.last);
+      channels.last.answer({
+        'type': 'error',
+        'code': 'bad_request',
+        'message': 'That frame is not understood.',
+      });
+      await tester.pump();
+      channels.last.dropped();
+      await tester.pump(const Duration(seconds: 1));
+      expect(channels, hasLength(2));
+    });
+
+    testWidgets('a person can stop it, and it stays stopped', (tester) async {
+      await panel(tester);
+      ready(channels.last);
+      await tester.pump();
+      channels.last.dropped();
+      await tester.pump();
+      await tester.tap(find.text('Stop trying'));
+      await tester.pump();
+      expect(find.text('Reconnecting…'), findsNothing);
+      expect(find.text('Stop trying'), findsNothing);
+      await tester.pump(const Duration(hours: 1));
+      expect(channels, hasLength(1));
+      await tester.tap(find.text('Try again'));
+      await tester.pump();
+      expect(channels, hasLength(2));
+    });
+
+    testWidgets('one dropped while the person is stopping an answer stays '
+        'down', (tester) async {
+      await panel(tester);
+      ready(channels.last);
+      channels.last.answer({'type': 'busy', 'busy': true});
+      await tester.pump();
+      controller.interrupt();
+      await tester.pump();
+      channels.last.dropped();
+      await tester.pump();
+      await tester.pump(const Duration(hours: 1));
+      expect(channels, hasLength(1));
+      expect(find.text('Try again'), findsOneWidget);
+    });
+
+    testWidgets('a message asked while it waits goes at once and is sent when '
+        'ready', (tester) async {
+      await panel(tester);
+      ready(channels.last);
+      await tester.pump();
+      channels.last.dropped();
+      await tester.pump();
+      controller.ask('still there?');
+      await tester.pump();
+      expect(channels, hasLength(2));
+      ready(channels.last);
+      await tester.pump();
+      expect(channels.last.sent.last['text'], 'still there?');
+      await tester.pump(const Duration(seconds: 8));
+      expect(channels, hasLength(2), reason: 'no second attempt is left over');
+    });
+
+    testWidgets('a closed conversation does not come back', (tester) async {
+      channels = [];
+      final closing = AssistantController(
+        token: 'user-token',
+        connect: () {
+          final channel = FakeChannel();
+          channels.add(channel);
+          return channel;
+        },
+        retryDelay: const Duration(seconds: 1),
+      )..open();
+      channels.last.dropped();
+      await tester.pump();
+      closing.dispose();
+      await tester.pump(const Duration(hours: 1));
+      expect(channels, hasLength(1));
+    });
   });
 
   test('a diff keeps the lines both sides share', () {

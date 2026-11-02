@@ -88,6 +88,8 @@ class AssistantController extends ChangeNotifier {
     required this.token,
     required AssistantChannel Function() connect,
     this.connectTimeout = ChatSettings.defaultConnectTimeout,
+    this.retryDelay = ChatSettings.defaultRetryDelay,
+    this.retryMaxDelay = ChatSettings.defaultRetryMaxDelay,
     this._lastConversation,
     this.onConversation,
   }) : _openChannel = connect;
@@ -99,6 +101,18 @@ class AssistantController extends ChangeNotifier {
   /// How long the socket may take to say it is ready before the attempt counts as failed.
   final Duration connectTimeout;
   Timer? _connecting;
+
+  /// The wait before the first reconnect after a socket fails; each next one doubles, up to
+  /// [retryMaxDelay].
+  final Duration retryDelay;
+
+  /// The longest wait between reconnects.
+  final Duration retryMaxDelay;
+  Timer? _retry;
+  late Duration _nextRetry = retryDelay;
+
+  /// Universal Exports said this sign-in is no good, which trying again would not change.
+  bool _refused = false;
 
   /// The conversation a new sign-in goes back to, until the first hello has asked for it.
   /// Universal Exports checks it is the person's, and opens a new one when it is not or is gone.
@@ -140,6 +154,10 @@ class AssistantController extends ChangeNotifier {
   /// A socket is open or opening and has not said it is ready: neither connected nor failed.
   bool get connecting => _channel != null && !connected;
 
+  /// The socket failed and it will be tried again, by itself, until it answers or the person says
+  /// to stop.
+  bool reconnecting = false;
+
   final _arrivals = StreamController<AssistantEntry>.broadcast(sync: true);
 
   /// Each entry as it arrives while the conversation is open; not those a reconnect sends
@@ -153,11 +171,18 @@ class AssistantController extends ChangeNotifier {
   void open() {
     if (_channel != null) return;
     problem = null;
+    _attempt();
+  }
+
+  void _attempt() {
+    _retry?.cancel();
+    _retry = null;
     final AssistantChannel channel;
     try {
       channel = _openChannel();
     } on Object {
       problem = 'The connection to Moneypenny failed.';
+      _retryLater();
       return;
     }
     _channel = channel;
@@ -196,10 +221,42 @@ class AssistantController extends ChangeNotifier {
     );
   }
 
-  /// Tries the socket again after it failed; a message asked meanwhile is still sent.
+  /// Tries the socket again now, whatever stopped it; a message asked meanwhile is still sent.
   void retry() {
+    _refused = false;
+    _nextRetry = retryDelay;
     open();
     notifyListeners();
+  }
+
+  /// Stops trying the socket again, until the person asks.
+  void stopRetrying() {
+    _retry?.cancel();
+    _retry = null;
+    reconnecting = false;
+    final channel = _channel;
+    if (channel != null && !connected) {
+      _connecting?.cancel();
+      _connecting = null;
+      _subscription?.cancel();
+      _subscription = null;
+      _channel = null;
+      unawaited(channel.close());
+      problem ??= 'Not connected to Moneypenny.';
+    }
+    notifyListeners();
+  }
+
+  /// Waits, then tries again, unless the person or the sign-in said not to.
+  void _retryLater() {
+    reconnecting = !_refused;
+    if (_refused) return;
+    final wait = _nextRetry > retryMaxDelay ? retryMaxDelay : _nextRetry;
+    _nextRetry = wait * 2;
+    _retry = Timer(wait, () {
+      _attempt();
+      notifyListeners();
+    });
   }
 
   void _closed(String? why) {
@@ -210,8 +267,14 @@ class AssistantController extends ChangeNotifier {
     _channel = null;
     connected = false;
     busy = false;
+    final stopped = stopping;
     stopping = false;
     problem = why ?? problem ?? 'The connection to Moneypenny closed.';
+    if (stopped) {
+      reconnecting = false;
+    } else {
+      _retryLater();
+    }
     notifyListeners();
   }
 
@@ -228,6 +291,8 @@ class AssistantController extends ChangeNotifier {
         _connecting = null;
         connected = true;
         problem = null;
+        reconnecting = false;
+        _nextRetry = retryDelay;
         conversationId = message['conversation'] as String?;
         if (conversationId case final id?) onConversation?.call(id);
         busy = message['busy'] == true;
@@ -274,6 +339,7 @@ class AssistantController extends ChangeNotifier {
         stopping = busy && message['stopping'] == true;
       case 'error':
         problem = message['message'] as String? ?? 'Moneypenny refused that.';
+        _refused = _refused || message['code'] == 'unauthorized';
       default:
         return;
     }
@@ -336,6 +402,7 @@ class AssistantController extends ChangeNotifier {
   @override
   void dispose() {
     _connecting?.cancel();
+    _retry?.cancel();
     _subscription?.cancel();
     unawaited(_arrivals.close());
     final channel = _channel;

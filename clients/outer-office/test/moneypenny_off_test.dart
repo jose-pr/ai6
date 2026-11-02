@@ -135,6 +135,57 @@ void main() {
       },
     );
 
+    testWidgets('turned off while her socket is down, it does not come back', (
+      tester,
+    ) async {
+      var served = true;
+      var opened = 0;
+      SilentChannel? last;
+      final board = MissionBoard(
+        apiOrigin: Uri.parse('https://oo.example'),
+        pollInterval: null,
+        client: MockClient((request) async {
+          const json = {'content-type': 'application/json'};
+          if (request.url.path == '/v1/auth/login') {
+            return http.Response(
+              jsonEncode({'token': 'token'}),
+              201,
+              headers: json,
+            );
+          }
+          if (request.url.path == '/v1/user/profile') {
+            return http.Response(
+              jsonEncode(profile(moneypenny: served)),
+              200,
+              headers: json,
+            );
+          }
+          return http.Response('[]', 200, headers: json);
+        }),
+        assistantChannel: () {
+          opened++;
+          return last = SilentChannel();
+        },
+      );
+      await tester.pumpWidget(app(board));
+      await board.login('ana', 'secret');
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+      expect(opened, greaterThan(0));
+      last!.ready();
+      await tester.pump();
+      last!.fail();
+      await tester.pump();
+      served = false;
+      await board.loadUserSession();
+      await tester.pump();
+      final before = opened;
+      await tester.pump(const Duration(hours: 1));
+      expect(opened, before);
+      await tester.pumpWidget(const SizedBox());
+      board.dispose();
+    });
+
     testWidgets('served, Settings says nothing about her being off', (
       tester,
     ) async {
@@ -230,9 +281,7 @@ void main() {
       'a socket that stays silent ends in a retry, not an endless Connecting',
       (tester) async {
         await open(tester);
-        await tester.pump(
-          ChatSettings.defaultConnectTimeout + const Duration(seconds: 1),
-        );
+        await tester.pump(ChatSettings.defaultConnectTimeout);
         await tester.pump();
         expect(find.text('Connecting to Moneypenny…'), findsNothing);
         expect(find.text('Moneypenny did not answer.'), findsOneWidget);
@@ -261,7 +310,7 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(find.text('Connecting…'), findsNothing);
-      expect(find.text('Not connected'), findsOneWidget);
+      expect(find.text('Reconnecting…'), findsOneWidget);
       expect(find.text('The connection to Moneypenny closed.'), findsOneWidget);
       expect(find.widgetWithText(TextButton, 'Try again'), findsOneWidget);
       controller.dispose();

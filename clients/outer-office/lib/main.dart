@@ -3866,6 +3866,8 @@ class _AccessGateState extends State<_AccessGate> {
             ? DemoAssistantChannel.new
             : board.assistantChannel ?? () => connectAssistant(board.apiOrigin),
         connectTimeout: widget.chatSettings.connectTimeout,
+        retryDelay: widget.chatSettings.retryDelay,
+        retryMaxDelay: widget.chatSettings.retryMaxDelay,
         lastConversation: person == null
             ? null
             : preferences.readConversation(person),

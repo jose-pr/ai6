@@ -217,7 +217,9 @@ class _AssistantPanelState extends State<AssistantPanel> {
                           ),
                         ),
                         Text(
-                          controller.connecting
+                          controller.reconnecting
+                              ? 'Reconnecting…'
+                              : controller.connecting
                               ? 'Connecting…'
                               : !controller.connected
                               ? 'Not connected'
@@ -364,6 +366,11 @@ class _AssistantPanelState extends State<AssistantPanel> {
                     TextButton(
                       onPressed: controller.retry,
                       child: const Text('Try again'),
+                    ),
+                  if (controller.reconnecting)
+                    TextButton(
+                      onPressed: controller.stopRetrying,
+                      child: const Text('Stop trying'),
                     ),
                 ],
               ),

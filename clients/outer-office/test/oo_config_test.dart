@@ -91,6 +91,21 @@ MissionBoard _board(OoConfig config) => MissionBoard(
 );
 
 void main() {
+  test('the chat reconnects by the settings in [oo.chat]', () {
+    const defaults = ChatSettings();
+    expect(defaults.retryDelay, const Duration(seconds: 1));
+    expect(defaults.retryMaxDelay, const Duration(seconds: 16));
+    final chat = OoConfig.parse(
+      '[oo.chat]\nretry_delay = 0.5\nretry_max_delay = 4\n',
+    ).chat;
+    expect(chat.retryDelay, const Duration(milliseconds: 500));
+    expect(chat.retryMaxDelay, const Duration(seconds: 4));
+    expect(
+      () => OoConfig.parse('[oo.chat]\nretry_delay = 0\n'),
+      throwsFormatException,
+    );
+  });
+
   test('renewing the sign-in has its settings, and 0 turns it off', () {
     const none = OoConfig();
     expect(none.limits.refresh.renewBefore, const Duration(seconds: 600));

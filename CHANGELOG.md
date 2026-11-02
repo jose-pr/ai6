@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `send_cable` takes scope `operation`, as its description said it did.
 - An audit record's `resource` may also name `operation:`, `mission:` or `compartment:`.
 
+- Moneypenny's chat comes back by itself after a socket fails, and says `Reconnecting…` meanwhile:
+  after `[oo.chat] retry_delay` (default 1 second), doubling up to `retry_max_delay` (default 16). It
+  stays down after a refused sign-in, a person's `Stop trying`, a socket lost while stopping an answer,
+  and once the gateway's profile says she is off; `Try again` still works in each.
 - A socket of a web build no longer carries the page's query or `#/route`: Moneypenny's kept them,
   and a Session's left a bare `#` that a browser's `WebSocket` may refuse.
 - A person's avatar shows the initials of their first and last names, not their first two.

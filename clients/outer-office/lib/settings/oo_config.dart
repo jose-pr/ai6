@@ -164,6 +164,12 @@ class OoConfig {
       connectTimeout: number(chatTable, 'connect_timeout') == null
           ? defaults.connectTimeout
           : _seconds(number(chatTable, 'connect_timeout')!),
+      retryDelay: number(chatTable, 'retry_delay') == null
+          ? defaults.retryDelay
+          : _seconds(number(chatTable, 'retry_delay')!),
+      retryMaxDelay: number(chatTable, 'retry_max_delay') == null
+          ? defaults.retryMaxDelay
+          : _seconds(number(chatTable, 'retry_max_delay')!),
     );
     if (chat.minWidth > chat.maxWidth ||
         chat.width < chat.minWidth ||
@@ -569,9 +575,13 @@ class ChatSettings {
     this.windowHeight = 760,
     this.transitionMs = 200,
     this.connectTimeout = defaultConnectTimeout,
+    this.retryDelay = defaultRetryDelay,
+    this.retryMaxDelay = defaultRetryMaxDelay,
   });
 
   static const defaultConnectTimeout = Duration(seconds: 10);
+  static const defaultRetryDelay = Duration(seconds: 1);
+  static const defaultRetryMaxDelay = Duration(seconds: 16);
 
   /// The table's keys, in the order above.
   static const keys = {
@@ -585,7 +595,16 @@ class ChatSettings {
     'window_height',
     'transition_ms',
     'connect_timeout',
+    'retry_delay',
+    'retry_max_delay',
   };
+
+  /// `retry_delay`: the wait before her socket's first reconnect; each next one doubles, up to
+  /// [retryMaxDelay].
+  final Duration retryDelay;
+
+  /// `retry_max_delay`: the longest wait between reconnects.
+  final Duration retryMaxDelay;
 
   /// `min_width`, `max_width`: how narrow and wide the docked chat may be dragged.
   final double minWidth;
