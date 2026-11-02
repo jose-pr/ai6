@@ -241,7 +241,7 @@ pub struct StationLimits {
     pub green_ink: GreenInkLimits,        // gate_timeout
     pub detached: DetachedLimits,         // poll, script_timeout, name_chars
     pub runner: RunnerLimits,             // pump_poll, feed_poll, replay_batch: usize, keep_ended,
-                                          // cable_request_bytes, cable_connect_timeout, read_wait, connect_timeout,
+                                          // cable_request_bytes, cable_connect_timeout, read_wait, connect_timeout, answer_wait,
                                           // start_wait, start_margin, start_poll, terminal_poll,
                                           // superseded_close_wait, retry_pause
     pub api: ApiLimits,                   // refused_body_drain_bytes

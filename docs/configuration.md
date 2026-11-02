@@ -845,6 +845,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `cable_connect_timeout` | 10 | Seconds a runner's Cable relay may take to reach the Station |
 | `read_wait` | 1 | Seconds one read by the Station of a runner's Session waits for an event |
 | `connect_timeout` | 5 | Seconds `ai6 runner connect` may take to reach the runner's loopback port |
+| `answer_wait` | 10 | Seconds a runner that accepted `ai6 runner connect` has to answer its authentication |
 | `start_wait` | 30 | Seconds a started runner has to answer |
 | `start_margin` | 30 | Seconds starting a runner over a transport may take past `start_wait` |
 | `start_poll` | 0.05 | Seconds between looks at whether a runner started on this host serves yet |

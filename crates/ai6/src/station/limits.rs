@@ -544,6 +544,9 @@ pub struct RunnerLimits {
     pub read_wait: Seconds,
     /// Seconds `ai6 runner connect` may take to reach the runner's loopback port. Default 5.
     pub connect_timeout: Seconds,
+    /// Seconds a runner that accepted `ai6 runner connect` has to answer its authentication.
+    /// Default 10.
+    pub answer_wait: Seconds,
     /// Seconds a started runner has to answer. Default 30.
     pub start_wait: Seconds,
     /// Seconds starting a runner over a transport may take past `start_wait`. Default 30.
@@ -571,6 +574,7 @@ impl Default for RunnerLimits {
             cable_connect_timeout: Seconds::new(10),
             read_wait: Seconds::new(1),
             connect_timeout: Seconds::new(5),
+            answer_wait: Seconds::new(10),
             start_wait: Seconds::new(30),
             start_margin: Seconds::new(30),
             start_poll: Seconds(std::time::Duration::from_millis(50)),

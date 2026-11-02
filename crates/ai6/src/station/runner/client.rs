@@ -807,9 +807,22 @@ pub(crate) fn authenticated_stream(
         "params": {"methodId": RUNNER_TOKEN_METHOD, "_meta": {"token": token.trim()}},
     });
     writeln!(writer, "{authenticate}").map_err(|error| error.to_string())?;
-    let mut answer = String::new();
+    // On the handle that reads: on Windows a clone of a socket keeps its own read timeout.
     reader
-        .read_line(&mut answer)
+        .get_ref()
+        .set_read_timeout(Some(limits.answer_wait.0))
+        .map_err(|error| error.to_string())?;
+    let mut answer = String::new();
+    reader.read_line(&mut answer).map_err(|error| {
+        format!(
+            "the runner did not answer the authentication within {} s: {error}",
+            limits.answer_wait.0.as_secs_f64()
+        )
+    })?;
+    // The stream goes on to carry a Session, which may be silent for as long as it likes.
+    reader
+        .get_ref()
+        .set_read_timeout(None)
         .map_err(|error| error.to_string())?;
     let answer: serde_json::Value = serde_json::from_str(answer.trim())
         .map_err(|_| "the runner did not answer the authentication".to_owned())?;
@@ -890,6 +903,39 @@ mod tests {
         fn exit_status(&self, _timeout_ms: i64) -> Result<guatiao::Value, ProviderError> {
             Err(refuse("not used"))
         }
+    }
+
+    /// A runner that accepts and then says nothing is given up on, whatever the transport does.
+    #[test]
+    fn a_runner_that_accepts_and_stays_silent_is_given_up_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        std::fs::write(
+            dir.path().join(super::super::INFO_FILE),
+            serde_json::to_vec(&super::super::RunnerInfo {
+                address: silent.local_addr().unwrap().to_string(),
+                pid: 1,
+                version: "test".to_owned(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join(super::super::TOKEN_FILE), "token").unwrap();
+        let limits = RunnerLimits {
+            answer_wait: crate::bounds::Seconds(Duration::from_millis(100)),
+            ..RunnerLimits::default()
+        };
+        let path = dir.path().to_path_buf();
+        let (done, answer) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(authenticated_stream(&path, &limits).map(|_| ()));
+        });
+        let error = answer
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the read of the answer is bounded")
+            .unwrap_err();
+        assert!(error.contains("did not answer"), "{error}");
+        drop(silent);
     }
 
     #[test]
