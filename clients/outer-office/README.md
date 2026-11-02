@@ -334,8 +334,8 @@ read by `web/flutter_bootstrap.js` before the engine starts:
 cdn = "fonts"
 ```
 
-That file is `ai6 config public --config /etc/ai6/ai6.cfg --output build/web/ai6.cfg`, written after
-the build: it holds `[unex] url` and what the page needs of `[oo]`, from an allow list. A web
+That file is `ai6 config public --config /etc/ai6/ai6.cfg --output /srv/web/ai6.cfg`, written beside
+the deployed build: it holds `[unex] url` and what the page needs of `[oo]`, from an allow list. A web
 build never bundles a host's own `ai6.cfg`, and `test/oo_config_test.dart` fails if `web/` holds one.
 
 `test/no_cdn_test.dart` fails if the page or the bootstrap names a CDN host, if the

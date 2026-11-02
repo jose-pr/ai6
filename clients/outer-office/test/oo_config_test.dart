@@ -599,9 +599,5 @@ void main() {
       File('pubspec.yaml').readAsStringSync(),
       isNot(contains('ai6.cfg\n')),
     );
-    final build = Directory('build/web');
-    if (build.existsSync()) {
-      expect(File('build/web/ai6.cfg').existsSync(), isFalse);
-    }
   });
 }

@@ -1126,6 +1126,7 @@ checkout while the Registry lives in PostgreSQL.
 
 ```console
 ai6 config path                            # the ai6.cfg in use
+ai6 config public --output web/ai6.cfg     # the public file a web page reads
 ai6 config show agent 007                  # one record, as TOML
 ai6 config show theater --scope station:hq-1
 ai6 config import ./config                 # a directory's records into a SQL provider

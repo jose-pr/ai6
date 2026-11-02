@@ -955,6 +955,7 @@ pub fn platform_state_dir() -> Result<PathBuf, BootstrapError>;   // %LOCALAPPDA
 // format: EXTENSIONS, Format { Json, Toml, Yaml } (name, for_path, for_extension),
 //   parse(path, text) -> guatiao::Value, read::<T: FromValue>(path, text),
 //         from_str<T>(Format, &str), to_string<T>(Format, &T), FormatError
+// public: public_file(&Bootstrap) -> Result<PublicFile { text, left_out }, PublicError>
 ```
 
 `StationConfig::with_state_dir`, `with_protected_path` (a directory an assistant's
@@ -5004,6 +5005,11 @@ that table, so a provider with a configuration of its own declares it too.
   show and approve an Operation's standing orders. It reads the roster from the
   configuration provider and the Registry the bootstrap file names, like the Station.
 - `ai6 config path [--config PATH]` prints the bootstrap file in use, or `none (defaults)`.
+- `ai6 config public [--output PATH] [--config PATH]` writes the public `ai6.cfg` a web page reads
+  (`bootstrap::public`): an allow list of `[unex] url` and, of `[oo]`, its tables' numbers and booleans
+  and the words `[oo.appearance] theme` and `[oo.assets] cdn`. Other text under `[oo]` is left out and
+  named on standard error; a `url` holding `@`, `?` or `#` and this host's own file as the output are
+  refused.
 - `ai6 quarantine list|add <AGENT> <REASON> [--operation ID | --all]|release <AGENT> (--operation ID | --all)`:
   stop an Agent, or lift that, through the Registry; a Station applies the change within a
   scheduler tick.
