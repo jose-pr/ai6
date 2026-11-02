@@ -42,8 +42,8 @@ native windows build their app with `boardThemedApp`.
 
 ## Flutter windowing
 
-- Stable Flutter lacks the first-party Desktop Windowing API; use the isolated Flutter `main` SDK described in `README.md` while prototyping native windows.
-- Enable `enable-windowing` for that SDK before running or building the Windows client.
+- Stable Flutter lacks the first-party Desktop Windowing API; use the Flutter `main` commit `tools/sdk/sdk.lock` names, installed as `README.md` describes.
+- `env.sh` and `env.ps1` under the SDK prefix set `FLUTTER_WINDOWING`; any other Flutter needs `enable-windowing` before running or building a desktop client.
 - The API is experimental and internal in this Flutter revision; keep its use isolated in this package and do not describe it as production-stable.
 - Web uses one ordinary Flutter app view. Session details navigate inside that page;
   do not enable Flutter multi-view or imply it opens browser child windows. A browser

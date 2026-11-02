@@ -190,24 +190,38 @@ desktop the library its build hook bundles.
 
 ## Toolchain
 
-Native desktop Session windows use Flutter's first-party Desktop Windowing API, which is
-experimental and only on Flutter `main`. Keep a separate `main` SDK checkout so the stable
-SDK used elsewhere is unchanged, and use it for every command here:
+The app builds for Linux, Windows and the web; a checkout has no macOS runner, so on macOS it runs
+`flutter test` and the web build.
 
-```powershell
-$flutter = '<Flutter main SDK>\bin\flutter.bat'
-& $flutter config --enable-windowing
-& $flutter pub get
-& $flutter analyze --fatal-infos
-& $flutter test
-& $flutter build windows --debug
-& dart run tool/build_guatiao_wasm.dart
-& $flutter build web --release
-& dart run tool/cdn_files.dart fill
+Native desktop Session windows use Flutter's first-party Desktop Windowing API, which is
+experimental and only on Flutter `main`, so the app builds with the Flutter commit
+[`tools/sdk/sdk.lock`](../../tools/sdk/README.md) names. From the repository root:
+
+```sh
+sh tools/sdk/bootstrap.sh          # or: pwsh -File tools/sdk/bootstrap.ps1
+. ~/.ai6-sdk/env.sh                # or: . ~/.ai6-sdk/env.ps1
+```
+
+That SDK lives under its own directory, so any other Flutter on the machine is unchanged, and the
+file sets `FLUTTER_WINDOWING`, which turns the windowing API on for this shell only. Then, from
+this directory:
+
+```sh
+flutter pub get --offline
+flutter analyze --fatal-infos
+flutter test
+flutter build linux --debug        # or: flutter build windows --debug
+dart run tool/build_guatiao_wasm.dart
+flutter build web --release
+dart run tool/cdn_files.dart fill --deps "$AI6_SDK_DEPS"   # PowerShell: "$env:AI6_SDK_DEPS"
 ```
 
 Every web build, a release one included, runs `tool/cdn_files.dart fill` after
 `flutter build web`: it puts the fallback fonts into `build/web` (below).
+
+An image with all of this in it, on any base and any Flutter, is one `podman build` away:
+`containers/README.md` on the
+[`deps` branch](https://github.com/jose-pr/ai6/blob/deps/containers/README.md).
 
 The Windows runner uses the Skia renderer until Impeller with native windowing is verified
 across Windows GPUs.
@@ -219,9 +233,9 @@ short scripted sample, labelled "Sample conversation — demo": canned replies t
 questions (one with a table and a chart, one with a proposal whose Confirm and Cancel change
 nothing) and one reply to anything else. A signed-in app never uses the script.
 
-```powershell
-& $flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release --dart-define=OO_DEMO=true
-& $flutter run -d windows --dart-define=OO_DEMO=true
+```sh
+flutter run -d web-server --web-hostname 127.0.0.1 --web-port 7357 --release --dart-define=OO_DEMO=true
+flutter run -d windows --dart-define=OO_DEMO=true
 ```
 
 Open `http://127.0.0.1:7357` for the web build.
@@ -376,10 +390,10 @@ out, in its own window sharing the board's state.
 
 ## Development
 
-```powershell
+```sh
 dart format --output=none --set-exit-if-changed lib test
-& $flutter analyze --fatal-infos
-& $flutter test
+flutter analyze --fatal-infos
+flutter test
 ```
 
 `test/session_connection_test.dart` decodes the protocol vectors in

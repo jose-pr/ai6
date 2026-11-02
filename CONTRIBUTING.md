@@ -22,6 +22,13 @@ the exact sentence to reply with; read [`CLA.md`](CLA.md) first.
 It exists so the project can be relicensed later without tracking down every
 past contributor. You keep the copyright in everything you write.
 
+## Getting the SDKs
+
+`sh tools/sdk/bootstrap.sh` (`pwsh -File tools/sdk/bootstrap.ps1` on Windows) installs Rust and
+Flutter at the versions the repository is tested with, under one directory that nothing else
+shares; source the `env.sh` or `env.ps1` it writes. [`tools/sdk/README.md`](tools/sdk/README.md)
+says what it does and what it leaves to you.
+
 ## Before you open a pull request
 
 ```bash

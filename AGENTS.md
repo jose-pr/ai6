@@ -14,10 +14,11 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The operator command: reads, and cancels, retries, resumes and interrupts Missions |
 | `crates/providers/{agents,terminals,transports,theaters,safehouses,sources}/` | Guatiao providers: Claude, Codex and `acp` (any Agent Client Protocol agent) handlers, the `pty` terminal, the `local`, `ssh`, `adb`, `container` and `qemu` transports, the `ephemeral-container` Theater provider, the `git` and `copy` safe houses, GitHub and Jira Sources |
-| `clients/outer-office/` | Outer Office (short name OO), the Flutter desktop/web operator app; Moneypenny is the AI assistant inside it |
+| `clients/outer-office/` | Outer Office (short name OO), the Flutter Linux, Windows and web operator app; Moneypenny is the AI assistant inside it |
 | `examples/config/` | A runnable Operation and Agent roster |
 | `docs/`, `mkdocs.yml` | Narrative guides; the Rust API reference is published under `/rust/` |
 | `tools/public-api.ps1`, `tools/public-api/` | Checked public API snapshots of the library crates |
+| `tools/sdk/` | `sdk.lock`, every SDK a build needs at exact versions; `bootstrap.sh` and `bootstrap.ps1` install them under one directory; `check_lock.py` holds the lock to the repository |
 
 ## Commands
 
@@ -32,8 +33,12 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 pwsh -File tools/public-api.ps1 -Mode check
 ```
 
-The Flutter app needs the isolated Flutter `main` SDK described in
-`clients/outer-office/README.md`, because native desktop windowing is not in stable Flutter.
+`sh tools/sdk/bootstrap.sh` (`pwsh -File tools/sdk/bootstrap.ps1` on Windows) installs every SDK
+at the versions `tools/sdk/sdk.lock` names; `tools/sdk/README.md` has the flags. The Flutter app
+needs the Flutter `main` commit named there, because native desktop windowing is not in stable
+Flutter. A change to that commit is one change: refresh the `deps` branch, then update the lock and
+the defaults of the Dockerfiles in `containers/` on `deps`. `python3 tools/sdk/check_lock.py` fails
+when they differ, or when the lock disagrees with the workflows, `Cargo.toml` or `tool/cdn_files.json`.
 
 The Registry test suite runs every case on the file Registry and SQLite. With
 `AI6_TEST_POSTGRES_URL` set to a `postgres://…?sslmode=disable` server whose user may
@@ -85,7 +90,9 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
 ## CI and release
 
 - `.github/workflows/test.yml` runs the workspace matrix, public API snapshots and the
-  Flutter app, on demand and on `ci-*` tags.
+  Flutter app, on demand and on `ci-*` tags, with one leg on floating stable Rust so a new compiler
+  is still noticed. The app's jobs and, on `ci-*` tags, a `bootstrap` job on all six platforms
+  install their SDKs with `tools/sdk/bootstrap`, through `.github/actions/sdk`.
 - `.github/workflows/docs.yml` strictly builds the narrative site and Rust API reference,
   then deploys Pages.
 - `.github/workflows/release.yml` gates a source release on tests and a strict docs build.

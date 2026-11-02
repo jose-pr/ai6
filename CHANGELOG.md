@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- CI's app jobs and the documentation build use the SDKs `tools/sdk/sdk.lock` names instead of
+  floating ones: Flutter at a commit rather than `channel: main`, Python and the docs tooling
+  hash-locked, PostgreSQL's image by digest. One Rust leg stays on floating stable.
 - In Outer Office a name opens what it names, on every page: Operations, Missions, Sessions,
   Stations, Theaters, Agents, roles and pools, and Overview's counts open their page filtered to
   what they counted. Each page has one heading and a line on what it is for; an empty page says
@@ -59,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `tools/sdk/`: `sdk.lock` names every SDK a build needs at exact versions, `bootstrap.sh` and
+  `bootstrap.ps1` install them under one directory, verified, without touching the system or the
+  shell profile, and `check_lock.py` holds the lock to the repository.
+- Outer Office has a Linux runner. Linux, Windows and the web are its supported targets.
 - Forms in Outer Office for adding, editing and removing Operations, Agents, Agent roles, cover
   policies and Moneypenny's settings, in place of the JSON box. Each form comes from the record's
   own type: `#[derive(ToValue, FromValue, Schema, Form)]` declares every field's title, words,

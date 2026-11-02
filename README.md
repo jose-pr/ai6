@@ -44,6 +44,8 @@ cargo build --workspace --all-features
 
 Outer Office needs the Flutter `main` SDK; see
 [its README](https://github.com/jose-pr/ai6/blob/main/clients/outer-office/README.md).
+[`tools/sdk/bootstrap.sh`](https://github.com/jose-pr/ai6/blob/main/tools/sdk/README.md) installs
+every SDK a build needs, at the versions the repository is tested with.
 
 ## Quick start
 
