@@ -981,11 +981,19 @@ fn global_only(name: &str) -> bool {
 ///
 /// The reason, naming the Agent and the variables.
 pub(super) fn check_reviewer(state: &DaemonState, agent: &Agent) -> Result<(), String> {
-    let global = state
-        .roster
-        .agent(None, &agent.id)
-        .map(|global| global.env)
-        .unwrap_or_default();
+    let global = state.roster.agent(None, &agent.id).ok();
+    if global
+        .as_ref()
+        .map_or_else(Vec::new, |global| global.routes.clone())
+        != agent.routes
+    {
+        return Err(format!(
+            "Agent {:?} cannot review: the Operation's own agents.toml changes its routes, which \
+             a review takes only from the global roster",
+            agent.id
+        ));
+    }
+    let global = global.map(|global| global.env).unwrap_or_default();
     let named = |env: &BTreeMap<String, String>, name: &str| {
         env.iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(name))

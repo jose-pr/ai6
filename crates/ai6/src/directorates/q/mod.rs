@@ -15,7 +15,7 @@ pub mod transport;
 pub use mcp::claude_mcp_config;
 pub use pools::{
     Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin,
-    PoolChoice, PoolStrategy, choose_pools,
+    PoolChoice, PoolStrategy, RouteStanding, choose_pools, choose_route,
 };
 pub use sandbox::{SandboxError, SandboxRequest};
 pub use secrets::{
@@ -185,6 +185,17 @@ impl SessionEnv {
         &self.0
     }
 
+    /// Why an `env` on a roster record cannot be set: a name that is no variable, AI6's own or a
+    /// provider credential's ([`CREDENTIAL_VARIABLES`]). The catalog's own variables are checked
+    /// when a Station has one ([`LoadoutCatalog::check_session_env`]).
+    pub(crate) fn check_on_roster(&self) -> Result<(), String> {
+        let taken: Vec<String> = CREDENTIAL_VARIABLES
+            .iter()
+            .map(|variable| (*variable).to_owned())
+            .collect();
+        self.check(&taken, Limit::UNBOUNDED)
+    }
+
     /// Why a name or value cannot be set, ignoring case in `taken` as Windows does.
     fn check(&self, taken: &[String], chars: Limit) -> Result<(), String> {
         for (name, value) in &self.0 {
@@ -261,6 +272,18 @@ impl Loadout {
             secrets: vec![account.secret_name()?.to_owned()],
             env: SessionEnv::default(),
         })
+    }
+
+    /// The loadout that declares only the secrets a route of `agent` names, so a broker leases
+    /// them and nothing else.
+    pub fn for_route(agent: &str, secrets: &[String]) -> Self {
+        Self {
+            agent: format!("route:{agent}"),
+            sandbox: None,
+            mcp: Vec::new(),
+            secrets: secrets.to_vec(),
+            env: SessionEnv::default(),
+        }
     }
 }
 
@@ -573,6 +596,11 @@ impl LoadoutCatalog {
             .unwrap_or_else(|| SecretDefinition::new(name))
     }
 
+    /// Whether `name` is defined by a `[secret.<name>]` table.
+    pub fn knows_secret(&self, name: &str) -> bool {
+        self.secrets.contains_key(name)
+    }
+
     /// The definition of every secret any loadout or pool account names, in stable name
     /// order.
     pub fn secrets(&self) -> Vec<SecretDefinition> {
@@ -625,6 +653,8 @@ struct RawPool {
     strategy: Option<String>,
     login_command: Option<Vec<String>>,
     #[serde(default)]
+    named_only: bool,
+    #[serde(default)]
     account: BTreeMap<String, RawAccount>,
 }
 
@@ -644,7 +674,9 @@ struct RawAccount {
 
 impl RawPool {
     fn into_pool(self, id: String) -> Result<AccountPool, String> {
-        let mut pool = AccountPool::new(&id, self.handler).operations(self.operations);
+        let mut pool = AccountPool::new(&id, self.handler)
+            .operations(self.operations)
+            .named_only(self.named_only);
         if let Some(strategy) = self.strategy {
             pool = pool.strategy(PoolStrategy::parse(&strategy).ok_or_else(|| {
                 format!(
@@ -776,9 +808,9 @@ fn parse_document(
             failure
         })?;
 
-    if document.loadout.is_empty() && document.pool.is_empty() {
+    if document.loadout.is_empty() && document.pool.is_empty() && document.secret.is_empty() {
         return Err(QError::new(QErrorKind::Schema, path)
-            .because("declare at least one [loadout.<agent>] or [pool.<id>]"));
+            .because("declare at least one [loadout.<agent>], [pool.<id>] or [secret.<name>]"));
     }
     let mut pools = BTreeMap::new();
     for (id, raw) in document.pool {

@@ -111,6 +111,9 @@ pub(crate) struct LaunchManifest {
     pub(crate) working_directory: String,
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<String>,
+    /// The pool the Session's route names, when it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pool: Option<String>,
     pub(crate) cover: Option<CoverAudit>,
     /// The Station that supervises the Session.
     pub(crate) station_id: Option<String>,
@@ -772,6 +775,7 @@ mod tests {
         book.set_operation(
             "mission-1",
             LaunchManifest {
+                pool: None,
                 handler_provider: "claude".to_owned(),
                 terminal_provider: "detached".to_owned(),
                 working_directory: "/srv/work".to_owned(),
@@ -976,6 +980,7 @@ mod tests {
             book.set_operation(
                 "mission-1",
                 LaunchManifest {
+                    pool: None,
                     handler_provider: "claude".to_owned(),
                     terminal_provider: "pty".to_owned(),
                     working_directory: directory.path().to_string_lossy().into_owned(),
@@ -1032,6 +1037,7 @@ mod tests {
             book.set_operation(
                 "old-1",
                 LaunchManifest {
+                    pool: None,
                     handler_provider: "claude".to_owned(),
                     terminal_provider: "pty".to_owned(),
                     working_directory: directory.path().to_string_lossy().into_owned(),
@@ -1192,6 +1198,7 @@ mod tests {
             book.set_operation(
                 "held-1",
                 LaunchManifest {
+                    pool: None,
                     handler_provider: "claude".to_owned(),
                     terminal_provider: "pty".to_owned(),
                     working_directory: directory.path().to_string_lossy().into_owned(),

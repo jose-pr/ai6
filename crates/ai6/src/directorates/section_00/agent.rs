@@ -385,6 +385,14 @@ pub trait AgentHandler: Send + Sync {
     fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
         Ok(Vec::new())
     }
+
+    /// Why this handler, with its settings, would refuse a Mission's Session at `clearance`, in a
+    /// sentence; `None` when it holds such a Session to what the clearance promises. A route of
+    /// an Agent that would be refused is passed over. The default: it can hold any.
+    fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
+        let _ = clearance;
+        Ok(None)
+    }
 }
 
 /// One provider-owned, resumable agent operation.

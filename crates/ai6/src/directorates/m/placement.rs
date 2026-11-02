@@ -21,7 +21,7 @@ use std::time::Duration;
 use globset::Glob;
 use serde::{Deserialize, Serialize};
 
-use crate::directorates::m::roster::{Agent, Roster, RosterError};
+use crate::directorates::m::roster::{Agent, AgentRoute, Roster, RosterError, RouteRef};
 use crate::directorates::m::theaters::{
     AgentMode, EgressKind, LOCAL_THEATER, TheaterKind, TheaterSummary,
 };
@@ -103,6 +103,9 @@ pub struct AgentFacts {
     /// The model its record sets; none is the handler's default.
     #[serde(default)]
     pub model: Option<String>,
+    /// Its routes, when it lists them in place of one handler.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<RouteRef>,
     /// Higher priority is preferred.
     #[serde(default)]
     pub priority: i64,
@@ -120,10 +123,32 @@ impl From<&Agent> for AgentFacts {
             id: agent.id.clone(),
             handler: agent.handler.clone(),
             model: agent.model.clone(),
+            routes: if agent.is_routed() {
+                agent
+                    .route_list()
+                    .iter()
+                    .map(AgentRoute::reference)
+                    .collect()
+            } else {
+                Vec::new()
+            },
             priority: agent.priority,
             roles: agent.roles.clone(),
             tags: agent.tags.clone(),
         }
+    }
+}
+
+impl AgentFacts {
+    /// The handlers it can run on: its routes', or its one handler's.
+    fn handlers(&self) -> Vec<&str> {
+        if self.routes.is_empty() {
+            return self.handler.as_deref().into_iter().collect();
+        }
+        self.routes
+            .iter()
+            .map(|route| route.handler.as_str())
+            .collect()
     }
 }
 
@@ -520,20 +545,34 @@ pub fn place(
         }
         let mut usable = Vec::new();
         for agent in &candidates {
-            let handler = agent.handler.as_deref().unwrap_or_default();
-            let missing = station
-                .handlers
-                .as_ref()
-                .is_some_and(|handlers| !handlers.iter().any(|available| available == handler));
-            if missing {
+            let wanted = agent.handlers();
+            let here: Vec<&str> = wanted
+                .iter()
+                .copied()
+                .filter(|handler| {
+                    station
+                        .handlers
+                        .as_ref()
+                        .is_none_or(|handlers| handlers.iter().any(|known| known == handler))
+                })
+                .collect();
+            if here.is_empty() {
                 placement.rejections.push(PlacementRejection {
                     station: Some(station.station.clone()),
                     theater: None,
                     agent: Some(agent.id.clone()),
-                    reason: format!("handler {handler:?} is not available on this Station"),
+                    reason: match wanted.as_slice() {
+                        [handler] => {
+                            format!("handler {handler:?} is not available on this Station")
+                        }
+                        handlers => format!(
+                            "none of its routes' handlers ({}) is available on this Station",
+                            handlers.join(", ")
+                        ),
+                    },
                 });
             } else {
-                usable.push(*agent);
+                usable.push((*agent, here));
             }
         }
         let mut theaters: Vec<&TheaterSummary> = station.theaters.iter().collect();
@@ -552,22 +591,34 @@ pub fn place(
                 }
             };
             let score = load_score(station, theater);
-            for agent in &usable {
-                let handler = agent.handler.as_deref().unwrap_or_default();
-                if let Err(reason) = harness_verdict(theater, mode, handler) {
+            for (agent, handlers) in &usable {
+                // Which route runs is the Station's to choose when it starts the Session; here
+                // it is enough that one of them can.
+                let mut reasons = Vec::new();
+                let fits =
+                    handlers
+                        .iter()
+                        .find(|handler| match harness_verdict(theater, mode, handler) {
+                            Ok(()) => true,
+                            Err(reason) => {
+                                reasons.push(reason);
+                                false
+                            }
+                        });
+                let Some(handler) = fits else {
                     placement.rejections.push(PlacementRejection {
                         station: Some(station.station.clone()),
                         theater: Some(theater.id.clone()),
                         agent: Some(agent.id.clone()),
-                        reason,
+                        reason: reasons.join("; "),
                     });
                     continue;
-                }
+                };
                 placement.choices.push(PlacementChoice {
                     station: station.station.clone(),
                     theater: theater.id.clone(),
                     agent: agent.id.clone(),
-                    handler: agent.handler.clone(),
+                    handler: Some((*handler).to_owned()),
                     mode,
                     score,
                 });
@@ -638,7 +689,7 @@ fn agent_rejection(agent: &AgentFacts, request: &PlacementRequest) -> Option<Str
     {
         return Some("the Mission asks for a different Agent".to_owned());
     }
-    if agent.handler.is_none() {
+    if agent.handlers().is_empty() {
         return Some("it has no handler configured".to_owned());
     }
     if let Some(role) = request.role.as_deref()
@@ -994,6 +1045,7 @@ mod tests {
     fn agent(id: &str, handler: &str, priority: i64) -> AgentFacts {
         AgentFacts {
             id: id.to_owned(),
+            routes: Vec::new(),
             handler: Some(handler.to_owned()),
             model: None,
             priority,

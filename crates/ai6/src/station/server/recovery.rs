@@ -560,6 +560,7 @@ fn record_adopted(
         working_directory: launch.working_directory,
         model: launch.model,
         effort: launch.effort,
+        pool: launch.pool,
         cover: None,
         station_id: Some(state.station_id.clone()),
         theater_id: record.theater.clone(),
@@ -682,6 +683,7 @@ pub(super) fn launch_of(manifest: &LaunchManifest) -> SessionLaunch {
         manifest.working_directory.clone(),
     )
     .with_model(manifest.model.clone(), manifest.effort.clone())
+    .with_pool(manifest.pool.clone())
     .with_mode(manifest.mode)
     .with_clearance(manifest.clearance.clone());
     if let Some(runner) = &manifest.runner {

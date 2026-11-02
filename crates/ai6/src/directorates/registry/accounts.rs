@@ -904,7 +904,52 @@ mod tests {
         quota_reports_and_usage_are_kept_per_account,
         a_claim_in_another_pool_frees_the_missions_earlier_account,
         stations_with_different_rosters_keep_their_own_profiles,
+        two_stations_never_both_take_the_last_place_on_a_route,
+        a_routes_own_account_is_limited_for_every_station,
     );
+
+    /// One Station claims first; the other, which read the same room, gets nothing and takes the
+    /// next route instead.
+    fn two_stations_never_both_take_the_last_place_on_a_route(store: &dyn Store) {
+        let first = store.handle();
+        let second = store.handle();
+        let gateway = pool(PoolStrategy::Headroom, &[("a", 0, Some(1))]);
+        let other = AccountPool::new("other", "claude")
+            .account(Account::new("b", AccountKind::HarnessLogin).max_concurrent(1));
+        assert!(claim(first.as_ref(), &gateway, "s1", "m1", NOW).is_some());
+        assert!(
+            claim(second.as_ref(), &gateway, "s2", "m2", NOW).is_none(),
+            "the last place went once"
+        );
+        assert!(
+            claim(second.as_ref(), &other, "s2", "m2", NOW).is_some(),
+            "the next route has room"
+        );
+        assert!(claim(first.as_ref(), &other, "s1", "m3", NOW).is_none());
+    }
+
+    /// A limit one Station saw on a route with no pool holds on another until it resets, and the
+    /// row is an account like any other: it counts Sessions and when it was last used.
+    fn a_routes_own_account_is_limited_for_every_station(store: &dyn Store) {
+        let first = store.handle();
+        let second = store.handle();
+        let route = AccountPool::new("route-0123456789abcdef", "acp")
+            .account(Account::new("login", AccountKind::HarnessLogin));
+        let reference = AccountRef::new("route-0123456789abcdef", "login");
+        assert!(claim(first.as_ref(), &route, "s1", "assistant--a", NOW).is_some());
+        first.limit_account(&reference, NOW + 100.0).unwrap();
+        assert!(first.release_account("s1", "assistant--a").unwrap());
+        assert!(claim(second.as_ref(), &route, "s2", "assistant--b", NOW).is_none());
+        assert!(claim(second.as_ref(), &route, "s2", "assistant--b", NOW + 101.0).is_some());
+        let row = second
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|row| row.account == reference)
+            .unwrap();
+        assert_eq!(row.last_used, Some(NOW + 101.0));
+        assert_eq!(row.live_claims(NOW + 101.0).count(), 1);
+    }
 
     fn a_claim_in_another_pool_frees_the_missions_earlier_account(store: &dyn Store) {
         let registry = store.handle();

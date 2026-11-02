@@ -222,7 +222,12 @@ pub(super) fn reassign_if_unavailable(state: &DaemonState, mission: &Mission) ->
             .then(|| format!("Agent {agent:?} is quarantined"))
     });
     let Some(unavailable) = unavailable else {
-        if mission.waiting.is_some() {
+        // A routed Agent's wait is its start's to settle: it may still have no route with room.
+        let routed = state
+            .roster
+            .agent(operation, agent)
+            .is_ok_and(|agent| agent.is_routed());
+        if mission.waiting.is_some() && !routed {
             note_waiting(state, mission, None);
         }
         return true;
@@ -253,7 +258,7 @@ pub(super) fn reassign_if_unavailable(state: &DaemonState, mission: &Mission) ->
 }
 
 /// Records on the Mission why it waits, and tells the timeline once per new reason.
-fn note_waiting(state: &DaemonState, mission: &Mission, reason: Option<String>) {
+pub(super) fn note_waiting(state: &DaemonState, mission: &Mission, reason: Option<String>) {
     let mission_id = mission.mission_id.as_str();
     let changed = state
         .missions
@@ -348,17 +353,16 @@ pub(super) fn handler_weakenings(plugins: &Plugins, roster: &Roster) -> Vec<Stri
         let Ok(agent) = roster.agent(None, id) else {
             continue;
         };
-        let Some(provider) = agent.handler.as_deref() else {
-            continue;
-        };
-        if agent.handler_settings.is_empty() {
-            continue;
-        }
-        let Ok(handler) = plugins.handler_with(provider, &agent.handler_settings) else {
-            continue;
-        };
-        for line in handler.weakenings().unwrap_or_default() {
-            weakened.push(format!("Agent {id:?} is weakened: {line}"));
+        for route in agent.route_list() {
+            if route.handler_settings.is_empty() {
+                continue;
+            }
+            let Ok(handler) = plugins.handler_with(&route.handler, &route.handler_settings) else {
+                continue;
+            };
+            for line in handler.weakenings().unwrap_or_default() {
+                weakened.push(format!("Agent {id:?} is weakened: {line}"));
+            }
         }
     }
     weakened
@@ -672,6 +676,7 @@ mod tests {
             )
             .unwrap();
         let manifest = LaunchManifest {
+            pool: None,
             handler_provider: "mock-agent".to_owned(),
             terminal_provider: "mock-terminal".to_owned(),
             working_directory: std::env::temp_dir().to_string_lossy().into_owned(),

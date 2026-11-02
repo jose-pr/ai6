@@ -63,6 +63,10 @@ pub struct SessionLaunch {
     /// The effort, when the Agent names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// The pool its route names, when it names one; with the handler and model it says which
+    /// route ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
     /// Whether the harness runs on the Theater or acts on it from the Station.
     #[serde(default)]
     pub mode: ExecutionMode,
@@ -88,6 +92,7 @@ impl SessionLaunch {
             working_directory: working_directory.into(),
             model: None,
             effort: None,
+            pool: None,
             mode: ExecutionMode::default(),
             runner: None,
             clearance: None,
@@ -98,6 +103,12 @@ impl SessionLaunch {
     pub fn with_model(mut self, model: Option<String>, effort: Option<String>) -> Self {
         self.model = model;
         self.effort = effort;
+        self
+    }
+
+    /// Records the pool its route names.
+    pub fn with_pool(mut self, pool: Option<String>) -> Self {
+        self.pool = pool;
         self
     }
 

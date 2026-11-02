@@ -94,7 +94,7 @@ fn consider(
     let Some(promotion) = operation.promotion.due(
         &current,
         &operation.clearance,
-        &here.tally_of_model(agent.model.as_deref()),
+        &here.tally_of_model(agent.occupant_model().as_deref()),
         &[&here.tally, &record.in_operation(NO_OPERATION).tally],
         now as f64,
     ) else {
@@ -198,7 +198,7 @@ fn raise(
         signer,
         now,
     )
-    .for_occupant(agent.model.clone(), agent.clearance.clone())
+    .for_occupant(agent.occupant_model(), agent.clearance.clone())
     .because(request.reason.clone());
     match state
         .intake

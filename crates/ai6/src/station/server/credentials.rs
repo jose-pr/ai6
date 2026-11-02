@@ -12,9 +12,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::directorates::m::mission::Mission;
+use crate::directorates::m::roster::Agent;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
 use crate::directorates::q::{
-    CREDENTIAL_VARIABLES, LoadoutCatalog, SecretBackend, SecretBroker, SecretDefinition,
+    CREDENTIAL_VARIABLES, Loadout, LoadoutCatalog, SecretBackend, SecretBroker, SecretDefinition,
     SecretLease, SecretLeaseRequest, StationSecrets,
 };
 use crate::directorates::registry::approvals::{Approval, ApprovalStatus};
@@ -22,6 +23,8 @@ use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::timeline::TimelineEvent;
 
 use super::DaemonState;
+use super::accounts::Holder;
+use super::routes::OnRoute;
 
 /// The timeline kind of a credential event.
 const TIMELINE_KIND: &str = "credential";
@@ -240,44 +243,147 @@ pub(super) fn session_environment(
 /// Fails when the backend refuses an ordinary secret or no pool account can be had, so a
 /// Session never starts without the credentials its loadout and pools promise. Blocks on the
 /// backend and the Registry.
+///
+/// `agent` is as its Session works, on `on` when it has routes: the route's own secrets are what
+/// its harness reaches its model with, so they are issued whatever the Session has read.
 pub(super) fn issue(
     state: &DaemonState,
     mission: &Mission,
-    agent: &str,
+    agent: &Agent,
+    on: Option<&OnRoute>,
     exposure: &ExposureGate,
     site: super::accounts::Site,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
+    issue_for(
+        state,
+        mission.into(),
+        agent,
+        on,
+        Some((mission, exposure)),
+        site,
+        environment,
+    )
+}
+
+/// What an assistant Session of `agent` reaches its model with, under the name `holder` gives it:
+/// its route's account and secrets. She is given no loadout secret: nothing she reads is trusted,
+/// and a tool's credential would reach whatever she reads. Blocks on the backend and the Registry.
+#[cfg(feature = "publisher")]
+pub(super) fn issue_for_assistant(
+    state: &DaemonState,
+    holder: Holder<'_>,
+    agent: &Agent,
+    on: Option<&OnRoute>,
+    site: super::accounts::Site,
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    issue_for(state, holder, agent, on, None, site, environment)
+}
+
+fn issue_for(
+    state: &DaemonState,
+    holder: Holder<'_>,
+    agent: &Agent,
+    on: Option<&OnRoute>,
+    loadout_of: Option<(&Mission, &ExposureGate)>,
+    site: super::accounts::Site,
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
     let desk = &state.station.credentials;
-    let mission_id = mission.mission_id.to_string();
-    release(state, &mission_id);
+    let mission_id = holder.id;
+    release(state, mission_id);
+    if let Some(pool) = on.and_then(|on| on.implicit.as_ref()) {
+        super::accounts::claim_implicit(state, pool, holder)?;
+    }
     let Some(catalog) = &desk.catalog else {
         return Ok(());
     };
     let broker = desk.broker(catalog, state.station.limits().secrets.max_lease_ttl);
     // A pooled Agent's loadout may not set a provider credential variable.
-    let reserved = super::accounts::credential_variables(state, catalog, mission, agent);
+    let reserved = super::accounts::credential_variables(state, catalog, holder.operation, agent);
     let mut leases = Leases::default();
-    issue_loadout(
-        state,
-        (catalog, &broker),
-        mission,
-        agent,
-        exposure,
-        reserved.as_ref(),
-        environment,
-        &mut leases,
-    )?;
+    if let Some((mission, exposure)) = loadout_of {
+        issue_loadout(
+            state,
+            (catalog, &broker),
+            mission,
+            &agent.id,
+            exposure,
+            reserved.as_ref(),
+            environment,
+            &mut leases,
+        )?;
+    }
+    if let Some(on) = on {
+        issue_route_secrets(
+            state,
+            (catalog, &broker),
+            holder,
+            &agent.id,
+            on,
+            reserved.as_ref(),
+            environment,
+            &mut leases,
+        )?;
+    }
     // The pool account goes last, so nothing issued after it can stand in for its credential.
     if let Some(lease) =
-        super::accounts::issue(state, catalog, &broker, mission, agent, site, environment)?
+        super::accounts::issue(state, catalog, &broker, holder, agent, site, environment)?
     {
         leases.0.push(Issued {
             lease,
             approval: None,
         });
     }
-    keep(state, &mission_id, leases)
+    keep(state, mission_id, leases)
+}
+
+/// Leases the secrets `on`'s route names into `environment`. One whose variable is in `reserved`
+/// (the route draws an account from a pool, which supplies that variable) is not issued.
+#[allow(clippy::too_many_arguments)]
+fn issue_route_secrets(
+    state: &DaemonState,
+    (catalog, broker): (&LoadoutCatalog, &SecretBroker),
+    holder: Holder<'_>,
+    agent: &str,
+    on: &OnRoute,
+    reserved: Option<&BTreeSet<String>>,
+    environment: &mut BTreeMap<String, String>,
+    leases: &mut Leases,
+) -> Result<(), String> {
+    let definitions: Vec<SecretDefinition> = on
+        .route
+        .secrets
+        .iter()
+        .map(|name| catalog.secret(name))
+        .filter(|definition| {
+            let kept = reserved.is_none_or(|reserved| !reserved.contains(definition.env()));
+            if !kept {
+                eprintln!(
+                    "ai6: secret {:?} of a route of Agent {agent:?} is left out: the route draws \
+                     from an account pool, which supplies {}",
+                    definition.name(),
+                    definition.env()
+                );
+            }
+            kept
+        })
+        .collect();
+    if definitions.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<String> = definitions.iter().map(|d| d.name().to_owned()).collect();
+    let request = SecretLeaseRequest::with_ttl(
+        state.station_id.clone(),
+        holder.id,
+        state.station.limits().secrets.lease_ttl.0,
+    )
+    .map_err(|error| error.to_string())?;
+    let lease = broker
+        .lease_names(&Loadout::for_route(agent, &names), &names, request)
+        .map_err(|error| format!("Agent {agent:?}'s route could not lease its secrets: {error}"))?;
+    leases.hand_over(lease, None, &definitions, environment)
 }
 
 /// The loadout half of [`issue`]: the Agent's own secrets, ordinary and green ink, added to

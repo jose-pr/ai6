@@ -31,6 +31,7 @@ use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy}
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition, utc_day};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
+use crate::directorates::q::{PoolStrategy, SessionEnv};
 use crate::directorates::registry::clearance::ClearanceGrant;
 use crate::directorates::registry::sleepers::Sleeper;
 use crate::directorates::registry::store::validate_station_id;
@@ -91,6 +92,11 @@ pub struct Agent {
     pub model: Option<String>,
     /// Preferred reasoning effort, when configured.
     pub effort: Option<String>,
+    /// The ways it reaches its model when it has several (`[[agent.<id>.route]]`); empty for one
+    /// `handler`. What a route leaves out comes from the fields above ([`Agent::route_list`]).
+    pub routes: Vec<AgentRoute>,
+    /// How it chooses among its routes.
+    pub balance: RouteBalance,
     /// Mission roles this Agent can perform.
     pub roles: Vec<String>,
     /// Labels used when selecting an Agent for a Mission.
@@ -122,6 +128,131 @@ pub struct Agent {
 
 /// Days before an Agent's `retire_on` date that the Station warns of it, by default.
 pub const DEFAULT_RETIRE_WARNING_DAYS: u32 = 14;
+
+/// One way an Agent reaches its model: a handler, the name this source knows the model by, and an
+/// account source (`[[agent.<id>.route]]`). Identity stays the Agent's; routes of one Agent are
+/// meant to be one model, which AI6 does not check.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub struct AgentRoute {
+    /// The harness this route runs, from those the Stations report.
+    #[schema(title = "Handler", format = "reported:handlers")]
+    pub handler: String,
+    /// What this source calls the model; the Agent's model when empty.
+    #[schema(title = "Model", format = "used:model")]
+    pub model: Option<String>,
+    /// How hard the model thinks on this route; the Agent's effort when empty.
+    #[schema(title = "Reasoning effort", format = "used:effort", advanced)]
+    pub effort: Option<String>,
+    /// Settings for this route's handler; the Agent's when empty.
+    #[schema(title = "Handler settings", format = "settings-of:handler", advanced)]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    pub handler_settings: serde_json::Map<String, serde_json::Value>,
+    /// The account pool this route draws from; the Agent's when empty.
+    #[schema(title = "Account pool")]
+    pub pool: Option<String>,
+    /// Values this route's Sessions get in their environment, over the Agent's, such as where the
+    /// source is. Anyone who reads the roster reads them: no credential here.
+    #[schema(title = "Environment", advanced)]
+    #[map(default)]
+    pub env: SessionEnv,
+    /// The loadout secrets (`[secret.<name>]`) this route's Sessions reach their model with,
+    /// leased per Session whatever the Session has read.
+    #[schema(title = "Secrets", advanced)]
+    #[map(default)]
+    pub secrets: Vec<String>,
+    /// Among routes with room, the highest goes first where `balance` compares priority.
+    #[schema(title = "Priority", advanced)]
+    #[map(default = 0)]
+    pub priority: i64,
+}
+
+impl AgentRoute {
+    /// A route through `handler`, taking everything else from its Agent.
+    pub fn new(handler: impl Into<String>) -> Self {
+        Self {
+            handler: handler.into(),
+            ..Self::default()
+        }
+    }
+
+    /// This route under the name a Session record, a timeline and a conversation know it by.
+    pub fn reference(&self) -> RouteRef {
+        RouteRef {
+            handler: self.handler.clone(),
+            model: self.model.clone(),
+            pool: self.pool.clone(),
+        }
+    }
+}
+
+/// Which route of an Agent ran: its handler, model and pool.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteRef {
+    /// The AgentHandler provider.
+    pub handler: String,
+    /// The model, when the route or its Agent names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The pool the route names, when it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
+}
+
+impl RouteRef {
+    /// The route through `handler` to `model` from `pool`.
+    pub fn new(handler: impl Into<String>, model: Option<String>, pool: Option<String>) -> Self {
+        Self {
+            handler: handler.into(),
+            model,
+            pool,
+        }
+    }
+}
+
+impl fmt::Display for RouteRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.handler)?;
+        if let Some(model) = &self.model {
+            write!(f, " {model}")?;
+        }
+        if let Some(pool) = &self.pool {
+            write!(f, " (pool {pool})")?;
+        }
+        Ok(())
+    }
+}
+
+/// How an Agent chooses among its routes (`balance`): the words of a pool's `strategy`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(rename_all = "snake_case")]
+pub enum RouteBalance {
+    /// The route whose best account has the most quota left.
+    #[default]
+    #[schema(label = "Headroom: the route with the most quota left")]
+    Headroom,
+    /// The route that waited longest.
+    #[schema(label = "Round robin: the route that waited longest")]
+    RoundRobin,
+    /// The highest `priority` with room, in the order they are listed when equal.
+    #[schema(label = "Priority: the first route with room, in order")]
+    Priority,
+}
+
+impl RouteBalance {
+    /// The pool strategy that compares the same way.
+    pub fn strategy(self) -> PoolStrategy {
+        match self {
+            Self::Headroom => PoolStrategy::Headroom,
+            Self::RoundRobin => PoolStrategy::RoundRobin,
+            Self::Priority => PoolStrategy::Priority,
+        }
+    }
+}
 
 /// What happens to an Agent on its `retire_on` date (`on_retire`).
 #[non_exhaustive]
@@ -178,6 +309,91 @@ impl Retirement {
 }
 
 impl Agent {
+    /// Whether it lists routes rather than one `handler`.
+    pub fn is_routed(&self) -> bool {
+        !self.routes.is_empty()
+    }
+
+    /// Each way it reaches its model, complete: what a route leaves out filled in from the Agent.
+    /// An Agent with one `handler` is one route; one with neither has none. A route's `env` is
+    /// its own: [`Agent::on_route`] lays it over the Agent's.
+    pub fn route_list(&self) -> Vec<AgentRoute> {
+        if self.routes.is_empty() {
+            return self
+                .handler
+                .iter()
+                .map(|handler| AgentRoute {
+                    handler: handler.clone(),
+                    model: self.model.clone(),
+                    effort: self.effort.clone(),
+                    handler_settings: self.handler_settings.clone(),
+                    pool: self.pool.clone(),
+                    ..AgentRoute::default()
+                })
+                .collect();
+        }
+        self.routes
+            .iter()
+            .cloned()
+            .map(|route| AgentRoute {
+                model: route.model.or_else(|| self.model.clone()),
+                effort: route.effort.or_else(|| self.effort.clone()),
+                handler_settings: if route.handler_settings.is_empty() {
+                    self.handler_settings.clone()
+                } else {
+                    route.handler_settings
+                },
+                pool: route.pool.or_else(|| self.pool.clone()),
+                ..route
+            })
+            .collect()
+    }
+
+    /// Whether any of its routes runs one of `handlers`.
+    pub fn runs_on(&self, handlers: &[String]) -> bool {
+        self.route_list()
+            .iter()
+            .any(|route| handlers.contains(&route.handler))
+    }
+
+    /// This Agent as a Session on `route` works: `route` from [`Agent::route_list`] in place of
+    /// its own handler, model, effort, settings and pool, and `route`'s `env` over its own.
+    #[must_use]
+    pub fn on_route(&self, route: &AgentRoute) -> Self {
+        let mut agent = self.clone();
+        agent.handler = Some(route.handler.clone());
+        agent.model = route.model.clone();
+        agent.effort = route.effort.clone();
+        agent.handler_settings = route.handler_settings.clone();
+        agent.pool = route.pool.clone();
+        agent.env.extend(route.env.values().clone());
+        agent.routes = Vec::new();
+        agent
+    }
+
+    /// The route of [`Agent::route_list`] that `reference` names, by handler, model and pool.
+    pub fn route_named(&self, reference: &RouteRef) -> Option<AgentRoute> {
+        self.route_list()
+            .into_iter()
+            .find(|route| route.reference() == *reference)
+    }
+
+    /// What occupies the codename, for what is granted to an occupant: its model, or for routes
+    /// every model they name, so changing what it runs on ends such a grant.
+    pub fn occupant_model(&self) -> Option<String> {
+        if self.routes.is_empty() {
+            return self.model.clone();
+        }
+        let mut models: Vec<String> = self
+            .route_list()
+            .into_iter()
+            .filter_map(|route| route.model)
+            .collect();
+        models.sort();
+        models.dedup();
+        (!models.is_empty()).then(|| models.join(" | "))
+    }
+
     /// Where the Agent stands against its `retire_on` date at `now` (Unix seconds, UTC
     /// days): retired from the start of that day, retiring from `retire_warning_days`
     /// before it.
@@ -223,7 +439,7 @@ impl Agent {
             grant.agent == self.id
                 && grant.operation == operation.id
                 && grant.is_live(now as f64)
-                && grant.applies_to(self.model.as_deref(), &self.clearance)
+                && grant.applies_to(self.occupant_model().as_deref(), &self.clearance)
         }) {
             effective = if grant.raises() {
                 rank(&grant.clearance)
@@ -257,6 +473,8 @@ impl Agent {
             handler_settings: serde_json::Map::new(),
             model: None,
             effort: None,
+            routes: Vec::new(),
+            balance: RouteBalance::default(),
             roles: Vec::new(),
             tags: Vec::new(),
             clearance: "field".to_owned(),
@@ -952,6 +1170,7 @@ impl Roster {
             validate_clearance(&agent.clearance)
                 .map_err(|reason| error(format!("Agent {:?}: {reason}", agent.id)))?;
             validate_retire_on(&agent)?;
+            validate_routes(&agent)?;
             let id = agent.id.clone();
             if roster.agents.contains_key(&id) {
                 return Err(error(format!("Agent {id:?} is given twice")));
@@ -1128,12 +1347,7 @@ impl Roster {
                 ));
                 continue;
             }
-            let available = available_handlers.is_none_or(|handlers| {
-                agent
-                    .handler
-                    .as_ref()
-                    .is_some_and(|handler| handlers.contains(handler))
-            });
+            let available = available_handlers.is_none_or(|handlers| agent.runs_on(handlers));
             if available {
                 candidates.insert(agent.id.clone(), agent);
             }
@@ -1965,6 +2179,21 @@ pub(crate) struct AgentDefinition {
     )]
     #[map(with = guatiao_serde::adapt::object, default)]
     handler_settings: serde_json::Map<String, serde_json::Value>,
+    /// Several ways to reach the model, each a handler, what that source calls the model and an
+    /// account source, in place of the handler above. What a route leaves out it takes from
+    /// here. Routes of one Agent are meant to be one model; AI6 does not check it.
+    #[schema(title = "Routes", section = "harness", advanced)]
+    #[map(default)]
+    #[form(form = AgentRoute)]
+    route: Vec<AgentRoute>,
+    /// How it chooses among its routes.
+    #[schema(
+        title = "Balance between routes",
+        section = "harness",
+        advanced,
+        default = Some(RouteBalance::default())
+    )]
+    balance: Option<RouteBalance>,
 
     /// The Mission roles it can take.
     #[schema(title = "Roles", section = "duties", format = "record:roles")]
@@ -2218,6 +2447,11 @@ fn resolve_agent(
         .budget
         .resolve()
         .map_err(|message| error(format!("Agent {id:?}: {message}")))?;
+    if definition.handler.is_some() && !definition.route.is_empty() {
+        return Err(error(format!(
+            "Agent {id:?} gives both `handler` and routes: give one or the other"
+        )));
+    }
     let agent = Agent {
         id,
         description: if definition.description.is_empty() {
@@ -2228,10 +2462,25 @@ fn resolve_agent(
             definition.description.clone()
         },
         aliases: definition.aliases.clone(),
-        handler: definition
-            .handler
-            .clone()
-            .or_else(|| base.as_ref().and_then(|agent| agent.handler.clone())),
+        // What this record sets replaces the other form of what it extends.
+        handler: definition.handler.clone().or_else(|| {
+            base.as_ref()
+                .filter(|_| definition.route.is_empty())
+                .and_then(|agent| agent.handler.clone())
+        }),
+        routes: if definition.handler.is_some() {
+            Vec::new()
+        } else if definition.route.is_empty() {
+            base.as_ref()
+                .map(|agent| agent.routes.clone())
+                .unwrap_or_default()
+        } else {
+            definition.route.clone()
+        },
+        balance: definition
+            .balance
+            .or_else(|| base.as_ref().map(|agent| agent.balance))
+            .unwrap_or_default(),
         handler_settings: if definition.handler_settings.is_empty() {
             base.as_ref()
                 .map(|agent| agent.handler_settings.clone())
@@ -2305,8 +2554,47 @@ fn resolve_agent(
     };
     validate_clearance(&agent.clearance)?;
     validate_retire_on(&agent)?;
+    validate_routes(&agent)?;
     seen.remove(&agent.id);
     Ok(agent)
+}
+
+/// Refuses an Agent with both a `handler` and routes, a route with no handler, or a route's `env`
+/// naming a credential's variable or one of AI6's own.
+fn validate_routes(agent: &Agent) -> Result<(), RosterError> {
+    if agent.handler.is_some() && !agent.routes.is_empty() {
+        return Err(error(format!(
+            "Agent {:?} gives both `handler` and routes: give one or the other",
+            agent.id
+        )));
+    }
+    for route in &agent.routes {
+        if route.handler.trim().is_empty() {
+            return Err(error(format!(
+                "Agent {:?}: a route has no handler",
+                agent.id
+            )));
+        }
+        route.env.check_on_roster().map_err(|reason| {
+            error(format!(
+                "Agent {:?}: route {}: {reason}",
+                agent.id,
+                route.reference()
+            ))
+        })?;
+    }
+    // A Session record, a conversation and a route's own account know a route by these names.
+    let mut named = BTreeSet::new();
+    for route in agent.route_list() {
+        let reference = route.reference();
+        if !named.insert(reference.to_string()) {
+            return Err(error(format!(
+                "Agent {:?} gives route {reference} twice: handler, model and pool tell routes apart",
+                agent.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn parse_file<T: FromValue>(path: &Path) -> Result<T, RosterError> {
@@ -2472,6 +2760,191 @@ mod tests {
 
         directory.write("operations.toml", "[operation.G]\nstations = [\"\"]\n");
         assert!(Roster::load(&directory.0).is_err());
+    }
+
+    const ROUTED: &str = r#"
+[agent.007]
+roles = ["case-officer"]
+effort = "high"
+balance = "priority"
+
+[[agent.007.route]]
+handler = "claude"
+model = "claude-opus-5-5"
+pool = "claude-team"
+
+[[agent.007.route]]
+handler = "claude"
+model = "anthropic/claude-opus-5-5"
+pool = "litellm-team"
+secrets = ["litellm"]
+priority = 1
+env = { ANTHROPIC_BASE_URL = "https://llm.example" }
+
+[[agent.007.route]]
+handler = "codex"
+effort = "low"
+"#;
+
+    fn routed_roster(agents: &str) -> Result<Roster, RosterError> {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("agents.toml"), agents).unwrap();
+        let roster = Roster::load(root.path())?;
+        roster.check_agents()?;
+        Ok(roster)
+    }
+
+    #[test]
+    fn routes_take_what_they_leave_out_from_the_agent_and_keep_its_identity() {
+        let agent = routed_roster(ROUTED).unwrap().agent(None, "007").unwrap();
+        assert!(agent.is_routed());
+        assert_eq!(agent.handler, None);
+        assert_eq!(agent.balance, RouteBalance::Priority);
+        let routes = agent.route_list();
+        assert_eq!(routes.len(), 3);
+        assert_eq!(routes[0].effort.as_deref(), Some("high"));
+        assert_eq!(
+            routes[1].model.as_deref(),
+            Some("anthropic/claude-opus-5-5")
+        );
+        assert_eq!(routes[1].priority, 1);
+        assert_eq!(routes[2].effort.as_deref(), Some("low"));
+        assert_eq!(routes[2].model, None);
+
+        let on_gateway = agent.on_route(&routes[1]);
+        assert_eq!(on_gateway.id, "007");
+        assert_eq!(on_gateway.roles, ["case-officer"]);
+        assert_eq!(on_gateway.handler.as_deref(), Some("claude"));
+        assert_eq!(on_gateway.pool.as_deref(), Some("litellm-team"));
+        assert_eq!(
+            on_gateway.env["ANTHROPIC_BASE_URL"], "https://llm.example",
+            "the route's env reaches the Session"
+        );
+        assert!(!on_gateway.is_routed());
+        assert_eq!(
+            agent.route_named(&routes[1].reference()),
+            Some(routes[1].clone())
+        );
+        assert!(agent.runs_on(&["codex".to_owned()]));
+        assert!(!agent.runs_on(&["acp".to_owned()]));
+    }
+
+    #[test]
+    fn the_plain_form_is_one_route() {
+        let roster = routed_roster(
+            "[agent.009]\nhandler = \"claude\"\nmodel = \"haiku\"\npool = \"team\"\n\
+             [agent.none]\nroles = []\n",
+        )
+        .unwrap();
+        let agent = roster.agent(None, "009").unwrap();
+        assert!(!agent.is_routed());
+        let routes = agent.route_list();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0].reference(),
+            RouteRef::new("claude", Some("haiku".to_owned()), Some("team".to_owned()))
+        );
+        assert_eq!(agent.on_route(&routes[0]), agent, "nothing changes");
+        assert!(roster.agent(None, "none").unwrap().route_list().is_empty());
+    }
+
+    #[test]
+    fn both_forms_together_are_refused_and_extends_takes_one_or_the_other() {
+        let both = routed_roster(
+            "[agent.x]\nhandler = \"claude\"\n[[agent.x.route]]\nhandler = \"codex\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(both.contains("both `handler` and routes"), "{both}");
+        assert!(
+            Agent::new("x").routes.is_empty(),
+            "an Agent built in code starts plain"
+        );
+        let mut built = Agent::new("x");
+        built.handler = Some("claude".to_owned());
+        built.routes = vec![AgentRoute::new("codex")];
+        let refused = Roster::from_parts([], [built], [], Covers::default()).unwrap_err();
+        assert!(refused.to_string().contains("both `handler` and routes"));
+
+        let roster = routed_roster(&format!(
+            "{ROUTED}[agent.child]\nextends = \"007\"\n\
+             [agent.plain]\nextends = \"007\"\nhandler = \"acp\"\n\
+             [agent.base]\nhandler = \"claude\"\n\
+             [agent.moved]\nextends = \"base\"\n[[agent.moved.route]]\nhandler = \"codex\"\n"
+        ))
+        .unwrap();
+        assert_eq!(roster.agent(None, "child").unwrap().route_list().len(), 3);
+        let plain = roster.agent(None, "plain").unwrap();
+        assert!(!plain.is_routed(), "its own handler replaces the routes");
+        assert_eq!(plain.handler.as_deref(), Some("acp"));
+        let moved = roster.agent(None, "moved").unwrap();
+        assert_eq!(moved.handler, None, "its routes replace the handler");
+        assert_eq!(moved.route_list()[0].handler, "codex");
+    }
+
+    #[test]
+    fn two_routes_with_the_same_handler_model_and_pool_are_refused() {
+        let reason = routed_roster(
+            "[agent.x]\nmodel = \"m\"\n[[agent.x.route]]\nhandler = \"h\"\n\
+             [[agent.x.route]]\nhandler = \"h\"\nmodel = \"m\"\nsecrets = [\"s\"]\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(reason.contains("route h m twice"), "{reason}");
+        assert!(
+            routed_roster(
+                "[agent.x]\n[[agent.x.route]]\nhandler = \"h\"\nmodel = \"m\"\n\
+                 [[agent.x.route]]\nhandler = \"h\"\nmodel = \"m\"\npool = \"p\"\n",
+            )
+            .is_ok(),
+            "a pool tells them apart"
+        );
+    }
+
+    #[test]
+    fn a_routes_env_may_not_name_a_credential_or_ai6s_own_variable() {
+        for (name, expected) in [
+            ("ANTHROPIC_AUTH_TOKEN", "a credential's variable"),
+            ("anthropic_api_key", "a credential's variable"),
+            ("AI6_ANYTHING", "AI6's own"),
+            ("not a name", "not a variable name"),
+        ] {
+            let reason = routed_roster(&format!(
+                "[agent.x]\n[[agent.x.route]]\nhandler = \"claude\"\n\
+                 env = {{ \"{name}\" = \"value-not-shown\" }}\n"
+            ))
+            .unwrap_err()
+            .to_string();
+            assert!(reason.contains(expected), "{reason}");
+            assert!(!reason.contains("value-not-shown"), "{reason}");
+        }
+    }
+
+    #[test]
+    fn a_grant_to_an_occupant_ends_when_its_routes_change_models() {
+        let agent = routed_roster(ROUTED).unwrap().agent(None, "007").unwrap();
+        assert_eq!(
+            agent.occupant_model().as_deref(),
+            Some("anthropic/claude-opus-5-5 | claude-opus-5-5")
+        );
+        let plain = routed_roster("[agent.p]\nhandler = \"h\"\nmodel = \"m\"\n")
+            .unwrap()
+            .agent(None, "p")
+            .unwrap();
+        assert_eq!(plain.occupant_model().as_deref(), Some("m"));
+    }
+
+    #[test]
+    fn select_agent_counts_a_routed_agent_when_any_route_can_run() {
+        let roster = routed_roster(ROUTED).unwrap();
+        let query = |handlers: &'static [&'static str]| {
+            let handlers: Vec<String> = handlers.iter().map(|h| (*h).to_owned()).collect();
+            roster
+                .select_agent(&AgentQuery::new().handlers(Some(&handlers)))
+                .map(|agent| agent.id)
+        };
+        assert_eq!(query(&["codex"]).unwrap(), "007");
+        assert!(query(&["acp"]).is_err());
     }
 
     #[test]

@@ -362,6 +362,7 @@ mod tests {
                 .set_operation(
                     &working,
                     crate::directorates::m::mission::LaunchManifest {
+                        pool: None,
                         handler_provider: "mock-recorder".to_owned(),
                         terminal_provider: "mock-terminal".to_owned(),
                         working_directory: "/work".to_owned(),

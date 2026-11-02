@@ -23,6 +23,7 @@ mod medical;
 mod promotion;
 mod recovery;
 mod reload;
+mod routes;
 #[cfg(test)]
 mod stream_tests;
 #[cfg(feature = "cables-mcp")]
@@ -4038,7 +4039,9 @@ async fn start_mission(
         launch_plan_in(&state, mission.operation_id.as_deref(), made.as_deref())
     }
     .map_err(configuration_error)?;
-    if let Some(reason) = plan.refuses(agent.handler.as_deref()) {
+    if !agent.is_routed()
+        && let Some(reason) = plan.refuses(agent.handler.as_deref())
+    {
         return Err(configuration_error(reason));
     }
     if review && !(plan.mode == ExecutionMode::Field && plan.own_host) {
@@ -4053,6 +4056,47 @@ async fn start_mission(
     };
     let remote_field = plan.mode == ExecutionMode::Field && !plan.own_host;
     let wrapped = remote_field && runner.is_none();
+    let on_route = if agent.is_routed() {
+        let hosted_by_runner = runner.is_some();
+        let available = available_handlers(&state);
+        let clearance = if review {
+            "desk"
+        } else {
+            agent.clearance.as_str()
+        };
+        let place = routes::Place {
+            refuses: &|route| {
+                plan.refuses(Some(&route.handler)).or_else(|| {
+                    (!hosted_by_runner && !available.contains(&route.handler)).then(|| {
+                        format!(
+                            "handler {:?} is not available on this Station",
+                            route.handler
+                        )
+                    })
+                })
+            },
+            clearance: (!hosted_by_runner).then_some(clearance),
+            review,
+        };
+        match routes::choose(&state, mission.operation_id.as_deref(), &agent, &place) {
+            Ok(on) => {
+                if mission.waiting.is_some() {
+                    agents::note_waiting(&state, &mission, None);
+                }
+                Some(on)
+            }
+            Err(reason) => {
+                agents::note_waiting(&state, &mission, Some(reason.clone()));
+                return Err(conflict(&reason));
+            }
+        }
+    } else {
+        None
+    };
+    let agent = match &on_route {
+        Some(on) => agent.on_route(&on.route),
+        None => agent,
+    };
     let _reservation = reserve_mission_start(&state, &mission, &agent)?;
     let handler_provider = agent
         .handler
@@ -4205,6 +4249,10 @@ async fn start_mission(
     } else {
         configured
     };
+    // A route's values are how it reaches its model, which a review keeps too.
+    if let Some(on) = &on_route {
+        environment.extend(on.route.env.values().clone());
+    }
     if !review {
         environment.extend(requested_environment(request.environment));
         if let Some(briefing) = configure_station_cover(
@@ -4318,7 +4366,8 @@ async fn start_mission(
         && let Err(error) = credentials::issue(
             &state,
             &mission,
-            &agent.id,
+            &agent,
+            on_route.as_ref(),
             &exposure,
             site,
             &mut environment,
@@ -4344,6 +4393,7 @@ async fn start_mission(
         working_directory: working_directory.clone(),
         model: model.clone(),
         effort: effort.clone(),
+        pool: agent.pool.clone(),
         cover: cover_audit.clone(),
         station_id: Some(state.station_id.clone()),
         theater_id: Some(theater_id.clone()),
@@ -4629,6 +4679,16 @@ async fn start_mission(
             .await);
         }
     };
+    if let Some(on) = &on_route {
+        routes::record_chosen(
+            &state,
+            mission.operation_id.as_deref(),
+            &mission_id,
+            agent_id,
+            "chosen",
+            on,
+        );
+    }
     let working = {
         let mut missions = state.missions.lock().map_err(|_| internal_error())?;
         (|| {
@@ -4720,6 +4780,93 @@ async fn start_mission(
     ))
 }
 
+/// The route `mission`'s resume runs on, for a routed `agent`: the one its Session ran on, while
+/// its harness is still held here or by a runner; otherwise by the resume rule
+/// ([`routes::for_resume`]), which may leave it on the route with room, move it, queue a new
+/// attempt or leave it waiting. The last two refuse this resume with the reason.
+fn resume_route(
+    state: &DaemonState,
+    mission: &Mission,
+    agent: &roster::Agent,
+) -> Result<Option<routes::OnRoute>, ApiErrorResponse> {
+    if !agent.is_routed() {
+        return Ok(None);
+    }
+    let mission_id = mission.mission_id.as_str();
+    let operation = mission.operation_id.as_deref();
+    let Some(manifest) = state
+        .missions
+        .lock()
+        .map_err(|_| internal_error())?
+        .operation(mission_id)
+    else {
+        return Err(conflict(
+            "No durable AgentHandler settings are available to resume",
+        ));
+    };
+    let earlier = roster::RouteRef::new(
+        manifest.handler_provider.clone(),
+        manifest.model.clone(),
+        manifest.pool.clone(),
+    );
+    let active = state
+        .sessions
+        .lock()
+        .map_err(|_| internal_error())?
+        .contains_key(mission_id);
+    let on_runner = manifest.runner.is_some();
+    if active || (on_runner && mission.state != MissionState::Parked) {
+        let Some(route) = agent.route_named(&earlier) else {
+            return Err(conflict(&format!(
+                "route {earlier} is no longer on Agent {:?}",
+                agent.id
+            )));
+        };
+        let implicit = matches!(
+            accounts::source_of(state, operation, &agent.on_route(&route)),
+            accounts::Source::Unpooled
+        )
+        .then(|| routes::implicit_pool(&agent.id, &route));
+        return Ok(Some(routes::OnRoute { route, implicit }));
+    }
+    let available = available_handlers(state);
+    let place = routes::Place {
+        refuses: &|route| {
+            (!on_runner && !available.contains(&route.handler)).then(|| {
+                format!(
+                    "handler {:?} is not available on this Station",
+                    route.handler
+                )
+            })
+        },
+        clearance: (!on_runner).then_some(agent.clearance.as_str()),
+        review: vetting::is_review_mission(mission),
+    };
+    let last_account = state
+        .intake
+        .latest_session(mission_id)
+        .ok()
+        .flatten()
+        .and_then(|record| record.account);
+    let carried = accounts::carries_session(state, last_account.as_ref());
+    match routes::for_resume(state, operation, agent, &earlier, carried, &place) {
+        routes::ResumeOn::Stay(on) => Ok(Some(on)),
+        routes::ResumeOn::Move(on) => {
+            routes::record_chosen(state, operation, mission_id, &agent.id, "moved", &on);
+            Ok(Some(on))
+        }
+        routes::ResumeOn::NewAttempt(why) => {
+            if hand_off(state, mission_id, agent.id.clone()) {
+                eprintln!("ai6: Mission {mission_id:?} starts a new attempt: {why}");
+            }
+            Err(conflict(&format!(
+                "a new attempt was queued on another route: {why}"
+            )))
+        }
+        routes::ResumeOn::Wait(why) => Err(conflict(&why)),
+    }
+}
+
 async fn resume_mission(
     State(state): State<DaemonState>,
     axum::extract::Path(mission_id): axum::extract::Path<String>,
@@ -4744,8 +4891,13 @@ async fn resume_mission(
         .agent_id
         .as_deref()
         .ok_or_else(|| configuration_error("Mission has no assigned Agent"))?;
-    let resume_agent = agents::effective(&state, mission.operation_id.as_deref(), agent_id)
+    let unrouted_agent = agents::effective(&state, mission.operation_id.as_deref(), agent_id)
         .map_err(configuration_error)?;
+    let resume_on = resume_route(&state, &mission, &unrouted_agent)?;
+    let resume_agent = match &resume_on {
+        Some(on) => unrouted_agent.on_route(&on.route),
+        None => unrouted_agent.clone(),
+    };
     let _reservation = if state
         .sessions
         .lock()
@@ -4863,17 +5015,26 @@ async fn resume_mission(
             )
         }
     };
+    // A route may have moved it to another name for its model; what a route leaves out is the
+    // Agent's, so the record names what runs.
+    let (model, effort) = match &resume_on {
+        Some(on) => (on.route.model.clone(), on.route.effort.clone()),
+        None => (model, effort),
+    };
     // A review resumes as it started: answer-only, on this Station's own host, with nothing
     // beyond what its harness needs to authenticate.
     let review = vetting::is_review_mission(&mission);
     if review {
-        vetting::check_reviewer(&state, &resume_agent).map_err(configuration_error)?;
+        vetting::check_reviewer(&state, &unrouted_agent).map_err(configuration_error)?;
     }
     let mut environment = if review {
         vetting::review_environment(&environment)
     } else {
         environment
     };
+    if let Some(on) = &resume_on {
+        environment.extend(on.route.env.values().clone());
+    }
     if !review {
         environment.extend(requested_environment(request.environment.clone()));
         configure_station_cover(
@@ -5116,7 +5277,8 @@ async fn resume_mission(
         credentials::issue(
             &state,
             &mission,
-            &resume_agent.id,
+            &resume_agent,
+            resume_on.as_ref(),
             &exposure,
             site,
             &mut environment,
@@ -5378,6 +5540,11 @@ async fn resume_mission(
         && let Some(mut manifest) = missions.operation(&mission_id)
     {
         manifest.clearance = Some(launched_clearance.clone());
+        if let Some(on) = &resume_on {
+            manifest.model = on.route.model.clone();
+            manifest.effort = on.route.effort.clone();
+            manifest.pool = on.route.pool.clone();
+        }
         if let Err(error) = missions.set_operation(&mission_id, manifest) {
             eprintln!("ai6: Mission {mission_id:?} launch clearance not recorded: {error:?}");
         }

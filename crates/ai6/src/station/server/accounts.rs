@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::placement;
+use crate::directorates::m::roster::{Agent, AgentRoute};
 use crate::directorates::q::{
     Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin, Loadout,
     LoadoutCatalog, PoolChoice, SecretBroker, SecretLease, SecretLeaseRequest, choose_pools,
@@ -27,6 +28,25 @@ use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::section_00::agent::QuotaReport;
 
 use super::DaemonState;
+
+/// What holds an account: a Mission, or an assistant conversation under the Session name it
+/// starts its harness with, which belongs to no Operation.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Holder<'a> {
+    /// The Mission ID the claim is recorded under.
+    pub(super) id: &'a str,
+    /// Its Operation, when it has one.
+    pub(super) operation: Option<&'a str>,
+}
+
+impl<'a> From<&'a Mission> for Holder<'a> {
+    fn from(mission: &'a Mission) -> Self {
+        Self {
+            id: mission.mission_id.as_str(),
+            operation: mission.operation_id.as_deref(),
+        }
+    }
+}
 
 /// A claim on an account for `state`'s Session of `mission_id`, held for `[accounts]
 /// claim_ttl` unless the Station renews it at its check-in, so a dark Station's accounts free
@@ -136,17 +156,115 @@ pub(super) struct Site {
     pub(super) on_station: bool,
 }
 
-/// What an Agent may draw from: its handler's pools that admit `operation`, as narrowed by
-/// the Operation's `pools` and the Agent's pin.
+/// Where a route's Session gets its account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Source {
+    /// No pool serves it.
+    Unpooled,
+    /// These pools, by ID, in the order to try them.
+    Pools(Vec<String>),
+    /// Pools serve it but none may be used here, for this reason.
+    Refused(String),
+}
+
+/// Where `agent`, on the route it works on, draws its account for `operation`. A pool named where
+/// the Station has no loadouts is refused, since nothing is there to read its accounts from.
+pub(super) fn source_of(state: &DaemonState, operation: Option<&str>, agent: &Agent) -> Source {
+    let Some(catalog) = state.station.credentials.catalog() else {
+        return match &agent.pool {
+            Some(pool) => Source::Refused(format!("pool {pool:?} is not configured")),
+            None => Source::Unpooled,
+        };
+    };
+    match pools_for(state, catalog, operation, agent) {
+        PoolChoice::Unpooled => Source::Unpooled,
+        PoolChoice::Refused(reason) => Source::Refused(reason),
+        PoolChoice::Pools(pools) => {
+            Source::Pools(pools.iter().map(|pool| pool.id().to_owned()).collect())
+        }
+    }
+}
+
+/// The best account `pools` have room on at `now`, each pool by its own strategy, the least used
+/// across them; `None` when none has room.
+pub(super) fn best_account(
+    pools: &[&AccountPool],
+    states: &[AccountState],
+    now: f64,
+    unknown_use: u16,
+) -> Option<AccountState> {
+    pools
+        .iter()
+        .filter_map(|pool| {
+            let request = AccountClaimRequest::new(pool, "", "", Duration::ZERO);
+            let by_name = pool_states(pool, states);
+            let chosen = choose_account(
+                pool.balancing(),
+                request.candidates(),
+                &by_name,
+                None,
+                now,
+                unknown_use,
+            )?;
+            Some(
+                by_name.get(&chosen.account).cloned().unwrap_or_else(|| {
+                    AccountState::new(AccountRef::new(pool.id(), &chosen.account))
+                }),
+            )
+        })
+        .min_by_key(|state| state.highest_use(now, unknown_use))
+}
+
+/// Why `pools` have no account with room, as a person reads it.
+pub(super) fn no_room(pools: &[&AccountPool], states: &[AccountState], now: f64) -> String {
+    let ids: Vec<String> = pools.iter().map(|pool| pool.id().to_owned()).collect();
+    placement::no_account_headroom("", &ids, frees_at(pools, states, now)).reason
+}
+
+/// Whether a provider Session can move to an account of `route`'s pools.
+pub(super) fn route_carries_session(
+    state: &DaemonState,
+    operation: Option<&str>,
+    agent: &Agent,
+    route: &AgentRoute,
+) -> bool {
+    let Some(catalog) = state.station.credentials.catalog() else {
+        return false;
+    };
+    let PoolChoice::Pools(pools) = pools_for(state, catalog, operation, &agent.on_route(route))
+    else {
+        return false;
+    };
+    let states = state.intake.accounts().unwrap_or_default();
+    let now = state.clock.now() as f64;
+    let unknown_use = state.station.limits().accounts.unknown_use_permille;
+    has_room(&pools, &states, (now, unknown_use), |account| {
+        account.kind().carries_session()
+    })
+}
+
+/// Whether the account `earlier` names is of a kind a provider Session can move away from.
+pub(super) fn carries_session(state: &DaemonState, earlier: Option<&AccountRef>) -> bool {
+    let Some(earlier) = earlier else {
+        return false;
+    };
+    state
+        .station
+        .credentials
+        .catalog()
+        .and_then(|catalog| catalog.pool(&earlier.pool))
+        .and_then(|pool| pool.get(&earlier.account))
+        .is_some_and(|account| account.kind().carries_session())
+}
+
+/// What `agent`, on the route it works on, may draw from: its handler's pools that admit
+/// `operation`, as narrowed by the Operation's `pools` and the Agent's or route's pin.
 fn pools_for<'a>(
     state: &DaemonState,
     catalog: &'a LoadoutCatalog,
     operation: Option<&str>,
-    agent_id: &str,
+    agent: &Agent,
 ) -> PoolChoice<'a> {
-    let Ok(agent) = state.roster.agent(operation, agent_id) else {
-        return PoolChoice::Unpooled;
-    };
     let allowed = operation
         .and_then(|id| state.roster.operation(id).ok())
         .and_then(|operation| operation.pools.clone());
@@ -166,12 +284,10 @@ fn pools_for<'a>(
 pub(super) fn credential_variables(
     state: &DaemonState,
     catalog: &LoadoutCatalog,
-    mission: &Mission,
-    agent_id: &str,
+    operation: Option<&str>,
+    agent: &Agent,
 ) -> Option<BTreeSet<String>> {
-    if let PoolChoice::Unpooled =
-        pools_for(state, catalog, mission.operation_id.as_deref(), agent_id)
-    {
+    if let PoolChoice::Unpooled = pools_for(state, catalog, operation, agent) {
         return None;
     }
     let mut variables: BTreeSet<String> = CREDENTIAL_VARIABLES
@@ -184,6 +300,33 @@ pub(super) fn credential_variables(
         }
     }
     Some(variables)
+}
+
+/// Claims the account of a route with no pool for `holder`'s Session: it hands over nothing, and
+/// the claim fails when the route's limit stands, so a limit one Station saw holds on every one.
+pub(super) fn claim_implicit(
+    state: &DaemonState,
+    pool: &AccountPool,
+    holder: Holder<'_>,
+) -> Result<(), String> {
+    let now = state.clock.now() as f64;
+    let desk = &state.station.credentials.accounts;
+    lock(&desk.pending).insert(holder.id.to_owned());
+    let request =
+        claim_request(state, pool, holder.id).operation(holder.operation.map(str::to_owned));
+    let claimed = state.intake.claim_account(&request, now);
+    lock(&desk.pending).remove(holder.id);
+    let chosen = claimed
+        .map_err(|error| format!("route's account could not be claimed: {error}"))?
+        .ok_or("the route's limit has not reset")?;
+    lock(&desk.held).insert(
+        holder.id.to_owned(),
+        Held {
+            account: chosen.account,
+            kind: AccountKind::HarnessLogin,
+        },
+    );
+    Ok(())
 }
 
 /// Claims an account for `mission`'s Session and puts its credential in `environment`,
@@ -199,25 +342,36 @@ pub(super) fn issue(
     state: &DaemonState,
     catalog: &LoadoutCatalog,
     broker: &SecretBroker,
-    mission: &Mission,
-    agent_id: &str,
+    holder: Holder<'_>,
+    agent: &Agent,
     site: Site,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<Option<SecretLease>, String> {
-    let operation = mission.operation_id.as_deref();
-    let pools = match pools_for(state, catalog, operation, agent_id) {
+    let agent_id = agent.id.as_str();
+    let pools = match pools_for(state, catalog, holder.operation, agent) {
         PoolChoice::Unpooled => return Ok(None),
         PoolChoice::Refused(reason) => return Err(format!("Agent {agent_id:?}: {reason}")),
         PoolChoice::Pools(pools) => pools,
     };
-    for variable in credential_variables(state, catalog, mission, agent_id).unwrap_or_default() {
+    for variable in
+        credential_variables(state, catalog, holder.operation, agent).unwrap_or_default()
+    {
         environment.remove(&variable);
     }
-    let mission_id = mission.mission_id.as_str();
+    let mission_id = holder.id;
     let desk = &state.station.credentials.accounts;
     // A check-in during a slow hand-over (a Codex login) renews this claim too.
     lock(&desk.pending).insert(mission_id.to_owned());
-    let issued = claim_and_hand_over(state, broker, &pools, mission, agent_id, site, environment);
+    let issued = claim_and_hand_over(
+        state,
+        broker,
+        catalog,
+        &pools,
+        holder,
+        agent_id,
+        site,
+        environment,
+    );
     lock(&desk.pending).remove(mission_id);
     if issued.is_err()
         && let Err(release) = state.intake.release_account(&state.station_id, mission_id)
@@ -227,16 +381,18 @@ pub(super) fn issue(
     issued
 }
 
+#[allow(clippy::too_many_arguments)]
 fn claim_and_hand_over(
     state: &DaemonState,
     broker: &SecretBroker,
+    catalog: &LoadoutCatalog,
     pools: &[&AccountPool],
-    mission: &Mission,
+    holder: Holder<'_>,
     agent_id: &str,
     site: Site,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<Option<SecretLease>, String> {
-    let mission_id = mission.mission_id.as_str();
+    let mission_id = holder.id;
     let now = state.clock.now() as f64;
     let earlier = state
         .intake
@@ -244,7 +400,7 @@ fn claim_and_hand_over(
         .ok()
         .flatten()
         .and_then(|record| record.account);
-    let (pool, chosen) = claim(state, pools, mission, earlier.as_ref(), site, now)?;
+    let (pool, chosen) = claim(state, catalog, pools, holder, earlier.as_ref(), site, now)?;
     let account = pool
         .get(&chosen.account.account)
         .ok_or("the claimed account is not configured")?;
@@ -256,7 +412,7 @@ fn claim_and_hand_over(
             kind: account.kind(),
         },
     );
-    if let Some(operation) = mission.operation_id.as_deref() {
+    if let Some(operation) = holder.operation {
         record(
             state,
             TimelineEvent::new(TIMELINE_KIND, "claimed", operation, now)
@@ -269,11 +425,11 @@ fn claim_and_hand_over(
     Ok(lease)
 }
 
-/// The kind of the account `earlier` names, when it is still configured.
-fn kind_of(pools: &[&AccountPool], earlier: &AccountRef) -> Option<AccountKind> {
-    pools
-        .iter()
-        .find(|pool| pool.id() == earlier.pool)
+/// The kind of the account `earlier` names, when it is still configured, whichever route it
+/// was claimed for.
+fn kind_of(catalog: &LoadoutCatalog, earlier: &AccountRef) -> Option<AccountKind> {
+    catalog
+        .pool(&earlier.pool)
         .and_then(|pool| pool.get(&earlier.account))
         .map(Account::kind)
 }
@@ -283,20 +439,20 @@ fn kind_of(pools: &[&AccountPool], earlier: &AccountRef) -> Option<AccountKind> 
 /// it, and otherwise moves only to accounts of a kind that can.
 fn claim<'a>(
     state: &DaemonState,
+    catalog: &LoadoutCatalog,
     pools: &[&'a AccountPool],
-    mission: &Mission,
+    holder: Holder<'_>,
     earlier: Option<&AccountRef>,
     site: Site,
     now: f64,
 ) -> Result<(&'a AccountPool, AccountState), String> {
-    let mission_id = mission.mission_id.as_str();
     let request = |pool: &AccountPool| {
-        claim_request(state, pool, mission_id).operation(mission.operation_id.clone())
+        claim_request(state, pool, holder.id).operation(holder.operation.map(str::to_owned))
     };
     let failed = |pool: &AccountPool, error: std::io::Error| {
         format!("pool {:?} could not be claimed from: {error}", pool.id())
     };
-    let earlier_kind = earlier.and_then(|earlier| kind_of(pools, earlier));
+    let earlier_kind = earlier.and_then(|earlier| kind_of(catalog, earlier));
     if site.resuming
         && let (Some(earlier), Some(kind)) = (earlier, earlier_kind)
         && !kind.carries_session()
@@ -334,9 +490,8 @@ fn claim<'a>(
             Err(error) => return Err(failed(pool, error)),
         }
     }
-    let ids: Vec<String> = pools.iter().map(|pool| pool.id().to_owned()).collect();
     let states = state.intake.accounts().unwrap_or_default();
-    Err(placement::no_account_headroom("", &ids, frees_at(pools, &states, now)).reason)
+    Err(no_room(pools, &states, now))
 }
 
 /// Puts `account`'s credential where the harness reads it.
@@ -349,6 +504,9 @@ fn hand_over(
     site: Site,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<Option<SecretLease>, String> {
+    if account.kind() == AccountKind::HarnessLogin {
+        return Ok(None);
+    }
     let name = format!("{}/{}", pool.id(), account.name());
     let variable = account
         .variable(pool.handler())
@@ -487,16 +645,25 @@ pub(super) fn reattach(state: &DaemonState, mission: &Mission, session: &Session
     let mission_id = mission.mission_id.as_str();
     let configured = state.station.credentials.catalog().and_then(|catalog| {
         let pool = catalog.pool(&account.pool)?;
-        Some((pool, pool.get(&account.account)?.kind()))
+        Some((pool.clone(), pool.get(&account.account)?.kind()))
     });
-    let Some((pool, kind)) = configured else {
+    let own_account = || {
+        let handler = session.launch.as_ref()?.handler.as_str();
+        super::routes::is_implicit(&account.pool).then(|| {
+            (
+                super::routes::implicit_pool_named(&account.pool, handler),
+                AccountKind::HarnessLogin,
+            )
+        })
+    };
+    let Some((pool, kind)) = configured.or_else(own_account) else {
         eprintln!(
             "ai6: Mission {mission_id:?} runs on account {account}, which this Station does not \
              configure; its use is not counted"
         );
         return;
     };
-    let request = claim_request(state, pool, mission_id)
+    let request = claim_request(state, &pool, mission_id)
         .operation(mission.operation_id.clone())
         .only(&account.account)
         .in_use();
@@ -537,11 +704,12 @@ pub(super) fn reattach(state: &DaemonState, mission: &Mission, session: &Session
 /// any other made before this pass), and removes the Codex homes of Missions that are over.
 pub(super) fn tend(state: &DaemonState) {
     let desk = &state.station.credentials.accounts;
-    let has_pools = state
-        .station
-        .credentials
-        .catalog()
-        .is_some_and(|catalog| catalog.pools().next().is_some());
+    let has_pools = !lock(&desk.held).is_empty()
+        || state
+            .station
+            .credentials
+            .catalog()
+            .is_some_and(|catalog| catalog.pools().next().is_some());
     // Pending first: an issue moves its Mission to held before it leaves pending.
     let mut missions: BTreeSet<String> = lock(&desk.pending).clone();
     missions.extend(lock(&desk.held).keys().cloned());
@@ -658,6 +826,23 @@ pub(super) fn declare(state: &DaemonState) {
             }
         }
     }
+    for (pool, operations) in super::routes::implicit_accounts(state).into_values() {
+        for account in pool.accounts() {
+            let Some(profile) = AccountProfile::of(&pool, account.name(), operations.clone())
+            else {
+                continue;
+            };
+            let reference = AccountRef::new(pool.id(), account.name());
+            if let Err(error) =
+                state
+                    .intake
+                    .declare_account(&reference, &state.station_id, &profile)
+            {
+                eprintln!("ai6: route account {reference} not declared: {error}");
+            }
+            declared.insert(reference);
+        }
+    }
     let stale = match state.intake.accounts() {
         Ok(accounts) => accounts
             .into_iter()
@@ -737,20 +922,18 @@ pub(super) enum Rotation {
     Wait,
 }
 
-/// Marks the account `mission_id`'s Session holds limited until `resets_at` (or
-/// `fallback_secs` from now, and never past the Station's limit horizon), frees it, and says
-/// whether another account of the Mission's pools has room.
-pub(super) fn on_limit(
+/// Marks the account `holder`'s Session holds limited until `resets_at` (or `fallback_secs` from
+/// now, and never past the Station's limit horizon) and frees it. The account and its kind, and
+/// until when; `None` when it holds none.
+pub(super) fn mark_limited(
     state: &DaemonState,
-    mission: &Mission,
+    holder: Holder<'_>,
     resets_at: Option<i64>,
     fallback_secs: u64,
-) -> Rotation {
-    let mission_id = mission.mission_id.as_str();
+) -> Option<(AccountRef, bool, i64)> {
+    let mission_id = holder.id;
     let desk = &state.station.credentials.accounts;
-    let Some(held) = lock(&desk.held).remove(mission_id) else {
-        return Rotation::Unpooled;
-    };
+    let held = lock(&desk.held).remove(mission_id)?;
     let now = state.clock.now();
     let until = resets_at
         .filter(|reset| *reset > now)
@@ -762,18 +945,47 @@ pub(super) fn on_limit(
     if let Err(error) = state.intake.release_account(&state.station_id, mission_id) {
         eprintln!("ai6: account claim of Mission {mission_id:?} not released: {error}");
     }
-    let (any_room, carrying_room) =
-        state
+    Some((held.account, held.kind.carries_session(), until))
+}
+
+/// Marks the account `mission_id`'s Session holds limited ([`mark_limited`]) and says whether
+/// another account of the Mission's pools, or another of its Agent's routes, has room.
+pub(super) fn on_limit(
+    state: &DaemonState,
+    mission: &Mission,
+    resets_at: Option<i64>,
+    fallback_secs: u64,
+) -> Rotation {
+    let mission_id = mission.mission_id.as_str();
+    let Some((account, carried, until)) =
+        mark_limited(state, mission.into(), resets_at, fallback_secs)
+    else {
+        return Rotation::Unpooled;
+    };
+    let now = state.clock.now();
+    let operation = mission.operation_id.as_deref();
+    let agent = state
+        .roster
+        .agent(operation, mission.agent_id.as_deref().unwrap_or_default())
+        .ok();
+    let (any_room, carrying_room) = match agent.as_ref().filter(|agent| agent.is_routed()) {
+        Some(agent) => {
+            let handler = state
+                .missions
+                .lock()
+                .ok()
+                .and_then(|missions| missions.operation(mission_id))
+                .map(|manifest| manifest.handler_provider)
+                .unwrap_or_default();
+            super::routes::room_after_limit(state, operation, agent, &handler)
+        }
+        None => state
             .station
             .credentials
             .catalog()
-            .map_or((false, false), |catalog| {
-                let PoolChoice::Pools(pools) = pools_for(
-                    state,
-                    catalog,
-                    mission.operation_id.as_deref(),
-                    mission.agent_id.as_deref().unwrap_or_default(),
-                ) else {
+            .zip(agent.as_ref())
+            .map_or((false, false), |(catalog, agent)| {
+                let PoolChoice::Pools(pools) = pools_for(state, catalog, operation, agent) else {
                     return (false, false);
                 };
                 let states = state.intake.accounts().unwrap_or_default();
@@ -785,8 +997,9 @@ pub(super) fn on_limit(
                         account.kind().carries_session()
                     }),
                 )
-            });
-    let rotation = match (held.kind.carries_session(), carrying_room, any_room) {
+            }),
+    };
+    let rotation = match (carried, carrying_room, any_room) {
         (true, true, _) => Rotation::Resume,
         (_, _, true) => Rotation::Retry,
         _ => Rotation::Wait,
@@ -801,7 +1014,7 @@ pub(super) fn on_limit(
             state,
             TimelineEvent::new(TIMELINE_KIND, "limited", operation, now as f64)
                 .mission(mission_id)
-                .detail("account", held.account.to_string())
+                .detail("account", account.to_string())
                 .detail("until", until.to_string())
                 .detail("next", next),
         );
@@ -870,8 +1083,12 @@ pub(super) fn intake_hold(
     operation_id: &str,
     agent_id: &str,
 ) -> Option<String> {
+    let agent = state.roster.agent(Some(operation_id), agent_id).ok()?;
+    if agent.is_routed() {
+        return super::routes::hold(state, Some(operation_id), &agent);
+    }
     let catalog = state.station.credentials.catalog()?;
-    let PoolChoice::Pools(pools) = pools_for(state, catalog, Some(operation_id), agent_id) else {
+    let PoolChoice::Pools(pools) = pools_for(state, catalog, Some(operation_id), &agent) else {
         return None;
     };
     let states = state.intake.accounts().ok()?;
@@ -1008,6 +1225,11 @@ pub(super) mod testing {
     }
 
     impl AgentHandler for MockPooledHandler {
+        /// Stands for a handler that cannot hold a `desk` Session, as `acp` cannot.
+        fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
+            Ok((clearance == "desk").then(|| "it cannot keep commands from one".to_owned()))
+        }
+
         fn start(
             &self,
             request: AgentStart,
@@ -1059,6 +1281,7 @@ mod tests {
     use crate::directorates::registry::sessions::SessionStatus;
     use crate::directorates::registry::timeline::TimelineEvent;
 
+    use super::super::routes;
     use super::super::tests::{limited_state, start_mission_by_id, wait_for_state};
     use super::super::{
         StartMission, publish_station_check_in, schedule_intake_once, schedule_parked_once,
@@ -1249,6 +1472,650 @@ operations = ["other-*"]
 kind = "anthropic-auth-token"
 secret = "env-gamma"
 "#;
+
+    /// Two routes of Agent 007 to one model under two names, each with a pool of its own.
+    const ROUTE_POOLS: &str = r#"
+[pool.one]
+handler = "mock-pooled"
+named_only = true
+[pool.one.account.a]
+kind = "claude-oauth-token"
+secret = "one-a"
+
+[pool.two]
+handler = "mock-pooled"
+named_only = true
+[pool.two.account.b]
+kind = "claude-oauth-token"
+secret = "two-b"
+"#;
+
+    fn two_routes(balance: &str) -> String {
+        format!(
+            r#"[agent.007]
+balance = "{balance}"
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "name-one"
+pool = "one"
+priority = 1
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "name-two"
+pool = "two"
+priority = 2
+"#
+        )
+    }
+
+    /// A Station with the roster's agents file `agents` and `loadouts`, Operation `G` set by
+    /// `operation`, its clock at [`START`].
+    fn routed_state(
+        root: &Path,
+        operation: &str,
+        agents: &str,
+        loadouts: &str,
+    ) -> (DaemonState, Arc<AtomicI64>) {
+        let (mut state, now) = limited_state(root, operation, agents, START);
+        state.station = state
+            .station
+            .clone()
+            .with_loadouts(loadouts.parse().unwrap())
+            .with_secret_backend(FakeSecrets)
+            .with_account_homes(root.join("homes"));
+        for id in ["mission-1", "mission-2"] {
+            abandon(&state, id);
+        }
+        (state, now)
+    }
+
+    /// Starts `id` and waits for it to finish.
+    async fn run(state: &DaemonState, id: &str) {
+        create_mission(state, id);
+        start_mission_by_id(state, id).await;
+        wait_for_state(state, id, MissionState::Done).await;
+        until_released(state).await;
+    }
+
+    fn launch_of(
+        state: &DaemonState,
+        id: &str,
+    ) -> crate::directorates::registry::sessions::SessionLaunch {
+        let hold = session_hold(state, id).unwrap();
+        state
+            .intake
+            .session(&hold.id)
+            .unwrap()
+            .unwrap()
+            .launch
+            .unwrap()
+    }
+
+    fn report_use(state: &DaemonState, pool: &str, name: &str, used: u16) {
+        state
+            .intake
+            .report_quota(
+                &AccountRef::new(pool, name),
+                &[QuotaWindow::new("five_hour", START as f64).used_permille(used)],
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn headroom_sends_work_to_the_route_whose_best_account_has_most_left() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = routed_state(root.path(), "", &two_routes("headroom"), ROUTE_POOLS);
+        report_use(&state, "one", "a", 800);
+        report_use(&state, "two", "b", 100);
+        run(&state, "route-headroom-1").await;
+        assert_eq!(token("route-headroom-1"), "fake-two-b-0451");
+        let launch = launch_of(&state, "route-headroom-1");
+        assert_eq!(
+            (
+                launch.handler.as_str(),
+                launch.model.as_deref(),
+                launch.pool.as_deref()
+            ),
+            ("mock-pooled", Some("name-two"), Some("two")),
+            "the Session record says which route ran"
+        );
+        // The mock reports 300 on the account it ran on, so `two` stays ahead of 800.
+        report_use(&state, "two", "b", 900);
+        run(&state, "route-headroom-2").await;
+        assert_eq!(token("route-headroom-2"), "fake-one-a-0451");
+        let chosen: Vec<_> = state
+            .intake
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "route" && event.action == "chosen")
+            .collect();
+        assert_eq!(chosen.len(), 2, "the timeline says which route each took");
+        assert_eq!(chosen[0].detail["model"], "name-two");
+        assert_eq!(chosen[0].detail["pool"], "two");
+        assert_eq!(chosen[1].detail["model"], "name-one");
+    }
+
+    #[tokio::test]
+    async fn round_robin_takes_each_route_in_turn() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, now) = routed_state(root.path(), "", &two_routes("round_robin"), ROUTE_POOLS);
+        let mut seen = Vec::new();
+        for (turn, id) in ["route-rr-1", "route-rr-2", "route-rr-3"]
+            .iter()
+            .enumerate()
+        {
+            now.store(START + 1 + turn as i64, Ordering::SeqCst);
+            run(&state, id).await;
+            seen.push(token(id));
+        }
+        assert_eq!(
+            seen,
+            ["fake-one-a-0451", "fake-two-b-0451", "fake-one-a-0451"]
+        );
+    }
+
+    #[tokio::test]
+    async fn priority_keeps_to_the_first_with_room_and_a_limited_route_is_skipped_until_its_reset()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let (state, now) = routed_state(root.path(), "", &two_routes("priority"), ROUTE_POOLS);
+        run(&state, "route-priority-1").await;
+        assert_eq!(token("route-priority-1"), "fake-two-b-0451", "priority 2");
+        state
+            .intake
+            .limit_account(&AccountRef::new("two", "b"), (START + 100) as f64)
+            .unwrap();
+        run(&state, "route-priority-2").await;
+        assert_eq!(token("route-priority-2"), "fake-one-a-0451");
+        now.store(START + 101, Ordering::SeqCst);
+        run(&state, "route-priority-3").await;
+        assert_eq!(
+            token("route-priority-3"),
+            "fake-two-b-0451",
+            "back after it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_handler_missing_on_this_station_skips_its_routes_and_with_none_left_the_mission_waits()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let agents = r#"[agent.007]
+balance = "priority"
+[[agent.007.route]]
+handler = "not-on-this-station"
+model = "elsewhere"
+priority = 9
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "here"
+pool = "one"
+"#;
+        let (state, _now) = routed_state(root.path(), "", agents, ROUTE_POOLS);
+        run(&state, "route-missing-1").await;
+        assert_eq!(
+            launch_of(&state, "route-missing-1").model.as_deref(),
+            Some("here")
+        );
+
+        state
+            .intake
+            .limit_account(&AccountRef::new("one", "a"), (START + 100) as f64)
+            .unwrap();
+        create_mission(&state, "route-missing-2");
+        let Err(refused) = start_mission(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("route-missing-2".to_owned()),
+            axum::Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        else {
+            panic!("no route has room");
+        };
+        let reason = &refused.1.0.error;
+        assert!(
+            reason.contains("not-on-this-station elsewhere")
+                && reason.contains("is not available on this Station"),
+            "{reason}"
+        );
+        assert!(
+            reason.contains("mock-pooled here (pool one)") && reason.contains("no account"),
+            "{reason}"
+        );
+        let waiting = state
+            .missions
+            .lock()
+            .unwrap()
+            .get("route-missing-2")
+            .unwrap()
+            .waiting
+            .clone();
+        assert_eq!(
+            waiting.as_ref(),
+            Some(reason),
+            "the Mission says why it waits"
+        );
+        assert!(
+            calls("route-missing-2").is_empty(),
+            "no harness was started"
+        );
+        assert_eq!(
+            intake_hold(&state, "G", "007"),
+            None,
+            "another Station may have the first route's handler, so a brief need not wait"
+        );
+        let agent = state.roster.agent(Some("G"), "007").unwrap();
+        let elsewhere = routes::implicit_pool("007", &agent.route_list()[0]);
+        state
+            .intake
+            .limit_account(
+                &AccountRef::new(elsewhere.id(), "login"),
+                (START + 100) as f64,
+            )
+            .unwrap();
+        let waits = intake_hold(&state, "G", "007").expect("no route has room anywhere");
+        assert!(
+            waits.contains("elsewhere") && waits.contains("here"),
+            "{waits}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_route_that_cannot_hold_desk_is_not_chosen_and_the_reason_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = r#"[agent.007]
+clearance = "desk"
+balance = "priority"
+[[agent.007.route]]
+handler = "mock-pooled"
+priority = 5
+[[agent.007.route]]
+handler = "mock-agent"
+"#;
+        let (state, _now) =
+            routed_state(root.path(), "clearance = \"desk\"\n", agents, ROUTE_POOLS);
+        create_mission(&state, "route-desk-1");
+        start_mission_by_id(&state, "route-desk-1").await;
+        assert_eq!(launch_of(&state, "route-desk-1").handler, "mock-agent");
+        assert!(
+            calls("route-desk-1").is_empty(),
+            "the other handler never ran"
+        );
+        state.stopping.store(true, Ordering::Release);
+
+        let root = tempfile::tempdir().unwrap();
+        let only =
+            "[agent.007]\nclearance = \"desk\"\n[[agent.007.route]]\nhandler = \"mock-pooled\"\n";
+        let (state, _now) = routed_state(root.path(), "clearance = \"desk\"\n", only, ROUTE_POOLS);
+        create_mission(&state, "route-desk-2");
+        let Err(refused) = start_mission(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("route-desk-2".to_owned()),
+            axum::Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        else {
+            panic!("it cannot hold desk");
+        };
+        assert!(
+            refused.1.0.error.contains("cannot hold desk clearance"),
+            "{}",
+            refused.1.0.error
+        );
+    }
+
+    #[tokio::test]
+    async fn a_route_brings_its_own_env_and_secret_even_to_an_exposed_session_and_its_pool_serves_by_name()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let agents = r#"[agent.007]
+balance = "priority"
+env = { SHARED = "agent" }
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "anthropic/name"
+secrets = ["gateway"]
+env = { GATEWAY_URL = "https://llm.example", SHARED = "route" }
+[agent.009]
+handler = "mock-pooled"
+"#;
+        let loadouts = format!(
+            "{ROUTE_POOLS}[secret.gateway]\nenv = \"ANTHROPIC_AUTH_TOKEN\"\n[secret.other]\nenv = \"OTHER\"\n"
+        );
+        let (state, _now) = routed_state(root.path(), "", agents, &loadouts);
+        create_mission(&state, "route-env-1");
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .expose("route-env-1", &["brief:source".to_owned()])
+            .unwrap();
+        start_mission_by_id(&state, "route-env-1").await;
+        wait_for_state(&state, "route-env-1", MissionState::Done).await;
+        let (_, _, environment, _) = calls("route-env-1").remove(0);
+        assert_eq!(environment["GATEWAY_URL"], "https://llm.example");
+        assert_eq!(
+            environment["SHARED"], "route",
+            "the route's over the Agent's"
+        );
+        assert_eq!(
+            environment["ANTHROPIC_AUTH_TOKEN"], "fake-gateway-0451",
+            "what reaches its model is issued whatever the Session read"
+        );
+        assert!(!environment.contains_key("OTHER"));
+        assert!(
+            !serde_json::to_string(&state.intake.timeline_events("G").unwrap())
+                .unwrap()
+                .contains("0451"),
+            "the timeline carries names, never a credential"
+        );
+        until_released(&state).await;
+
+        // Agent 009 names no pool, and these serve only who names them.
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new("route-plain-1").unwrap(),
+                Some("G".to_owned()),
+                "work".to_owned(),
+                Some("009".to_owned()),
+                None,
+            )
+            .unwrap();
+        start_mission_by_id(&state, "route-plain-1").await;
+        wait_for_state(&state, "route-plain-1", MissionState::Done).await;
+        let (_, _, environment, _) = calls("route-plain-1").remove(0);
+        assert!(!environment.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert_eq!(
+            state
+                .intake
+                .session(&session_hold(&state, "route-plain-1").unwrap().id)
+                .unwrap()
+                .unwrap()
+                .account,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn a_route_naming_what_this_station_lacks_is_passed_over_with_the_reason() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = r#"[agent.007]
+balance = "priority"
+[[agent.007.route]]
+handler = "mock-pooled"
+secrets = ["nowhere"]
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "green"
+secrets = ["signed"]
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "unknown"
+pool = "nowhere"
+"#;
+        let loadouts = format!(
+            "{ROUTE_POOLS}[secret.signed]\nenv = \"X\"\nfrom = {{ env = \"X\" }}\ngreen_ink = true\nkinds = [\"push\"]\n"
+        );
+        let (state, _now) = routed_state(root.path(), "", agents, &loadouts);
+        let agent = state.roster.agent(Some("G"), "007").unwrap();
+        let place = routes::Place {
+            refuses: &|_| None,
+            clearance: None,
+            review: false,
+        };
+        let reason = routes::choose(&state, Some("G"), &agent, &place).unwrap_err();
+        assert!(
+            reason.contains("secret \"nowhere\" is not configured"),
+            "{reason}"
+        );
+        assert!(reason.contains("green ink"), "{reason}");
+        assert!(
+            reason.contains("pinned pool \"nowhere\" is not configured"),
+            "{reason}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limit_moves_a_resumable_session_to_a_route_of_the_same_handler_and_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let loadouts = r#"
+[pool.one]
+handler = "mock-pooled"
+[pool.one.account.a]
+kind = "claude-oauth-token"
+secret = "route-limited-a"
+[pool.two]
+handler = "mock-pooled"
+[pool.two.account.b]
+kind = "claude-oauth-token"
+secret = "two-b"
+"#;
+        let (state, _now) = routed_state(root.path(), "", &two_routes("headroom"), loadouts);
+        report_use(&state, "two", "b", 900);
+        create_mission(&state, "route-move");
+        start_mission_by_id(&state, "route-move").await;
+        wait_for_state(&state, "route-move", MissionState::Parked).await;
+        assert_eq!(
+            events(&state, "limited")[0].detail["next"],
+            "resume on another account"
+        );
+        assert!(account(&state, "one", "a").limited_until.is_some());
+        schedule_parked_once(&state).await;
+        wait_for_state(&state, "route-move", MissionState::Done).await;
+        let made = calls("route-move");
+        assert_eq!(
+            made.iter().map(|call| call.1).collect::<Vec<_>>(),
+            ["start", "resume"],
+            "the same provider Session, since this kind carries it"
+        );
+        assert_eq!(made[1].2["CLAUDE_CODE_OAUTH_TOKEN"], "fake-two-b-0451");
+        let launch = launch_of(&state, "route-move");
+        assert_eq!(launch.model.as_deref(), Some("name-two"));
+        assert_eq!(launch.pool.as_deref(), Some("two"));
+        assert_eq!(
+            state
+                .intake
+                .timeline_events("G")
+                .unwrap()
+                .iter()
+                .filter(|event| event.kind == "route" && event.action == "moved")
+                .count(),
+            1,
+            "the timeline says it moved"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_resume_stays_on_its_route_when_only_that_route_has_room() {
+        let root = tempfile::tempdir().unwrap();
+        let loadouts = r#"
+[pool.one]
+handler = "mock-pooled"
+[pool.one.account.a]
+kind = "claude-oauth-token"
+secret = "keep-limited-a"
+"#;
+        let agents = "[agent.007]\n[[agent.007.route]]\nhandler = \"mock-pooled\"\nmodel = \"name-one\"\npool = \"one\"\n";
+        let (state, now) = routed_state(root.path(), "", agents, loadouts);
+        create_mission(&state, "route-keep");
+        start_mission_by_id(&state, "route-keep").await;
+        wait_for_state(&state, "route-keep", MissionState::Parked).await;
+        schedule_parked_once(&state).await;
+        assert_eq!(calls("route-keep").len(), 1, "it waits for the reset");
+        now.store(POOLED_RESET + 3_600, Ordering::SeqCst);
+        schedule_parked_once(&state).await;
+        wait_for_state(&state, "route-keep", MissionState::Done).await;
+        let made = calls("route-keep");
+        assert_eq!(
+            made.iter().map(|call| call.1).collect::<Vec<_>>(),
+            ["start", "resume"]
+        );
+        assert_eq!(
+            made[1].2["CLAUDE_CODE_OAUTH_TOKEN"],
+            "fake-keep-limited-a-0451"
+        );
+        assert_eq!(
+            launch_of(&state, "route-keep").model.as_deref(),
+            Some("name-one")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limit_on_a_route_history_cannot_leave_starts_a_new_attempt_on_another() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = r#"[agent.007]
+balance = "priority"
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "first"
+secrets = ["fresh-limited-a"]
+priority = 2
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "second"
+secrets = ["second"]
+"#;
+        let loadouts = "[secret.fresh-limited-a]\nenv = \"CLAUDE_CODE_OAUTH_TOKEN\"\n\
+                        [secret.second]\nenv = \"CLAUDE_CODE_OAUTH_TOKEN\"\n";
+        let (state, _now) = routed_state(root.path(), "", agents, loadouts);
+        declare(&state);
+        create_mission(&state, "route-fresh");
+        start_mission_by_id(&state, "route-fresh").await;
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while state
+                .missions
+                .lock()
+                .unwrap()
+                .get("route-fresh")
+                .unwrap()
+                .state
+                != MissionState::Queued
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("a new attempt is queued");
+        let first_route = state
+            .intake
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|row| row.is_limited(START as f64))
+            .expect("the route's own account is marked");
+        assert!(routes::is_implicit(&first_route.account.pool));
+        assert_eq!(
+            first_route.profile().unwrap().labels["model"],
+            "first",
+            "the board can say which route it is"
+        );
+        // The attempt it replaces closes just after the Mission is queued.
+        schedule_queued_once(&state).await;
+        wait_for_state(&state, "route-fresh", MissionState::Done).await;
+        let made = calls("route-fresh");
+        assert_eq!(
+            made.iter().map(|call| call.1).collect::<Vec<_>>(),
+            ["start", "start"],
+            "history does not leave the first source"
+        );
+        assert_eq!(made[1].2["CLAUDE_CODE_OAUTH_TOKEN"], "fake-second-0451");
+        assert!(
+            made[1]
+                .3
+                .iter()
+                .any(|line| line.contains("continues an earlier attempt")),
+            "the Agent is told: {:?}",
+            made[1].3
+        );
+        assert_eq!(
+            launch_of(&state, "route-fresh").model.as_deref(),
+            Some("second")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_resume_rule_stays_moves_starts_afresh_or_waits() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = routed_state(root.path(), "", &two_routes("priority"), ROUTE_POOLS);
+        let agent = state.roster.agent(Some("G"), "007").unwrap();
+        let place = routes::Place {
+            refuses: &|_| None,
+            clearance: None,
+            review: false,
+        };
+        let one = crate::directorates::m::roster::RouteRef::new(
+            "mock-pooled",
+            Some("name-one".to_owned()),
+            Some("one".to_owned()),
+        );
+        let resume = |carried, earlier: &crate::directorates::m::roster::RouteRef| {
+            routes::for_resume(&state, Some("G"), &agent, earlier, carried, &place)
+        };
+        assert!(
+            matches!(resume(false, &one), routes::ResumeOn::Stay(on) if on.route.reference() == one)
+        );
+        state
+            .intake
+            .limit_account(&AccountRef::new("one", "a"), (START + 100) as f64)
+            .unwrap();
+        assert!(
+            matches!(resume(true, &one), routes::ResumeOn::Move(on) if on.route.model.as_deref() == Some("name-two")),
+            "same handler, an account kind that carries the history"
+        );
+        assert!(
+            matches!(resume(false, &one), routes::ResumeOn::NewAttempt(why) if why.contains("name-one")),
+            "the last account cannot carry it"
+        );
+        let gone = crate::directorates::m::roster::RouteRef::new(
+            "mock-pooled",
+            Some("gone".to_owned()),
+            None,
+        );
+        assert!(
+            matches!(resume(false, &gone), routes::ResumeOn::NewAttempt(why) if why.contains("no longer")),
+        );
+        state
+            .intake
+            .limit_account(&AccountRef::new("two", "b"), (START + 100) as f64)
+            .unwrap();
+        assert!(
+            matches!(resume(true, &one), routes::ResumeOn::Wait(why) if why.contains("name-two")),
+            "no route has room"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reattached_session_keeps_the_account_of_its_route_with_no_pool() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = "[agent.007]\n[[agent.007.route]]\nhandler = \"mock-pooled\"\nmodel = \"m\"\n";
+        let (state, _now) = routed_state(root.path(), "", agents, ROUTE_POOLS);
+        run(&state, "route-again").await;
+        let hold = session_hold(&state, "route-again").unwrap();
+        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        let own = record.account.clone().expect("its own account is recorded");
+        assert!(routes::is_implicit(&own.pool));
+        let mission = state
+            .missions
+            .lock()
+            .unwrap()
+            .get("route-again")
+            .cloned()
+            .unwrap();
+        reattach(&state, &mission, &record);
+        assert_eq!(held(&state, "route-again"), Some(own));
+    }
 
     /// Strict exposure takes an exposed Session's secrets, not the credential its harness reaches
     /// its model with: without that one no Source Mission could run at all.

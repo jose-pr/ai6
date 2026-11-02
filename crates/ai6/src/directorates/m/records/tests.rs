@@ -144,6 +144,17 @@ fn full_example(record: ConfigRecord) -> Value {
             "model": "opus",
             "effort": "high",
             "handler_settings": {"command": "agent", "args": ["--acp"], "request_timeout_ms": 5},
+            "route": [{
+                "handler": "codex",
+                "model": "another-name",
+                "effort": "low",
+                "handler_settings": {"command": "agent"},
+                "pool": "team",
+                "env": {"GATEWAY": "https://llm.example"},
+                "secrets": ["litellm"],
+                "priority": 2
+            }],
+            "balance": "round_robin",
             "roles": ["case-officer"],
             "clearance": "field",
             "priority": 5,

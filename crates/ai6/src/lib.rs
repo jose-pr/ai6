@@ -71,9 +71,10 @@ pub use directorates::m::records::{
     RecordForm, RecordFormError, RecordKey, from_json as read_definition,
 };
 pub use directorates::m::roster::{
-    Agent, AgentQuery, AgentRole, CoverIdentity, DEFAULT_CHECKPOINT_SECS,
+    Agent, AgentQuery, AgentRole, AgentRoute, CoverIdentity, DEFAULT_CHECKPOINT_SECS,
     DEFAULT_MAX_OPERATION_DEPTH, DEFAULT_RETIRE_WARNING_DAYS, OnLost, OnRetire, Operation,
-    Retirement, Roster, RosterBuilder, RosterError, RosterErrorKind, RosterSettings, Workspace,
+    Retirement, Roster, RosterBuilder, RosterError, RosterErrorKind, RosterSettings, RouteBalance,
+    RouteRef, Workspace,
 };
 pub use directorates::m::theaters::{
     AgentMode, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind, EphemeralAccess,
@@ -130,7 +131,7 @@ pub use directorates::q::transport::{
 };
 pub use directorates::q::{
     Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin,
-    PoolChoice, PoolStrategy, choose_pools,
+    PoolChoice, PoolStrategy, RouteStanding, choose_pools, choose_route,
 };
 pub use directorates::q::{
     Loadout, LoadoutCatalog, McpServer, QError, QErrorKind, SandboxError, SandboxProfile,

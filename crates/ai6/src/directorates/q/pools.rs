@@ -30,16 +30,21 @@ pub enum AccountKind {
     /// The directory of an existing login (`CLAUDE_CONFIG_DIR` or `CODEX_HOME`), used as it
     /// is: the way to share a subscription that issues no token.
     ConfigDir,
+    /// The login the harness already has where it runs (`grok login`, `agy`): AI6 hands over
+    /// nothing and only keeps count of its use and its limits, so several routes can share one
+    /// budget.
+    HarnessLogin,
 }
 
 /// Every kind, in configuration order.
-const KINDS: [AccountKind; 6] = [
+const KINDS: [AccountKind; 7] = [
     AccountKind::ClaudeOauthToken,
     AccountKind::AnthropicApiKey,
     AccountKind::AnthropicAuthToken,
     AccountKind::OpenaiApiKey,
     AccountKind::CodexAccessToken,
     AccountKind::ConfigDir,
+    AccountKind::HarnessLogin,
 ];
 
 /// The variables that carry a provider credential to a harness. A pooled Session gets
@@ -64,6 +69,7 @@ impl AccountKind {
             Self::OpenaiApiKey => "openai-api-key",
             Self::CodexAccessToken => "codex-access-token",
             Self::ConfigDir => "config-dir",
+            Self::HarnessLogin => "harness-login",
         }
     }
 
@@ -79,7 +85,9 @@ impl AccountKind {
             Self::ClaudeOauthToken => Some("CLAUDE_CODE_OAUTH_TOKEN"),
             Self::AnthropicApiKey => Some("ANTHROPIC_API_KEY"),
             Self::AnthropicAuthToken => Some("ANTHROPIC_AUTH_TOKEN"),
-            Self::OpenaiApiKey | Self::CodexAccessToken | Self::ConfigDir => None,
+            Self::OpenaiApiKey | Self::CodexAccessToken | Self::ConfigDir | Self::HarnessLogin => {
+                None
+            }
         }
     }
 
@@ -93,9 +101,9 @@ impl AccountKind {
         }
     }
 
-    /// Whether the value is a loadout secret (every kind but `config-dir`).
+    /// Whether the value is a loadout secret (every kind but `config-dir` and `harness-login`).
     pub fn reads_secret(self) -> bool {
-        self != Self::ConfigDir
+        !matches!(self, Self::ConfigDir | Self::HarnessLogin)
     }
 
     /// Whether a provider Session can move to another account of this kind and keep its
@@ -112,7 +120,7 @@ impl AccountKind {
                 Some("claude")
             }
             Self::OpenaiApiKey | Self::CodexAccessToken => Some("codex"),
-            Self::ConfigDir => None,
+            Self::ConfigDir | Self::HarnessLogin => None,
         }
     }
 }
@@ -266,8 +274,12 @@ impl Account {
 
     /// The variable the harness reads the credential or directory from, given the pool's
     /// handler: the override, else the kind's own, else for `config-dir` `CLAUDE_CONFIG_DIR`
-    /// (handler `claude`) or `CODEX_HOME` (`codex`). `None` when none applies.
+    /// (handler `claude`) or `CODEX_HOME` (`codex`). `None` when none applies, and for a
+    /// `harness-login` account, which hands over nothing.
     pub fn variable(&self, handler: &str) -> Option<String> {
+        if self.kind == AccountKind::HarnessLogin {
+            return None;
+        }
         if let Some(env) = &self.env {
             return Some(env.clone());
         }
@@ -313,6 +325,7 @@ pub struct AccountPool {
     strategy: PoolStrategy,
     accounts: BTreeMap<String, Account>,
     login_command: Vec<String>,
+    named_only: bool,
 }
 
 impl AccountPool {
@@ -326,7 +339,21 @@ impl AccountPool {
             strategy: PoolStrategy::default(),
             accounts: BTreeMap::new(),
             login_command: vec!["codex".to_owned()],
+            named_only: false,
         }
+    }
+
+    /// Serves only an Agent or route that names the pool, so a pool of one source is not drawn
+    /// by every other Agent of its handler.
+    #[must_use]
+    pub fn named_only(mut self, named_only: bool) -> Self {
+        self.named_only = named_only;
+        self
+    }
+
+    /// Whether only an Agent or route that names the pool draws from it.
+    pub fn is_named_only(&self) -> bool {
+        self.named_only
     }
 
     /// Opens the pool only to Operations matching one of these globs.
@@ -459,11 +486,19 @@ impl AccountPool {
                     account.kind, self.handler
                 )));
             }
-            match (account.kind.reads_secret(), &account.secret, &account.dir) {
-                (true, _, Some(_)) => return Err(at("only a config-dir account takes `dir`")),
-                (false, Some(_), _) => return Err(at("a config-dir account reads no secret")),
-                (false, None, None) => return Err(at("a config-dir account needs `dir`")),
-                _ => {}
+            if account.kind == AccountKind::HarnessLogin {
+                if account.secret.is_some() || account.dir.is_some() || account.env.is_some() {
+                    return Err(at(
+                        "a harness-login account hands over nothing: no `secret`, `dir` or `env`",
+                    ));
+                }
+            } else {
+                match (account.kind.reads_secret(), &account.secret, &account.dir) {
+                    (true, _, Some(_)) => return Err(at("only a config-dir account takes `dir`")),
+                    (false, Some(_), _) => return Err(at("a config-dir account reads no secret")),
+                    (false, None, None) => return Err(at("a config-dir account needs `dir`")),
+                    _ => {}
+                }
             }
             if let Some(secret) = account.secret_name()
                 && !valid_name(secret)
@@ -471,6 +506,7 @@ impl AccountPool {
                 return Err(at(&format!("secret {secret:?} is not a secret name")));
             }
             match account.variable(&self.handler) {
+                None if account.kind == AccountKind::HarnessLogin => {}
                 Some(variable) if super::transport::kit::is_variable_name(&variable) => {}
                 Some(variable) => {
                     return Err(at(&format!("{variable:?} is not a variable name")));
@@ -503,8 +539,8 @@ pub enum PoolChoice<'a> {
 
 /// Applies the three-way rule to `pools`: a pool is usable when it serves `handler`, its
 /// globs admit `operation` or one of its `ancestors` (nearest first), and `allowed` (the
-/// Operation's `pools`; `None` is every pool) names it. `pinned` (the Agent's `pool`) narrows
-/// the choice to one pool.
+/// Operation's `pools`; `None` is every pool) names it. `pinned` (the Agent's or route's
+/// `pool`) narrows the choice to one pool, the only way to a pool that serves by name alone.
 pub fn choose_pools<'a>(
     pools: impl IntoIterator<Item = &'a AccountPool>,
     handler: Option<&str>,
@@ -541,7 +577,7 @@ pub fn choose_pools<'a>(
     };
     let serving: Vec<&AccountPool> = pools
         .into_iter()
-        .filter(|pool| pool.handler == handler)
+        .filter(|pool| pool.handler == handler && !pool.named_only)
         .collect();
     if serving.is_empty() {
         return PoolChoice::Unpooled;
@@ -583,6 +619,48 @@ fn refusal(
         return Some("is not in the Operation's `pools`".to_owned());
     }
     None
+}
+
+/// What [`choose_route`] compares about one route with room, from the numbers pools keep.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RouteStanding {
+    /// Thousandths of quota used on the route's best account; `None` when no provider reported
+    /// any, which counts as the `unknown_use` given to [`choose_route`].
+    pub used_permille: Option<u16>,
+    /// Sessions on the route's best account now.
+    pub active: usize,
+    /// When its best account last took a Session, as Unix seconds.
+    pub last_used: Option<f64>,
+    /// The route's `priority`; higher first.
+    pub priority: i64,
+}
+
+/// Which of `open` an Agent's Session takes, as `strategy` says, an earlier entry winning every
+/// tie: [`PoolStrategy::Headroom`] compares use, then Sessions, then who waited longest, then
+/// priority; [`PoolStrategy::RoundRobin`] who waited longest; [`PoolStrategy::Priority`] priority
+/// alone, so routes of equal priority go in the order they are listed. `None` when `open` is empty.
+pub fn choose_route(
+    strategy: PoolStrategy,
+    open: &[RouteStanding],
+    unknown_use: u16,
+) -> Option<usize> {
+    let last_used = |route: &RouteStanding| route.last_used.unwrap_or(f64::NEG_INFINITY);
+    let compare = |left: &RouteStanding, right: &RouteStanding| {
+        let by_last_used = last_used(left).total_cmp(&last_used(right));
+        let by_priority = right.priority.cmp(&left.priority);
+        match strategy {
+            PoolStrategy::RoundRobin => by_last_used,
+            PoolStrategy::Priority => by_priority,
+            PoolStrategy::Headroom => left
+                .used_permille
+                .unwrap_or(unknown_use)
+                .cmp(&right.used_permille.unwrap_or(unknown_use))
+                .then(left.active.cmp(&right.active))
+                .then(by_last_used)
+                .then(by_priority),
+        }
+    };
+    (0..open.len()).min_by(|left, right| compare(&open[*left], &open[*right]).then(left.cmp(right)))
 }
 
 /// Logs a Codex account in to a `CODEX_HOME`, for the kinds Codex reads only from there.
@@ -922,6 +1000,133 @@ mod tests {
             panic!("refused");
         };
         assert!(reason.contains("outside any Operation"), "{reason}");
+    }
+
+    fn standing(
+        used: Option<u16>,
+        active: usize,
+        last_used: Option<f64>,
+        priority: i64,
+    ) -> RouteStanding {
+        RouteStanding {
+            used_permille: used,
+            active,
+            last_used,
+            priority,
+        }
+    }
+
+    #[test]
+    fn each_balance_chooses_a_route_by_its_own_measure() {
+        let open = [
+            standing(Some(800), 0, Some(10.0), 5),
+            standing(Some(100), 3, Some(30.0), 1),
+            standing(None, 1, Some(20.0), 9),
+        ];
+        let choose = |strategy, unknown| choose_route(strategy, &open, unknown);
+        assert_eq!(choose(PoolStrategy::Headroom, 500), Some(1), "least used");
+        assert_eq!(
+            choose(PoolStrategy::Headroom, 50),
+            Some(2),
+            "a route no provider reported on counts as the unknown use"
+        );
+        assert_eq!(
+            choose(PoolStrategy::RoundRobin, 500),
+            Some(0),
+            "who waited longest"
+        );
+        assert_eq!(choose(PoolStrategy::Priority, 500), Some(2), "highest");
+        assert_eq!(choose_route(PoolStrategy::Priority, &[], 500), None);
+    }
+
+    #[test]
+    fn equal_routes_spread_by_sessions_and_last_use_and_ties_keep_the_listed_order() {
+        let tied = [standing(None, 0, None, 0), standing(None, 0, None, 0)];
+        for strategy in [
+            PoolStrategy::Headroom,
+            PoolStrategy::RoundRobin,
+            PoolStrategy::Priority,
+        ] {
+            assert_eq!(choose_route(strategy, &tied, 500), Some(0), "{strategy:?}");
+        }
+        let busy = [standing(None, 1, None, 0), standing(None, 0, Some(9.0), 0)];
+        assert_eq!(choose_route(PoolStrategy::Headroom, &busy, 500), Some(1));
+        let used = [
+            standing(None, 0, Some(9.0), 0),
+            standing(None, 0, Some(5.0), 0),
+        ];
+        assert_eq!(choose_route(PoolStrategy::Headroom, &used, 500), Some(1));
+    }
+
+    #[test]
+    fn a_pool_that_serves_by_name_is_drawn_only_when_named() {
+        let pools = [
+            pool("gateway", "claude").named_only(true),
+            pool("team", "claude"),
+        ];
+        let ids = |choice: PoolChoice<'_>| -> Vec<String> {
+            match choice {
+                PoolChoice::Pools(pools) => pools.iter().map(|pool| pool.id().to_owned()).collect(),
+                other => panic!("{other:?}"),
+            }
+        };
+        assert_eq!(
+            ids(choose_pools(
+                &pools,
+                Some("claude"),
+                Some("G"),
+                &[],
+                None,
+                None
+            )),
+            ["team"],
+            "an Agent that names no pool does not draw it"
+        );
+        assert_eq!(
+            ids(choose_pools(
+                &pools,
+                Some("claude"),
+                Some("G"),
+                &[],
+                None,
+                Some("gateway")
+            )),
+            ["gateway"]
+        );
+        assert_eq!(
+            choose_pools(&pools[..1], Some("claude"), Some("G"), &[], None, None),
+            PoolChoice::Unpooled,
+            "it is as if the handler had no pool"
+        );
+    }
+
+    #[test]
+    fn a_harness_login_account_hands_over_nothing_and_takes_no_setting_for_it() {
+        let login = Account::new("free", AccountKind::HarnessLogin);
+        assert_eq!(login.variable("acp"), None);
+        assert_eq!(login.secret_name(), None);
+        assert!(!login.kind().carries_session());
+        assert_eq!(
+            AccountKind::parse("harness-login"),
+            Some(AccountKind::HarnessLogin)
+        );
+        assert!(
+            AccountPool::new("grok", "acp")
+                .account(login.clone())
+                .validate()
+                .is_ok()
+        );
+        for bad in [
+            login.clone().secret("s"),
+            login.clone().dir("/x"),
+            login.clone().env("X"),
+        ] {
+            let reason = AccountPool::new("grok", "acp")
+                .account(bad)
+                .validate()
+                .unwrap_err();
+            assert!(reason.contains("hands over nothing"), "{reason}");
+        }
     }
 
     #[test]

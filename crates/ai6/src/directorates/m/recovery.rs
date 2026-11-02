@@ -164,6 +164,7 @@ mod tests {
         policy.theater = Some("box".to_owned());
         policy.agents = vec![AgentFacts {
             id: "007".to_owned(),
+            routes: Vec::new(),
             handler: Some("claude".to_owned()),
             model: None,
             priority: 0,
