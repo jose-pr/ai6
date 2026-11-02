@@ -140,7 +140,12 @@ pub struct AcpOptions {
     /// Whether a connection that ends without being closed is a `failed` event. A runner's
     /// Session is not failed by its link dropping: the Station attaches again.
     pub fail_on_disconnect: bool,
+    /// Says what became of the agent, for that `failed` event: an exit status, its last words.
+    pub disconnect_detail: Option<DisconnectDetail>,
 }
+
+/// Asked once a connection has ended without being closed.
+pub type DisconnectDetail = Box<dyn Fn() -> Option<String> + Send + Sync>;
 
 impl Default for AcpOptions {
     fn default() -> Self {
@@ -164,6 +169,7 @@ impl Default for AcpOptions {
             decider: Arc::new(RefuseAll),
             close_on_drop: true,
             fail_on_disconnect: true,
+            disconnect_detail: None,
         }
     }
 }
@@ -1055,9 +1061,16 @@ async fn main_task(
                     shared.lost.store(true, Ordering::SeqCst);
                     shared.flush();
                     if shared.fail_on_disconnect && !shared.finished() {
+                        let detail = options
+                            .disconnect_detail
+                            .as_ref()
+                            .and_then(|detail| detail());
                         shared.emit(event_text(
                             "failed",
-                            "the agent closed its connection".to_owned(),
+                            detail.map_or_else(
+                                || "the agent closed its connection".to_owned(),
+                                |detail| format!("the agent closed its connection: {detail}"),
+                            ),
                         ));
                     }
                 }

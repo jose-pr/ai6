@@ -153,6 +153,17 @@ fn a_refusal_and_an_error_fail_the_session() {
 }
 
 #[test]
+fn an_agent_that_dies_is_reported_with_its_exit_status_and_last_words() {
+    let (_, events) = run(&[("FAKE_DIE", "1")], "");
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, "failed");
+    let said = last.text.as_deref().unwrap();
+    assert!(said.contains("the agent closed its connection"), "{said}");
+    assert!(said.contains("it exited with code 3"), "{said}");
+    assert!(said.contains("the fake agent ran out of road"), "{said}");
+}
+
+#[test]
 fn a_permission_request_is_judged_by_the_gate() {
     // Not a shell command: allowed.
     let (_, events) = run(&[("FAKE_ASK", "read")], "");

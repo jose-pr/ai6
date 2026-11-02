@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use ai6::HarnessStdio;
-use ai6::directorates::q::terminal::{AgentTerminal, STREAM_COLS, Spec, TerminalSession};
+use ai6::directorates::q::terminal::{AgentTerminal, ExitInfo, STREAM_COLS, Spec, TerminalSession};
 use ai6::directorates::section_00::acp::{
-    AcpOptions, AcpSession, GateDecider, TerminalIo, lines_over_io,
+    AcpOptions, AcpSession, Diagnostics, GateDecider, TerminalIo, lines_over_io,
 };
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentSession, AgentStart, AssistantMode, clearance_runs_commands,
@@ -72,6 +72,9 @@ pub struct AcpSettings {
     /// How many of the agent's last non-protocol output lines are kept to explain its death.
     #[serde(default = "diagnostic_lines")]
     pub diagnostic_lines: usize,
+    /// How long, in milliseconds, the report of a lost agent waits for its exit status.
+    #[serde(default = "exit_wait")]
+    pub exit_wait_ms: i64,
     /// How often, in milliseconds, a silent agent's output is checked for a stop request.
     #[serde(default = "poll")]
     pub poll_ms: i64,
@@ -99,6 +102,9 @@ fn close_grace() -> u64 {
 }
 fn diagnostic_lines() -> usize {
     20
+}
+fn exit_wait() -> i64 {
+    1_000
 }
 fn poll() -> i64 {
     200
@@ -150,6 +156,39 @@ impl AcpHandler {
         self.settings.as_ref().ok_or_else(|| {
             refuse("the acp handler needs `handler_settings` with a `command` on its Agent")
         })
+    }
+}
+
+/// The lines the agent wrote outside the protocol, kept to explain its death.
+fn last_words(diagnostics: &Diagnostics) -> String {
+    diagnostics
+        .lock()
+        .map(|lines| lines.iter().cloned().collect::<Vec<_>>().join(" | "))
+        .unwrap_or_default()
+}
+
+/// What became of an agent whose connection ended: how its process ended and what it last wrote.
+fn lost_agent(
+    process: &Object<dyn TerminalSession>,
+    diagnostics: &Diagnostics,
+    exit_wait_ms: i64,
+) -> Option<String> {
+    let how = process
+        .exit_status(exit_wait_ms)
+        .ok()
+        .and_then(|status| ExitInfo::from_value(&status).ok())
+        .filter(|exit| !exit.running)
+        .map(|exit| match (exit.code, exit.signal) {
+            (Some(code), _) => format!("it exited with code {code}"),
+            (None, Some(signal)) => format!("it was ended by signal {signal}"),
+            (None, None) => "it exited".to_owned(),
+        });
+    let said = last_words(diagnostics);
+    match (how, said.is_empty()) {
+        (None, true) => None,
+        (Some(how), true) => Some(how),
+        (None, false) => Some(format!("it last wrote: {said}")),
+        (Some(how), false) => Some(format!("{how}; it last wrote: {said}")),
     }
 }
 
@@ -273,6 +312,11 @@ impl AcpHandler {
             )),
             close_on_drop: true,
             fail_on_disconnect: true,
+            disconnect_detail: Some({
+                let (process, diagnostics) = (process.clone(), diagnostics.clone());
+                let exit_wait_ms = settings.exit_wait_ms;
+                Box::new(move || lost_agent(&process, &diagnostics, exit_wait_ms))
+            }),
         };
         let ended = process.clone();
         let stopper = io.clone();
@@ -283,10 +327,7 @@ impl AcpHandler {
         AcpSession::connect(lines, options, Some(on_close))
             .map(AcpSession::into_handle)
             .map_err(|error| {
-                let said = diagnostics
-                    .lock()
-                    .map(|lines| lines.iter().cloned().collect::<Vec<_>>().join(" | "))
-                    .unwrap_or_default();
+                let said = last_words(&diagnostics);
                 if said.is_empty() {
                     error
                 } else {

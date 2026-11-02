@@ -70,6 +70,10 @@ fn handle(
                     );
                     return;
                 }
+                if var("FAKE_DIE").is_some() {
+                    eprintln!("the fake agent ran out of road");
+                    std::process::exit(3);
+                }
                 let mut reply = format!("cwd:{cwd} prompt:{prompt}");
                 if let Some(name) = var("FAKE_ECHO_ENV") {
                     reply.push_str(&format!(
