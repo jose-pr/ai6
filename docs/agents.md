@@ -573,6 +573,35 @@ Credentials already on a Theater outside these leases (a git credential helper, 
 agent, a CLI login) are reported as weakenings; see [Fitting a Theater
 out](theaters.md#fitting-a-theater-out).
 
+### Values that are no secret
+
+`env` on a loadout gives each Session of the Agent values that are no secret, most often the
+`PATH` its harness and tools are found on:
+
+```toml
+[loadout.007]
+secrets = ["anthropic", "forge"]
+env = { PATH = "/opt/tools/bin:/usr/bin:/bin", TZ = "UTC" }
+```
+
+- A harness's environment is what AI6 gives it and nothing of the Station's own, so the `PATH` a
+  harness needs is one you set: here or in the Agent's own `[agent.<codename>.env]`; a loadout's value wins over
+  the Agent's for the same name, and a start or resume request's wins over both.
+- **Exposure does not take it away.** A Session an Operation's [exposure](medical.md) policy
+  restricts with `secrets` loses its secrets, which is how a Mission from a Source runs under
+  `strict`, and keeps this table. A `PATH` given as a secret would be lost with them.
+- **A value here is config, and anyone who can read the record reads it** (`ai6 config show
+  loadout 007`, an export, the database). Put tool locations, modes and proxies without credentials
+  here. Never a token, a password, a key or a URL that holds one: those are a `[secret.<name>]`.
+- To keep that mistake from being made by name, a loadout is refused at load when an `env` name, in
+  any case, is a provider credential's variable (`ANTHROPIC_API_KEY`, `CODEX_HOME` and the rest of
+  [`CREDENTIAL_VARIABLES`](#account-pools)), the variable of any `[secret.<name>]` or of a secret a
+  loadout names, a pool account's, or starts with `AI6_`. A value holds no control character and is
+  within `[provider] loadout_value_chars`, like the rest of the document; the refusal names the
+  variable and never its value.
+- A [Chief of Staff review](#chief-of-staff) and [Moneypenny](assistant.md#where-she-runs) keep only
+  what reaches the model of this table too, `PATH` among it.
+
 ### Account pools
 
 Several provider accounts can be shared by every Station, each Session drawing one, so

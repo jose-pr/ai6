@@ -4196,10 +4196,11 @@ async fn start_mission(
         initial_context.push(recovery::hand_off(lost, work));
     }
     initial_context.extend(request.initial_context);
+    let configured = credentials::session_environment(&state, &agent.id, &agent.env);
     let mut environment = if review {
-        vetting::review_environment(&agent.env)
+        vetting::review_environment(&configured)
     } else {
-        agent.env.clone()
+        configured
     };
     if !review {
         environment.extend(requested_environment(request.environment));
@@ -4849,7 +4850,7 @@ async fn resume_mission(
                 operation.handler_provider.clone(),
                 operation.terminal_provider.clone(),
                 operation.working_directory.clone(),
-                resume_agent.env.clone(),
+                credentials::session_environment(&state, &resume_agent.id, &resume_agent.env),
                 operation.model,
                 operation.effort,
                 operation.cover,
@@ -10765,6 +10766,102 @@ queue = 1
             "two records never share an ID"
         );
         assert_eq!(opened.attempt, 3);
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    /// A Source Mission under the default `strict` policy is exposed from its start, which takes
+    /// every secret but the model credential: its loadout's `env` is what still reaches it.
+    #[tokio::test]
+    async fn a_source_born_mission_under_strict_exposure_finds_its_path_in_its_loadout() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-recorder\"\n",
+        );
+        state.station = state
+            .station
+            .clone()
+            .with_loadouts(
+                "[loadout.007]\nsecrets = [\"forge-token\"]\n\
+                 env = { PATH = \"/opt/tools/bin\" }\n"
+                    .parse()
+                    .unwrap(),
+            )
+            .with_secret_backend(FakeSecrets::default());
+        let item = crate::SourceItem {
+            id: "owner/repo#2".to_owned(),
+            title: "Fix the build".to_owned(),
+            body: "the body".to_owned(),
+            url: None,
+            labels: Vec::new(),
+            author: Some("reporter".to_owned()),
+            updated: "2026-10-26T00:00:00Z".to_owned(),
+            code: None,
+            code_tag: None,
+        };
+        let mut brief = crate::source_brief("G", "github", &item, &Default::default());
+        brief.provenance = Some(
+            crate::Provenance::new(crate::Origin::Source, &brief, "test", 1)
+                .with_principal("github")
+                .with_reference(item.id.clone()),
+        );
+        let mission_id = format!("loadout-env-{}", std::process::id());
+        create_intake_mission(
+            &state,
+            &brief,
+            &MissionId::try_new(&mission_id).unwrap(),
+            "G".to_owned(),
+            "007".to_owned(),
+            None,
+        )
+        .unwrap();
+        start_mission_by_id(&state, &mission_id).await;
+        assert_eq!(exposure_sources(&state, &mission_id), ["brief:source"]);
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let recorded = |requests: Vec<BTreeMap<String, String>>| {
+            requests
+                .into_iter()
+                .next_back()
+                .expect("the handler was called")
+        };
+        let started = recorded(
+            RECORDED_STARTS
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|request| request.mission_id.as_str() == mission_id)
+                .map(|request| request.environment.clone())
+                .collect(),
+        );
+        assert_eq!(started["PATH"], "/opt/tools/bin");
+        assert!(
+            !started.contains_key("FORGE_TOKEN"),
+            "exposed: no secret but the model's"
+        );
+
+        let _ = resume_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(ResumeMission {
+                message: Some("carry on".to_owned()),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let resumed = recorded(
+            RECORDED_RESUMES
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|request| request.mission_id.as_str() == mission_id)
+                .map(|request| request.environment.clone())
+                .collect(),
+        );
+        assert_eq!(resumed["PATH"], "/opt/tools/bin");
+        assert!(!resumed.contains_key("FORGE_TOKEN"));
         state.stopping.store(true, Ordering::Release);
     }
 

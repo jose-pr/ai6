@@ -1176,7 +1176,9 @@ impl Desk {
             }
         };
         // As a Chief of Staff review, the harness keeps only what reaches its model.
-        let mut environment = vetting::review_environment(&agent.env);
+        let mut environment = vetting::review_environment(
+            &super::credentials::session_environment(&state, &agent.id, &agent.env),
+        );
         environment.insert(ASSISTANT_MCP_URL_ENV.to_owned(), self.mcp_url.clone());
         environment.insert(ASSISTANT_MCP_TOKEN_ENV.to_owned(), job.mcp_token.clone());
         // Her own Claude Code configuration directory, beside the working directory: the
@@ -3159,7 +3161,14 @@ mod tests {
         resumed: Script,
     ) -> Fixture {
         let root = tempfile::tempdir().unwrap();
-        let state = test_state(root.path(), "", agents);
+        let mut state = test_state(root.path(), "", agents);
+        state.station = state.station.clone().with_loadouts(
+            "[loadout.moneypenny]
+             env = { PATH = \"/opt/moneypenny/bin\", LOADOUT_TOOL_MODE = \"fast\" }
+"
+            .parse()
+            .unwrap(),
+        );
         let asked = Arc::new(Mutex::new(Asked::default()));
         let reports = Arc::new(Mutex::new(Vec::new()));
         let sink = reports.clone();
@@ -3427,6 +3436,15 @@ mod tests {
         assert!(
             !start.environment.contains_key("LOADOUT_SECRET"),
             "nothing else of the Agent's environment"
+        );
+        assert_eq!(
+            start.environment.get("PATH").map(String::as_str),
+            Some("/opt/moneypenny/bin"),
+            "her harness finds its program on what her loadout sets"
+        );
+        assert!(
+            !start.environment.contains_key("LOADOUT_TOOL_MODE"),
+            "of her loadout's env too, only what reaches the model"
         );
         let area = Path::new(&start.working_directory);
         assert!(area.is_dir());

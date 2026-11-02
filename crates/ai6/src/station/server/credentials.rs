@@ -203,6 +203,33 @@ impl SecretBackend for Shared {
     }
 }
 
+/// What a Session of `agent` starts from: its roster `env`, with its loadout's `env` over it.
+/// The issue of secrets after this takes only secrets' and pool accounts' variables away, which
+/// a loadout's `env` cannot name, so what is here reaches an exposed Session too.
+pub(super) fn session_environment(
+    state: &DaemonState,
+    agent: &str,
+    roster: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut environment = roster.clone();
+    if let Some(loadout) = state
+        .station
+        .credentials
+        .catalog
+        .as_ref()
+        .and_then(|catalog| catalog.for_agent(agent).ok())
+    {
+        environment.extend(
+            loadout
+                .env()
+                .values()
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+    }
+    environment
+}
+
 /// Claims a pool account for a Session of `mission` when its Agent draws from a pool, and
 /// leases the Agent's loadout secrets; puts each value in `environment` under its variable,
 /// replacing what the Mission held before. An Agent without a loadout or pool gets nothing;

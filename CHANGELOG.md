@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `env` on a loadout: non-secret values a Session is given, which exposure does not take away, so a
+  Mission from a Source under `strict` finds its `PATH`. A name that is a provider credential's, a
+  secret's or a pool account's variable, or AI6's own, is refused at load, and a value is shown to
+  anyone who reads the record. `SessionEnv` is the table's type, for any record that holds one, and
+  `LoadoutCatalog::check_session_env` its check.
 - `ca_file` on a GitHub or Jira Source or tracker instance: a PEM file of certificate authorities
   added to the public roots, by absolute path, for a site under a company's own authority. A bad file
   is refused naming its path, and a set one is reported as a weakening at start and at check-in.

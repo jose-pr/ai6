@@ -47,6 +47,12 @@ resumed one only her instructions, which Claude Code uses once the prompt it rec
 the Session is gone (after compaction). Of its Agent's environment it keeps only what reaches the model, as a
 [Chief of Staff review](agents.md#chief-of-staff) does.
 
+Her harness's program (`claude`, `codex`) is found on the `PATH` of that environment, not the
+Station's: set it in her Agent's `[agent.moneypenny.env]`, or as [non-secret values on her
+loadout](agents.md#values-that-are-no-secret) (`[loadout.moneypenny] env = { PATH = "..." }`). An
+interpreter her scripts run is found the same way, and the sandbox then opens the directory it was
+found in; with no `PATH` there, that lookup alone falls back to the Station's.
+
 ## What she may touch
 
 She is started in the handlers' **assistant mode**: no built-in tool at all (no shell, no

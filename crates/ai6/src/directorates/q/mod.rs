@@ -32,6 +32,7 @@ use std::str::FromStr;
 use crate::bootstrap::SecretRef;
 use crate::bounds::Limit;
 use crate::directorates::m::config::ConfigLimits;
+use guatiao::{FromValue, Schema, ToValue};
 use serde::Deserialize;
 
 /// Stage at which a loadout operation failed.
@@ -164,6 +165,56 @@ impl std::error::Error for QError {
     }
 }
 
+/// Values a Session is given in its environment that are no secret: `env` on a record that
+/// says how a Session runs. Anyone who can read that record reads them, and exposure does not
+/// take them away; [`LoadoutCatalog::check_session_env`] keeps a credential's variables out.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, ToValue, FromValue, Schema)]
+#[serde(transparent)]
+#[map(crate = ::guatiao, transparent)]
+pub struct SessionEnv(BTreeMap<String, String>);
+
+impl From<BTreeMap<String, String>> for SessionEnv {
+    fn from(values: BTreeMap<String, String>) -> Self {
+        Self(values)
+    }
+}
+
+impl SessionEnv {
+    /// The values by variable name.
+    pub fn values(&self) -> &BTreeMap<String, String> {
+        &self.0
+    }
+
+    /// Why a name or value cannot be set, ignoring case in `taken` as Windows does.
+    fn check(&self, taken: &[String], chars: Limit) -> Result<(), String> {
+        for (name, value) in &self.0 {
+            if !transport::kit::is_variable_name(name) {
+                return Err(format!("env {name:?} is not a variable name"));
+            }
+            if value.chars().any(char::is_control) || !chars.allows(value.chars().count()) {
+                return Err(format!(
+                    "the value of env {name} has a control character or is over {chars} characters \
+                     (`[provider] loadout_value_chars`)"
+                ));
+            }
+            let upper = name.to_ascii_uppercase();
+            if upper.starts_with("AI6_") {
+                return Err(format!("env {name} is one of AI6's own variables"));
+            }
+            if taken
+                .iter()
+                .any(|variable| variable.eq_ignore_ascii_case(name))
+            {
+                return Err(format!(
+                    "env {name} is a credential's variable: a value here is shown to anyone who \
+                     reads the record, so a credential belongs in a [secret.<name>]"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One Agent's named sandbox, MCP servers and secret references.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Loadout {
@@ -171,6 +222,7 @@ pub struct Loadout {
     sandbox: Option<String>,
     mcp: Vec<String>,
     secrets: Vec<String>,
+    env: SessionEnv,
 }
 
 impl Loadout {
@@ -194,6 +246,11 @@ impl Loadout {
         &self.secrets
     }
 
+    /// The values a Session of this Agent is given that are no secret.
+    pub fn env(&self) -> &SessionEnv {
+        &self.env
+    }
+
     /// The loadout that declares only a pool account's secret, so a broker leases it and
     /// nothing else; `None` for an account that reads no secret.
     pub fn for_account(pool: &AccountPool, account: &Account) -> Option<Self> {
@@ -202,6 +259,7 @@ impl Loadout {
             sandbox: None,
             mcp: Vec::new(),
             secrets: vec![account.secret_name()?.to_owned()],
+            env: SessionEnv::default(),
         })
     }
 }
@@ -380,7 +438,36 @@ impl LoadoutCatalog {
             .and_then(|()| refuse_green_ink(&pool, &self.secrets))
             .map_err(|reason| QError::new(QErrorKind::Schema, None).because(reason))?;
         self.pools.insert(pool.id().to_owned(), pool);
+        for loadout in self.loadouts.values() {
+            self.check_session_env(&loadout.env, Limit::UNBOUNDED)
+                .map_err(|reason| {
+                    QError::new(QErrorKind::Schema, None)
+                        .because(format!("loadout {:?}: {reason}", loadout.agent))
+                })?;
+        }
         Ok(self)
+    }
+
+    /// Refuses an `env` table a Session could not be given beside this catalog: a name that is a
+    /// provider credential's ([`CREDENTIAL_VARIABLES`]), a secret's or a pool account's variable,
+    /// or AI6's own. Case is ignored, as Windows ignores it.
+    ///
+    /// # Errors
+    ///
+    /// Why, naming the variable and never its value.
+    pub fn check_session_env(&self, env: &SessionEnv, chars: Limit) -> Result<(), String> {
+        let mut taken: Vec<String> = CREDENTIAL_VARIABLES
+            .iter()
+            .map(|variable| (*variable).to_owned())
+            .collect();
+        taken.extend(self.secrets().iter().map(|secret| secret.env().to_owned()));
+        for pool in self.pools.values() {
+            taken.extend(
+                pool.accounts()
+                    .filter_map(|account| account.variable(pool.handler())),
+            );
+        }
+        env.check(&taken, chars)
     }
 
     /// The account pools in ID order.
@@ -626,6 +713,8 @@ struct RawLoadout {
     mcp: Vec<String>,
     #[serde(default)]
     secrets: Vec<String>,
+    #[serde(default)]
+    env: SessionEnv,
 }
 
 #[derive(Deserialize)]
@@ -716,6 +805,7 @@ fn parse_document(
                 sandbox: raw.sandbox,
                 mcp: raw.mcp,
                 secrets: raw.secrets,
+                env: raw.env,
             },
         );
     }
@@ -813,13 +903,22 @@ fn parse_document(
             .map_err(|reason| QError::new(QErrorKind::Schema, path.clone()).because(reason))?;
     }
 
-    Ok(LoadoutCatalog {
+    let catalog = LoadoutCatalog {
         loadouts,
         sandboxes,
         servers,
         secrets,
         pools,
-    })
+    };
+    for loadout in catalog.loadouts.values() {
+        catalog
+            .check_session_env(&loadout.env, chars)
+            .map_err(|reason| {
+                QError::new(QErrorKind::Schema, path.clone())
+                    .because(format!("loadout {:?}: {reason}", loadout.agent))
+            })?;
+    }
+    Ok(catalog)
 }
 
 /// Refuses a pool account whose secret is a green ink one: a pool account is handed to every
@@ -891,6 +990,7 @@ fn validate_text(
 
 #[cfg(test)]
 mod tests {
+    use super::{Account, AccountKind, AccountPool, BTreeMap, PathBuf, SessionEnv};
     use super::{ConfigLimits, Limit, LoadoutCatalog, QErrorKind};
     use std::str::FromStr;
 
@@ -912,6 +1012,120 @@ command = ["mcp-server-filesystem", "$WORKTREE"]
 command = ["mcp-server-shell", "--flag", "same", "--flag", "same"]
 deny = ["git push --force"]
 "#;
+
+    #[test]
+    fn a_loadout_s_env_is_config_a_session_is_given() {
+        let catalog: LoadoutCatalog =
+            "[loadout.007]\nenv = { PATH = \"/opt/tools/bin\", TOOL_MODE = \"\" }\n"
+                .parse()
+                .unwrap();
+        let env = catalog.for_agent("007").unwrap().env();
+        assert_eq!(env.values()["PATH"], "/opt/tools/bin");
+        assert_eq!(env.values()["TOOL_MODE"], "", "an empty value is a value");
+    }
+
+    #[test]
+    fn a_loadout_s_env_may_not_take_a_credential_s_variable() {
+        let secret = "[secret.forge]\nenv = \"GH_TOKEN\"\n";
+        let pool = "[pool.team]\nhandler = \"claude\"\n[pool.team.account.a]\nkind = \"config-dir\"\ndir = \"/x\"\nenv = \"TEAM_LOGIN\"\n";
+        for (document, name) in [
+            (
+                "env = { ANTHROPIC_API_KEY = \"planted\" }\n".to_owned(),
+                "ANTHROPIC_API_KEY",
+            ),
+            (
+                "env = { anthropic_api_key = \"planted\" }\n".to_owned(),
+                "anthropic_api_key",
+            ),
+            (
+                "env = { CODEX_HOME = \"planted\" }\n".to_owned(),
+                "CODEX_HOME",
+            ),
+            (
+                "secrets = [\"forge\"]\nenv = { GH_TOKEN = \"planted\" }\n".to_owned() + secret,
+                "GH_TOKEN",
+            ),
+            // A secret no loadout names yet is still a secret's variable.
+            (
+                "env = { GH_TOKEN = \"planted\" }\n".to_owned() + secret,
+                "GH_TOKEN",
+            ),
+            // Named, with its variable left to the default.
+            (
+                "secrets = [\"forge-token\"]\nenv = { FORGE_TOKEN = \"planted\" }\n".to_owned(),
+                "FORGE_TOKEN",
+            ),
+            (
+                "env = { TEAM_LOGIN = \"planted\" }\n".to_owned() + pool,
+                "TEAM_LOGIN",
+            ),
+            (
+                "env = { AI6_GREEN_INK_GATE = \"planted\" }\n".to_owned(),
+                "AI6_GREEN_INK_GATE",
+            ),
+            (
+                "env = { AI6_ANYTHING = \"planted\" }\n".to_owned(),
+                "AI6_ANYTHING",
+            ),
+            (
+                "env = { \"NOT A NAME\" = \"planted\" }\n".to_owned(),
+                "NOT A NAME",
+            ),
+            (
+                "env = { BAD_VALUE = \"line\\nbreak planted\" }\n".to_owned(),
+                "BAD_VALUE",
+            ),
+        ] {
+            let text = format!("[loadout.007]\n{document}");
+            let refused = text.parse::<LoadoutCatalog>().unwrap_err();
+            assert_eq!(refused.kind(), QErrorKind::Schema, "{text}");
+            let reason = refused.reason().unwrap_or_default().to_owned();
+            assert!(reason.contains(name), "{text}: {reason}");
+            assert!(reason.contains("007"), "{text}: {reason}");
+            assert!(
+                !reason.contains("planted"),
+                "a value is not repeated: {reason}"
+            );
+        }
+        let limits = ConfigLimits {
+            loadout_value_chars: Limit::at(4),
+            ..ConfigLimits::default()
+        };
+        let long = "[loadout.007]\nenv = { PATH = \"/opt/tools\" }\n";
+        assert!(LoadoutCatalog::parse(long, &limits).is_err());
+    }
+
+    #[test]
+    fn a_pool_added_in_code_is_checked_against_a_loadout_s_env() {
+        let catalog: LoadoutCatalog = "[loadout.007]\nenv = { TEAM_LOGIN = \"x\" }\n"
+            .parse()
+            .unwrap();
+        let pool = AccountPool::new("team", "claude").account(
+            Account::new("a", AccountKind::ConfigDir)
+                .dir(PathBuf::from("/x"))
+                .env("TEAM_LOGIN".to_owned()),
+        );
+        let refused = catalog.with_pool(pool).unwrap_err();
+        assert!(
+            refused.reason().unwrap_or_default().contains("TEAM_LOGIN"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn the_env_type_reads_and_writes_as_a_table_for_any_record_that_holds_one() {
+        use crate::guatiao::{FromValue, ToValue};
+        let env = SessionEnv::from(BTreeMap::from([("PATH".to_owned(), "/bin".to_owned())]));
+        assert_eq!(
+            SessionEnv::from_value(&env.to_value().unwrap()).unwrap(),
+            env
+        );
+        let by_serde: SessionEnv = toml::from_str::<toml::Table>("PATH = \"/bin\"\n")
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert_eq!(by_serde, env);
+    }
 
     #[test]
     fn loadout_references_resolve_and_keep_declared_server_order() {

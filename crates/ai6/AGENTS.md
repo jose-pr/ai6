@@ -3455,6 +3455,7 @@ impl Loadout {
     pub fn sandbox_name(&self) -> Option<&str>;
     pub fn mcp_names(&self) -> &[String];
     pub fn secret_names(&self) -> &[String];
+    pub fn env(&self) -> &SessionEnv;   // [loadout.X] env: non-secret values a Session is given, which exposure does not strip
     /// Declares only the account's secret (agent "pool:<id>/<name>"), so a broker leases it
     /// alone; None for a config-dir account.
     pub fn for_account(pool: &AccountPool, account: &Account) -> Option<Self>;
@@ -3511,11 +3512,13 @@ impl McpServer {
     pub fn command(&self) -> &[String];
     pub fn deny(&self) -> &[String];
 }
+pub struct SessionEnv;   // env = { NAME = "value" } on a record; From<BTreeMap<String, String>>, values(); ToValue, FromValue, Schema, Deserialize
 pub struct LoadoutCatalog;   // Default: empty
 impl LoadoutCatalog {
     pub fn load(path: impl AsRef<Path>, limits: &ConfigLimits) -> Result<Self, QError>;   // TooLarge past loadout_bytes
     pub fn parse(text: &str, limits: &ConfigLimits) -> Result<Self, QError>;   // FromStr: the default limits
     pub fn with_pool(self, pool: AccountPool) -> Result<Self, QError>;   // validates; replaces the same ID
+    pub fn check_session_env(&self, env: &SessionEnv, chars: Limit) -> Result<(), String>;   // refuses a credential's, secret's, pool account's or AI6_ variable
     pub fn pools(&self) -> impl Iterator<Item = &AccountPool>;
     pub fn pool(&self, id: &str) -> Option<&AccountPool>;
     pub fn for_agent(&self, agent: &str) -> Result<&Loadout, QError>;

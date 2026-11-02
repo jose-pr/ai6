@@ -561,7 +561,7 @@ refused, and a running Station keeps the last good one.
 | `assistant` | `agents` | no | yes | live | `[assistant]`, Moneypenny's settings |
 | `cover` | `covers` | no | no | live | `[cover.<name>]` |
 | `theater` | `theaters` | yes | no | restart | `[theater.<id>]` |
-| `loadout`, `sandbox`, `mcp`, `secret`, `pool` | `loadouts` | yes | no | live | `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]`, `[secret.<name>]` (references, never values), `[pool.<id>]` |
+| `loadout`, `sandbox`, `mcp`, `secret`, `pool` | `loadouts` | yes | no | live | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[secret.<name>]` (references, never values), `[pool.<id>]` |
 | `cables` | `cables` | yes | yes | restart | the whole file: grants, inbound, channels, limits |
 | `plugin` | `plugins` | yes | no | restart | `[[library]]` entries, keyed by their `file` |
 | `station` | `station` | yes | yes | restart | the whole file: the Station's runtime settings |
