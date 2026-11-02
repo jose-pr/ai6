@@ -215,6 +215,7 @@ impl AgentHandler for CodexHandler {
             .filter(|_| !(request.answer_only || request.assistant.is_some()));
         let scripts = Scripts::of(request.assistant.as_ref());
         let mut session = CodexSession::new(process, request.effort)
+            .working_in(&request.working_directory)
             .limited_by(&self.config)
             .with_gate(gate)
             .with_weakening(weakening)
@@ -334,6 +335,7 @@ impl CodexHandler {
         )?;
         let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
         let mut session = CodexSession::new(process, request.effort)
+            .working_in(&request.working_directory)
             .limited_by(&self.config)
             .with_gate(gate)
             .with_weakening(weakening)
@@ -574,6 +576,10 @@ struct CodexSession {
     tripped: AtomicBool,
     /// The command of each command execution item the thread started, by item id.
     started: Mutex<std::collections::HashMap<String, String>>,
+    /// The paths of each file change item the thread started, by item id.
+    started_changes: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    /// Where a file change is the Mission's own work.
+    working_directory: Option<std::path::PathBuf>,
     /// Set once the app server's output has ended.
     ended: AtomicBool,
     /// Set once that end was reported as a `failed` event.
@@ -607,6 +613,8 @@ impl CodexSession {
             reports_commands: false,
             tripped: AtomicBool::new(false),
             started: Mutex::default(),
+            started_changes: Mutex::default(),
+            working_directory: None,
             ended: AtomicBool::new(false),
             ended_reported: AtomicBool::new(false),
             ended_reason: Mutex::new(None),
@@ -716,6 +724,11 @@ impl CodexSession {
             quota: Vec::new(),
         });
         Ok(())
+    }
+
+    fn working_in(mut self, directory: &str) -> Self {
+        self.working_directory = Some(std::path::PathBuf::from(directory));
+        self
     }
 
     fn with_gate(mut self, gate: Option<Gate>) -> Self {
@@ -872,6 +885,26 @@ impl CodexSession {
                 rebuilt,
             )?;
         }
+        if let Some(id) = message.get("id")
+            && message.get("method").and_then(Value::as_str) == Some(FILE_APPROVAL)
+        {
+            self.answer_file_approval(id, message.get("params").unwrap_or(&Value::Null), rebuilt)?;
+        }
+        if message.get("method").and_then(Value::as_str) == Some("item/started")
+            && let Some(item) = message.pointer("/params/item")
+            && item.get("type").and_then(Value::as_str) == Some("fileChange")
+            && let Some(id) = item.get("id").and_then(Value::as_str)
+        {
+            let paths = item
+                .get("changes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|change| change.get("path").and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect();
+            lock(&self.started_changes)?.insert(id.to_owned(), paths);
+        }
         if message.get("method").and_then(Value::as_str) == Some("item/started")
             && let Some(item) = message.pointer("/params/item")
             && item.get("type").and_then(Value::as_str) == Some("commandExecution")
@@ -908,6 +941,9 @@ fn started_item(message: &Value) -> Option<&str> {
 
 /// The app-server's request to approve a command before it runs.
 const COMMAND_APPROVAL: &str = "item/commandExecution/requestApproval";
+
+/// The app-server's request to approve a file change before it is applied.
+const FILE_APPROVAL: &str = "item/fileChange/requestApproval";
 
 /// Thread items a restricted thread may produce besides calls to its own MCP servers: what it
 /// is told and says, its reasoning and plan, and the thread's own bookkeeping.
@@ -1025,6 +1061,65 @@ impl CodexSession {
             ),
             (Some(gate), _, Some(command)) => gate(command, cwd),
         };
+        self.answer_approval(id, params, verdict)
+    }
+
+    /// Answers a file change the way the Claude handler's gate treats an edit: green ink governs
+    /// shell commands, so an edit inside the working directory is the Mission's own work and
+    /// `accept`ed. Codex 0.164.0 applies what is accepted wherever it points, even from a
+    /// read-only thread, so a gated thread is declined a path outside the working directory, a
+    /// `grantRoot`, a request whose line was `rebuilt`, and one with no file change item started
+    /// earlier under its item id. Without a gate everything is accepted.
+    fn answer_file_approval(
+        &self,
+        id: &Value,
+        params: &Value,
+        rebuilt: bool,
+    ) -> Result<(), ProviderError> {
+        let paths = params
+            .get("itemId")
+            .and_then(Value::as_str)
+            .and_then(|item| {
+                lock(&self.started_changes)
+                    .ok()
+                    .and_then(|started| started.get(item).cloned())
+            });
+        let granted = params.get("grantRoot").is_some_and(|root| !root.is_null());
+        let verdict = match (&self.gate, &self.working_directory, paths) {
+            (None, _, _) => GateVerdict::Allow,
+            _ if rebuilt => self.declined(
+                "Green ink: this file change request reached AI6 rebuilt from a terminal's \
+                 rendering, so what it changes may not be what was asked; it is declined. Apply \
+                 the change again.",
+            )?,
+            _ if granted => self.declined(
+                "Green ink: a file change may not widen where this thread writes; it is \
+                 declined. Keep the change inside the working directory.",
+            )?,
+            (Some(_), Some(root), Some(paths))
+                if !paths.is_empty() && paths.iter().all(|path| inside(root, path)) =>
+            {
+                GateVerdict::Allow
+            }
+            (Some(_), _, Some(_)) => self.declined(
+                "Green ink: this file change reaches outside the working directory; it is \
+                 declined. Keep the change inside the working directory.",
+            )?,
+            (Some(_), _, None) => self.declined(
+                "Green ink: this approval request names a change no file change item started \
+                 with before it; it is declined. Apply the change again.",
+            )?,
+        };
+        self.answer_approval(id, params, verdict)
+    }
+
+    /// Writes the decision, and steers a held step's reason into the running turn.
+    fn answer_approval(
+        &self,
+        id: &Value,
+        params: &Value,
+        verdict: GateVerdict,
+    ) -> Result<(), ProviderError> {
         let decision = match verdict {
             GateVerdict::Allow => "accept",
             GateVerdict::Hold(_) => "decline",
@@ -1047,6 +1142,42 @@ impl CodexSession {
             }))?;
         }
         Ok(())
+    }
+}
+
+/// Whether `path` lies under `root`, as far as the file system resolves either: a link inside the
+/// directory that points out of it counts as outside.
+fn inside(root: &Path, path: &str) -> bool {
+    let path = Path::new(path);
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    if joined
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    resolved(&joined).starts_with(resolved(root))
+}
+
+/// `path` with its longest existing ancestor made canonical; what does not exist yet follows it.
+fn resolved(path: &Path) -> std::path::PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(found) = existing.canonicalize() {
+            return rest.iter().rev().fold(found, |path, part| path.join(part));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name);
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
     }
 }
 
@@ -2402,6 +2533,107 @@ mod tests {
         );
         let colour = format!("{}\r\n{head}\x1b[0m{tail}\r\n", started("cargo test"));
         assert_eq!(answered(colour.as_bytes()).0, "accept", "colour alone");
+    }
+
+    /// The `item/started` and request Codex 0.164.0 sends on an `apply_patch` in a gated
+    /// (`approvalPolicy` untrusted) thread, field for field, for `path`.
+    fn file_change(path: &str, grant_root: Value) -> String {
+        format!(
+            "{}\r\n{}\r\n",
+            json!({"method": "item/started", "params": {
+                "threadId": "01a19a10-25e3-74e3-8584-f85797bbe59f",
+                "turnId": "01a19a10-2834-7e90-b669-8320d3df8e45",
+                "item": {
+                    "type": "fileChange",
+                    "id": "exec-43c043eb-e8cf-4952-ab6b-7f8306cf9b5e",
+                    "changes": [{"path": path, "kind": {"type": "add"}, "diff": "x\n"}],
+                    "status": "inProgress",
+                },
+            }}),
+            json!({"method": FILE_APPROVAL, "id": 0, "params": {
+                "threadId": "01a19a10-25e3-74e3-8584-f85797bbe59f",
+                "turnId": "01a19a10-2834-7e90-b669-8320d3df8e45",
+                "itemId": "exec-43c043eb-e8cf-4952-ab6b-7f8306cf9b5e",
+                "startedAtMs": 1_793_586_113_669_u64,
+                "reason": null,
+                "grantRoot": grant_root,
+            }}),
+        )
+    }
+
+    /// What a gated session working in `directory` answers to `stream`, and what it told the turn.
+    fn answered_in(directory: &Path, stream: &str) -> (Value, String) {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let session = CodexSession::new(
+            ResumeTerminalSession {
+                input: Mutex::new(stream.as_bytes().to_vec()),
+                writes: writes.clone(),
+                killed: Arc::new(AtomicBool::new(false)),
+            }
+            .into_object(),
+            None,
+        )
+        .working_in(&directory.to_string_lossy())
+        .with_gate(approvals_gate(Arc::new(Mutex::new(Vec::new()))));
+        while let Ok(Some(_)) = session.next_event(20) {}
+        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+        let decision = written
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|message| message.pointer("/result/decision").is_some())
+            .expect("the file change was answered, not left waiting");
+        (decision["result"]["decision"].clone(), written)
+    }
+
+    #[test]
+    fn a_file_change_inside_the_working_directory_is_accepted_and_any_other_declined() {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        std::fs::create_dir_all(work.join("notes")).unwrap();
+        let path = |path: &Path| path.to_string_lossy().into_owned();
+
+        let (decision, written) = answered_in(
+            &work,
+            &file_change(&path(&work.join("notes").join("p.md")), Value::Null),
+        );
+        assert_eq!(decision, "accept", "{written}");
+        assert!(!written.contains("turn/steer"), "{written}");
+        let (decision, _) = answered_in(
+            &work,
+            &file_change(&path(&work.join("new").join("deep").join("p.md")), Value::Null),
+        );
+        assert_eq!(decision, "accept", "a directory the change makes");
+
+        for (why, stream) in [
+            (
+                "outside",
+                file_change(&path(&root.path().join("outside.md")), Value::Null),
+            ),
+            (
+                "climbing out",
+                file_change(
+                    &format!("{}/../outside.md", path(&work)),
+                    Value::Null,
+                ),
+            ),
+            (
+                "a wider root",
+                file_change(
+                    &path(&work.join("p.md")),
+                    json!(path(root.path())),
+                ),
+            ),
+        ] {
+            let (decision, written) = answered_in(&work, &stream);
+            assert_eq!(decision, "decline", "{why}");
+            assert!(written.contains("turn/steer"), "{why}: the Agent is told");
+        }
+
+        let unseen = json!({"method": FILE_APPROVAL, "id": 0, "params": {
+            "threadId": "t", "turnId": "u", "itemId": "never-started",
+            "reason": null, "grantRoot": null}});
+        let (decision, _) = answered_in(&work, &format!("{unseen}\r\n"));
+        assert_eq!(decision, "decline", "no item started");
     }
 
     #[test]

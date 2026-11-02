@@ -23,7 +23,8 @@ initialization, thread start/resume, turn submission and event decoding.
 - Uses per-process app-server configuration to connect to the AI6 Cable MCP endpoint;
   the bearer token is read from the launch environment.
 - Answers Codex's command approval requests with the green ink gate: a push to a protected
-  ref, a merge or a release is declined until a live approval covers it.
+  ref, a merge or a release is declined until a live approval covers it. A file change inside
+  the working directory is accepted, one reaching outside it declined.
 - Marks the working directory an untrusted project unless AI6 allows its settings, so a
   checkout's `.codex/` config, hooks and rules do not load.
 - Starts an answer-only thread (`AgentStart::answer_only`, for a Chief of Staff review) in the

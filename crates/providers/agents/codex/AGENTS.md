@@ -104,7 +104,14 @@ from a line the terminal broke, or with a control other than SGR removed from in
 and one whose `itemId` names no earlier `item/started` commandExecution item with the same
 `command` (so a subcommand approval sharing a parent item is declined). A Session without a
 Cable endpoint cannot ask for green ink, so it has no gate and everything is accepted, as with
-the Claude handler. With a gate, `thread/start` and `thread/resume` carry
+the Claude handler. `item/fileChange/requestApproval` (params `threadId`, `turnId`, `itemId`,
+`startedAtMs`, `reason`, `grantRoot`; the paths are on the `item/started` fileChange item it
+follows) is answered by the rule the Claude handler's gate keeps, which holds only shell tools:
+an edit inside the working directory is `accept`ed. Codex 0.164.0 applies an accepted patch
+wherever it points, even from a thread that reports a read-only sandbox (measured against a
+loopback stand-in), so a gated thread is declined, the same way as a command, a path outside the
+working directory (a link out of it counts), a `grantRoot`, a `rebuilt` line and an item not
+started. With a gate, `thread/start` and `thread/resume` carry
 `approvalPolicy = "untrusted"`, so Codex asks before every command outside its own list of
 safe reads; in remote-hands mode it stays `never`, and the Station gates `theater_run`.
 Codex's documentation calls `untrusted` unsupported, but Codex 0.164.0 honours it (same

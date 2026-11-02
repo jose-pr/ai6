@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- A gated Codex thread's `apply_patch` no longer waits for a stall:
+  `item/fileChange/requestApproval` is answered by the rule the Claude handler's gate keeps. An
+  edit inside the working directory is accepted; a path outside it or a wider `grantRoot` is
+  declined and the Agent told, since Codex applies an accepted patch wherever it points.
 - A mirror is no duplicate of its own original, so a class authorisation `issue-create` can
   approve one; a second copy of the same issue still is.
 - `own` means a comment AI6 wrote, decided by AI6's mark and never by its author, so one person's
