@@ -392,7 +392,7 @@ fn every_tracker_write_reaches_the_issue() {
     assert!(capabilities.issue_types.iter().any(|name| name == "Task"));
     assert!(capabilities.priorities.iter().any(|name| name == "Medium"));
     assert!(!capabilities.transitions.is_empty());
-    assert!(!capabilities.markers);
+    assert!(capabilities.markers);
 
     let read = provider.issue(key.clone()).unwrap();
     assert_eq!(read.body, NON_ASCII);
@@ -454,12 +454,21 @@ fn every_tracker_write_reaches_the_issue() {
     assert!(reply.own, "a comment AI6 wrote");
     assert!(reply.permitted, "the issue's reporter");
     assert_eq!(reply.body, "AI6 test data: waiting.");
+    let cursor = replies.cursor.clone().expect("a cursor");
+    let later = provider
+        .replies(ReplyPoll {
+            items: vec![key.clone()],
+            since: Some(cursor),
+        })
+        .unwrap();
+    assert!(later.replies.is_empty(), "nothing after the cursor");
     // The same account, through Jira's API with no property: what a person's comment looks like.
-    let person = live.post(
+    let person: Value = serde_json::from_str(&live.post(
         &format!("/issue/{key}/comment"),
         json!({"body": {"type": "doc", "version": 1, "content": [{"type": "paragraph",
             "content": [{"type": "text", "text": "AI6 test data: a person's reply."}]}]}}),
-    );
+    ))
+    .unwrap();
     let with_person = provider
         .replies(ReplyPoll {
             items: vec![key.clone()],
@@ -469,18 +478,10 @@ fn every_tracker_write_reaches_the_issue() {
     let reply = with_person
         .replies
         .iter()
-        .find(|reply| reply.id == person)
+        .find(|reply| Some(reply.id.as_str()) == person["id"].as_str())
         .expect("the person's reply is listed");
     assert!(!reply.own, "a person's comment on the credential's own account");
     assert!(reply.permitted, "its author is the issue's reporter");
-    let cursor = replies.cursor.clone().expect("a cursor");
-    let later = provider
-        .replies(ReplyPoll {
-            items: vec![key.clone()],
-            since: Some(cursor),
-        })
-        .unwrap();
-    assert!(later.replies.is_empty(), "nothing after the cursor");
 
     provider
         .update(TrackerUpdate {

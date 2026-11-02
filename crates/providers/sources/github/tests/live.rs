@@ -230,7 +230,10 @@ fn a_labelled_issue_is_polled_and_its_outcome_reaches_the_issue() {
     live.finish(&provider, labelled, "ai6:done", text);
     let comments = live.request("GET", &format!("/issues/{labelled}/comments"), None);
     assert_eq!(comments.as_array().unwrap().len(), 1);
-    assert_eq!(comments[0]["body"], text);
+    assert_eq!(
+        comments[0]["body"],
+        format!("{text}\n\n<!-- ai6:comment -->")
+    );
     let issue = live.request("GET", &format!("/issues/{labelled}"), None);
     let labels: Vec<&str> = issue["labels"]
         .as_array()
