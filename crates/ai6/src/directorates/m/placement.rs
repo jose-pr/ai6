@@ -22,6 +22,7 @@ use globset::Glob;
 use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::roster::{Agent, AgentRoute, Roster, RosterError, RouteRef};
+use crate::directorates::m::scorecard::ScorecardPolicy;
 use crate::directorates::m::theaters::{
     AgentMode, EgressKind, LOCAL_THEATER, TheaterKind, TheaterSummary,
 };
@@ -52,6 +53,9 @@ pub struct OperationPolicy {
     /// Whether its Missions go where there is most room or fill busy places first.
     #[serde(default)]
     pub placement: PlacementStrategy,
+    /// What its scorecard covers.
+    #[serde(default)]
+    pub scorecard: ScorecardPolicy,
 }
 
 /// How placement orders the places that pass (Operation key `placement`).
@@ -163,6 +167,7 @@ impl OperationPolicy {
             checkout: false,
             agents: Vec::new(),
             placement: PlacementStrategy::Spread,
+            scorecard: ScorecardPolicy::default(),
         }
     }
 
@@ -182,6 +187,7 @@ impl OperationPolicy {
             checkout: operation.path.is_some(),
             agents,
             placement: operation.placement,
+            scorecard: operation.scorecard,
         })
     }
 }

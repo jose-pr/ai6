@@ -26,6 +26,7 @@ use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
 use crate::directorates::m::records;
 use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
+use crate::directorates::m::scorecard::{ScorecardDefinition, ScorecardPolicy};
 use crate::directorates::m::vetting::{VettingPolicy, VettingSetting, policy_of};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
@@ -617,6 +618,8 @@ pub struct Operation {
     pub harness: HarnessPolicy,
     /// When M asks a person to raise an Agent's clearance here.
     pub promotion: PromotionPolicy,
+    /// What its scorecard covers.
+    pub scorecard: ScorecardPolicy,
     /// Each key its definition was resolved with, dotted, and the Operation that wrote it.
     origins: BTreeMap<String, String>,
     /// The definition it was resolved from, its ancestors' keys layered in.
@@ -1830,6 +1833,11 @@ pub(crate) struct OperationDefinition {
     #[map(default)]
     #[form(form)]
     promotion: PromotionDefinition,
+    /// What the scorecard of its Agents, routes and models covers.
+    #[schema(title = "Scorecard", section = "safety", advanced)]
+    #[map(default)]
+    #[form(form)]
+    scorecard: ScorecardDefinition,
 
     /// Trackers and CI this Operation takes briefs from; each source's settings are its own.
     #[schema(title = "Work sources", section = "sources", advanced)]
@@ -1875,6 +1883,7 @@ impl Default for OperationDefinition {
             vetting: None,
             harness: HarnessPolicy::default(),
             promotion: PromotionDefinition::default(),
+            scorecard: ScorecardDefinition::default(),
             sources: toml::Table::new(),
             sleepers: BTreeMap::new(),
         }
@@ -2017,6 +2026,7 @@ impl OperationDefinition {
             pools: self.pools,
             harness: self.harness,
             promotion,
+            scorecard: self.scorecard.resolve(),
             origins: BTreeMap::new(),
             definition: serde_json::Map::new(),
         })

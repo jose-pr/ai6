@@ -77,6 +77,9 @@ pub struct SessionLaunch {
     /// The clearance the harness was launched at, which fixed its tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clearance: Option<String>,
+    /// The Agent codename the harness ran as. A scorecard groups Sessions by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 impl SessionLaunch {
@@ -96,7 +99,14 @@ impl SessionLaunch {
             mode: ExecutionMode::default(),
             runner: None,
             clearance: None,
+            agent: None,
         }
+    }
+
+    /// Records the Agent codename the harness ran as.
+    pub fn with_agent(mut self, agent: Option<String>) -> Self {
+        self.agent = agent;
+        self
     }
 
     /// Records the model and effort.
@@ -184,6 +194,60 @@ pub struct SessionRecord {
     /// pool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<AccountRef>,
+    /// When the Session was recorded, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opened_at: Option<f64>,
+    /// When it became `Ended` or `Lost`, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_at: Option<f64>,
+    /// How its Mission stood when the holder last wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<SessionResult>,
+}
+
+/// How a Mission stood at its Session's last write: what a scorecard judges the attempt by.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionResult {
+    /// The Mission's state, in its wire spelling (`working`, `blocked`, `stalled`, `done`,
+    /// `failed`, `blown`, `abandoned`, `parked`, `quarantined`).
+    pub state: String,
+    /// Why it stands there when AI6 knows: a blocked Mission's reason (`green-ink`, `budget`,
+    /// `interrupted`), or `handed-off` for an attempt another replaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// How many tools its harness refused in its last turn.
+    #[serde(default)]
+    pub denied_tools: u32,
+}
+
+impl SessionResult {
+    /// The reason of an attempt another replaced after a limit: no outcome of its Agent's.
+    pub const HANDED_OFF: &'static str = "handed-off";
+
+    /// A result in `state`.
+    pub fn new(state: impl Into<String>) -> Self {
+        Self {
+            state: state.into(),
+            reason: None,
+            denied_tools: 0,
+        }
+    }
+
+    /// Names why the Mission stands there.
+    #[must_use]
+    pub fn with_reason(mut self, reason: Option<String>) -> Self {
+        self.reason = reason;
+        self
+    }
+
+    /// Counts the tools its harness refused.
+    #[must_use]
+    pub fn with_denied_tools(mut self, denied: usize) -> Self {
+        self.denied_tools = u32::try_from(denied).unwrap_or(u32::MAX);
+        self
+    }
 }
 
 impl SessionRecord {
@@ -295,9 +359,16 @@ pub struct SessionUpdate {
     recent: Option<Vec<String>>,
     checkpoint: Option<(SafeHouseCheckpoint, f64)>,
     account: Option<AccountRef>,
+    result: Option<SessionResult>,
 }
 
 impl SessionUpdate {
+    /// Records how the Mission stands, replacing the earlier result.
+    pub fn result(mut self, result: SessionResult) -> Self {
+        self.result = Some(result);
+        self
+    }
+
     /// Records the pool account the Session runs on now, replacing the one recorded.
     pub fn account(mut self, account: AccountRef) -> Self {
         self.account = Some(account);
@@ -544,6 +615,9 @@ pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> Ses
         checkpointed_at: None,
         lost: None,
         account: new.account,
+        opened_at: Some(now),
+        closed_at: None,
+        result: None,
     }
 }
 
@@ -624,7 +698,22 @@ pub(super) fn apply_fenced(
             record.exposure.push(exposure);
         }
     }
+    if let Some(result) = update.result {
+        let cut = |text: String| {
+            text.chars()
+                .take(limits.recent_event_chars.or_max())
+                .collect()
+        };
+        record.result = Some(SessionResult {
+            state: cut(result.state),
+            reason: result.reason.map(cut),
+            denied_tools: result.denied_tools,
+        });
+    }
     if let Some(status) = update.status {
+        if status.is_closed() {
+            record.closed_at = Some(now);
+        }
         record.status = status;
         record.parked_until = match status {
             SessionStatus::Parked => update.parked_until.or(record.parked_until),
@@ -650,6 +739,7 @@ pub(super) fn lose(
         return Err(SessionError::HeldBy(record.station.clone()));
     }
     record.status = SessionStatus::Lost;
+    record.closed_at = Some(now);
     record.parked_until = None;
     record.lost = Some(
         reason
@@ -916,6 +1006,7 @@ mod tests {
         a_live_lease_cannot_be_taken_but_the_holder_renews_it,
         the_fencing_token_follows_the_headquarters_term_and_only_grows,
         status_changes_are_fenced_and_an_ended_session_is_closed,
+        a_session_keeps_its_agent_times_and_the_result_of_its_last_write,
         only_a_lapsed_session_is_lost_and_its_holder_is_fenced_out,
         the_holder_records_launch_recent_events_and_checkpoints_within_bounds,
         the_latest_session_is_the_highest_attempt,
@@ -1041,6 +1132,63 @@ mod tests {
             .take_session_at("s-1", "station-c", TTL, NOW + 1_000.0)
             .unwrap();
         assert!(again.fence > taken.fence);
+    }
+
+    fn a_session_keeps_its_agent_times_and_the_result_of_its_last_write(store: &dyn Store) {
+        let registry = store.handle();
+        let launch = SessionLaunch::new("claude", "pipe", "/w").with_agent(Some("007".to_owned()));
+        let opened = registry
+            .open_session_at(new_session().with_launch(launch), TTL, NOW)
+            .unwrap();
+        assert_eq!(opened.opened_at, Some(NOW));
+        assert_eq!((opened.closed_at, opened.result.clone()), (None, None));
+
+        let blocked = registry
+            .write_fenced(
+                "s-1",
+                "station-a",
+                opened.fence,
+                NOW + 10.0,
+                None,
+                SessionUpdate::default().result(
+                    SessionResult::new("blocked")
+                        .with_reason(Some("green-ink".to_owned()))
+                        .with_denied_tools(2),
+                ),
+            )
+            .unwrap();
+        assert_eq!(blocked.closed_at, None, "still open");
+        let result = blocked.result.unwrap();
+        assert_eq!(
+            (
+                result.state.as_str(),
+                result.reason.as_deref(),
+                result.denied_tools
+            ),
+            ("blocked", Some("green-ink"), 2)
+        );
+
+        let ended = registry
+            .write_fenced(
+                "s-1",
+                "station-a",
+                opened.fence,
+                NOW + 90.0,
+                None,
+                SessionUpdate::default()
+                    .result(SessionResult::new("done"))
+                    .status(SessionStatus::Ended),
+            )
+            .unwrap();
+        assert_eq!(ended.closed_at, Some(NOW + 90.0));
+        let read = registry.session("s-1").unwrap().unwrap();
+        assert_eq!(read, ended);
+        assert_eq!(read.result.unwrap().state, "done");
+        assert_eq!(
+            read.launch.unwrap().agent.as_deref(),
+            Some("007"),
+            "the Agent is stored with the launch"
+        );
     }
 
     fn status_changes_are_fenced_and_an_ended_session_is_closed(store: &dyn Store) {

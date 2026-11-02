@@ -790,6 +790,49 @@ mod tests {
     }
 
     #[test]
+    fn a_session_record_names_its_agent_and_how_its_mission_ended() {
+        use crate::directorates::registry::sessions::SessionStatus;
+
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", AGENTS);
+        let session = |mission: &str| {
+            state
+                .intake
+                .session(&format!("s-{mission}-1"))
+                .unwrap()
+                .unwrap()
+        };
+        for mission in ["mission-1", "mission-2"] {
+            launch(&state, mission, "opus", 1);
+            work(&state, mission);
+        }
+        super::super::recovery::record_launch(&state, "mission-1");
+        assert_eq!(
+            session("mission-1")
+                .launch
+                .and_then(|launch| launch.agent)
+                .as_deref(),
+            Some("007"),
+            "the codename the Mission was posted to"
+        );
+
+        apply_event_state(&state, "mission-1", &event("completed"));
+        let done = session("mission-1");
+        assert_eq!(done.status, SessionStatus::Ended);
+        assert_eq!(done.result.as_ref().unwrap().state, "done");
+        assert!(done.closed_at.is_some());
+
+        apply_event_state(&state, "mission-2", &event("stalled"));
+        let stalled = session("mission-2");
+        assert_eq!(stalled.status, SessionStatus::Active, "a stall can resume");
+        assert_eq!(stalled.result.unwrap().state, "stalled");
+        assert_eq!(
+            crate::directorates::m::scorecard::judge(&done),
+            crate::directorates::m::scorecard::Judgment::Done
+        );
+    }
+
+    #[test]
     fn an_unreadable_grant_is_desk_in_the_check_in_as_at_work() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);

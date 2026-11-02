@@ -581,6 +581,7 @@ pub struct Operation {
     pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
     pub harness: HarnessPolicy,                   // [operation.ID.harness]; ignore unless configured
     pub promotion: PromotionPolicy,               // [operation.ID.promotion]; see Promotion below
+    pub scorecard: ScorecardPolicy,               // [operation.ID.scorecard]; see Scorecard below
 }
 impl Operation {
     /// The defaults a file gives `[operation.ID]`: clearance "field", cover "covert",
@@ -2243,8 +2244,10 @@ impl SessionStatus { pub fn is_closed(self) -> bool }   // Ended or Lost
     pub mode: ExecutionMode,                 // default Field
     pub runner: Option<String>,              // the runner's Session key; only these are adopted
     pub clearance: Option<String>,           // what the harness was launched at, which fixed its tools
+    pub agent: Option<String>,               // the Agent codename it ran as; a scorecard groups by it
 }
 impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
+    pub fn with_agent(self, Option<String>) -> Self;
     pub fn with_model(self, Option<String>, Option<String>) -> Self;
     pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self;
     pub fn with_clearance(self, Option<String>) -> Self; }
@@ -2267,7 +2270,16 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub checkpoint: Option<SafeHouseCheckpoint>, pub checkpointed_at: Option<f64>,
     pub lost: Option<String>,                // why, with SessionStatus::Lost
     pub account: Option<AccountRef>,         // the pool account it runs on, when pooled
+    pub opened_at: Option<f64>,              // Unix seconds
+    pub closed_at: Option<f64>,              // set when it becomes Ended or Lost
+    pub result: Option<SessionResult>,       // how its Mission stood at the holder's last write
 }
+#[non_exhaustive] pub struct SessionResult { pub state: String /* the Mission state: working, blocked,
+    stalled, done, failed, blown, abandoned, parked, quarantined */, pub reason: Option<String>
+    /* a blocked Mission's reason (green-ink, issue, budget, interrupted, clearance-lowered), or
+       SessionResult::HANDED_OFF */, pub denied_tools: u32 }
+impl SessionResult { pub const HANDED_OFF: &'static str; pub fn new(state) -> Self;
+    pub fn with_reason(self, Option<String>) -> Self; pub fn with_denied_tools(self, usize) -> Self }
 impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }   // false once closed
 pub fn run_id(mission_id: &str, attempt: u32, bytes: usize) -> String;  // `<mission>.<attempt>` within bytes
 pub struct NewSession   // NewSession::new(session_id, mission_id, station); next_attempt(id_bytes) -> Option<Self>
@@ -2277,7 +2289,7 @@ pub struct NewSession   // NewSession::new(session_id, mission_id, station); nex
 pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStatus) .parked_until(f64)
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
                           //   .launch(SessionLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
-                          //   .account(AccountRef)
+                          //   .account(AccountRef) .result(SessionResult) (closing the status sets closed_at)
 #[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, HeldBy(String), Stale, Io(io::Error) }
 
 pub trait SessionStore {
@@ -2377,6 +2389,47 @@ impl Quarantine { pub fn new(agent, operation, reason, by, at) -> Self;
 A quarantined sender's Cables are accepted but held (`CableState::Held`) until an
 authorized release, whatever the receiver's inbound mode. `AgentQuery::excluding`
 skips the named Agents; the Station passes the quarantined ones.
+
+## Scorecard (`ai6::directorates::m::scorecard`)
+
+How each Agent, route and model has done in an Operation over a window, computed on demand from
+the Session records and the usage ledger; nothing is stored. `judge(&SessionRecord)` gives each
+attempt one `Judgment` by whose doing the outcome was; only `done`, `failed`, `blown` and `stalled`
+are judged, and a limit, a lost Station, a hand-off, a person's stop or wait and a spending limit
+are listed but never held against the Agent. An attempt with no Session record (a failed checkout, a
+brief with no Agent) is not an attempt.
+
+```rust
+#[non_exhaustive] pub enum Judgment { Done, Failed, Blown, Stalled, WaitingOnPerson, BudgetStop,
+    Parked, Lost, HandedOff, Withdrawn, Running, Unrecorded }   // serde snake_case
+impl Judgment { pub const ALL: [Self; 12]; pub fn as_str(self) -> &'static str;
+    pub fn is_judged(self) -> bool; pub fn is_fault(self) -> bool /* failed, blown, stalled */ }
+pub fn judge(record: &SessionRecord) -> Judgment;
+pub const DEFAULT_WINDOW_DAYS: u64 /* 30 */; pub const DEFAULT_SMALL_SAMPLE: u64 /* 5 */;
+pub struct ScorecardDefinition;   // [operation.ID.scorecard]: window_days (0 = every attempt), small_sample
+impl ScorecardDefinition { pub fn resolve(&self) -> ScorecardPolicy }
+#[non_exhaustive] pub struct ScorecardPolicy { pub window_days: u64, pub small_sample: u64 }  // Operation.scorecard,
+                                  // and OperationPolicy.scorecard in the check-in
+#[non_exhaustive] pub struct AttemptRef { pub mission_id: String, pub session_id: String, pub attempt: u32 }
+#[non_exhaustive] pub struct Standing {
+    pub attempts: BTreeMap<Judgment, Vec<AttemptRef>>,   // the numbers are their lengths
+    pub judged: u64, pub failure_rate: Option<f64>,      // faults / judged
+    pub small_sample: bool,                              // judged < the policy's small_sample
+    pub refused_tools: u64, pub attempts_with_refusals: u64,
+    pub usage: UsageTotals, pub wall_secs: f64 }         // closed attempts; parked time included
+impl Standing { pub fn count(&self, Judgment) -> u64 }
+#[non_exhaustive] pub struct AgentCard { pub agent: String, pub standing: Standing, pub routes: Vec<RouteCard> }
+#[non_exhaustive] pub struct RouteCard { pub route: RouteRef, pub standing: Standing }
+#[non_exhaustive] pub struct ModelCard { pub model: Option<String>, pub standing: Standing }
+#[non_exhaustive] pub struct Scorecard { pub operation: String, pub window_days: u64, pub from: Option<f64>,
+    pub until: f64, pub small_sample: u64, pub agents: Vec<AgentCard>, pub models: Vec<ModelCard>,
+    pub unattributed: u64 /* attempts whose launch names no Agent: counted toward their model only */ }
+impl Scorecard { pub fn build(operation: &str, records: &[SessionRecord],
+    usage: &BTreeMap<String /* AI6 Session ID */, UsageTotals>, policy: &ScorecardPolicy, now: f64) -> Self }
+```
+
+The Station writes `SessionLaunch.agent` and a `SessionResult` at every sync of the Mission's state
+to its Session record; Universal Exports serves the scorecard (`GET .../agents/scorecard`).
 
 ## Promotion and clearance grants (`ai6::directorates::m::promotion`, `ai6::directorates::registry::clearance`)
 

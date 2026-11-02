@@ -40,6 +40,14 @@ origin leaves the public roots alone.
   `CLEARANCE` the clearance it works at there (`field(configured:desk)` when a grant moved it,
   `-` unknown) and `PROMOTION` `REQUEST_ID:AGENT:CLEARANCE@OPERATION` while M's promotion
   request waits for green ink, else `-`. A refusal names `agent.read`.
+- `ai6ctl agents scorecard --operation <ID> [--window-days N] [--show JUDGMENT]` prints
+  `GET .../agents/scorecard` as a `#` line (the window and small-sample line) and tab-separated
+  `AGENT ROUTE JUDGED FAILURE_RATE SAMPLE` then one column per judgment (`DONE FAILED BLOWN STALLED
+  WAITING_ON_PERSON BUDGET_STOP PARKED LOST HANDED_OFF WITHDRAWN RUNNING UNRECORDED`) and
+  `REFUSED_TOOLS TOKENS COST_USD WALL_SECS`: per Agent (`ROUTE` `all`), per route (`HANDLER MODEL
+  POOL`) and per model (`AGENT` `(model)`). `SAMPLE` is `SMALL` under the Operation's line. `--show`
+  adds one line per attempt behind that judgment (`MISSION`, `SESSION`). Needs `agent.read` and
+  `roster.read`.
 - `ai6ctl agents lower <AGENT> <CLEARANCE> --reason <TEXT> [--expires-in-secs N] --operation
   <ID>` puts `.../agents/{agent}/clearance` and prints `AGENT: held at CLEARANCE in ID`;
   `ai6ctl agents restore <AGENT> --operation <ID>` deletes it and prints `AGENT: grant to

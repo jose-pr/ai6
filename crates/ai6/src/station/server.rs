@@ -76,7 +76,7 @@ use crate::directorates::registry::cables::{
 };
 use crate::directorates::registry::mission_ids::run_id;
 use crate::directorates::registry::sessions::{
-    NewSession, SessionError, SessionRecord, SessionStatus, SessionUpdate,
+    NewSession, SessionError, SessionRecord, SessionResult, SessionStatus, SessionUpdate,
 };
 use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
@@ -1922,6 +1922,11 @@ fn sync_session_record(state: &DaemonState, mission_id: &str) {
     if let Some(account) = accounts::held(state, mission_id) {
         update = update.account(account);
     }
+    update = update.result(
+        SessionResult::new(mission.state.as_str())
+            .with_reason(mission.blocked_reason.clone())
+            .with_denied_tools(mission.denied_tools.len()),
+    );
     update = match mission.state {
         MissionState::Queued => return,
         MissionState::Parked => update
@@ -4660,7 +4665,8 @@ async fn start_mission(
         .ok()
         .and_then(|missions| missions.operation(&mission_id))
     {
-        new_session = new_session.with_launch(recovery::launch_of(&manifest));
+        new_session =
+            new_session.with_launch(recovery::launch_of(&manifest, mission.agent_id.as_deref()));
     }
     let hold = match open_run(&state, new_session) {
         Ok(record) => SessionHold {
@@ -6740,7 +6746,12 @@ fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
             &hold.id,
             &state.station_id,
             hold.fence,
-            SessionUpdate::default().status(SessionStatus::Ended),
+            SessionUpdate::default()
+                .result(
+                    SessionResult::new("abandoned")
+                        .with_reason(Some(SessionResult::HANDED_OFF.to_owned())),
+                )
+                .status(SessionStatus::Ended),
         );
     }
     handed_off

@@ -44,3 +44,9 @@ quiet_days = 30
 missions = 25
 max_failure_rate = 0.1
 quiet_days = 60
+
+# The scorecard (Outer Office's Agents page, ai6ctl agents scorecard) covers the last 30 days and
+# calls a row under 5 judged attempts a small sample. These are the defaults.
+[operation.G.scorecard]
+window_days = 30
+small_sample = 5

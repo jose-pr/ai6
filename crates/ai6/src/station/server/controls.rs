@@ -65,7 +65,7 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
     else {
         return ControlOutcome::rejected(None, "this Station has no such Mission");
     };
-    let current = Some(state_name(mission.state));
+    let current = Some(mission.state.as_str());
     if let Err(reason) = check_lease(state, mission_id) {
         return ControlOutcome::rejected(current, reason);
     }
@@ -89,7 +89,7 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
             if !announced {
                 announce(state, &mission, after);
             }
-            ControlOutcome::applied(state_name(after))
+            ControlOutcome::applied(after.as_str())
         }
         Err(reason) => {
             let now = state
@@ -97,7 +97,7 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
                 .lock()
                 .ok()
                 .and_then(|missions| missions.get(mission_id).map(|mission| mission.state))
-                .map_or(current, |after| Some(state_name(after)));
+                .map_or(current, |after| Some(after.as_str()));
             ControlOutcome::rejected(now, reason)
         }
     }
@@ -138,7 +138,7 @@ async fn cancel(state: &DaemonState, mission: &Mission) -> Result<Applied, Strin
     if is_terminal_state(mission.state) {
         return Err(format!(
             "the Mission already ended ({})",
-            state_name(mission.state)
+            mission.state.as_str()
         ));
     }
     let live = has_live_session(state, mission);
@@ -172,7 +172,7 @@ async fn retry(
     ) {
         return Err(format!(
             "only a stalled or finished Mission can be retried; this one is {}",
-            state_name(mission.state)
+            mission.state.as_str()
         ));
     }
     let agent = agent
@@ -240,7 +240,7 @@ async fn resume(
     ) {
         return Err(format!(
             "only a parked, blocked or stalled Mission can resume; this one is {}",
-            state_name(mission.state)
+            mission.state.as_str()
         ));
     }
     let (_, Json(started)) = resume_mission(
@@ -263,7 +263,7 @@ async fn interrupt(state: &DaemonState, mission: &Mission) -> Result<Applied, St
     if mission.state != MissionState::Working || !has_live_session(state, mission) {
         return Err(format!(
             "only a working Session can be interrupted; this Mission is {}",
-            state_name(mission.state)
+            mission.state.as_str()
         ));
     }
     let interrupted = interrupt_mission(State(state.clone()), Path(mission.mission_id.to_string()))
@@ -370,22 +370,6 @@ fn reason_for(state: &DaemonState, mission: &Mission, error: ApiErrorResponse) -
     ) {
         Ok(_) => format!("{REFUSED}: {cause}"),
         Err(_) => format!("{REFUSED}; the Station's log says why"),
-    }
-}
-
-/// The Mission state as Universal Exports and its clients spell it.
-fn state_name(state: MissionState) -> &'static str {
-    match state {
-        MissionState::Queued => "queued",
-        MissionState::Working => "working",
-        MissionState::Blocked => "blocked",
-        MissionState::Stalled => "stalled",
-        MissionState::Done => "done",
-        MissionState::Failed => "failed",
-        MissionState::Blown => "blown",
-        MissionState::Abandoned => "abandoned",
-        MissionState::Parked => "parked",
-        MissionState::Quarantined => "quarantined",
     }
 }
 

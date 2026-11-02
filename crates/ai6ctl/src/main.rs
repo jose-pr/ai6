@@ -231,6 +231,19 @@ enum AgentCommand {
         /// The Agent codename.
         agent: String,
     },
+    /// How each Agent, route and model has run the Operation's Missions over a window (needs
+    /// agent.read on the Operation and roster.read): attempts done, failed, blown and stalled
+    /// are the Agent's own; the rest are shown but not held against it.
+    Scorecard {
+        /// Days to cover instead of the Operation's setting; 0 covers every attempt.
+        #[arg(long)]
+        window_days: Option<u64>,
+        /// List the Missions behind one verdict (`done`, `failed`, `blown`, `stalled`,
+        /// `waiting_on_person`, `budget_stop`, `parked`, `lost`, `handed_off`, `withdrawn`,
+        /// `running`, `unrecorded`), one line per attempt.
+        #[arg(long)]
+        show: Option<String>,
+    },
 }
 
 /// Changes to a pool account.
@@ -972,6 +985,21 @@ async fn run() -> Result<(), String> {
                     )?;
                     let agents: Vec<AgentView> = send(request, "agent.read", "Agent list").await?;
                     print_agents(&agents);
+                }
+                Some(AgentCommand::Scorecard { window_days, show }) => {
+                    let mut request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::GET,
+                        &[&operation, "agents", "scorecard"],
+                    )?;
+                    if let Some(days) = window_days {
+                        request = request.query(&[("window_days", days)]);
+                    }
+                    let card: ScorecardView =
+                        send(request, "agent.read and roster.read", "scorecard").await?;
+                    print_scorecard(&card, show.as_deref());
                 }
                 Some(AgentCommand::Lower {
                     agent,
@@ -2199,6 +2227,166 @@ fn model_shown(view: &AgentView) -> String {
         .map_or("-".to_owned(), |model| {
             model.map_or("default".to_owned(), plain)
         })
+}
+
+/// The scorecard of an Operation, as Universal Exports serves it.
+#[derive(Debug, Deserialize)]
+struct ScorecardView {
+    window_days: u64,
+    small_sample: u64,
+    #[serde(default)]
+    unattributed: u64,
+    agents: Vec<ScorecardAgent>,
+    models: Vec<ScorecardModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScorecardAgent {
+    agent: String,
+    standing: ScorecardStanding,
+    routes: Vec<ScorecardRoute>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScorecardRoute {
+    route: RouteView,
+    standing: ScorecardStanding,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScorecardModel {
+    model: Option<String>,
+    standing: ScorecardStanding,
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteView {
+    handler: String,
+    model: Option<String>,
+    pool: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScorecardStanding {
+    attempts: std::collections::BTreeMap<String, Vec<ScorecardAttempt>>,
+    judged: u64,
+    failure_rate: Option<f64>,
+    small_sample: bool,
+    refused_tools: u64,
+    usage: ScorecardUsage,
+    wall_secs: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScorecardAttempt {
+    mission_id: String,
+    session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScorecardUsage {
+    input: u64,
+    output: u64,
+    cost_micro_usd: u64,
+}
+
+impl ScorecardStanding {
+    fn count(&self, verdict: &str) -> usize {
+        self.attempts.get(verdict).map_or(0, Vec::len)
+    }
+}
+
+const VERDICT_COLUMNS: [&str; 12] = [
+    "done",
+    "failed",
+    "blown",
+    "stalled",
+    "waiting_on_person",
+    "budget_stop",
+    "parked",
+    "lost",
+    "handed_off",
+    "withdrawn",
+    "running",
+    "unrecorded",
+];
+
+fn print_scorecard(card: &ScorecardView, show: Option<&str>) {
+    let window = if card.window_days == 0 {
+        "every attempt on record".to_owned()
+    } else {
+        format!("the last {} days", card.window_days)
+    };
+    let unattributed = if card.unattributed > 0 {
+        format!("; {} attempts name no Agent", card.unattributed)
+    } else {
+        String::new()
+    };
+    println!(
+        "# {window}; a row under {} judged attempts says SMALL and ranks nothing{unattributed}",
+        card.small_sample
+    );
+    println!(
+        "AGENT\tROUTE\tJUDGED\tFAILURE_RATE\tSAMPLE\t{}\tREFUSED_TOOLS\tTOKENS\tCOST_USD\tWALL_SECS",
+        VERDICT_COLUMNS.map(str::to_uppercase).join("\t")
+    );
+    let mut rows = Vec::new();
+    for agent in &card.agents {
+        rows.push((agent.agent.clone(), "all".to_owned(), &agent.standing));
+        for route in &agent.routes {
+            let name = format!(
+                "{} {} {}",
+                route.route.handler,
+                route.route.model.as_deref().unwrap_or("default"),
+                route.route.pool.as_deref().unwrap_or("-"),
+            );
+            rows.push((agent.agent.clone(), name, &route.standing));
+        }
+    }
+    for model in &card.models {
+        rows.push((
+            "(model)".to_owned(),
+            model.model.clone().unwrap_or_else(|| "default".to_owned()),
+            &model.standing,
+        ));
+    }
+    for (agent, route, standing) in &rows {
+        let counts = VERDICT_COLUMNS
+            .iter()
+            .map(|verdict| standing.count(verdict).to_string())
+            .collect::<Vec<_>>()
+            .join("\t");
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.4}\t{:.0}",
+            plain(agent),
+            plain(route),
+            standing.judged,
+            standing
+                .failure_rate
+                .map_or_else(|| "-".to_owned(), |rate| format!("{:.0}%", rate * 100.0)),
+            if standing.small_sample { "SMALL" } else { "ok" },
+            counts,
+            standing.refused_tools,
+            standing.usage.input + standing.usage.output,
+            standing.usage.cost_micro_usd as f64 / 1_000_000.0,
+            standing.wall_secs,
+        );
+    }
+    if let Some(verdict) = show {
+        println!("AGENT\tROUTE\tJUDGMENT\tMISSION\tSESSION");
+        for (agent, route, standing) in &rows {
+            for attempt in standing.attempts.get(verdict).into_iter().flatten() {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    plain(agent),
+                    plain(route),
+                    plain(verdict),
+                    plain(&attempt.mission_id),
+                    plain(&attempt.session_id)
+                );
+            }
+        }
+    }
 }
 
 fn print_agents(agents: &[AgentView]) {

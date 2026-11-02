@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   join the manifest a pin covers. agy's updater is off during a Session unless `auto_update` is set.
   The words for a limit are the `limit_phrases` setting; what a signed-in account's quota says has
   not been seen in a run.
+- A scorecard for each Agent, route and model: `GET /v1/user/operations/ID/agents/scorecard`,
+  `ai6ctl agents scorecard` and a Scorecard section on the Agents page. It is computed from the
+  Session records and usage ledger on each request. Each attempt is judged by whose doing it was:
+  done, failed, blown and stalled are the Agent's own, while a provider limit, a lost Station, a
+  hand-off, a person's stop or wait and a spending limit are listed and not held against it. Every
+  number lists its attempts, and a row under `small_sample` judged attempts says so. The Session
+  record gains `opened_at`, `closed_at`, `result` and `launch.agent`, and `[operation.ID.scorecard]`
+  sets `window_days` (30) and `small_sample` (5).
+
 - An Agent can list routes in place of one handler, `[[agent.<id>.route]]`: a handler, what that
   source calls the model, and an account source, with `effort`, `handler_settings`, `pool`, `env`,
   `secrets` and `priority`; what one leaves out comes from the Agent. `balance` chooses among them:

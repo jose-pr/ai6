@@ -743,6 +743,70 @@ async fn agents_lists_each_agents_record_in_the_operation() {
     let _ = shutdown.send(());
 }
 
+#[tokio::test]
+async fn agents_scorecard_prints_each_row_and_the_attempts_behind_a_judgment() {
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    for (mission, state) in [("m-1", "done"), ("m-2", "failed"), ("m-3", "abandoned")] {
+        let record = registry
+            .open_session(
+                ai6::NewSession::new(format!("{mission}.1"), mission, "station-01")
+                    .with_operation("operation-01")
+                    .with_launch(
+                        ai6::SessionLaunch::new("claude", "pipe", "/w")
+                            .with_model(Some("opus".to_owned()), None)
+                            .with_agent(Some("007".to_owned())),
+                    ),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        registry
+            .update_session(
+                &record.session_id,
+                "station-01",
+                record.fence,
+                ai6::SessionUpdate::default()
+                    .result(ai6::SessionResult::new(state))
+                    .status(ai6::SessionStatus::Ended),
+            )
+            .unwrap();
+    }
+    let printed = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &[
+                "agents",
+                "scorecard",
+                "--operation",
+                "operation-01",
+                "--show",
+                "failed",
+            ],
+        )
+        .await,
+    );
+    assert!(printed[0].starts_with("# the last 30 days;"), "{printed:?}");
+    assert!(printed[1].starts_with("AGENT\tROUTE\tJUDGED\tFAILURE_RATE\tSAMPLE\tDONE\tFAILED\t"));
+    assert!(
+        printed[2].starts_with("007\tall\t2\t50%\tSMALL\t1\t1\t0\t0\t0\t0\t0\t0\t0\t1\t0\t0\t0\t"),
+        "{}",
+        printed[2]
+    );
+    assert!(printed[3].starts_with("007\tclaude opus -\t2\t50%\tSMALL\t"));
+    assert!(printed[4].starts_with("(model)\topus\t2\t"));
+    assert_eq!(
+        &printed[5..],
+        [
+            "AGENT\tROUTE\tJUDGMENT\tMISSION\tSESSION",
+            "007\tall\tfailed\tm-2\tm-2.1",
+            "007\tclaude opus -\tfailed\tm-2\tm-2.1",
+            "(model)\topus\tfailed\tm-2\tm-2.1",
+        ]
+    );
+    let _ = shutdown.send(());
+}
+
 /// The lines a successful ai6ctl run printed.
 fn lines(output: &std::process::Output) -> Vec<String> {
     assert!(

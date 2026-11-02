@@ -1409,6 +1409,8 @@ pub ai6::directorates::m::mission::MissionState::Quarantined
 pub ai6::directorates::m::mission::MissionState::Queued
 pub ai6::directorates::m::mission::MissionState::Stalled
 pub ai6::directorates::m::mission::MissionState::Working
+impl ai6::directorates::m::mission::MissionState
+pub fn ai6::directorates::m::mission::MissionState::as_str(self) -> &'static str
 pub struct ai6::directorates::m::mission::Mission
 pub ai6::directorates::m::mission::Mission::agent_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::blocked_reason: core::option::Option<alloc::string::String>
@@ -1475,6 +1477,7 @@ pub ai6::directorates::m::placement::OperationPolicy::agents: alloc::vec::Vec<ai
 pub ai6::directorates::m::placement::OperationPolicy::checkout: bool
 pub ai6::directorates::m::placement::OperationPolicy::operation: alloc::string::String
 pub ai6::directorates::m::placement::OperationPolicy::placement: ai6::directorates::m::placement::PlacementStrategy
+pub ai6::directorates::m::placement::OperationPolicy::scorecard: ai6::directorates::m::scorecard::ScorecardPolicy
 pub ai6::directorates::m::placement::OperationPolicy::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::m::placement::OperationPolicy::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::placement::OperationPolicy::theater: core::option::Option<alloc::string::String>
@@ -1725,6 +1728,7 @@ pub ai6::directorates::m::roster::Operation::pools: core::option::Option<alloc::
 pub ai6::directorates::m::roster::Operation::promotion: ai6::directorates::m::promotion::PromotionPolicy
 pub ai6::directorates::m::roster::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
 pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::Operation::scorecard: ai6::directorates::m::scorecard::ScorecardPolicy
 pub ai6::directorates::m::roster::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
 pub ai6::directorates::m::roster::Operation::sources: toml::table::Table
 pub ai6::directorates::m::roster::Operation::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -1812,6 +1816,74 @@ pub const ai6::directorates::m::roster::DEFAULT_CHECKPOINT_SECS: u64
 pub const ai6::directorates::m::roster::DEFAULT_MAX_COMPARTMENT_RULES: usize
 pub const ai6::directorates::m::roster::DEFAULT_MAX_OPERATION_DEPTH: usize
 pub const ai6::directorates::m::roster::DEFAULT_RETIRE_WARNING_DAYS: u32
+pub mod ai6::directorates::m::scorecard
+#[non_exhaustive] pub enum ai6::directorates::m::scorecard::Judgment
+pub ai6::directorates::m::scorecard::Judgment::Blown
+pub ai6::directorates::m::scorecard::Judgment::BudgetStop
+pub ai6::directorates::m::scorecard::Judgment::Done
+pub ai6::directorates::m::scorecard::Judgment::Failed
+pub ai6::directorates::m::scorecard::Judgment::HandedOff
+pub ai6::directorates::m::scorecard::Judgment::Lost
+pub ai6::directorates::m::scorecard::Judgment::Parked
+pub ai6::directorates::m::scorecard::Judgment::Running
+pub ai6::directorates::m::scorecard::Judgment::Stalled
+pub ai6::directorates::m::scorecard::Judgment::Unrecorded
+pub ai6::directorates::m::scorecard::Judgment::WaitingOnPerson
+pub ai6::directorates::m::scorecard::Judgment::Withdrawn
+impl ai6::directorates::m::scorecard::Judgment
+pub const ai6::directorates::m::scorecard::Judgment::ALL: [Self; 12]
+pub fn ai6::directorates::m::scorecard::Judgment::as_str(self) -> &'static str
+pub fn ai6::directorates::m::scorecard::Judgment::is_fault(self) -> bool
+pub fn ai6::directorates::m::scorecard::Judgment::is_judged(self) -> bool
+#[non_exhaustive] pub struct ai6::directorates::m::scorecard::AgentCard
+pub ai6::directorates::m::scorecard::AgentCard::agent: alloc::string::String
+pub ai6::directorates::m::scorecard::AgentCard::routes: alloc::vec::Vec<ai6::directorates::m::scorecard::RouteCard>
+pub ai6::directorates::m::scorecard::AgentCard::standing: ai6::directorates::m::scorecard::Standing
+#[non_exhaustive] pub struct ai6::directorates::m::scorecard::AttemptRef
+pub ai6::directorates::m::scorecard::AttemptRef::attempt: u32
+pub ai6::directorates::m::scorecard::AttemptRef::mission_id: alloc::string::String
+pub ai6::directorates::m::scorecard::AttemptRef::session_id: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::m::scorecard::ModelCard
+pub ai6::directorates::m::scorecard::ModelCard::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::scorecard::ModelCard::standing: ai6::directorates::m::scorecard::Standing
+#[non_exhaustive] pub struct ai6::directorates::m::scorecard::RouteCard
+pub ai6::directorates::m::scorecard::RouteCard::route: ai6::directorates::m::roster::RouteRef
+pub ai6::directorates::m::scorecard::RouteCard::standing: ai6::directorates::m::scorecard::Standing
+#[non_exhaustive] pub struct ai6::directorates::m::scorecard::Scorecard
+pub ai6::directorates::m::scorecard::Scorecard::agents: alloc::vec::Vec<ai6::directorates::m::scorecard::AgentCard>
+pub ai6::directorates::m::scorecard::Scorecard::from: core::option::Option<f64>
+pub ai6::directorates::m::scorecard::Scorecard::models: alloc::vec::Vec<ai6::directorates::m::scorecard::ModelCard>
+pub ai6::directorates::m::scorecard::Scorecard::operation: alloc::string::String
+pub ai6::directorates::m::scorecard::Scorecard::small_sample: u64
+pub ai6::directorates::m::scorecard::Scorecard::unattributed: u64
+pub ai6::directorates::m::scorecard::Scorecard::until: f64
+pub ai6::directorates::m::scorecard::Scorecard::window_days: u64
+impl ai6::directorates::m::scorecard::Scorecard
+pub fn ai6::directorates::m::scorecard::Scorecard::build(&str, &[ai6::directorates::registry::sessions::SessionRecord], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::medical::usage::UsageTotals>, &ai6::directorates::m::scorecard::ScorecardPolicy, f64) -> Self
+pub struct ai6::directorates::m::scorecard::ScorecardDefinition
+impl ai6::directorates::m::scorecard::ScorecardDefinition
+pub fn ai6::directorates::m::scorecard::ScorecardDefinition::resolve(&self) -> ai6::directorates::m::scorecard::ScorecardPolicy
+impl core::default::Default for ai6::directorates::m::scorecard::ScorecardDefinition
+pub fn ai6::directorates::m::scorecard::ScorecardDefinition::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::scorecard::ScorecardPolicy
+pub ai6::directorates::m::scorecard::ScorecardPolicy::small_sample: u64
+pub ai6::directorates::m::scorecard::ScorecardPolicy::window_days: u64
+impl core::default::Default for ai6::directorates::m::scorecard::ScorecardPolicy
+pub fn ai6::directorates::m::scorecard::ScorecardPolicy::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::scorecard::Standing
+pub ai6::directorates::m::scorecard::Standing::attempts: alloc::collections::btree::map::BTreeMap<ai6::directorates::m::scorecard::Judgment, alloc::vec::Vec<ai6::directorates::m::scorecard::AttemptRef>>
+pub ai6::directorates::m::scorecard::Standing::attempts_with_refusals: u64
+pub ai6::directorates::m::scorecard::Standing::failure_rate: core::option::Option<f64>
+pub ai6::directorates::m::scorecard::Standing::judged: u64
+pub ai6::directorates::m::scorecard::Standing::refused_tools: u64
+pub ai6::directorates::m::scorecard::Standing::small_sample: bool
+pub ai6::directorates::m::scorecard::Standing::usage: ai6::directorates::medical::usage::UsageTotals
+pub ai6::directorates::m::scorecard::Standing::wall_secs: f64
+impl ai6::directorates::m::scorecard::Standing
+pub fn ai6::directorates::m::scorecard::Standing::count(&self, ai6::directorates::m::scorecard::Judgment) -> u64
+pub const ai6::directorates::m::scorecard::DEFAULT_SMALL_SAMPLE: u64
+pub const ai6::directorates::m::scorecard::DEFAULT_WINDOW_DAYS: u64
+pub fn ai6::directorates::m::scorecard::judge(&ai6::directorates::registry::sessions::SessionRecord) -> ai6::directorates::m::scorecard::Judgment
 pub mod ai6::directorates::m::theaters
 #[non_exhaustive] pub enum ai6::directorates::m::theaters::AgentMode
 pub ai6::directorates::m::theaters::AgentMode::Auto
@@ -4791,6 +4863,7 @@ pub fn ai6::directorates::registry::sessions::NewSession::with_operation(self, i
 pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionLaunch
+pub ai6::directorates::registry::sessions::SessionLaunch::agent: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::clearance: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::handler: alloc::string::String
@@ -4802,6 +4875,7 @@ pub ai6::directorates::registry::sessions::SessionLaunch::terminal: alloc::strin
 pub ai6::directorates::registry::sessions::SessionLaunch::working_directory: alloc::string::String
 impl ai6::directorates::registry::sessions::SessionLaunch
 pub fn ai6::directorates::registry::sessions::SessionLaunch::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_agent(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_clearance(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
@@ -4812,23 +4886,35 @@ pub ai6::directorates::registry::sessions::SessionRecord::account: core::option:
 pub ai6::directorates::registry::sessions::SessionRecord::attempt: u32
 pub ai6::directorates::registry::sessions::SessionRecord::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
 pub ai6::directorates::registry::sessions::SessionRecord::checkpointed_at: core::option::Option<f64>
+pub ai6::directorates::registry::sessions::SessionRecord::closed_at: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
 pub ai6::directorates::registry::sessions::SessionRecord::fence: u64
 pub ai6::directorates::registry::sessions::SessionRecord::launch: core::option::Option<ai6::directorates::registry::sessions::SessionLaunch>
 pub ai6::directorates::registry::sessions::SessionRecord::lease_expires: f64
 pub ai6::directorates::registry::sessions::SessionRecord::lost: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::mission_id: alloc::string::String
+pub ai6::directorates::registry::sessions::SessionRecord::opened_at: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::operation: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::parked_until: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::predecessor: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::recent: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionRecord::result: core::option::Option<ai6::directorates::registry::sessions::SessionResult>
 pub ai6::directorates::registry::sessions::SessionRecord::session_id: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionRecord::station: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionRecord::status: ai6::directorates::registry::sessions::SessionStatus
 pub ai6::directorates::registry::sessions::SessionRecord::theater: core::option::Option<alloc::string::String>
 impl ai6::directorates::registry::sessions::SessionRecord
 pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
+#[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionResult
+pub ai6::directorates::registry::sessions::SessionResult::denied_tools: u32
+pub ai6::directorates::registry::sessions::SessionResult::reason: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionResult::state: alloc::string::String
+impl ai6::directorates::registry::sessions::SessionResult
+pub const ai6::directorates::registry::sessions::SessionResult::HANDED_OFF: &'static str
+pub fn ai6::directorates::registry::sessions::SessionResult::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionResult::with_denied_tools(self, usize) -> Self
+pub fn ai6::directorates::registry::sessions::SessionResult::with_reason(self, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::directorates::registry::sessions::SessionUpdate
 impl ai6::directorates::registry::sessions::SessionUpdate
 pub fn ai6::directorates::registry::sessions::SessionUpdate::account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
@@ -4838,6 +4924,7 @@ pub fn ai6::directorates::registry::sessions::SessionUpdate::launch(self, ai6::d
 pub fn ai6::directorates::registry::sessions::SessionUpdate::parked_until(self, f64) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::recent(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::result(self, ai6::directorates::registry::sessions::SessionResult) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::directorates::registry::sessions::SessionStatus) -> Self
 pub trait ai6::directorates::registry::sessions::SessionStore
 pub fn ai6::directorates::registry::sessions::SessionStore::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
@@ -6941,6 +7028,24 @@ pub ai6::Ingest::InFlight
 pub ai6::Ingest::Queued
 pub ai6::Ingest::Unchanged
 pub ai6::Ingest::Updated
+#[non_exhaustive] pub enum ai6::Judgment
+pub ai6::Judgment::Blown
+pub ai6::Judgment::BudgetStop
+pub ai6::Judgment::Done
+pub ai6::Judgment::Failed
+pub ai6::Judgment::HandedOff
+pub ai6::Judgment::Lost
+pub ai6::Judgment::Parked
+pub ai6::Judgment::Running
+pub ai6::Judgment::Stalled
+pub ai6::Judgment::Unrecorded
+pub ai6::Judgment::WaitingOnPerson
+pub ai6::Judgment::Withdrawn
+impl ai6::directorates::m::scorecard::Judgment
+pub const ai6::directorates::m::scorecard::Judgment::ALL: [Self; 12]
+pub fn ai6::directorates::m::scorecard::Judgment::as_str(self) -> &'static str
+pub fn ai6::directorates::m::scorecard::Judgment::is_fault(self) -> bool
+pub fn ai6::directorates::m::scorecard::Judgment::is_judged(self) -> bool
 #[non_exhaustive] pub enum ai6::KeepVerified
 pub ai6::KeepVerified::All
 pub ai6::KeepVerified::Newest(u64)
@@ -7397,6 +7502,10 @@ impl ai6::directorates::m::roster::Agent
 pub fn ai6::directorates::m::roster::Agent::new(impl core::convert::Into<alloc::string::String>) -> Self
 impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
 pub fn ai6::directorates::m::placement::AgentFacts::from(&ai6::directorates::m::roster::Agent) -> Self
+#[non_exhaustive] pub struct ai6::AgentCard
+pub ai6::AgentCard::agent: alloc::string::String
+pub ai6::AgentCard::routes: alloc::vec::Vec<ai6::directorates::m::scorecard::RouteCard>
+pub ai6::AgentCard::standing: ai6::directorates::m::scorecard::Standing
 pub struct ai6::AgentEvent
 pub ai6::AgentEvent::data: core::option::Option<alloc::vec::Vec<u8>>
 pub ai6::AgentEvent::kind: alloc::string::String
@@ -7914,6 +8023,10 @@ pub ai6::AssistantWorkspace::personal: alloc::string::String
 pub ai6::AssistantWorkspace::shared: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantWorkspace
 pub fn ai6::directorates::section_00::assistant::AssistantWorkspace::validate(&self) -> core::result::Result<(), alloc::string::String>
+#[non_exhaustive] pub struct ai6::AttemptRef
+pub ai6::AttemptRef::attempt: u32
+pub ai6::AttemptRef::mission_id: alloc::string::String
+pub ai6::AttemptRef::session_id: alloc::string::String
 #[non_exhaustive] pub struct ai6::AuditLimits
 pub ai6::AuditLimits::record_bytes: ai6::bounds::Limit
 pub ai6::AuditLimits::records: ai6::bounds::Limit
@@ -8990,6 +9103,9 @@ pub struct ai6::MissionUsage
 pub ai6::MissionUsage::daily_cost_micro_usd: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
 pub ai6::MissionUsage::sessions: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::medical::usage::UsageTotals>
 pub ai6::MissionUsage::total: ai6::directorates::medical::usage::UsageTotals
+#[non_exhaustive] pub struct ai6::ModelCard
+pub ai6::ModelCard::model: core::option::Option<alloc::string::String>
+pub ai6::ModelCard::standing: ai6::directorates::m::scorecard::Standing
 #[non_exhaustive] pub struct ai6::ModelTenure
 pub ai6::ModelTenure::from: f64
 pub ai6::ModelTenure::model: core::option::Option<alloc::string::String>
@@ -9033,6 +9149,7 @@ pub ai6::Operation::pools: core::option::Option<alloc::vec::Vec<alloc::string::S
 pub ai6::Operation::promotion: ai6::directorates::m::promotion::PromotionPolicy
 pub ai6::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
 pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
+pub ai6::Operation::scorecard: ai6::directorates::m::scorecard::ScorecardPolicy
 pub ai6::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
 pub ai6::Operation::sources: toml::table::Table
 pub ai6::Operation::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -9060,6 +9177,7 @@ pub ai6::OperationPolicy::agents: alloc::vec::Vec<ai6::directorates::m::placemen
 pub ai6::OperationPolicy::checkout: bool
 pub ai6::OperationPolicy::operation: alloc::string::String
 pub ai6::OperationPolicy::placement: ai6::directorates::m::placement::PlacementStrategy
+pub ai6::OperationPolicy::scorecard: ai6::directorates::m::scorecard::ScorecardPolicy
 pub ai6::OperationPolicy::station_labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::OperationPolicy::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::OperationPolicy::theater: core::option::Option<alloc::string::String>
@@ -9464,6 +9582,9 @@ pub fn ai6::directorates::m::roster::RosterSettings::with_max_compartment_rules(
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
+#[non_exhaustive] pub struct ai6::RouteCard
+pub ai6::RouteCard::route: ai6::directorates::m::roster::RouteRef
+pub ai6::RouteCard::standing: ai6::directorates::m::scorecard::Standing
 #[non_exhaustive] pub struct ai6::RouteRef
 pub ai6::RouteRef::handler: alloc::string::String
 pub ai6::RouteRef::model: core::option::Option<alloc::string::String>
@@ -9574,6 +9695,27 @@ impl ai6::SandboxRequest
 pub fn ai6::SandboxRequest::new(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
 pub fn ai6::SandboxRequest::with_allowed_root(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::SandboxRequest::with_executable(self, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::Scorecard
+pub ai6::Scorecard::agents: alloc::vec::Vec<ai6::directorates::m::scorecard::AgentCard>
+pub ai6::Scorecard::from: core::option::Option<f64>
+pub ai6::Scorecard::models: alloc::vec::Vec<ai6::directorates::m::scorecard::ModelCard>
+pub ai6::Scorecard::operation: alloc::string::String
+pub ai6::Scorecard::small_sample: u64
+pub ai6::Scorecard::unattributed: u64
+pub ai6::Scorecard::until: f64
+pub ai6::Scorecard::window_days: u64
+impl ai6::directorates::m::scorecard::Scorecard
+pub fn ai6::directorates::m::scorecard::Scorecard::build(&str, &[ai6::directorates::registry::sessions::SessionRecord], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::medical::usage::UsageTotals>, &ai6::directorates::m::scorecard::ScorecardPolicy, f64) -> Self
+pub struct ai6::ScorecardDefinition
+impl ai6::directorates::m::scorecard::ScorecardDefinition
+pub fn ai6::directorates::m::scorecard::ScorecardDefinition::resolve(&self) -> ai6::directorates::m::scorecard::ScorecardPolicy
+impl core::default::Default for ai6::directorates::m::scorecard::ScorecardDefinition
+pub fn ai6::directorates::m::scorecard::ScorecardDefinition::default() -> Self
+#[non_exhaustive] pub struct ai6::ScorecardPolicy
+pub ai6::ScorecardPolicy::small_sample: u64
+pub ai6::ScorecardPolicy::window_days: u64
+impl core::default::Default for ai6::directorates::m::scorecard::ScorecardPolicy
+pub fn ai6::directorates::m::scorecard::ScorecardPolicy::default() -> Self
 pub struct ai6::Seconds(pub core::time::Duration)
 impl ai6::bounds::Seconds
 pub const fn ai6::bounds::Seconds::new(u64) -> Self
@@ -9692,6 +9834,7 @@ pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::va
 impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
 pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 #[non_exhaustive] pub struct ai6::SessionLaunch
+pub ai6::SessionLaunch::agent: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::clearance: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::effort: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::handler: alloc::string::String
@@ -9703,6 +9846,7 @@ pub ai6::SessionLaunch::terminal: alloc::string::String
 pub ai6::SessionLaunch::working_directory: alloc::string::String
 impl ai6::directorates::registry::sessions::SessionLaunch
 pub fn ai6::directorates::registry::sessions::SessionLaunch::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_agent(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_clearance(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
@@ -9724,23 +9868,35 @@ pub ai6::SessionRecord::account: core::option::Option<ai6::directorates::registr
 pub ai6::SessionRecord::attempt: u32
 pub ai6::SessionRecord::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
 pub ai6::SessionRecord::checkpointed_at: core::option::Option<f64>
+pub ai6::SessionRecord::closed_at: core::option::Option<f64>
 pub ai6::SessionRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
 pub ai6::SessionRecord::fence: u64
 pub ai6::SessionRecord::launch: core::option::Option<ai6::directorates::registry::sessions::SessionLaunch>
 pub ai6::SessionRecord::lease_expires: f64
 pub ai6::SessionRecord::lost: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::mission_id: alloc::string::String
+pub ai6::SessionRecord::opened_at: core::option::Option<f64>
 pub ai6::SessionRecord::operation: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::parked_until: core::option::Option<f64>
 pub ai6::SessionRecord::predecessor: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::recent: alloc::vec::Vec<alloc::string::String>
+pub ai6::SessionRecord::result: core::option::Option<ai6::directorates::registry::sessions::SessionResult>
 pub ai6::SessionRecord::session_id: alloc::string::String
 pub ai6::SessionRecord::station: alloc::string::String
 pub ai6::SessionRecord::status: ai6::directorates::registry::sessions::SessionStatus
 pub ai6::SessionRecord::theater: core::option::Option<alloc::string::String>
 impl ai6::directorates::registry::sessions::SessionRecord
 pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
+#[non_exhaustive] pub struct ai6::SessionResult
+pub ai6::SessionResult::denied_tools: u32
+pub ai6::SessionResult::reason: core::option::Option<alloc::string::String>
+pub ai6::SessionResult::state: alloc::string::String
+impl ai6::directorates::registry::sessions::SessionResult
+pub const ai6::directorates::registry::sessions::SessionResult::HANDED_OFF: &'static str
+pub fn ai6::directorates::registry::sessions::SessionResult::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionResult::with_denied_tools(self, usize) -> Self
+pub fn ai6::directorates::registry::sessions::SessionResult::with_reason(self, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::SessionUpdate
 impl ai6::directorates::registry::sessions::SessionUpdate
 pub fn ai6::directorates::registry::sessions::SessionUpdate::account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
@@ -9750,6 +9906,7 @@ pub fn ai6::directorates::registry::sessions::SessionUpdate::launch(self, ai6::d
 pub fn ai6::directorates::registry::sessions::SessionUpdate::parked_until(self, f64) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::recent(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::result(self, ai6::directorates::registry::sessions::SessionResult) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::directorates::registry::sessions::SessionStatus) -> Self
 #[non_exhaustive] pub struct ai6::Settings
 pub ai6::Settings::access: core::option::Option<serde_json::value::Value>
@@ -10051,6 +10208,17 @@ pub fn ai6::directorates::m::theaters::SshAccess::with_host_key(self, impl core:
 pub fn ai6::directorates::m::theaters::SshAccess::with_identity(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_port(self, u16) -> Self
 pub fn ai6::directorates::m::theaters::SshAccess::with_user(self, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::Standing
+pub ai6::Standing::attempts: alloc::collections::btree::map::BTreeMap<ai6::directorates::m::scorecard::Judgment, alloc::vec::Vec<ai6::directorates::m::scorecard::AttemptRef>>
+pub ai6::Standing::attempts_with_refusals: u64
+pub ai6::Standing::failure_rate: core::option::Option<f64>
+pub ai6::Standing::judged: u64
+pub ai6::Standing::refused_tools: u64
+pub ai6::Standing::small_sample: bool
+pub ai6::Standing::usage: ai6::directorates::medical::usage::UsageTotals
+pub ai6::Standing::wall_secs: f64
+impl ai6::directorates::m::scorecard::Standing
+pub fn ai6::directorates::m::scorecard::Standing::count(&self, ai6::directorates::m::scorecard::Judgment) -> u64
 #[non_exhaustive] pub struct ai6::StationConfig
 impl ai6::station::server::StationConfig
 pub fn ai6::station::server::StationConfig::with_account_homes(self, impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -10643,10 +10811,12 @@ pub const ai6::DEFAULT_READ_LIMIT: u64
 pub const ai6::DEFAULT_REQUEST_TTL: core::time::Duration
 pub const ai6::DEFAULT_RESOURCES_EVERY: core::time::Duration
 pub const ai6::DEFAULT_RETIRE_WARNING_DAYS: u32
+pub const ai6::DEFAULT_SMALL_SAMPLE: u64
 pub const ai6::DEFAULT_STALLS: u32
 pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
 pub const ai6::DEFAULT_TERMINAL: &str
 pub const ai6::DEFAULT_WARN_AT_PERMILLE: u16
+pub const ai6::DEFAULT_WINDOW_DAYS: u64
 pub const ai6::DEFAULT_WINDOW_SECS: u64
 pub const ai6::DENIED_EVENT: &str
 pub const ai6::EVENT_ACCEPTED: &str
@@ -11401,6 +11571,7 @@ pub fn ai6::is_review(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::is_sha256_pin(&str) -> bool
 pub fn ai6::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
 pub fn ai6::is_untrusted(&ai6::directorates::registry::store::Brief) -> bool
+pub fn ai6::judge(&ai6::directorates::registry::sessions::SessionRecord) -> ai6::directorates::m::scorecard::Judgment
 pub fn ai6::library_pin(&[u8]) -> coqui_peer::id::PeerId
 pub fn ai6::load_access(impl core::convert::AsRef<std::path::Path>, ai6::bounds::Limit) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::load_policy(impl core::convert::AsRef<std::path::Path>, ai6::bounds::Limit) -> core::result::Result<ai6::AccessPolicy, ai6::directorates::m::access::AccessPolicyError>

@@ -41,6 +41,24 @@ pub enum MissionState {
     Quarantined,
 }
 
+impl MissionState {
+    /// The state as Universal Exports and its clients spell it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Working => "working",
+            Self::Blocked => "blocked",
+            Self::Stalled => "stalled",
+            Self::Done => "done",
+            Self::Failed => "failed",
+            Self::Blown => "blown",
+            Self::Abandoned => "abandoned",
+            Self::Parked => "parked",
+            Self::Quarantined => "quarantined",
+        }
+    }
+}
+
 /// A Mission as stored and returned by the daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mission {

@@ -1489,6 +1489,10 @@ impl Gateway {
                 get(agents::list),
             )
             .route(
+                "/v1/user/operations/{operation_id}/agents/scorecard",
+                get(agents::scorecard),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/agents/{agent}/clearance",
                 axum::routing::put(agents::lower).delete(agents::restore),
             )

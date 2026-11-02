@@ -676,7 +676,7 @@ fn short(commit: &str) -> &str {
 }
 
 /// How this Station launched a Mission's Session, as another Station needs it to re-attach.
-pub(super) fn launch_of(manifest: &LaunchManifest) -> SessionLaunch {
+pub(super) fn launch_of(manifest: &LaunchManifest, agent: Option<&str>) -> SessionLaunch {
     let mut launch = SessionLaunch::new(
         manifest.handler_provider.clone(),
         manifest.terminal_provider.clone(),
@@ -685,7 +685,8 @@ pub(super) fn launch_of(manifest: &LaunchManifest) -> SessionLaunch {
     .with_model(manifest.model.clone(), manifest.effort.clone())
     .with_pool(manifest.pool.clone())
     .with_mode(manifest.mode)
-    .with_clearance(manifest.clearance.clone());
+    .with_clearance(manifest.clearance.clone())
+    .with_agent(agent.map(str::to_owned));
     if let Some(runner) = &manifest.runner {
         launch = launch.with_runner(runner.clone());
     }
@@ -706,7 +707,12 @@ pub(super) fn record_launch(state: &DaemonState, mission_id: &str) {
     let Some(hold) = manifest.session.clone() else {
         return;
     };
-    let update = SessionUpdate::default().launch(launch_of(&manifest));
+    let agent = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id)?.agent_id.clone());
+    let update = SessionUpdate::default().launch(launch_of(&manifest, agent.as_deref()));
     if let Err(error) = state
         .intake
         .update_session(&hold.id, &state.station_id, hold.fence, update)

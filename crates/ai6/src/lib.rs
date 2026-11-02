@@ -76,6 +76,10 @@ pub use directorates::m::roster::{
     Retirement, Roster, RosterBuilder, RosterError, RosterErrorKind, RosterSettings, RouteBalance,
     RouteRef, Workspace,
 };
+pub use directorates::m::scorecard::{
+    AgentCard, AttemptRef, DEFAULT_SMALL_SAMPLE, DEFAULT_WINDOW_DAYS, Judgment, ModelCard,
+    RouteCard, Scorecard, ScorecardDefinition, ScorecardPolicy, Standing, judge,
+};
 pub use directorates::m::theaters::{
     AgentMode, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind, EphemeralAccess,
     LOCAL_THEATER, RunnerSettings, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind,
@@ -181,7 +185,8 @@ pub use directorates::registry::logbook::{
 pub use directorates::registry::mission_ids::{MissionEntry, run_id};
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
-    NewSession, SessionError, SessionLaunch, SessionRecord, SessionStatus, SessionUpdate,
+    NewSession, SessionError, SessionLaunch, SessionRecord, SessionResult, SessionStatus,
+    SessionUpdate,
 };
 pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization,

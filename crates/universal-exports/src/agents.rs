@@ -17,7 +17,7 @@ use std::time::Duration;
 use ai6::directorates::registry::backend::*;
 use ai6::{
     AgentRecord, AgentTally, ApprovalRequest, AuditRecord, CLEARANCE_KIND, ClearanceGrant,
-    ModelTenure, NO_OPERATION,
+    ModelTenure, NO_OPERATION, Scorecard, ScorecardPolicy,
 };
 use ai6_diptel::OperationId;
 use axum::Json;
@@ -136,6 +136,17 @@ impl Headquarters {
             .find(|station| station.station() == headquarters.station())
             .map(|station| Self(station.info().clone()))
             .unwrap_or_default())
+    }
+
+    /// The scorecard settings the check-in says `operation` has; the defaults before it has
+    /// checked in.
+    fn scorecard_policy(&self, operation: &str) -> ScorecardPolicy {
+        self.0
+            .get("operation_policies")
+            .and_then(|policies| policies.get(operation))
+            .and_then(|policy| policy.get("scorecard"))
+            .and_then(|policy| serde_json::from_value(policy.clone()).ok())
+            .unwrap_or_default()
     }
 
     /// The Agents posted to `operation`.
@@ -323,6 +334,70 @@ pub(crate) async fn list(
     .await
     .map_err(|_| ApiError::internal())??;
     Ok(Json(views))
+}
+
+/// The query of `GET .../agents/scorecard`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ScorecardQuery {
+    /// Days to cover instead of the Operation's setting; 0 covers every attempt on record.
+    window_days: Option<u64>,
+}
+
+/// `GET /v1/user/operations/{operation_id}/agents/scorecard`: how each Agent, route and model
+/// ran the Operation's Missions over the window, with the attempts behind every number. Needs
+/// `agent.read` on the Operation and `roster.read`, since it shows which handler and model each
+/// Agent ran on.
+pub(crate) async fn scorecard(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(operation_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<ScorecardQuery>,
+) -> Result<Json<Scorecard>, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.read").await?;
+    if !resource_action_allowed(
+        &gateway,
+        person,
+        crate::roster::ROSTER_RESOURCE.to_owned(),
+        "roster.read",
+    )
+    .await?
+    {
+        return Err(ApiError::forbidden());
+    }
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    ensure_operation_registered(&registry, &operation_id).await?;
+    let operation = operation_id.to_string();
+    let now = unix_timestamp()?;
+    let card = tokio::task::spawn_blocking(move || {
+        let mut policy = Headquarters::read(registry.as_ref())?.scorecard_policy(&operation);
+        if let Some(days) = query.window_days {
+            policy.window_days = days;
+        }
+        let sessions = registry.sessions().map_err(|_| ApiError::internal())?;
+        let mut usage = BTreeMap::new();
+        let missions = sessions
+            .iter()
+            .filter(|session| session.operation.as_deref() == Some(operation.as_str()))
+            .map(|session| session.mission_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        for mission in missions {
+            if let Some(ledger) = registry
+                .mission_usage(Some(&operation), mission)
+                .map_err(|_| ApiError::internal())?
+            {
+                usage.extend(ledger.sessions);
+            }
+        }
+        Ok::<_, ApiError>(Scorecard::build(
+            &operation, &sessions, &usage, &policy, now,
+        ))
+    })
+    .await
+    .map_err(|_| ApiError::internal())??;
+    Ok(Json(card))
 }
 
 /// Whether a waiting request is M's promotion request: kind `clearance`, filed under Session
@@ -1044,5 +1119,148 @@ mod tests {
                 "{action}: {actions:?}"
             );
         }
+    }
+
+    /// Opens Session `mission`.1 of `agent` on `model`, in `state` with `reason`; closed unless
+    /// its Mission is blocked.
+    fn attempt(
+        served: &crate::controls::tests::Served,
+        mission: &str,
+        agent: &str,
+        model: &str,
+        state: &str,
+        reason: Option<&str>,
+    ) {
+        use ai6::{NewSession, SessionLaunch, SessionResult, SessionStatus, SessionUpdate};
+        let record = served
+            .registry
+            .open_session(
+                NewSession::new(format!("{mission}.1"), mission, "hq")
+                    .with_operation("G")
+                    .with_launch(
+                        SessionLaunch::new("claude", "pipe", "/w")
+                            .with_model(Some(model.to_owned()), None)
+                            .with_agent(Some(agent.to_owned())),
+                    ),
+                std::time::Duration::from_secs(60),
+            )
+            .unwrap();
+        served
+            .registry
+            .update_session(
+                &record.session_id,
+                "hq",
+                record.fence,
+                SessionUpdate::default()
+                    .result(SessionResult::new(state).with_reason(reason.map(str::to_owned)))
+                    .status(if state == "blocked" {
+                        SessionStatus::Active
+                    } else {
+                        SessionStatus::Ended
+                    }),
+            )
+            .unwrap();
+    }
+
+    async fn scorecard(base: &str, token: &str, query: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .get(format!(
+                "{base}/v1/user/operations/G/agents/scorecard{query}"
+            ))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_scorecard_counts_the_agents_own_outcomes_for_who_may_read_the_roster() {
+        let served = served_with(ROSTER_READERS).await;
+        served
+            .registry
+            .check_in(
+                "hq",
+                BTreeMap::from([(
+                    "operation_policies".to_owned(),
+                    serde_json::json!({"G": {"operation": "G", "agents": [{"id": "007"}],
+                        "scorecard": {"window_days": 7, "small_sample": 2}}}),
+                )]),
+            )
+            .unwrap();
+        attempt(&served, "m1", "007", "opus", "done", None);
+        attempt(&served, "m2", "007", "opus", "failed", None);
+        attempt(&served, "m3", "007", "opus", "abandoned", None);
+        attempt(&served, "m4", "007", "haiku", "blocked", Some("green-ink"));
+        served
+            .registry
+            .record_usage(
+                Some("G"),
+                "m2",
+                "m2.1",
+                &ai6::UsageTotals {
+                    input: 70,
+                    output: 7,
+                    cost_micro_usd: 900,
+                    ..ai6::UsageTotals::default()
+                },
+                1,
+            )
+            .unwrap();
+
+        assert_eq!(
+            scorecard(&served.base, &served.viewer, "").await.status(),
+            StatusCode::FORBIDDEN,
+            "agent.read alone does not show which model each Agent ran on"
+        );
+        let card: serde_json::Value = scorecard(&served.base, &served.operator, "")
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(card["window_days"], 7, "the check-in's setting");
+        assert_eq!(card["small_sample"], 2);
+        let seven = &card["agents"][0];
+        assert_eq!(seven["agent"], "007");
+        let standing = &seven["standing"];
+        assert_eq!(standing["judged"], 2);
+        assert_eq!(standing["failure_rate"], 0.5);
+        assert_eq!(standing["small_sample"], false);
+        assert_eq!(standing["attempts"]["failed"][0]["mission_id"], "m2");
+        assert_eq!(
+            standing["attempts"]["withdrawn"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            standing["attempts"]["waiting_on_person"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(standing["usage"]["cost_micro_usd"], 900);
+        let models: Vec<_> = card["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|model| model["model"].as_str())
+            .collect();
+        assert_eq!(
+            models,
+            [None, Some("haiku"), Some("opus")],
+            "the Session the fixture's gateway already holds names no model"
+        );
+        assert_eq!(
+            card["unattributed"], 1,
+            "nor an Agent: counted by model only"
+        );
+        assert_eq!(seven["routes"][0]["route"]["handler"], "claude");
+
+        let all: serde_json::Value = scorecard(&served.base, &served.operator, "?window_days=0")
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(all["window_days"], 0, "the request's window wins");
+        assert!(all["from"].is_null());
     }
 }

@@ -1335,6 +1335,36 @@
             "00": {}
           }
         },
+        "scorecard": {
+          "type": "object",
+          "properties": {
+            "window_days": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Window",
+              "description": "Days of attempts a scorecard covers; 0 covers every attempt on record.",
+              "default": 30
+            },
+            "small_sample": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Small sample below",
+              "description": "Judged attempts below which a row says its sample is too small to rank on.",
+              "default": 5
+            }
+          },
+          "additionalProperties": false,
+          "title": "Scorecard",
+          "description": "What the scorecard of its Agents, routes and models covers.",
+          "x-section": "safety",
+          "x-advanced": true,
+          "default": {
+            "window_days": 30,
+            "small_sample": 5
+          }
+        },
         "sources": {
           "type": "object",
           "additionalProperties": {},
@@ -1528,6 +1558,15 @@
                     }
                   }
                 }
+              }
+            }
+          }
+        },
+        "scorecard": {
+          "form": {
+            "fields": {
+              "window_days": {
+                "unit": "days"
               }
             }
           }
