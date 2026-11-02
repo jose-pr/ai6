@@ -71,7 +71,7 @@ use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    LIMIT_EVENT, TURN_CANCELLED,
+    DENIED_EVENT, LIMIT_EVENT, TURN_CANCELLED,
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
@@ -2196,6 +2196,22 @@ impl Pump {
                         .chain(limited)
                         .map(|notice| AssistantEvent::new(EVENT_NOTICE, Some(notice)))
                         .collect();
+                    // The Antigravity CLI ends a turn at a refused tool, and says success: without
+                    // this the person sees an empty answer, and nobody sees why.
+                    if event.kind == DENIED_EVENT {
+                        let tools = event.text.as_deref().unwrap_or("a tool");
+                        eprintln!(
+                            "ai6: assistant conversation {}: its harness refused calls of {tools}",
+                            conversation_digest(&self.conversation_id)
+                        );
+                        events.push(AssistantEvent::new(
+                            EVENT_NOTICE,
+                            Some(format!(
+                                "Moneypenny's agent was refused {tools}, which may have ended \
+                                 this answer early."
+                            )),
+                        ));
+                    }
                     if event.kind == "completed" || cancelled {
                         // The work is saved before the turn is reported over, so the next
                         // message's turn starts from it.
@@ -3228,6 +3244,8 @@ mod tests {
         ReadsLong,
         /// Ends the turn as cancelled, as the Grok CLI does when a tool is refused.
         CancelsTurn,
+        /// Reports a refused tool and completes with no text, as the Antigravity CLI ends a turn.
+        Refused,
         /// Exits, as its handler reports it.
         Dies,
         /// Never writes anything.
@@ -3313,6 +3331,10 @@ mod tests {
                 }
                 Script::CancelsTurn => {
                     events.push_back(event("blocked", Some(TURN_CANCELLED)));
+                }
+                Script::Refused => {
+                    events.push_back(event(DENIED_EVENT, Some("read_file")));
+                    events.push_back(event("completed", Some("")));
                 }
                 Script::Dies => {
                     events.push_back(event("output", Some("Error: the stored login has expired")));
@@ -4916,6 +4938,25 @@ secret = "gateway-key"
         fixture.desk.handle(job("c-1", "And now?")).await;
         assert_eq!(fixture.asked.lock().unwrap().messages, ["And now?"]);
         assert_eq!(fixture.asked.lock().unwrap().starts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_refused_tool_is_told_to_the_person_since_the_answer_may_be_empty() {
+        let fixture = scripted(true, IDLE, Script::Refused, Script::Refused);
+        fixture.desk.handle(job("c-1", "Read that")).await;
+        until(|| kinds(&fixture, "c-1").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert_eq!(
+            kinds(&fixture, "c-1"),
+            [EVENT_ACCEPTED, EVENT_NOTICE, EVENT_COMPLETED]
+        );
+        let reports = fixture.reports.lock().unwrap();
+        let notice = reports
+            .iter()
+            .flat_map(|report| report.events.iter())
+            .find(|event| event.kind == EVENT_NOTICE)
+            .and_then(|event| event.text.clone())
+            .unwrap();
+        assert!(notice.contains("refused read_file"), "{notice}");
     }
 
     #[tokio::test]
