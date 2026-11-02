@@ -1,4 +1,4 @@
-//! The tool check of a restricted thread (answer-only or assistant).
+//! The tool check of a restricted thread (answer-only, assistant or `desk`).
 //!
 //! A Codex release can offer the model tools that no setting this handler passes switches off,
 //! and a new release adds more. So before a restricted app server starts, the handler runs the
@@ -42,6 +42,11 @@ pub const KEPT_FEATURES: [&str; 5] = [
     // the check would see less than the thread is given.
     "incremental_tools",
 ];
+
+/// The feature that runs `exec`'s JavaScript: with it off, `exec` is still offered and fails with
+/// `code-mode host is disabled`, and an MCP server's tools, which only `exec` reaches, with it
+/// (Codex 0.164.0).
+const CODE_MODE_HOST: &str = "code_mode_host";
 
 /// What a failed check does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -265,8 +270,8 @@ fn collect(list: &[Value], prefix: &str, tools: &mut Vec<String>) -> Option<()> 
 }
 
 /// The tools of Codex's code mode: `exec` runs JavaScript that calls the thread's other tools
-/// (its MCP servers' and the command tools) and `wait` waits on it. A scripts thread is offered
-/// these alone.
+/// (its MCP servers' and the command tools) and `wait` waits on it. A scripts or `desk` thread is
+/// offered these alone.
 pub(crate) const CODE_MODE_TOOLS: [&str; 2] = ["functions.exec", "functions.wait"];
 
 /// The tools nested in `exec` that run a script's commands: `exec_command` starts one and
@@ -288,17 +293,20 @@ const INERT_TOOLS: [&str; 1] = ["clock__curr_time"];
 pub(crate) struct Allowed<'a> {
     /// The MCP servers the thread may use.
     pub(crate) servers: &'a [String],
-    /// Whether it runs scripts: [`CODE_MODE_TOOLS`] are allowed, with [`COMMAND_TOOLS`] nested.
-    pub(crate) scripts: bool,
+    /// Whether code mode is admitted: [`CODE_MODE_TOOLS`] are allowed, and a server's tools may
+    /// be reached only through `exec`.
+    pub(crate) code_mode: bool,
+    /// Whether it runs commands: `exec` may nest [`COMMAND_TOOLS`].
+    pub(crate) commands: bool,
     /// Whether it may change files through Codex's patch tool (`apply_patch`, nested).
     pub(crate) files: bool,
 }
 
 impl Allowed<'_> {
-    /// Whether `exec` may nest `tool`: the command tools, `apply_patch` with files, the
-    /// resource tools and `mcp__<server>__<tool>` of the thread's servers, and the inert ones.
+    /// Whether `exec` may nest `tool`: the command tools with commands, `apply_patch` with files,
+    /// the resource tools and `mcp__<server>__<tool>` of the thread's servers, and the inert ones.
     fn nests(&self, tool: &str) -> bool {
-        COMMAND_TOOLS.contains(&tool)
+        (self.commands && COMMAND_TOOLS.contains(&tool))
             || INERT_TOOLS.contains(&tool)
             || (self.files && tool == "apply_patch")
             || (!self.servers.is_empty() && MCP_RESOURCE_TOOLS.contains(&tool))
@@ -316,7 +324,7 @@ impl Allowed<'_> {
 
 /// Judges the offered tools against what a thread may use: each tool must belong to one of its
 /// MCP servers (`mcp__<server>.<tool>`) and each server must offer at least one. With
-/// `scripts`, [`CODE_MODE_TOOLS`] are allowed too, a server need not offer a tool directly
+/// `code_mode`, [`CODE_MODE_TOOLS`] are allowed too, a server need not offer a tool directly
 /// (code mode nests them in `exec`), and every tool `exec` declares (`nested`, from
 /// [`exec_nested`]) must be one it may nest ([`Allowed::nests`]). `Ok(None)` passes;
 /// `Ok(Some(found))` is a failure a `warn` check starts with; `Err` refuses.
@@ -327,7 +335,7 @@ pub(crate) fn judge(
     check: ToolCheck,
 ) -> Result<Option<String>, String> {
     let Allowed {
-        servers, scripts, ..
+        servers, code_mode, ..
     } = allowed;
     let found = match offered {
         None => {
@@ -335,7 +343,7 @@ pub(crate) fn judge(
         }
         Some(offered) => {
             let offers = |tool: &str| {
-                (scripts && CODE_MODE_TOOLS.contains(&tool))
+                (code_mode && CODE_MODE_TOOLS.contains(&tool))
                     || servers.iter().any(|server| {
                         tool.strip_prefix(&format!("mcp__{server}."))
                             .is_some_and(|rest| !rest.is_empty())
@@ -348,7 +356,7 @@ pub(crate) fn judge(
                 .collect::<BTreeSet<_>>();
             let missing = servers
                 .iter()
-                .filter(|_| !scripts)
+                .filter(|_| !code_mode)
                 .filter(|server| {
                     !offered
                         .iter()
@@ -369,7 +377,7 @@ pub(crate) fn judge(
                     missing.join(", ")
                 ));
             }
-            if scripts && offered.iter().any(|tool| tool == CODE_MODE_TOOLS[0]) {
+            if code_mode && offered.iter().any(|tool| tool == CODE_MODE_TOOLS[0]) {
                 match nested {
                     None => found.push(
                         "the tools nested in functions.exec could not be read from its \
@@ -441,7 +449,8 @@ struct FeaturesKey {
     overrides: Vec<String>,
     environment: Vec<(String, Option<String>)>,
     check: ToolCheck,
-    scripts: bool,
+    code_mode: bool,
+    commands: bool,
 }
 
 /// The features and MCP servers last switched off for a key, as `-c` overrides, and what a
@@ -464,10 +473,11 @@ pub(crate) struct Probe<'a> {
     pub(crate) model: Option<&'a str>,
     /// The MCP servers the thread may use.
     pub(crate) servers: &'a [String],
-    /// Whether the thread runs scripts in Codex's sandbox: it keeps
-    /// [`SCRIPT_FEATURES`](crate::sandbox::SCRIPT_FEATURES) and may be offered
-    /// [`CODE_MODE_TOOLS`].
-    pub(crate) scripts: bool,
+    /// Whether the thread may be offered [`CODE_MODE_TOOLS`]: it keeps [`CODE_MODE_HOST`].
+    pub(crate) code_mode: bool,
+    /// Whether it runs commands, in Codex's sandbox or with none: it also keeps
+    /// [`SCRIPT_FEATURES`](crate::sandbox::SCRIPT_FEATURES).
+    pub(crate) commands: bool,
     /// Whether it may change files through Codex's patch tool.
     pub(crate) files: bool,
     /// The handler's configuration: terminal control bytes, the check's lifetime and timeout.
@@ -505,7 +515,8 @@ impl Probe<'_> {
                 .map(|name| ((*name).to_owned(), self.environment.get(*name).cloned()))
                 .collect(),
             check,
-            scripts: self.scripts,
+            code_mode: self.code_mode,
+            commands: self.commands,
         };
         let cached = feature_lists().lock().ok().and_then(|lists| {
             lists
@@ -533,7 +544,8 @@ impl Probe<'_> {
         let output = self.capture(&argv)?;
         let allowed = Allowed {
             servers: self.servers,
-            scripts: self.scripts,
+            code_mode: self.code_mode,
+            commands: self.commands,
             files: self.files,
         };
         let offered = offered_tools(&output, self.csi());
@@ -576,7 +588,8 @@ impl Probe<'_> {
             .unwrap_or_default()
             .into_iter()
             .filter(|name| !KEPT_FEATURES.contains(&name.as_str()))
-            .filter(|name| !(self.scripts && SCRIPT_FEATURES.contains(&name.as_str())))
+            .filter(|name| !(self.commands && SCRIPT_FEATURES.contains(&name.as_str())))
+            .filter(|name| !(self.code_mode && name == CODE_MODE_HOST))
             .flat_map(|name| ["-c".to_owned(), format!("features.{name}=false")])
             .collect::<Vec<_>>();
         let listed = mcp_server_names(
@@ -693,8 +706,19 @@ mod tests {
     fn allow(servers: &[String], scripts: bool) -> Allowed<'_> {
         Allowed {
             servers,
-            scripts,
+            code_mode: scripts,
+            commands: scripts,
             files: scripts,
+        }
+    }
+
+    /// A `desk` thread on `servers`: code mode and file changes, no command.
+    fn desk(servers: &[String]) -> Allowed<'_> {
+        Allowed {
+            servers,
+            code_mode: true,
+            commands: false,
+            files: true,
         }
     }
 
@@ -914,7 +938,8 @@ mod tests {
         let nested = exec_nested(SCRIPTS.as_bytes(), CSI).unwrap();
         let no_files = Allowed {
             servers: &servers,
-            scripts: true,
+            code_mode: true,
+            commands: true,
             files: false,
         };
         let refused =
@@ -979,6 +1004,60 @@ mod tests {
             exec_nested(b"[{\"type\":\"message\"}]", CSI),
             Some(Vec::new())
         );
+    }
+
+    /// `codex debug prompt-input` of Codex 0.164.0 on Windows for a `desk` thread, the settings
+    /// of `desk_argv` with one MCP server, `ai6-cables`; `exec`'s description whole.
+    const DESK: &str = include_str!("../tests/fixtures/codex-0.164.0/prompt-input-desk.json");
+
+    #[test]
+    fn a_desk_thread_passes_with_no_command_tool_nested_in_exec() {
+        let servers = vec!["ai6-cables".to_owned()];
+        let offered = offered_tools(DESK.as_bytes(), CSI).unwrap();
+        let nested = exec_nested(DESK.as_bytes(), CSI).unwrap();
+        assert_eq!(offered, CODE_MODE_TOOLS);
+        assert_eq!(
+            nested,
+            [
+                "apply_patch",
+                "list_mcp_resource_templates",
+                "list_mcp_resources",
+                "read_mcp_resource",
+                "clock__curr_time"
+            ],
+            "features.shell_tool=false takes the command tools out of exec"
+        );
+        let judged = |nested: &[String], allowed| {
+            judge(Some(&offered), Some(nested), allowed, ToolCheck::Strict)
+        };
+        assert_eq!(judged(&nested, desk(&servers)), Ok(None));
+
+        // The same thread on a release that leaves a command tool in exec.
+        let scripts = exec_nested(SCRIPTS.as_bytes(), CSI).unwrap();
+        let refused = judged(&scripts, desk(&servers)).unwrap_err();
+        assert!(
+            refused.contains("functions.exec beyond the thread's: exec_command, write_stdin"),
+            "{refused}"
+        );
+        let found = judge(
+            Some(&offered),
+            Some(&scripts),
+            desk(&servers),
+            ToolCheck::Warn,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(found.contains("exec_command"), "{found}");
+
+        // A tool outside code mode, as a model not on code mode would be offered.
+        let more = [offered.clone(), vec!["functions.shell".to_owned()]].concat();
+        let refused = judge(
+            Some(&more),
+            Some(&nested),
+            desk(&servers),
+            ToolCheck::Strict,
+        );
+        assert!(refused.unwrap_err().contains("functions.shell"));
     }
 
     #[test]

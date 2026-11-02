@@ -33,7 +33,7 @@ use ai6::directorates::q::terminal::{
 };
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
+    LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::guatiao::library::{Object, ProviderError};
@@ -197,6 +197,11 @@ impl AgentHandler for CodexHandler {
             &request.environment,
             request.assistant.as_ref(),
         );
+        let desk = held_to_desk(
+            &request.clearance,
+            request.answer_only,
+            request.assistant.as_ref(),
+        );
         let (process, weakening) = spawn(
             terminal,
             &self.config.executable,
@@ -206,6 +211,7 @@ impl AgentHandler for CodexHandler {
                 config: &self.config,
                 project_settings: request.project_settings,
                 answer_only: request.answer_only || request.assistant.is_some(),
+                desk,
                 assistant: request.assistant.as_ref(),
                 model: request.model.as_deref(),
                 profile: profile.as_ref(),
@@ -219,7 +225,11 @@ impl AgentHandler for CodexHandler {
             .limited_by(&self.config)
             .with_gate(gate)
             .with_weakening(weakening)
-            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()))
+            .restricted_to(restriction(
+                request.answer_only,
+                request.assistant.as_ref(),
+                desk.then_some(&request.environment),
+            ))
             .reporting_commands(scripts != Scripts::None);
         session.request(
             "initialize",
@@ -251,6 +261,7 @@ impl AgentHandler for CodexHandler {
             &request.environment,
             request.answer_only || request.assistant.is_some(),
             scripts,
+            desk,
         );
         let response = match session.request(
             "thread/resume",
@@ -319,6 +330,11 @@ impl CodexHandler {
             &request.environment,
             request.assistant.as_ref(),
         );
+        let desk = held_to_desk(
+            &request.clearance,
+            request.answer_only,
+            request.assistant.as_ref(),
+        );
         let (process, weakening) = spawn(
             terminal,
             &self.config.executable,
@@ -328,6 +344,7 @@ impl CodexHandler {
                 config: &self.config,
                 project_settings: request.project_settings,
                 answer_only: request.answer_only || request.assistant.is_some(),
+                desk,
                 assistant: request.assistant.as_ref(),
                 model: request.model.as_deref(),
                 profile: profile.as_ref(),
@@ -339,7 +356,11 @@ impl CodexHandler {
             .limited_by(&self.config)
             .with_gate(gate)
             .with_weakening(weakening)
-            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()))
+            .restricted_to(restriction(
+                request.answer_only,
+                request.assistant.as_ref(),
+                desk.then_some(&request.environment),
+            ))
             .reporting_commands(scripts != Scripts::None);
         session.request(
             "initialize",
@@ -367,6 +388,7 @@ impl CodexHandler {
             &request.environment,
             request.answer_only || request.assistant.is_some(),
             scripts,
+            desk,
         );
         if let Some(model) = request.model {
             params["model"] = json!(model);
@@ -403,7 +425,7 @@ impl CodexHandler {
     }
 }
 
-/// What a restricted (answer-only or assistant) thread may use besides answering.
+/// What a restricted (answer-only, assistant or `desk`) thread may use besides answering.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Restriction {
     /// The MCP servers whose tools it may call.
@@ -411,12 +433,50 @@ struct Restriction {
     /// Whether it may run commands: an assistant with scripts.
     commands: bool,
     /// Whether it may change files through Codex's own patch tool: an assistant with scripts
-    /// and directories to write.
+    /// and directories to write, or a `desk` thread working on the Station's disk.
     file_changes: bool,
+    /// Whether Codex asks before each change, and only one inside the working directory is
+    /// accepted: a `desk` thread, with or without a green ink gate.
+    asks_file_changes: bool,
 }
 
-/// What a restricted thread may use, `None` for a thread that is not restricted.
-fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<Restriction> {
+/// Whether a Mission's thread at `clearance` is held to `desk`: answer-only and assistant threads
+/// have limits of their own.
+fn held_to_desk(clearance: &str, answer_only: bool, assistant: Option<&AssistantMode>) -> bool {
+    !answer_only && assistant.is_none() && !clearance_runs_commands(clearance)
+}
+
+/// AI6's own MCP servers a Session's environment names, as [`app_server_argv`] configures them.
+fn station_servers(environment: &std::collections::BTreeMap<String, String>) -> Vec<String> {
+    [
+        ("ai6-cables", "AI6_CABLE_MCP"),
+        ("ai6-theater", "AI6_THEATER_MCP"),
+    ]
+    .iter()
+    .filter(|(_, prefix)| {
+        environment.contains_key(&format!("{prefix}_URL"))
+            && environment.contains_key(&format!("{prefix}_TOKEN"))
+    })
+    .map(|(server, _)| (*server).to_owned())
+    .collect()
+}
+
+/// What a restricted thread may use, `None` for a thread that is not restricted. `desk` is the
+/// environment of a thread held to `desk`.
+fn restriction(
+    answer_only: bool,
+    assistant: Option<&AssistantMode>,
+    desk: Option<&std::collections::BTreeMap<String, String>>,
+) -> Option<Restriction> {
+    if let Some(environment) = desk {
+        let on_station = !is_remote_hands(environment);
+        return Some(Restriction {
+            servers: station_servers(environment),
+            commands: false,
+            file_changes: on_station,
+            asks_file_changes: on_station,
+        });
+    }
     match assistant {
         Some(mode) => {
             let commands = Scripts::of(Some(mode)) != Scripts::None;
@@ -428,6 +488,7 @@ fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<R
                     .collect(),
                 commands,
                 file_changes: commands && (mode.unsandboxed || !mode.files.is_empty()),
+                asks_file_changes: false,
             })
         }
         None => answer_only.then(Restriction::default),
@@ -531,12 +592,14 @@ fn station_gate(environment: &std::collections::BTreeMap<String, String>) -> Opt
 /// Codex's own list of safe reads, so the gate sees each one.
 /// An assistant with scripts never asks either, and runs them in the sandbox its app server's
 /// profile describes (no `sandbox` here: Codex does not combine the two), or with none when
-/// unsandboxed.
+/// unsandboxed. A `desk` thread has no command to ask about; `untrusted` over a read-only sandbox
+/// makes Codex 0.164.0 ask about each patch, so the handler decides where it lands.
 fn set_approval_policy(
     params: &mut Value,
     environment: &std::collections::BTreeMap<String, String>,
     answer_only: bool,
     scripts: Scripts,
+    desk: bool,
 ) {
     if answer_only {
         restrict_to_answer_only(params);
@@ -551,6 +614,9 @@ fn set_approval_policy(
         }
     } else if is_remote_hands(environment) {
         restrict_to_remote_hands(params);
+    } else if desk {
+        params["sandbox"] = json!("read-only");
+        params["approvalPolicy"] = json!("untrusted");
     } else if GateClient::from_environment(environment).is_some() {
         params["approvalPolicy"] = json!("untrusted");
     }
@@ -566,7 +632,7 @@ struct CodexSession {
     effort: Option<String>,
     /// The latest quota window the account reported as used up.
     exhausted: Mutex<Option<UsageLimit>>,
-    /// For a restricted (answer-only or assistant) thread, what it may use.
+    /// For a restricted (answer-only, assistant or `desk`) thread, what it may use.
     restricted: Option<Restriction>,
     /// Whether a command it starts is reported as the tool `exec_command`: an assistant with
     /// scripts, whose commands may read any file of her working directory and, unsandboxed,
@@ -958,13 +1024,17 @@ const RESTRICTED_ITEMS: [&str; 7] = [
 ];
 
 /// What `message` shows a restricted thread doing that it may not: any request from the server
-/// but token refresh and attestation (approvals, tool calls, questions, elicitation), or an
-/// `item/started` or `item/completed` of any other kind than [`RESTRICTED_ITEMS`], an MCP call
-/// to one of its servers, and, as `restriction` allows, a command execution or a file change.
+/// but token refresh, attestation and, as `restriction` allows, a file change (approvals, tool
+/// calls, questions, elicitation), or an `item/started` or `item/completed` of any other kind than
+/// [`RESTRICTED_ITEMS`], an MCP call to one of its servers, and, as `restriction` allows, a command
+/// execution or a file change.
 fn forbidden_use(message: &Value, restriction: &Restriction) -> Option<String> {
     let servers = &restriction.servers;
     let method = message.get("method")?.as_str()?;
     if message.get("id").is_some() {
+        if method == FILE_APPROVAL && restriction.asks_file_changes {
+            return None;
+        }
         return (!matches!(
             method,
             "account/chatgptAuthTokens/refresh" | "attestation/generate"
@@ -1069,7 +1139,8 @@ impl CodexSession {
     /// `accept`ed. Codex 0.164.0 applies what is accepted wherever it points, even from a
     /// read-only thread, so a gated thread is declined a path outside the working directory, a
     /// `grantRoot`, a request whose line was `rebuilt`, and one with no file change item started
-    /// earlier under its item id. Without a gate everything is accepted.
+    /// earlier under its item id, and so is a `desk` thread, gated or not. Otherwise, without a
+    /// gate, everything is accepted.
     fn answer_file_approval(
         &self,
         id: &Value,
@@ -1085,8 +1156,13 @@ impl CodexSession {
                     .and_then(|started| started.get(item).cloned())
             });
         let granted = params.get("grantRoot").is_some_and(|root| !root.is_null());
-        let verdict = match (&self.gate, &self.working_directory, paths) {
-            (None, _, _) => GateVerdict::Allow,
+        let judged = self.gate.is_some()
+            || self
+                .restricted
+                .as_ref()
+                .is_some_and(|allowed| allowed.asks_file_changes);
+        let verdict = match (judged, &self.working_directory, paths) {
+            (false, _, _) => GateVerdict::Allow,
             _ if rebuilt => self.declined(
                 "Green ink: this file change request reached AI6 rebuilt from a terminal's \
                  rendering, so what it changes may not be what was asked; it is declined. Apply \
@@ -1096,16 +1172,16 @@ impl CodexSession {
                 "Green ink: a file change may not widen where this thread writes; it is \
                  declined. Keep the change inside the working directory.",
             )?,
-            (Some(_), Some(root), Some(paths))
+            (true, Some(root), Some(paths))
                 if !paths.is_empty() && paths.iter().all(|path| inside(root, path)) =>
             {
                 GateVerdict::Allow
             }
-            (Some(_), _, Some(_)) => self.declined(
+            (true, _, Some(_)) => self.declined(
                 "Green ink: this file change reaches outside the working directory; it is \
                  declined. Keep the change inside the working directory.",
             )?,
-            (Some(_), _, None) => self.declined(
+            (true, _, None) => self.declined(
                 "Green ink: this approval request names a change no file change item started \
                  with before it; it is declined. Apply the change again.",
             )?,
@@ -1458,6 +1534,8 @@ struct Mode<'a> {
     project_settings: bool,
     /// Set for answer-only and assistant threads alike: both run read-only and never ask.
     answer_only: bool,
+    /// Set for a Mission's thread held to `desk` ([`held_to_desk`]).
+    desk: bool,
     assistant: Option<&'a AssistantMode>,
     /// The model the thread asks for; what Codex offers it depends on the model.
     model: Option<&'a str>,
@@ -1503,8 +1581,8 @@ fn close_unless<T>(
     })
 }
 
-/// Starts the app server, and returns what a `warn` tool check found. A restricted (answer-only
-/// or assistant) app server starts only after its tool check ([`tools`]).
+/// Starts the app server, and returns what a `warn` tool check found. A restricted (answer-only,
+/// assistant or `desk`) app server starts only after its tool check ([`tools`]).
 fn spawn(
     terminal: Object<dyn AgentTerminal>,
     executable: &str,
@@ -1516,6 +1594,8 @@ fn spawn(
         assistant_argv(executable, environment, assistant, mode.profile)?
     } else if mode.answer_only {
         answer_only_argv(executable)
+    } else if mode.desk {
+        desk_argv(executable, environment)
     } else {
         app_server_argv(executable, environment)
     };
@@ -1524,17 +1604,21 @@ fn spawn(
     }
     let scripts = Scripts::of(mode.assistant);
     let mut weakening = None;
-    if mode.answer_only {
-        let servers = mode
-            .assistant
-            .map(|assistant| {
-                assistant
-                    .mcp_servers
-                    .iter()
-                    .map(|server| server.name.clone())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+    if mode.answer_only || mode.desk {
+        let servers = if mode.desk {
+            station_servers(environment)
+        } else {
+            mode.assistant
+                .map(|assistant| {
+                    assistant
+                        .mcp_servers
+                        .iter()
+                        .map(|server| server.name.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+        let commands = scripts != Scripts::None;
         let checked = tools::Probe {
             terminal: &terminal,
             executable,
@@ -1543,10 +1627,14 @@ fn spawn(
             environment,
             model: mode.model,
             servers: &servers,
-            scripts: scripts != Scripts::None,
+            code_mode: commands || mode.desk,
+            commands,
             config: mode.config,
-            files: restriction(mode.answer_only, mode.assistant)
-                .is_some_and(|allowed| allowed.file_changes),
+            // `apply_patch` is nested in `exec` in remote-hands mode too, where a read-only sandbox
+            // that never asks refuses it.
+            files: mode.desk
+                || restriction(mode.answer_only, mode.assistant, None)
+                    .is_some_and(|allowed| allowed.file_changes),
         }
         .check()?;
         argv.extend(checked.overrides);
@@ -1603,6 +1691,28 @@ fn app_server_argv(
                 format!("mcp_servers.{server}.default_tools_approval_mode=\"approve\""),
             ]);
         }
+    }
+    argv
+}
+
+/// The Theater tools a `desk` thread may not call: one runs a command, the other writes any path on
+/// the Theater. Codex 0.164.0 leaves a tool named here out of `exec`.
+const THEATER_TOOLS_OFF: &str = "mcp_servers.ai6-theater.disabled_tools=[\"theater_run\",\
+                                 \"theater_write\"]";
+
+/// The app server of a Mission's thread held to `desk`: AI6's servers, and no built-in tool
+/// ([`NO_BUILT_IN_TOOLS`]). With `features.shell_tool` off Codex 0.164.0 offers `functions.exec`
+/// and `functions.wait` with no command tool nested, and `exec`'s JavaScript has no file system,
+/// process or network of its own; the tool check ([`tools`]) confirms what a release offers.
+/// That leaves the thread nothing that reads a file, since Codex reads through commands.
+fn desk_argv(
+    executable: &str,
+    environment: &std::collections::BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut argv = app_server_argv(executable, environment);
+    argv.extend(no_built_in_tools(false));
+    if is_remote_hands(environment) {
+        argv.extend(["-c".to_owned(), THEATER_TOOLS_OFF.to_owned()]);
     }
     argv
 }
@@ -2236,7 +2346,7 @@ mod tests {
                         .unwrap()
                         .to_string_lossy()
                         .into_owned(),
-                    clearance: "developer".to_owned(),
+                    clearance: "field".to_owned(),
                     environment: environment.clone(),
                     model: Some("gpt-5".to_owned()),
                     effort: Some("high".to_owned()),
@@ -2634,6 +2744,370 @@ mod tests {
         assert_eq!(decision, "decline", "no item started");
     }
 
+    /// What a `desk` session working in `directory`, without a gate, answers to `stream`.
+    fn answered_at_desk(directory: &Path, stream: &str) -> Value {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let session = CodexSession::new(
+            ResumeTerminalSession {
+                input: Mutex::new(stream.as_bytes().to_vec()),
+                writes: writes.clone(),
+                killed: Arc::new(AtomicBool::new(false)),
+            }
+            .into_object(),
+            None,
+        )
+        .working_in(&directory.to_string_lossy())
+        .restricted_to(restriction(false, None, Some(&BTreeMap::new())));
+        while let Ok(Some(_)) = session.next_event(20) {}
+        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+        written
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find_map(|message| message.pointer("/result/decision").cloned())
+            .expect("the file change was answered, not left waiting")
+    }
+
+    #[test]
+    fn a_desk_thread_without_a_gate_may_change_files_only_inside_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let path = |path: &Path| path.to_string_lossy().into_owned();
+        assert_eq!(
+            answered_at_desk(&work, &file_change(&path(&work.join("p.md")), Value::Null)),
+            "accept"
+        );
+        for (why, stream) in [
+            (
+                "outside",
+                file_change(&path(&root.path().join("outside.md")), Value::Null),
+            ),
+            (
+                "climbing out",
+                file_change(&format!("{}/../outside.md", path(&work)), Value::Null),
+            ),
+            (
+                "a wider root",
+                file_change(&path(&work.join("p.md")), json!(path(root.path()))),
+            ),
+        ] {
+            assert_eq!(answered_at_desk(&work, &stream), "decline", "{why}");
+        }
+    }
+
+    /// The settings a start, then a resume, at `clearance` hand the app server, and the policy each
+    /// thread was started with.
+    fn launched_at(
+        clearance: &str,
+        executable: &str,
+        environment: BTreeMap<String, String>,
+    ) -> Launched {
+        let mut environment = environment;
+        environment.insert(
+            "CODEX_FIXTURE_THREAD_ID".to_owned(),
+            "codex-clearance-thread".to_owned(),
+        );
+        environment.insert("CODEX_FIXTURE_SHOW_POLICY".to_owned(), "1".to_owned());
+        let terminal = ProcessTerminal::new();
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: executable.to_owned(),
+            ..CodexConfig::default()
+        })
+        .unwrap();
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let started = handler
+            .start(
+                AgentStart {
+                    mission_id: "mission-clearance".parse().unwrap(),
+                    agent_id: "007".to_owned(),
+                    prompt: "work".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: cwd.clone(),
+                    clearance: clearance.to_owned(),
+                    environment: environment.clone(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        let first = read_to_completion(&started);
+        started.close().unwrap();
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-clearance".parse().unwrap(),
+                    session_id: SessionId::try_new("codex-clearance-thread").unwrap(),
+                    message: Some("more".to_owned()),
+                    working_directory: cwd,
+                    clearance: clearance.to_owned(),
+                    environment,
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        let second = read_to_completion(&resumed);
+        resumed.close().unwrap();
+        let policy = |events: &[AgentEvent]| -> Value {
+            let text = events
+                .iter()
+                .find_map(|event| event.text.as_deref()?.strip_prefix("policy: "))
+                .expect("the thread's policy was reported");
+            serde_json::from_str(text).unwrap()
+        };
+        let policies = [policy(&first), policy(&second)];
+        let specs = terminal.specs.lock().unwrap();
+        let servers: Vec<_> = specs
+            .iter()
+            .filter(|spec| spec.argv[1] == "app-server")
+            .map(|spec| spec.argv[2..].to_vec())
+            .collect();
+        let rendered = specs
+            .iter()
+            .filter(|spec| spec.argv.len() > 2 && spec.argv[1..3] == ["debug", "prompt-input"])
+            .count();
+        assert_eq!(servers.len(), 2);
+        Launched {
+            servers,
+            policies,
+            rendered,
+        }
+    }
+
+    struct Launched {
+        servers: Vec<Vec<String>>,
+        policies: [Value; 2],
+        /// How many times `codex debug prompt-input` ran.
+        rendered: usize,
+    }
+
+    fn cable() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            (
+                "AI6_CABLE_MCP_URL".to_owned(),
+                "http://127.0.0.1:1/mcp".to_owned(),
+            ),
+            ("AI6_CABLE_MCP_TOKEN".to_owned(), "token".to_owned()),
+        ])
+    }
+
+    /// The `-c` values of a list of arguments, with the working directory's `projects` entry left
+    /// out, since it holds a path.
+    fn settings(arguments: &[String]) -> Vec<&str> {
+        arguments
+            .iter()
+            .filter(|argument| *argument != "-c" && !argument.starts_with("projects="))
+            .map(String::as_str)
+            .collect()
+    }
+
+    #[test]
+    fn a_threads_settings_follow_its_clearance_on_start_and_resume() {
+        let station = [
+            "mcp_servers.ai6-cables.url=\"http://127.0.0.1:1/mcp\"",
+            "mcp_servers.ai6-cables.bearer_token_env_var=\"AI6_CABLE_MCP_TOKEN\"",
+            "mcp_servers.ai6-cables.default_tools_approval_mode=\"approve\"",
+        ];
+        for (index, clearance) in ["field", "00"].iter().enumerate() {
+            let launched = launched_at(
+                clearance,
+                &format!("codex-field-clearance-fixture-{index}"),
+                cable(),
+            );
+            assert_eq!(launched.rendered, 0, "{clearance}: no tool check");
+            for server in &launched.servers {
+                assert_eq!(settings(server), station, "{clearance}");
+            }
+            for policy in &launched.policies {
+                assert_eq!(policy["sandbox"], Value::Null, "{clearance}");
+                assert_eq!(policy["approvalPolicy"], "untrusted", "{clearance}");
+            }
+        }
+        // A value the handler does not know, an empty one included, gets the least it can give.
+        // The fake lists `code_mode_host`, kept, and `tool_suggest`, switched off.
+        let desk: Vec<&str> = station
+            .iter()
+            .copied()
+            .chain(NO_BUILT_IN_TOOLS)
+            .chain(["features.tool_suggest=false"])
+            .collect();
+        for (index, clearance) in ["desk", "developer", ""].iter().enumerate() {
+            let launched = launched_at(
+                clearance,
+                &format!("codex-desk-clearance-fixture-{index}"),
+                cable(),
+            );
+            assert_eq!(launched.rendered, 2, "{clearance:?}: checked each time");
+            for server in &launched.servers {
+                assert_eq!(settings(server), desk, "{clearance:?}");
+            }
+            for policy in &launched.policies {
+                assert_eq!(policy["sandbox"], "read-only", "{clearance:?}");
+                assert_eq!(policy["approvalPolicy"], "untrusted", "{clearance:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_desk_thread_on_a_remote_theater_has_neither_theater_run_nor_theater_write() {
+        let mut environment = cable();
+        environment.extend([
+            (
+                "AI6_THEATER_MCP_URL".to_owned(),
+                "http://127.0.0.1:2/mcp".to_owned(),
+            ),
+            ("AI6_THEATER_MCP_TOKEN".to_owned(), "token".to_owned()),
+        ]);
+        let launched = launched_at("desk", "codex-desk-remote-fixture", environment.clone());
+        for server in &launched.servers {
+            assert!(settings(server).contains(&THEATER_TOOLS_OFF), "{server:?}");
+        }
+        for policy in &launched.policies {
+            assert_eq!(policy["sandbox"], "read-only");
+            assert_eq!(
+                policy["approvalPolicy"], "never",
+                "nothing lands on the Station"
+            );
+        }
+        let launched = launched_at("field", "codex-field-remote-fixture", environment);
+        for server in &launched.servers {
+            assert!(!settings(server).contains(&THEATER_TOOLS_OFF), "{server:?}");
+        }
+    }
+
+    /// `codex debug prompt-input` of Codex 0.164.0 for a `desk` thread. `SCRIPTS_PROMPT` stands for
+    /// a thread whose `exec` still nests the command tools.
+    const DESK_PROMPT: &str =
+        include_str!("../tests/fixtures/codex-0.164.0/prompt-input-desk.json");
+
+    fn desk_start(
+        executable: &str,
+        prompt: &str,
+        extra: &[(&str, &str)],
+    ) -> Result<Object<dyn AgentSession>, ProviderError> {
+        let mut environment = cable();
+        environment.insert(
+            "CODEX_FIXTURE_THREAD_ID".to_owned(),
+            "codex-desk-thread".to_owned(),
+        );
+        environment.extend(
+            extra
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+        );
+        CodexHandler::try_from(CodexConfig {
+            executable: executable.to_owned(),
+            ..CodexConfig::default()
+        })
+        .unwrap()
+        .start(
+            AgentStart {
+                mission_id: "mission-desk".parse().unwrap(),
+                agent_id: "007".to_owned(),
+                prompt: prompt.to_owned(),
+                initial_context: Vec::new(),
+                working_directory: std::env::current_dir()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                clearance: "desk".to_owned(),
+                environment,
+                model: Some("gpt-6.1-sol".to_owned()),
+                effort: None,
+                max_cost_micro_usd: None,
+                project_settings: false,
+                project_mcp: false,
+                answer_only: false,
+                assistant: None,
+            },
+            ProcessTerminal::new().into_object(),
+        )
+    }
+
+    #[test]
+    fn a_desk_thread_starts_only_if_codex_gives_it_no_command_tool() {
+        let desk = DESK_PROMPT.replace('\n', "");
+        let session = desk_start(
+            "codex-desk-offered-fixture",
+            "work",
+            &[("CODEX_FIXTURE_PROMPT_INPUT", &desk)],
+        )
+        .unwrap();
+        let events = read_to_completion(&session);
+        assert!(
+            !events.iter().any(|event| event.kind == "weakened"),
+            "{events:?}"
+        );
+        session.close().unwrap();
+
+        let nests_commands = SCRIPTS_PROMPT.replace('\n', "");
+        let refused = match desk_start(
+            "codex-desk-commands-fixture",
+            "work",
+            &[("CODEX_FIXTURE_PROMPT_INPUT", &nests_commands)],
+        ) {
+            Ok(_) => panic!("a desk thread with exec_command started"),
+            Err(error) => error.to_string(),
+        };
+        assert!(
+            refused.contains("exec_command") && refused.contains(TOOL_CHECK_ENV),
+            "{refused}"
+        );
+        let session = desk_start(
+            "codex-desk-commands-warned-fixture",
+            "work",
+            &[
+                ("CODEX_FIXTURE_PROMPT_INPUT", &nests_commands),
+                (TOOL_CHECK_ENV, "warn"),
+            ],
+        )
+        .unwrap();
+        let events = read_to_completion(&session);
+        assert!(
+            events.iter().any(|event| event.kind == "weakened"
+                && event.text.as_deref().unwrap().contains("exec_command")),
+            "{events:?}"
+        );
+        session.close().unwrap();
+    }
+
+    #[test]
+    fn a_desk_thread_that_runs_a_command_anyway_is_ended() {
+        for (executable, prompt) in [
+            ("codex-desk-item-fixture", "item: commandExecution"),
+            ("codex-desk-ask-fixture", "run: rm -rf /"),
+        ] {
+            let session = desk_start(executable, prompt, &[]).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let reason = loop {
+                assert!(Instant::now() < deadline, "{prompt}: never ended");
+                if let Some(event) = session.next_event(100).unwrap()
+                    && event.kind == "failed"
+                {
+                    break event.text.unwrap();
+                }
+            };
+            assert!(reason.contains("restricted Codex thread used"), "{reason}");
+            session.close().unwrap();
+        }
+    }
+
     #[test]
     fn a_gated_session_asks_before_every_untrusted_command() {
         let cable = std::collections::BTreeMap::from([
@@ -2644,11 +3118,11 @@ mod tests {
             ("AI6_CABLE_MCP_TOKEN".to_owned(), "token".to_owned()),
         ]);
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &cable, false, Scripts::None);
+        set_approval_policy(&mut params, &cable, false, Scripts::None, false);
         assert_eq!(params["approvalPolicy"], "untrusted");
 
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &cable, true, Scripts::None);
+        set_approval_policy(&mut params, &cable, true, Scripts::None, false);
         assert_eq!(
             params["sandbox"], "read-only",
             "answer-only wins over the gate"
@@ -2663,7 +3137,7 @@ mod tests {
         );
         remote.insert("AI6_THEATER_MCP_TOKEN".to_owned(), "theater".to_owned());
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &remote, false, Scripts::None);
+        set_approval_policy(&mut params, &remote, false, Scripts::None, false);
         assert_eq!(
             params["approvalPolicy"], "never",
             "the Station gates theater_run"
@@ -2675,6 +3149,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             false,
             Scripts::None,
+            false,
         );
         assert!(
             params.get("approvalPolicy").is_none(),
@@ -4155,7 +4630,7 @@ mod tests {
         let item = |kind: &str| json!({"method":"item/started","params":{"item":{"type":kind}}});
         let mut mode = AssistantMode::moneypenny();
         mode.interpreters.push("python3".to_owned());
-        let scripts = restriction(false, Some(&mode)).unwrap();
+        let scripts = restriction(false, Some(&mode), None).unwrap();
         assert_eq!(forbidden_use(&item("commandExecution"), &scripts), None);
         assert!(
             forbidden_use(&item("fileChange"), &scripts).is_some(),
@@ -4163,7 +4638,7 @@ mod tests {
         );
         assert!(forbidden_use(&item("webSearch"), &scripts).is_some());
         mode.files.push("personal".to_owned());
-        let files = restriction(false, Some(&mode)).unwrap();
+        let files = restriction(false, Some(&mode), None).unwrap();
         assert_eq!(forbidden_use(&item("fileChange"), &files), None);
         let approval = json!({"id": 3, "method": COMMAND_APPROVAL, "params": {}});
         assert!(
@@ -4237,11 +4712,12 @@ mod tests {
             "no sandbox profile without scripts: {argv:?}"
         );
         assert_eq!(
-            restriction(false, Some(&mode)),
+            restriction(false, Some(&mode), None),
             Some(Restriction {
                 servers: vec!["moneypenny".to_owned()],
                 commands: false,
                 file_changes: false,
+                asks_file_changes: false,
             })
         );
         let told = assistant_instructions(
@@ -4255,7 +4731,7 @@ mod tests {
             "{told:?}"
         );
         let mut params = json!({ "cwd": "/work" });
-        set_approval_policy(&mut params, &environment, true, Scripts::None);
+        set_approval_policy(&mut params, &environment, true, Scripts::None, false);
         assert_eq!(params["sandbox"], "read-only");
     }
 

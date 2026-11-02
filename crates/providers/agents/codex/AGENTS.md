@@ -217,16 +217,37 @@ app-server protocol source (`ThreadStartParams`: `sandbox`, `approvalPolicy`, `c
 `web_search` key and its `disabled` value): those for `thread/start`. Inferred: that
 `thread/resume` takes `config` as well, and that the read-only sandbox has no network.
 
+A Mission's thread at `desk`, or a clearance that is not one of the three
+(`ai6::clearance_runs_commands`; `AgentStart::clearance`, `AgentResume::clearance`), an empty one
+included, gets what a field Session gets (the AI6 servers its environment names, approved the same
+way, and the project override `project_settings` decides) and `-c` for `features.shell_tool=false`,
+`web_search="disabled"`, `features.multi_agent=false`, `agents.enabled=false`, `features.apps=false`,
+`skills.max_context_tokens=1` and `tools.experimental_request_user_input={enabled=false}`;
+`thread/start` and `thread/resume` carry `sandbox = "read-only"` and `approvalPolicy = "untrusted"`.
+`features.shell_tool=false` takes `exec_command` and `write_stdin` out of `functions.exec`, and a direct
+call of either answers `unsupported call`; `exec`'s JavaScript has no `require`, `process`, `fetch` or
+dynamic `import` (Codex 0.164.0, Windows, through a loopback stand-in, `prompt-input-desk.json`).
+Nothing is left that reads a file, since Codex reads through commands: such a thread has its prompt and
+the `AGENTS.md` Codex loads. Under those settings Codex asks about each `apply_patch`, an accepted one
+inside the working directory is applied, a thread resumed with them after one started without them
+loses the command tools though its history still lists them (same measurement), and the handler answers
+`item/fileChange/requestApproval` as for a gated thread, gate or no gate: outside the working
+directory, a `grantRoot`, a `rebuilt` line and an item not started are declined. In remote-hands mode the
+thread stays read-only with approval `never`, so `apply_patch` is refused without asking, and `-c
+mcp_servers.ai6-theater.disabled_tools=["theater_run","theater_write"]` takes those two out of `exec`
+(same measurement). `field` and `00` get a field Session as above, with no tool check.
+
 A restricted thread that uses a tool anyway is killed, ends with a `failed` event naming
 it, and nothing read after that becomes an event: any server request but
-`account/chatgptAuthTokens/refresh` and `attestation/generate`, or an `item/started` /
+`account/chatgptAuthTokens/refresh` and `attestation/generate` (and, on a `desk` thread,
+`item/fileChange/requestApproval`), or an `item/started` /
 `item/completed` whose item type is not `userMessage`, `agentMessage`, `reasoning`, `plan`,
 `contextCompaction`, `enteredReviewMode` or `exitedReviewMode`, an `mcpToolCall` to one of the
-thread's servers, and, for an assistant with scripts, `commandExecution` and (with `files`, or
-unsandboxed) `fileChange` (an unknown item type counts as a tool; item types from `codex
-app-server generate-json-schema`, 0.164.0).
+thread's servers, for an assistant with scripts, `commandExecution` and (with `files`, or
+unsandboxed) `fileChange`, and for a `desk` thread on the Station's disk, `fileChange` (an unknown item
+type counts as a tool; item types from `codex app-server generate-json-schema`, 0.164.0).
 
-Both are restricted threads, which start or resume only after the tool check:
+All three are restricted threads, which start or resume only after the tool check:
 
 ```rust
 pub const TOOL_CHECK_ENV: &str = "AI6_CODEX_TOOL_CHECK"; // strict (default, also unset) | warn; other values refuse
@@ -242,7 +263,7 @@ kept, `prompt-input` matched the app server's request in every case compared.
 Through the terminal AI6 supplies, with the app server's `-c` settings, environment and
 working directory, the handler runs `codex --version`, then `codex features list` and adds
 `-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES` (with scripts,
-nor `code_mode_host`, `shell_tool` or `unified_exec`) (a non-blank line
+nor `code_mode_host`, `shell_tool` or `unified_exec`; at `desk`, nor `code_mode_host`) (a non-blank line
 that is not `name stage state` fails the check), then `codex mcp list --json` with those and
 adds `-c mcp_servers.<name>.enabled=false` for every listed server that is not one of the
 thread's (output that is not one JSON array of objects with a string `name`, with nothing
@@ -266,7 +287,10 @@ character but letters and digits as `_`), or `clock__curr_time`, which only read
 which Codex 0.164.0 offers with no setting to remove it. That release declares exactly
 `apply_patch`, `exec_command`, `list_mcp_resource_templates`, `list_mcp_resources`,
 `read_mcp_resource`, `write_stdin` and `clock__curr_time`, with or without `files`: in `strict`
-a sandboxed scripts thread without `files` is refused (`apply_patch`). Deferred tools, an MCP
+a sandboxed scripts thread without `files` is refused (`apply_patch`). A `desk` thread passes on the
+same terms with code mode allowed, `exec_command` and `write_stdin` forbidden and `apply_patch`
+allowed; that release, with `features.shell_tool=false`, declares the rest and neither of those, and
+a release that declares either is refused in `strict`. Deferred tools, an MCP
 server's among them, are left out of the description and not seen. The start is
 reported as a weakening in either mode (`Codex gives Moneypenny's thread functions.exec and
 functions.wait (code mode): her scripts may run any command inside Codex's sandbox, not only
