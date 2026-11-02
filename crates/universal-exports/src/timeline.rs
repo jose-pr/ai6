@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use ai6::{AuditRecord, AuthorizationRequest, TimelineEvent};
+use ai6::{AuditRecord, AuthorizationRequest, Authorizer, TimelineEvent};
 use ai6_diptel::{MissionId, OperationId};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -187,12 +187,7 @@ pub(crate) async fn operation_timeline(
         .transpose()?;
     authorize_operation_action(&gateway, person.clone(), &operation, "audit.read").await?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let authorizer = gateway
-        .access
-        .as_ref()
-        .ok_or_else(ApiError::unavailable)?
-        .authorizer
-        .clone();
+    let authorizer = gateway.authorizer()?;
     let operation = operation.to_string();
     let chars = table.text_chars.or_max();
     let page = tokio::task::spawn_blocking(move || {

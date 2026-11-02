@@ -513,7 +513,7 @@ Inputs are checked against the tool's schema (unknown properties refused) before
 runs, and identifiers are percent-encoded into paths. Results are JSON inside
 `<ai6-data tool="NAME">…</ai6-data>` with `<` escaped, cut at 200,000 characters. Tools:
 `agent_roles`, `audit`, `board` (`/v1/stations` and `/v1/board`), `class_authorizations`,
-`field_guide` (the `docs/` pages, compiled in), `green_ink`, `held_briefs`, `mission`,
+`compartments`, `field_guide` (the `docs/` pages, compiled in), `green_ink`, `held_briefs`, `mission`,
 `mission_proposals`, `missions`, `placement_preview`, `pools`, `profile`, `quarantines`,
 `roster`, `station_settings`, `timeline`; all read only. `propose_shared_change` is listed
 with the write tools.
@@ -1011,6 +1011,39 @@ record's `accounts` (`accounts_config`), else the authenticator when it offers a
 without one the routes answer `409 no account provider`. Moneypenny reads with the `access`
 tool and proposes with `propose_access_change` and `propose_account_change`; a reset password
 goes to the app as a `reveal` event on the conversation, never into her transcript.
+
+## Compartments for people
+
+A person holds an action where the access policy allows it or a compartment read into them grants
+it; only `mission.status`, `mission.read`, `product.read`, `cable.send` and `cable.read` can come
+from a compartment, on `operation:` resources and a board Mission. Each request reads what is
+granted from the configuration provider once; a record that cannot be read grants nothing, and a
+provider that cannot be read grants nothing. A read allowed only by a compartment is written as
+`compartment.read` (`<compartment> <action>`, once per person, compartment, resource and action
+every `[gateway] compartment_audit` seconds, default 60) before it returns, and a failed write
+refuses it. The profile asks and writes nothing. A compartment grant does not count towards what an
+editor may hand out: the guards ask `EffectiveAccess::holds`, which is the access tiers alone.
+
+A refusal is `400`, `409` or `503` with `{"error": reason}`, the provider's own words.
+
+| Route | Needs | Answers |
+| --- | --- | --- |
+| `GET /v1/user/compartments`, `GET .../{id}` | `compartment.read` at `compartment:<id>` | `id`, `description`, `actions`, `min_clearance?`, `limits`, `weakenings`, `covers` and `read_in` (`{entry, propagate}`), `revision`, `writable`; what the person cannot see with `mission.status` or `mission.read` is neither named nor counted |
+| `GET /v1/user/compartment-form` | signed in | the settings form (`ai6::RecordForm`) |
+| `PUT /v1/user/compartments/{id}` | `compartment.manage` there | settings only; covers and read-ins stay, so what the editor cannot see survives; audited `compartment.put` |
+| `DELETE /v1/user/compartments/{id}` | same | `compartment.delete` |
+| `PUT .../{id}/covers/{resource}` | `compartment.manage` there and `compartment.cover` on the Operation | `operation:<id>` or `mission:<id>`, body `{propagate?}`; `compartment.cover` |
+| `DELETE .../{id}/covers/{resource}` | either | `compartment.uncover`: an Operation may always withdraw |
+| `PUT .../{id}/read-in/{subject}` | `compartment.manage` there; a person, group or account also `access.manage` there | body `{propagate?}`; `compartment.read_in` |
+| `DELETE .../{id}/read-in/{subject}` | `compartment.manage` there | `compartment.read_out` |
+| `GET /v1/missions/{id}/products` | `product.read` or `mission.read` by the policy, or `product.read` through a compartment | status, `outcome_untrusted`, `cx_report_untrusted`, `refs`; anything else is `404` |
+| `GET /v1/missions?compartment=K` | reads or is read into K | only Missions the person may read that K covers |
+
+The profile's Operations gain `compartments`, the IDs that give the person something there, and
+the actions `mission.status`, `product.read` and `compartment.cover`; `global_actions` gains
+`compartment.manage` for a rule at `*`. Moneypenny's `compartments` tool reads the list, and her
+tools and Cables follow the person's widened grants with no change of their own: no `compartment:`
+audience, and her Cables stay per Operation.
 
 `universal-exports` returns `0` after graceful shutdown, `1` when configuration or
 listener startup fails, and `2` for invalid arguments. The operator command-line client is

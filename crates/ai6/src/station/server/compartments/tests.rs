@@ -13,6 +13,7 @@ use crate::directorates::medical::exposure::{BRIEF_COMPARTMENT, BRIEF_EXPOSURE_K
 use crate::directorates::registry::mission_issues::{
     IssueLink, LinkRelation, LinkState, OutboxEntry, OutboxKind,
 };
+use crate::directorates::registry::products::CUT_MARKER;
 use crate::directorates::registry::store::Brief;
 use crate::directorates::registry::suite::brief;
 

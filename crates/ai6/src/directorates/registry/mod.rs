@@ -18,6 +18,7 @@ pub mod limits;
 pub mod logbook;
 pub mod mission_ids;
 pub mod mission_issues;
+pub mod products;
 pub mod quarantine;
 pub mod sessions;
 pub mod sleepers;

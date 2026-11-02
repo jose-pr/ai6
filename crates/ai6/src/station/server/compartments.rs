@@ -15,24 +15,17 @@ use crate::directorates::m::compartments::{
 };
 use crate::directorates::medical::exposure::{ExposureGate, product_source};
 use crate::directorates::registry::cables::CableCompartments;
-use crate::directorates::registry::sessions::SessionStatus;
+use crate::directorates::registry::products::{mission_product, mission_status};
 use crate::directorates::registry::store::{AuditRecord, FiledBrief, newest_first};
 
 /// What every refused Mission answers, whatever the reason.
 const UNKNOWN_MISSION: &str = "unknown Mission";
 /// What a call answers when what is granted cannot be read.
 const UNAVAILABLE: &str = "compartments are unavailable";
-/// Marks a text cut at a compartment's `max_product_bytes`.
-const CUT_MARKER: &str = "… [cut]";
-
 /// The audit action of a read through a compartment.
 const READ_ACTION: &str = "compartment.read";
 /// The audit action of a proposal through a compartment.
 pub(super) const PROPOSE_ACTION: &str = "mission.propose";
-
-/// The keys of a filed outcome another Operation may read. An outcome also holds Session IDs and
-/// where the work ran, which are not part of a product.
-const OUTCOME_KEYS: [&str; 4] = ["state", "reason", "branch", "summary"];
 
 /// Who is calling: the Session as the Station started it. No part of it comes from the request.
 #[derive(Clone)]
@@ -192,7 +185,7 @@ impl CompartmentDesk {
                 continue;
             };
             through.get_or_insert_with(|| allowing.to_owned());
-            missions.push(status_of(&state, &filed));
+            missions.push(mission_status(state.intake.as_ref(), &filed));
         }
         let Some(through) = through else {
             let _ = audit(
@@ -310,7 +303,7 @@ impl CompartmentDesk {
         )?;
         let operation = filed.brief.operation.clone().unwrap_or_default();
         Self::mark_exposed(&state, reader, &operation);
-        let mut answer = status_of(&state, &filed);
+        let mut answer = mission_status(state.intake.as_ref(), &filed);
         answer["title_untrusted"] = json!(filed.brief.title);
         answer["brief_untrusted"] = json!(filed.brief.body);
         answer["note"] = json!(OUTSIDE_TEXT);
@@ -332,30 +325,7 @@ impl CompartmentDesk {
             |compartment| compartment.limits.max_product_bytes,
         );
         Self::mark_exposed(&state, reader, &operation);
-        let mut answer = status_of(&state, &filed);
-        if let Some(outcome) = filed.outcome.as_ref().and_then(Value::as_object) {
-            let kept: serde_json::Map<String, Value> = outcome
-                .iter()
-                .filter(|(key, _)| OUTCOME_KEYS.contains(&key.as_str()))
-                .map(|(key, value)| (key.clone(), cut_value(value, limit)))
-                .collect();
-            answer["outcome_untrusted"] = Value::Object(kept);
-        }
-        let report = state
-            .intake
-            .outbox_entries(Some(mission))
-            .unwrap_or_default()
-            .into_iter()
-            .rfind(|entry| {
-                entry.kind == crate::directorates::registry::mission_issues::OutboxKind::Report
-            });
-        if let Some(report) = report {
-            answer["cx_report_untrusted"] = json!(cut(&report.body, limit));
-        }
-        let refs = refs_of(&state, &filed, mission);
-        if !refs.is_empty() {
-            answer["refs"] = Value::Object(refs);
-        }
+        let mut answer = mission_product(state.intake.as_ref(), &filed, limit);
         answer["note"] = json!(OUTSIDE_TEXT);
         Ok(answer)
     }
@@ -441,129 +411,6 @@ fn bounded(text: &str, bytes: usize) -> String {
         line.truncate(end);
     }
     line
-}
-
-/// The fields any holder of `mission.status` sees. Never a brief, a Session ID, a Station, a
-/// Theater, a safe house, a launch manifest, usage or cost.
-fn status_of(state: &DaemonState, filed: &FiledBrief) -> Value {
-    let key = filed.brief.key();
-    let lease = (filed.state == "claimed")
-        .then(|| state.intake.lease(&key).ok().flatten())
-        .flatten();
-    let held = |name: &str| {
-        lease
-            .as_ref()
-            .and_then(|lease| lease.meta().get(name))
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    };
-    let agent = held("agent")
-        .or_else(|| {
-            filed
-                .outcome
-                .as_ref()
-                .and_then(|outcome| outcome.get("agent"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .or_else(|| filed.brief.agent.clone());
-    let attempts = lease.as_ref().map_or(
-        filed.attempts,
-        crate::directorates::registry::store::Lease::attempt,
-    );
-    let mut answer = json!({
-        "mission": key,
-        "operation": filed.brief.operation,
-        "state": filed.state,
-        "role": held("role").or_else(|| filed.brief.role.clone()),
-        "agent": agent,
-        "attempts": attempts,
-        "created": filed.brief.created,
-    });
-    if let Some(reason) = blocked_reason(state, filed) {
-        answer["blocked"] = json!(reason);
-    }
-    answer
-}
-
-/// Why a Mission is not moving, as a word: held by vetting, or its Session parked or lost.
-fn blocked_reason(state: &DaemonState, filed: &FiledBrief) -> Option<&'static str> {
-    if filed.state == "held" {
-        return Some("held");
-    }
-    if filed.state != "claimed" {
-        return None;
-    }
-    let key = filed.brief.key();
-    let sessions = state.intake.sessions().ok()?;
-    let latest = sessions
-        .iter()
-        .filter(|session| session.mission_id == key)
-        .max_by_key(|session| session.attempt)?;
-    match latest.status {
-        SessionStatus::Parked => Some("parked"),
-        SessionStatus::Lost => Some("lost"),
-        _ => None,
-    }
-}
-
-/// The refs the Registry holds for a Mission: its branch from the outcome, and the branch and
-/// commit of its last checkpoint.
-fn refs_of(
-    state: &DaemonState,
-    filed: &FiledBrief,
-    mission: &str,
-) -> serde_json::Map<String, Value> {
-    let mut refs = serde_json::Map::new();
-    if let Some(branch) = filed
-        .outcome
-        .as_ref()
-        .and_then(|outcome| outcome.get("branch"))
-        .and_then(Value::as_str)
-    {
-        refs.insert("branch".to_owned(), json!(branch));
-    }
-    let checkpoint = state.intake.sessions().ok().and_then(|sessions| {
-        sessions
-            .into_iter()
-            .filter(|session| session.mission_id == mission)
-            .max_by_key(|session| session.attempt)
-            .and_then(|session| session.checkpoint)
-    });
-    if let Some(checkpoint) = checkpoint {
-        refs.insert("branch".to_owned(), json!(checkpoint.branch));
-        refs.insert("commit".to_owned(), json!(checkpoint.commit));
-    }
-    refs
-}
-
-/// `text` within `limit` bytes, marked when cut.
-fn cut(text: &str, limit: crate::Limit) -> String {
-    if limit.allows(text.len()) {
-        return text.to_owned();
-    }
-    let mut end = limit.or_max();
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}{CUT_MARKER}", &text[..end])
-}
-
-/// `value` with each string in it within `limit` bytes.
-fn cut_value(value: &Value, limit: crate::Limit) -> Value {
-    match value {
-        Value::String(text) => Value::String(cut(text, limit)),
-        Value::Array(items) => {
-            Value::Array(items.iter().map(|item| cut_value(item, limit)).collect())
-        }
-        Value::Object(entries) => Value::Object(
-            entries
-                .iter()
-                .map(|(key, item)| (key.clone(), cut_value(item, limit)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
 }
 
 #[cfg(test)]

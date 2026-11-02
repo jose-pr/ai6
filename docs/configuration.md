@@ -567,6 +567,7 @@ refused, and a running Station keeps the last good one.
 | `access` | `access` | no | yes | live, in Universal Exports | the whole file: `[role.<name>]`, `[[rule]]`, `chief` and `delegable` |
 | `operation_access` | `operation_access` | no | no | live, in Universal Exports | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
 | `unex` | `unex` | no | yes | restart | the whole file: Universal Exports' sign-in, limits and assistant |
+| `compartment` | `compartments` | no | no | at each call | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
 
 A Station polls its provider every `[provider] poll` seconds. A family that applies live
 reaches requests, the scheduler and new Sessions at once; running Sessions keep what they
@@ -634,6 +635,7 @@ pending_per_station = 8
 | `access_token_ttl` | 3,600 | Seconds a sign-in that names no lifetime gets, and each renewal gives from then; more than 0, within `access_token_max_ttl`; longer is looser |
 | `access_token_max_ttl` | 86,400 | The longest lifetime a request for a token may name, in seconds |
 | `session_max` | 43,200 | How long renewing keeps a sign-in going, in seconds from when it was made; `0` turns renewal off, `"none"` lets it run on |
+| `compartment_audit` | 60 | Seconds between audit records of one person's reads of one resource that only one [compartment](compartments.md#what-is-checked-and-when) allows; `0` writes one for every read |
 
 `[controls]`
 
@@ -927,6 +929,9 @@ in seconds, 86,400; `"none"` for no bound) and `default_ttl` (the lifetime of a 
 asks for none, 900, within `max_ttl`). Each must be positive. Universal Exports reads
 `body_bytes` and `default_ttl` when it starts, to refuse a Cable Moneypenny proposes with a
 longer body and to tell the person how long one that names no lifetime lasts.
+`cross_operation` says what it takes for a Cable to reach another Operation: `"compartments"`, the
+default, asks a [compartment](compartments.md#cables) as well as the grants; `"station_grants"`
+asks the grants alone, a weakening logged at start and reported at check-in.
 
 ### Moneypenny's limits
 

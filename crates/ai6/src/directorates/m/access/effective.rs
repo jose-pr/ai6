@@ -389,7 +389,8 @@ impl EffectiveAccess {
     }
 
     /// Whether `person` holds `action` at `scope` through the chief and the access tiers.
-    /// `lineage` names the ancestors of an Operation scope.
+    /// `lineage` names the ancestors of an Operation scope. A compartment grant is not one of
+    /// the tiers: it does not count towards what an editor may hand out.
     pub fn holds(&self, person: &Person, action: &str, scope: &str, lineage: &Lineage) -> bool {
         if self.is_chief(person) {
             return true;

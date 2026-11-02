@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+use ai6::Authorizer;
 use ai6::{
     AssistantCable, AssistantCableDecision, AssistantCableGrant, AssistantEvent, AuditRecord,
     EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, Limit,
@@ -46,10 +47,10 @@ pub(super) async fn grants(
     person: &ai6::Person,
     most: Limit,
 ) -> Vec<AssistantCableGrant> {
-    let (Some(registry), Some(access)) = (gateway.registry.clone(), gateway.access.as_ref()) else {
+    let (Some(registry), Ok(authorizer)) = (gateway.registry.clone(), gateway.authorizer()) else {
         return Vec::new();
     };
-    let (authorizer, person) = (access.authorizer.clone(), person.clone());
+    let person = person.clone();
     tokio::task::spawn_blocking(move || {
         let records = registry.stations(Duration::MAX).ok()?;
         let tree = crate::tree::OperationTree::from_check_ins(&records);
@@ -363,13 +364,13 @@ impl Assistant {
         let Ok(person) = resolve_user(gateway, &token).await else {
             return (false, false);
         };
-        let Some(access) = gateway.access.as_ref() else {
+        let Ok(authorizer) = gateway.authorizer() else {
             return (false, false);
         };
         let Ok(tree) = crate::operation_tree(gateway).await else {
             return (false, false);
         };
-        let (authorizer, operation) = (access.authorizer.clone(), operation.to_owned());
+        let operation = operation.to_owned();
         tokio::task::spawn_blocking(move || {
             let allowed = |action: &str| {
                 authorizer

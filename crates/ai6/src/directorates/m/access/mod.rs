@@ -60,7 +60,8 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// person's own memory needs no action, and nobody changes another's. `access.read` and
 /// `access.manage` read and change a policy, at `config:access` (the global one) or
 /// `operation:<id>` (that Operation's); `account.manage` manages accounts at
-/// `config:accounts`.
+/// `config:accounts`. `compartment.read` and `compartment.manage` act on `compartment:<id>`;
+/// `compartment.cover` on `operation:<id>` is the Operation's consent to be covered.
 pub const ACTIONS: &[&str] = &[
     "access.manage",
     "access.read",
@@ -73,6 +74,9 @@ pub const ACTIONS: &[&str] = &[
     "audit.read",
     "cable.read",
     "cable.send",
+    "compartment.cover",
+    "compartment.manage",
+    "compartment.read",
     "issue.comment",
     "issue.create",
     "issue.link",
@@ -80,8 +84,10 @@ pub const ACTIONS: &[&str] = &[
     "mission.control",
     "mission.create",
     "mission.read",
+    "mission.status",
     "pool.manage",
     "pool.read",
+    "product.read",
     "roster.manage",
     "roster.read",
     "session.input",
@@ -102,6 +108,7 @@ pub const OPERATION_ACTIONS: &[&str] = &[
     "audit.read",
     "cable.read",
     "cable.send",
+    "compartment.cover",
     "issue.comment",
     "issue.create",
     "issue.link",
@@ -109,8 +116,10 @@ pub const OPERATION_ACTIONS: &[&str] = &[
     "mission.control",
     "mission.create",
     "mission.read",
+    "mission.status",
     "pool.manage",
     "pool.read",
+    "product.read",
     "session.input",
     "session.read",
 ];

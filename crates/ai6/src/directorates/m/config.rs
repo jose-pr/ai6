@@ -309,6 +309,21 @@ pub struct ConfigDefinitions {
     pub writable: bool,
 }
 
+impl ConfigDefinitions {
+    /// `records`, read at `revision`, for a provider built outside this crate.
+    pub fn new(
+        revision: ConfigRevision,
+        records: Vec<(String, serde_json::Value)>,
+        writable: bool,
+    ) -> Self {
+        Self {
+            revision,
+            records,
+            writable,
+        }
+    }
+}
+
 /// The configuration a Station runs, as it reports it at check-in (key `config`).
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

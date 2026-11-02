@@ -116,8 +116,7 @@ pub struct AccessPolicy {
 }
 
 /// The actions an Operation's roles may hold unless the policy says otherwise: every Operation
-/// action but the two that must not be delegated by default (`access.manage` and
-/// `approval.class`).
+/// action but those that must not be delegated by default ([`NOT_DELEGABLE`]).
 pub fn default_delegable() -> Vec<String> {
     OPERATION_ACTIONS
         .iter()
@@ -127,7 +126,7 @@ pub fn default_delegable() -> Vec<String> {
 }
 
 /// The Operation actions the default cap withholds.
-pub const NOT_DELEGABLE: [&str; 2] = ["access.manage", "approval.class"];
+pub const NOT_DELEGABLE: [&str; 3] = ["access.manage", "approval.class", "compartment.cover"];
 
 impl AccessPolicy {
     /// Reads a policy document.
@@ -202,14 +201,17 @@ pub fn load_policy(
 /// rules, no chief and the default cap. They are ordinary data, editable and deletable, and
 /// are never written again once the record exists.
 pub fn seeded_policy() -> AccessPolicy {
-    const READ: [&str; 7] = [
+    const READ: [&str; 10] = [
         "mission.read",
+        "mission.status",
+        "product.read",
         "session.read",
         "agent.read",
         "roster.read",
         "station.read",
         "pool.read",
         "cable.read",
+        "compartment.read",
     ];
     const WATCH: [&str; 2] = ["audit.read", "access.read"];
     const WORK: [&str; 9] = [
@@ -223,7 +225,9 @@ pub fn seeded_policy() -> AccessPolicy {
         "issue.update",
         "issue.create",
     ];
-    const ADMINISTER: [&str; 7] = [
+    const ADMINISTER: [&str; 9] = [
+        "compartment.manage",
+        "compartment.cover",
         "roster.manage",
         "agent.configure",
         "station.configure",

@@ -400,8 +400,9 @@ impl Compartment {
         self
     }
 
-    /// Checks everything that does not need the roster: a usable ID, at least one action and
-    /// one cover, known names, usable limits.
+    /// Checks everything that does not need the roster: a usable ID, at least one action, known
+    /// names, usable limits. A compartment that covers nothing grants nothing and stays valid:
+    /// an Operation may withdraw the last cover, and covers are added one at a time.
     ///
     /// # Errors
     ///
@@ -414,9 +415,6 @@ impl Compartment {
         }
         if self.actions.is_empty() {
             return Err(invalid(&"it grants no action"));
-        }
-        if self.covers.is_empty() {
-            return Err(invalid(&"it covers nothing"));
         }
         for cover in &self.covers {
             let (CoverTarget::Operation(id) | CoverTarget::Mission(id)) = &cover.target;
@@ -1155,6 +1153,30 @@ impl CompiledCompartments {
                 CompiledOne::asks(&one.people, person, action, resource, &self.lineage)
             })
             .map(|(id, _)| id.as_str())
+    }
+
+    /// Whether compartment `id` gives `person` `action` on `resource`.
+    pub fn person_allows_in(
+        &self,
+        id: &str,
+        person: &Person,
+        action: CompartmentAction,
+        resource: &CompartmentResource,
+    ) -> bool {
+        self.compiled.get(id).is_some_and(|one| {
+            CompiledOne::asks(&one.people, person, action, resource, &self.lineage)
+        })
+    }
+
+    /// Whether `person` is read into compartment `id`, whatever it covers.
+    pub fn person_holds(&self, id: &str, person: &Person) -> bool {
+        self.compiled.get(id).is_some_and(|one| {
+            one.resources(&self.lineage).iter().any(|resource| {
+                CompartmentAction::ALL.into_iter().any(|action| {
+                    CompiledOne::asks(&one.people, person, action, resource, &self.lineage)
+                })
+            })
+        })
     }
 
     /// The compartments that give `person` something on `operation`, in ID order.

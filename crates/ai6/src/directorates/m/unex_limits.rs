@@ -72,6 +72,9 @@ pub struct UnexGatewayLimits {
     /// How long renewing keeps a sign-in going, in seconds from when it was made; the password
     /// is not asked again until then. `0` turns renewal off. Default 43,200.
     pub session_max: TimeLimit,
+    /// Seconds between audit records of one person's reads of one resource allowed only by one
+    /// compartment; the app polls, so `0` writes one for every read. Default 60.
+    pub compartment_audit: Seconds,
 }
 
 impl Default for UnexGatewayLimits {
@@ -93,6 +96,7 @@ impl Default for UnexGatewayLimits {
             access_token_ttl: Seconds::new(3_600),
             access_token_max_ttl: TimeLimit::secs(DAY),
             session_max: TimeLimit::secs(43_200),
+            compartment_audit: Seconds::new(60),
         }
     }
 }

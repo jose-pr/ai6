@@ -365,7 +365,6 @@ fn an_action_outside_the_vocabulary_is_invalid_and_named() {
 fn a_record_must_grant_something_on_something() {
     for (definition, reason) in [
         (json!({"covers": [{"operation": "Q"}]}), "no action"),
-        (json!({"actions": ["mission.status"]}), "covers nothing"),
         (
             json!({"actions": ["mission.status"], "covers": [{"operation": "Q", "mission": "m"}]}),
             "one Operation or one Mission",

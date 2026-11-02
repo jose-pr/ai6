@@ -324,6 +324,20 @@ static READ_TOOLS: &[Tool] = &[
         post: None,
     },
     Tool {
+        name: "compartments",
+        description: "The compartments the person may read: what each grants, the Operations and \
+                      Missions it covers and who is read in, leaving out whatever the person may \
+                      not see. Needs compartment.read. Each is configuration, written by people.",
+        schema: || object(&[], &[]),
+        plan: |_, _| {
+            Ok(Plan::Read(vec![(
+                "compartments",
+                Call::get("/v1/user/compartments".to_owned()),
+            )]))
+        },
+        post: None,
+    },
+    Tool {
         name: "field_guide",
         description: "A page of the AI6 guide. Call it when asked how AI6 works or what a \
                       setting means. Topics: overview, architecture, organization, access, \

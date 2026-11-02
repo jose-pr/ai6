@@ -664,6 +664,11 @@ pub enum RosterErrorKind {
 }
 
 impl RosterError {
+    /// A failure to read or write the configuration, for a provider built outside this crate.
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        error_of(RosterErrorKind::Unavailable, message)
+    }
+
     /// What kind of failure this is.
     pub fn kind(&self) -> RosterErrorKind {
         self.kind

@@ -6,6 +6,7 @@
 mod access_admin;
 mod accounts;
 mod agents;
+mod compartments;
 mod controls;
 mod green_ink;
 mod held;
@@ -136,6 +137,11 @@ struct ProxyIdentity {
 pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
 
 impl AccessProviders {
+    /// The authorizer as configured, without compartments.
+    fn authorizer(&self) -> Arc<dyn Authorizer> {
+        self.authorizer.clone()
+    }
+
     /// Combines the configured authentication, identity and authorization providers.
     pub fn new(
         authenticator: Arc<dyn Authenticator>,
@@ -504,6 +510,7 @@ pub struct Gateway {
     access: Option<AccessProviders>,
     roster: Option<Arc<dyn ConfigProvider>>,
     access_admin: Option<Arc<access_admin::LiveAccess>>,
+    compartment_reads: compartments::AuditMemory,
     accounts: Option<Arc<dyn ai6::Accounts>>,
     login_guard: std::sync::Arc<LoginGuard>,
     controls: Arc<std::sync::Mutex<ControlBook>>,
@@ -581,6 +588,7 @@ impl Gateway {
             access: None,
             roster: None,
             access_admin: None,
+            compartment_reads: Default::default(),
             accounts: None,
             login_guard,
             controls: Arc::new(std::sync::Mutex::new(controls)),
@@ -617,6 +625,33 @@ impl Gateway {
     pub fn with_roster(mut self, source: Arc<dyn ConfigProvider>) -> Self {
         self.roster = Some(source);
         self
+    }
+
+    /// What this request is allowed: the access policy with what compartments add, what they
+    /// add read once, and each read they alone allow written to the audit log.
+    fn authorizer(&self) -> Result<Arc<compartments::CompartmentAccess>, ApiError> {
+        let every = self.config.unex().gateway.compartment_audit.0.as_secs_f64();
+        self.compartment_access(Some(every))
+    }
+
+    /// [`authorizer`](Self::authorizer) for what only tells a person what they could read,
+    /// which reads nothing and writes nothing.
+    fn probing_authorizer(&self) -> Result<Arc<compartments::CompartmentAccess>, ApiError> {
+        self.compartment_access(None)
+    }
+
+    fn compartment_access(
+        &self,
+        audit_every: Option<f64>,
+    ) -> Result<Arc<compartments::CompartmentAccess>, ApiError> {
+        let access = self.access.as_ref().ok_or_else(ApiError::unavailable)?;
+        Ok(Arc::new(compartments::CompartmentAccess::new(
+            access.authorizer(),
+            self.roster.clone(),
+            self.registry.clone(),
+            self.compartment_reads.clone(),
+            audit_every,
+        )))
     }
 
     /// Serves the access administration routes (`/v1/user/access`, an Operation's `access`) over
@@ -1375,6 +1410,10 @@ impl Gateway {
             )
             .route("/v1/missions", get(missions))
             .route(
+                "/v1/missions/{id}/products",
+                get(compartments::mission_products),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/missions",
                 post(create_user_mission),
             )
@@ -1525,6 +1564,23 @@ impl Gateway {
                 "/v1/user/operations/{operation_id}/access/rules",
                 axum::routing::put(access_admin::put_operation_rules),
             )
+            .route("/v1/user/compartments", get(compartments::list))
+            .route("/v1/user/compartment-form", get(compartments::form))
+            .route(
+                "/v1/user/compartments/{id}",
+                get(compartments::show)
+                    .put(compartments::put)
+                    .delete(compartments::remove),
+            )
+            .route(
+                "/v1/user/compartments/{id}/covers/{resource}",
+                axum::routing::put(compartments::put_cover).delete(compartments::remove_cover),
+            )
+            .route(
+                "/v1/user/compartments/{id}/read-in/{subject}",
+                axum::routing::put(compartments::put_read_in)
+                    .delete(compartments::remove_read_in),
+            )
             .route("/v1/user/accounts", get(accounts::list))
             .route(
                 "/v1/user/accounts/{name}",
@@ -1665,12 +1721,7 @@ async fn stations(
 ) -> Result<Json<StationBoard>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let authorizer = gateway
-        .access
-        .as_ref()
-        .ok_or_else(ApiError::unavailable)?
-        .authorizer
-        .clone();
+    let authorizer = gateway.authorizer()?;
     let (station_records, headquarters, dark) = tokio::task::spawn_blocking(move || {
         let stations = registry
             .stations(Duration::MAX)
@@ -1885,6 +1936,8 @@ struct MissionsQuery {
     operation: Option<String>,
     #[serde(default)]
     subtree: bool,
+    /// What one compartment covers, of what the person may read.
+    compartment: Option<String>,
 }
 
 async fn missions(
@@ -1900,6 +1953,39 @@ async fn missions(
             OperationTree::default()
         };
         sessions.retain(|session| tree.in_subtree(&session.operation_id, operation));
+    }
+    if let Some(compartment) = query.compartment {
+        let person = resolve_user(&gateway, bearer(&headers)?).await?;
+        let access = gateway.probing_authorizer()?;
+        sessions = tokio::task::spawn_blocking(move || {
+            let compiled = access.compiled();
+            let readable = access
+                .authorize(AuthorizationRequest {
+                    person: person.clone(),
+                    action: "compartment.read".to_owned(),
+                    resource: format!("compartment:{compartment}"),
+                    ancestors: Vec::new(),
+                })
+                .is_ok_and(|decision| decision.allowed);
+            let holds =
+                compiled.is_some_and(|compiled| compiled.person_holds(&compartment, &person));
+            match compiled.filter(|_| readable || holds) {
+                Some(compiled) => sessions
+                    .into_iter()
+                    .filter(|session| {
+                        compartments::in_compartment(
+                            compiled,
+                            &compartment,
+                            &session.operation_id,
+                            &session.mission_id,
+                        )
+                    })
+                    .collect(),
+                None => Vec::new(),
+            }
+        })
+        .await
+        .map_err(|_| ApiError::internal())?;
     }
     Ok(Json(
         gateway.enrich_missions(group_missions(sessions)).await,
@@ -1983,7 +2069,7 @@ async fn create_user_mission(
     {
         return Err(ApiError::bad_request());
     }
-    let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
+    let authorizer = gateway.authorizer()?;
     let actor_id = person.id.clone();
     let check = operation_request(
         person.clone(),
@@ -1991,7 +2077,7 @@ async fn create_user_mission(
         operation_id.as_str(),
         &operation_tree(&gateway).await?,
     );
-    let decision = tokio::task::spawn_blocking(move || providers.authorizer.authorize(check))
+    let decision = tokio::task::spawn_blocking(move || authorizer.authorize(check))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
@@ -2340,12 +2426,7 @@ async fn authorized_board_sessions(
     headers: &HeaderMap,
 ) -> Result<Vec<BoardSession>, ApiError> {
     let person = resolve_user(gateway, bearer(headers)?).await?;
-    let authorizer = gateway
-        .access
-        .as_ref()
-        .ok_or_else(ApiError::unavailable)?
-        .authorizer
-        .clone();
+    let authorizer = gateway.authorizer()?;
     let sessions = gateway.board_sessions().await;
     let registry = gateway.registry.clone();
     let tree = operation_tree(gateway).await?;
@@ -2375,7 +2456,15 @@ async fn authorized_board_sessions(
                     &tree,
                 ))
                 .map_err(|_| ())?;
-            if decision.allowed {
+            // A compartment may cover this Mission alone, not its Operation.
+            if decision.allowed
+                || authorizer.allows_mission(
+                    &person,
+                    ai6::CompartmentAction::MissionRead,
+                    &session.mission_id,
+                    &session.operation_id,
+                )
+            {
                 visible.push(session);
             }
         }
@@ -2505,6 +2594,9 @@ struct UserOperationAccess {
     #[serde(skip_serializing_if = "Option::is_none")]
     parent: Option<String>,
     actions: Vec<String>,
+    /// The compartments that give the person something here.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    compartments: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -2870,15 +2962,11 @@ async fn user_profile(
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
-    let authorizer = gateway
-        .access
-        .as_ref()
-        .ok_or_else(ApiError::unavailable)?
-        .authorizer
-        .clone();
     let authorization_person = person.clone();
     let tree = OperationTree::from_check_ins(&station_records);
     observe_tree(&gateway, &tree);
+    // The profile says what could be read and reads nothing.
+    let authorizer = gateway.probing_authorizer()?;
     let (operations, stations, roster, global_actions) = tokio::task::spawn_blocking(move || {
         let mut operation_ids: BTreeSet<String> = tree.operations().map(str::to_owned).collect();
         let mut stations = Vec::new();
@@ -2925,6 +3013,9 @@ async fn user_profile(
             let mut actions = Vec::new();
             for action in [
                 "mission.read",
+                "mission.status",
+                "product.read",
+                "compartment.cover",
                 "mission.create",
                 "mission.control",
                 "approval.decide",
@@ -2954,11 +3045,22 @@ async fn user_profile(
                     actions.push(action.to_owned());
                 }
             }
+            let compartments: Vec<String> = authorizer
+                .compiled()
+                .map(|compiled| {
+                    compiled
+                        .person_compartments(&authorization_person, &operation_id)
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
             if !actions.is_empty() {
                 operations.push(UserOperationAccess {
                     operation_id,
                     parent: None,
                     actions,
+                    compartments,
                 });
             }
         }
@@ -2993,6 +3095,7 @@ async fn user_profile(
             ("access.manage", ai6::CONFIG_ACCESS),
             ("account.manage", ai6::CONFIG_ACCOUNTS),
             ("assistant.memory.admin", "config:assistant"),
+            ("compartment.manage", "compartment:*"),
         ] {
             let allowed = authorizer
                 .authorize(AuthorizationRequest {
@@ -3068,12 +3171,7 @@ async fn authorize_resource_action(
     resource: String,
     action: &'static str,
 ) -> Result<(), ApiError> {
-    let authorizer = gateway
-        .access
-        .as_ref()
-        .ok_or_else(ApiError::unavailable)?
-        .authorizer
-        .clone();
+    let authorizer = gateway.authorizer()?;
     let request = resource_request(person, action, resource, &operation_tree(gateway).await?);
     let decision = tokio::task::spawn_blocking(move || authorizer.authorize(request))
         .await
@@ -3551,12 +3649,7 @@ async fn user_audit(
         return Err(ApiError::bad_request());
     }
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let authorizer = gateway
-        .access
-        .as_ref()
-        .ok_or_else(ApiError::unavailable)?
-        .authorizer
-        .clone();
+    let authorizer = gateway.authorizer()?;
     let tree = operation_tree(&gateway).await?;
     if let Some(operation_id) = &operation_filter {
         let scoped_authorizer = authorizer.clone();
@@ -3595,15 +3688,20 @@ async fn user_audit(
         let records = registry.list_audit(500).map_err(|_| ApiError::internal())?;
         let mut visible = Vec::new();
         for record in records {
-            if operation_filter
-                .as_ref()
-                .is_some_and(|operation_id| operation_id != &record.operation)
-            {
+            // A crossing belongs to both sides: the reader's Operation and what it read.
+            let crossed = record
+                .resource
+                .as_deref()
+                .and_then(|resource| resource.strip_prefix("operation:"));
+            if operation_filter.as_ref().is_some_and(|operation_id| {
+                operation_id != &record.operation && crossed != Some(operation_id.as_str())
+            }) {
                 continue;
             }
             let resource = record
                 .resource
                 .clone()
+                .filter(|resource| !resource.starts_with("mission:"))
                 .unwrap_or_else(|| tree::operation_resource(&record.operation));
             if station_filter
                 .as_ref()
@@ -3619,7 +3717,17 @@ async fn user_audit(
                     &tree,
                 ))
                 .map_err(|_| ApiError::internal())?
-                .allowed;
+                .allowed
+                || (crossed.is_some()
+                    && authorizer
+                        .authorize(operation_request(
+                            person.clone(),
+                            "audit.read",
+                            &record.operation,
+                            &tree,
+                        ))
+                        .map_err(|_| ApiError::internal())?
+                        .allowed);
             if allowed {
                 visible.push(record);
                 if visible.len() == limit {
