@@ -541,7 +541,9 @@ mod over_mcp {
     use super::super::super::green_ink;
     use super::*;
     use crate::directorates::m::identity::SessionId;
-    use crate::directorates::registry::cables::CablePrincipal;
+    use crate::directorates::registry::cables::{
+        CableEndpoint, CablePolicy, CablePrincipal, CableRelay,
+    };
 
     async fn connect(url: &str, token: &str) -> RunningService<RoleClient, ()> {
         ().serve(StreamableHttpClientTransport::from_config(
@@ -780,6 +782,81 @@ mod over_mcp {
             state.intake.list_mission_proposals("B", 10).unwrap().len(),
             1
         );
+        client.cancel().await.unwrap();
+    }
+
+    /// A relay on `state` as `serve` builds one: the log, and the answers read from the provider.
+    fn relay_on(state: &mut DaemonState, endpoints: Vec<CableEndpoint>) {
+        let log = state.intake.clone();
+        let relay = Arc::new(
+            CableRelay::new(
+                state.intake.clone(),
+                CablePolicy::default(),
+                move || endpoints.clone(),
+                BTreeMap::new(),
+            )
+            .with_durable_audit(move |record| {
+                super::super::super::write_cable_audit(log.as_ref(), "test", record)
+            }),
+        );
+        state.cables = relay.clone();
+        relay.set_compartments(Arc::new(CableAnswers::new(state.clone())));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_cable_to_a_compartment_goes_through_the_tool_and_is_logged() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = station(root.path());
+        let station_id = state.station_id.clone();
+        relay_on(
+            &mut state,
+            vec![
+                CableEndpoint::try_new(
+                    "008".to_owned(),
+                    "B".to_owned(),
+                    None,
+                    station_id,
+                    Some("session-008".to_owned()),
+                    Some("B-1".to_owned()),
+                )
+                .unwrap(),
+            ],
+        );
+        let endpoint = endpoint(&state, "007", true).await;
+        let client = connect(endpoint.url(), endpoint.token()).await;
+        let cable = |key: &'static str| json!({"scope": "compartment", "target": "KESTREL", "body": "the release moved", "idempotency_key": key});
+        let refused = call(&client, "send_cable", cable("before")).await;
+        assert!(refused.contains("not authorized"), "{refused}");
+
+        grant(
+            root.path(),
+            "KESTREL",
+            &["cable.send"],
+            "operation = \"B\"",
+            "operation:G",
+        );
+        let peers = call(&client, "discover_agents", json!({})).await;
+        assert!(peers.contains("\"compartment\":\"KESTREL\""), "{peers}");
+        assert!(!peers.contains("session-008"), "{peers}");
+        let sent = call(&client, "send_cable", cable("granted")).await;
+        assert!(sent.contains("\"recipient_count\":1"), "{sent}");
+        let records = state.intake.audit_records().unwrap();
+        let record = records
+            .iter()
+            .find(|record| record.action == "cable.send")
+            .expect("a crossing is in the log");
+        assert_eq!(record.actor, "agent:007");
+        assert_eq!(record.operation, "G");
+        assert_eq!(record.resource.as_deref(), Some("compartment:KESTREL"));
+        assert!(
+            record.target.starts_with("compartment:KESTREL cable-"),
+            "{}",
+            record.target
+        );
+
+        read_out(root.path());
+        let refused = call(&client, "send_cable", cable("after")).await;
+        assert!(refused.contains("not authorized"), "{refused}");
         client.cancel().await.unwrap();
     }
 

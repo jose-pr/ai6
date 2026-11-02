@@ -14,6 +14,7 @@ use crate::directorates::m::compartments::{
     CompartmentAction, CompartmentLimits, CompartmentResource, CompiledCompartments, FieldPrincipal,
 };
 use crate::directorates::medical::exposure::{ExposureGate, product_source};
+use crate::directorates::registry::cables::CableCompartments;
 use crate::directorates::registry::sessions::SessionStatus;
 use crate::directorates::registry::store::{AuditRecord, FiledBrief, newest_first};
 
@@ -40,6 +41,30 @@ pub(super) struct Reader {
     pub(super) operation: String,
     pub(super) mission: Option<String>,
     pub(super) exposure: ExposureGate,
+}
+
+/// What the Cable relay asks of the Station about compartments, read at each question.
+pub(super) struct CableAnswers(DaemonState);
+
+impl CableAnswers {
+    pub(super) fn new(state: DaemonState) -> Self {
+        Self(state)
+    }
+}
+
+impl CableCompartments for CableAnswers {
+    fn current(&self) -> Result<CompiledCompartments, String> {
+        self.0
+            .config
+            .compartments()
+            .map_err(|reason| reason.to_string())
+    }
+
+    fn clearance(&self, agent: &str, operation: &str) -> Option<String> {
+        agents::effective(&self.0.current(), Some(operation), agent)
+            .ok()
+            .map(|agent| agent.clearance)
+    }
 }
 
 /// A Session's way to read other Operations' work.

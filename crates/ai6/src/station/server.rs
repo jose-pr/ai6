@@ -71,7 +71,7 @@ use crate::directorates::q::transport::TransportClient;
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{
     CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay, CableRelayError,
-    CableRelease, CableSendRequest, CableTarget,
+    CableRelease, CableSendRequest, CableTarget, CrossOperation,
 };
 use crate::directorates::registry::mission_ids::run_id;
 use crate::directorates::registry::sessions::{
@@ -873,9 +873,10 @@ where
     .with_audit_sink(move |record| {
         audit_refused_cable_for_person(audit_registry.as_ref(), &audit_station, record);
     })
-    .with_person_audit(move |record| {
-        write_person_cable_audit(person_registry.as_ref(), &person_station, record)
+    .with_durable_audit(move |record| {
+        write_cable_audit(person_registry.as_ref(), &person_station, record)
     })
+    .with_cross_operation(cable_config.cross_operation())
     .with_limits(
         cable_config.max_fanout(),
         sender_rate,
@@ -906,7 +907,11 @@ where
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
     agents::log_handler_weakenings(&plugins, &roster);
-    for weakened in snapshot_compartments.weakenings() {
+    for weakened in snapshot_compartments
+        .weakenings()
+        .into_iter()
+        .chain(cable_config.weakenings())
+    {
         eprintln!("ai6: {weakened}");
     }
     vetting::log_weakenings(&roster);
@@ -942,6 +947,10 @@ where
         #[cfg(feature = "publisher")]
         publisher,
     };
+    #[cfg(feature = "cables-mcp")]
+    state
+        .cables
+        .set_compartments(Arc::new(compartments::CableAnswers::new(state.clone())));
     let token = crate::station::runner::ensure_token_at(&state_dir.join(API_TOKEN_FILE))?;
     let app = api(state.clone(), token);
     let declaring = state.clone();
@@ -1113,16 +1122,16 @@ async fn list_intake_briefs(
 
 /// Writes the audit record of a Cable an assistant is about to send for a person, before the
 /// relay stores it (its person audit log); `Err` makes the relay refuse the send.
-fn write_person_cable_audit(
+fn write_cable_audit(
     registry: &dyn RegistryBackend,
     station: &str,
     record: &crate::directorates::registry::cables::CableAuditRecord,
 ) -> Result<(), String> {
-    match person_cable_audit(station, record) {
+    match crossing_cable_audit(record).or_else(|| person_cable_audit(station, record)) {
         Some(audit) => registry
             .record_audit(&audit)
             .map_err(|error| error.to_string()),
-        None => Err("not a Cable sent for a person".to_owned()),
+        None => Err("not a Cable the log keeps".to_owned()),
     }
 }
 
@@ -1146,6 +1155,43 @@ fn audit_refused_cable_for_person(
 /// The audit log entry of a Cable an assistant sent, or was refused, on a person's behalf:
 /// action `cable.send`, the person as actor, `<agent> <decision> <target> <cable id>` as
 /// target. Other relay records are metadata the relay keeps to itself.
+/// The audit log entry of a Cable that crosses an Operation: `cable.send` or, on the reading
+/// side, `cable.read`; `<scope>:<name> <cable id>` as target.
+fn crossing_cable_audit(
+    record: &crate::directorates::registry::cables::CableAuditRecord,
+) -> Option<crate::directorates::registry::store::AuditRecord> {
+    let crossing = record.crossing.as_ref()?;
+    let reading = record.event == "cable_read";
+    let resource = match (&crossing.compartment, reading) {
+        (Some(compartment), false) => format!("compartment:{compartment}"),
+        _ => format!("operation:{}", crossing.operation),
+    };
+    let scope = format!("{:?}", record.target_scope).to_lowercase();
+    let mut target = match &record.target_name {
+        Some(name) => format!("{scope}:{name}"),
+        None => scope,
+    };
+    target.push(' ');
+    target.push_str(record.cable_id.as_deref().unwrap_or("-"));
+    let mut end = target.len().min(500);
+    while !target.is_char_boundary(end) {
+        end -= 1;
+    }
+    target.truncate(end);
+    Some(crate::directorates::registry::store::AuditRecord {
+        id: format!("cable.crossing-{}", uuid::Uuid::new_v4().simple()),
+        actor: record
+            .on_behalf_of
+            .clone()
+            .unwrap_or_else(|| format!("agent:{}", record.agent)),
+        action: if reading { "cable.read" } else { "cable.send" }.to_owned(),
+        operation: record.operation.clone(),
+        resource: Some(resource),
+        target,
+        at: record.at,
+    })
+}
+
 fn person_cable_audit(
     station: &str,
     record: &crate::directorates::registry::cables::CableAuditRecord,
@@ -2216,6 +2262,12 @@ fn publish_station_check_in(state: &DaemonState) {
         theater.sessions = running.get(&theater.id).copied().unwrap_or_default();
     }
     info.insert("theaters".to_owned(), serde_json::json!(theaters));
+    if state.cables.cross_operation() == CrossOperation::StationGrants {
+        info.insert(
+            "cables_weakened".to_owned(),
+            serde_json::json!(["cross_operation = \"station_grants\""]),
+        );
+    }
     if !state.station.tls_weakened.is_empty() {
         info.insert(
             "tls_weakened".to_owned(),

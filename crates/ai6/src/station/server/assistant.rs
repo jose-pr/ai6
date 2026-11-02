@@ -4304,8 +4304,8 @@ event_bytes = 7
                 },
                 BTreeMap::new(),
             )
-            .with_person_audit(move |record| {
-                super::super::write_person_cable_audit(audit.as_ref(), "test", record)
+            .with_durable_audit(move |record| {
+                super::super::write_cable_audit(audit.as_ref(), "test", record)
             }),
         );
 

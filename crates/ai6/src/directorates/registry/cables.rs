@@ -3,9 +3,10 @@
 mod relay;
 
 pub use relay::{
-    CableAction, CableAuditRecord, CableConfig, CableDelivery, CableEndpoint, CableGrant,
-    CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePolicy, CablePrincipal,
-    CableRelay, CableRelayError, CableRelease, CableSendRequest, MAX_CABLE_FANOUT,
+    CableAction, CableAuditRecord, CableCompartments, CableConfig, CableCrossing, CableDelivery,
+    CableEndpoint, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePeer,
+    CablePolicy, CablePrincipal, CableRelay, CableRelayError, CableRelease, CableSendRequest,
+    CrossOperation, MAX_CABLE_FANOUT,
 };
 
 use std::error::Error;
@@ -52,6 +53,8 @@ pub enum CableScope {
     /// Broadcast to eligible Agents of one Operation and of every Operation subordinate to
     /// it.
     Operation,
+    /// Broadcast to the live Agents of what one compartment covers.
+    Compartment,
 }
 
 /// A typed unicast Agent or broadcast audience.

@@ -254,6 +254,17 @@ impl CompiledCompartments {
 pub fn current(provider: &dyn ConfigProvider) -> Result<CompiledCompartments, RosterError>;
 ```
 
+A Session's tools (feature `cables-mcp`), listed only while it holds a compartment and working
+before the harness reports its Session ID: `compartments`, `missions_in`, `mission_brief`,
+`mission_products`; `propose_mission` takes `operation`. A brief or a product marks the Session
+`product:<operation>` first; a proposal into another Operation is `brief:compartment` there. Cable
+scope `compartment` (`CableTarget`, `CableSendRequest::with_operation` narrows it) needs `cable.send`
+through it and no receive grant; `CableConfig::cross_operation()` is `Compartments` by default, so any
+Cable crossing an Operation also needs `cable.send` there, or `StationGrants`, a logged weakening.
+`CableRelay::set_compartments(Arc<dyn CableCompartments>)` gives the relay its answers;
+`with_durable_audit` takes the log of crossings and of Cables sent for a person, and refuses
+without one. A `compartment` Cable grant in the `cables` record names only `release`.
+
 **Ask `current` for every decision and keep nothing.** It reads the records from the provider, so a
 removed grant holds from the next call; a record that cannot be read grants nothing and is named in
 `refused()`; a provider that cannot be read is an error, and the caller refuses. `compile` is the
@@ -402,7 +413,7 @@ pub struct BudgetDefinition;  // the TOML table; .resolve() -> Result<Budget, St
 pub fn micro_usd(dollars: f64) -> u64;  pub fn utc_day(unix_seconds: i64) -> String;
 
 // exposure — which Sessions read untrusted input
-pub struct Exposure { pub source: String /* brief:source | brief:registry_drop | cable:X | tool:X | review */, pub at: f64 }
+pub struct Exposure { pub source: String /* brief:source | brief:registry_drop | brief:compartment | cable:X | product:OPERATION | tool:X | review */, pub at: f64 }
 pub enum Restriction { Proposals, Approvals, Cables, Secrets }
 pub struct ExposurePolicy;   // default() = strict; ::preset(Strict | Observe); .restricts(r); .exposed_by_tool(name)
 pub struct ExposureDefinition;   // [operation.ID.exposure]: preset, restrict = [..], tools = [..]

@@ -4,13 +4,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::bounds::{Limit, Seconds, TimeLimit};
+use crate::directorates::m::compartments::{
+    CompartmentAction, CompartmentLimits, CompartmentResource, CompiledCompartments, FieldPrincipal,
+};
 
 use crate::directorates::registry::backend::*;
 
@@ -93,6 +96,47 @@ pub enum CableAction {
     Discover,
     /// List and release held Cables addressed to this scope.
     Release,
+}
+
+/// What it takes for a Cable to reach an Agent of another Operation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum CrossOperation {
+    /// A compartment giving the sender `cable.send` there, as well as the Cable grants.
+    #[default]
+    Compartments,
+    /// The Cable grants alone, so a Station grant crosses every Operation on the Station. A
+    /// weakening: it is logged and reported at check-in.
+    StationGrants,
+}
+
+/// What a relay asks about compartments. A Station answers from its configuration provider at
+/// each call, so nothing is remembered across Cables.
+pub trait CableCompartments: Send + Sync {
+    /// What is granted now.
+    ///
+    /// # Errors
+    ///
+    /// When it cannot be read: the Cable is not sent or not delivered.
+    fn current(&self) -> Result<CompiledCompartments, String>;
+
+    /// The clearance `agent` works at in `operation` now; `None` when it no longer does.
+    fn clearance(&self, agent: &str, operation: &str) -> Option<String>;
+}
+
+/// An Agent reached through a compartment, as discovery shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct CablePeer {
+    /// Its codename.
+    pub agent: String,
+    /// Its Operation.
+    pub operation: String,
+    /// Its Mission, when it has one.
+    pub mission_id: Option<String>,
+    /// The compartment that reaches it.
+    pub compartment: String,
 }
 
 /// Policy applied to one recipient before the Cable is persisted.
@@ -304,6 +348,13 @@ impl CableGrant {
         if agent != "*" {
             super::validate_text("Cable grant agent", Some(&agent), 256, true)?;
         }
+        // Being covered is the receiving side's consent and cable.send comes from the
+        // compartment, so the only grant left to name is who releases what was held.
+        if target.scope() == CableScope::Compartment && action != CableAction::Release {
+            return Err(CableError::new(
+                "a Cable grant may name scope compartment only with action release",
+            ));
+        }
         Ok(Self {
             agent,
             action,
@@ -346,6 +397,8 @@ pub struct CableConfig {
     max_ttl: TimeLimit,
     #[serde(default = "default_default_ttl")]
     default_ttl: Seconds,
+    #[serde(default)]
+    cross_operation: CrossOperation,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -372,6 +425,7 @@ impl Default for CableConfig {
             body_bytes: default_body_bytes(),
             max_ttl: default_max_ttl(),
             default_ttl: default_default_ttl(),
+            cross_operation: CrossOperation::default(),
         }
     }
 }
@@ -439,6 +493,20 @@ impl CableConfig {
             self.scope_rate,
             self.scope_burst,
         )
+    }
+
+    /// What it takes for a Cable to reach another Operation.
+    pub fn cross_operation(&self) -> CrossOperation {
+        self.cross_operation
+    }
+
+    /// Each setting that gives up a default check, worded for a log line.
+    pub fn weakenings(&self) -> Vec<String> {
+        if self.cross_operation == CrossOperation::StationGrants {
+            vec!["weakening: cables.cross_operation = \"station_grants\"".to_owned()]
+        } else {
+            Vec::new()
+        }
     }
 
     /// Returns the UTF-8 bytes a Cable's body may have (`body_bytes`, default 16 KiB), the
@@ -520,6 +588,18 @@ pub struct CableAuditRecord {
     pub cable_id: Option<String>,
     /// The person the sender acted for, when it is an assistant acting for one.
     pub on_behalf_of: Option<String>,
+    /// The Operation boundary this Cable crosses, when it crosses one.
+    pub crossing: Option<CableCrossing>,
+}
+
+/// One Operation boundary a Cable crosses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CableCrossing {
+    /// The Operation on the other side: the recipient's on a send, the sender's on a read.
+    pub operation: String,
+    /// The compartment that allowed it; `None` under [`CrossOperation::StationGrants`].
+    pub compartment: Option<String>,
 }
 
 /// Recipient identity shown to an authorized Cable approver without the message body.
@@ -571,6 +651,8 @@ pub struct CableSendRequest {
     reply_to: Option<String>,
     /// For a reply to a Cable sent for a person: only the Session that sent it.
     to_session: Option<String>,
+    /// Narrows a compartment Cable to one Operation it covers.
+    operation: Option<String>,
 }
 
 impl fmt::Debug for CableSendRequest {
@@ -662,7 +744,15 @@ impl CableSendRequest {
             conversation_id: None,
             reply_to: None,
             to_session: None,
+            operation: None,
         }
+    }
+
+    /// Narrows a compartment Cable to one Operation it covers.
+    #[must_use]
+    pub fn with_operation(mut self, operation: impl Into<String>) -> Self {
+        self.operation = Some(operation.into());
+        self
     }
 
     /// Sets a requested lifetime in seconds, validated when the relay accepts the request.
@@ -687,7 +777,7 @@ impl CableSendRequest {
 type EndpointSource = dyn Fn() -> Vec<CableEndpoint> + Send + Sync;
 type LineageSource = dyn Fn(&str) -> Vec<String> + Send + Sync;
 type AuditSink = dyn Fn(&CableAuditRecord) + Send + Sync;
-type PersonAudit = dyn Fn(&CableAuditRecord) -> Result<(), String> + Send + Sync;
+type DurableAudit = dyn Fn(&CableAuditRecord) -> Result<(), String> + Send + Sync;
 type EndpointKey = (String, String, Option<String>, Option<String>);
 
 /// Authorizes sends and receives, snapshots broadcast audiences and stores accepted Cables.
@@ -707,8 +797,10 @@ pub struct CableRelay {
     default_ttl: Seconds,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     audit: Option<Arc<AuditSink>>,
-    person_audit: Option<Arc<PersonAudit>>,
+    durable_audit: Option<Arc<DurableAudit>>,
     live_endpoints: Mutex<BTreeMap<EndpointKey, CableEndpoint>>,
+    cross_operation: CrossOperation,
+    compartments: OnceLock<Arc<dyn CableCompartments>>,
 }
 
 impl CableRelay {
@@ -740,9 +832,29 @@ impl CableRelay {
             default_ttl: default_default_ttl(),
             now: Arc::new(system_time),
             audit: None,
-            person_audit: None,
+            durable_audit: None,
             live_endpoints: Mutex::new(BTreeMap::new()),
+            cross_operation: CrossOperation::default(),
+            compartments: OnceLock::new(),
         }
+    }
+
+    /// Sets what it takes for a Cable to reach another Operation.
+    #[must_use]
+    pub fn with_cross_operation(mut self, cross_operation: CrossOperation) -> Self {
+        self.cross_operation = cross_operation;
+        self
+    }
+
+    /// What it takes for a Cable to reach another Operation.
+    pub fn cross_operation(&self) -> CrossOperation {
+        self.cross_operation
+    }
+
+    /// Gives the relay what compartments are asked of; until then none grants anything. It is
+    /// set once, after the Station that answers has been built around this relay.
+    pub fn set_compartments(&self, compartments: Arc<dyn CableCompartments>) {
+        let _ = self.compartments.set(compartments);
     }
 
     /// Sets bounded fan-out and persistent sender/scope token-bucket limits.
@@ -841,15 +953,176 @@ impl CableRelay {
         self
     }
 
-    /// Installs the durable audit log of Cables sent for a person: `write` is given the
-    /// record of each such Cable before it is stored, and the send is refused when it
-    /// errs. Without one, nothing is sent for a person.
-    pub fn with_person_audit(
+    /// Installs the durable audit log of Cables sent for a person and of those that cross an
+    /// Operation: `write` is given the record of each such Cable before it is stored or read,
+    /// and the send or the read is refused when it errs. Without one, neither happens.
+    pub fn with_durable_audit(
         mut self,
         write: impl Fn(&CableAuditRecord) -> Result<(), String> + Send + Sync + 'static,
     ) -> Self {
-        self.person_audit = Some(Arc::new(write));
+        self.durable_audit = Some(Arc::new(write));
         self
+    }
+
+    /// What is granted now; `None` when it cannot be read, which refuses whatever asked.
+    fn compartments_now(&self) -> Option<CompiledCompartments> {
+        match self.compartments.get() {
+            Some(compartments) => compartments.current().ok(),
+            None => Some(CompiledCompartments::default()),
+        }
+    }
+
+    /// `agent` of `operation` on `mission` as compartments ask about it, at its clearance now.
+    fn field_principal(
+        &self,
+        agent: &str,
+        operation: &str,
+        mission: Option<&str>,
+    ) -> Option<FieldPrincipal> {
+        let clearance = self.compartments.get()?.clearance(agent, operation)?;
+        Some(FieldPrincipal::new(
+            agent,
+            operation,
+            mission.map(str::to_owned),
+            clearance,
+        ))
+    }
+
+    /// The compartment that lets a Cable go from one side to the other: the sender holding
+    /// `cable.send` on the recipient, or, for a reply, the recipient holding it on the sender,
+    /// whose Cable opened the conversation. With `only`, that compartment alone counts.
+    fn crossing_allowed(
+        &self,
+        compiled: &CompiledCompartments,
+        sender: (&str, &str, Option<&str>),
+        recipient: (&str, &str, Option<&str>),
+        replying: bool,
+        only: Option<&str>,
+    ) -> Option<String> {
+        let ask = |from: (&str, &str, Option<&str>), to: (&str, &str, Option<&str>)| {
+            let principal = self.field_principal(from.0, from.1, from.2)?;
+            let resource = match to.2 {
+                Some(mission) => CompartmentResource::Mission {
+                    id: mission.to_owned(),
+                    operation: to.1.to_owned(),
+                },
+                None => CompartmentResource::Operation(to.1.to_owned()),
+            };
+            match only {
+                Some(id) => compiled
+                    .field_allows_in(id, &principal, CompartmentAction::CableSend, &resource)
+                    .then(|| id.to_owned()),
+                None => compiled
+                    .field_allows(&principal, CompartmentAction::CableSend, &resource)
+                    .map(str::to_owned),
+            }
+        };
+        ask(sender, recipient).or_else(|| {
+            if replying {
+                ask(recipient, sender)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Whether `cable` truly replies to one `agent` of `operation` sent to its sender, which is
+    /// what lets a reply lean on the grant that opened the conversation.
+    fn replies_to(
+        &self,
+        reply_to: Option<&str>,
+        sender: &str,
+        agent: &str,
+        operation: &str,
+    ) -> bool {
+        let Some(id) = reply_to else {
+            return false;
+        };
+        self.registry
+            .get_cable(id)
+            .ok()
+            .flatten()
+            .is_some_and(|original| {
+                original.sender_agent() == agent
+                    && original.sender_operation() == operation
+                    && original
+                        .recipients()
+                        .iter()
+                        .any(|recipient| recipient.agent() == sender)
+            })
+    }
+
+    /// Whether `cable`, sent across an Operation, may still reach `principal`: the grant that let
+    /// it go is asked again. `None` when what is granted cannot be read; the compartment that
+    /// allows it otherwise.
+    fn delivery_allowed(
+        &self,
+        cable: &Cable,
+        principal: &CablePrincipal,
+    ) -> Option<Result<Option<String>, ()>> {
+        let crosses = cable.sender_operation() != principal.operation;
+        let in_compartment = cable.target().scope() == CableScope::Compartment;
+        if !crosses && !in_compartment {
+            return Some(Ok(None));
+        }
+        if !in_compartment && self.cross_operation == CrossOperation::StationGrants {
+            return Some(Ok(None));
+        }
+        let compiled = self.compartments_now()?;
+        let replying = self.replies_to(
+            cable.reply_to(),
+            cable.sender_agent(),
+            &principal.agent,
+            &principal.operation,
+        );
+        let allowed = self.crossing_allowed(
+            &compiled,
+            (
+                cable.sender_agent(),
+                cable.sender_operation(),
+                cable.mission_id(),
+            ),
+            (
+                &principal.agent,
+                &principal.operation,
+                principal.mission_id.as_deref(),
+            ),
+            replying,
+            in_compartment.then(|| cable.target().name().unwrap_or_default()),
+        );
+        Some(allowed.map(Some).ok_or(()))
+    }
+
+    /// Writes that `principal` read `cable` from another Operation. A compartment Cable from its
+    /// own Operation crosses nothing and is not written.
+    fn audit_crossing_read(
+        &self,
+        principal: &CablePrincipal,
+        cable: &Cable,
+        compartment: Option<String>,
+    ) -> Result<(), CableRelayError> {
+        if cable.sender_operation() == principal.operation {
+            return Ok(());
+        }
+        let mut record = self.audit_record(
+            "cable_read",
+            principal,
+            cable.target(),
+            "accepted",
+            Some(cable),
+        );
+        record.crossing = Some(CableCrossing {
+            operation: cable.sender_operation().to_owned(),
+            compartment,
+        });
+        self.write_durably(&record)
+    }
+
+    fn write_durably(&self, record: &CableAuditRecord) -> Result<(), CableRelayError> {
+        match &self.durable_audit {
+            Some(write) if write(record).is_ok() => Ok(()),
+            _ => Err(CableRelayError::Unavailable),
+        }
     }
 
     /// Replaces relay policy; new send and delivery checks use the updated rules.
@@ -901,6 +1174,8 @@ impl CableRelay {
                 endpoint.agent != principal.agent
                     && !endpoint.conversation_only
                     && endpoint.station == principal.station
+                    && (endpoint.operation == principal.operation
+                        || self.cross_operation == CrossOperation::StationGrants)
                     && self.allows(&policy, &endpoint.agent, CableAction::Receive, &station)
             })
             .collect::<Vec<_>>();
@@ -910,6 +1185,49 @@ impl CableRelay {
                 .then_with(|| left.session_id.cmp(&right.session_id))
         });
         Ok(visible)
+    }
+
+    /// The live Agents `principal` reaches with `cable.send` through a compartment: who they are
+    /// and in what Operation and Mission, never where they run.
+    pub fn discover_through_compartments(
+        &self,
+        principal: &CablePrincipal,
+    ) -> Result<Vec<CablePeer>, CableRelayError> {
+        let Some(compiled) = self.compartments_now() else {
+            return Err(CableRelayError::RegistryUnavailable);
+        };
+        let Some(sender) = self.field_principal(
+            &principal.agent,
+            &principal.operation,
+            principal.mission_id.as_deref(),
+        ) else {
+            return Ok(Vec::new());
+        };
+        let mut peers = Vec::new();
+        for endpoint in self.all_endpoints()? {
+            if endpoint.conversation_only || endpoint.session_id == principal.session_id {
+                continue;
+            }
+            let resource = endpoint_resource(&endpoint);
+            if let Some(compartment) =
+                compiled.field_allows(&sender, CompartmentAction::CableSend, &resource)
+            {
+                peers.push(CablePeer {
+                    agent: endpoint.agent,
+                    operation: endpoint.operation,
+                    mission_id: endpoint.mission_id,
+                    compartment: compartment.to_owned(),
+                });
+            }
+        }
+        peers.sort_by(|left, right| {
+            (&left.agent, &left.operation, &left.mission_id).cmp(&(
+                &right.agent,
+                &right.operation,
+                &right.mission_id,
+            ))
+        });
+        Ok(peers)
     }
 
     /// Applies current receive policy, marks accepted queued items delivered and reads an inbox.
@@ -973,14 +1291,23 @@ impl CableRelay {
             let Some(recipient) = recipient_for(&cable, principal) else {
                 continue;
             };
+            let in_compartment = cable.target().scope() == CableScope::Compartment;
+            // What was granted when the Cable went is asked again now. Unreadable, it stays
+            // where it is; a grant that is gone refuses it.
+            let Some(crossing) = self.delivery_allowed(&cable, principal) else {
+                continue;
+            };
             if recipient.state() == CableState::Queued {
                 let receiver_target = receiver_target(&cable, principal)?;
-                if !self.allows(
-                    &policy,
-                    &principal.agent,
-                    CableAction::Receive,
-                    &receiver_target,
-                ) {
+                if crossing.is_err()
+                    || (!in_compartment
+                        && !self.allows(
+                            &policy,
+                            &principal.agent,
+                            CableAction::Receive,
+                            &receiver_target,
+                        ))
+                {
                     self.set_delivery_state(&cable, recipient, CableState::Refused, now)?;
                     self.record_event(
                         "cable_delivery",
@@ -996,6 +1323,14 @@ impl CableRelay {
                     CableInboundMode::Hold => CableState::Held,
                     CableInboundMode::Refuse => CableState::Refused,
                 };
+                // Nothing is delivered across an Operation that the log does not hold first.
+                if state == CableState::Delivered
+                    && self
+                        .audit_crossing_read(principal, &cable, crossing.clone().unwrap_or(None))
+                        .is_err()
+                {
+                    continue;
+                }
                 let Some(updated) = self.set_delivery_state(&cable, recipient, state, now)? else {
                     continue;
                 };
@@ -1020,7 +1355,7 @@ impl CableRelay {
                     "delivered",
                     Some(&updated),
                 );
-            } else if recipient.state() == CableState::Delivered {
+            } else if recipient.state() == CableState::Delivered && crossing.is_ok() {
                 deliveries.push(delivery_view(&cable, recipient));
             }
         }
@@ -1139,9 +1474,23 @@ impl CableRelay {
             });
             let receive_target =
                 endpoint.and_then(|endpoint| receiver_target_for_endpoint(&cable, endpoint).ok());
-            let next_state = if receive_target.is_some_and(|target| {
-                self.allows(&policy, recipient.agent(), CableAction::Receive, &target)
-            }) {
+            let grants_receive = receive_target.is_some_and(|target| {
+                cable.target().scope() == CableScope::Compartment
+                    || self.allows(&policy, recipient.agent(), CableAction::Receive, &target)
+            });
+            let still_crosses = endpoint.is_some_and(|endpoint| {
+                let held_by = CablePrincipal {
+                    agent: endpoint.agent.clone(),
+                    operation: endpoint.operation.clone(),
+                    theater: endpoint.theater.clone(),
+                    station: endpoint.station.clone(),
+                    session_id: endpoint.session_id.clone(),
+                    mission_id: endpoint.mission_id.clone(),
+                    on_behalf_of: None,
+                };
+                matches!(self.delivery_allowed(&cable, &held_by), Some(Ok(_)))
+            });
+            let next_state = if grants_receive && still_crosses {
                 CableState::Delivered
             } else {
                 CableState::Refused
@@ -1229,9 +1578,13 @@ impl CableRelay {
         {
             return Err(CableRelayError::Unavailable);
         }
-        let target =
+        // A reply to a compartment Cable stays in that compartment, on the grant that opened it.
+        let target = if original.target().scope() == CableScope::Compartment {
+            original.target().clone()
+        } else {
             CableTarget::try_new(CableScope::Agent, Some(original.sender_agent().to_owned()))
-                .map_err(|_| CableRelayError::InvalidRequest)?;
+                .map_err(|_| CableRelayError::InvalidRequest)?
+        };
         let mut request =
             CableSendRequest::new(target, body, idempotency_key).with_reply_to(original.id());
         request.conversation_id = Some(
@@ -1249,6 +1602,8 @@ impl CableRelay {
                     .ok_or(CableRelayError::Unavailable)?
                     .to_owned(),
             );
+        } else if original.target().scope() == CableScope::Compartment {
+            request.to_session = original.session_id().map(str::to_owned);
         }
         self.send(principal, request)
     }
@@ -1285,6 +1640,9 @@ impl CableRelay {
         let ttl = self.ttl_of(&request);
         if !ttl.is_finite() || ttl <= 0.0 || !self.max_ttl.allows_secs(ttl) {
             return Err(CableRelayError::InvalidRequest);
+        }
+        if principal.on_behalf_of.is_some() && request.target.scope() == CableScope::Compartment {
+            return Err(CableRelayError::Unavailable);
         }
         if request.body.trim().is_empty()
             || !self.body_bytes.allows(request.body.len())
@@ -1340,6 +1698,26 @@ impl CableRelay {
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let mut candidates = self.candidates(&request.target)?;
+        if request.target.scope() == CableScope::Compartment {
+            let replying_to = self.compartment_reply_of(principal, &request);
+            candidates = match replying_to {
+                // A reply goes to the Session that opened the conversation, wherever it works.
+                Some(original) => self
+                    .all_endpoints()?
+                    .into_iter()
+                    .filter(|endpoint| {
+                        endpoint.agent == original.sender_agent()
+                            && endpoint.operation == original.sender_operation()
+                            && (original.session_id().is_none()
+                                || endpoint.session_id.as_deref() == original.session_id())
+                    })
+                    .collect(),
+                None => candidates,
+            };
+            if let Some(operation) = request.operation.as_deref() {
+                candidates.retain(|endpoint| endpoint.operation == operation);
+            }
+        }
         if principal.on_behalf_of.is_some() {
             // Acting for a person, an assistant reaches only the Operation it acts in.
             candidates.retain(|endpoint| {
@@ -1352,9 +1730,15 @@ impl CableRelay {
             // An assistant's conversations, each a different person's, hear only replies.
             candidates.retain(|endpoint| !endpoint.conversation_only);
         }
-        let recipients =
-            self.authorized_recipients(&policy, principal, &request.target, candidates)?;
-        if recipients.is_empty() || recipients.len() > self.max_fanout {
+        let compartment_limits = self.compartment_limits(&request.target);
+        let (recipients, crossings) =
+            self.authorized_recipients(&policy, principal, &request, candidates)?;
+        let fanout = compartment_limits
+            .as_ref()
+            .map_or(Limit::at(self.max_fanout as u64), |limits| {
+                limits.max_fanout
+            });
+        if recipients.is_empty() || !fanout.allows(recipients.len()) {
             self.record_event("cable_send", principal, &request.target, "denied", None);
             return Err(CableRelayError::Unavailable);
         }
@@ -1367,10 +1751,27 @@ impl CableRelay {
             Some(person) => format!("sender:{}:person:{person}", principal.agent),
             None => format!("sender:{}", principal.agent),
         };
-        let buckets = [
-            (sender, self.sender_rate, self.sender_burst),
-            (format!("scope:{scope}"), self.scope_rate, self.scope_burst),
-        ];
+        let mut buckets = vec![(sender, self.sender_rate, self.sender_burst)];
+        match &compartment_limits {
+            // The compartment's own bounds, counted across every Station on the Registry.
+            Some(limits) => {
+                if let Some(rate) = limits.rate.get() {
+                    buckets.push((
+                        format!("compartment:{target_name}"),
+                        rate,
+                        burst_of(limits.burst),
+                    ));
+                }
+                if let Some(rate) = limits.sender_rate.get() {
+                    buckets.push((
+                        format!("compartment:{target_name}:sender:{}", principal.agent),
+                        rate,
+                        burst_of(limits.sender_burst),
+                    ));
+                }
+            }
+            None => buckets.push((format!("scope:{scope}"), self.scope_rate, self.scope_burst)),
+        }
         let borrowed = buckets
             .iter()
             .map(|(key, rate, capacity)| (key.as_str(), *rate, *capacity))
@@ -1394,6 +1795,26 @@ impl CableRelay {
         let cable = Cable::try_new(draft, &self.registry.limits().cables)
             .map_err(|_| CableRelayError::InvalidRequest)?;
         self.audit_for_person("cable_send", principal, &request.target, &cable)?;
+        for crossing in crossings {
+            let mut record = self.audit_record(
+                "cable_send",
+                principal,
+                &request.target,
+                "accepted",
+                Some(&cable),
+            );
+            record.crossing = Some(crossing);
+            if self.write_durably(&record).is_err() {
+                self.record_event(
+                    "cable_send",
+                    principal,
+                    &request.target,
+                    "audit_failed",
+                    None,
+                );
+                return Err(CableRelayError::Unavailable);
+            }
+        }
         let accepted = self
             .registry
             .submit_cable(&cable)
@@ -1480,6 +1901,9 @@ impl CableRelay {
                     })
                     .collect()
             }
+            // Who a compartment reaches is decided per endpoint in `authorized_recipients`,
+            // from what is granted now.
+            CableScope::Compartment => endpoints,
             CableScope::Channel => {
                 let members = self.channels.get(target.name().unwrap_or(""));
                 endpoints
@@ -1508,18 +1932,65 @@ impl CableRelay {
         Ok(endpoints)
     }
 
+    /// The original a compartment reply answers: a Cable of that compartment sent to `principal`.
+    fn compartment_reply_of(
+        &self,
+        principal: &CablePrincipal,
+        request: &CableSendRequest,
+    ) -> Option<Cable> {
+        let original = self
+            .registry
+            .get_cable(request.reply_to.as_deref()?)
+            .ok()??;
+        (*original.target() == request.target && recipient_for(&original, principal).is_some())
+            .then_some(original)
+    }
+
+    /// The limits of the compartment `target` names; `None` for any other audience, or a
+    /// compartment that cannot be read, which then reaches nobody.
+    fn compartment_limits(&self, target: &CableTarget) -> Option<CompartmentLimits> {
+        if target.scope() != CableScope::Compartment {
+            return None;
+        }
+        self.compartments_now()?
+            .get(target.name().unwrap_or_default())
+            .map(|compartment| compartment.limits)
+    }
+
+    /// Who of `candidates` a send reaches, and the Operation boundaries it crosses getting there.
     fn authorized_recipients(
         &self,
         policy: &CablePolicy,
         sender: &CablePrincipal,
-        target: &CableTarget,
+        request: &CableSendRequest,
         candidates: Vec<CableEndpoint>,
-    ) -> Result<Vec<CableRecipient>, CableRelayError> {
+    ) -> Result<(Vec<CableRecipient>, Vec<CableCrossing>), CableRelayError> {
+        let target = &request.target;
+        let in_compartment = target.scope() == CableScope::Compartment;
         if target.scope() != CableScope::Agent
+            && !in_compartment
             && !self.allows(policy, &sender.agent, CableAction::Send, target)
         {
             return Err(CableRelayError::Unavailable);
         }
+        let crossing_checked = in_compartment
+            || (self.cross_operation == CrossOperation::Compartments
+                && candidates
+                    .iter()
+                    .any(|endpoint| endpoint.operation != sender.operation));
+        let compiled = if crossing_checked {
+            // What is granted cannot be read: this send crosses nothing.
+            match self.compartments_now() {
+                Some(compiled) => Some(compiled),
+                None => return Err(CableRelayError::RegistryUnavailable),
+            }
+        } else {
+            None
+        };
+        let original = request
+            .reply_to
+            .as_deref()
+            .and_then(|id| self.registry.get_cable(id).ok().flatten());
         // A quarantined sender's Cables are held for an authorized release, never delivered.
         let sender_quarantined = self
             .registry
@@ -1527,7 +1998,42 @@ impl CableRelay {
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let mut selected = Vec::new();
         let mut seen = BTreeSet::new();
+        let mut crossings: BTreeMap<String, CableCrossing> = BTreeMap::new();
         for endpoint in candidates {
+            if in_compartment && endpoint.session_id == sender.session_id {
+                continue;
+            }
+            let crosses = endpoint.operation != sender.operation;
+            let compartment = if in_compartment || (crosses && crossing_checked) {
+                let replying = original.as_ref().is_some_and(|original| {
+                    original.sender_agent() == endpoint.agent
+                        && original.sender_operation() == endpoint.operation
+                        && recipient_for(original, sender).is_some()
+                });
+                let allowed = compiled.as_ref().and_then(|compiled| {
+                    self.crossing_allowed(
+                        compiled,
+                        (
+                            &sender.agent,
+                            &sender.operation,
+                            sender.mission_id.as_deref(),
+                        ),
+                        (
+                            &endpoint.agent,
+                            &endpoint.operation,
+                            endpoint.mission_id.as_deref(),
+                        ),
+                        replying,
+                        in_compartment.then(|| target.name().unwrap_or_default()),
+                    )
+                });
+                let Some(allowed) = allowed else {
+                    continue;
+                };
+                Some(allowed)
+            } else {
+                None
+            };
             let (sender_target, receiver_target) =
                 if target.scope() == CableScope::Agent && endpoint.station == sender.station {
                     (
@@ -1545,19 +2051,33 @@ impl CableRelay {
                 } else {
                     (target.clone(), target.clone())
                 };
-            if !self.allows(policy, &sender.agent, CableAction::Send, &sender_target)
-                || !self.allows(
-                    policy,
-                    &endpoint.agent,
-                    CableAction::Receive,
-                    &receiver_target,
-                )
+            if !in_compartment
+                && (!self.allows(policy, &sender.agent, CableAction::Send, &sender_target)
+                    || !self.allows(
+                        policy,
+                        &endpoint.agent,
+                        CableAction::Receive,
+                        &receiver_target,
+                    ))
             {
                 continue;
             }
             let identity = (endpoint.agent.clone(), endpoint.session_id.clone());
             if !seen.insert(identity) {
                 continue;
+            }
+            if crosses {
+                // A compartment Cable is one record of the compartment; any other, one per
+                // Operation it reaches.
+                let key = if in_compartment {
+                    String::new()
+                } else {
+                    endpoint.operation.clone()
+                };
+                crossings.entry(key).or_insert_with(|| CableCrossing {
+                    operation: endpoint.operation.clone(),
+                    compartment: compartment.clone(),
+                });
             }
             let state = match policy.inbound_mode(&endpoint.agent) {
                 CableInboundMode::Deliver if sender_quarantined => CableState::Held,
@@ -1570,7 +2090,7 @@ impl CableRelay {
                     .map_err(|_| CableRelayError::InvalidRequest)?,
             );
         }
-        Ok(selected)
+        Ok((selected, crossings.into_values().collect()))
     }
 
     /// For a principal acting for a person, writes the audit record of `cable` before the
@@ -1586,11 +2106,7 @@ impl CableRelay {
             return Ok(());
         }
         let record = self.audit_record(event, principal, target, "accepted", Some(cable));
-        let written = match &self.person_audit {
-            Some(write) => write(&record),
-            None => Err("this relay keeps no audit log for Cables sent for a person".to_owned()),
-        };
-        if written.is_err() {
+        if self.write_durably(&record).is_err() {
             self.record_event(event, principal, target, "audit_failed", Some(cable));
             return Err(CableRelayError::Unavailable);
         }
@@ -1633,6 +2149,7 @@ impl CableRelay {
             at: (self.now)(),
             cable_id: cable.map(|item| item.id().to_owned()),
             on_behalf_of: principal.on_behalf_of.clone(),
+            crossing: None,
         }
     }
 }
@@ -1701,6 +2218,24 @@ fn delivery_view(cable: &Cable, recipient: &CableRecipient) -> CableDelivery {
     }
 }
 
+fn endpoint_resource(endpoint: &CableEndpoint) -> CompartmentResource {
+    match &endpoint.mission_id {
+        Some(mission) => CompartmentResource::Mission {
+            id: mission.clone(),
+            operation: endpoint.operation.clone(),
+        },
+        None => CompartmentResource::Operation(endpoint.operation.clone()),
+    }
+}
+
+/// A burst for a token bucket: `none` is as large as a bucket holds.
+fn burst_of(limit: Limit) -> u32 {
+    limit
+        .get()
+        .and_then(|burst| u32::try_from(burst).ok())
+        .unwrap_or(u32::MAX)
+}
+
 fn endpoint_key(endpoint: &CableEndpoint) -> EndpointKey {
     (
         endpoint.agent.clone(),
@@ -1718,6 +2253,7 @@ fn scope_name(scope: CableScope) -> &'static str {
         CableScope::Global => "global",
         CableScope::Channel => "channel",
         CableScope::Operation => "operation",
+        CableScope::Compartment => "compartment",
     }
 }
 
@@ -1737,6 +2273,10 @@ fn new_cable_id() -> String {
     let sequence = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     format!("cable-{nanos:x}-{:x}-{sequence:x}", std::process::id())
 }
+
+#[cfg(test)]
+#[path = "compartment_tests.rs"]
+mod compartment_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1784,6 +2324,7 @@ mod tests {
         CableGrant::try_new(agent.into(), action, target).unwrap()
     }
 
+    /// A relay for what the grants decide: `compartment_tests` holds what a crossing needs.
     fn relay(
         registry: Arc<dyn RegistryBackend>,
         policy: CablePolicy,
@@ -1791,6 +2332,8 @@ mod tests {
     ) -> CableRelay {
         CableRelay::new(registry, policy, move || endpoints.clone(), BTreeMap::new())
             .with_clock(|| 1_700_000_000.0)
+            .with_cross_operation(CrossOperation::StationGrants)
+            .with_durable_audit(|_| Ok(()))
     }
 
     fn request(target: CableTarget, key: &str) -> CableSendRequest {
@@ -1933,7 +2476,7 @@ mod tests {
             ],
         )
         .with_audit_sink(move |record| audit_records.lock().unwrap().push(record.clone()))
-        .with_person_audit(|_| Ok(()));
+        .with_durable_audit(|_| Ok(()));
         // Two conversations of the same assistant Agent, for two people.
         for (session, operation) in [
             ("assistant-a", "operation-a"),
@@ -2078,8 +2621,9 @@ mod tests {
         .with_limits(100, 0.001, sender_burst, 100.0, 1_000)
         .unwrap()
         .with_audit_sink(move |record| sink.lock().unwrap().push(record.clone()));
+        service.durable_audit = None;
         if let Some(audit) = audit {
-            service = service.with_person_audit(audit);
+            service = service.with_durable_audit(audit);
         }
         for session in ["assistant-a", "assistant-b"] {
             service
@@ -2650,7 +3194,9 @@ mod tests {
                 BTreeSet::from(["007".into(), "008".into(), "010".into()]),
             )]),
         )
-        .with_clock(|| 1_700_000_000.0);
+        .with_clock(|| 1_700_000_000.0)
+        .with_cross_operation(CrossOperation::StationGrants)
+        .with_durable_audit(|_| Ok(()));
         let sender = principal("007", "operation-a");
 
         let theater_cable = service
