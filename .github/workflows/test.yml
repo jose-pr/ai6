@@ -96,9 +96,11 @@ jobs:
           printf 'local all all trust\nhostssl all all 0.0.0.0/0 scram-sha-256\nhostssl all all ::/0 scram-sha-256\n' > "$tls/pg_hba.conf"
           sudo chown 999:999 "$tls/server.key" "$tls/server.pem" "$tls/pg_hba.conf"
           sudo chmod 600 "$tls/server.key"
-          docker run -d --name postgres -e POSTGRES_PASSWORD=ci -p 5432:5432 postgres:17
+          # The image tools/sdk/sdk.lock names.
+          image=postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+          docker run -d --name postgres -e POSTGRES_PASSWORD=ci -p 5432:5432 "$image"
           docker run -d --name postgres-tls -e POSTGRES_PASSWORD=ci -p 5433:5432 \
-            -v "$tls:/tls" postgres:17 -c ssl=on -c ssl_cert_file=/tls/server.pem \
+            -v "$tls:/tls" "$image" -c ssl=on -c ssl_cert_file=/tls/server.pem \
             -c ssl_key_file=/tls/server.key -c hba_file=/tls/pg_hba.conf
           for container in postgres postgres-tls; do
             for _ in $(seq 1 90); do
