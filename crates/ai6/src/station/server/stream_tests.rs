@@ -492,6 +492,31 @@ fn stalling_state(root: &Path, key: &str) -> DaemonState {
     state
 }
 
+/// A stall is not an end: the safe house its resume starts in stays until the Mission ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stalled_mission_keeps_its_safe_house_until_it_ends() {
+    let root = tempfile::tempdir().unwrap();
+    let state = stalling_state(root.path(), "stall");
+    let _stop = StopOnDrop(state.clone());
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_state(&state, "mission-1", MissionState::Stalled).await;
+    wait_until("the stalled harness is closed", || {
+        !has_live_session(&state, "mission-1")
+    })
+    .await;
+    let report = mission_state(&state, "mission-1").safe_house.unwrap();
+    assert!(report.kept, "{report:?}");
+    assert!(Path::new(&report.path).is_dir(), "{report:?}");
+
+    let _ = resume(&state, "mission-1", Some("go on"))
+        .await
+        .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
+    wait_for_state(&state, "mission-1", MissionState::Done).await;
+    let report_after = mission_state(&state, "mission-1").safe_house.unwrap();
+    assert!(!report_after.kept, "the end of the Mission finishes it");
+    assert!(!Path::new(&report.path).exists());
+}
+
 #[cfg(feature = "publisher")]
 mod controls_on_a_stream {
     use ai6_diptel::{ControlAction, ControlId, MissionControl, MissionId, OperationId};
@@ -508,4 +533,71 @@ mod controls_on_a_stream {
         )
     }
 
+    /// Cancelling a Mission with no live Session still ends what it left behind.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelling_a_stalled_mission_finishes_its_safe_house() {
+        let root = tempfile::tempdir().unwrap();
+        let state = stalling_state(root.path(), "stall-cancel");
+        let _stop = StopOnDrop(state.clone());
+        start_mission_by_id(&state, "mission-1").await;
+        wait_for_state(&state, "mission-1", MissionState::Stalled).await;
+        wait_until("the stalled harness is closed", || {
+            !has_live_session(&state, "mission-1")
+        })
+        .await;
+        let report = mission_state(&state, "mission-1").safe_house.unwrap();
+        assert!(Path::new(&report.path).is_dir());
+
+        let outcome = super::super::controls::apply(&state, &control(ControlAction::Cancel)).await;
+        assert_eq!(outcome, ControlOutcome::applied("abandoned"));
+        assert!(!mission_state(&state, "mission-1").safe_house.unwrap().kept);
+        assert!(!Path::new(&report.path).exists());
+    }
+
+    /// What is wrong reaches the operator; a credential in the provider's words does not.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refused_resume_says_why_and_holds_no_secret() {
+        for (key, failure, wanted, hidden) in [
+            (
+                "cause",
+                "cannot start claude: The directory name is invalid. (os error 267)",
+                "The directory name is invalid",
+                None,
+            ),
+            (
+                "leak",
+                "login failed for sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "refused",
+                Some("sk-ant-"),
+            ),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let state = test_state(
+                root.path(),
+                "",
+                &agent(key, &format!("MOCK_STREAM_RESUME_FAILS = \"{failure}\"\n"), ""),
+            );
+            let _stop = StopOnDrop(state.clone());
+            start_mission_by_id(&state, "mission-1").await;
+            wait_for_session(&state, "mission-1", &format!("stream-{key}")).await;
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .transition("mission-1", MissionState::Blocked)
+                .unwrap();
+            let outcome =
+                super::super::controls::apply(&state, &control(ControlAction::Resume)).await;
+            let text = format!("{outcome:?}");
+            assert!(outcome != ControlOutcome::applied("working"), "{text}");
+            assert!(text.contains(wanted), "{text}");
+            assert!(
+                key != "cause" || text.contains("directory name"),
+                "the cause is hidden: {text}"
+            );
+            if let Some(hidden) = hidden {
+                assert!(!text.contains(hidden), "{text}");
+            }
+                }
+    }
 }

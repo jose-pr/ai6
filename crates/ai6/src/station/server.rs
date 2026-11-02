@@ -3807,11 +3807,15 @@ async fn transition_mission(
     axum::extract::Path(mission_id): axum::extract::Path<String>,
     Json(request): Json<TransitionMission>,
 ) -> Result<Json<Mission>, ApiErrorResponse> {
-    let mission = {
+    let (mission, was_final) = {
         let mut missions = state.missions.lock().map_err(|_| internal_error())?;
-        missions
+        let was_final = missions
+            .get(&mission_id)
+            .is_some_and(|mission| is_terminal_state(mission.state));
+        let mission = missions
             .transition(&mission_id, request.state)
-            .map_err(mission_error)?
+            .map_err(mission_error)?;
+        (mission, was_final)
     };
     sync_session_record(&state, &mission_id);
     publish_lifecycle(&state, &mission_id, mission.state);
@@ -3819,7 +3823,7 @@ async fn transition_mission(
         mission.state,
         MissionState::Done | MissionState::Failed | MissionState::Blown | MissionState::Abandoned
     ) {
-        finalize_mission_resources(&state, &mission_id, true).await?;
+        finalize_mission_resources(&state, &mission_id, true, was_final).await?;
     }
     let mission = state
         .missions
@@ -5119,7 +5123,10 @@ async fn resume_mission(
             credentials::release(&state, &mission_id);
             return Err(match failed {
                 Err(error) => runtime_error(format!("AgentHandler resume worker failed: {error}")),
-                Ok(Err(error)) => provider_error(error),
+                Ok(Err(error)) => {
+                    eprintln!("ai6: Mission {mission_id:?}: the resume was refused: {error}");
+                    provider_error(error)
+                }
                 Ok(Ok(_)) => internal_error(),
             });
         }
@@ -5722,7 +5729,8 @@ fn spawn_event_pump_with_monitor(
                 if let Ok(session) = session.lock() {
                     let _ = session.interrupt();
                 }
-                finish_operation(&state, &mission_id, &session);
+                // Not an end: the safe house stays for the resume or retry that goes on from here.
+                stop_session_keeping_mission(&state, &mission_id, &session);
                 if !max_runtime {
                     let kind = if looping {
                         IncidentKind::Loop
@@ -6480,6 +6488,7 @@ async fn finalize_mission_resources(
     state: &DaemonState,
     mission_id: &str,
     interrupt: bool,
+    was_final: bool,
 ) -> Result<(), ApiErrorResponse> {
     let operation = state
         .sessions
@@ -6489,6 +6498,9 @@ async fn finalize_mission_resources(
         .inspect(|operation| operation.gate.close());
     credentials::release(state, mission_id);
     let Some(operation) = operation else {
+        if !was_final {
+            finish_left_safe_house(state, mission_id).await;
+        }
         return Ok(());
     };
     let report = tokio::task::spawn_blocking(move || {
@@ -6524,6 +6536,59 @@ async fn finalize_mission_resources(
         .set_safe_house(mission_id, report)
         .map_err(mission_error)?;
     Ok(())
+}
+
+/// Finishes the safe house a Mission with no live Session left waiting (one that stalled, or
+/// whose turn ended while it waited), now that the Mission has ended. What goes wrong is logged:
+/// the Mission has ended either way, and its house stays where its report says.
+async fn finish_left_safe_house(state: &DaemonState, mission_id: &str) {
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+    else {
+        return;
+    };
+    let (Some(report), Some(operation_id)) = (
+        mission.safe_house.clone().filter(|report| report.kept),
+        mission.operation_id.clone(),
+    ) else {
+        return;
+    };
+    let Ok(configured) = state.roster.operation(&operation_id).cloned() else {
+        return;
+    };
+    let (plugins, state_dir) = (state.plugins.clone(), state.station.state_dir().ok());
+    let finished = tokio::task::spawn_blocking(move || {
+        open_safe_house(
+            &plugins,
+            &configured,
+            &mission.mission_id,
+            &mission.prompt,
+            state_dir.as_deref(),
+            true,
+            Some(report),
+            None,
+        )?
+        .map(|house| house.finish().map_err(|error| error.to_string()))
+        .transpose()
+    })
+    .await;
+    match finished {
+        Ok(Ok(Some(report))) => {
+            if let Ok(mut missions) = state.missions.lock() {
+                let _ = missions.set_safe_house(mission_id, report);
+            }
+        }
+        Ok(Ok(None)) => {}
+        Ok(Err(error)) => {
+            eprintln!("ai6: Mission {mission_id:?}: its safe house was not finished: {error}");
+        }
+        Err(error) => {
+            eprintln!("ai6: Mission {mission_id:?}: its safe house was not finished: {error}");
+        }
+    }
 }
 
 async fn start_failure(
@@ -10674,7 +10739,7 @@ queue = 1
         assert_eq!(listing["entries"][0]["name"], "hello.txt");
 
         // Ending the Mission closes the Session, which stops its event pump.
-        finalize_mission_resources(&state, &mission_id, true)
+        finalize_mission_resources(&state, &mission_id, true, false)
             .await
             .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
         let _ = fs::remove_dir_all(&scratch);
@@ -10918,7 +10983,7 @@ queue = 1
 
         // Ending the Mission revokes what is still leased.
         let before = secrets.revoked.lock().unwrap().len();
-        finalize_mission_resources(&state, &mission_id, true)
+        finalize_mission_resources(&state, &mission_id, true, false)
             .await
             .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
         assert_eq!(secrets.revoked.lock().unwrap().len(), before + 1);
@@ -11376,7 +11441,7 @@ queue = 1
             )
             .await;
             assert_eq!(written["path"], "/work/hello.txt", "{written}");
-            finalize_mission_resources(&state, &mission, true)
+            finalize_mission_resources(&state, &mission, true, false)
                 .await
                 .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
             let mut book = state.missions.lock().unwrap();

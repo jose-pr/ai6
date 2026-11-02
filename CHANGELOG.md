@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- A stalled Mission can be resumed: the stall closes its harness and keeps its safe house, which
+  is finished when the Mission reaches a final state, also when that is a cancel with no live
+  Session. A refused resume says why: the Station logs the cause, and the operator's answer
+  carries the provider's first line unless it holds something shaped like a secret.
 - Interrupting a Mission leaves it `blocked` however the harness reports the end of the turn:
   Claude Code answers an interrupt with a result, which ended the Mission `done`. The Mission is
   blocked before the harness is told, with reason `interrupted`; the end of that turn closes the

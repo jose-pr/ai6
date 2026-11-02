@@ -45,7 +45,8 @@ queued ─► working ⇄ blocked ─► done | failed | abandoned
 ```
 
 `blocked` is a recoverable prompt wait. `stalled` closes the active operation while
-preserving the Mission record and any changed safe-house work for recovery.
+keeping the Mission record and its safe house, touched or not, for a resume or retry; the safe
+house is finished when the Mission reaches a final state.
 
 A Mission `blocked` with reason `green-ink` waits for a person to sign a step its Agent
 asked for (see [Green ink](missions.md#green-ink)). The watchdog is paused meanwhile:

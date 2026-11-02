@@ -19,7 +19,10 @@ use super::{
     ApiErrorResponse, DaemonState, ResumeMission, TransitionMission, interrupt_mission,
     is_terminal_state, lifecycle_name, medical, resume_mission, session_hold, transition_mission,
 };
+use crate::bounds::Limit;
+use crate::directorates::m::issues::OnSecret;
 use crate::directorates::m::mission::{Mission, MissionState};
+use crate::directorates::q::outbound::{self, LinkRule, SecretSet};
 use crate::directorates::registry::sessions::{SessionStatus, SessionUpdate};
 use crate::station::publisher::{ControlDelivery, ControlOutcome};
 
@@ -249,7 +252,7 @@ async fn resume(
         }),
     )
     .await
-    .map_err(reason)?;
+    .map_err(|error| reason_for(state, mission, error))?;
     Ok(Applied {
         state: started.mission.state,
         announced: true,
@@ -318,9 +321,49 @@ fn announce(state: &DaemonState, mission: &Mission, after: MissionState) {
 fn reason(error: ApiErrorResponse) -> String {
     let ApiErrorResponse(status, Json(error)) = error;
     if status == StatusCode::BAD_GATEWAY {
-        "the provider refused the request".to_owned()
+        REFUSED.to_owned()
     } else {
         error.error
+    }
+}
+
+/// What an operator is told when the provider refused the request.
+const REFUSED: &str = "the provider refused the request";
+
+/// Why a control on `mission` failed. A provider's words say what is wrong, but they are not AI6's
+/// and may quote its command line or environment: only the first line is passed on, and only when
+/// it holds nothing shaped like a credential and none of the Agent's secret settings; the Station's
+/// log has the whole text.
+fn reason_for(state: &DaemonState, mission: &Mission, error: ApiErrorResponse) -> String {
+    let ApiErrorResponse(status, Json(error)) = error;
+    if status != StatusCode::BAD_GATEWAY {
+        return error.error;
+    }
+    let cause = error.error.lines().next().unwrap_or_default().trim();
+    let secrets = SecretSet::new(
+        mission
+            .agent_id
+            .as_deref()
+            .and_then(|agent| state.roster.agent(mission.operation_id.as_deref(), agent).ok())
+            .into_iter()
+            .flat_map(|agent| agent.env.into_iter())
+            .filter(|(name, _)| {
+                let name = name.to_uppercase();
+                ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL"]
+                    .iter()
+                    .any(|word| name.contains(word))
+            })
+            .map(|(_, value)| value),
+    );
+    match outbound::check(
+        cause,
+        &secrets,
+        &LinkRule::any(),
+        Limit::UNBOUNDED,
+        OnSecret::Refuse,
+    ) {
+        Ok(_) => format!("{REFUSED}: {cause}"),
+        Err(_) => format!("{REFUSED}; the Station's log says why"),
     }
 }
 
