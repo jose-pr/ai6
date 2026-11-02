@@ -1887,17 +1887,29 @@ mod tests {
     #[derive(Clone)]
     struct ProcessTerminal {
         specs: Arc<Mutex<Vec<Spec>>>,
+        /// The command word of each command run through `spawn_private`.
+        private: Arc<Mutex<Vec<String>>>,
     }
 
     impl ProcessTerminal {
         fn new() -> Self {
             Self {
                 specs: Arc::new(Mutex::new(Vec::new())),
+                private: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
 
     impl AgentTerminal for ProcessTerminal {
+        fn spawn_private(
+            &self,
+            value: &ai6::guatiao::Value,
+        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+            let spec = Spec::from_value(value).map_err(internal)?;
+            self.private.lock().unwrap().push(spec.argv[1].clone());
+            self.spawn(value)
+        }
+
         fn spawn(
             &self,
             value: &ai6::guatiao::Value,
@@ -3001,6 +3013,15 @@ mod tests {
         prompt: &str,
         extra: &[(&str, &str)],
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
+        desk_start_on(ProcessTerminal::new(), executable, prompt, extra)
+    }
+
+    fn desk_start_on(
+        terminal: ProcessTerminal,
+        executable: &str,
+        prompt: &str,
+        extra: &[(&str, &str)],
+    ) -> Result<Object<dyn AgentSession>, ProviderError> {
         let mut environment = cable();
         environment.insert(
             "CODEX_FIXTURE_THREAD_ID".to_owned(),
@@ -3036,8 +3057,41 @@ mod tests {
                 answer_only: false,
                 assistant: None,
             },
-            ProcessTerminal::new().into_object(),
+            terminal.into_object(),
         )
+    }
+
+    /// `codex mcp list --json` prints each server's environment values: only the app server, the
+    /// Session itself, may run where its viewers read it.
+    #[test]
+    fn the_tool_check_runs_out_of_the_viewers_sight_and_the_app_server_in_it() {
+        let terminal = ProcessTerminal::new();
+        let desk = DESK_PROMPT.replace('\n', "");
+        let session = desk_start_on(
+            terminal.clone(),
+            "codex-private-probe-fixture",
+            "work",
+            &[("CODEX_FIXTURE_PROMPT_INPUT", &desk)],
+        )
+        .unwrap();
+        read_to_completion(&session);
+        session.close().unwrap();
+        let private = terminal.private.lock().unwrap();
+        for command in ["--version", "features", "mcp", "debug"] {
+            assert!(private.iter().any(|word| word == command), "{private:?}");
+        }
+        assert!(
+            !private.iter().any(|word| word == "app-server"),
+            "{private:?}"
+        );
+        assert!(
+            terminal
+                .specs
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|spec| spec.argv[1] == "app-server")
+        );
     }
 
     #[test]
@@ -3193,6 +3247,13 @@ mod tests {
     }
 
     impl AgentTerminal for ResumeTerminal {
+        fn spawn_private(
+            &self,
+            value: &ai6::guatiao::Value,
+        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+            self.spawn(value)
+        }
+
         fn spawn(
             &self,
             value: &ai6::guatiao::Value,

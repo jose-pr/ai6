@@ -106,6 +106,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Security.** Codex's tool check no longer reaches a Session's viewers. `codex mcp list --json`
+  prints each MCP server's environment values and `codex debug prompt-input` the thread's
+  instructions, and both went through the terminal a Station publishes, so anyone with
+  `session.read` on a `desk` Mission or an answer-only review on Codex could read them. Those
+  commands now run through `AgentTerminal::spawn_private`, a new slot every implementer of the kind
+  adds: only the handler reads its output. Treat a value an MCP server's environment held as read
+  by those people if such Missions ran with a publisher.
 - Resuming a Mission whose harness is still running no longer ends it. The old harness answers
   being stopped with the end of its turn, and that could fail the Mission with the new harness
   running, or refuse the resume. The old harness is now stopped once the new one has taken its

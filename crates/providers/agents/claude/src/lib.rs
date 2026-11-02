@@ -1934,6 +1934,13 @@ mod tests {
     const FAKE_TEXT: &str = "fake-claude: ";
 
     impl AgentTerminal for ProcessTerminal {
+        fn spawn_private(
+            &self,
+            value: &ai6::guatiao::Value,
+        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+            self.spawn(value)
+        }
+
         fn spawn(
             &self,
             value: &ai6::guatiao::Value,
@@ -2291,6 +2298,13 @@ mod tests {
     }
 
     impl AgentTerminal for ResumeTerminal {
+        fn spawn_private(
+            &self,
+            value: &ai6::guatiao::Value,
+        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+            self.spawn(value)
+        }
+
         fn spawn(
             &self,
             value: &ai6::guatiao::Value,

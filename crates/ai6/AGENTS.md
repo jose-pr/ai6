@@ -4007,7 +4007,9 @@ The daemon also queues `budget` (warning or limit), `exposed` (text: the source)
 
 `Spec`, `ExitInfo`, `Terminal`, `AgentTerminal` and `TerminalSession` define the
 Guatiao terminal contracts. `Terminal` is a provider kind discovered by AI6;
-`AgentTerminal` is the object bridge AI6 wraps around that provider for a handler.
+`AgentTerminal` is the object bridge AI6 wraps around that provider for a handler. What `spawn`
+starts is the Session: its output reaches viewers. What `spawn_private` starts is a probe of the
+handler's own: only the handler reads its output.
 The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in tests.
 `ExitInfo::code` is the signed 32-bit exit code the standard library reports, so Windows'
 `0xC000013A` is `-1073741510`; `pub fn exit_code_text(code: i64) -> String` renders it for a
@@ -4020,6 +4022,7 @@ Which provider a harness runs in follows from what its handler declares
 ```rust
 pub trait Terminal {                          // kind ai6_terminal
     fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
+    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
     fn tty(&self) -> bool { true }            // appended slot: false when the program gets plain pipes (`pipe`, the detached wrapper)
 }
 pub enum HarnessStdio { Terminal /* default */, Json }  // crosses as "terminal" | "json"

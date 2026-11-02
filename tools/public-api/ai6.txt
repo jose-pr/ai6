@@ -2266,6 +2266,7 @@ pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::box
 impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalBridge::spawn_private(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 pub struct ai6::directorates::q::terminal::TerminalOffer
 pub ai6::directorates::q::terminal::TerminalOffer::id: alloc::string::String
 pub ai6::directorates::q::terminal::TerminalOffer::tty: bool
@@ -2276,12 +2277,15 @@ pub const ai6::directorates::q::terminal::STREAM_COLS: u16
 pub trait ai6::directorates::q::terminal::AgentTerminal: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::terminal::AgentTerminal::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::AgentTerminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::AgentTerminal::spawn_private(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalBridge::spawn_private(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::terminal::AgentTerminal for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::spawn_private(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 pub trait ai6::directorates::q::terminal::Terminal: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::terminal::Terminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::terminal::Terminal::tty(&self) -> bool
@@ -9474,6 +9478,7 @@ pub fn ai6::directorates::q::terminal::TerminalBridge::agent_terminal(alloc::box
 impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalBridge::spawn_private(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 pub struct ai6::TerminalOffer
 pub ai6::TerminalOffer::id: alloc::string::String
 pub ai6::TerminalOffer::tty: bool
@@ -10094,12 +10099,15 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub trait ai6::AgentTerminal: core::marker::Send + core::marker::Sync
 pub fn ai6::AgentTerminal::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::AgentTerminal::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentTerminal::spawn_private(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::terminal::AgentTerminal for ai6::directorates::q::terminal::TerminalBridge
 pub fn ai6::directorates::q::terminal::TerminalBridge::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn ai6::directorates::q::terminal::TerminalBridge::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::terminal::TerminalBridge::spawn_private(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::terminal::AgentTerminal for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal> where Self: core::marker::Sized + core::marker::Send + 'static
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::terminal::AgentTerminal>::spawn_private(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
 pub trait ai6::ApprovalStore
 pub fn ai6::ApprovalStore::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::ApprovalStore::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>

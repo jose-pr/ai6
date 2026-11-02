@@ -1487,6 +1487,57 @@ mod tests {
     }
 
     #[test]
+    fn a_private_commands_output_reaches_the_handler_and_no_gateway() {
+        let (origin, requests, gateway) = gateway();
+        let publisher = Publisher::start(Config::try_new(&origin, "test-token").unwrap()).unwrap();
+        let telemetry = publisher.session(
+            "operation-a".to_owned(),
+            MissionId::try_new("mission-a").unwrap(),
+        );
+        let terminal = TerminalBridge::agent_terminal_with_watchdog_and_telemetry(
+            Box::new(RawOutputTerminal),
+            telemetry.clone(),
+            crate::directorates::medical::watchdog::Watchdog::default(),
+            true,
+        );
+        let spec = Spec {
+            argv: vec!["mock".to_owned()],
+            cwd: None,
+            env: None,
+            rows: 24,
+            cols: 80,
+        }
+        .to_value()
+        .unwrap();
+        let mut output = [0; 8];
+        let probe = terminal.spawn_private(&spec).unwrap();
+        assert_eq!(
+            probe.read(&mut output, 100).unwrap(),
+            3,
+            "the handler reads it"
+        );
+        // The Session's own output goes out, so the gateway has seen all it will once this comes.
+        let session = terminal.spawn(&spec).unwrap();
+        assert_eq!(session.read(&mut output, 100).unwrap(), 3);
+        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.publish_lifecycle("working");
+
+        let registration = requests.recv_timeout(Duration::from_secs(60)).unwrap();
+        assert_eq!(registration.path, "/v1/station/sessions");
+        let terminal_frame = requests.recv_timeout(Duration::from_secs(60)).unwrap();
+        assert_eq!(
+            terminal_frame.path,
+            "/v1/station/sessions/session-a/terminal/41"
+        );
+        let lifecycle = requests.recv_timeout(Duration::from_secs(60)).unwrap();
+        assert_eq!(
+            lifecycle.path, "/v1/station/sessions/session-a/lifecycle/42",
+            "one read's output, the Session's, and no other frame came before this"
+        );
+        gateway.join().unwrap();
+    }
+
+    #[test]
     fn authenticated_gateway_input_reaches_the_bound_provider_terminal() {
         let session_id = GatewaySessionId::new("session-input").unwrap();
         let (_, terminal_frame) = terminal_frames(

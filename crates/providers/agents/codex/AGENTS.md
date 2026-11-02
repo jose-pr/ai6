@@ -260,8 +260,9 @@ pub const KEPT_FEATURES: [&str; 5] = ["secret_auth_storage", "enable_request_com
 while the app server still sends the tools of the model's catalog entry (0.164.0); with it
 kept, `prompt-input` matched the app server's request in every case compared.
 
-Through the terminal AI6 supplies, with the app server's `-c` settings, environment and
-working directory, the handler runs `codex --version`, then `codex features list` and adds
+Through the terminal AI6 supplies, out of the Session's sight (`AgentTerminal::spawn_private`: the
+listing holds each MCP server's environment values, and no viewer reads any of it), with the app
+server's `-c` settings, environment and working directory, the handler runs `codex --version`, then `codex features list` and adds
 `-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES` (with scripts,
 nor `code_mode_host`, `shell_tool` or `unified_exec`; at `desk`, nor `code_mode_host`) (a non-blank line
 that is not `name stage state` fails the check), then `codex mcp list --json` with those and

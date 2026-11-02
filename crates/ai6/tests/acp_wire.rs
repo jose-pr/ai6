@@ -134,6 +134,13 @@ impl AgentTerminal for NoTerminal {
             "no terminal in this test",
         ))
     }
+
+    fn spawn_private(
+        &self,
+        spec: &GuatiaoValue,
+    ) -> Result<Object<dyn ai6::directorates::q::terminal::TerminalSession>, ProviderError> {
+        self.spawn(spec)
+    }
 }
 
 fn facade(script: Vec<AgentEvent>) -> (AcpFacade, Arc<Log>) {

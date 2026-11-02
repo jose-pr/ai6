@@ -115,7 +115,8 @@ pub(crate) fn feature_list(output: &[u8], csi: ai6::Limit) -> Option<FeatureList
 
 /// The server names in `codex mcp list --json` output; `None` unless it is one JSON array of
 /// objects, each with a string `name`, with nothing after it. The output also holds each
-/// server's environment values, so nothing else of it is kept.
+/// server's environment values, so nothing else of it is kept, and the command runs out of the
+/// viewers' sight ([`Probe::capture`]).
 pub(crate) fn mcp_server_names(output: &[u8], csi: ai6::Limit) -> Option<Vec<String>> {
     // Pretty-printed JSON, as `offered_tools` reads it: every line break can go.
     let mut text = strip_controls(output, csi);
@@ -640,7 +641,11 @@ impl Probe<'_> {
             rows: 24,
             cols: STREAM_COLS,
         };
-        let session = self.terminal.spawn(&spec.to_value().map_err(internal)?)?;
+        // `codex mcp list --json` prints each server's environment values and `debug prompt-input`
+        // the thread's instructions, so none of this may reach the Session's viewers.
+        let session = self
+            .terminal
+            .spawn_private(&spec.to_value().map_err(internal)?)?;
         let deadline = Instant::now() + Duration::from_millis(self.config.tool_command_timeout_ms);
         let mut output = Vec::new();
         let mut buffer = vec![0_u8; 65536];

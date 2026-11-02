@@ -275,7 +275,9 @@ whose nested tools include `apply_patch` and `view_image`), computer and browser
 plugin's `mcp__cua_repl` tools, collaboration tools, `request_user_input`, `clock.sleep`,
 plugins, hooks and skills by default, and ignores a user's `features.unified_exec = false`.
 So before an answer-only, assistant or `desk` Codex thread starts or resumes, the handler runs the
-same Codex with the same settings, environment and working directory:
+same Codex with the same settings, environment and working directory, out of its viewers' sight:
+these commands' output goes to the handler alone, since `codex mcp list --json` prints each
+server's environment values:
 
 1. `codex features list`, then switches off every enabled feature except
    `secret_auth_storage`, `enable_request_compression`, `system_proxy_fallback` and

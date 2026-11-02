@@ -531,6 +531,10 @@ pub fn choose_terminal(
 pub trait AgentTerminal: Send + Sync {
     /// Starts a terminal process through AI6's selected Terminal provider.
     fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
+    /// Starts a command the handler runs for itself, through the same provider: its output goes
+    /// to the handler alone, never to the Session's viewers, its watchdog or operator input. For
+    /// a probe, whose output can hold what no viewer may read.
+    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
 }
 
 /// Wraps an AI6-discovered terminal provider in the object handle passed to AgentHandlers.
@@ -628,6 +632,10 @@ impl AgentTerminal for TerminalBridge {
             .into_object());
         }
         Ok(Arc::try_unwrap(session).unwrap_or_else(|_| unreachable!("no shared terminal handle")))
+    }
+
+    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        self.provider.spawn(spec)
     }
 }
 
