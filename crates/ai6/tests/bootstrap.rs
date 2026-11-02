@@ -654,6 +654,40 @@ fn the_token_is_one_key_for_both_sides_of_the_station_channel() {
 }
 
 #[test]
+fn config_schema_lists_the_sections_and_prints_one_as_its_declaration_states_it() {
+    let listed = ai6().args(["config", "schema"]).output().unwrap();
+    assert!(listed.status.success());
+    let listed = String::from_utf8(listed.stdout).unwrap();
+    for line in [
+        "provider\tConfiguration provider",
+        "record.station.scheduler\tThe scheduler",
+        "record.unex.gateway\tThe gateway",
+        "oo.chat\tMoneypenny's chat",
+    ] {
+        assert!(listed.contains(line), "{line}\n{listed}");
+    }
+
+    let one = ai6()
+        .args(["config", "schema", "record.station.scheduler"])
+        .output()
+        .unwrap();
+    assert!(one.status.success());
+    let schema: serde_json::Value = serde_json::from_slice(&one.stdout).unwrap();
+    let check_in = &schema["properties"]["check_in"];
+    assert_eq!(check_in["title"], "Between check-ins with the Registry");
+    assert_eq!(check_in["default"], 15.0);
+    assert_eq!(check_in["format"], "seconds");
+
+    let none = ai6()
+        .args(["config", "schema", "no.such.section"])
+        .output()
+        .unwrap();
+    assert!(!none.status.success());
+    let said = String::from_utf8(none.stderr).unwrap();
+    assert!(said.contains("no.such.section"), "{said}");
+}
+
+#[test]
 fn config_public_holds_only_the_allow_list_and_names_what_it_left_out() {
     let dir = tempfile::tempdir().unwrap();
     let config = write(

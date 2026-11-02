@@ -455,7 +455,8 @@ async fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Config {
             command:
-                command @ (ConfigCommand::Show { .. }
+                command @ (ConfigCommand::Schema { .. }
+                | ConfigCommand::Show { .. }
                 | ConfigCommand::Import { .. }
                 | ConfigCommand::Rm { .. }
                 | ConfigCommand::Public { .. }
