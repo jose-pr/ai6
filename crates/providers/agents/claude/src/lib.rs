@@ -2706,8 +2706,12 @@ mod tests {
         assert_eq!(event.kind, "failed");
         assert!(event.text.unwrap().contains("ede_diagnostic"));
 
-        let done = json!({"type": "result", "subtype": "success", "is_error": false, "result": "ok"});
-        assert_eq!(decode_event(&done, b"{}".to_vec()).unwrap().kind, "completed");
+        let done =
+            json!({"type": "result", "subtype": "success", "is_error": false, "result": "ok"});
+        assert_eq!(
+            decode_event(&done, b"{}".to_vec()).unwrap().kind,
+            "completed"
+        );
     }
 
     /// A harness that exits while its terminal keeps the output open (ConPTY) ends the Session

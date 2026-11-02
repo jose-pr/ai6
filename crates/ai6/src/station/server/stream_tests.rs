@@ -175,9 +175,10 @@ impl AgentSession for StreamSession {
                     .is_some_and(|read| read.elapsed() >= FIRST_LINE_AFTER);
             if first_line_due && !stream.initialized {
                 stream.initialized = true;
-                stream.session_id = Some(SessionId::try_new(self.reports.clone()).map_err(
-                    |error| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string()),
-                )?);
+                stream.session_id =
+                    Some(SessionId::try_new(self.reports.clone()).map_err(|error| {
+                        ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
+                    })?);
                 if self.turn == "complete" {
                     stream
                         .queue
@@ -234,13 +235,16 @@ async fn wait_until(what: &str, mut holds: impl FnMut() -> bool) {
 }
 
 async fn wait_for_session(state: &DaemonState, mission_id: &str, wanted: &str) {
-    wait_until("the Mission records the Session its stream reported", || {
-        mission_state(state, mission_id)
-            .session_ids
-            .last()
-            .map(SessionId::as_str)
-            == Some(wanted)
-    })
+    wait_until(
+        "the Mission records the Session its stream reported",
+        || {
+            mission_state(state, mission_id)
+                .session_ids
+                .last()
+                .map(SessionId::as_str)
+                == Some(wanted)
+        },
+    )
     .await;
 }
 
@@ -407,11 +411,7 @@ async fn an_interrupted_turn_leaves_the_mission_blocked_however_it_ends() {
         let state = test_state(
             root.path(),
             "",
-            &agent(
-                &key,
-                &format!("MOCK_STREAM_INTERRUPT = \"{ending}\"\n"),
-                "",
-            ),
+            &agent(&key, &format!("MOCK_STREAM_INTERRUPT = \"{ending}\"\n"), ""),
         );
         let _stop = StopOnDrop(state.clone());
         start_mission_by_id(&state, "mission-1").await;
@@ -585,7 +585,11 @@ mod controls_on_a_stream {
             let state = test_state(
                 root.path(),
                 "",
-                &agent(key, &format!("MOCK_STREAM_RESUME_FAILS = \"{failure}\"\n"), ""),
+                &agent(
+                    key,
+                    &format!("MOCK_STREAM_RESUME_FAILS = \"{failure}\"\n"),
+                    "",
+                ),
             );
             let _stop = StopOnDrop(state.clone());
             start_mission_by_id(&state, "mission-1").await;
@@ -608,6 +612,6 @@ mod controls_on_a_stream {
             if let Some(hidden) = hidden {
                 assert!(!text.contains(hidden), "{text}");
             }
-                }
+        }
     }
 }

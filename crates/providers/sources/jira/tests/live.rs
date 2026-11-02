@@ -480,7 +480,10 @@ fn every_tracker_write_reaches_the_issue() {
         .iter()
         .find(|reply| Some(reply.id.as_str()) == person["id"].as_str())
         .expect("the person's reply is listed");
-    assert!(!reply.own, "a person's comment on the credential's own account");
+    assert!(
+        !reply.own,
+        "a person's comment on the credential's own account"
+    );
     assert!(reply.permitted, "its author is the issue's reporter");
 
     provider

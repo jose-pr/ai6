@@ -1257,7 +1257,9 @@ secret = "env-gamma"
         for (mission, loadouts, wanted) in [
             (
                 "exposed-pooled",
-                format!("{ENV_POOLS}\n[loadout.007]\nsecrets = [\"forge\"]\n[secret.forge]\nenv = \"GH_TOKEN\"\n"),
+                format!(
+                    "{ENV_POOLS}\n[loadout.007]\nsecrets = [\"forge\"]\n[secret.forge]\nenv = \"GH_TOKEN\"\n"
+                ),
                 "fake-env-alpha-0451",
             ),
             (
@@ -1283,7 +1285,9 @@ secret = "env-gamma"
             wait_for_state(&state, mission, MissionState::Done).await;
             let (_, _, environment, _) = calls(mission).remove(0);
             assert_eq!(
-                environment.get("CLAUDE_CODE_OAUTH_TOKEN").map(String::as_str),
+                environment
+                    .get("CLAUDE_CODE_OAUTH_TOKEN")
+                    .map(String::as_str),
                 Some(wanted),
                 "{mission}"
             );

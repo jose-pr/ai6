@@ -2600,7 +2600,10 @@ mod tests {
         assert!(!written.contains("turn/steer"), "{written}");
         let (decision, _) = answered_in(
             &work,
-            &file_change(&path(&work.join("new").join("deep").join("p.md")), Value::Null),
+            &file_change(
+                &path(&work.join("new").join("deep").join("p.md")),
+                Value::Null,
+            ),
         );
         assert_eq!(decision, "accept", "a directory the change makes");
 
@@ -2611,17 +2614,11 @@ mod tests {
             ),
             (
                 "climbing out",
-                file_change(
-                    &format!("{}/../outside.md", path(&work)),
-                    Value::Null,
-                ),
+                file_change(&format!("{}/../outside.md", path(&work)), Value::Null),
             ),
             (
                 "a wider root",
-                file_change(
-                    &path(&work.join("p.md")),
-                    json!(path(root.path())),
-                ),
+                file_change(&path(&work.join("p.md")), json!(path(root.path()))),
             ),
         ] {
             let (decision, written) = answered_in(&work, &stream);

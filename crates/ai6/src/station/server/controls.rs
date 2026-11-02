@@ -344,7 +344,12 @@ fn reason_for(state: &DaemonState, mission: &Mission, error: ApiErrorResponse) -
         mission
             .agent_id
             .as_deref()
-            .and_then(|agent| state.roster.agent(mission.operation_id.as_deref(), agent).ok())
+            .and_then(|agent| {
+                state
+                    .roster
+                    .agent(mission.operation_id.as_deref(), agent)
+                    .ok()
+            })
             .into_iter()
             .flat_map(|agent| agent.env.into_iter())
             .filter(|(name, _)| {

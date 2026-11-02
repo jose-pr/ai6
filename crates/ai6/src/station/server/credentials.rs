@@ -14,8 +14,8 @@ use std::time::Duration;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
 use crate::directorates::q::{
-    CREDENTIAL_VARIABLES, LoadoutCatalog, SecretBackend, SecretBroker, SecretDefinition, SecretLease, SecretLeaseRequest,
-    StationSecrets,
+    CREDENTIAL_VARIABLES, LoadoutCatalog, SecretBackend, SecretBroker, SecretDefinition,
+    SecretLease, SecretLeaseRequest, StationSecrets,
 };
 use crate::directorates::registry::approvals::{Approval, ApprovalStatus};
 use crate::directorates::registry::backend::RegistryBackend;
@@ -242,15 +242,9 @@ pub(super) fn issue(
         &mut leases,
     )?;
     // The pool account goes last, so nothing issued after it can stand in for its credential.
-    if let Some(lease) = super::accounts::issue(
-        state,
-        catalog,
-        &broker,
-        mission,
-        agent,
-        site,
-        environment,
-    )? {
+    if let Some(lease) =
+        super::accounts::issue(state, catalog, &broker, mission, agent, site, environment)?
+    {
         leases.0.push(Issued {
             lease,
             approval: None,

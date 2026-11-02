@@ -427,7 +427,10 @@ fn every_tracker_write_reaches_the_issue() {
         .iter()
         .find(|reply| reply.id == unmarked.id)
         .unwrap();
-    assert!(reply.own, "a post with no marker named still carries the mark");
+    assert!(
+        reply.own,
+        "a post with no marker named still carries the mark"
+    );
     let person = live.request(
         "POST",
         &format!("/issues/{number}/comments"),
