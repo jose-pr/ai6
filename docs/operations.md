@@ -286,7 +286,8 @@ looser than `strict` when it starts.
 `harness` says whether an Agent's harness may load the configuration its working directory
 carries. Claude Code reads settings, hooks, permissions, skills, subagents, commands and
 project `CLAUDE.md` through its `project` and `local` setting sources (`.claude/`, `CLAUDE.md`)
-and MCP servers from `.mcp.json`; Codex reads its `.codex/` layer (config, hooks, rules). Hooks
+and MCP servers from `.mcp.json`; Codex reads its `.codex/` layer (config, hooks, rules); the
+Antigravity CLI hooks, plugins and MCP servers from `.agents/` and `.agent/`. Hooks
 and MCP servers run commands, often scripts kept elsewhere in the checkout, with the
 Agent's environment, and in an issue-driven Mission whoever wrote the branch could have
 written all of it ([Hooks](hooks.md)).
@@ -299,19 +300,21 @@ pin = "sha256:..."                # what `ai6 harness pin DIR` prints
 
 | `project_settings` | The harness loads |
 | --- | --- |
-| `ignore` (default) | only the user's configuration and AI6's own: Claude Code runs with `--setting-sources user --strict-mcp-config`, so no project settings, hooks, skills, subagents, commands, project `CLAUDE.md` or `.mcp.json` servers; Codex runs with the working directory marked an untrusted project |
+| `ignore` (default) | only the user's configuration and AI6's own: Claude Code runs with `--setting-sources user --strict-mcp-config`, so no project settings, hooks, skills, subagents, commands, project `CLAUDE.md` or `.mcp.json` servers; Codex runs with the working directory marked an untrusted project; the Antigravity CLI has no such switch, so its handler refuses a working directory that carries them |
 | `pinned` | the project's configuration while its manifest (below) has the digest `pin`; otherwise it starts as `ignore` |
 | `load` | whatever is there; a Station prints it as a weakening when it starts |
 
-The **manifest** of a working directory is every regular file under `.claude/` and `.codex/`
-(at any depth), `.mcp.json`, and every file inside the working directory that a `command` or
+The **manifest** of a working directory is every regular file under `.claude/`, `.codex/`,
+`.agents/plugins/` and `.agent/plugins/` (at any depth), `.mcp.json`, `hooks.json` and
+`mcp_config.json` in `.agents/` and `.agent/`, and every file inside the working directory that a `command` or
 `args` entry of a hook or MCP server names: in JSON and TOML settings, and on a `command:`
 line of a skill's or subagent's front matter; `$CLAUDE_PROJECT_DIR` stands for the working
 directory. `pin` is the digest of the manifest's lines, `PATH NUL sha256:HEX LF` in path
 order. A symbolic link, a device, a pipe, a file over 1 MiB, more than 16 MiB or more than
 4096 files in all (the Station's `[harness]` limits) make the manifest unreadable, and the
 harness starts as `ignore`. Under
-`pinned`, Claude Code keeps `--strict-mcp-config` unless the manifest holds `.mcp.json`.
+`pinned`, Claude Code keeps `--strict-mcp-config` unless the manifest holds `.mcp.json`, and
+the Antigravity CLI's handler refuses `mcp_config.json` unless the manifest holds it.
 
 Each `pinned` start and resume reads the manifest on the Station and records its digest on
 the Operation's timeline (`harness`): `project-settings-pinned` when it matches,

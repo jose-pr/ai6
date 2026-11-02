@@ -911,8 +911,8 @@ resumes.
 ### Harness project settings (`ai6::directorates::m::harness`)
 
 ```rust
-pub const PROJECT_DIRECTORIES: [&str; 2];      // ".claude", ".codex": every regular file, any depth
-pub const PROJECT_FILES: [&str; 1];            // ".mcp.json"
+pub const PROJECT_DIRECTORIES: [&str; 4];      // ".claude", ".codex", ".agents/plugins", ".agent/plugins": every regular file, any depth
+pub const PROJECT_FILES: [&str; 5];            // ".mcp.json", ".agents/hooks.json", ".agent/hooks.json", ".agents/mcp_config.json", ".agent/mcp_config.json"
 #[non_exhaustive] pub enum ProjectSettings { Ignore /* default */, Pinned, Load } // lowercase
 #[non_exhaustive] pub struct HarnessPolicy {
     pub project_settings: ProjectSettings,
@@ -950,7 +950,7 @@ an error, and the harness starts as `ignore`. The Station decides at each start 
 the blocking pool (`AgentStart::project_settings`, `project_mcp`), records the manifest
 digest on the Operation's timeline (kind `harness`, `project-settings-pinned` or
 `project-settings-ignored` with `reason`), and treats a harness on another host as `ignore`.
-`decision.mcp` under `pinned` is whether the manifest holds `.mcp.json`. `ai6 harness pin DIR`
+`decision.mcp` under `pinned` is whether the manifest holds `.mcp.json`, `.agents/mcp_config.json` or `.agent/mcp_config.json`. `ai6 harness pin DIR`
 prints the manifest and its pin. Weakenings are printed at start.
 
 ## Bootstrap files (`ai6::bootstrap`, no feature)

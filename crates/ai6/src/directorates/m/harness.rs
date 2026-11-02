@@ -2,7 +2,8 @@
 //!
 //! A checkout can configure the harness that works in it: Claude Code reads settings, hooks,
 //! skills, subagents and commands from `.claude/` and MCP servers from `.mcp.json`; Codex reads
-//! its `.codex/` layer (config, hooks, rules). Hooks and MCP servers run commands, often
+//! its `.codex/` layer (config, hooks, rules); the Antigravity CLI hooks and MCP servers from
+//! `.agents/` and `.agent/`. Hooks and MCP servers run commands, often
 //! scripts kept elsewhere in the checkout. In a Mission driven by an issue, whoever wrote the
 //! branch could write all of that. An Operation's [`HarnessPolicy`] decides: `ignore` (the
 //! default) loads none of it, `pinned` loads it only while its [`ProjectManifest`] has the
@@ -27,9 +28,22 @@ use serde::{Deserialize, Serialize};
 
 /// The directories whose every regular file a manifest holds, relative to the working
 /// directory.
-pub const PROJECT_DIRECTORIES: [&str; 2] = [".claude", ".codex"];
+pub const PROJECT_DIRECTORIES: [&str; 4] =
+    [".claude", ".codex", ".agents/plugins", ".agent/plugins"];
 /// The single files a manifest holds when present.
-pub const PROJECT_FILES: [&str; 1] = [".mcp.json"];
+pub const PROJECT_FILES: [&str; 5] = [
+    ".mcp.json",
+    ".agents/hooks.json",
+    ".agent/hooks.json",
+    ".agents/mcp_config.json",
+    ".agent/mcp_config.json",
+];
+/// Those of [`PROJECT_FILES`] that name MCP servers.
+const PROJECT_MCP_FILES: [&str; 3] = [
+    ".mcp.json",
+    ".agents/mcp_config.json",
+    ".agent/mcp_config.json",
+];
 
 /// What a harness may do with the working directory's own configuration.
 #[non_exhaustive]
@@ -206,7 +220,9 @@ impl HarnessPolicy {
                         if found == pin {
                             ProjectDecision {
                                 load: true,
-                                mcp: manifest.files.contains_key(".mcp.json"),
+                                mcp: PROJECT_MCP_FILES
+                                    .iter()
+                                    .any(|file| manifest.files.contains_key(*file)),
                                 manifest: Some(found),
                                 refused: None,
                             }
@@ -647,6 +663,44 @@ mod tests {
         let decision =
             HarnessPolicy::pinned(manifest.digest()).decide(root.path(), &HarnessLimits::default());
         assert!(decision.load && decision.mcp);
+    }
+
+    #[test]
+    fn the_antigravity_clis_files_are_in_the_manifest_so_a_change_breaks_the_pin() {
+        let root = checkout();
+        write(
+            root.path(),
+            ".agents/hooks.json",
+            r#"{"h":{"SessionStart":[{"type":"command","command":"./tools/hook.sh"}]}}"#,
+        );
+        write(root.path(), "tools/hook.sh", "1");
+        write(root.path(), ".agent/hooks.json", "{}");
+        write(root.path(), ".agents/plugins/p/plugin.json", "{}");
+        write(root.path(), ".agent/plugins/p/plugin.json", "{}");
+        let manifest = ProjectManifest::read(root.path()).unwrap();
+        for held in [
+            ".agents/hooks.json",
+            ".agent/hooks.json",
+            ".agents/plugins/p/plugin.json",
+            ".agent/plugins/p/plugin.json",
+            "tools/hook.sh",
+        ] {
+            assert!(manifest.files.contains_key(held), "{held}");
+        }
+        let pin = HarnessPolicy::pinned(manifest.digest());
+        let decision = pin.decide(root.path(), &HarnessLimits::default());
+        assert!(decision.load && !decision.mcp, "hooks are no MCP servers");
+        write(root.path(), ".agents/hooks.json", "{}");
+        assert!(!pin.decide(root.path(), &HarnessLimits::default()).load);
+
+        for servers in [".agents/mcp_config.json", ".agent/mcp_config.json"] {
+            let root = checkout();
+            write(root.path(), servers, r#"{"mcpServers":{}}"#);
+            let manifest = ProjectManifest::read(root.path()).unwrap();
+            let decision = HarnessPolicy::pinned(manifest.digest())
+                .decide(root.path(), &HarnessLimits::default());
+            assert!(decision.load && decision.mcp, "{servers}");
+        }
     }
 
     #[cfg(unix)]
