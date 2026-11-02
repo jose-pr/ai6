@@ -295,6 +295,20 @@ fn a_hold_inbound_mode_holds_a_compartment_cable_and_release_asks_the_grant_agai
         .unwrap();
     assert_eq!((released.delivered, released.refused), (0, 1));
 
+    // What cannot be read leaves it held.
+    *held.held.lock().unwrap() = Some(vec![kestrel()]);
+    let waits = relay
+        .send(
+            &principal("a1", "A", "s-a1"),
+            send(to_compartment("K"), "held-waits"),
+        )
+        .unwrap();
+    *held.held.lock().unwrap() = None;
+    let released = relay
+        .release(&principal("c1", "C", "s-c1"), waits.id())
+        .unwrap();
+    assert_eq!((released.delivered, released.refused), (0, 0));
+
     // Held and read in: it is delivered.
     *held.held.lock().unwrap() = Some(vec![kestrel()]);
     let again = relay
@@ -307,6 +321,87 @@ fn a_hold_inbound_mode_holds_a_compartment_cable_and_release_asks_the_grant_agai
         .release(&principal("c1", "C", "s-c1"), again.id())
         .unwrap();
     assert_eq!((released.delivered, released.refused), (1, 0));
+}
+
+#[test]
+fn a_cable_released_across_an_operation_is_in_the_log_and_a_failing_log_keeps_it_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Arc::new(FileRegistry::open(dir.path()));
+    let target = to_compartment("K");
+    let policy = CablePolicy::try_new(
+        vec![CableGrant::try_new("c1".into(), CableAction::Release, target.clone()).unwrap()],
+        BTreeMap::from([("b1".to_owned(), CableInboundMode::Hold)]),
+    )
+    .unwrap();
+    let endpoints = vec![endpoint("b1", "B", "s-b1")];
+    let log_fails = Arc::new(Mutex::new(true));
+    let (fails, records): (_, Records) = (log_fails.clone(), Arc::default());
+    let written = records.clone();
+    let relay = CableRelay::new(
+        registry.clone(),
+        policy,
+        move || endpoints.clone(),
+        BTreeMap::new(),
+    )
+    .with_clock(|| 1_700_000_000.0)
+    .with_durable_audit(move |record| {
+        if record.event == "cable_read" && *fails.lock().unwrap() {
+            return Err("the log is full".to_owned());
+        }
+        written.lock().unwrap().push(record.clone());
+        Ok(())
+    });
+    relay.set_compartments(answers(vec![kestrel()]));
+    let cable = relay
+        .send(&principal("a1", "A", "s-a1"), send(target, "held"))
+        .unwrap();
+    let approver = principal("c1", "C", "s-c1");
+    let released = relay.release(&approver, cable.id()).unwrap();
+    assert_eq!((released.delivered, released.refused), (0, 0));
+    *log_fails.lock().unwrap() = false;
+    let released = relay.release(&approver, cable.id()).unwrap();
+    assert_eq!((released.delivered, released.refused), (1, 0));
+    assert!(
+        records
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|record| record.event == "cable_read")
+    );
+}
+
+#[test]
+fn a_recipient_with_no_session_is_not_in_a_compartment_s_audience() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Arc::new(FileRegistry::open(dir.path()));
+    let endpoints = vec![
+        CableEndpoint::try_new(
+            "b9".into(),
+            "B".into(),
+            None,
+            "station-a".into(),
+            None,
+            None,
+        )
+        .unwrap(),
+    ];
+    let relay = CableRelay::new(
+        registry.clone(),
+        CablePolicy::default(),
+        move || endpoints.clone(),
+        BTreeMap::new(),
+    )
+    .with_clock(|| 1_700_000_000.0)
+    .with_durable_audit(|_| Ok(()));
+    relay.set_compartments(answers(vec![kestrel()]));
+    assert!(
+        relay
+            .send(
+                &principal("a1", "A", "s-a1"),
+                send(to_compartment("K"), "one")
+            )
+            .is_err()
+    );
 }
 
 #[test]

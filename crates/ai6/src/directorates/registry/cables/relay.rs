@@ -1478,22 +1478,34 @@ impl CableRelay {
                 cable.target().scope() == CableScope::Compartment
                     || self.allows(&policy, recipient.agent(), CableAction::Receive, &target)
             });
-            let still_crosses = endpoint.is_some_and(|endpoint| {
-                let held_by = CablePrincipal {
-                    agent: endpoint.agent.clone(),
-                    operation: endpoint.operation.clone(),
-                    theater: endpoint.theater.clone(),
-                    station: endpoint.station.clone(),
-                    session_id: endpoint.session_id.clone(),
-                    mission_id: endpoint.mission_id.clone(),
-                    on_behalf_of: None,
-                };
-                matches!(self.delivery_allowed(&cable, &held_by), Some(Ok(_)))
+            let held_by = endpoint.map(|endpoint| CablePrincipal {
+                agent: endpoint.agent.clone(),
+                operation: endpoint.operation.clone(),
+                theater: endpoint.theater.clone(),
+                station: endpoint.station.clone(),
+                session_id: endpoint.session_id.clone(),
+                mission_id: endpoint.mission_id.clone(),
+                on_behalf_of: None,
             });
-            let next_state = if grants_receive && still_crosses {
-                CableState::Delivered
-            } else {
-                CableState::Refused
+            let crossing = held_by
+                .as_ref()
+                .map(|held_by| self.delivery_allowed(&cable, held_by));
+            // What is granted cannot be read: it stays held for a later release.
+            if matches!(crossing, Some(None)) {
+                continue;
+            }
+            let next_state = match (grants_receive, crossing, held_by) {
+                (true, Some(Some(Ok(compartment))), Some(held_by)) => {
+                    // Nothing is delivered across an Operation that the log does not hold first.
+                    if self
+                        .audit_crossing_read(&held_by, &cable, compartment)
+                        .is_err()
+                    {
+                        continue;
+                    }
+                    CableState::Delivered
+                }
+                _ => CableState::Refused,
             };
             if self
                 .set_delivery_state(&cable, &recipient, next_state, now)?
@@ -2000,7 +2012,11 @@ impl CableRelay {
         let mut seen = BTreeSet::new();
         let mut crossings: BTreeMap<String, CableCrossing> = BTreeMap::new();
         for endpoint in candidates {
-            if in_compartment && endpoint.session_id == sender.session_id {
+            // A recipient with no Session would be read by any Session of that Agent, in an
+            // Operation the compartment may not cover.
+            if in_compartment
+                && (endpoint.session_id.is_none() || endpoint.session_id == sender.session_id)
+            {
                 continue;
             }
             let crosses = endpoint.operation != sender.operation;
