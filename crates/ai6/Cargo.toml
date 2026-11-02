@@ -34,6 +34,10 @@ name = "ai6"
 path = "src/main.rs"
 required-features = ["cli"]
 
+[[example]]
+name = "settings_reference"
+required-features = ["cli"]
+
 [[test]]
 name = "acp_wire"
 path = "tests/acp_wire.rs"

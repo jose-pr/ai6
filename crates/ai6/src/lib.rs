@@ -11,6 +11,7 @@ extern crate alloc;
 
 pub mod bootstrap;
 pub mod bounds;
+pub mod settings;
 
 pub use bounds::{Limit, Rate, Seconds, TimeLimit};
 pub mod directorates;

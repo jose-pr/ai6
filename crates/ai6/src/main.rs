@@ -98,6 +98,13 @@ struct BootstrapArg {
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
+    /// Print one section's JSON Schema, as its declaration states it: titles, descriptions,
+    /// defaults, units and bounds. With no section, list every section and its title.
+    Schema {
+        /// A dotted path: `provider`, `registry.limits.sessions`, `oo.chat`, `record.station`,
+        /// `record.unex.gateway`, `record.operation.issues`.
+        section: Option<String>,
+    },
     /// Print the bootstrap file in use, or `none (defaults)`.
     Path {
         #[command(flatten)]
@@ -827,6 +834,20 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
         open_provider(&location, &located.value)
     };
     match command {
+        ConfigCommand::Schema { section } => match section {
+            None => Ok(ai6::settings::sections()
+                .into_iter()
+                .map(|(name, title)| format!("{name}\t{title}\n"))
+                .collect()),
+            Some(section) => {
+                let schema = ai6::settings::schema(&section).ok_or_else(|| {
+                    format!("no section {section:?}; `ai6 config schema` lists them")
+                })?;
+                serde_json::to_string_pretty(&schema)
+                    .map(|text| format!("{text}\n"))
+                    .map_err(|error| error.to_string())
+            }
+        },
         ConfigCommand::Path { .. } => Ok(String::new()),
         ConfigCommand::Public { output, bootstrap } => public_config(output.as_deref(), &bootstrap),
         ConfigCommand::Rm {
