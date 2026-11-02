@@ -33,6 +33,7 @@ pub fn universal_exports::AgentInput::fmt(&self, &mut core::fmt::Formatter<'_>) 
 #[non_exhaustive] pub struct universal_exports::AgentRoute
 pub universal_exports::AgentRoute::handler: core::option::Option<alloc::string::String>
 pub universal_exports::AgentRoute::model: core::option::Option<alloc::string::String>
+pub universal_exports::AgentRoute::pool: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::AgentView
 pub universal_exports::AgentView::agent: alloc::string::String
 pub universal_exports::AgentView::by_clearance: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::agent_records::AgentTally>
@@ -312,11 +313,13 @@ pub universal_exports::LoginLimits::per_name: core::num::nonzero::NonZeroU32
 impl core::default::Default for universal_exports::LoginLimits
 pub fn universal_exports::LoginLimits::default() -> Self
 #[non_exhaustive] pub struct universal_exports::MissionAttempt
+pub universal_exports::MissionAttempt::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
 pub universal_exports::MissionAttempt::attempt: u32
 pub universal_exports::MissionAttempt::checkpoint_branch: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::lost: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::predecessor: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::provider_session_id: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub universal_exports::MissionAttempt::session_id: alloc::string::String
 pub universal_exports::MissionAttempt::station: alloc::string::String
 pub universal_exports::MissionAttempt::status: alloc::string::String

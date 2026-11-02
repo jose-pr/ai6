@@ -1625,6 +1625,119 @@
           "x-advanced": true,
           "default": {}
         },
+        "route": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "handler": {
+                "type": "string",
+                "format": "reported:handlers",
+                "title": "Handler",
+                "description": "The harness this route runs, from those the Stations report."
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "used:model",
+                "title": "Model",
+                "description": "What this source calls the model; the Agent's model when empty."
+              },
+              "effort": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "used:effort",
+                "title": "Reasoning effort",
+                "description": "How hard the model thinks on this route; the Agent's effort when empty.",
+                "x-advanced": true
+              },
+              "handler_settings": {
+                "type": "object",
+                "additionalProperties": {},
+                "format": "settings-of:handler",
+                "title": "Handler settings",
+                "description": "Settings for this route's handler; the Agent's when empty.",
+                "x-advanced": true,
+                "default": {}
+              },
+              "pool": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "title": "Account pool",
+                "description": "The account pool this route draws from; the Agent's when empty."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Environment",
+                "description": "Values this route's Sessions get in their environment, over the Agent's, such as where the source is. Anyone who reads the roster reads them: no credential here.",
+                "x-advanced": true,
+                "default": {}
+              },
+              "secrets": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Secrets",
+                "description": "The loadout secrets (`[secret.<name>]`) this route's Sessions reach their model with, leased per Session whatever the Session has read.",
+                "x-advanced": true,
+                "default": []
+              },
+              "priority": {
+                "type": "integer",
+                "minimum": -9223372036854775808,
+                "maximum": 9223372036854775807,
+                "title": "Priority",
+                "description": "Among routes with room, the highest goes first where `balance` compares priority.",
+                "x-advanced": true,
+                "default": 0
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "handler"
+            ]
+          },
+          "title": "Routes",
+          "description": "Several ways to reach the model, each a handler, what that source calls the model and an account source, in place of the handler above. What a route leaves out it takes from here. Routes of one Agent are meant to be one model; AI6 does not check it.",
+          "x-section": "harness",
+          "x-advanced": true,
+          "default": []
+        },
+        "balance": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "headroom",
+                "round_robin",
+                "priority"
+              ],
+              "x-enum-labels": {
+                "headroom": "Headroom: the route with the most quota left",
+                "round_robin": "Round robin: the route that waited longest",
+                "priority": "Priority: the first route with room, in order"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Balance between routes",
+          "description": "How it chooses among its routes.",
+          "x-section": "harness",
+          "x-advanced": true,
+          "default": "headroom"
+        },
         "roles": {
           "type": "array",
           "items": {
@@ -1957,6 +2070,9 @@
       "fields": {
         "description": {
           "widget": "textarea"
+        },
+        "route": {
+          "form": {}
         },
         "context": {
           "widget": "textarea"
@@ -3336,6 +3452,14 @@
               "description": "Seconds a message waits for the conversation's closing harness.",
               "default": 10.0
             },
+            "limit_fallback": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Out for this long at a limit with no reset time",
+              "description": "Seconds a route or account stays out when a harness reports a limit with no reset time.",
+              "default": 1800.0
+            },
             "remove_retry": {
               "type": "number",
               "minimum": 0,
@@ -3492,6 +3616,7 @@
             "parked": 64,
             "known": 1024,
             "close_wait": 10.0,
+            "limit_fallback": 1800.0,
             "remove_retry": 2.0,
             "unlocked_stale": 3600.0,
             "clone_timeout": 120.0,

@@ -558,6 +558,7 @@ pub ai6::directorates::m::assistant::AssistantDeskLimits::job_bytes: ai6::bounds
 pub ai6::directorates::m::assistant::AssistantDeskLimits::job_retry: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantDeskLimits::job_wait: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantDeskLimits::known: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantDeskLimits::limit_fallback: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantDeskLimits::live: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantDeskLimits::memory_requests: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantDeskLimits::page_upload_timeout: ai6::bounds::Seconds
@@ -1465,6 +1466,7 @@ pub ai6::directorates::m::placement::AgentFacts::id: alloc::string::String
 pub ai6::directorates::m::placement::AgentFacts::model: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::AgentFacts::priority: i64
 pub ai6::directorates::m::placement::AgentFacts::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::AgentFacts::routes: alloc::vec::Vec<ai6::directorates::m::roster::RouteRef>
 pub ai6::directorates::m::placement::AgentFacts::tags: alloc::vec::Vec<alloc::string::String>
 impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
 pub fn ai6::directorates::m::placement::AgentFacts::from(&ai6::directorates::m::roster::Agent) -> Self
@@ -1616,8 +1618,15 @@ pub ai6::directorates::m::roster::RosterErrorKind::Conflict
 pub ai6::directorates::m::roster::RosterErrorKind::Invalid
 pub ai6::directorates::m::roster::RosterErrorKind::ReadOnly
 pub ai6::directorates::m::roster::RosterErrorKind::Unavailable
+#[non_exhaustive] pub enum ai6::directorates::m::roster::RouteBalance
+pub ai6::directorates::m::roster::RouteBalance::Headroom
+pub ai6::directorates::m::roster::RouteBalance::Priority
+pub ai6::directorates::m::roster::RouteBalance::RoundRobin
+impl ai6::directorates::m::roster::RouteBalance
+pub fn ai6::directorates::m::roster::RouteBalance::strategy(self) -> ai6::PoolStrategy
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Agent
 pub ai6::directorates::m::roster::Agent::aliases: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::balance: ai6::directorates::m::roster::RouteBalance
 pub ai6::directorates::m::roster::Agent::budget: ai6::directorates::medical::usage::Budget
 pub ai6::directorates::m::roster::Agent::clearance: alloc::string::String
 pub ai6::directorates::m::roster::Agent::context: alloc::string::String
@@ -1636,11 +1645,18 @@ pub ai6::directorates::m::roster::Agent::priority: i64
 pub ai6::directorates::m::roster::Agent::retire_on: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Agent::retire_warning_days: u32
 pub ai6::directorates::m::roster::Agent::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::routes: alloc::vec::Vec<ai6::directorates::m::roster::AgentRoute>
 pub ai6::directorates::m::roster::Agent::tags: alloc::vec::Vec<alloc::string::String>
 impl ai6::directorates::m::roster::Agent
 pub fn ai6::directorates::m::roster::Agent::effective_clearance(&self, &ai6::directorates::m::roster::Operation, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, i64) -> alloc::string::String
 pub fn ai6::directorates::m::roster::Agent::is_retired(&self, i64) -> bool
+pub fn ai6::directorates::m::roster::Agent::is_routed(&self) -> bool
+pub fn ai6::directorates::m::roster::Agent::occupant_model(&self) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::roster::Agent::on_route(&self, &ai6::directorates::m::roster::AgentRoute) -> Self
 pub fn ai6::directorates::m::roster::Agent::retirement(&self, i64) -> ai6::directorates::m::roster::Retirement
+pub fn ai6::directorates::m::roster::Agent::route_list(&self) -> alloc::vec::Vec<ai6::directorates::m::roster::AgentRoute>
+pub fn ai6::directorates::m::roster::Agent::route_named(&self, &ai6::directorates::m::roster::RouteRef) -> core::option::Option<ai6::directorates::m::roster::AgentRoute>
+pub fn ai6::directorates::m::roster::Agent::runs_on(&self, &[alloc::string::String]) -> bool
 impl ai6::directorates::m::roster::Agent
 pub fn ai6::directorates::m::roster::Agent::new(impl core::convert::Into<alloc::string::String>) -> Self
 impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
@@ -1667,6 +1683,18 @@ pub ai6::directorates::m::roster::AgentRole::purpose: alloc::string::String
 impl ai6::directorates::m::roster::AgentRole
 pub fn ai6::directorates::m::roster::AgentRole::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+#[non_exhaustive] pub struct ai6::directorates::m::roster::AgentRoute
+pub ai6::directorates::m::roster::AgentRoute::effort: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::AgentRoute::env: ai6::directorates::q::SessionEnv
+pub ai6::directorates::m::roster::AgentRoute::handler: alloc::string::String
+pub ai6::directorates::m::roster::AgentRoute::handler_settings: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub ai6::directorates::m::roster::AgentRoute::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::AgentRoute::pool: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::AgentRoute::priority: i64
+pub ai6::directorates::m::roster::AgentRoute::secrets: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::m::roster::AgentRoute
+pub fn ai6::directorates::m::roster::AgentRoute::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::roster::AgentRoute::reference(&self) -> ai6::directorates::m::roster::RouteRef
 pub struct ai6::directorates::m::roster::CoverIdentity
 pub ai6::directorates::m::roster::CoverIdentity::email: alloc::string::String
 pub ai6::directorates::m::roster::CoverIdentity::name: alloc::string::String
@@ -1762,6 +1790,14 @@ pub fn ai6::directorates::m::roster::RosterSettings::with_max_compartment_rules(
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::roster::RouteRef
+pub ai6::directorates::m::roster::RouteRef::handler: alloc::string::String
+pub ai6::directorates::m::roster::RouteRef::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::roster::RouteRef::pool: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::roster::RouteRef
+pub fn ai6::directorates::m::roster::RouteRef::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+impl core::fmt::Display for ai6::directorates::m::roster::RouteRef
+pub fn ai6::directorates::m::roster::RouteRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Workspace
 pub ai6::directorates::m::roster::Workspace::base: alloc::string::String
 pub ai6::directorates::m::roster::Workspace::branch: alloc::string::String
@@ -2758,6 +2794,7 @@ pub ai6::directorates::q::AccountKind::AnthropicAuthToken
 pub ai6::directorates::q::AccountKind::ClaudeOauthToken
 pub ai6::directorates::q::AccountKind::CodexAccessToken
 pub ai6::directorates::q::AccountKind::ConfigDir
+pub ai6::directorates::q::AccountKind::HarnessLogin
 pub ai6::directorates::q::AccountKind::OpenaiApiKey
 impl ai6::AccountKind
 pub fn ai6::AccountKind::as_str(self) -> &'static str
@@ -2834,8 +2871,10 @@ pub fn ai6::AccountPool::balancing(&self) -> ai6::PoolStrategy
 pub fn ai6::AccountPool::get(&self, &str) -> core::option::Option<&ai6::Account>
 pub fn ai6::AccountPool::handler(&self) -> &str
 pub fn ai6::AccountPool::id(&self) -> &str
+pub fn ai6::AccountPool::is_named_only(&self) -> bool
 pub fn ai6::AccountPool::login(&self) -> &[alloc::string::String]
 pub fn ai6::AccountPool::login_command(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn ai6::AccountPool::named_only(self, bool) -> Self
 pub fn ai6::AccountPool::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::AccountPool::operation_globs(&self) -> &[alloc::string::String]
 pub fn ai6::AccountPool::operations(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
@@ -2853,6 +2892,7 @@ impl ai6::directorates::q::Loadout
 pub fn ai6::directorates::q::Loadout::agent(&self) -> &str
 pub fn ai6::directorates::q::Loadout::env(&self) -> &ai6::directorates::q::SessionEnv
 pub fn ai6::directorates::q::Loadout::for_account(&ai6::AccountPool, &ai6::Account) -> core::option::Option<Self>
+pub fn ai6::directorates::q::Loadout::for_route(&str, &[alloc::string::String]) -> Self
 pub fn ai6::directorates::q::Loadout::mcp_names(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::Loadout::sandbox_name(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::q::Loadout::secret_names(&self) -> &[alloc::string::String]
@@ -2860,6 +2900,7 @@ pub struct ai6::directorates::q::LoadoutCatalog
 impl ai6::directorates::q::LoadoutCatalog
 pub fn ai6::directorates::q::LoadoutCatalog::check_session_env(&self, &ai6::directorates::q::SessionEnv, ai6::bounds::Limit) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::q::LoadoutCatalog::for_agent(&self, &str) -> core::result::Result<&ai6::directorates::q::Loadout, ai6::directorates::q::QError>
+pub fn ai6::directorates::q::LoadoutCatalog::knows_secret(&self, &str) -> bool
 pub fn ai6::directorates::q::LoadoutCatalog::load(impl core::convert::AsRef<std::path::Path>, &ai6::directorates::m::config::ConfigLimits) -> core::result::Result<Self, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::loadouts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::Loadout>
 pub fn ai6::directorates::q::LoadoutCatalog::mcp_servers(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::McpServer>
@@ -2892,6 +2933,11 @@ impl core::error::Error for ai6::directorates::q::QError
 pub fn ai6::directorates::q::QError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for ai6::directorates::q::QError
 pub fn ai6::directorates::q::QError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::RouteStanding
+pub ai6::directorates::q::RouteStanding::active: usize
+pub ai6::directorates::q::RouteStanding::last_used: core::option::Option<f64>
+pub ai6::directorates::q::RouteStanding::priority: i64
+pub ai6::directorates::q::RouteStanding::used_permille: core::option::Option<u16>
 pub struct ai6::directorates::q::SandboxProfile
 impl ai6::directorates::q::SandboxProfile
 pub fn ai6::directorates::q::SandboxProfile::backend(&self) -> &str
@@ -2990,6 +3036,7 @@ impl ai6::SecretBackend for ai6::StationSecrets
 pub fn ai6::StationSecrets::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
 pub fn ai6::StationSecrets::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
 pub fn ai6::directorates::q::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
+pub fn ai6::directorates::q::choose_route(ai6::PoolStrategy, &[ai6::RouteStanding], u16) -> core::option::Option<usize>
 pub fn ai6::directorates::q::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub mod ai6::directorates::registry
 pub mod ai6::directorates::registry::accounts
@@ -4749,6 +4796,7 @@ pub ai6::directorates::registry::sessions::SessionLaunch::effort: core::option::
 pub ai6::directorates::registry::sessions::SessionLaunch::handler: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionLaunch::mode: ai6::directorates::m::placement::ExecutionMode
 pub ai6::directorates::registry::sessions::SessionLaunch::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionLaunch::pool: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::runner: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::terminal: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionLaunch::working_directory: alloc::string::String
@@ -4757,6 +4805,7 @@ pub fn ai6::directorates::registry::sessions::SessionLaunch::new(impl core::conv
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_clearance(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_pool(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionRecord
 pub ai6::directorates::registry::sessions::SessionRecord::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
@@ -5726,6 +5775,7 @@ pub ai6::directorates::section_00::acp::AcpOptions::effort: core::option::Option
 pub ai6::directorates::section_00::acp::AcpOptions::effort_option: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::fail_on_disconnect: bool
 pub ai6::directorates::section_00::acp::AcpOptions::initialize_timeout_ms: u64
+pub ai6::directorates::section_00::acp::AcpOptions::limit_phrases: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::mcp_servers: alloc::vec::Vec<serde_json::value::Value>
 pub ai6::directorates::section_00::acp::AcpOptions::meta: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::directorates::section_00::acp::AcpOptions::model: core::option::Option<alloc::string::String>
@@ -5959,6 +6009,7 @@ pub const ai6::directorates::section_00::agent::TURN_CANCELLED: &str
 pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -5966,6 +6017,7 @@ pub fn ai6::directorates::section_00::agent::AgentHandler::weakenings(&self) -> 
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -5973,6 +6025,7 @@ pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -6078,6 +6131,7 @@ pub ai6::directorates::section_00::assistant::AssistantJob::message: alloc::stri
 pub ai6::directorates::section_00::assistant::AssistantJob::person_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::reach: ai6::directorates::section_00::assistant::AssistantReach
 pub ai6::directorates::section_00::assistant::AssistantJob::recap: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantJob::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub ai6::directorates::section_00::assistant::AssistantJob::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::skills: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::token_expires_at: f64
@@ -6101,6 +6155,7 @@ pub struct ai6::directorates::section_00::assistant::AssistantReport
 pub ai6::directorates::section_00::assistant::AssistantReport::conversation_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantReport::events: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantEvent>
 pub ai6::directorates::section_00::assistant::AssistantReport::job_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantReport::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub ai6::directorates::section_00::assistant::AssistantReport::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantReport::station_id: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantReport
@@ -6697,6 +6752,7 @@ pub ai6::AccountKind::AnthropicAuthToken
 pub ai6::AccountKind::ClaudeOauthToken
 pub ai6::AccountKind::CodexAccessToken
 pub ai6::AccountKind::ConfigDir
+pub ai6::AccountKind::HarnessLogin
 pub ai6::AccountKind::OpenaiApiKey
 impl ai6::AccountKind
 pub fn ai6::AccountKind::as_str(self) -> &'static str
@@ -7071,6 +7127,12 @@ pub ai6::RosterErrorKind::Conflict
 pub ai6::RosterErrorKind::Invalid
 pub ai6::RosterErrorKind::ReadOnly
 pub ai6::RosterErrorKind::Unavailable
+#[non_exhaustive] pub enum ai6::RouteBalance
+pub ai6::RouteBalance::Headroom
+pub ai6::RouteBalance::Priority
+pub ai6::RouteBalance::RoundRobin
+impl ai6::directorates::m::roster::RouteBalance
+pub fn ai6::directorates::m::roster::RouteBalance::strategy(self) -> ai6::PoolStrategy
 #[non_exhaustive] pub enum ai6::SandboxError
 pub ai6::SandboxError::DuplicateMount
 pub ai6::SandboxError::InvalidCommand
@@ -7273,8 +7335,10 @@ pub fn ai6::AccountPool::balancing(&self) -> ai6::PoolStrategy
 pub fn ai6::AccountPool::get(&self, &str) -> core::option::Option<&ai6::Account>
 pub fn ai6::AccountPool::handler(&self) -> &str
 pub fn ai6::AccountPool::id(&self) -> &str
+pub fn ai6::AccountPool::is_named_only(&self) -> bool
 pub fn ai6::AccountPool::login(&self) -> &[alloc::string::String]
 pub fn ai6::AccountPool::login_command(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn ai6::AccountPool::named_only(self, bool) -> Self
 pub fn ai6::AccountPool::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::AccountPool::operation_globs(&self) -> &[alloc::string::String]
 pub fn ai6::AccountPool::operations(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
@@ -7323,6 +7387,7 @@ pub fn ai6::directorates::m::approvals::ActionScope::try_new(impl core::convert:
 pub fn ai6::directorates::m::approvals::ActionScope::validate(&self) -> core::io::error::Result<()>
 #[non_exhaustive] pub struct ai6::Agent
 pub ai6::Agent::aliases: alloc::vec::Vec<alloc::string::String>
+pub ai6::Agent::balance: ai6::directorates::m::roster::RouteBalance
 pub ai6::Agent::budget: ai6::directorates::medical::usage::Budget
 pub ai6::Agent::clearance: alloc::string::String
 pub ai6::Agent::context: alloc::string::String
@@ -7341,11 +7406,18 @@ pub ai6::Agent::priority: i64
 pub ai6::Agent::retire_on: core::option::Option<alloc::string::String>
 pub ai6::Agent::retire_warning_days: u32
 pub ai6::Agent::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::Agent::routes: alloc::vec::Vec<ai6::directorates::m::roster::AgentRoute>
 pub ai6::Agent::tags: alloc::vec::Vec<alloc::string::String>
 impl ai6::directorates::m::roster::Agent
 pub fn ai6::directorates::m::roster::Agent::effective_clearance(&self, &ai6::directorates::m::roster::Operation, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, i64) -> alloc::string::String
 pub fn ai6::directorates::m::roster::Agent::is_retired(&self, i64) -> bool
+pub fn ai6::directorates::m::roster::Agent::is_routed(&self) -> bool
+pub fn ai6::directorates::m::roster::Agent::occupant_model(&self) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::roster::Agent::on_route(&self, &ai6::directorates::m::roster::AgentRoute) -> Self
 pub fn ai6::directorates::m::roster::Agent::retirement(&self, i64) -> ai6::directorates::m::roster::Retirement
+pub fn ai6::directorates::m::roster::Agent::route_list(&self) -> alloc::vec::Vec<ai6::directorates::m::roster::AgentRoute>
+pub fn ai6::directorates::m::roster::Agent::route_named(&self, &ai6::directorates::m::roster::RouteRef) -> core::option::Option<ai6::directorates::m::roster::AgentRoute>
+pub fn ai6::directorates::m::roster::Agent::runs_on(&self, &[alloc::string::String]) -> bool
 impl ai6::directorates::m::roster::Agent
 pub fn ai6::directorates::m::roster::Agent::new(impl core::convert::Into<alloc::string::String>) -> Self
 impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
@@ -7364,6 +7436,7 @@ pub ai6::AgentFacts::id: alloc::string::String
 pub ai6::AgentFacts::model: core::option::Option<alloc::string::String>
 pub ai6::AgentFacts::priority: i64
 pub ai6::AgentFacts::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::AgentFacts::routes: alloc::vec::Vec<ai6::directorates::m::roster::RouteRef>
 pub ai6::AgentFacts::tags: alloc::vec::Vec<alloc::string::String>
 impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
 pub fn ai6::directorates::m::placement::AgentFacts::from(&ai6::directorates::m::roster::Agent) -> Self
@@ -7441,6 +7514,18 @@ pub ai6::AgentRoleLimits::record_bytes: ai6::bounds::Limit
 pub ai6::AgentRoleLimits::records: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::AgentRoleLimits
 pub fn ai6::directorates::registry::limits::AgentRoleLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::AgentRoute
+pub ai6::AgentRoute::effort: core::option::Option<alloc::string::String>
+pub ai6::AgentRoute::env: ai6::directorates::q::SessionEnv
+pub ai6::AgentRoute::handler: alloc::string::String
+pub ai6::AgentRoute::handler_settings: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub ai6::AgentRoute::model: core::option::Option<alloc::string::String>
+pub ai6::AgentRoute::pool: core::option::Option<alloc::string::String>
+pub ai6::AgentRoute::priority: i64
+pub ai6::AgentRoute::secrets: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::m::roster::AgentRoute
+pub fn ai6::directorates::m::roster::AgentRoute::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::roster::AgentRoute::reference(&self) -> ai6::directorates::m::roster::RouteRef
 pub struct ai6::AgentStart
 pub ai6::AgentStart::agent_id: alloc::string::String
 pub ai6::AgentStart::answer_only: bool
@@ -7563,6 +7648,7 @@ pub ai6::AssistantDeskLimits::job_bytes: ai6::bounds::Limit
 pub ai6::AssistantDeskLimits::job_retry: ai6::bounds::Seconds
 pub ai6::AssistantDeskLimits::job_wait: ai6::bounds::Seconds
 pub ai6::AssistantDeskLimits::known: ai6::bounds::Limit
+pub ai6::AssistantDeskLimits::limit_fallback: ai6::bounds::Seconds
 pub ai6::AssistantDeskLimits::live: ai6::bounds::Limit
 pub ai6::AssistantDeskLimits::memory_requests: ai6::bounds::Limit
 pub ai6::AssistantDeskLimits::page_upload_timeout: ai6::bounds::Seconds
@@ -7647,6 +7733,7 @@ pub ai6::AssistantJob::message: alloc::string::String
 pub ai6::AssistantJob::person_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::reach: ai6::directorates::section_00::assistant::AssistantReach
 pub ai6::AssistantJob::recap: core::option::Option<alloc::string::String>
+pub ai6::AssistantJob::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub ai6::AssistantJob::session_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantJob::skills: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantJob::token_expires_at: f64
@@ -7757,6 +7844,7 @@ pub struct ai6::AssistantReport
 pub ai6::AssistantReport::conversation_id: alloc::string::String
 pub ai6::AssistantReport::events: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantEvent>
 pub ai6::AssistantReport::job_id: core::option::Option<alloc::string::String>
+pub ai6::AssistantReport::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub ai6::AssistantReport::session_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantReport::station_id: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantReport
@@ -8783,6 +8871,7 @@ impl ai6::directorates::q::Loadout
 pub fn ai6::directorates::q::Loadout::agent(&self) -> &str
 pub fn ai6::directorates::q::Loadout::env(&self) -> &ai6::directorates::q::SessionEnv
 pub fn ai6::directorates::q::Loadout::for_account(&ai6::AccountPool, &ai6::Account) -> core::option::Option<Self>
+pub fn ai6::directorates::q::Loadout::for_route(&str, &[alloc::string::String]) -> Self
 pub fn ai6::directorates::q::Loadout::mcp_names(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::Loadout::sandbox_name(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::q::Loadout::secret_names(&self) -> &[alloc::string::String]
@@ -8790,6 +8879,7 @@ pub struct ai6::LoadoutCatalog
 impl ai6::directorates::q::LoadoutCatalog
 pub fn ai6::directorates::q::LoadoutCatalog::check_session_env(&self, &ai6::directorates::q::SessionEnv, ai6::bounds::Limit) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::q::LoadoutCatalog::for_agent(&self, &str) -> core::result::Result<&ai6::directorates::q::Loadout, ai6::directorates::q::QError>
+pub fn ai6::directorates::q::LoadoutCatalog::knows_secret(&self, &str) -> bool
 pub fn ai6::directorates::q::LoadoutCatalog::load(impl core::convert::AsRef<std::path::Path>, &ai6::directorates::m::config::ConfigLimits) -> core::result::Result<Self, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::loadouts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::Loadout>
 pub fn ai6::directorates::q::LoadoutCatalog::mcp_servers(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::McpServer>
@@ -9399,6 +9489,19 @@ pub fn ai6::directorates::m::roster::RosterSettings::with_max_compartment_rules(
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
+#[non_exhaustive] pub struct ai6::RouteRef
+pub ai6::RouteRef::handler: alloc::string::String
+pub ai6::RouteRef::model: core::option::Option<alloc::string::String>
+pub ai6::RouteRef::pool: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::roster::RouteRef
+pub fn ai6::directorates::m::roster::RouteRef::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+impl core::fmt::Display for ai6::directorates::m::roster::RouteRef
+pub fn ai6::directorates::m::roster::RouteRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::RouteStanding
+pub ai6::RouteStanding::active: usize
+pub ai6::RouteStanding::last_used: core::option::Option<f64>
+pub ai6::RouteStanding::priority: i64
+pub ai6::RouteStanding::used_permille: core::option::Option<u16>
 pub struct ai6::RuleDef
 pub ai6::RuleDef::changed_unix: core::option::Option<u64>
 pub ai6::RuleDef::editor: core::option::Option<alloc::string::String>
@@ -9619,6 +9722,7 @@ pub ai6::SessionLaunch::effort: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::handler: alloc::string::String
 pub ai6::SessionLaunch::mode: ai6::directorates::m::placement::ExecutionMode
 pub ai6::SessionLaunch::model: core::option::Option<alloc::string::String>
+pub ai6::SessionLaunch::pool: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::runner: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::terminal: alloc::string::String
 pub ai6::SessionLaunch::working_directory: alloc::string::String
@@ -9627,6 +9731,7 @@ pub fn ai6::directorates::registry::sessions::SessionLaunch::new(impl core::conv
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_clearance(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_pool(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::SessionLimits
 pub ai6::SessionLimits::exposure_source_bytes: ai6::bounds::Limit
@@ -10662,6 +10767,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::withdraw_account(&self,
 pub trait ai6::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -10669,6 +10775,7 @@ pub fn ai6::AgentHandler::weakenings(&self) -> core::result::Result<alloc::vec::
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -10676,6 +10783,7 @@ pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -11296,6 +11404,7 @@ pub fn ai6::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &
 pub fn ai6::check_operation_change(&str, &ai6::OperationAccess, &ai6::OperationAccess, &ai6::Editor, &ai6::EffectiveAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64, u16) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
 pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
+pub fn ai6::choose_route(ai6::PoolStrategy, &[ai6::RouteStanding], u16) -> core::option::Option<usize>
 pub fn ai6::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6::directorates::q::terminal::TerminalOffer], core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::classify(&str, &dyn ai6::directorates::m::approvals::Repository, usize) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>

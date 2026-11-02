@@ -1282,6 +1282,7 @@ report; `unlocked_stale` when the desk starts.
 | `parked` | 64 | **Memory changes kept undelivered.** Memory changes kept on the Station because they could not be delivered; past it the oldest is dropped. |
 | `known` | 1,024 | **Conversations remembered for a resume.** Conversations whose provider Session the desk remembers for a resume. |
 | `close_wait` | 10 | **Wait for a closing harness.** Seconds a message waits for the conversation's closing harness. |
+| `limit_fallback` | 1,800 | **Out for this long at a limit with no reset time.** Seconds a route or account stays out when a harness reports a limit with no reset time. |
 | `remove_retry` | 2 | **Retry removing a directory for.** Seconds removing a closed harness's directory is tried again. |
 | `unlocked_stale` | 3,600 | **Sweep abandoned directories after.** Seconds before a directory of working directories left without its lock, or a lock without its directory, is swept. |
 | `clone_timeout` | 120 | **Longest clone.** Seconds a clone of one of her repositories may take; a memory request's clone also stops at its deadline. |

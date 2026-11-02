@@ -74,11 +74,8 @@ void main() {
       'claude gemini-free',
     );
     expect(
-      attempt({
-        'handler': 'acp',
-        'model': 'grok-4.7',
-        'pool': 'grok-free',
-      }).route,
+      attempt({'handler': 'acp', 'model': 'grok-4.7', 'pool': 'grok-free'})
+          .route,
       'acp grok-4.7 (pool grok-free)',
     );
   });
