@@ -236,7 +236,7 @@ void main() {
     addTearDown(board.dispose);
     final chat = await signIn(tester, board, channel);
     await openPage(tester, 'Missions');
-    await tester.tap(find.byTooltip('Sessions that are blocked'));
+    await tester.tap(find.byTooltip('Missions that are blocked'));
     await tester.pumpAndSettle();
     expect(find.text('Mission mission-2'), findsNothing);
     expect(find.text('Mission mission-1'), findsOneWidget);

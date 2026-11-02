@@ -1192,22 +1192,19 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Sessions that are blocked'));
+    // The Mission's latest Session is the blocked one, so it is a blocked Mission with all of
+    // its Sessions, and not a parked one for an older Session.
+    await tester.tap(find.byTooltip('Missions that are blocked'));
     await tester.pumpAndSettle();
-    expect(find.text('claude-session-123'), findsNothing);
+    expect(find.text('claude-session-123'), findsOneWidget);
     expect(find.text('codex-session-456'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Sessions that are parked'));
+    await tester.tap(find.byTooltip('Missions that are parked'));
     await tester.pumpAndSettle();
-    expect(find.text('claude-session-789'), findsOneWidget);
-    expect(find.text('codex-session-456'), findsNothing);
-
-    await tester.tap(find.byTooltip('Sessions that are quarantined'));
-    await tester.pumpAndSettle();
-    expect(find.text('claude-session-901'), findsOneWidget);
     expect(find.text('claude-session-789'), findsNothing);
+    expect(find.text('No Missions match these filters.'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Show every Session'));
+    await tester.tap(find.byTooltip('Show every Mission'));
     await tester.pumpAndSettle();
     expect(find.text('claude-session-123'), findsOneWidget);
     expect(find.text('codex-session-456'), findsOneWidget);

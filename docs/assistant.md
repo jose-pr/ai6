@@ -731,9 +731,9 @@ shows it) is marked so, and the app frames it: "Made after reading text from out
 Check it before acting on it."
 
 Her `missions` tool filters exactly as the Missions page does (both are held to one shared
-set of cases): by Operation; by state, keeping the Sessions in those states (a Session that
-reported none is working) and each Mission with one kept; then by the Station or Agent of a
-kept Session and by text in the Operation, Mission, Session IDs or brief, in any case.
+set of cases): by Operation; by a Mission's state, that of its latest Session (a Session that
+reported none is working); then by the Station or Agent of any of its Sessions and by text in the
+Operation, Mission, Session IDs or brief, in any case.
 
 The bounds are settings, `[assistant.views]` in the global `agents.toml` (the `views` table of
 the `assistant` record), each at least 1; Universal Exports reads them when it starts:

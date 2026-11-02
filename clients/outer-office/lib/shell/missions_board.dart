@@ -14,16 +14,11 @@ import 'oo_empty.dart';
 import 'oo_freshness.dart';
 import 'oo_link.dart';
 
-/// The Missions a Missions [route] selects from the board, in its order. A state filter keeps
-/// the Sessions in those states (a Mission shows when one of its Sessions does); a Station or
-/// Agent filter keeps the Missions with a Session on that Station or for that Agent.
+/// The Missions a Missions [route] selects from the board, in its order. A state filter looks at
+/// each Mission's state, that of its latest Session, as Overview and an Operation's counts do; a
+/// Station or Agent filter keeps the Missions with a Session on that Station or for that Agent.
 List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
   final states = route.states;
-  final sessions = [
-    for (final session in board.sessions)
-      if (states.isEmpty || states.contains(session.state ?? 'working'))
-        session,
-  ];
   final text = route['text']?.toLowerCase();
   // With `subtree`, the Operation and those under it as the person's tree shows them.
   final subtree = switch (route['operation_id']) {
@@ -34,6 +29,7 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
     _ => null,
   };
   bool matches(MissionGroup mission) {
+    if (states.isNotEmpty && !states.contains(mission.state)) return false;
     if (route['operation_id'] case final operation?
         when subtree != null
             ? !subtree.contains(mission.operationId)
@@ -87,7 +83,7 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
   final descending = sort == 'updated'
       ? route['order'] != 'asc'
       : route['order'] == 'desc';
-  final missions = groupMissions(sessions).where(matches).indexed.toList()
+  final missions = groupMissions(board.sessions).where(matches).indexed.toList()
     ..sort((a, b) {
       final order = key(a.$2).compareTo(key(b.$2));
       return order != 0 ? (descending ? -order : order) : a.$1.compareTo(b.$1);
@@ -97,14 +93,14 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
 
 class BoardHeader extends StatelessWidget {
   const BoardHeader({
-    required this.sessions,
+    required this.missions,
     required this.selectedStates,
     required this.onSelectStates,
     required this.sort,
     super.key,
   });
 
-  final List<SessionSummary> sessions;
+  final List<MissionGroup> missions;
 
   /// The states shown; none means every state.
   final List<String> selectedStates;
@@ -116,9 +112,8 @@ class BoardHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final counts = <String, int>{};
-    for (final session in sessions) {
-      final state = session.state ?? 'working';
-      counts.update(state, (value) => value + 1, ifAbsent: () => 1);
+    for (final mission in missions) {
+      counts.update(mission.state, (value) => value + 1, ifAbsent: () => 1);
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
@@ -135,7 +130,7 @@ class BoardHeader extends StatelessWidget {
                   children: [
                     _CountChip(
                       label: 'All',
-                      count: sessions.length,
+                      count: missions.length,
                       selected: selectedStates.isEmpty,
                       onPressed: () => onSelectStates(const []),
                     ),
@@ -177,7 +172,7 @@ class _CountChip extends StatelessWidget {
   final String label;
   final int count;
 
-  /// The state this chip filters by; none for all Sessions.
+  /// The state this chip filters by; none for all Missions.
   final String? state;
   final bool selected;
   final VoidCallback onPressed;
@@ -192,7 +187,7 @@ class _CountChip extends StatelessWidget {
     selected: selected,
     onSelected: (_) => onPressed(),
     visualDensity: VisualDensity.compact,
-    tooltip: state == null ? 'Show every Session' : 'Sessions that are $label',
+    tooltip: state == null ? 'Show every Mission' : 'Missions that are $label',
   );
 }
 

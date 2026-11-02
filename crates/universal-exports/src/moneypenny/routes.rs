@@ -307,10 +307,11 @@ impl Route {
 
     /// Whether this Missions route's page shows `mission`, an item of `GET /v1/missions`; the
     /// app's `routeMissions` decides the same, and `assistant_routes.json` holds the cases both
-    /// test. A state filter keeps the Sessions in those states (a Session without one is
-    /// working) and the Mission shows when one is kept; Station, Agent and text then look at
-    /// the kept Sessions, the text also at the Operation, the Mission and the brief's prompt,
-    /// without regard to case. Any other page shows none.
+    /// test. A state filter looks at the Mission's state: that of its latest Session, the one
+    /// with the highest `sequence` and the first of equals (a Session without a state is
+    /// working). Station, Agent and text look at any of its Sessions, the text also at the
+    /// Operation, the Mission and the brief's prompt, without regard to case. Any other page
+    /// shows none.
     pub(crate) fn shows_mission(&self, mission: &Value) -> bool {
         if self.page != Page::Missions {
             return false;
@@ -319,18 +320,20 @@ impl Route {
             Field::States(states) => Some(states),
             Field::Text(_) => None,
         });
-        let sessions: Vec<&Value> = mission["sessions"]
+        let sessions = mission["sessions"]
             .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|session| {
-                states.is_none_or(|states| {
-                    let state = session["state"].as_str().unwrap_or("working");
-                    states.iter().any(|wanted| wanted == state)
-                })
-            })
-            .collect();
-        if sessions.is_empty() {
+            .map_or(&[][..], Vec::as_slice);
+        let Some(latest) = sessions.iter().reduce(|left, right| {
+            if right["sequence"].as_u64() > left["sequence"].as_u64() {
+                right
+            } else {
+                left
+            }
+        }) else {
+            return false;
+        };
+        let state = latest["state"].as_str().unwrap_or("working");
+        if states.is_some_and(|states| !states.iter().any(|wanted| wanted == state)) {
             return false;
         }
         let equals = |key: &str, value: &Value| self.text(key).is_none_or(|wanted| value == wanted);

@@ -206,6 +206,39 @@
         },
         "usage": null,
         "attempts": []
+      },
+      {
+        "operation_id": "G",
+        "mission_id": "m-finished",
+        "sessions": [
+          {
+            "operation_id": "G",
+            "mission_id": "m-finished",
+            "session_id": "s-5",
+            "state": "blocked",
+            "reason": null,
+            "sequence": 4,
+            "updated_at": null,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          },
+          {
+            "operation_id": "G",
+            "mission_id": "m-finished",
+            "session_id": "s-6",
+            "state": "done",
+            "reason": null,
+            "sequence": 7,
+            "updated_at": null,
+            "exposure": [],
+            "station_id": "worker",
+            "agent": "007"
+          }
+        ],
+        "brief": null,
+        "usage": null,
+        "attempts": []
       }
     ],
     "cases": [
@@ -216,7 +249,8 @@
         "shows": [
           "m-retried",
           "m-quiet",
-          "m-done"
+          "m-done",
+          "m-finished"
         ]
       },
       {
@@ -226,9 +260,16 @@
             "failed"
           ]
         },
-        "shows": [
-          "m-retried"
-        ]
+        "shows": []
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "blocked"
+          ]
+        },
+        "shows": []
       },
       {
         "route": {
@@ -251,7 +292,8 @@
           ]
         },
         "shows": [
-          "m-done"
+          "m-done",
+          "m-finished"
         ]
       },
       {
@@ -290,7 +332,21 @@
           ],
           "station_id": "hq"
         },
-        "shows": []
+        "shows": [
+          "m-retried"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "state": [
+            "done"
+          ],
+          "text": "s-5"
+        },
+        "shows": [
+          "m-finished"
+        ]
       },
       {
         "route": {

@@ -440,9 +440,9 @@ static READ_TOOLS: &[Tool] = &[
         name: "missions",
         description: "The Missions the person may read, each with its Sessions, states and \
                       attempts, filtered as the Missions page filters them: by Operation, by \
-                      the states of their Sessions (a Mission shows when one of its Sessions \
-                      is in one), then by the Station or Agent of those Sessions and by text \
-                      in the Operation, Mission, Session IDs or brief.",
+                      the state of their latest Session, then by the Station or Agent of any \
+                      of their Sessions and by text in the Operation, Mission, Session IDs or \
+                      brief.",
         schema: || {
             object(
                 &[
@@ -452,17 +452,17 @@ static READ_TOOLS: &[Tool] = &[
                         json!({
                             "type": "array",
                             "items": {"type": "string", "enum": routes::STATES},
-                            "description": "Only Missions with a Session in one of these states \
-                                            (a Session that reported none is working)."
+                            "description": "Only Missions whose latest Session is in one of these \
+                                            states (a Session that reported none is working)."
                         }),
                     ),
                     (
                         "station_id",
-                        text("Only Missions with such a Session on this Station."),
+                        text("Only Missions with a Session on this Station."),
                     ),
                     (
                         "agent",
-                        text("Only Missions with such a Session for this Agent."),
+                        text("Only Missions with a Session for this Agent."),
                     ),
                     (
                         "text",

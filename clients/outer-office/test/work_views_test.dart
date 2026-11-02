@@ -11,6 +11,7 @@ import 'package:outer_office/shell/mission_detail.dart';
 import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/shell/oo_freshness.dart';
 import 'package:outer_office/shell/oo_shell.dart' show OoPage;
+import 'package:outer_office/shell/overview_page.dart';
 
 import 'routes_test.dart' show locations;
 
@@ -248,6 +249,53 @@ void main() {
       expect(top('m-new'), lessThan(top('m-a')));
       expect(top('m-a'), lessThan(top('m-b')));
       expect(top('m-b'), lessThan(top('m-c')));
+    },
+  );
+
+  testWidgets(
+    "the Missions tile's link shows the Missions it counted, by their latest Session",
+    (tester) async {
+      final board = demoBoard();
+      SessionSummary session(
+        String mission,
+        String id,
+        String state,
+        int sequence,
+      ) => SessionSummary(
+        operationId: 'G',
+        missionId: mission,
+        sessionId: id,
+        state: state,
+        sequence: sequence,
+      );
+      board.sessions = [
+        session('m-finished', 's-older', 'blocked', 4),
+        session('m-finished', 's-latest', 'done', 7),
+        session('m-open', 's-open', 'working', 2),
+      ];
+      await openAt(tester, board, '/overview', size: const Size(1400, 1600));
+      final overview = find.byType(OverviewPage);
+      final tile = find.descendant(
+        of: overview,
+        matching: find.text('Missions'),
+      );
+      expect(find.text('1 working · 2 on the board'), findsOneWidget);
+      await tester.tap(tile.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Mission m-open'), findsOneWidget);
+      expect(find.text('Mission m-finished'), findsNothing);
+      expect(
+        find.text('All  2'),
+        findsOneWidget,
+        reason: 'the chips count Missions, not Sessions',
+      );
+      expect(find.text('blocked  0'), findsOneWidget);
+      expect(find.text('done  1'), findsOneWidget);
+      await tester.tap(find.text('done  1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mission m-finished'), findsOneWidget);
+      expect(find.text('s-older'), findsOneWidget, reason: 'all its Sessions');
+      expect(find.text('s-latest'), findsOneWidget);
     },
   );
 
