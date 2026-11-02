@@ -1669,7 +1669,10 @@ fn spawn(
 
 /// The app server of a Mission, with AI6's servers its environment names, their tools approved
 /// without asking: Codex otherwise asks about each MCP call, which fails it under approval `never`
-/// and leaves it unanswered under `untrusted`. The Station checks what those tools do.
+/// and leaves it unanswered under `untrusted`. The Station checks what those tools do. In
+/// remote-hands mode it has no command tool: the harness runs on the Station, where nothing it does
+/// is to land, and Codex's read-only sandbox lets a command read any file there (Codex 0.164.0 on
+/// Linux).
 fn app_server_argv(
     executable: &str,
     environment: &std::collections::BTreeMap<String, String>,
@@ -1691,6 +1694,9 @@ fn app_server_argv(
                 format!("mcp_servers.{server}.default_tools_approval_mode=\"approve\""),
             ]);
         }
+    }
+    if is_remote_hands(environment) {
+        argv.extend(["-c".to_owned(), "features.shell_tool=false".to_owned()]);
     }
     argv
 }
@@ -1843,9 +1849,9 @@ fn is_remote_hands(environment: &std::collections::BTreeMap<String, String>) -> 
         && environment.contains_key("AI6_THEATER_MCP_TOKEN")
 }
 
-/// Codex cannot switch its shell tool off, so in remote-hands mode it runs in a read-only
-/// sandbox that asks nothing: work cannot land on the Station, and the Theater tools are
-/// how it changes anything.
+/// In remote-hands mode the Theater tools are how a thread changes anything. Its command tool is off
+/// ([`app_server_argv`]), and its read-only sandbox that asks nothing refuses Codex's patches, so
+/// no work lands on the Station.
 fn restrict_to_remote_hands(params: &mut Value) {
     params["sandbox"] = json!("read-only");
     params["approvalPolicy"] = json!("never");
@@ -3763,6 +3769,18 @@ mod tests {
         assert!(
             argv.iter()
                 .all(|argument| !argument.contains("theater-secret-token"))
+        );
+
+        assert!(
+            argv.iter()
+                .any(|argument| argument == "features.shell_tool=false"),
+            "on Linux its read-only sandbox lets a command read any file of the Station: {argv:?}"
+        );
+        assert!(
+            !app_server_argv("codex", &std::collections::BTreeMap::new())
+                .iter()
+                .any(|argument| argument == "features.shell_tool=false"),
+            "a field Session on the Station keeps its commands"
         );
 
         let mut params = json!({ "cwd": "/scratch" });

@@ -208,8 +208,8 @@ out with the missing capability named. Placement previews show the mode of each 
 
 In remote-hands mode the Station starts the harness in a scratch directory under its state
 directory (`remote-hands/<mission>`, not removed), switches off the harness's own shell and
-file tools (Claude Code's `--disallowedTools`; Codex runs in a read-only sandbox that asks
-nothing), and gives it four tools on a per-Session authenticated MCP endpoint, bound to the
+file tools (Claude Code's `--disallowedTools`; Codex's `features.shell_tool = false`, and a
+read-only sandbox that asks nothing, which refuses its patches), and gives it four tools on a per-Session authenticated MCP endpoint, bound to the
 Mission:
 
 | Tool | Does |

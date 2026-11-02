@@ -106,6 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A Codex thread in remote-hands mode no longer keeps a command tool on the Station. Its read-only
+  sandbox left `exec_command` reading any file the Station's user can read on Linux (measured with
+  Codex 0.164.0; on Windows such commands were refused by policy). `features.shell_tool=false` now
+  takes it out, and what the handler's documentation said, that it could not be switched off, was wrong.
 - The Stations guide said Stations speak `ai6-station/1` to each other. Nothing dials or listens on
   it: they coordinate through the Registry. `ai6 identity` and `ai6 peer` stay as they are.
 - A terminal that reconnects replays from what it received. It started from, and followed, the board's

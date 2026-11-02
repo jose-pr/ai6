@@ -87,10 +87,15 @@ under both.
 When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
 remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
 App-server then also receives overrides for an `ai6-theater` server, its tools approved the
-same way, and `thread/start` and `thread/resume` carry `sandbox = "read-only"` and
-`approvalPolicy = "never"`, because Codex's shell tool cannot be switched off: the sandbox keeps
-anything from being written on the Station. Codex 0.164.0 reports both back from `thread/start`
-(same measurement).
+same way, and `-c features.shell_tool=false`, and `thread/start` and `thread/resume` carry
+`sandbox = "read-only"` and `approvalPolicy = "never"`. Codex 0.164.0 reports both back from
+`thread/start` (same measurement). Measured through a loopback stand-in on Windows and on Linux with
+bubblewrap: at those settings without the shell setting, `exec_command` is offered, and on Linux a
+command reads any file the Station's user can (no write and no network), while on Windows every
+command tried is `blocked by policy`; with it, `exec_command` and `write_stdin` leave `functions.exec`
+on both, `apply_patch` is refused by the sandbox, and the Theater's tools still work. Codex's other
+tools stay (`view_image`, `request_user_input`, its goal and collaboration tools), since a thread at
+`field` or `00` gets no tool check.
 The handler answers every `item/commandExecution/requestApproval` server request (params
 `threadId`, `turnId`, `command`, `cwd`, `kind`) with the green ink gate
 (`ai6::directorates::section_00::gate::gate`, asking the Station through the Cable endpoint):
