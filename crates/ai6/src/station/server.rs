@@ -154,7 +154,7 @@ pub struct StationConfig {
     /// check-in.
     tls_weakened: Vec<String>,
     /// The pins and profile a runner the Station starts on its own host checks against.
-    runner_pins: Option<(crate::PinSet, crate::PluginProfile)>,
+    runner_pins: Option<(crate::PinSet, crate::PluginProfile, crate::KeepVerified)>,
     /// The `station` record's tables: what bounds and paces the Station's work.
     limits: Arc<StationLimits>,
 }
@@ -360,6 +360,7 @@ pub struct ServeConfig {
     plugin_paths: Vec<PathBuf>,
     plugin_policy: Option<plugins::PluginPolicy>,
     plugin_profile: Option<crate::PluginProfile>,
+    keep_verified: crate::KeepVerified,
     config_dir: Option<PathBuf>,
     secrets_dir: Option<PathBuf>,
     config_source: Option<Arc<dyn ConfigProvider>>,
@@ -380,6 +381,7 @@ impl ServeConfig {
             plugin_paths: Vec::new(),
             plugin_policy: None,
             plugin_profile: None,
+            keep_verified: crate::KeepVerified::default(),
             config_dir: None,
             secrets_dir: None,
             config_source: None,
@@ -412,6 +414,15 @@ impl ServeConfig {
     #[must_use]
     pub fn with_plugin_profile(mut self, profile: crate::PluginProfile) -> Self {
         self.plugin_profile = Some(profile);
+        self
+    }
+
+    /// Which old verified copies of provider libraries a `strict` scan removes: the host's own
+    /// choice ([`PluginSettings::keep_verified`](crate::bootstrap::PluginSettings)). A policy
+    /// from [`ServeConfig::with_plugin_policy`] has its own.
+    #[must_use]
+    pub fn with_keep_verified(mut self, keep: crate::KeepVerified) -> Self {
+        self.keep_verified = keep;
         self
     }
 
@@ -753,7 +764,8 @@ where
             let policy = plugins::PluginPolicy::new(
                 snapshot.settings.pins.clone(),
                 state_dir.join("plugins").join("verified"),
-            );
+            )
+            .with_keep_verified(config.keep_verified);
             match config.plugin_profile {
                 Some(profile) => policy.with_profile(profile),
                 None => policy,
@@ -761,7 +773,11 @@ where
         }
     };
     if snapshot.settings.pins.is_some() || config.plugin_profile.is_some() {
-        config.station.runner_pins = Some((plugin_policy.pins().clone(), plugin_policy.profile()));
+        config.station.runner_pins = Some((
+            plugin_policy.pins().clone(),
+            plugin_policy.profile(),
+            plugin_policy.keep_verified(),
+        ));
     }
     let cable_config = snapshot.settings.cables.clone();
     let provider_loadouts = snapshot.settings.loadouts.clone();
@@ -2370,7 +2386,7 @@ fn runner_link(state: &DaemonState, theater_id: &str) -> Result<Option<Arc<Runne
     Ok(link
         .map(|link| link.with_settings(settings))
         .map(|link| match &state.station.runner_pins {
-            Some((pins, profile)) => link.with_pins(pins.clone(), *profile),
+            Some((pins, profile, keep)) => link.with_pins(pins.clone(), *profile, *keep),
             None => link,
         })
         .map(Arc::new))

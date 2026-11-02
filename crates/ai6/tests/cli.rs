@@ -729,10 +729,99 @@ fn plugins_a_station_under_strict_loads_a_rebuilt_library_with_no_record_change(
     );
     drop(second);
 
+    // Told to keep nothing else, the next start clears the old build and only that.
+    std::fs::write(
+        &signed.config,
+        "state_dir = \"state\"\n[plugins]\npaths = [\"plugins\"]\nkeep_verified = 0\n",
+    )
+    .unwrap();
+    let (third, summary) = station_plugins(&signed, &log);
+    let shown = summary.to_string();
+    assert_eq!(
+        summary["verified_removed"][0],
+        verified_copy(&state, &original).display().to_string(),
+        "{shown}"
+    );
+    assert!(!verified_copy(&state, &original).exists(), "{shown}");
+    assert!(verified_copy(&state, &rebuilt).exists(), "{shown}");
+    drop(third);
+
     assert_eq!(
         std::fs::read(signed.root.path().join("plugins.toml")).unwrap(),
         records
     );
+}
+
+#[test]
+fn plugins_a_running_process_keeps_its_copy_while_another_clears_the_directory() {
+    let signed = Signed::new();
+    signed.sign();
+    let pins = signed.root.path().join("pins.toml");
+    std::fs::write(&pins, signed.publisher_entry()).unwrap();
+    let state = signed.root.path().join("runner");
+    let plugins = signed.library.parent().unwrap();
+    let runner = || {
+        let mut command = ai6();
+        command
+            .args(["runner", "serve", "--listen", "127.0.0.1:0", "--state-dir"])
+            .arg(&state)
+            .arg("--plugin-path")
+            .arg(plugins)
+            .arg("--pins")
+            .arg(&pins)
+            .args(["--keep-verified", "0"])
+            .stdin(std::process::Stdio::null());
+        command
+    };
+    let original = std::fs::read(&signed.library).unwrap();
+    let old_copy = verified_copy(&state, &original);
+
+    // One process has the build mapped and is running.
+    let holder = Running(
+        runner()
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    until("the first runner to start", || {
+        state.join("runner.json").exists().then_some(())
+    });
+    assert!(old_copy.exists());
+
+    // A second finds a new build and keeps nothing else. It then stops, the state directory
+    // being taken, which is no part of this.
+    let mut rebuilt = original.clone();
+    rebuilt.extend_from_slice(b"rebuilt");
+    std::fs::write(&signed.library, &rebuilt).unwrap();
+    signed.sign();
+    let output = runner().output().unwrap();
+    let said = text(&output.stderr);
+    assert!(said.contains("another runner serves"), "{said}");
+    assert!(
+        said.contains(&format!(
+            "old verified copy left: {}: another process holds it",
+            old_copy.display()
+        )),
+        "{said}"
+    );
+    assert!(old_copy.exists(), "{said}");
+    assert!(verified_copy(&state, &rebuilt).exists(), "{said}");
+    drop(holder);
+
+    // With the holder gone, the same scan clears it.
+    let log = signed.root.path().join("runner.log");
+    let log_file = std::fs::File::create(&log).unwrap();
+    let cleared = Running(
+        runner()
+            .stdout(log_file.try_clone().unwrap())
+            .stderr(log_file)
+            .spawn()
+            .unwrap(),
+    );
+    until("the old copy to go", || (!old_copy.exists()).then_some(()));
+    assert!(verified_copy(&state, &rebuilt).exists());
+    drop(cleared);
 }
 
 #[test]

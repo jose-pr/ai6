@@ -266,6 +266,11 @@ struct PinArgs {
     /// with a pin set and report without).
     #[arg(long, value_name = "PROFILE")]
     plugin_profile: Option<ai6::PluginProfile>,
+    /// Which verified copies a strict scan keeps besides those it loaded: a count, 0 for none of
+    /// them, or `none` for no limit (default: 8). A Station passes its own `[plugins]
+    /// keep_verified`.
+    #[arg(long, value_name = "N|none")]
+    keep_verified: Option<ai6::KeepVerified>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -612,6 +617,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
     if let Some(profile) = located.value.plugins.profile {
         config = config.with_plugin_profile(profile);
     }
+    config = config.with_keep_verified(located.value.plugins.keep_verified());
     if let Some(station) = &located.value.station {
         config = config.with_station_id(station);
     }
@@ -822,7 +828,8 @@ fn plugin_policy(
     let policy = ai6::station::plugins::PluginPolicy::new(
         snapshot.settings.pins.clone(),
         opened.state_dir.join("plugins").join("verified"),
-    );
+    )
+    .with_keep_verified(located.value.plugins.keep_verified());
     match located.value.plugins.profile {
         Some(profile) => policy.with_profile(profile),
         None => policy,
@@ -1094,6 +1101,9 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                 if let Some(profile) = args.pins.plugin_profile {
                     arguments.extend(["--plugin-profile".into(), profile.as_str().into()]);
                 }
+                if let Some(keep) = args.pins.keep_verified {
+                    arguments.extend(["--keep-verified".into(), keep.to_string().into()]);
+                }
                 let started = std::env::current_exe().and_then(|program| {
                     ai6::station::runner::spawn_detached(
                         &program,
@@ -1130,6 +1140,10 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
                     eprintln!("ai6: provider library pins: {error}");
                     return ExitCode::FAILURE;
                 }
+            };
+            let policy = match args.pins.keep_verified {
+                Some(keep) => policy.with_keep_verified(keep),
+                None => policy,
             };
             let mut config = ai6::station::runner::RunnerConfig::new(&state_dir)
                 .with_plugin_paths(args.plugin_paths)

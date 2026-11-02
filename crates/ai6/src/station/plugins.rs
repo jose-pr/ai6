@@ -3,6 +3,7 @@
 use core::fmt;
 use std::collections::BTreeMap;
 use std::env::consts::DLL_EXTENSION;
+use std::fs::{File, OpenOptions, TryLockError};
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,7 +22,8 @@ use serde::Serialize;
 use sha2::Digest as _;
 
 use crate::directorates::registry::bona_fides::{
-    LibraryPin, PinCheck, PinSet, PluginProfile, PublisherKey, library_pin, publisher_message,
+    KeepVerified, LibraryPin, PinCheck, PinSet, PluginProfile, PublisherKey, library_pin,
+    publisher_message,
 };
 
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
@@ -67,6 +69,11 @@ pub struct PluginScanSummary {
     /// profile, each library that loaded unpinned or unmatched, SHA-1 pins, a publisher whose
     /// signature alone is enough.
     pub weakened: Vec<String>,
+    /// Old verified copies this scan removed.
+    pub verified_removed: Vec<String>,
+    /// Old verified copies this scan left, with why: another process holds them, or they could
+    /// not be removed. The next scan tries again.
+    pub verified_held: Vec<String>,
 }
 
 /// One AI6 provider library a scan found.
@@ -88,12 +95,15 @@ pub struct LibraryCheck {
 /// Under [`PluginProfile::Strict`] each library is read once, checked against the pin set,
 /// and loaded from a copy written into `verified_dir` under its digest, never from where it
 /// was found; under `Report` every library loads from where it was found and each one the
-/// pin set does not accept is a weakening; under `Off` nothing is checked.
+/// pin set does not accept is a weakening; under `Off` nothing is checked. A `Strict` scan then
+/// removes the copies in `verified_dir` it did not load, as [`KeepVerified`] says: never one a
+/// scan elsewhere is about to load or a running process has loaded.
 #[derive(Debug, Clone)]
 pub struct PluginPolicy {
     profile: PluginProfile,
     pins: PinSet,
     verified_dir: Option<PathBuf>,
+    keep_verified: KeepVerified,
 }
 
 impl Default for PluginPolicy {
@@ -103,6 +113,7 @@ impl Default for PluginPolicy {
             profile: PluginProfile::Report,
             pins: PinSet::new(),
             verified_dir: None,
+            keep_verified: KeepVerified::default(),
         }
     }
 }
@@ -117,6 +128,7 @@ impl PluginPolicy {
             profile,
             pins: pins.unwrap_or_default(),
             verified_dir: Some(verified_dir.into()),
+            keep_verified: KeepVerified::default(),
         }
     }
 
@@ -168,9 +180,21 @@ impl PluginPolicy {
         self
     }
 
+    /// Keeps old verified copies as `keep` says.
+    #[must_use]
+    pub fn with_keep_verified(mut self, keep: KeepVerified) -> Self {
+        self.keep_verified = keep;
+        self
+    }
+
     /// The profile scans run under.
     pub fn profile(&self) -> PluginProfile {
         self.profile
+    }
+
+    /// Which old verified copies a `strict` scan keeps.
+    pub fn keep_verified(&self) -> KeepVerified {
+        self.keep_verified
     }
 
     /// The accepted libraries.
@@ -231,6 +255,8 @@ pub struct Plugins {
     summary: PluginScanSummary,
     /// The configuration each provider is built with when its caller gives none.
     defaults: BTreeMap<String, Value>,
+    /// A shared lock on each verified copy the registry mapped, kept as long as the mapping.
+    _held_copies: ManuallyDrop<Vec<File>>,
 }
 
 impl Plugins {
@@ -254,6 +280,11 @@ impl Plugins {
         };
         let mut search = SearchPath::new();
         let mut found_at = BTreeMap::new();
+        let verified = policy
+            .verified_dir
+            .as_deref()
+            .filter(|_| policy.profile == PluginProfile::Strict);
+        let scanning = verified.map(enter_verified);
         if policy.profile == PluginProfile::Off {
             summary
                 .weakened
@@ -292,10 +323,29 @@ impl Plugins {
                 .iter()
                 .map(|(path, reason)| format!("{}: {reason}", shown(path))),
         );
+        let mut held_copies = Vec::new();
+        if let (Some(directory), Some(scanning)) = (verified, scanning) {
+            // Before the scan's own lock goes, so no clearing elsewhere can come between.
+            held_copies.extend(
+                report
+                    .loaded
+                    .iter()
+                    .filter(|(path, _)| found_at.contains_key(path))
+                    .filter_map(|(path, _)| hold_copy(path)),
+            );
+            clear_verified(
+                directory,
+                scanning,
+                &found_at,
+                policy.keep_verified,
+                &mut summary,
+            );
+        }
         Self {
             registry: ManuallyDrop::new(registry),
             summary,
             defaults: BTreeMap::new(),
+            _held_copies: ManuallyDrop::new(held_copies),
         }
     }
 
@@ -325,6 +375,7 @@ impl Plugins {
             registry: ManuallyDrop::new(registry),
             summary: PluginScanSummary::default(),
             defaults: BTreeMap::new(),
+            _held_copies: ManuallyDrop::new(Vec::new()),
         }
     }
 
@@ -621,6 +672,12 @@ pub fn log_scan(summary: &PluginScanSummary) {
     for weakened in &summary.weakened {
         eprintln!("ai6: warning: {weakened}");
     }
+    for removed in &summary.verified_removed {
+        eprintln!("ai6: removed old verified copy {removed}");
+    }
+    for held in &summary.verified_held {
+        eprintln!("ai6: old verified copy left: {held}");
+    }
 }
 
 /// The filter a scan applies to what a library declares: one of AI6's own kinds.
@@ -815,6 +872,115 @@ fn copy_verified(directory: &Path, digest: &PeerId, bytes: &[u8]) -> std::io::Re
     Ok(path)
 }
 
+/// The lock file of a verified directory. A scan holds it shared from before its first copy until
+/// its last load; clearing holds it exclusive, so a copy cannot go between being written and
+/// being loaded.
+const VERIFIED_LOCK: &str = ".lock";
+
+/// Opens the lock of `directory`, creating both, and waits for any clearing to end. A clearing
+/// holds it only while it deletes, and the system releases it when the holder dies.
+fn enter_verified(directory: &Path) -> std::io::Result<File> {
+    std::fs::create_dir_all(directory)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.join(VERIFIED_LOCK))?;
+    lock.lock_shared()?;
+    Ok(lock)
+}
+
+/// A shared lock on a copy this process loaded: what another process's clearing asks about, since
+/// a mapped file cannot be relied on to refuse its deletion. `None` where no lock can be had.
+fn hold_copy(copy: &Path) -> Option<File> {
+    let file = File::open(copy).ok()?;
+    file.lock_shared().ok()?;
+    Some(file)
+}
+
+/// Removes the copies in `directory` this scan did not hand to Guatiao, past the newest `keep`.
+/// While another scan is under way it removes nothing: the next scan clears them. A failure here
+/// never fails the scan.
+fn clear_verified(
+    directory: &Path,
+    scanning: std::io::Result<File>,
+    used: &BTreeMap<PathBuf, PathBuf>,
+    keep: KeepVerified,
+    summary: &mut PluginScanSummary,
+) {
+    let KeepVerified::Newest(keep) = keep else {
+        return;
+    };
+    let not_cleared = |error: std::io::Error| format!("{}: {error}", directory.display());
+    let lock = match scanning {
+        Ok(lock) => lock,
+        Err(error) => {
+            summary.verified_held.push(not_cleared(error));
+            return;
+        }
+    };
+    // A shared lock does not become exclusive in place: the copies this scan loaded are held on
+    // their own, and any other scan that starts in the gap makes the attempt below fail.
+    if let Err(error) = lock.unlock() {
+        summary.verified_held.push(not_cleared(error));
+        return;
+    }
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => return,
+        Err(TryLockError::Error(error)) => {
+            summary.verified_held.push(not_cleared(error));
+            return;
+        }
+    }
+    let listing = match std::fs::read_dir(directory) {
+        Ok(listing) => listing,
+        Err(error) => {
+            summary.verified_held.push(not_cleared(error));
+            return;
+        }
+    };
+    let used: Vec<&std::ffi::OsStr> = used.keys().filter_map(|copy| copy.file_name()).collect();
+    let mut unused: Vec<(std::time::SystemTime, PathBuf)> = listing
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter(|entry| is_verified_copy(&entry.path()) && !used.contains(&&*entry.file_name()))
+        .map(|entry| {
+            let written = entry.metadata().and_then(|metadata| metadata.modified());
+            (written.unwrap_or(std::time::UNIX_EPOCH), entry.path())
+        })
+        .collect();
+    unused.sort_unstable_by(|a, b| b.cmp(a));
+    let keep = usize::try_from(keep).unwrap_or(usize::MAX);
+    for (_, copy) in unused.into_iter().skip(keep) {
+        let shown = copy.display().to_string();
+        match remove_copy(&copy) {
+            Ok(()) => summary.verified_removed.push(shown),
+            Err(error) => summary.verified_held.push(format!("{shown}: {error}")),
+        }
+    }
+}
+
+/// Whether `path` is named as [`copy_verified`] names a copy.
+fn is_verified_copy(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension == DLL_EXTENSION)
+        && path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("sha256-"))
+}
+
+/// Removes a copy unless a process holds it ([`hold_copy`]).
+fn remove_copy(copy: &Path) -> std::io::Result<()> {
+    let file = File::open(copy)?;
+    file.try_lock().map_err(|error| match error {
+        TryLockError::WouldBlock => std::io::Error::other("another process holds it"),
+        TryLockError::Error(error) => error,
+    })?;
+    std::fs::remove_file(copy)
+}
+
 /// Whether `signature` is `key`'s Ed25519 signature of `message`.
 fn verify_ed25519(key: &PublisherKey, message: &[u8], signature: &[u8]) -> bool {
     UnparsedPublicKey::new(&ED25519, key.as_bytes())
@@ -867,6 +1033,7 @@ pub fn check_libraries(paths: &[PathBuf], pins: &PinSet) -> PluginScanSummary {
         profile: PluginProfile::Strict,
         pins: pins.clone(),
         verified_dir: None,
+        keep_verified: KeepVerified::default(),
     };
     let mut summary = PluginScanSummary {
         profile: policy.profile.as_str().to_owned(),
@@ -1599,11 +1766,279 @@ tty = false
         (directory, library)
     }
 
+    fn digest_policy(bytes: &[u8], verified: &Path) -> PluginPolicy {
+        PluginPolicy::new(
+            Some(PinSet::new().with_library(LibraryPin::digest(file_name(), library_pin(bytes)))),
+            verified,
+        )
+    }
+
     fn copy_of(bytes: &[u8], verified: &Path) -> PathBuf {
         verified.join(format!(
             "sha256-{}.{DLL_EXTENSION}",
             library_pin(bytes).hex()
         ))
+    }
+
+    /// A copy nothing loads, written `hours` ago.
+    fn old_copy(verified: &Path, name: &str, hours: u64) -> PathBuf {
+        let copy = verified.join(format!("sha256-{name}.{DLL_EXTENSION}"));
+        std::fs::write(&copy, name).unwrap();
+        let written = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
+        OpenOptions::new()
+            .write(true)
+            .open(&copy)
+            .unwrap()
+            .set_modified(written)
+            .unwrap();
+        copy
+    }
+
+    #[test]
+    fn a_strict_scan_keeps_what_it_loaded_and_the_newest_and_removes_the_rest() {
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let oldest = old_copy(verified.path(), "oldest", 50);
+        let older = old_copy(verified.path(), "older", 40);
+        let old = old_copy(verified.path(), "old", 30);
+        let newer = old_copy(verified.path(), "newer", 20);
+        let newest = old_copy(verified.path(), "newest", 10);
+        let other_kind = verified.path().join("sha256-note.txt");
+        let not_a_copy = verified.path().join(format!("kept.{DLL_EXTENSION}"));
+        std::fs::write(&other_kind, "not a library").unwrap();
+        std::fs::write(&not_a_copy, "not named as a copy").unwrap();
+
+        let policy =
+            digest_policy(&bytes, verified.path()).with_keep_verified(KeepVerified::Newest(2));
+        let plugins = Plugins::scan_with(&[directory.path().to_path_buf()], &policy);
+        let summary = plugins.scan_summary();
+
+        assert!(has_roles(&plugins), "{summary:?}");
+        assert!(copy_of(&bytes, verified.path()).exists(), "what it loaded");
+        assert!(newest.exists() && newer.exists(), "{summary:?}");
+        assert!(
+            !old.exists() && !older.exists() && !oldest.exists(),
+            "{summary:?}"
+        );
+        assert!(other_kind.exists() && not_a_copy.exists(), "not its files");
+        let mut removed = summary.verified_removed.clone();
+        removed.sort();
+        let mut expected = [&old, &older, &oldest].map(|copy| copy.display().to_string());
+        expected.sort();
+        assert_eq!(removed, expected);
+        assert!(summary.verified_held.is_empty(), "{summary:?}");
+    }
+
+    #[test]
+    fn keep_zero_removes_every_unused_copy_and_none_removes_nothing() {
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let stale = old_copy(verified.path(), "stale", 1);
+        let scan = |keep| {
+            let policy = digest_policy(&bytes, verified.path()).with_keep_verified(keep);
+            Plugins::scan_with(&[directory.path().to_path_buf()], &policy)
+        };
+
+        let plugins = scan(KeepVerified::All);
+        assert!(has_roles(&plugins));
+        assert!(plugins.scan_summary().verified_removed.is_empty());
+        assert!(stale.exists(), "none is no limit");
+
+        let plugins = scan(KeepVerified::Newest(0));
+        assert!(has_roles(&plugins), "{:?}", plugins.scan_summary());
+        assert!(!stale.exists());
+        assert!(
+            copy_of(&bytes, verified.path()).exists(),
+            "what it loaded stays at any count"
+        );
+    }
+
+    #[test]
+    fn only_a_strict_scan_clears_the_verified_directory() {
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let stale = old_copy(verified.path(), "stale", 1);
+        for profile in [PluginProfile::Report, PluginProfile::Off] {
+            let policy = digest_policy(&bytes, verified.path())
+                .with_keep_verified(KeepVerified::Newest(0))
+                .with_profile(profile);
+            let plugins = Plugins::scan_with(&[directory.path().to_path_buf()], &policy);
+            assert!(has_roles(&plugins), "{profile:?}");
+            assert!(stale.exists(), "{profile:?}");
+        }
+    }
+
+    #[test]
+    fn a_copy_another_process_holds_stays_without_failing_the_scan_and_goes_later() {
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let held = old_copy(verified.path(), "held", 1);
+        let holder = File::open(&held).unwrap();
+        holder.lock_shared().unwrap();
+        let scan = || {
+            let policy =
+                digest_policy(&bytes, verified.path()).with_keep_verified(KeepVerified::Newest(0));
+            Plugins::scan_with(&[directory.path().to_path_buf()], &policy)
+        };
+
+        let plugins = scan();
+        let summary = plugins.scan_summary();
+        assert!(has_roles(&plugins), "{summary:?}");
+        assert!(summary.failed.is_empty(), "{summary:?}");
+        assert!(held.exists());
+        assert_eq!(summary.verified_held.len(), 1, "{summary:?}");
+        assert!(
+            summary.verified_held[0].contains(&held.display().to_string())
+                && summary.verified_held[0].contains("another process holds it"),
+            "{summary:?}"
+        );
+
+        drop(holder);
+        let plugins = scan();
+        assert!(!held.exists(), "{:?}", plugins.scan_summary());
+    }
+
+    /// What holding a library looks like to a clearing on Windows beyond any lock: the system
+    /// refuses to open or delete a file another handle shares nothing of.
+    #[cfg(windows)]
+    #[test]
+    fn a_copy_open_without_delete_sharing_stays_without_failing_the_scan() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let held = old_copy(verified.path(), "held", 1);
+        let holder = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&held)
+            .unwrap();
+
+        let policy =
+            digest_policy(&bytes, verified.path()).with_keep_verified(KeepVerified::Newest(0));
+        let plugins = Plugins::scan_with(&[directory.path().to_path_buf()], &policy);
+        let summary = plugins.scan_summary();
+        assert!(has_roles(&plugins), "{summary:?}");
+        assert!(summary.failed.is_empty(), "{summary:?}");
+        assert!(summary.verified_removed.is_empty(), "{summary:?}");
+        assert!(
+            summary.verified_held[0].contains(&held.display().to_string()),
+            "{summary:?}"
+        );
+        drop(holder);
+        assert!(held.exists());
+    }
+
+    #[test]
+    fn a_loaded_copy_stays_held_so_a_later_clearing_leaves_it() {
+        let (first, _library, bytes) = one_library();
+        let verified = scratch();
+        let plugins = Plugins::scan_with(
+            &[first.path().to_path_buf()],
+            &digest_policy(&bytes, verified.path()),
+        );
+        assert!(has_roles(&plugins), "{:?}", plugins.scan_summary());
+        let loaded = copy_of(&bytes, verified.path());
+        assert!(matches!(
+            File::open(&loaded).unwrap().try_lock(),
+            Err(TryLockError::WouldBlock)
+        ));
+
+        // A new build scanned by another process, which keeps nothing it did not load.
+        let new = rebuilt(&bytes);
+        let (second, _second_library) = holding(&new);
+        let policy =
+            digest_policy(&new, verified.path()).with_keep_verified(KeepVerified::Newest(0));
+        let later = Plugins::scan_with(&[second.path().to_path_buf()], &policy);
+        let summary = later.scan_summary();
+        assert!(has_roles(&later), "{summary:?}");
+        assert!(loaded.exists(), "{summary:?}");
+        assert!(
+            summary.verified_held[0].contains(&loaded.display().to_string()),
+            "{summary:?}"
+        );
+        drop(plugins);
+        assert!(
+            matches!(
+                File::open(&loaded).unwrap().try_lock(),
+                Err(TryLockError::WouldBlock)
+            ),
+            "the mapping outlives the value, and so does the lock"
+        );
+    }
+
+    #[test]
+    fn a_scan_under_way_elsewhere_stops_the_clearing_until_it_ends() {
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let stale = old_copy(verified.path(), "stale", 1);
+        // Holds the lock as a scan does between its first copy and its last load.
+        let elsewhere = enter_verified(verified.path()).unwrap();
+        let scan = || {
+            let policy =
+                digest_policy(&bytes, verified.path()).with_keep_verified(KeepVerified::Newest(0));
+            Plugins::scan_with(&[directory.path().to_path_buf()], &policy)
+        };
+
+        let plugins = scan();
+        assert!(has_roles(&plugins), "{:?}", plugins.scan_summary());
+        assert!(stale.exists(), "{:?}", plugins.scan_summary());
+
+        drop(elsewhere);
+        let plugins = scan();
+        assert!(!stale.exists(), "{:?}", plugins.scan_summary());
+    }
+
+    #[test]
+    fn a_scan_waits_for_a_clearing_under_way_and_then_loads() {
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let clearing = enter_verified(verified.path()).unwrap();
+        clearing.unlock().unwrap();
+        clearing.try_lock().unwrap();
+
+        let (done, finished) = std::sync::mpsc::channel();
+        let policy = digest_policy(&bytes, verified.path());
+        let paths = [directory.path().to_path_buf()];
+        std::thread::spawn(move || {
+            let plugins = Plugins::scan_with(&paths, &policy);
+            done.send(has_roles(&plugins)).unwrap();
+        });
+        // It cannot finish while the lock is held, however fast the machine.
+        assert!(
+            finished
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .is_err()
+        );
+        assert!(
+            !copy_of(&bytes, verified.path()).exists(),
+            "no copy is written during a clearing"
+        );
+
+        drop(clearing);
+        assert!(
+            finished
+                .recv_timeout(std::time::Duration::from_secs(300))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn a_lock_that_cannot_be_taken_stops_the_clearing_and_not_the_scan() {
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let stale = old_copy(verified.path(), "stale", 1);
+        std::fs::create_dir(verified.path().join(VERIFIED_LOCK)).unwrap();
+
+        let policy =
+            digest_policy(&bytes, verified.path()).with_keep_verified(KeepVerified::Newest(0));
+        let plugins = Plugins::scan_with(&[directory.path().to_path_buf()], &policy);
+        let summary = plugins.scan_summary();
+        assert!(has_roles(&plugins), "{summary:?}");
+        assert!(stale.exists());
+        assert!(
+            summary.verified_held[0].contains(&verified.path().display().to_string()),
+            "{summary:?}"
+        );
     }
 
     #[test]

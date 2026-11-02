@@ -76,7 +76,7 @@ pub(crate) struct RunnerLink {
     timeouts: Timeouts,
     /// The pins and profile the Station resolved, which a runner it starts on its own host
     /// checks its libraries against.
-    pins: Option<(crate::PinSet, crate::PluginProfile)>,
+    pins: Option<(crate::PinSet, crate::PluginProfile, crate::KeepVerified)>,
     /// The `[runner]` and `[providers.<id>]` tables, which the link runs by and hands a runner
     /// it starts.
     settings: RunnerHandoff,
@@ -174,10 +174,16 @@ impl RunnerLink {
     }
 
     /// Starts a runner on the Station's own host checking its libraries against `pins` under
-    /// `profile`, written to `plugins.toml` in the runner's state directory.
+    /// `profile`, written to `plugins.toml` in the runner's state directory, and keeping old
+    /// verified copies as `keep` says.
     #[must_use]
-    pub(crate) fn with_pins(mut self, pins: crate::PinSet, profile: crate::PluginProfile) -> Self {
-        self.pins = Some((pins, profile));
+    pub(crate) fn with_pins(
+        mut self,
+        pins: crate::PinSet,
+        profile: crate::PluginProfile,
+        keep: crate::KeepVerified,
+    ) -> Self {
+        self.pins = Some((pins, profile, keep));
         self
     }
 
@@ -307,7 +313,7 @@ impl RunnerLink {
                     .and_then(|()| std::fs::write(&settings, text))
                     .map_err(|error| format!("{}: {error}", settings.display()))?;
                 arguments.extend(["--settings".into(), settings.into_os_string()]);
-                if let Some((pins, profile)) = &self.pins {
+                if let Some((pins, profile, keep)) = &self.pins {
                     let path = state_dir.join("plugins.toml");
                     let text = toml::to_string(pins).map_err(|error| error.to_string())?;
                     std::fs::create_dir_all(state_dir)
@@ -318,6 +324,8 @@ impl RunnerLink {
                         path.into_os_string(),
                         "--plugin-profile".into(),
                         profile.as_str().into(),
+                        "--keep-verified".into(),
+                        keep.to_string().into(),
                     ]);
                 }
                 super::spawn_detached(command, &arguments, state_dir, &self.settings.runner)

@@ -344,6 +344,34 @@ fn a_ca_file_that_trusts_nothing_is_refused_naming_it() {
 }
 
 #[test]
+fn plugins_keep_verified_is_a_count_or_none_and_defaults_to_eight() {
+    let dir = tempfile::tempdir().unwrap();
+    let read = |text: &str| {
+        let path = write(dir.path(), "ai6.cfg", text);
+        Bootstrap::find(Some(&path)).map(|located| located.value.plugins.keep_verified())
+    };
+    assert_eq!(read("").unwrap(), ai6::KeepVerified::Newest(8));
+    assert_eq!(
+        read("[plugins]\nkeep_verified = 0\n").unwrap(),
+        ai6::KeepVerified::Newest(0)
+    );
+    assert_eq!(
+        read("[plugins]\nkeep_verified = 3\n").unwrap(),
+        ai6::KeepVerified::Newest(3)
+    );
+    assert_eq!(
+        read("[plugins]\nkeep_verified = \"none\"\n").unwrap(),
+        ai6::KeepVerified::All
+    );
+    for refused in ["-1", "\"all\""] {
+        assert!(
+            read(&format!("[plugins]\nkeep_verified = {refused}\n")).is_err(),
+            "{refused}"
+        );
+    }
+}
+
+#[test]
 fn a_station_with_a_bad_ca_file_does_not_start() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "empty.pem", "");

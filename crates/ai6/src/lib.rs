@@ -151,8 +151,8 @@ pub use directorates::registry::backend::{
     UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
-    LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey, Require,
-    SignatureCheck, library_pin, record_digest,
+    KeepVerified, LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey,
+    Require, SignatureCheck, library_pin, record_digest,
 };
 pub use directorates::registry::cables::{
     Cable, CableAction, CableAuditRecord, CableConfig, CableDelivery, CableDraft, CableEndpoint,

@@ -32,7 +32,7 @@ use zeroize::Zeroizing;
 use crate::bounds::Limit;
 use crate::bounds::Seconds;
 use crate::directorates::m::config::ConfigLimits;
-use crate::directorates::registry::bona_fides::PluginProfile;
+use crate::directorates::registry::bona_fides::{KeepVerified, PluginProfile};
 use crate::directorates::registry::limits::RegistryLimits;
 
 use self::format::Format;
@@ -329,6 +329,9 @@ pub struct PluginSettings {
     pub paths: Vec<PathBuf>,
     /// `strict`, `report` or `off`. Default: `strict` with a pin set, `report` without.
     pub profile: Option<PluginProfile>,
+    /// Which verified copies a `strict` scan keeps besides the ones it loaded: a count, `0` for
+    /// none of them, or `"none"` for no limit. Default [`KeepVerified::default`].
+    pub keep_verified: Option<KeepVerified>,
 }
 
 /// `[secrets]`: where the Station's own secret backend reads values.
@@ -856,6 +859,11 @@ impl PluginSettings {
         for path in &mut self.paths {
             *path = beside(dir, path);
         }
+    }
+
+    /// [`PluginSettings::keep_verified`], or its default.
+    pub fn keep_verified(&self) -> KeepVerified {
+        self.keep_verified.unwrap_or_default()
     }
 }
 

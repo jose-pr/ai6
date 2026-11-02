@@ -278,6 +278,73 @@ impl core::str::FromStr for PluginProfile {
     }
 }
 
+/// Which verified copies of provider libraries a host keeps besides the ones it just loaded:
+/// `[plugins] keep_verified`. Default the newest 8 files, by when each was written.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepVerified {
+    /// The newest this many; `0` removes every copy the scan did not load. Written as a number.
+    Newest(u64),
+    /// Every copy, so nothing is removed. Written `none`: no limit.
+    All,
+}
+
+impl Default for KeepVerified {
+    fn default() -> Self {
+        Self::Newest(8)
+    }
+}
+
+impl core::fmt::Display for KeepVerified {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Newest(count) => write!(formatter, "{count}"),
+            Self::All => formatter.write_str("none"),
+        }
+    }
+}
+
+impl core::str::FromStr for KeepVerified {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        if text == "none" {
+            return Ok(Self::All);
+        }
+        text.parse()
+            .map(Self::Newest)
+            .map_err(|_| format!("keep_verified {text:?} is not a count or \"none\""))
+    }
+}
+
+impl<'de> Deserialize<'de> for KeepVerified {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = KeepVerified;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                formatter.write_str("a count or \"none\"")
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, count: u64) -> Result<Self::Value, E> {
+                Ok(KeepVerified::Newest(count))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, count: i64) -> Result<Self::Value, E> {
+                u64::try_from(count)
+                    .map(KeepVerified::Newest)
+                    .map_err(|_| E::custom("keep_verified cannot be negative"))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
+                text.parse().map_err(E::custom)
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
 /// Checks a publisher's Ed25519 signature: `(key, message, signature)`, true when it verifies.
 pub type SignatureCheck<'a> = dyn Fn(&PublisherKey, &[u8], &[u8]) -> bool + 'a;
 
@@ -936,6 +1003,33 @@ mod tests {
         assert_eq!(both.weakenings(), Vec::<String>::new());
         let digest = PinSet::new().with_library(LibraryPin::digest("a.so", pin));
         assert_eq!(digest.weakenings(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn keep_verified_reads_a_count_or_none_and_round_trips_through_its_text() {
+        #[derive(Deserialize)]
+        struct Table {
+            keep_verified: KeepVerified,
+        }
+        let read = |text: &str| toml::from_str::<Table>(text).map(|table| table.keep_verified);
+        assert_eq!(KeepVerified::default(), KeepVerified::Newest(8));
+        assert_eq!(read("keep_verified = 3").unwrap(), KeepVerified::Newest(3));
+        assert_eq!(read("keep_verified = 0").unwrap(), KeepVerified::Newest(0));
+        assert_eq!(read("keep_verified = \"none\"").unwrap(), KeepVerified::All);
+        for refused in [
+            "keep_verified = -1",
+            "keep_verified = \"all\"",
+            "keep_verified = 1.5",
+        ] {
+            assert!(read(refused).is_err(), "{refused}");
+        }
+        for keep in [
+            KeepVerified::Newest(0),
+            KeepVerified::Newest(8),
+            KeepVerified::All,
+        ] {
+            assert_eq!(keep.to_string().parse::<KeepVerified>(), Ok(keep));
+        }
     }
 
     #[test]

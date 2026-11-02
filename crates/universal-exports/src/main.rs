@@ -466,7 +466,8 @@ fn plugin_policy(
     let policy = ai6::station::plugins::PluginPolicy::new(
         snapshot.settings.pins.clone(),
         settings.state_dir.join("plugins").join("verified"),
-    );
+    )
+    .with_keep_verified(settings.located.value.plugins.keep_verified());
     match settings.located.value.plugins.profile {
         Some(profile) => policy.with_profile(profile),
         None => policy,
