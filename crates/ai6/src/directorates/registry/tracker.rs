@@ -122,7 +122,8 @@ pub struct Reply {
     /// owner, member or collaborator, a Jira reporter or assignee, or someone the
     /// settings name.
     pub permitted: bool,
-    /// Whether the comment was written by the identity AI6 posts as.
+    /// Whether AI6 wrote the comment, by the mark it leaves on what it writes and never by its
+    /// author: the identity AI6 posts as may be a person's, whose replies count.
     pub own: bool,
     /// The comment text. Untrusted.
     pub body: String,
@@ -150,7 +151,7 @@ pub struct TrackerPost {
     pub body: String,
     /// The comment to replace, when this edits one.
     pub edit: Option<String>,
-    /// A short name the provider hides in the comment where the tracker allows it.
+    /// A short name for the mark the provider leaves on every comment; a default without one.
     pub marker: Option<String>,
 }
 

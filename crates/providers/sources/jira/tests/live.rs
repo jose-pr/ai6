@@ -451,9 +451,28 @@ fn every_tracker_write_reaches_the_issue() {
         .unwrap();
     assert_eq!(replies.replies.len(), 1);
     let reply = &replies.replies[0];
-    assert!(reply.own, "the credential's own comment");
+    assert!(reply.own, "a comment AI6 wrote");
     assert!(reply.permitted, "the issue's reporter");
     assert_eq!(reply.body, "AI6 test data: waiting.");
+    // The same account, through Jira's API with no property: what a person's comment looks like.
+    let person = live.post(
+        &format!("/issue/{key}/comment"),
+        json!({"body": {"type": "doc", "version": 1, "content": [{"type": "paragraph",
+            "content": [{"type": "text", "text": "AI6 test data: a person's reply."}]}]}}),
+    );
+    let with_person = provider
+        .replies(ReplyPoll {
+            items: vec![key.clone()],
+            since: None,
+        })
+        .unwrap();
+    let reply = with_person
+        .replies
+        .iter()
+        .find(|reply| reply.id == person)
+        .expect("the person's reply is listed");
+    assert!(!reply.own, "a person's comment on the credential's own account");
+    assert!(reply.permitted, "its author is the issue's reporter");
     let cursor = replies.cursor.clone().expect("a cursor");
     let later = provider
         .replies(ReplyPoll {

@@ -93,13 +93,14 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
 - **Capabilities**: comment, edit, free-text labels (`free_labels`), assign, close, issue
   types and priorities from `GET /issue/createmeta/{project}/issuetypes` and `GET /priority`,
   `children = parent` on Cloud and `subtasks` on Server (`none` when the project has no
-  sub-task type), `issue_links` and `remote_links`, `visibility = unknown`, no markers, and
+  sub-task type), `issue_links` and `remote_links`, `visibility = unknown`, markers, and
   the transitions open on the item asked about. Project answers are cached
   `capability_ttl_secs`.
 - **Post** comments (ADF on Cloud, plain text on Server) or edits
   (`PUT /issue/{key}/comment/{id}`). Cloud text goes through the Markdown subset headings,
   bullet and numbered lists, fenced code blocks and `http(s)` links; raw HTML stays literal.
-  A blank body is an error before any request, since Jira refuses it.
+  A blank body is an error before any request, since Jira refuses it. Every new comment carries
+  the comment property `dev.coqui.ai6` (`{"marker": NAME}`), which an edit leaves in place.
 - **Update**: labels by `update.labels` add/remove (whitespace becomes `-`); one assignee
   (`accountId` on Cloud, `name` on Server; clearing sends null); a `transition` by name
   (case-insensitive) or ID, or a `state`: `closed` takes a transition into a `done`-category

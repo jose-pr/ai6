@@ -11,7 +11,6 @@ use support::{canned, serve};
 
 const REPO: &str = include_str!("fixtures/tracker_repo.json");
 const REPO_LABELS: &str = include_str!("fixtures/tracker_repo_labels.json");
-const USER: &str = include_str!("fixtures/tracker_user.json");
 const ISSUE: &str = include_str!("fixtures/tracker_issue.json");
 const CLOSED_CHILD: &str = include_str!("fixtures/tracker_issue_closed.json");
 const CHILD: &str = include_str!("fixtures/tracker_issue_child.json");
@@ -25,7 +24,6 @@ const LABEL_ABSENT: &str = include_str!("fixtures/tracker_label_absent.json");
 const ASSIGNEE_ADDED: &str = include_str!("fixtures/tracker_assignee_added.json");
 const NOT_FOUND: &str = include_str!("fixtures/not_found.json");
 const COMMENT_EMPTY: &str = include_str!("fixtures/tracker_comment_empty.json");
-const NEEDS_AUTH: &str = include_str!("fixtures/tracker_requires_authentication.json");
 
 const TOKEN_VAR: &str = "AI6_TEST_GITHUB_RECORDED_TOKEN";
 static INIT: Once = Once::new();
@@ -90,8 +88,8 @@ fn a_recorded_post_and_edit_give_the_comment_and_its_address() {
 }
 
 #[test]
-fn a_recorded_comment_with_a_marker_is_the_tokens_own_and_moves_the_cursor() {
-    let fake = serve(|_| vec![canned(200, USER), canned(200, COMMENTS_SINCE)]);
+fn a_recorded_comment_with_a_marker_is_ai6s_own_and_moves_the_cursor() {
+    let fake = serve(|_| vec![canned(200, COMMENTS_SINCE)]);
     let batch = provider(&fake.base)
         .replies(ReplyPoll {
             items: vec!["o/r#4".to_owned()],
@@ -106,22 +104,10 @@ fn a_recorded_comment_with_a_marker_is_the_tokens_own_and_moves_the_cursor() {
     assert!(reply.own && reply.permitted);
     assert_eq!(batch.cursor.as_deref(), Some("2026-11-01T15:56:42Z"));
     assert!(
-        fake.requests.lock().unwrap()[1]
+        fake.requests.lock().unwrap()[0]
             .target
             .contains("since=2026-11-01T15%3A54%3A23Z")
     );
-}
-
-#[test]
-fn a_recorded_marker_says_its_own_when_the_token_has_no_user() {
-    let fake = serve(|_| vec![canned(403, NEEDS_AUTH), canned(200, COMMENTS_SINCE)]);
-    let batch = provider(&fake.base)
-        .replies(ReplyPoll {
-            items: vec!["o/r#4".to_owned()],
-            since: None,
-        })
-        .unwrap();
-    assert!(batch.replies[0].own, "an App token cannot read /user");
 }
 
 #[test]

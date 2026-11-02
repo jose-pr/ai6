@@ -305,7 +305,10 @@ fn a_post_comments_and_an_edit_replaces_the_comment() {
     );
     assert_eq!(requests[1].method, "PATCH");
     assert_eq!(requests[1].target, "/repos/o/r/issues/comments/501");
-    assert_eq!(body_of(&requests[1])["body"], "Waiting.");
+    assert_eq!(
+        body_of(&requests[1])["body"],
+        "Waiting.\n\n<!-- ai6:comment -->"
+    );
 }
 
 #[test]
@@ -415,6 +418,25 @@ fn an_update_changes_labels_assignees_and_state_and_refuses_transitions() {
 }
 
 #[test]
+fn every_post_carries_a_mark() {
+    let fake = serve(|_| vec![canned(201, COMMENT_CREATED)]);
+    provider(&fake.base, "")
+        .post(TrackerPost {
+            item: "o/r#12".to_owned(),
+            body: "Unnamed.".to_owned(),
+            edit: None,
+            marker: None,
+        })
+        .unwrap();
+    let requests = fake.requests.lock().unwrap();
+    assert!(
+        requests[0].body.contains("<!-- ai6:comment -->"),
+        "{}",
+        requests[0].body
+    );
+}
+
+#[test]
 fn a_blank_post_is_refused_before_any_request() {
     let fake = serve(|_| vec![canned(201, COMMENT_CREATED)]);
     for marker in [None, Some("status".to_owned())] {
@@ -520,8 +542,8 @@ fn replies_mark_permitted_authors_and_the_tokens_own_comments() {
       {"id": 3, "issue_url": "https://api.github.com/repos/o/r/issues/12", "user": {"login": "reporter"},
        "author_association": "NONE", "body": "It is the CI.",
        "created_at": "2026-10-05T10:02:00Z", "updated_at": "2026-10-05T10:02:00Z"},
-      {"id": 4, "issue_url": "https://api.github.com/repos/o/r/issues/12", "user": {"login": "ai6-bot"},
-       "author_association": "NONE", "body": "Started.",
+      {"id": 4, "issue_url": "https://api.github.com/repos/o/r/issues/12", "user": {"login": "maint"},
+       "author_association": "MEMBER", "body": "Started.\n\n<!-- ai6:status -->",
        "created_at": "2026-10-05T10:03:00Z", "updated_at": "2026-10-05T10:04:00Z"},
       {"id": 5, "issue_url": "https://api.github.com/repos/o/r/issues/99", "user": {"login": "maint"},
        "author_association": "OWNER", "body": "Elsewhere.",
@@ -529,7 +551,6 @@ fn replies_mark_permitted_authors_and_the_tokens_own_comments() {
     ]"#;
     let fake = serve(|_| {
         vec![
-            canned(200, r#"{"login": "ai6-bot"}"#),
             canned(200, comments),
             canned(
                 200,
@@ -554,7 +575,7 @@ fn replies_mark_permitted_authors_and_the_tokens_own_comments() {
             ("1", true, false),
             ("2", false, false),
             ("3", true, false),
-            ("4", false, true)
+            ("4", true, true)
         ],
         "comments on other issues are skipped"
     );
@@ -562,14 +583,14 @@ fn replies_mark_permitted_authors_and_the_tokens_own_comments() {
     assert_eq!(batch.replies[0].body, "Use the main branch.");
     assert_eq!(batch.cursor.as_deref(), Some("2026-10-05T10:05:00Z"));
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests[0].target, "/user");
     assert!(
-        requests[1]
+        requests[0]
             .target
-            .starts_with("/repos/o/r/issues/comments?")
+            .starts_with("/repos/o/r/issues/comments?"),
+        "who the token belongs to decides nothing"
     );
     assert!(
-        requests[1]
+        requests[0]
             .target
             .contains("since=2026-10-05T09%3A00%3A00Z")
     );
@@ -582,7 +603,6 @@ fn listed_reply_authors_may_answer_and_no_items_read_nothing() {
         "created_at": "t", "updated_at": "2026-10-06T00:00:00Z"}]"#;
     let fake = serve(|_| {
         vec![
-            canned(404, "{}"),
             canned(200, comment),
             canned(
                 200,
@@ -598,7 +618,7 @@ fn listed_reply_authors_may_answer_and_no_items_read_nothing() {
         })
         .unwrap();
     assert!(batch.replies[0].permitted);
-    assert!(!batch.replies[0].own, "an unknown identity owns nothing");
+    assert!(!batch.replies[0].own, "no mark, no matter who wrote it");
     let none = github
         .replies(ReplyPoll {
             items: Vec::new(),

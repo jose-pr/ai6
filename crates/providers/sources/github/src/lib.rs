@@ -109,8 +109,6 @@ pub struct Github {
     agent: ureq::Agent,
     /// The repository-level capabilities and when they were read.
     capabilities: Mutex<Option<(Instant, TrackerCapabilities)>>,
-    /// The login the token belongs to; `Some(None)` once GitHub declined to say.
-    identity: Mutex<Option<Option<String>>>,
 }
 
 impl Github {
@@ -165,7 +163,6 @@ impl Github {
             api,
             agent,
             capabilities: Mutex::new(None),
-            identity: Mutex::new(None),
         })
     }
 
@@ -312,19 +309,6 @@ impl Github {
 
     fn issue_url(&self, number: u64) -> String {
         format!("{}/{number}", self.issues_url())
-    }
-
-    /// The login the token belongs to, asked once; `None` when GitHub will not say.
-    fn own_login(&self) -> Option<String> {
-        let mut identity = self.identity.lock().ok()?;
-        if identity.is_none() {
-            let login = self
-                .get_json(&self.endpoint("/user"), &[])
-                .ok()
-                .and_then(|user| user.get("login")?.as_str().map(str::to_owned));
-            *identity = Some(login);
-        }
-        identity.clone().flatten()
     }
 
     fn repo_capabilities(&self) -> Result<TrackerCapabilities, ProviderError> {
@@ -541,7 +525,6 @@ impl Tracker for Github {
                 cursor: request.since,
             });
         }
-        let own = self.own_login();
         let mut query = vec![
             ("sort", "updated".to_owned()),
             ("direction", "asc".to_owned()),
@@ -607,10 +590,8 @@ impl Tracker for Github {
                     author_id: login.to_owned(),
                     author: login.to_owned(),
                     permitted,
-                    own: own
-                        .as_deref()
-                        .is_some_and(|own| own.eq_ignore_ascii_case(login))
-                        || text("body").is_some_and(|body| body.contains(MARKER_PREFIX)),
+                    // By the marker alone: the token may be a person's, whose replies count.
+                    own: text("body").is_some_and(|body| body.contains(MARKER_PREFIX)),
                     body: text("body").unwrap_or_default().to_owned(),
                     created: text("created_at").unwrap_or_default().to_owned(),
                 });
@@ -631,13 +612,14 @@ impl Tracker for Github {
             ));
         }
         let mut body = post.body;
-        if let Some(marker) = &post.marker {
-            let marker: String = marker
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
-                .collect();
-            body.push_str(&format!("\n\n{MARKER_PREFIX}{marker} -->"));
-        }
+        let marker: String = post
+            .marker
+            .as_deref()
+            .unwrap_or("comment")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
+            .collect();
+        body.push_str(&format!("\n\n{MARKER_PREFIX}{marker} -->"));
         let payload = serde_json::json!({ "body": body });
         let comment = match &post.edit {
             Some(id) => {

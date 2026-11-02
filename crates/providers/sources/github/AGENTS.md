@@ -81,8 +81,9 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
   naming an issue in text, `visibility` from the repository's `private`. Repository answers
   are cached `capability_ttl_secs`.
 - **Post** comments (`POST .../comments`) or edits (`PATCH .../issues/comments/{id}`; the ID
-  is digits only). A `marker` is appended as an HTML comment `<!-- ai6:NAME -->`, which GitHub
-  keeps in `body`. A blank body is an error before any request, since GitHub refuses it.
+  is digits only). Every post ends with an HTML comment `<!-- ai6:NAME -->` (`NAME` the `marker`,
+  `comment` without one), which GitHub keeps in `body` and which alone makes a reply `own`. A
+  blank body is an error before any request, since GitHub refuses it.
 - **Update**: labels added (a label the repository lacks is created) and removed (a label the
   issue lacks is not an error; a missing issue is, told apart by GitHub's message), assignees
   added and removed, `state` `open` or `closed` (closing sets `state_reason: completed`). A

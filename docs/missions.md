@@ -591,8 +591,11 @@ and its Watchdog pauses. The Headquarters Station reads new comments on the sour
 child issues of unfinished Missions every `reply_every` (60 s), cursor per tracker instance in
 the Registry. A comment is delivered only from someone allowed to answer for the issue: the
 issue's author or reporter, a GitHub owner, member or collaborator, a Jira assignee, or a
-login in the instance's `reply_authors`; AI6's own comments are skipped and any other author is
-a timeline event naming them, never their text. The Station that holds the Mission delivers a
+login in the instance's `reply_authors`. AI6's own comments are skipped, told by the mark AI6
+leaves on what it writes (a hidden `<!-- ai6:… -->` on GitHub, the comment property
+`dev.coqui.ai6` on Jira) and never by their author, so one person's token works: that person's
+own reply is delivered like anyone's. Any other author is a timeline event naming them, never
+their text. The Station that holds the Mission delivers a
 permitted reply as untrusted text in the same fence as an issue's body: a message to a live
 Session, a resume of one that ended its turn while it waited. A stalled, parked or quarantined
 Mission keeps the reply until it goes on; a queued or finished one is not told. The Session is

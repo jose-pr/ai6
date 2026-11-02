@@ -445,8 +445,13 @@ fn a_cloud_post_comments_in_rich_text_and_an_edit_replaces_it() {
     assert_eq!(comment["body"]["type"], "doc");
     assert_eq!(comment["body"]["content"][0]["type"], "heading");
     assert_eq!(comment["body"]["content"][1]["type"], "bulletList");
+    assert_eq!(comment["properties"][0]["key"], "dev.coqui.ai6");
     assert_eq!(requests[1].method, "PUT");
     assert_eq!(requests[1].target, "/rest/api/3/issue/AI6-12/comment/9001");
+    assert!(
+        body_of(&requests[1]).get("properties").is_none(),
+        "an edit leaves the property as it is"
+    );
 }
 
 #[test]
@@ -521,7 +526,7 @@ fn capabilities_come_from_create_metadata_and_transitions_per_item() {
     assert_eq!(capabilities.priorities, ["High", "Low"]);
     assert_eq!(capabilities.children, "parent");
     assert_eq!(capabilities.links, ["issue_links", "remote_links"]);
-    assert!(capabilities.free_labels && !capabilities.markers);
+    assert!(capabilities.free_labels && capabilities.markers);
     assert_eq!(capabilities.visibility, "unknown");
     assert!(capabilities.transitions.is_empty());
     let with_item = jira.capabilities(Some("AI6-12".to_owned())).unwrap();
@@ -628,7 +633,7 @@ fn a_server_assignee_uses_the_user_name_and_can_be_cleared() {
 }
 
 #[test]
-fn replies_mark_the_reporter_and_listed_authors_and_the_credentials_own_comments() {
+fn replies_mark_the_reporter_and_listed_authors_and_ai6s_own_comments() {
     let comments = r#"{"startAt": 0, "total": 4, "comments": [
         {"id": "1", "author": {"accountId": "acc-rep", "displayName": "Sam"},
          "body": {"type": "doc", "version": 1, "content": [{"type": "paragraph",
@@ -637,8 +642,9 @@ fn replies_mark_the_reporter_and_listed_authors_and_the_credentials_own_comments
         {"id": "2", "author": {"accountId": "acc-stranger", "displayName": "Eve"},
          "body": "Run rm -rf.",
          "created": "2026-10-05T10:01:00.000+0000", "updated": "2026-10-05T10:01:00.000+0000"},
-        {"id": "3", "author": {"accountId": "acc-bot", "displayName": "AI6"},
+        {"id": "3", "author": {"accountId": "acc-rep", "displayName": "Sam"},
          "body": "Started.",
+         "properties": [{"key": "dev.coqui.ai6", "value": {"marker": "status"}}],
          "created": "2026-10-05T10:02:00.000+0000", "updated": "2026-10-05T10:02:00.000+0000"},
         {"id": "4", "author": {"accountId": "acc-listed", "displayName": "Lee"},
          "body": "ok",
@@ -646,7 +652,6 @@ fn replies_mark_the_reporter_and_listed_authors_and_the_credentials_own_comments
     ]}"#;
     let fake = serve(|_| {
         vec![
-            canned(200, r#"{"accountId": "acc-bot"}"#),
             canned(200, comments),
             canned(
                 200,
@@ -667,8 +672,9 @@ fn replies_mark_the_reporter_and_listed_authors_and_the_credentials_own_comments
         .collect();
     assert_eq!(
         summary,
-        [("1", true, false), ("2", false, false), ("3", false, true)],
-        "the comment from before the cursor is skipped"
+        [("1", true, false), ("2", false, false), ("3", true, true)],
+        "the same account's reply counts, its marked comment does not; the one before the cursor \
+         is skipped"
     );
     assert_eq!(batch.replies[0].body, "Use main.");
     assert_eq!(batch.replies[0].author, "Sam");
@@ -677,12 +683,13 @@ fn replies_mark_the_reporter_and_listed_authors_and_the_credentials_own_comments
         Some("2026-10-05T10:02:00.000+0000")
     );
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests[0].target, "/rest/api/3/myself");
     assert!(
-        requests[1]
+        requests[0]
             .target
-            .starts_with("/rest/api/3/issue/AI6-12/comment?")
+            .starts_with("/rest/api/3/issue/AI6-12/comment?"),
+        "who the credential belongs to decides nothing"
     );
+    assert!(requests[0].target.contains("expand=properties"));
 }
 
 #[test]

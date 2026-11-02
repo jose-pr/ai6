@@ -238,7 +238,7 @@ impl DrainState {
 /// from people allowed to answer for the issue. Only the Headquarters Station does; returns how
 /// many replies it stored.
 ///
-/// Comments by AI6's own identity are skipped. A comment from anyone else is recorded as
+/// Comments AI6 wrote, by its mark and not their author, are skipped. Any other is recorded as
 /// ignored (the author's name on the timeline, never the text), so a poll that sees it again
 /// does nothing.
 pub(crate) fn poll_replies(

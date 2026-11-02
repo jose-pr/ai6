@@ -424,7 +424,26 @@ fn every_tracker_write_reaches_the_issue() {
         .iter()
         .find(|reply| reply.id == unmarked.id)
         .unwrap();
-    assert!(reply.own, "known by the token's login, with no marker");
+    assert!(reply.own, "a post with no marker named still carries the mark");
+    let person = live.request(
+        "POST",
+        &format!("/issues/{number}/comments"),
+        Some(json!({ "body": "AI6 test data: a person's reply on the token's account." })),
+    )["id"]
+        .to_string();
+    let replies = provider
+        .replies(ReplyPoll {
+            items: vec![item.clone()],
+            since: None,
+        })
+        .unwrap();
+    let reply = replies
+        .replies
+        .iter()
+        .find(|reply| reply.id == person)
+        .unwrap();
+    assert!(!reply.own, "a person's comment on the token's own account");
+    assert!(reply.permitted, "the repository's owner may answer");
 
     provider
         .update(TrackerUpdate {

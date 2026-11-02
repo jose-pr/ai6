@@ -150,8 +150,6 @@ pub struct Jira {
     agent: ureq::Agent,
     /// The project-level answers and when they were read.
     discovered: Mutex<Option<(Instant, Discovered)>>,
-    /// The account the credential belongs to, once known.
-    identity: Mutex<Option<String>>,
 }
 
 impl Jira {
@@ -210,7 +208,6 @@ impl Jira {
             site,
             agent,
             discovered: Mutex::new(None),
-            identity: Mutex::new(None),
         })
     }
 
@@ -475,29 +472,6 @@ impl Jira {
         }
     }
 
-    /// The account the credential belongs to, asked once.
-    ///
-    /// Jira comments carry no marker, so the account is the only way to tell AI6's own comments
-    /// from replies: not knowing it is an error, never "owns nothing".
-    fn own_account(&self) -> Result<String, ProviderError> {
-        if let Ok(identity) = self.identity.lock()
-            && let Some(account) = identity.as_ref()
-        {
-            return Ok(account.clone());
-        }
-        let me = self.get_json(
-            &self.api("/myself"),
-            &[],
-            "Jira rejected asking for the account",
-        )?;
-        let account = person_id(&me)
-            .ok_or_else(|| failure("Jira answered with no account for the credential"))?;
-        if let Ok(mut identity) = self.identity.lock() {
-            *identity = Some(account.clone());
-        }
-        Ok(account)
-    }
-
     fn discover(&self) -> Result<Discovered, ProviderError> {
         let ttl = Duration::from_secs(self.settings.capability_ttl_secs);
         if let Ok(cache) = self.discovered.lock()
@@ -576,7 +550,7 @@ impl Jira {
                 links: vec!["issue_links".to_owned(), "remote_links".to_owned()],
                 replies: true,
                 visibility: "unknown".to_owned(),
-                markers: false,
+                markers: true,
             },
             subtask_type,
         };
@@ -737,7 +711,6 @@ impl Tracker for Jira {
         if keys.is_empty() {
             return Ok(ReplyBatch { replies, cursor });
         }
-        let own = self.own_account()?;
         for key in keys {
             let mut who: Option<Vec<String>> = None;
             let mut start_at = 0_u64;
@@ -746,6 +719,7 @@ impl Tracker for Jira {
                     &self.api(&format!("/issue/{key}/comment")),
                     &[
                         ("orderBy", "created".to_owned()),
+                        ("expand", "properties".to_owned()),
                         ("startAt", start_at.to_string()),
                         ("maxResults", self.settings.page_size.to_string()),
                     ],
@@ -798,7 +772,7 @@ impl Tracker for Jira {
                             .to_owned(),
                         item: key.to_owned(),
                         permitted: permitted && !author_id.is_empty(),
-                        own: own == author_id,
+                        own: is_ai6_comment(comment),
                         author_id,
                         author: text(&author, "displayName").unwrap_or_default(),
                         body,
@@ -824,17 +798,17 @@ impl Tracker for Jira {
             ));
         }
         let rejected = format!("Jira rejected the comment on {key}");
-        let payload = serde_json::json!({ "body": self.text(&post.body) });
         let comment = match &post.edit {
             Some(id) => {
                 if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
                     return Err(bad_value("a comment ID is a number"));
                 }
+                // The property stays through an edit that does not name it.
                 read_json(self.call(
                     "PUT",
                     &self.api(&format!("/issue/{key}/comment/{id}")),
                     &[],
-                    Some(&payload),
+                    Some(&serde_json::json!({ "body": self.text(&post.body) })),
                     &rejected,
                 )?)?
             }
@@ -842,7 +816,13 @@ impl Tracker for Jira {
                 "POST",
                 &self.api(&format!("/issue/{key}/comment")),
                 &[],
-                Some(&payload),
+                Some(&serde_json::json!({
+                    "body": self.text(&post.body),
+                    "properties": [{
+                        "key": COMMENT_PROPERTY,
+                        "value": { "marker": post.marker.as_deref().unwrap_or("comment") },
+                    }],
+                })),
                 &rejected,
             )?)?,
         };
@@ -1073,6 +1053,23 @@ fn read_json(
         .body_mut()
         .read_json()
         .map_err(|e| failure(&format!("unreadable response: {e}")))
+}
+
+/// The comment entity property AI6 sets on every comment it writes. A person's comment cannot carry
+/// it by accident, whoever's account it is on: Jira's UI sets no property, and only a comment read
+/// with `expand=properties` shows one. Tested on Jira Cloud's REST API v3.
+const COMMENT_PROPERTY: &str = "dev.coqui.ai6";
+
+/// Whether AI6 wrote `comment`, read with `expand=properties`.
+fn is_ai6_comment(comment: &serde_json::Value) -> bool {
+    comment
+        .get("properties")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|properties| {
+            properties.iter().any(|property| {
+                property.get("key").and_then(serde_json::Value::as_str) == Some(COMMENT_PROPERTY)
+            })
+        })
 }
 
 /// A person's stable ID: the Cloud account ID, else the Server user key or name.

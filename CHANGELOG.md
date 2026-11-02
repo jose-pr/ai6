@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- `own` means a comment AI6 wrote, decided by AI6's mark and never by its author, so one person's
+  token works: that person's reply on a tracker is delivered like anyone's when `reply_authors` or
+  the tracker's rules permit it. GitHub marks with its hidden comment; Jira with the comment
+  entity property `dev.coqui.ai6`, set on every comment AI6 writes and read with
+  `expand=properties`.
 - A Source issue's labels no longer become a brief's required Agent tags, so anyone able to label
   an issue cannot fail its Mission, and AI6's own status labels cannot either. They stay readable
   to the Agent inside the fenced brief. A brief that never became a Mission reports that, not an

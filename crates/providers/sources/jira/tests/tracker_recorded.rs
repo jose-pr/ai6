@@ -13,7 +13,6 @@ const META: &str = include_str!("fixtures/tracker_createmeta_issuetypes.json");
 const PRIORITIES: &str = include_str!("fixtures/tracker_priorities.json");
 const TRANSITIONS: &str = include_str!("fixtures/transitions.json");
 const ISSUE: &str = include_str!("fixtures/tracker_issue.json");
-const MYSELF: &str = include_str!("fixtures/tracker_myself.json");
 const COMMENT_CREATED: &str = include_str!("fixtures/comment_created.json");
 const COMMENT_EDITED: &str = include_str!("fixtures/tracker_comment_edited.json");
 const COMMENTS: &str = include_str!("fixtures/tracker_comments.json");
@@ -139,14 +138,8 @@ fn a_recorded_post_and_edit_give_the_comment_and_its_address() {
 }
 
 #[test]
-fn recorded_comments_are_the_credentials_own_and_the_cursor_is_the_newest_change() {
-    let fake = serve(|_| {
-        vec![
-            canned(200, MYSELF),
-            canned(200, COMMENTS),
-            canned(200, ISSUE),
-        ]
-    });
+fn recorded_comments_are_told_by_their_property_and_the_cursor_is_the_newest_change() {
+    let fake = serve(|_| vec![canned(200, COMMENTS), canned(200, ISSUE)]);
     let batch = provider(&fake.base)
         .replies(ReplyPoll {
             items: vec!["AI6-7".to_owned()],
@@ -156,7 +149,8 @@ fn recorded_comments_are_the_credentials_own_and_the_cursor_is_the_newest_change
     assert_eq!(batch.replies.len(), 1);
     let reply = &batch.replies[0];
     assert_eq!(reply.id, "10000");
-    assert!(reply.own);
+    assert!(!reply.own, "no property, whoever's account it is on");
+    assert!(reply.permitted, "the credential's own account may answer");
     assert_eq!(reply.body, "AI6 test data: the edited comment.");
     assert_eq!(
         batch.cursor.as_deref(),
@@ -167,13 +161,7 @@ fn recorded_comments_are_the_credentials_own_and_the_cursor_is_the_newest_change
 #[test]
 fn a_cursor_on_another_clock_still_finds_the_comment_after_it() {
     let earlier_in_utc = "2026-11-01T15:57:00.000+0000";
-    let fake = serve(|_| {
-        vec![
-            canned(200, MYSELF),
-            canned(200, COMMENTS),
-            canned(200, ISSUE),
-        ]
-    });
+    let fake = serve(|_| vec![canned(200, COMMENTS), canned(200, ISSUE)]);
     let batch = provider(&fake.base)
         .replies(ReplyPoll {
             items: vec!["AI6-7".to_owned()],
@@ -184,7 +172,7 @@ fn a_cursor_on_another_clock_still_finds_the_comment_after_it() {
 }
 
 #[test]
-fn replies_fail_when_the_account_cannot_be_named() {
+fn replies_fail_when_the_credential_is_refused() {
     let fake = serve(|_| vec![canned(401, "Client must be authenticated")]);
     let error = provider(&fake.base)
         .replies(ReplyPoll {
