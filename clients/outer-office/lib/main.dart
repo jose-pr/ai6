@@ -234,6 +234,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
         MissionBriefSummary(
           operationId: 'G',
           missionId: 'mission-007',
+          name: 'Review the requested change',
           prompt: 'Review the requested change and report findings.',
           agentId: 'technical-officer',
           roleId: 'case-officer',
@@ -3545,6 +3546,7 @@ class MissionBriefSummary {
     required this.operationId,
     required this.missionId,
     required this.prompt,
+    this.name,
     required this.agentId,
     required this.roleId,
     required this.handlerProvider,
@@ -3562,6 +3564,10 @@ class MissionBriefSummary {
   final String operationId;
   final String missionId;
   final String prompt;
+
+  /// What to show beside the Mission ID: a person's title, or an issue's title. An issue's is
+  /// written by whoever can open one, so it is shown as text and nothing acts on it.
+  final String? name;
 
   /// The issue a brief from a Source came from, as `TRACKER:ITEM`.
   String? get sourceIssue =>
@@ -3594,6 +3600,7 @@ class MissionBriefSummary {
       operationId: json['operation_id'] as String,
       missionId: json['mission_id'] as String,
       prompt: brief['prompt'] as String,
+      name: brief['name'] as String?,
       agentId: brief['agent_id'] as String?,
       roleId: brief['role_id'] as String?,
       handlerProvider: brief['handler_provider'] as String,
@@ -3671,12 +3678,16 @@ class MissionAttemptSummary {
     required this.attempt,
     required this.station,
     required this.status,
+    this.runId,
     this.theater,
     this.lost,
     this.checkpointBranch,
   });
 
   final int attempt;
+
+  /// AI6's ID for this run, `<mission>.<attempt>`, apart from the provider's Session ID.
+  final String? runId;
   final String station;
   final String? theater;
 
@@ -3692,6 +3703,7 @@ class MissionAttemptSummary {
   factory MissionAttemptSummary.fromJson(Map<String, dynamic> json) =>
       MissionAttemptSummary(
         attempt: json['attempt'] as int,
+        runId: json['session_id'] as String?,
         station: json['station'] as String,
         status: json['status'] as String,
         theater: json['theater'] as String?,

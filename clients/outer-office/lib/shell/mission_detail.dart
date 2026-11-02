@@ -87,6 +87,11 @@ class MissionDetail extends StatelessWidget {
               ),
             ],
           ),
+          if (brief != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 5),
+              child: MissionNameLine(brief: brief),
+            ),
           Padding(
             padding: const EdgeInsets.only(left: 32),
             child: OoLink(
@@ -248,7 +253,11 @@ class _AttemptCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Attempt ${attempt.attempt} · ${attempt.status}',
+              [
+                'Attempt ${attempt.attempt}',
+                ?attempt.runId,
+                attempt.status,
+              ].join(' · '),
               style: text.titleSmall,
             ),
             Wrap(

@@ -359,7 +359,13 @@ class _OoSearchState extends State<OoSearch> {
       (
         OoIconName.missions,
         'Mission ${mission.missionId}',
-        'Operation ${mission.operationId} · ${mission.state}',
+        [
+          ?widget.board
+              .missionBrief(mission.operationId, mission.missionId)
+              ?.name,
+          'Operation ${mission.operationId}',
+          mission.state,
+        ].join(' · '),
         _route(OoPage.missions, {
           'operation_id': mission.operationId,
           'mission_id': mission.missionId,

@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../assistant/pages.dart' show launchPage;
 import '../controls/mission_actions.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
@@ -53,6 +54,12 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
         mission.operationId,
         mission.missionId,
         for (final session in mission.sessions) session.sessionId,
+        for (final attempt in board.attempts(
+          mission.operationId,
+          mission.missionId,
+        ))
+          ?attempt.runId,
+        ?brief?.name,
         ?brief?.prompt,
       ];
       if (!haystack.any((item) => item.toLowerCase().contains(text))) {
@@ -74,7 +81,7 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
     'created' => created,
     'state' => (mission) => boardStates.indexOf(mission.state),
     'operation' => (mission) => mission.operationId,
-    'mission' => (mission) => mission.missionId,
+    'mission' => (mission) => missionOrder(mission.missionId),
     _ => updated,
   };
   // By update time the newest comes first unless the route says `asc`; otherwise `desc`
@@ -236,6 +243,11 @@ class MissionGroup {
   bool get finished => const {'done', 'failed', 'abandoned'}.contains(state);
 }
 
+/// A Mission ID as it sorts for a person: `ai6-9` before `ai6-10`. Only an order; nothing is
+/// read out of the ID.
+String missionOrder(String id) =>
+    id.replaceAllMapped(RegExp(r'\d+'), (run) => run[0]!.padLeft(20, '0'));
+
 /// The board's Sessions grouped by Mission, by Operation then Mission ID.
 List<MissionGroup> groupMissions(List<SessionSummary> sessions) {
   final groups = <(String, String), List<SessionSummary>>{};
@@ -255,7 +267,9 @@ List<MissionGroup> groupMissions(List<SessionSummary> sessions) {
       .toList();
   result.sort((left, right) {
     final station = left.operationId.compareTo(right.operationId);
-    return station != 0 ? station : left.missionId.compareTo(right.missionId);
+    return station != 0
+        ? station
+        : missionOrder(left.missionId).compareTo(missionOrder(right.missionId));
   });
   return result;
 }
@@ -346,6 +360,9 @@ class MissionCard extends StatelessWidget {
               ),
             ],
           ),
+          if (board.missionBrief(mission.operationId, mission.missionId)
+              case final brief?)
+            MissionNameLine(brief: brief),
           Padding(
             padding: const EdgeInsets.only(left: 27, top: 4, bottom: 8),
             child: OoLink(
@@ -396,6 +413,49 @@ class MissionCard extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// The name beside a Mission's ID, and a link to the issue it came from when there is one.
+///
+/// A name can be an issue's title, written by whoever can open an issue: it is plain text here,
+/// cut to two lines, and only a web link from the tracker opens anything.
+class MissionNameLine extends StatelessWidget {
+  const MissionNameLine({required this.brief, super.key});
+
+  final MissionBriefSummary brief;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = brief.name;
+    final url = switch (brief.origin?.itemUrl) {
+      final String link => Uri.tryParse(link),
+      null => null,
+    };
+    final web = url != null && const {'http', 'https'}.contains(url.scheme);
+    if (name == null && !web) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: 27, top: 2),
+      child: Wrap(
+        spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (name != null)
+            Text(
+              name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          if (web)
+            TextButton.icon(
+              onPressed: () => launchPage(url),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: Text(brief.sourceIssue ?? 'Open the issue'),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// What the queue says of a Mission in a line: its state as a word with its icon and the
@@ -483,6 +543,7 @@ class _AttemptHistory extends StatelessWidget {
           for (final attempt in attempts) ...[
             OoLinkLine([
               ('Attempt ${attempt.attempt}', null),
+              if (attempt.runId case final run?) ('Run $run', null),
               (attempt.status, null),
               ('Station ${attempt.station}', OoLinkTo.station(attempt.station)),
               if (attempt.theater case final theater?)
