@@ -3,17 +3,23 @@
 -- Records are JSON text in the same shape the file Registry writes, with the columns a
 -- lookup needs beside them. Every row carries the revision of the write that last touched
 -- it: the value of its clock row in ai6_clock, which each write transaction advances first.
+--
+-- Opening a database runs the statements for what it lacks, so each one can be run again: a new
+-- table or index goes here and needs no script, and the version stays. What moves data does.
 
-CREATE TABLE ai6_clock (
+CREATE TABLE IF NOT EXISTS ai6_schema (version INTEGER NOT NULL);
+
+CREATE TABLE IF NOT EXISTS ai6_clock (
     name TEXT PRIMARY KEY,
     revision INTEGER NOT NULL
 );
-INSERT INTO ai6_clock (name, revision) VALUES ('registry', 0), ('config', 0);
+INSERT INTO ai6_clock (name, revision) VALUES ('registry', 0), ('config', 0)
+    ON CONFLICT (name) DO NOTHING;
 
 -- The brief queue: state is new, held, claimed, done or failed. held is the record of a
 -- brief vetting held (its Operation, the vetting and when); clearance lists the finding kinds
 -- the brief no longer stops for.
-CREATE TABLE ai6_briefs (
+CREATE TABLE IF NOT EXISTS ai6_briefs (
     key TEXT PRIMARY KEY,
     state TEXT NOT NULL,
     brief TEXT NOT NULL,
@@ -28,9 +34,9 @@ CREATE TABLE ai6_briefs (
     clearance TEXT,
     revision INTEGER NOT NULL
 );
-CREATE INDEX ai6_briefs_state ON ai6_briefs (state);
+CREATE INDEX IF NOT EXISTS ai6_briefs_state ON ai6_briefs (state);
 
-CREATE TABLE ai6_brief_leases (
+CREATE TABLE IF NOT EXISTS ai6_brief_leases (
     key TEXT PRIMARY KEY,
     station TEXT NOT NULL,
     expires REAL NOT NULL,
@@ -40,7 +46,7 @@ CREATE TABLE ai6_brief_leases (
 );
 
 -- The last number given per Operation (its name folded to lower case); it only grows.
-CREATE TABLE ai6_mission_counters (
+CREATE TABLE IF NOT EXISTS ai6_mission_counters (
     name TEXT PRIMARY KEY,
     last INTEGER NOT NULL,
     revision INTEGER NOT NULL
@@ -48,7 +54,7 @@ CREATE TABLE ai6_mission_counters (
 
 -- Every Mission ID issued, by its lower-case form, since two that differ only by case are one
 -- file and one branch elsewhere. entry names what can enter again and must get the same ID.
-CREATE TABLE ai6_mission_ids (
+CREATE TABLE IF NOT EXISTS ai6_mission_ids (
     folded TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL,
     entry TEXT UNIQUE,
@@ -56,7 +62,7 @@ CREATE TABLE ai6_mission_ids (
 );
 
 -- state is pending, approved or rejected.
-CREATE TABLE ai6_mission_proposals (
+CREATE TABLE IF NOT EXISTS ai6_mission_proposals (
     operation TEXT NOT NULL,
     id TEXT NOT NULL,
     state TEXT NOT NULL,
@@ -66,13 +72,13 @@ CREATE TABLE ai6_mission_proposals (
     PRIMARY KEY (operation, id)
 );
 
-CREATE TABLE ai6_stations (
+CREATE TABLE IF NOT EXISTS ai6_stations (
     station TEXT PRIMARY KEY,
     record TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
-CREATE TABLE ai6_station_settings (
+CREATE TABLE IF NOT EXISTS ai6_station_settings (
     station TEXT PRIMARY KEY,
     max_concurrent_missions INTEGER NOT NULL,
     min_free_memory_mb INTEGER NOT NULL,
@@ -81,7 +87,7 @@ CREATE TABLE ai6_station_settings (
 );
 
 -- One row: the Headquarters lease.
-CREATE TABLE ai6_headquarters (
+CREATE TABLE IF NOT EXISTS ai6_headquarters (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     station TEXT NOT NULL,
     expires REAL NOT NULL,
@@ -90,14 +96,14 @@ CREATE TABLE ai6_headquarters (
 );
 
 -- Access-token metadata by SHA-256 digest; never a bearer secret.
-CREATE TABLE ai6_access_tokens (
+CREATE TABLE IF NOT EXISTS ai6_access_tokens (
     token_id TEXT PRIMARY KEY,
     digest TEXT NOT NULL UNIQUE,
     record TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
-CREATE TABLE ai6_cables (
+CREATE TABLE IF NOT EXISTS ai6_cables (
     id TEXT PRIMARY KEY,
     sender_agent TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
@@ -107,24 +113,24 @@ CREATE TABLE ai6_cables (
     revision INTEGER NOT NULL,
     UNIQUE (sender_agent, idempotency_key)
 );
-CREATE INDEX ai6_cables_expiry ON ai6_cables (expires_at);
+CREATE INDEX IF NOT EXISTS ai6_cables_expiry ON ai6_cables (expires_at);
 
 -- Token buckets keyed by the SHA-256 of the quota key.
-CREATE TABLE ai6_cable_quotas (
+CREATE TABLE IF NOT EXISTS ai6_cable_quotas (
     key TEXT PRIMARY KEY,
     tokens REAL NOT NULL,
     updated REAL NOT NULL,
     revision INTEGER NOT NULL
 );
 
-CREATE TABLE ai6_audit (
+CREATE TABLE IF NOT EXISTS ai6_audit (
     id TEXT PRIMARY KEY,
     at REAL NOT NULL,
     record TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
-CREATE TABLE ai6_agent_roles (
+CREATE TABLE IF NOT EXISTS ai6_agent_roles (
     operation TEXT NOT NULL,
     id TEXT NOT NULL,
     role TEXT NOT NULL,
@@ -133,7 +139,7 @@ CREATE TABLE ai6_agent_roles (
 );
 
 -- Green ink: state is pending or decided; seq orders a Mission's requests.
-CREATE TABLE ai6_approvals (
+CREATE TABLE IF NOT EXISTS ai6_approvals (
     operation TEXT NOT NULL,
     id TEXT NOT NULL,
     mission TEXT NOT NULL,
@@ -143,9 +149,9 @@ CREATE TABLE ai6_approvals (
     revision INTEGER NOT NULL,
     PRIMARY KEY (operation, id)
 );
-CREATE INDEX ai6_approvals_mission ON ai6_approvals (operation, mission, seq);
+CREATE INDEX IF NOT EXISTS ai6_approvals_mission ON ai6_approvals (operation, mission, seq);
 
-CREATE TABLE ai6_class_authorizations (
+CREATE TABLE IF NOT EXISTS ai6_class_authorizations (
     operation TEXT NOT NULL,
     id TEXT NOT NULL,
     created_at REAL NOT NULL,
@@ -155,7 +161,7 @@ CREATE TABLE ai6_class_authorizations (
 );
 
 -- scope is the Operation, or '' for every Operation.
-CREATE TABLE ai6_quarantines (
+CREATE TABLE IF NOT EXISTS ai6_quarantines (
     agent TEXT NOT NULL,
     scope TEXT NOT NULL,
     record TEXT NOT NULL,
@@ -163,19 +169,19 @@ CREATE TABLE ai6_quarantines (
     PRIMARY KEY (agent, scope)
 );
 
-CREATE TABLE ai6_incidents (
+CREATE TABLE IF NOT EXISTS ai6_incidents (
     agent TEXT PRIMARY KEY,
     history TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
-CREATE TABLE ai6_agent_records (
+CREATE TABLE IF NOT EXISTS ai6_agent_records (
     agent TEXT PRIMARY KEY,
     record TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
-CREATE TABLE ai6_clearance_grants (
+CREATE TABLE IF NOT EXISTS ai6_clearance_grants (
     operation TEXT NOT NULL,
     agent TEXT NOT NULL,
     record TEXT NOT NULL,
@@ -183,15 +189,15 @@ CREATE TABLE ai6_clearance_grants (
     PRIMARY KEY (operation, agent)
 );
 
-CREATE TABLE ai6_sessions (
+CREATE TABLE IF NOT EXISTS ai6_sessions (
     session_id TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL,
     record TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
-CREATE INDEX ai6_sessions_mission ON ai6_sessions (mission_id);
+CREATE INDEX IF NOT EXISTS ai6_sessions_mission ON ai6_sessions (mission_id);
 
-CREATE TABLE ai6_sleeper_authorizations (
+CREATE TABLE IF NOT EXISTS ai6_sleeper_authorizations (
     operation TEXT NOT NULL,
     name TEXT NOT NULL,
     record TEXT NOT NULL,
@@ -200,13 +206,13 @@ CREATE TABLE ai6_sleeper_authorizations (
 );
 
 -- Each Station's logbook: the newest Head of Station reports, oldest first.
-CREATE TABLE ai6_logbooks (
+CREATE TABLE IF NOT EXISTS ai6_logbooks (
     station TEXT PRIMARY KEY,
     reports TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
-CREATE TABLE ai6_source_cursors (
+CREATE TABLE IF NOT EXISTS ai6_source_cursors (
     operation TEXT NOT NULL,
     provider TEXT NOT NULL,
     cursor TEXT NOT NULL,
@@ -214,18 +220,18 @@ CREATE TABLE ai6_source_cursors (
     PRIMARY KEY (operation, provider)
 );
 
-CREATE TABLE ai6_timeline (
+CREATE TABLE IF NOT EXISTS ai6_timeline (
     id TEXT PRIMARY KEY,
     operation TEXT NOT NULL,
     at_micros INTEGER NOT NULL,
     event TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
-CREATE INDEX ai6_timeline_order ON ai6_timeline (at_micros, id);
-CREATE INDEX ai6_timeline_operation ON ai6_timeline (operation, at_micros, id);
+CREATE INDEX IF NOT EXISTS ai6_timeline_order ON ai6_timeline (at_micros, id);
+CREATE INDEX IF NOT EXISTS ai6_timeline_operation ON ai6_timeline (operation, at_micros, id);
 
 -- Pool accounts: claims, quota windows and daily tokens, one row per account.
-CREATE TABLE ai6_accounts (
+CREATE TABLE IF NOT EXISTS ai6_accounts (
     pool TEXT NOT NULL,
     account TEXT NOT NULL,
     record TEXT NOT NULL,
@@ -234,7 +240,7 @@ CREATE TABLE ai6_accounts (
 );
 
 -- operation is '' for usage outside any Operation.
-CREATE TABLE ai6_usage (
+CREATE TABLE IF NOT EXISTS ai6_usage (
     operation TEXT NOT NULL,
     mission TEXT NOT NULL,
     ledger TEXT NOT NULL,
@@ -246,7 +252,7 @@ CREATE TABLE ai6_usage (
 -- record or station:<id> for one Station's; definition is a JSON object with the keys of the
 -- record's table in its family file. A singleton family's one record is keyed 'settings'.
 
-CREATE TABLE ai6_config_operation (
+CREATE TABLE IF NOT EXISTS ai6_config_operation (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -254,7 +260,7 @@ CREATE TABLE ai6_config_operation (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_agent (
+CREATE TABLE IF NOT EXISTS ai6_config_agent (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -262,7 +268,7 @@ CREATE TABLE ai6_config_agent (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_role (
+CREATE TABLE IF NOT EXISTS ai6_config_role (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -270,7 +276,7 @@ CREATE TABLE ai6_config_role (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_assistant (
+CREATE TABLE IF NOT EXISTS ai6_config_assistant (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -278,7 +284,7 @@ CREATE TABLE ai6_config_assistant (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_cover (
+CREATE TABLE IF NOT EXISTS ai6_config_cover (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -286,7 +292,7 @@ CREATE TABLE ai6_config_cover (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_theater (
+CREATE TABLE IF NOT EXISTS ai6_config_theater (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -294,7 +300,7 @@ CREATE TABLE ai6_config_theater (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_loadout (
+CREATE TABLE IF NOT EXISTS ai6_config_loadout (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -302,7 +308,7 @@ CREATE TABLE ai6_config_loadout (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_sandbox (
+CREATE TABLE IF NOT EXISTS ai6_config_sandbox (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -310,7 +316,7 @@ CREATE TABLE ai6_config_sandbox (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_mcp (
+CREATE TABLE IF NOT EXISTS ai6_config_mcp (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -318,7 +324,7 @@ CREATE TABLE ai6_config_mcp (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_secret (
+CREATE TABLE IF NOT EXISTS ai6_config_secret (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -326,7 +332,7 @@ CREATE TABLE ai6_config_secret (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_pool (
+CREATE TABLE IF NOT EXISTS ai6_config_pool (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -334,7 +340,7 @@ CREATE TABLE ai6_config_pool (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_cables (
+CREATE TABLE IF NOT EXISTS ai6_config_cables (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -342,7 +348,7 @@ CREATE TABLE ai6_config_cables (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_plugin (
+CREATE TABLE IF NOT EXISTS ai6_config_plugin (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -350,7 +356,7 @@ CREATE TABLE ai6_config_plugin (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_station (
+CREATE TABLE IF NOT EXISTS ai6_config_station (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -358,7 +364,7 @@ CREATE TABLE ai6_config_station (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_tls (
+CREATE TABLE IF NOT EXISTS ai6_config_tls (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -366,7 +372,7 @@ CREATE TABLE ai6_config_tls (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_access (
+CREATE TABLE IF NOT EXISTS ai6_config_access (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -374,7 +380,7 @@ CREATE TABLE ai6_config_access (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_operation_access (
+CREATE TABLE IF NOT EXISTS ai6_config_operation_access (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -382,7 +388,7 @@ CREATE TABLE ai6_config_operation_access (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_unex (
+CREATE TABLE IF NOT EXISTS ai6_config_unex (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -390,7 +396,7 @@ CREATE TABLE ai6_config_unex (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_roster (
+CREATE TABLE IF NOT EXISTS ai6_config_roster (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
@@ -407,37 +413,37 @@ CREATE TABLE ai6_config_compartment (
 );
 
 -- The issues a Mission is linked to, as one JSON list per Mission.
-CREATE TABLE ai6_mission_issues (
+CREATE TABLE IF NOT EXISTS ai6_mission_issues (
     mission_id TEXT PRIMARY KEY,
     links TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
 -- Every write to a tracker: state is pending, held, sending, posted, refused or failed.
-CREATE TABLE ai6_issue_outbox (
+CREATE TABLE IF NOT EXISTS ai6_issue_outbox (
     id TEXT PRIMARY KEY,
     state TEXT NOT NULL,
     record TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
-CREATE INDEX ai6_issue_outbox_state ON ai6_issue_outbox (state);
+CREATE INDEX IF NOT EXISTS ai6_issue_outbox_state ON ai6_issue_outbox (state);
 
 -- The questions Agents asked on linked issues, one JSON list per Mission.
-CREATE TABLE ai6_issue_questions (
+CREATE TABLE IF NOT EXISTS ai6_issue_questions (
     mission_id TEXT PRIMARY KEY,
     questions TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
 -- Comments from permitted authors of linked issues, one JSON list per Mission.
-CREATE TABLE ai6_issue_replies (
+CREATE TABLE IF NOT EXISTS ai6_issue_replies (
     mission_id TEXT PRIMARY KEY,
     replies TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
 
 -- Where the last poll of an instance's replies stopped.
-CREATE TABLE ai6_issue_cursors (
+CREATE TABLE IF NOT EXISTS ai6_issue_cursors (
     operation TEXT NOT NULL,
     tracker TEXT NOT NULL,
     cursor TEXT NOT NULL,
@@ -446,7 +452,7 @@ CREATE TABLE ai6_issue_cursors (
 );
 
 -- Agents' proposals to create issues: state is pending, approved, rejected or created.
-CREATE TABLE ai6_issue_proposals (
+CREATE TABLE IF NOT EXISTS ai6_issue_proposals (
     id TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL,
     state TEXT NOT NULL,

@@ -472,6 +472,7 @@ pub(crate) fn error(error: tokio_postgres::Error) -> io::Error {
         {
             io::ErrorKind::TimedOut
         }
+        Some(code) if *code == SqlState::INSUFFICIENT_PRIVILEGE => io::ErrorKind::PermissionDenied,
         _ if error.is_closed() => io::ErrorKind::ConnectionAborted,
         _ => io::ErrorKind::Other,
     };

@@ -1843,7 +1843,9 @@ pub fn weakenings(location: &str) -> Vec<String>;
 `require` or `disable`, `Unsupported` without the feature or for a schema newer than this
 build (the version is in `ai6_schema`), and with the database's error (its cause included,
 such as which certificate check failed) when it cannot be reached; a PostgreSQL location
-connects at once. Writes also refuse, `Unsupported`, while the database's schema version is
+connects at once. It makes what the database lacks and runs no DDL when nothing is, so a role with
+no `CREATE` right starts on a whole database; `PermissionDenied`, naming the role, the schema and
+what is missing, when that role cannot make it. Writes also refuse, `Unsupported`, while the database's schema version is
 newer than this build's.
 
 TLS: `sslmode=verify-full` is the default: TLS (rustls, ring), with the server's certificate
@@ -1875,8 +1877,8 @@ Stations as the directory lock does, so claims, brief leases, the Headquarters e
 term, and Session fencing keep the file Registry's guarantees, and its new value is the
 revision stamped on each row written. SQLite runs writes as `BEGIN IMMEDIATE` with a 30 s
 busy timeout and WAL. PostgreSQL runs writes `READ COMMITTED` and reads `REPEATABLE READ
-READ ONLY`, whatever the server's default, and serializes concurrent migrations of one
-schema with an advisory lock. Brief, Headquarters and Session leases and check-in times
+READ ONLY`, whatever the server's default, and serializes each open's check of one schema with an
+advisory lock. Brief, Headquarters and Session leases and check-in times
 are taken from the database's clock (`clock_timestamp()`, SQLite `unixepoch('subsec')`)
 inside the transaction that writes them, so a Station whose clock is off cannot take a live
 lease early; the clock-explicit test hooks keep their given time. A unique violation maps

@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `send_cable` takes scope `operation`, as its description said it did.
 - An audit record's `resource` may also name `operation:`, `mission:` or `compartment:`.
 
+- A SQL Registry or roster gets a table or index it lacks when it is opened, so a new one needs no
+  script: every statement of the schema can run again, and only what is missing runs, under the lock
+  two Stations opening together already wait on. The version stays 1. A role with no `CREATE` right
+  now starts on an up-to-date database (`CREATE TABLE IF NOT EXISTS ai6_schema` stopped it at every
+  open), and when something is missing it stops at start, naming the role, the schema and what is
+  missing, rather than at first use. Two Stations opening a new SQLite file together no longer fail on
+  changing the journal mode.
 - `tools/sdk/check_lock.py` fails when `pubspec.lock` names a package the `deps` commit's `pub/` lacks,
   which only an offline build found out before.
 - Moneypenny's chat comes back by itself after a socket fails, and says `Reconnecting…` meanwhile:

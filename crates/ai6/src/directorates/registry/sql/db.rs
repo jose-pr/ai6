@@ -11,6 +11,7 @@
 //! lock sees what the previous holder committed, and reads run `REPEATABLE READ READ ONLY`,
 //! so a read of several tables sees one commit.
 
+use std::collections::BTreeSet;
 use std::io;
 #[cfg(feature = "sqlite")]
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -28,6 +29,9 @@ const SCHEMA_VERSION: i64 = 1;
 const SQLITE_SCHEMA: &str = include_str!("schema/sqlite.sql");
 #[cfg(feature = "postgres")]
 const POSTGRES_SCHEMA: &str = include_str!("schema/postgres.sql");
+
+/// The clock rows the schema seeds, one per [`Clock`].
+const CLOCK_ROWS: i64 = 2;
 
 /// With the schema's name, serializes concurrent migrations of one PostgreSQL schema.
 #[cfg(feature = "postgres")]
@@ -222,6 +226,66 @@ impl<'a> Location<'a> {
     }
 }
 
+/// One statement of a schema file; its text is safe to run again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Statement {
+    /// The table or index it makes; `None` for the one that fills the clock.
+    pub(super) creates: Option<String>,
+    text: String,
+}
+
+/// The statements of a schema file, in order. Whole-line comments are dropped first, since one
+/// may hold a semicolon.
+///
+/// # Errors
+///
+/// `InvalidData` for anything but `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS` and
+/// the clock's `INSERT`, which could not be run again at every open.
+pub(super) fn statements(schema: &str) -> io::Result<Vec<Statement>> {
+    let code: String = schema
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("--"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    code.split(';')
+        .map(str::trim)
+        .filter(|statement| !statement.is_empty())
+        .map(|text| {
+            let creates = ["CREATE TABLE IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS "]
+                .into_iter()
+                .find_map(|head| text.strip_prefix(head))
+                .and_then(|rest| rest.split_whitespace().next())
+                .map(str::to_owned);
+            if creates.is_none() && !text.starts_with("INSERT INTO ai6_clock ") {
+                return Err(invalid(format!("not a repeatable statement: {text}")));
+            }
+            Ok(Statement {
+                creates,
+                text: text.to_owned(),
+            })
+        })
+        .collect()
+}
+
+/// The tables and indexes of the schema statements create in, as `CREATE ... IF NOT EXISTS`
+/// looks for them; reading them needs no right beyond connecting.
+pub(super) fn schema_objects(tx: &mut Tx<'_>) -> io::Result<BTreeSet<String>> {
+    let sql = match &tx.inner {
+        #[cfg(feature = "sqlite")]
+        TxInner::Sqlite(_) => "SELECT name FROM sqlite_master WHERE type IN ('table', 'index')",
+        #[cfg(feature = "postgres")]
+        TxInner::Postgres(_) => {
+            "SELECT c.relname::text FROM pg_catalog.pg_class c \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p', 'i', 'I')"
+        }
+    };
+    tx.query(sql, &[])?
+        .into_iter()
+        .map(|row| row.text(0))
+        .collect()
+}
+
 impl Database {
     /// Opens the database at `location` and brings its schema up to date.
     pub(crate) fn open(location: Location<'_>, options: &SqlOptions) -> io::Result<Self> {
@@ -245,10 +309,21 @@ impl Database {
         connection
             .busy_timeout(busy_timeout)
             .map_err(sqlite_error)?;
-        // WAL lets readers in other processes carry on while one Station writes.
-        connection
-            .execute_batch("PRAGMA journal_mode = WAL;")
-            .map_err(sqlite_error)?;
+        // WAL lets readers in other processes carry on while one Station writes. Changing to it
+        // answers busy at once while another connection does the same, without the busy handler.
+        let waiting = std::time::Instant::now();
+        loop {
+            match connection.execute_batch("PRAGMA journal_mode = WAL;") {
+                Ok(()) => break,
+                Err(rusqlite::Error::SqliteFailure(failure, _))
+                    if failure.code == rusqlite::ErrorCode::DatabaseBusy
+                        && waiting.elapsed() < busy_timeout =>
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(failure) => return Err(sqlite_error(failure)),
+            }
+        }
         Ok(Self {
             kind: Kind::Sqlite(Mutex::new(connection)),
         })
@@ -360,9 +435,10 @@ impl Database {
             #[cfg(feature = "postgres")]
             Dialect::Postgres => POSTGRES_SCHEMA,
         };
+        let statements = statements(schema)?;
         self.transaction(Mode::Migrate, |tx, _| {
-            // Two Stations opening a new database migrate it once: SQLite's IMMEDIATE
-            // transaction and this lock make the second wait for the first.
+            // Two Stations opening a database that lacks something make it once: SQLite's
+            // IMMEDIATE transaction and this lock make the second wait for the first.
             #[cfg(feature = "postgres")]
             if dialect == Dialect::Postgres {
                 tx.execute(
@@ -370,11 +446,47 @@ impl Database {
                     &[Value::Int(MIGRATION_LOCK)],
                 )?;
             }
-            tx.batch("CREATE TABLE IF NOT EXISTS ai6_schema (version BIGINT NOT NULL)")?;
-            let current = schema_version(tx)?;
+            let present = schema_objects(tx)?;
+            // A newer ai6's database is refused before anything is made in it.
+            let current = if present.contains("ai6_schema") {
+                schema_version(tx)?
+            } else {
+                0
+            };
             check_schema(current)?;
+            // Asked first: PostgreSQL ends the transaction at a refused statement. Nothing runs
+            // when nothing is missing, since `IF NOT EXISTS` needs the rights of a `CREATE` even
+            // then, and a role without them may run a database someone else keeps up to date.
+            let missing: Vec<&Statement> = statements
+                .iter()
+                .filter(|s| {
+                    s.creates
+                        .as_ref()
+                        .is_some_and(|name| !present.contains(name))
+                })
+                .collect();
+            if !missing.is_empty() {
+                let at = where_we_are(tx)?;
+                for statement in &missing {
+                    tx.batch(&statement.text).map_err(|failure| {
+                        if failure.kind() == io::ErrorKind::PermissionDenied {
+                            refused_to_create(&at, &missing, &failure)
+                        } else {
+                            failure
+                        }
+                    })?;
+                }
+            }
+            let rows = tx
+                .query_opt("SELECT count(*) FROM ai6_clock", &[])?
+                .ok_or_else(|| invalid("the clock could not be counted"))?
+                .int(0)?;
+            if rows < CLOCK_ROWS {
+                for statement in statements.iter().filter(|s| s.creates.is_none()) {
+                    tx.batch(&statement.text)?;
+                }
+            }
             if current < 1 {
-                tx.batch(schema)?;
                 tx.execute(
                     "INSERT INTO ai6_schema (version) VALUES ($1)",
                     &[Value::Int(SCHEMA_VERSION)],
@@ -414,6 +526,41 @@ fn run_in<T, E: From<io::Error>>(
         Mode::Read | Mode::Migrate => 0,
     };
     work(tx, revision)
+}
+
+/// The role and schema a `CREATE` would run as and in; on SQLite, the file's own.
+fn where_we_are(tx: &mut Tx<'_>) -> io::Result<(String, String)> {
+    match &tx.inner {
+        #[cfg(feature = "sqlite")]
+        TxInner::Sqlite(_) => Ok(("this process".to_owned(), "main".to_owned())),
+        #[cfg(feature = "postgres")]
+        TxInner::Postgres(_) => {
+            let row = tx
+                .query_opt("SELECT current_user::text, current_schema()::text", &[])?
+                .ok_or_else(|| invalid("the database did not say who is connected"))?;
+            Ok((row.text(0)?, row.text(1)?))
+        }
+    }
+}
+
+fn refused_to_create(
+    (role, schema): &(String, String),
+    missing: &[&Statement],
+    failure: &io::Error,
+) -> io::Error {
+    let names: Vec<&str> = missing
+        .iter()
+        .filter_map(|statement| statement.creates.as_deref())
+        .collect();
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!(
+            "this database lacks {} and role {role} may not make them in schema {schema}: start \
+             this ai6 once as a role that may, or create them from the schema file, and grant \
+             them to {role} ({failure})",
+            names.join(", ")
+        ),
+    )
 }
 
 fn schema_version(tx: &mut Tx<'_>) -> io::Result<i64> {

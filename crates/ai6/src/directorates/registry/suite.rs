@@ -179,6 +179,24 @@ impl PostgresStore {
         self.location_with(&[])
     }
 
+    /// Runs `sql` as the server's own user.
+    pub(crate) fn admin(&self, sql: &str) -> std::io::Result<()> {
+        super::sql::postgres_admin(&self.server, sql)
+    }
+
+    /// This store's schema.
+    pub(crate) fn schema(&self) -> &str {
+        &self.schema
+    }
+
+    /// [`location`](Self::location), signing in as `role` with `password`.
+    pub(crate) fn location_as(&self, role: &str, password: &str) -> String {
+        let location = self.location();
+        let (scheme, rest) = location.split_once("://").expect("a URL");
+        let rest = rest.split_once('@').map_or(rest, |(_, host)| host);
+        format!("{scheme}://{role}:{password}@{rest}")
+    }
+
     /// [`location`](Self::location) with more server settings for each session.
     pub(crate) fn location_with(&self, settings: &[(&str, &str)]) -> String {
         let separator = if self.server.contains('?') { '&' } else { '?' };

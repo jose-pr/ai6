@@ -148,9 +148,15 @@ Headquarters lease lasts 60 seconds between renewals; `ai6.cfg`'s `[registry]
 headquarters_lease` sets how long a standby control Station waits before taking over from one
 that went dark.
 
-In a SQL Registry each kind of record has its own table, created on first use; a database
-whose schema version is newer than the Station knows is refused, when it is opened and on
-every write. Every write first takes the Registry's row in `ai6_clock`, so writers
+In a SQL Registry each kind of record has its own table. Each open compares the tables and
+indexes this build needs with what the database's catalog holds, under the same lock two Stations
+opening together wait on, and makes only what is missing, so a new table needs no script. Nothing
+runs when nothing is missing, so a role with no `CREATE` right starts on a database someone else
+keeps up to date. A role that cannot make what is missing stops at start, naming itself, the schema
+and what is missing: start that build once as a role that may, or create them from
+`crates/ai6/src/directorates/registry/sql/schema/postgres.sql`, and grant them to it. A script still
+does what moves data. A database whose schema version is newer than the Station knows is refused,
+when it is opened and on every write. Every write first takes the Registry's row in `ai6_clock`, so writers
 queue as they do on the directory's lock, and leases, the Headquarters term and Session
 fencing behave the same on every backend. A Station that stalls inside a write (a paused
 VM, a half-open connection) loses its session after a quarter of the Headquarters lease,

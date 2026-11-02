@@ -523,5 +523,198 @@ mod tests {
         });
     }
 
+    fn table_answers(registry: &SqlRegistry, table: &str) -> bool {
+        registry
+            .db
+            .read(|tx| tx.query_opt(&format!("SELECT count(*) FROM {table}"), &[]))
+            .is_ok()
+    }
+
+    /// Takes away one table and one index, as a database a newer build first opens lacks them.
+    fn lose_a_table_and_an_index(registry: &SqlRegistry) {
+        registry
+            .db
+            .write(Clock::Registry, |tx, _| {
+                tx.execute("DROP TABLE ai6_issue_proposals", &[])?;
+                tx.execute("DROP INDEX ai6_timeline_order", &[])
+            })
+            .unwrap();
+    }
+
+    fn clock_revision(registry: &SqlRegistry) -> i64 {
+        registry
+            .db
+            .read(|tx| {
+                tx.query_opt(
+                    "SELECT revision FROM ai6_clock WHERE name = $1",
+                    &["registry".into()],
+                )?
+                .ok_or_else(|| io::Error::other("no clock row"))?
+                .int(0)
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn what_a_database_lacks_is_made_when_it_is_opened_and_nothing_else_changes() {
+        on_each_database(|location| {
+            let station = SqlRegistry::open(location).unwrap();
+            station.check_in("station-a", Default::default()).unwrap();
+            lose_a_table_and_an_index(&station);
+            assert!(!table_answers(&station, "ai6_issue_proposals"));
+            let revision = clock_revision(&station);
+
+            let again = SqlRegistry::open(location).unwrap();
+            assert!(table_answers(&again, "ai6_issue_proposals"));
+            let objects = again.db.read(db::schema_objects).unwrap();
+            assert!(objects.contains("ai6_timeline_order"), "{objects:?}");
+            assert_eq!(clock_revision(&again), revision, "the clock keeps counting");
+            assert_eq!(again.stations(Duration::from_secs(60)).unwrap().len(), 1);
+            let (rows, version) = again
+                .db
+                .read(|tx| {
+                    let row = tx
+                        .query_opt("SELECT count(*), max(version) FROM ai6_schema", &[])?
+                        .ok_or_else(|| io::Error::other("no row"))?;
+                    Ok::<_, io::Error>((row.int(0)?, row.int(1)?))
+                })
+                .unwrap();
+            assert_eq!((rows, version), (1, 1), "still one row of version 1");
+        });
+    }
+
+    #[test]
+    fn stations_opening_together_each_find_the_schema_whole() {
+        on_each_database(|location| {
+            let open_together = || {
+                std::thread::scope(|scope| {
+                    let opening: Vec<_> = (0..6)
+                        .map(|_| scope.spawn(|| SqlRegistry::open(location).map(|_| ())))
+                        .collect();
+                    for one in opening {
+                        one.join().unwrap().unwrap();
+                    }
+                });
+            };
+            open_together();
+            let station = SqlRegistry::open(location).unwrap();
+            lose_a_table_and_an_index(&station);
+            open_together();
+            assert!(table_answers(&station, "ai6_issue_proposals"));
+        });
+    }
+
+    /// The server role a deployment runs under when someone else owns the schema: it may read
+    /// and write every table and create nothing. Dropped with the value.
+    #[cfg(feature = "postgres")]
+    struct UnprivilegedRole<'a> {
+        store: &'a suite::PostgresStore,
+        name: String,
+    }
+
+    #[cfg(feature = "postgres")]
+    impl<'a> UnprivilegedRole<'a> {
+        /// `None` when the server's user may not make roles.
+        fn new(store: &'a suite::PostgresStore) -> Option<Self> {
+            let name = format!("ai6_role_{}", uuid::Uuid::new_v4().simple());
+            match store.admin(&format!("CREATE ROLE {name} LOGIN PASSWORD 'unprivileged'")) {
+                Ok(()) => Some(Self { store, name }),
+                Err(error) => {
+                    eprintln!("skipped: the server's user cannot create a role: {error}");
+                    None
+                }
+            }
+        }
+
+        fn grant(&self) {
+            let (schema, name) = (self.store.schema(), &self.name);
+            self.store
+                .admin(&format!(
+                    "GRANT USAGE ON SCHEMA {schema} TO {name}; \
+                     GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO {name}"
+                ))
+                .unwrap();
+        }
+
+        fn location(&self) -> String {
+            self.store.location_as(&self.name, "unprivileged")
+        }
+    }
+
+    #[cfg(feature = "postgres")]
+    impl Drop for UnprivilegedRole<'_> {
+        fn drop(&mut self) {
+            let name = &self.name;
+            let _ = self
+                .store
+                .admin(&format!("DROP OWNED BY {name} CASCADE; DROP ROLE {name}"));
+        }
+    }
+
+    #[cfg(feature = "postgres")]
+    #[test]
+    fn a_role_that_cannot_create_starts_on_a_whole_database_and_is_told_what_is_missing() {
+        let Some(store) = suite::PostgresStore::new() else {
+            eprintln!("skipped a PostgreSQL test: {}", suite::POSTGRES_URL_ENV);
+            return;
+        };
+        let owner = SqlRegistry::open(&store.location()).unwrap();
+        let Some(role) = UnprivilegedRole::new(&store) else {
+            return;
+        };
+        role.grant();
+
+        let station = SqlRegistry::open(&role.location())
+            .expect("nothing is missing, so no DDL right is needed");
+        station.check_in("station-a", Default::default()).unwrap();
+        crate::directorates::m::config::SqlProvider::open(&role.location())
+            .expect("the roster on the same database too");
+
+        lose_a_table_and_an_index(&owner);
+        let refused = SqlRegistry::open(&role.location()).unwrap_err();
+        assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied, "{refused}");
+        let said = refused.to_string();
+        assert!(said.contains(&role.name), "names the role: {said}");
+        assert!(
+            said.contains("ai6_issue_proposals"),
+            "names the table: {said}"
+        );
+        assert!(
+            said.contains("ai6_timeline_order"),
+            "names the index: {said}"
+        );
+        assert!(said.contains(store.schema()), "names the schema: {said}");
+
+        // The owner makes them; the role then only needs its grants on what is new.
+        let again = SqlRegistry::open(&store.location()).unwrap();
+        assert!(table_answers(&again, "ai6_issue_proposals"));
+        role.grant();
+        SqlRegistry::open(&role.location()).unwrap();
+    }
+
+    #[test]
+    fn the_two_schemas_name_the_same_tables_and_indexes() {
+        let names = |schema: &str| -> std::collections::BTreeSet<String> {
+            db::statements(schema)
+                .unwrap()
+                .iter()
+                .filter_map(|statement| statement.creates.clone())
+                .collect()
+        };
+        let postgres = names(include_str!("sql/schema/postgres.sql"));
+        assert_eq!(postgres, names(include_str!("sql/schema/sqlite.sql")));
+        assert!(postgres.contains("ai6_schema"), "{postgres:?}");
+        assert!(postgres.contains("ai6_timeline_order"), "{postgres:?}");
+        for schema in [
+            include_str!("sql/schema/postgres.sql"),
+            include_str!("sql/schema/sqlite.sql"),
+        ] {
+            let statements = db::statements(schema).unwrap();
+            let seeds = statements.iter().filter(|s| s.creates.is_none()).count();
+            assert_eq!(seeds, 1, "one statement fills the clock");
+            assert_eq!(statements[0].creates.as_deref(), Some("ai6_schema"));
+        }
+    }
+
     use db::Value;
 }
