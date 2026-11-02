@@ -208,7 +208,8 @@ async fn run(cli: Cli) -> Result<(), String> {
     let host_chiefs = settings.located.value.unex.access.chief.clone();
     for subject in &host_chiefs {
         subject.parse::<ai6::Subject>().map_err(|_| {
-            format!("[unex.access] chief: entry is not account:<name>, person:<id> or group:<name>")
+            "[unex.access] chief: an entry is not account:<name>, person:<id> or group:<name>"
+                .to_owned()
         })?;
     }
     let live = Arc::new(
