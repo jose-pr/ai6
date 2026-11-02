@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `require = "both"` gives up none of this and gets no line. New: `PublisherSigner`,
   `publisher_entry`, `check_libraries`.
 - A `strict` scan removes old verified copies of provider libraries, which were never removed: it
-  keeps what it loaded and the newest `[plugins] keep_verified` files (default 8; `0` keeps none of
+  keeps what it loaded and the newest `keep_verified` files of `[station.plugins]` or `[unex.plugins]` (default 8; `0` keeps none of
   them; `"none"` means no limit). A copy another process loaded or is about to load is left, and a copy
   that cannot be removed is listed and never fails the scan. This covers the Station, Universal
   Exports and the field runner (`ai6 runner serve --keep-verified`). New: `KeepVerified`,

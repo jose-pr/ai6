@@ -1729,8 +1729,10 @@ mod tests {
     use crate::directorates::registry::approvals::Ruling;
     use crate::directorates::registry::mission_issues::{IssueReply, IssueSnapshot};
 
+    /// `stall_timeout` holds a mock harness, which says nothing after it starts: long enough for a
+    /// busy machine to finish a test, and short enough that a failed test still ends the process.
     const AGENTS: &str = "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
-                          [agent.007.limits]\nstall_timeout = 5\n\
+                          [agent.007.limits]\nstall_timeout = 120\n\
                           [agent.desk]\nhandler = \"mock-recorder\"\nclearance = \"desk\"\n";
 
     const SOURCES: &str = "sources = { gh = { provider = \"github\", repo = \"o/r\", \
@@ -3015,13 +3017,7 @@ mod tests {
             .intake
             .decide_issue_proposal(id, false, "sam", false)
             .unwrap();
-        // A round leaves the outcome for later while the Mission is not where it can hear it, so
-        // on a busy machine it may take more than one.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-        while told("TOLD-ONE").is_empty() && std::time::Instant::now() < deadline {
-            deliver_proposal_outcomes(&state).await;
-            arrived(&state, &mission).await;
-        }
+        deliver_proposal_outcomes(&state).await;
         deliver_proposal_outcomes(&state).await;
         arrived(&state, &mission).await;
         let messages = told("TOLD-ONE");
