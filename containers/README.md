@@ -73,6 +73,9 @@ own Flutter adds what that one weighs.
 A ref that does not exist fails the build, naming it. So does a ref whose Flutter does not run,
 since the build ends with `flutter --version`.
 
+An image takes `pub/` and `cdn/` from this branch and leaves `crates/` out. The Rust it builds
+fetches its crates, or uses `crates/` the way the branch's README says.
+
 `pub/` matches the Flutter it was built with. A Flutter whose own pinned packages differ needs
 network on the first `flutter pub get`, or a refreshed `pub/` (the branch's README).
 

@@ -3,8 +3,9 @@
 This branch holds no AI6 source. `pub/` is a Dart pub cache with every package the Outer Office
 Flutter app in `clients/outer-office` needs, so the app can be built for Linux, Windows and the web
 without reaching pub.dev or GitHub. `cdn/` holds every file the Outer Office web app would
-otherwise fetch from a CDN (below). `containers/` holds Dockerfiles for an image that builds the
-app, on any base and any Flutter (its README).
+otherwise fetch from a CDN (below). `crates/` holds every Rust crate the workspace needs, so it
+builds without reaching crates.io or GitHub (below). `containers/` holds Dockerfiles for an image
+that builds the app, on any base and any Flutter (its README).
 
 `tools/sdk/sdk.lock` on `main` names the commit of this branch a build uses, so a new commit here
 reaches nobody until the lock moves to it.
@@ -96,3 +97,49 @@ dart run tool/cdn_files.dart mirror --out /path/to/ai6-deps/cdn
 ```
 
 Update the engine revision named above and commit `cdn/` here.
+
+## `crates/`
+
+Every package `Cargo.lock` on `main` names, for every target, and nothing else:
+
+- `crates/<name>-<version>.crate`: the file crates.io serves, 488 of them, 67.5 MiB. Its SHA-256 is
+  the lock's checksum. Each keeps its own licence, inside it.
+- `crates/git/<repository>-<revision>.tar.gz`: a source archive of each pinned commit, with no
+  history, 5.05 MiB: `guatiao` 4.78, `coqui-access` 0.20, `anycfg-rs` 0.07, each MPL-2.0. The lock
+  has no checksum for these, so `crates/git/SHA256SUMS` holds what they were when `git` fetched
+  that exact commit.
+
+That is 72.6 MiB of this branch's 314.5 MiB, and 72 MiB of a plain clone of the repository, which
+fetches this branch too (185 MiB in all; `main` alone is 10 MiB). Git cannot compress these files
+further, and each new version of a crate stays in the history. The largest is 8.9 MiB. Unpacked for
+a build, they are about 600 MiB.
+
+### Use it
+
+From a checkout of `main` at a commit whose `tools/sdk/sdk.lock` names this branch's commit, and a
+checkout of that commit at `/path/to/ai6-deps`, with Python 3.11.4 or later:
+
+```sh
+python3 tools/sdk/crates.py use /path/to/ai6-deps
+```
+
+It checks each file, unpacks them as cargo directory sources in a new directory outside the
+repository (`--out DIR` names it), writes a cargo config there and prints how to use it: set
+`CARGO_HOME` to the directory it names, or pass `cargo --config FILE`. `cargo build --locked` then
+needs no network and no cargo cache. `--repo-config` also writes the checkout's own
+`.cargo/config.toml`, which git ignores; delete it to build from the network again.
+
+### Refresh it
+
+When `Cargo.lock` changes on `main`, from a checkout of `main` and a worktree on this branch:
+
+```sh
+python3 tools/sdk/crates.py refresh /path/to/ai6-deps
+```
+
+It makes `crates/` match the lock, fetching from crates.io and the pinned git commits and removing
+what the lock dropped; commits that here; points `DEPS_REF` in `containers/` at that commit; and
+points `app deps` in `tools/sdk/sdk.lock` at it, in a commit on `main`'s side. Push this branch
+first, without rebasing it: the lock names its commit. `sync` does only the first of those, and
+`check` only reports. `tools/sdk/check_lock.py` fails when the commit the lock names does not cover
+`Cargo.lock`.
