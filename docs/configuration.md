@@ -637,6 +637,7 @@ pending_per_station = 8
 | `access_token_ttl` | 3,600 | Seconds a sign-in that names no lifetime gets, and each renewal gives from then; more than 0, within `access_token_max_ttl`; longer is looser |
 | `access_token_max_ttl` | 86,400 | The longest lifetime a request for a token may name, in seconds |
 | `session_max` | 43,200 | How long renewing keeps a sign-in going, in seconds from when it was made; `0` turns renewal off, `"none"` lets it run on |
+| `session_cookie` | `true` | Whether a browser's sign-in also gets an HttpOnly cookie, so a reload [signs it back in](access.md#staying-signed-in) up to `session_max` after signing in; `false`, or `session_max = 0`, keeps a sign-in in the tab's memory alone |
 | `compartment_audit` | 60 | Seconds between audit records of one person's reads of one resource that only one [compartment](compartments.md#what-is-checked-and-when) allows; `0` writes one for every read |
 
 `[controls]`

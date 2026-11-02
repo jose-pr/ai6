@@ -285,6 +285,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to its last conversation after signing in again. `session_max = 0` turns renewal off
   ([Access and sign-in](https://jose-pr.github.io/ai6/access/#staying-signed-in)).
   (the Access and sign-in guide, "Staying signed in").
+- Outer Office on the web stays signed in across a page reload. A browser's sign-in also gets an
+  HttpOnly, `Secure`, `SameSite=Strict` cookie scoped to `/v1/auth`, which script on the page cannot
+  read, and at startup the app asks the new `POST /v1/auth/resume` for a fresh token. The sign-in
+  still ends `[gateway] session_max` after signing in, a resume cannot move that, and signing out ends
+  the cookie and every token of that sign-in. This gives something up: someone with the browser open
+  on that machine stays signed in until then, without a password. `[gateway] session_cookie = false`
+  turns it off, and a reload signs in again. The desktop app, `ai6ctl` and API clients are unchanged.
+  (the Access and sign-in guide, "Staying signed in").
 - A long answer no longer loses Moneypenny's tools when her tool token's time passes: past it, the
   token of a running turn stays accepted while its Station is heard from within `answer_deadline`,
   and until the person stops it. Her Cable token follows the same rule.

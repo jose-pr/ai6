@@ -253,8 +253,13 @@ straight from the Flutter dev server cannot sign in. [Access and
 sign-in](https://jose-pr.github.io/ai6/access/#signing-in-from-a-browser) lists what the proxy must
 pass. The sign-in page asks `GET /v1/auth/methods` what the gateway accepts and shows its name and
 password form, the button of an organization proxy that vouches for the person, or both, on web
-and desktop alike. The bearer token is kept in memory only, so a reload signs in again, and
-signing out revokes it. An open app renews it `[refresh] renew_before` ahead of its end, on its own
+and desktop alike. The bearer token is kept in memory only, and signing out revokes it. On the web
+a sign-in also gets an HttpOnly session cookie that this code cannot read, nothing else is kept, and
+a reload asks `POST /v1/auth/resume` for a new token and goes back to the page the URL names and the
+last conversation. So someone with the browser open on that machine stays signed in up to `[gateway]
+session_max` (twelve hours) after signing in, until they sign out; `[gateway] session_cookie = false`
+turns that off and a reload signs in again. The desktop app has no cookie: closing it signs out. An
+open app renews its token `[refresh] renew_before` ahead of its end, on its own
 timer, so the person never sees the hour, and says once when the sign-in can be renewed no
 further. Signing in again goes back to the last conversation, kept per person on the device
 ([Staying signed in](https://jose-pr.github.io/ai6/access/#staying-signed-in)).

@@ -100,7 +100,8 @@ token, says what `POST /v1/auth/login` accepts here: `password` (a name and a se
 both; when the gateway does not answer it shows the form. A wrong password and an unknown
 account read the same, a `429` counts its `Retry-After` down and holds **Continue** until then,
 and a `403` asks an administrator to check `public_origin` and the proxy. The token stays in the
-tab's memory: a reload or a new tab signs in again, and signing out revokes it.
+tab's memory, and signing out revokes it; a reload or a new tab gets a new one from the session
+cookie below.
 
 ### Staying signed in
 
@@ -119,6 +120,38 @@ than for an hour, renewing does not ask for the password again, and a directory 
 report a disabled account leaves it working until then; a person removed from the directory
 cannot renew. Lower it, or set it to `0` to turn renewal off; one larger than the default, or
 `"none"`, is reported as a weakening at start.
+
+A sign-in from a browser also gets a cookie, so a reload does not ask for the password:
+`ai6_session`, `HttpOnly; Secure; SameSite=Strict; Path=/v1/auth`, ending `session_max` after
+signing in. Script on the page cannot read it, and the app keeps no token in browser storage. The
+gateway stores only its digest. When the app starts on the web with no token it calls `POST
+/v1/auth/resume`, which answers as a login does, with a new token; no cookie or a bad one answers
+`401` and the sign-in page shows with no message. A resume does not move the end of the sign-in: the
+time runs from when the person signed in, however often the page reloads. The person must still be
+in the directory, and a front proxy naming someone else on that request ends it.
+
+**What this gives up.** Someone with the browser open on that machine stays signed in, with the
+person's own access, until `session_max` runs out or they sign out, and no password is asked for
+again. Closing the browser does not end it. On a shared machine, sign out, or turn the cookie off.
+
+`[gateway] session_cookie = false` turns it off: a sign-in lives in the tab's memory and a reload
+signs in again, and a cookie handed out before the change is refused. `session_max = 0` means no
+cookie either, as there is no renewal to come back to. A login with `"session_cookie": false` in its
+body gets none. Only a request carrying `Origin` gets one, which is what tells a browser from the
+desktop app, `ai6ctl` and other API clients; they are unchanged.
+
+Signing out revokes the sign-in, not only the token presented: the cookie, and every token a reload
+or another tab got from it, stop at once, on every gateway sharing the Registry, and the browser is
+told to drop the cookie. Revoking any of those tokens through `DELETE
+/v1/station/access-tokens/{token_id}` does the same. Other sign-ins of the same person carry on.
+There is no way yet to end all of a person's sign-ins at once.
+
+The cookie is sent only to `/v1/auth/`, and only `resume` and `logout` read it; it is not a bearer
+token, and no route takes its value as one. `resume` always wants the public origin (`403`
+otherwise), so another site's page cannot use it. Refused cookies are counted by address like login
+tries, in a count of their own that costs nobody a password try, and past `login_tries_per_address` the
+answer is `429`. Because `Secure` needs HTTPS, the browser must reach the app over the HTTPS origin
+`public_origin` names, as it must to sign in at all.
 
 Signing in again finds the conversation that was open: the app keeps its ID per person on the
 device and asks for it in its hello. The gateway checks it is the person's, and opens a new one when
@@ -141,8 +174,10 @@ sends a ping, so the proxy's idle timeout closes a quiet one; give those two a l
 every request under `/v1/` the proxy must:
 
 - set `X-Forwarded-Proto: https`, replacing what the client sent, and pass `Origin` unchanged:
-  `POST /v1/auth/login`, `POST /v1/auth/renew`, `POST /v1/attach` and `/v1/socket/` answer `403`
-  otherwise, and an app whose renewals are refused that way is signed out when its token ends;
+  `POST /v1/auth/login`, `POST /v1/auth/renew`, `POST /v1/auth/resume`, `POST /v1/attach` and
+  `/v1/socket/` answer `403` otherwise, and an app whose renewals are refused that way is signed out
+  when its token ends;
+- pass `Cookie` and `Set-Cookie` as they are, which proxies do unless told otherwise;
 - name the client in the header `client_address_header` names, or all clients share one login
   count;
 - speak HTTP/1.1 to the gateway, not buffer answers (`/v1/moneypenny/mcp` streams), and accept a

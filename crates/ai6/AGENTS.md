@@ -3430,9 +3430,13 @@ them with `ai6 peer waiting` (fingerprint and source address) and accepts one wi
 state directory).
 `AccessTokenRecord` is the device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
-expiry and optional revocation times; its debug output redacts the digest.
-`AccessTokenStore` (`store_access_token`, `find_access_token`, `revoke_access_token`,
-`extend_access_token`, which moves an active record's expiry later and never earlier);
+expiry and optional revocation times; its debug output redacts the digest. `into_session_cookie()`
+marks a record as a sign-in's session cookie (`is_session_cookie()`) and `in_sign_in(token_id)` a
+bearer token as belonging to that sign-in (`sign_in()`).
+`AccessTokenStore` (`store_access_token`; `find_access_token`, which never answers with a session
+cookie, nor with a token whose sign-in was revoked; `find_session_cookie`, the converse;
+`revoke_access_token`, where a token of a sign-in takes the sign-in with it;
+`extend_access_token`, which moves an active bearer record's expiry later and never earlier);
 `FileRegistry` stores and validates records in the `access-tokens/` and `access-token-digests/`
 directories, returns only active records, and serializes revocation and extension under the
 shared Registry lock.
