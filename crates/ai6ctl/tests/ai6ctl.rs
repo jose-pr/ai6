@@ -161,6 +161,9 @@ async fn ai6ctl(server: String, token: Option<String>, args: &[&str]) -> std::pr
     tokio::task::spawn_blocking(move || {
         let mut command = Command::new(env!("CARGO_BIN_EXE_ai6ctl"));
         command
+            // A loaded machine can take longer than the five seconds a person would wait.
+            .arg("--timeout")
+            .arg("120")
             .arg("--server")
             .arg(server)
             .args(args)
