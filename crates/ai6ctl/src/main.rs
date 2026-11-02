@@ -562,7 +562,7 @@ enum MissionCommand {
 /// What `ai6ctl pages` does.
 #[derive(Debug, Subcommand)]
 enum PagesCommand {
-    /// List your pages: id, kind, size, expiry and whether each was made after outside text.
+    /// List your pages: id, kind, size and expiry.
     List,
     /// Print a link to a page, valid for the time the gateway sets (an hour by default); open
     /// it in a browser. The link is bound to this access token.
@@ -1349,18 +1349,13 @@ async fn pages(
             for page in list {
                 let text = |key: &str| plain(page[key].as_str().unwrap_or("-"));
                 println!(
-                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}",
                     text("id"),
                     text("kind"),
                     page["bytes"].as_u64().unwrap_or(0),
                     page["expires_at"]
                         .as_f64()
                         .map_or_else(|| "remembered".to_owned(), |at| format!("{at:.0}")),
-                    if page["exposed"].as_bool() == Some(true) {
-                        "exposed"
-                    } else {
-                        "-"
-                    },
                     text("title"),
                 );
             }

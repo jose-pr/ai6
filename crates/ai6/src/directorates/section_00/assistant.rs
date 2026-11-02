@@ -197,15 +197,6 @@ fn check_network(network: &AssistantNetwork) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether a [`EVENT_TOOL`] event's `tool` brings text from outside AI6 into the conversation:
-/// the web tools always, and a script (Claude Code's `Bash`, Codex's `exec_command`) when
-/// `scripts_reach_hosts` ([`AssistantReach::scripts_reach_hosts`]). Text it brings in exposes
-/// the conversation.
-pub fn outside_tool(tool: &str, scripts_reach_hosts: bool) -> bool {
-    matches!(tool, "WebFetch" | "WebSearch")
-        || (matches!(tool, "Bash" | "exec_command") && scripts_reach_hosts)
-}
-
 /// Whether the environment variable `name` names a directory holding a login or credentials,
 /// which an assistant's scripts may not read: `CLAUDE_CONFIG_DIR` (the assistant's own Claude
 /// Code configuration, its transcripts and any stored login), `CODEX_HOME` and any `*_HOME`
@@ -316,12 +307,6 @@ impl AssistantReach {
         }
     }
 
-    /// Whether her scripts may reach a host: a network policy that reaches one, or scripts let
-    /// run without a sandbox, which no policy limits.
-    pub fn scripts_reach_hosts(&self) -> bool {
-        !self.network.reaches_nothing() || self.unsandboxed_scripts
-    }
-
     /// Checks the reach: interpreters as [`interpreter_name`] accepts them, and a network as
     /// [`AssistantMode::validate`] wants it.
     ///
@@ -374,8 +359,8 @@ pub const EVENT_MEMORY_CHANGES: &str = "memory_changes";
 /// saved to a branch of its own because `main` refused it, or a repository that could not be
 /// opened.
 pub const EVENT_NOTICE: &str = "notice";
-/// The assistant asked to send a Cable while exposed: nothing was sent, and
-/// [`AssistantEvent::cable`] is what waits for the person's confirmation.
+/// The assistant asked to send a Cable: nothing was sent, and [`AssistantEvent::cable`] is what
+/// waits for the person's confirmation.
 pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal";
 /// A Cable left on the person's behalf; [`AssistantEvent::cable`] says which.
 pub const EVENT_CABLE_SENT: &str = "cable_sent";
@@ -392,8 +377,7 @@ pub const ASSISTANT_SHARED_CHANGE_TOOL: &str = "propose_shared_change";
 pub const ASSISTANT_PUBLISH_PAGE_TOOL: &str = "publish_page";
 
 /// One file of a page a Station read from the assistant's workspace, as its manifest lists
-/// it: the path under the page, its size, SHA-256 and whether it was written while the
-/// conversation was exposed to outside text.
+/// it: the path under the page, its size and SHA-256.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantPageFile {
@@ -403,9 +387,6 @@ pub struct AssistantPageFile {
     pub bytes: u64,
     /// Its SHA-256, lower-case hex.
     pub sha256: String,
-    /// Whether the record of outside text lists it.
-    #[serde(default)]
-    pub outside_text: bool,
 }
 
 /// The digest by which a Station and Universal Exports match an upload to a `publish_page`
@@ -839,11 +820,6 @@ pub struct AssistantJob {
     /// `message` is empty. A harness that is not answering is left as it is.
     #[serde(default)]
     pub interrupt: bool,
-    /// The conversation has read text written outside AI6's own records, as Universal Exports
-    /// knows it when the job is queued (`Conversation.exposed` there is the one record of it):
-    /// a memory change then waits for the person, and so does whatever else waits on exposure.
-    #[serde(default)]
-    pub exposed: bool,
     /// The person the conversation is for. Required with `workspace` and `commit`: the
     /// Station fills the person's repository from its own roster and takes only that one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1303,7 +1279,6 @@ mod tests {
             session_id: None,
             close: false,
             interrupt: false,
-            exposed: false,
             person_id: None,
             workspace: None,
             commit: None,

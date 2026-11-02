@@ -552,31 +552,20 @@ groups)`, the deployment's scripts and network narrowed by the tables of the per
 groups and their own; `skills`: `AssistantSettings::skills_for(person, groups)`, the catalog
 (`[assistant.skills]`) less what the same tables leave out; and `groups` (the person's
 Directory groups), so the Station re-caps both by its own roster's tables rather than trust the
-gateway's narrowing. Every job carries
-`exposed`, the conversation's one record of exposure (`Conversation.exposed`, never cleared;
-`Conversation.exposed_by` lists what raised it, at most 16 sources of 200 bytes, `tool:NAME`
-for a read tool or the Station's source as given, each once, and a proposal made then carries
-both as `exposed` and `exposed_by`; a proposal also carries `read`, the read tools called since
+gateway's narrowing. A conversation carries no mark of what she read; tool results stay framed in
+`<ai6-data>`. A proposal carries `read`, the read tools called since
 the person's last message, at most 16, each `{tool, ids}` with only the identifier arguments
 `operation_id`, `mission_id`, `station_id`, `agent`, `kind` and `key`, and `opens`, the link
 of the page it changes (`app:/missions?operation_id=G&mission_id=m-1`, none for a shared
-change, Cable or memory file)):
-set once a read tool other than `field_guide`, `profile` and `station_settings` answers
-with text a route gave (a result, or a refusal quoting the route's answer: any status but
-401, 403, 404 and 503), before she gets the answer, when a Station reports a `tool` event naming
-`WebFetch` or `WebSearch`, or `Bash` while the last job's reach lets scripts reach a host
-(`ai6::outside_tool`; the conversation shows a `notice` naming the tool), and by the Station
-running the conversation through `POST
-/v1/station/assistant/exposure`, which also shows the person a `notice` naming the source the
-first time. A Station's
-`memory_changes` event (with `change`) in a conversation not exposed becomes a `notice`
+change, Cable or memory file). A Station's
+`memory_changes` event (with `change`) becomes a `notice`
 entry (`data.diff`) and a `memory` commit job (message `moneypenny: remember PATHS`, trailer
-`Via: Moneypenny (conversation ID)`) for that Station; in an exposed one, a `memory_commit`
-proposal (request method `COMMIT`, body `{message, files, diff}`, needs `your confirmation`
-on `your memory`) and a note telling her it waits. Confirmed, a commit proposal is audited
+`Via: Moneypenny (conversation ID)`) for that Station, at once, whatever she read; the commit
+keeps `AssistantChange::base`, so it is refused when a file changed on `main` since she read it.
+A confirmed shared change is audited
 `moneypenny.confirmed` (resource `config:assistant`) and sent as a commit job to the
 conversation's Station (else the first healthy one), staying `confirming` until the Station
-answers; cancelled, nothing is sent (`memory_discard`: the Station set it aside already). A
+answers; cancelled, nothing is sent. A
 commit job's answer becomes a `notice` (or `error`) entry, settles its proposal `done` or
 `failed`, and is told to her with the next message. A `notice` event becomes a `notice`
 entry and a note for her.
@@ -598,11 +587,10 @@ sent at once as a `shared` commit job; otherwise it is a proposal (needs `member
 Cables. Each message's job carries `person_id` and `cables`: the Operations the Stations check
 in with (`operations` of their check-in) where the Authorizer gives the person `cable.send` or
 `cable.read`, at most 64 in Operation ID order, read again for every message. With any, the
-Station gives her its Cable endpoint (see the `ai6` header, assistant desk). Exposure is the
-same `Conversation.exposed` as above: the Station raises it with `POST
-/v1/station/assistant/exposure` before it shows her a Cable body, and asks the `GET` with the
-call's `operation` before every Cable call, which then also answers whether the person holds
-`cable.send` and `cable.read` there now. A `cable_proposal` event becomes a proposal: tool
+Station gives her its Cable endpoint (see the `ai6` header, assistant desk), and asks `GET
+/v1/station/assistant/cables` before every Cable call, which answers whether the person holds
+`cable.send` and `cable.read` there now. Every Cable she sends or replies is held by the Station
+for the person to confirm. A `cable_proposal` event becomes a proposal: tool
 `send_cable` or `reply_to_cable`, request `CABLE <target>` with body `{operation, recipient,
 ttl_seconds, body}`, summary naming the recipient and lifetime,
 needs `cable.send` on `operation:<id>`, the session of the conversation's current access
@@ -662,9 +650,8 @@ route in its JSON form, checked by `routes.rs` (its schema is flat, `page` plus 
 any page; which fields a page takes is the parser's rule), `label` 1 to `navigate_label_bytes` bytes
 without control characters but newlines. Anything else answers `isError` "Navigation refused:
 REASON" and adds nothing; a valid call adds a `navigation` entry, `data: {"id": "nav-<hex>",
-"route", "label", "exposed"?: true}`, and answers "Offered to the person as nav-…; the page
-opens when they choose it." It is allowed in an exposed conversation, stamped as a view is,
-never raises exposure and is not audited. The `audit` tool's `operation_id` and `station_id`
+"route", "label"}`, and answers "Offered to the person as nav-…; the page
+opens when they choose it." It is not audited. The `audit` tool's `operation_id` and `station_id`
 are an Audit route's (not both).
 
 ### Pages she publishes
@@ -687,8 +674,7 @@ gets 404. Page routes: `GET /v/{token}/` (the frame: the bar and an `<iframe>`),
 `feed_reads_per_minute`). A link stands only while its page, its time and its viewer's
 sign-in do. Every page response carries the sandbox CSP (no `allow-same-origin`), `nosniff`,
 `no-referrer`, `no-store`, CORP `cross-origin` and `Access-Control-Allow-Origin: *`; no `/v1`
-route ever answers CORS. Her conversation lists `exposed_by`; a page keeps the list as it was
-at publish (plus `file:PATH` for outside-text files) for the bar.
+route ever answers CORS.
 
 ## Gateway state
 
@@ -929,8 +915,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `DELETE /v1/user/assistant/memory/{path}` | User bearer, own memory only. "Forget": a commit by the person removing the file; `{"path","commit"}`, `404` a missing file. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most `[assistant.gateway] max_wait`), held the same with Moneypenny off. |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries; `cable_proposal` and `cable_sent` as under Cables in Moneypenny, the assistant. |
-| `GET /v1/station/assistant/exposure?station=ID&conversation=ID[&operation=ID]` | Station bearer. `{"exposed": bool}` for a conversation the Station runs; with `operation` also `"send"` and `"read"`, whether its person holds `cable.send` and `cable.read` there now (both false once the person's sign-in ended); `404` unknown conversation, `403` a Station that does not run it. |
-| `POST /v1/station/assistant/exposure` | Station bearer; body `{"station", "conversation", "source"}` (source 1-256 bytes). Marks the conversation exposed for good, `204`; `404`, `403` as for `GET`. |
+| `GET /v1/station/assistant/cables?station=ID&conversation=ID&operation=ID` | Station bearer. `{"send", "read"}` for a conversation the Station runs: whether its person holds `cable.send` and `cable.read` there now (both false once the person's sign-in ended); `404` unknown conversation, `403` a Station that does not run it. |
 | `POST /v1/attach` | Requires exact `Origin` and trusted HTTPS proxy marker; exchanges token from JSON body for a scoped cookie. |
 | `GET /v1/socket/{session_id}?after={sequence}` | Requires the cookie, exact `Origin` and trusted HTTPS marker. Streams binary guatiao messages. |
 

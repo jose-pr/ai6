@@ -9,25 +9,22 @@
 //!
 //! When the roster's `[assistant]` gives people personal repositories, each message names the
 //! person's workspace (their repository, their groups' shared ones, their name for commits).
-//! A memory change the Station sets aside is committed at once in a conversation that has
-//! read nothing others wrote, and is a proposal once it has; a change to a shared repository
-//! is a proposal unless the group's repository is `write = true`.
+//! A memory change the Station sets aside is committed at once, its diff shown in the chat; a
+//! change to a shared repository is a proposal unless the group's repository is `write = true`.
 //!
-//! Exposure has one record, `Conversation.exposed`, never cleared. A read tool marks it
-//! unless it is one of [`tools::QUIET_TOOLS`], and a Station marks it
-//! (`POST /v1/station/assistant/exposure`) for what only it sees. Group and organisation
-//! repositories are trusted text and expose nothing. Jobs carry it as
-//! [`ai6::AssistantJob::exposed`].
+//! A conversation is never marked for what she read: her gate is the person's confirmation, and
+//! exposure is for a Mission's Session. Tool results stay framed in `<ai6-data>`, which tells her
+//! what is data.
 //!
 //! `show` and `navigate` only add an entry for the app: a view, or an app page offered as a
 //! card the person opens ([`routes`]). Neither reads nor changes anything, so neither is
-//! audited, and both are stamped `exposed` in an exposed conversation without raising it.
+//! audited.
 //!
 //! Routes: `GET /v1/user/moneypenny` (the app's WebSocket), `POST /v1/moneypenny/mcp` (the
 //! harness's tools, with a token bound to the person and the conversation),
 //! `/v1/user/assistant/memory` (the person's memory, [`memory`]),
 //! `GET /v1/station/assistant/next`, `POST /v1/station/assistant/reports` and
-//! `GET`/`POST /v1/station/assistant/exposure` (the Stations).
+//! `GET /v1/station/assistant/cables` (the Stations).
 
 pub(crate) mod actions;
 pub(crate) mod cables;
@@ -57,7 +54,6 @@ use ai6::{
     COMMIT_MEMORY, COMMIT_SHARED, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT,
     EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
     EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, Limit, Seconds,
-    outside_tool,
 };
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
@@ -289,7 +285,6 @@ fn control_job(
         session_id: conversation.session_id.clone(),
         close: *control == Control::Close,
         interrupt: *control == Control::Interrupt,
-        exposed: conversation.exposed,
         person_id: Some(conversation.person_id.clone()),
         workspace: None,
         commit,
@@ -701,8 +696,6 @@ impl Assistant {
                 session_id: conversation.session_id.clone(),
                 close: false,
                 interrupt: false,
-                // Shared repositories are trusted text: checking them out exposes nothing.
-                exposed: conversation.exposed,
                 person_id: Some(person_id.to_owned()),
                 workspace,
                 commit: None,
@@ -718,9 +711,6 @@ impl Assistant {
             conversation.workspace = job.workspace.clone();
             // A new turn: proposals made from here rest on what she reads from here.
             conversation.turn_reads.clear();
-            // Sticky for the conversation: a harness started under a wider reach may still be running
-            // its script when a narrower message arrives, so its `Bash` still counts as outside text.
-            conversation.scripts_reach_hosts |= job.reach.scripts_reach_hosts();
             if let Some(text) = shown {
                 conversation.push(
                     Entry {
@@ -1082,7 +1072,7 @@ impl Assistant {
                         &self.config,
                         &mut after,
                     ),
-                    _ => apply(conversation, event, max_entries, &self.config.gateway),
+                    _ => apply(conversation, event, max_entries),
                 }
             }
             for (change, diff) in set_aside {
@@ -1113,11 +1103,9 @@ impl Assistant {
         Ok(())
     }
 
-    /// Handles a memory change a Station set aside for `conversation_id`: in a conversation
-    /// that read others' text it becomes a proposal the person confirms (`memory_commit`) or
-    /// cancels (`memory_discard`: it was set aside already); otherwise `station` is asked to
-    /// commit it at once, and the person sees what was kept. Answers whether a job was
-    /// queued.
+    /// Handles a memory change a Station set aside for `conversation_id`: `station` is asked to
+    /// commit it at once, and the person sees the diff. The commit is refused when a file it
+    /// changes moved on `main` since she read it. Answers whether a job was queued.
     fn memory_change(
         &self,
         desk: &mut Desk,
@@ -1158,44 +1146,6 @@ impl Assistant {
             author_name: workspace.author_name.clone(),
             author_email: workspace.author_email.clone(),
         };
-        if conversation.exposed {
-            let mut proposal = commit_proposal(
-                actions::MEMORY_COMMIT,
-                digest(&conversation.bearer),
-                "memory/ of your personal repository".to_owned(),
-                actions::Scope::Resource("your memory".to_owned()),
-                "your confirmation",
-                format!("Remember: {paths}"),
-                commit,
-            );
-            if let Some(body) = proposal.draft.call.body.as_mut() {
-                body["diff"] = json!(diff);
-            }
-            if record_proposal(conversation, proposal, bounds, &self.config.gateway) {
-                conversation.notes.push(format!(
-                    "[App: your memory change ({paths}) waits for the person's confirmation, \
-                     because this conversation read text others wrote.]"
-                ));
-            } else {
-                conversation.push(
-                    Entry {
-                        role: Role::Error,
-                        text: format!(
-                            "Moneypenny's memory change ({paths}) was not kept: {}",
-                            proposals_full(&self.config.gateway)
-                        ),
-                        at: now(),
-                        data: None,
-                    },
-                    bounds,
-                );
-                conversation.notes.push(format!(
-                    "[App: your memory change ({paths}) was not kept: {}]",
-                    proposals_full(&self.config.gateway)
-                ));
-            }
-            return false;
-        }
         conversation.push(
             Entry {
                 role: Role::Notice,
@@ -1476,46 +1426,31 @@ impl Assistant {
             .or_else(|| healthy.into_iter().next())
     }
 
-    /// Records a read tool call of the turn, and when its answer quoted text written outside
-    /// AI6's own records, marks the conversation exposed for good by `source`.
-    /// `Conversation.exposed` is the one record of it; jobs carry it to the Station.
+    /// Records a read tool call of the turn, which a proposal then lists.
     pub(crate) fn note_read(
         &self,
         conversation_id: &str,
         tool: &str,
         ids: std::collections::BTreeMap<String, String>,
-        source: Option<&str>,
     ) {
         if let Some(conversation) = self.desk().store.conversations.get_mut(conversation_id) {
             conversation.note_read(tool, ids, &self.config.gateway);
-            if let Some(source) = source {
-                conversation.expose_by(source, &self.config.gateway);
-            }
         }
     }
 
-    /// The conversation `station` runs, whether it is exposed after `source`, when given,
-    /// exposes it; `404` for one this gateway does not hold, `403` for one another Station
-    /// runs.
-    fn run_by(
-        &self,
-        station: &str,
-        conversation_id: &str,
-        source: Option<&str>,
-    ) -> Result<bool, ApiError> {
-        let mut desk = self.desk();
+    /// Whether `station` runs the conversation: `404` for one this gateway does not hold, `403`
+    /// for one another Station runs.
+    fn run_by(&self, station: &str, conversation_id: &str) -> Result<(), ApiError> {
+        let desk = self.desk();
         let conversation = desk
             .store
             .conversations
-            .get_mut(conversation_id)
+            .get(conversation_id)
             .ok_or_else(ApiError::not_found)?;
         if conversation.station.as_deref() != Some(station) {
             return Err(ApiError::forbidden());
         }
-        if let Some(source) = source {
-            conversation.expose_by(source, &self.config.gateway);
-        }
-        Ok(conversation.exposed)
+        Ok(())
     }
 
     /// Runs [`actions::SHARED_CHANGE`]: a change to one file of a shared repository of a
@@ -1746,11 +1681,7 @@ impl Assistant {
         else {
             return tools::Outcome::error("The conversation is gone.");
         };
-        // Built after reading outside text: the app frames it so the person checks it first.
-        let mut data = json!({"id": id, "view": view});
-        if conversation.exposed {
-            data["exposed"] = Value::Bool(true);
-        }
+        let data = json!({"id": id, "view": view});
         conversation.push(
             Entry {
                 role: Role::View,
@@ -1772,7 +1703,7 @@ impl Assistant {
 
     /// Offers the person an app page, when `input` is `{"to": ROUTE, "label": TEXT}` with a
     /// valid route; otherwise tells her why and offers nothing. It changes nothing, so it is
-    /// allowed in an exposed conversation and not audited; its entry is stamped as a view is.
+    /// not audited.
     pub(crate) fn navigate(&self, granted: &Granted, input: &Value) -> tools::Outcome {
         let (route, label) = match navigation(input, &self.config) {
             Ok(navigation) => navigation,
@@ -1789,10 +1720,7 @@ impl Assistant {
         else {
             return tools::Outcome::error("The conversation is gone.");
         };
-        let mut data = json!({"id": id, "route": route.to_json(), "label": label});
-        if conversation.exposed {
-            data["exposed"] = Value::Bool(true);
-        }
+        let data = json!({"id": id, "route": route.to_json(), "label": label});
         conversation.push(
             Entry {
                 role: Role::Navigation,
@@ -2226,12 +2154,7 @@ fn cut(text: &str, limit: usize) -> String {
 }
 
 /// Records one harness event in the conversation.
-fn apply(
-    conversation: &mut Conversation,
-    event: &AssistantEvent,
-    max_entries: Bounds,
-    gateway: &AssistantGatewayLimits,
-) {
+fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: Bounds) {
     let at = now();
     let text = event.text.clone().unwrap_or_default();
     let entry = |role, text: String| Entry {
@@ -2248,23 +2171,6 @@ fn apply(
         EVENT_TOOL => {
             let tools = event.tools.join(", ");
             conversation.push(entry(Role::Tools, tools), max_entries);
-            let reach = conversation.scripts_reach_hosts;
-            if let Some(tool) = event.tools.iter().find(|tool| outside_tool(tool, reach))
-                && !conversation.exposed
-            {
-                conversation.expose_by(&format!("tool:{tool}"), gateway);
-                conversation.push(
-                    entry(
-                        Role::Notice,
-                        format!(
-                            "Moneypenny read text from outside AI6 ({}): from now on her memory \
-                             changes and Cables wait for your confirmation.",
-                            cut(tool, 200)
-                        ),
-                    ),
-                    max_entries,
-                );
-            }
         }
         EVENT_COMPLETED => {
             if !conversation.answered && !text.trim().is_empty() {
@@ -2634,29 +2540,25 @@ pub(crate) async fn next(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct ExposureQuery {
+pub(crate) struct StandingQuery {
     station: String,
     conversation: String,
-    /// An Operation whose Cable permissions the Station asks about too.
-    #[serde(default)]
-    operation: Option<String>,
+    /// The Operation whose Cable permissions the Station asks about.
+    operation: String,
 }
 
-/// `GET /v1/station/assistant/exposure?station=ID&conversation=ID[&operation=ID]`:
-/// `{"exposed": bool}` for a conversation the Station runs, with an Operation also `"send"`
-/// and `"read"`, whether its person holds `cable.send` and `cable.read` there now; `404` for
-/// one this gateway does not hold, `403` for one another Station runs.
-pub(crate) async fn exposure(
+/// `GET /v1/station/assistant/cables?station=ID&conversation=ID&operation=ID`: `"send"` and
+/// `"read"`, whether the person of a conversation the Station runs holds `cable.send` and
+/// `cable.read` on the Operation now; `404` for one this gateway does not hold, `403` for one
+/// another Station runs.
+pub(crate) async fn cable_standing(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
-    Query(query): Query<ExposureQuery>,
+    Query(query): Query<StandingQuery>,
 ) -> Result<Json<Value>, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
     let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
-    let exposed = assistant.run_by(&query.station, &query.conversation, None)?;
-    let Some(operation) = query.operation else {
-        return Ok(Json(json!({"exposed": exposed})));
-    };
+    assistant.run_by(&query.station, &query.conversation)?;
     // A harness cut off by a Stop sends and reads no Cable.
     let cut_off = assistant
         .desk()
@@ -2670,66 +2572,10 @@ pub(crate) async fn exposure(
         (false, false)
     } else {
         assistant
-            .cable_permissions(&gateway, &query.conversation, &operation)
+            .cable_permissions(&gateway, &query.conversation, &query.operation)
             .await
     };
-    Ok(Json(
-        json!({"exposed": exposed, "send": send, "read": read}),
-    ))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Exposed {
-    station: String,
-    conversation: String,
-    /// Where the outside text came from, such as `personal:notes/a.md`.
-    source: String,
-}
-
-/// `POST /v1/station/assistant/exposure` with `{"station", "conversation", "source"}`: marks a
-/// conversation the Station runs exposed for good, `204`; `404` and `403` as for `GET`. The
-/// person is shown a notice naming the source the first time.
-pub(crate) async fn expose(
-    State(gateway): State<Gateway>,
-    headers: HeaderMap,
-    Json(exposed): Json<Exposed>,
-) -> Result<StatusCode, ApiError> {
-    gateway.authenticate_station(bearer(&headers)?)?;
-    if !ai6::directorates::section_00::assistant::valid_identity(&exposed.source) {
-        return Err(ApiError::bad_request());
-    }
-    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
-    let was = assistant.run_by(&exposed.station, &exposed.conversation, None)?;
-    assistant.run_by(
-        &exposed.station,
-        &exposed.conversation,
-        Some(&exposed.source),
-    )?;
-    if !was {
-        let bounds = assistant.config.bounds();
-        if let Some(conversation) = assistant
-            .desk()
-            .store
-            .conversations
-            .get_mut(&exposed.conversation)
-        {
-            conversation.push(
-                Entry {
-                    role: Role::Notice,
-                    text: format!(
-                        "Moneypenny read text written outside AI6's own records ({}): from now \
-                         on her memory changes and Cables wait for your confirmation.",
-                        cut(&exposed.source, 200)
-                    ),
-                    at: now(),
-                    data: None,
-                },
-                bounds,
-            );
-        }
-    }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(json!({"send": send, "read": read})))
 }
 
 /// `POST /v1/station/assistant/reports`: what a Station's assistant harness did. `204`;

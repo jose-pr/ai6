@@ -209,7 +209,7 @@ pub use directorates::section_00::assistant::{
     EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
     EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAction,
     MemoryAnswer, MemoryCommit, MemoryFile, MemoryOp, SCRIPT_ENVIRONMENT, credential_dir_var,
-    host_pattern, interpreter_name, memory_path, outside_tool, page_call_digest,
+    host_pattern, interpreter_name, memory_path, page_call_digest,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

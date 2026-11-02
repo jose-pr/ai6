@@ -475,7 +475,6 @@ pub ai6::directorates::m::assistant::AssistantGatewayLimits::conversation_entrie
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::conversations: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::conversations_per_person: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::event_buffer: u64
-pub ai6::directorates::m::assistant::AssistantGatewayLimits::exposed_sources: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::hello_timeout: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::live_per_person: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::max_wait: ai6::bounds::Seconds
@@ -495,7 +494,6 @@ pub ai6::directorates::m::assistant::AssistantGatewayLimits::result_chars: ai6::
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::route_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::shared_base_wait: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::socket_message_bytes: ai6::bounds::Limit
-pub ai6::directorates::m::assistant::AssistantGatewayLimits::source_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::sweep_every: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::token_reuse_margin: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::token_ttl: ai6::bounds::Seconds
@@ -517,7 +515,6 @@ pub ai6::directorates::m::assistant::AssistantLimits::inlined_memory_bytes: ai6:
 pub ai6::directorates::m::assistant::AssistantLimits::memory_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::memory_file_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::memory_files: ai6::bounds::Limit
-pub ai6::directorates::m::assistant::AssistantLimits::memory_import_depth: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::memory_list_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::memory_list_files: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::memory_walk: ai6::bounds::Limit
@@ -2149,7 +2146,6 @@ pub ai6::directorates::q::safehouse::CheckpointSpec::fallback: core::option::Opt
 pub ai6::directorates::q::safehouse::CheckpointSpec::files: core::option::Option<alloc::vec::Vec<ai6::directorates::q::safehouse::CheckpointFile>>
 pub ai6::directorates::q::safehouse::CheckpointSpec::max_bytes: core::option::Option<u64>
 pub ai6::directorates::q::safehouse::CheckpointSpec::message: alloc::string::String
-pub ai6::directorates::q::safehouse::CheckpointSpec::record: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::safehouse::CheckpointSpec::remote: alloc::string::String
 pub struct ai6::directorates::q::safehouse::SafeHouseCheckpoint
 pub ai6::directorates::q::safehouse::SafeHouseCheckpoint::base: core::option::Option<alloc::string::String>
@@ -5633,7 +5629,6 @@ pub ai6::directorates::section_00::assistant::AssistantJob::close: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::commit: core::option::Option<ai6::directorates::section_00::assistant::AssistantCommit>
 pub ai6::directorates::section_00::assistant::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::conversation_id: alloc::string::String
-pub ai6::directorates::section_00::assistant::AssistantJob::exposed: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::groups: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::section_00::assistant::AssistantJob::interrupt: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::job_id: alloc::string::String
@@ -5653,7 +5648,6 @@ impl core::fmt::Debug for ai6::directorates::section_00::assistant::AssistantJob
 pub fn ai6::directorates::section_00::assistant::AssistantJob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::section_00::assistant::AssistantPageFile
 pub ai6::directorates::section_00::assistant::AssistantPageFile::bytes: u64
-pub ai6::directorates::section_00::assistant::AssistantPageFile::outside_text: bool
 pub ai6::directorates::section_00::assistant::AssistantPageFile::path: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantPageFile::sha256: alloc::string::String
 pub struct ai6::directorates::section_00::assistant::AssistantReach
@@ -5662,7 +5656,6 @@ pub ai6::directorates::section_00::assistant::AssistantReach::network: ai6::dire
 pub ai6::directorates::section_00::assistant::AssistantReach::unsandboxed_scripts: bool
 impl ai6::directorates::section_00::assistant::AssistantReach
 pub fn ai6::directorates::section_00::assistant::AssistantReach::capped_by(&self, &ai6::directorates::section_00::assistant::AssistantReach) -> ai6::directorates::section_00::assistant::AssistantReach
-pub fn ai6::directorates::section_00::assistant::AssistantReach::scripts_reach_hosts(&self) -> bool
 pub fn ai6::directorates::section_00::assistant::AssistantReach::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::directorates::section_00::assistant::AssistantReport
 pub ai6::directorates::section_00::assistant::AssistantReport::conversation_id: alloc::string::String
@@ -5737,7 +5730,6 @@ pub fn ai6::directorates::section_00::assistant::credential_dir_var(&str) -> boo
 pub fn ai6::directorates::section_00::assistant::host_pattern(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::interpreter_name(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::memory_path(&str) -> bool
-pub fn ai6::directorates::section_00::assistant::outside_tool(&str, bool) -> bool
 pub fn ai6::directorates::section_00::assistant::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::directorates::section_00::assistant::repository_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::valid_identity(&str) -> bool
@@ -7069,7 +7061,6 @@ pub ai6::AssistantGatewayLimits::conversation_entries: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::conversations: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::conversations_per_person: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::event_buffer: u64
-pub ai6::AssistantGatewayLimits::exposed_sources: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::hello_timeout: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::live_per_person: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::max_wait: ai6::bounds::Seconds
@@ -7089,7 +7080,6 @@ pub ai6::AssistantGatewayLimits::result_chars: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::route_bytes: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::shared_base_wait: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::socket_message_bytes: ai6::bounds::Limit
-pub ai6::AssistantGatewayLimits::source_bytes: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::sweep_every: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::token_reuse_margin: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::token_ttl: ai6::bounds::Seconds
@@ -7108,7 +7098,6 @@ pub ai6::AssistantJob::close: bool
 pub ai6::AssistantJob::commit: core::option::Option<ai6::directorates::section_00::assistant::AssistantCommit>
 pub ai6::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantJob::conversation_id: alloc::string::String
-pub ai6::AssistantJob::exposed: bool
 pub ai6::AssistantJob::groups: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::AssistantJob::interrupt: bool
 pub ai6::AssistantJob::job_id: alloc::string::String
@@ -7138,7 +7127,6 @@ pub ai6::AssistantLimits::inlined_memory_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::memory_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::memory_file_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::memory_files: ai6::bounds::Limit
-pub ai6::AssistantLimits::memory_import_depth: ai6::bounds::Limit
 pub ai6::AssistantLimits::memory_list_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::memory_list_files: ai6::bounds::Limit
 pub ai6::AssistantLimits::memory_walk: ai6::bounds::Limit
@@ -7190,7 +7178,6 @@ impl core::default::Default for ai6::directorates::section_00::agent::AssistantN
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::default() -> Self
 pub struct ai6::AssistantPageFile
 pub ai6::AssistantPageFile::bytes: u64
-pub ai6::AssistantPageFile::outside_text: bool
 pub ai6::AssistantPageFile::path: alloc::string::String
 pub ai6::AssistantPageFile::sha256: alloc::string::String
 #[non_exhaustive] pub struct ai6::AssistantPageLimits
@@ -7225,7 +7212,6 @@ pub ai6::AssistantReach::network: ai6::directorates::section_00::agent::Assistan
 pub ai6::AssistantReach::unsandboxed_scripts: bool
 impl ai6::directorates::section_00::assistant::AssistantReach
 pub fn ai6::directorates::section_00::assistant::AssistantReach::capped_by(&self, &ai6::directorates::section_00::assistant::AssistantReach) -> ai6::directorates::section_00::assistant::AssistantReach
-pub fn ai6::directorates::section_00::assistant::AssistantReach::scripts_reach_hosts(&self) -> bool
 pub fn ai6::directorates::section_00::assistant::AssistantReach::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::AssistantReport
 pub ai6::AssistantReport::conversation_id: alloc::string::String
@@ -7596,7 +7582,6 @@ pub ai6::CheckpointSpec::fallback: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::files: core::option::Option<alloc::vec::Vec<ai6::directorates::q::safehouse::CheckpointFile>>
 pub ai6::CheckpointSpec::max_bytes: core::option::Option<u64>
 pub ai6::CheckpointSpec::message: alloc::string::String
-pub ai6::CheckpointSpec::record: core::option::Option<alloc::string::String>
 pub ai6::CheckpointSpec::remote: alloc::string::String
 #[non_exhaustive] pub struct ai6::ClassAuthorization
 pub ai6::ClassAuthorization::agents: alloc::vec::Vec<alloc::string::String>
@@ -10591,7 +10576,6 @@ pub fn ai6::load_access(impl core::convert::AsRef<std::path::Path>, ai6::bounds:
 pub fn ai6::load_policy(impl core::convert::AsRef<std::path::Path>, ai6::bounds::Limit) -> core::result::Result<ai6::AccessPolicy, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::memory_path(&str) -> bool
 pub fn ai6::micro_usd(f64) -> u64
-pub fn ai6::outside_tool(&str, bool) -> bool
 pub fn ai6::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities, &ai6::station::limits::ProvisionLimits) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>

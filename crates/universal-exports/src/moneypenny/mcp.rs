@@ -215,16 +215,8 @@ pub(crate) async fn endpoint(
             } else if let Some(tool) = write {
                 assistant.propose(&gateway, &granted, tool, &input).await
             } else {
-                let (outcome, quoted) = tools::run(&gateway, &granted.bearer, name, &input).await;
-                // Marked before she reads the text, so whatever waits on exposure waits; a
-                // refusal quoting the route's answer can carry others' text as well as a result.
-                let source = (quoted && tools::exposes(name)).then(|| format!("tool:{name}"));
-                assistant.note_read(
-                    &granted.conversation_id,
-                    name,
-                    tools::identifiers(&input),
-                    source.as_deref(),
-                );
+                let outcome = tools::run(&gateway, &granted.bearer, name, &input).await;
+                assistant.note_read(&granted.conversation_id, name, tools::identifiers(&input));
                 outcome
             };
             answer(
@@ -242,6 +234,28 @@ pub(crate) async fn endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn green_ink_stays_a_persons_she_only_reads_what_waits_for_it() {
+        let listed = listed(&views::ViewLimits::default());
+        let green: Vec<&Value> = listed["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| tool["name"].as_str().unwrap().contains("green"))
+            .collect();
+        assert_eq!(green.len(), 1, "{green:?}");
+        assert_eq!(green[0]["name"], "green_ink");
+        assert_eq!(green[0]["annotations"]["readOnlyHint"], true);
+        assert!(
+            green[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("Only the person signs them"),
+            "{}",
+            green[0]
+        );
+    }
 
     #[test]
     fn listed_tools_are_sorted_and_navigate_has_a_strict_schema() {

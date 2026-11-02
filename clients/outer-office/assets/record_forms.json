@@ -3014,26 +3014,6 @@
               "description": "Files of her personal folder looked at to name what a turn changed.",
               "default": 10000
             },
-            "memory_import_depth": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "title": "Depth of memory imports",
-              "description": "How deep `@path` imports from her memory are followed to find outside text; Claude Code follows five, so a smaller value is looser.",
-              "default": 5
-            },
             "page_file_bytes": {
               "anyOf": [
                 {
@@ -3120,7 +3100,6 @@
             "memory_files": 1024,
             "memory_bytes": 8388608,
             "memory_walk": 10000,
-            "memory_import_depth": 5,
             "page_file_bytes": 8388608,
             "page_files": 200,
             "page_bytes": 16777216
@@ -3964,47 +3943,6 @@
               "description": "Bytes of an audit record's target.",
               "default": 512
             },
-            "exposed_sources": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "title": "Sources of exposure listed",
-              "description": "Sources a conversation lists as having exposed it, and a proposal carries as `exposed_by`.",
-              "default": 16
-            },
-            "source_bytes": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "format": "bytes",
-              "title": "Longest source of exposure",
-              "description": "Bytes of one such source.",
-              "default": 200
-            },
             "proposal_reads": {
               "anyOf": [
                 {
@@ -4065,8 +4003,6 @@
             "result_chars": 200000,
             "author_chars": 200,
             "audit_target_bytes": 512,
-            "exposed_sources": 16,
-            "source_bytes": 200,
             "proposal_reads": 16
           }
         },
@@ -4369,7 +4305,7 @@
             "frame": {
               "type": "boolean",
               "title": "Show pages in the gateway's frame",
-              "description": "Whether a page is shown in the gateway's frame with the classification bar. A page made after she read outside text always is. Default true.",
+              "description": "Whether a page is shown in the gateway's frame with the classification bar. Default true.",
               "default": true
             },
             "sharing": {

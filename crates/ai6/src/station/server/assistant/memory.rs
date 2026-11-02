@@ -250,7 +250,6 @@ fn save(
             branch: Some(MAIN.to_owned()),
             fallback: None,
             files: Some(vec![file]),
-            record: None,
             exclude: None,
             max_bytes: None,
         })

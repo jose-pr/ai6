@@ -195,42 +195,6 @@ fn within(repo: &Repo<'_>, work_tree: &Path, max: u64) -> Result<(), Failure> {
     ))
 }
 
-/// Stages an entry in `record` for each file the index adds or changes against `HEAD` (every
-/// staged file when `HEAD` is unborn), outside `record` itself: the entry holds the path and a
-/// newline and is named by its own object ID. Answers whether it staged any.
-fn record_changes(repo: &Repo<'_>, record: &str) -> Result<bool, Failure> {
-    if !exact_path(record) {
-        return Err(format!(
-            "{record:?} is not a directory a save may record in"
-        ));
-    }
-    let inside = format!("{record}/");
-    let mut any = false;
-    for path in staged_paths(repo)? {
-        if path.starts_with(&inside) {
-            continue;
-        }
-        any = true;
-        let entry = repo
-            .input(
-                &["hash-object", "-w", "--no-filters", "--stdin"],
-                format!("{path}\n").as_bytes(),
-            )?
-            .trim()
-            .to_owned();
-        repo.run(
-            &[
-                "update-index",
-                "--add",
-                "--cacheinfo",
-                &format!("100644,{entry},{record}/{entry}"),
-            ],
-            &[],
-        )?;
-    }
-    Ok(any)
-}
-
 /// Refuses `files` when one with a `base` holds anything else on `branch` of `remote` (fetched
 /// now): the change was made from another text, and would replace what was written since.
 fn check_bases(
@@ -631,22 +595,8 @@ impl Worktree {
                 if let Some(max) = spec.max_bytes {
                     within(&repo, &self.path, max)?;
                 }
-                let recorded = match &spec.record {
-                    Some(record) => record_changes(&repo, record)?,
-                    None => false,
-                };
                 if staged(&repo)? {
                     run(&["commit", "--quiet", "--no-verify", "-m", &spec.message])?;
-                    if let Some(record) = spec.record.as_ref().filter(|_| recorded) {
-                        // The entries were staged as blobs: Git writes them here too.
-                        run(&[
-                            "checkout",
-                            "--quiet",
-                            "HEAD",
-                            "--",
-                            &format!(":(literal){record}"),
-                        ])?;
-                    }
                 }
             }
         }
@@ -908,7 +858,6 @@ mod tests {
             branch: Some("main".to_owned()),
             fallback: Some("moneypenny/conversation".to_owned()),
             files: None,
-            record: None,
             exclude: None,
             max_bytes: None,
         }
@@ -1356,60 +1305,6 @@ mod tests {
         leaving.exclude = Some(vec!["../x".to_owned()]);
         fs::write(house.path.join("more.md"), "more\n").unwrap();
         assert!(house.save(&leaving, "main").is_err());
-        house.discard().unwrap();
-    }
-
-    #[test]
-    fn a_recording_save_names_every_file_it_adds_or_changes_in_the_same_commit() {
-        let root = tempfile::tempdir().unwrap();
-        let bare = root.path().join("eve.git");
-        let house = open(&spec(
-            &bare.to_string_lossy(),
-            &root.path().join("personal"),
-            true,
-        ))
-        .unwrap();
-        fs::write(house.path.join("kept.md"), "kept\n").unwrap();
-        fs::write(house.path.join("gone.md"), "gone\n").unwrap();
-        house.save(&save_spec("moneypenny: first"), "main").unwrap();
-
-        let mut recording = save_spec("moneypenny: second");
-        recording.record = Some(".moneypenny/outside-text".to_owned());
-        fs::create_dir_all(house.path.join("notes").join("deep")).unwrap();
-        fs::write(house.path.join("notes").join("deep").join("a.md"), "a\n").unwrap();
-        fs::write(house.path.join("kept.md"), "changed\n").unwrap();
-        fs::remove_file(house.path.join("gone.md")).unwrap();
-        fs::write(house.path.join(".hidden"), "never committed\n").unwrap();
-        house.save(&recording, "main").unwrap();
-
-        let entries = run(
-            &bare,
-            &[
-                "show",
-                "--name-only",
-                "--format=",
-                "main",
-                "--",
-                ".moneypenny/outside-text",
-            ],
-        );
-        let mut named: Vec<String> = entries
-            .lines()
-            .map(|entry| run(&bare, &["show", &format!("main:{entry}")]))
-            .collect();
-        named.sort();
-        assert_eq!(named, ["kept.md\n", "notes/deep/a.md\n"], "{entries}");
-        assert!(
-            house
-                .path
-                .join(".moneypenny")
-                .join("outside-text")
-                .read_dir()
-                .unwrap()
-                .count()
-                >= 2,
-            "the entries are in the working tree too"
-        );
         house.discard().unwrap();
     }
 

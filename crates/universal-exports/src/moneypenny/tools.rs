@@ -16,17 +16,6 @@ use super::guide;
 use super::routes::{self, Route};
 use crate::Gateway;
 
-/// The read tools that do not expose the conversation: this guide, the person's own identity and
-/// permissions, a Station's numeric limits, and what Agents ask to create on issues (her gate is
-/// the person's confirmation, however the text reached her). Every other read tool exposes it,
-/// including any added later.
-pub(crate) const QUIET_TOOLS: [&str; 4] = [
-    "field_guide",
-    "issue_proposals",
-    "profile",
-    "station_settings",
-];
-
 /// The arguments of a read tool call that are identifiers, by name: only these are kept of
 /// what she read, never free text (`text`, `reason` and the like).
 pub(crate) fn identifiers(input: &Value) -> std::collections::BTreeMap<String, String> {
@@ -47,12 +36,6 @@ pub(crate) fn identifiers(input: &Value) -> std::collections::BTreeMap<String, S
                 .map(|()| ((*name).to_owned(), value.to_owned()))
         })
         .collect()
-}
-
-/// Whether a call of read tool `name` whose text quotes a route's answer exposes the
-/// conversation.
-pub(crate) fn exposes(name: &str) -> bool {
-    !QUIET_TOOLS.contains(&name)
 }
 
 /// One request to a route.
@@ -378,7 +361,7 @@ static READ_TOOLS: &[Tool] = &[
     Tool {
         name: "held_briefs",
         description: "The briefs an Operation's vetting held for a person to release or \
-                      refuse, with why. Their text is untrusted outside text. Needs \
+                      refuse, with why. Their text is untrusted. Needs \
                       mission.create.",
         schema: || object(&[operation()], &["operation_id"]),
         plan: |input, _| operation_path(input, "held-briefs"),
@@ -785,17 +768,6 @@ pub(crate) fn refusal(status: StatusCode, value: &Value, chars: ai6::Limit) -> S
     }
 }
 
-/// Whether [`refusal`] of `status` quotes the route's answer, which may hold text others wrote.
-fn refusal_quotes(status: StatusCode) -> bool {
-    !matches!(
-        status,
-        StatusCode::UNAUTHORIZED
-            | StatusCode::FORBIDDEN
-            | StatusCode::NOT_FOUND
-            | StatusCode::SERVICE_UNAVAILABLE
-    )
-}
-
 /// What a read tool gave.
 pub(crate) enum Fetched {
     /// Standing text, not a route's answer.
@@ -804,11 +776,9 @@ pub(crate) enum Fetched {
     Value(Value),
 }
 
-/// Why a read tool gave nothing: what to tell Moneypenny, whether it quotes what a route
-/// answered, and the status a route refused with.
+/// Why a read tool gave nothing: what to tell Moneypenny, and the status a route refused with.
 pub(crate) struct Failed {
     pub(crate) outcome: Outcome,
-    pub(crate) quoted: bool,
     pub(crate) status: Option<StatusCode>,
 }
 
@@ -816,7 +786,6 @@ impl Failed {
     fn invalid(problem: String) -> Self {
         Self {
             outcome: Outcome::error(format!("INVALID_INPUT: {problem}")),
-            quoted: false,
             status: None,
         }
     }
@@ -833,7 +802,6 @@ pub(crate) async fn read(
     let Some(tool) = read_tools().iter().find(|tool| tool.name == name) else {
         return Err(Failed {
             outcome: Outcome::error(format!("There is no tool {name:?}.")),
-            quoted: false,
             status: None,
         });
     };
@@ -863,14 +831,12 @@ pub(crate) async fn read(
             Ok((status, value)) => {
                 return Err(Failed {
                     outcome: Outcome::error(refusal(status, &value, chars)),
-                    quoted: refusal_quotes(status),
                     status: Some(status),
                 });
             }
             Err(error) => {
                 return Err(Failed {
                     outcome: Outcome::error(format!("The request failed: {error}")),
-                    quoted: false,
                     status: None,
                 });
             }
@@ -883,34 +849,21 @@ pub(crate) async fn read(
     }))
 }
 
-/// Runs the read tool `name` with `input` as the holder of `bearer`; also answers whether its
-/// text quotes what a route answered, as a result or in a refusal, which [`exposes`] then
-/// judges whatever the outcome.
-pub(crate) async fn run(
-    gateway: &Gateway,
-    bearer: &str,
-    name: &str,
-    input: &Value,
-) -> (Outcome, bool) {
+/// Runs the read tool `name` with `input` as the holder of `bearer`.
+pub(crate) async fn run(gateway: &Gateway, bearer: &str, name: &str, input: &Value) -> Outcome {
     match read(gateway, bearer, name, input).await {
-        Ok(Fetched::Guide(text)) => (
-            Outcome {
-                text: text.to_owned(),
-                is_error: false,
-            },
-            false,
-        ),
+        Ok(Fetched::Guide(text)) => Outcome {
+            text: text.to_owned(),
+            is_error: false,
+        },
         Ok(Fetched::Value(value)) => {
             let chars = super::gateway_limits(gateway).result_chars;
-            (
-                Outcome {
-                    text: wrap(name, &value, chars),
-                    is_error: false,
-                },
-                true,
-            )
+            Outcome {
+                text: wrap(name, &value, chars),
+                is_error: false,
+            }
         }
-        Err(failed) => (failed.outcome, failed.quoted),
+        Err(failed) => failed.outcome,
     }
 }
 

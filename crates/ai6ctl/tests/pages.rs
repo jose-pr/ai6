@@ -34,9 +34,9 @@ async fn start() -> (String, Seen) {
                 record(&seen, "GET", "/v1/user/pages".into(), &headers, Value::Null);
                 Json(json!([
                     {"id": "page-a", "kind": "dashboard", "title": "Load\tby station", "bytes": 2048,
-                     "expires_at": 1_800_000_000.0, "exposed": true},
+                     "expires_at": 1_800_000_000.0},
                     {"id": "page-b", "kind": "file", "title": "Log", "bytes": 10,
-                     "expires_at": null, "exposed": false},
+                     "expires_at": null},
                 ]))
             }),
         )
@@ -123,9 +123,9 @@ async fn pages_list_prints_one_line_each_with_the_expiry_or_remembered() {
     // A control character in a title is shown as one, never as a column break.
     assert_eq!(
         lines[0],
-        "page-a\tdashboard\t2048\t1800000000\texposed\tLoad\u{fffd}by station"
+        "page-a\tdashboard\t2048\t1800000000\tLoad\u{fffd}by station"
     );
-    assert_eq!(lines[1], "page-b\tfile\t10\tremembered\t-\tLog");
+    assert_eq!(lines[1], "page-b\tfile\t10\tremembered\tLog");
     assert_eq!(seen.lock().unwrap()[0].2, "Bearer tok");
 }
 

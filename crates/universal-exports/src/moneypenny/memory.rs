@@ -442,7 +442,6 @@ impl Assistant {
             session_id: None,
             close: false,
             interrupt: false,
-            exposed: false,
             person_id: Some(person.to_owned()),
             workspace: None,
             commit: None,

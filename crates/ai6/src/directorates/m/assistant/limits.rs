@@ -91,11 +91,6 @@ pub struct AssistantLimits {
     #[schema(title = "Files looked at per turn")]
     #[map(default = AssistantLimits::default().memory_walk)]
     pub memory_walk: Limit,
-    /// How deep `@path` imports from her memory are followed to find outside text; Claude Code
-    /// follows five, so a smaller value is looser.
-    #[schema(title = "Depth of memory imports")]
-    #[map(default = AssistantLimits::default().memory_import_depth)]
-    pub memory_import_depth: Limit,
     /// Bytes of one file the Station reads to publish a page. Default 8 MiB.
     #[schema(title = "Largest file read for a page", format = "bytes")]
     #[map(default = AssistantLimits::default().page_file_bytes)]
@@ -130,7 +125,6 @@ impl Default for AssistantLimits {
             memory_files: Limit::at(1_024),
             memory_bytes: Limit::at(8 * MIB),
             memory_walk: Limit::at(10_000),
-            memory_import_depth: Limit::at(5),
             page_file_bytes: Limit::at(8 * MIB),
             page_files: Limit::at(200),
             page_bytes: Limit::at(16 * MIB),
@@ -392,15 +386,6 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Longest audit record target", format = "bytes")]
     #[map(default = AssistantGatewayLimits::default().audit_target_bytes)]
     pub audit_target_bytes: Limit,
-    /// Sources a conversation lists as having exposed it, and a proposal carries as
-    /// `exposed_by`.
-    #[schema(title = "Sources of exposure listed")]
-    #[map(default = AssistantGatewayLimits::default().exposed_sources)]
-    pub exposed_sources: Limit,
-    /// Bytes of one such source.
-    #[schema(title = "Longest source of exposure", format = "bytes")]
-    #[map(default = AssistantGatewayLimits::default().source_bytes)]
-    pub source_bytes: Limit,
     /// Read tool calls of one turn a proposal lists as what she had read.
     #[schema(title = "Reads a proposal lists")]
     #[map(default = AssistantGatewayLimits::default().proposal_reads)]
@@ -443,8 +428,6 @@ impl Default for AssistantGatewayLimits {
             result_chars: Limit::at(200_000),
             author_chars: Limit::at(200),
             audit_target_bytes: Limit::at(512),
-            exposed_sources: Limit::at(16),
-            source_bytes: Limit::at(200),
             proposal_reads: Limit::at(16),
         }
     }
@@ -581,8 +564,8 @@ pub struct AssistantPageLimits {
     #[schema(title = "Dashboards read live feeds")]
     #[map(default = AssistantPageLimits::default().feeds)]
     pub feeds: bool,
-    /// Whether a page is shown in the gateway's frame with the classification bar. A page
-    /// made after she read outside text always is. Default true.
+    /// Whether a page is shown in the gateway's frame with the classification bar. Default
+    /// true.
     #[schema(title = "Show pages in the gateway's frame")]
     #[map(default = AssistantPageLimits::default().frame)]
     pub frame: bool,
@@ -715,7 +698,7 @@ impl AssistantLimits {
 
     /// One line per bound looser than its default.
     pub fn weakenings(&self) -> Vec<String> {
-        looser("assistant.limits", self, &[], &["memory_import_depth"])
+        looser("assistant.limits", self, &[], &[])
     }
 }
 
@@ -833,10 +816,10 @@ default_ttl = 3600",
             ["assistant.desk.live none is looser than the default 4"]
         );
         let limits: AssistantLimits =
-            crate::directorates::m::records::from_toml("memory_import_depth = 2").unwrap();
+            crate::directorates::m::records::from_toml("memory_walk = 20000").unwrap();
         assert_eq!(
             limits.weakenings(),
-            ["assistant.limits.memory_import_depth 2 is looser than the default 5"]
+            ["assistant.limits.memory_walk 20000 is looser than the default 10000"]
         );
         let gateway: AssistantGatewayLimits =
             crate::directorates::m::records::from_toml("token_ttl = 7200\nsweep_every = 5")

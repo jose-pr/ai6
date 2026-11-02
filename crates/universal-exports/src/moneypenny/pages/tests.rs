@@ -30,8 +30,6 @@ fn page(id: &str, person: &str, files: &BTreeMap<String, Vec<u8>>) -> Page {
         bytes: files.values().map(|bytes| bytes.len() as u64).sum(),
         created_at: 1.0,
         expires_at: Some(now() + 3600.0),
-        exposed_by: Vec::new(),
-        exposed: false,
         feeds: Vec::new(),
         shares: Vec::new(),
     }
@@ -233,6 +231,32 @@ fn a_page_is_checked_against_every_quota_before_anything_is_stored() {
 }
 
 #[test]
+fn a_stored_page_with_fields_this_build_does_not_know_still_loads() {
+    let (dir, store) = store();
+    let files = one("index.html", "<p>x</p>");
+    let stored = keep(
+        &store,
+        page("page-a", "p", &files),
+        &files,
+        &Default::default(),
+    )
+    .unwrap();
+    let meta = dir.path().join("pages").join(&stored.id).join("meta.json");
+    let mut record: Value = serde_json::from_slice(&std::fs::read(&meta).unwrap()).unwrap();
+    record["kept_by_an_older_build"] = json!(true);
+    record["with_its_list"] = json!(["tool:missions"]);
+    std::fs::write(&meta, serde_json::to_vec(&record).unwrap()).unwrap();
+
+    // By fields: serde_json does not round-trip every f64 exactly.
+    let reopened = PageStore::open(dir.path().join("pages")).unwrap();
+    let loaded = reopened.get(&stored.id).expect("the page still loads");
+    assert_eq!(
+        (&loaded.person_id, &loaded.title, &loaded.files),
+        (&stored.person_id, &stored.title, &stored.files)
+    );
+}
+
+#[test]
 fn a_discarded_page_leaves_nothing_and_a_committed_one_survives_a_restart() {
     let (dir, store) = store();
     let defaults = AssistantPageLimits::default();
@@ -408,7 +432,6 @@ async fn a_claim_waits_for_the_station_checks_the_manifest_and_gives_up() {
         path: "index.html".to_owned(),
         bytes: bytes.len() as u64,
         sha256: sha256_hex(&bytes),
-        outside_text: true,
     };
     // Files that arrive while the claim waits.
     let waiting = {
@@ -422,9 +445,8 @@ async fn a_claim_waits_for_the_station_checks_the_manifest_and_gives_up() {
     store
         .stage_done("hq", "c", "d", Ok(vec![file.clone()]), &defaults)
         .unwrap();
-    let (files, manifest) = waiting.await.unwrap().unwrap();
+    let files = waiting.await.unwrap().unwrap();
     assert_eq!(files["index.html"], bytes);
-    assert!(manifest[0].outside_text);
     // An upload is taken once.
     assert!(
         store

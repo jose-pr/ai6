@@ -46,13 +46,10 @@ pub(crate) struct Draft {
     pub(crate) summary: String,
 }
 
-/// What a proposal rests on when she makes it: the read tools she called this turn and
-/// whether, and by what, the conversation was exposed to text written outside AI6's records.
+/// What a proposal rests on when she makes it: the read tools she called this turn.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Evidence {
     pub(crate) read: Vec<super::store::ReadCall>,
-    pub(crate) exposed: bool,
-    pub(crate) exposed_by: Vec<String>,
 }
 
 /// A proposal and where it stands.
@@ -70,8 +67,8 @@ pub(crate) struct Proposal {
     /// A commit a Station makes once the person confirms, in place of `draft.call`, which then
     /// only describes it.
     pub(crate) work: Option<ai6::AssistantCommit>,
-    /// For a Cable Moneypenny asked to send after reading outside text: the Station holding
-    /// it, which sends it once confirmed. Such a proposal is not a gateway request.
+    /// For a Cable Moneypenny asked to send: the Station holding it, which sends it once
+    /// confirmed. Such a proposal is not a gateway request.
     pub(crate) cable: Option<CableHold>,
     /// What she had read when she made it.
     pub(crate) evidence: Evidence,
@@ -87,10 +84,6 @@ pub(crate) struct CableHold {
     /// The Station whose desk holds it.
     pub(crate) station: String,
 }
-
-/// The proposal of a memory change her conversation set aside: confirmed, a Station commits
-/// it (`memory_commit`); cancelled, it is discarded (`memory_discard`).
-pub(crate) const MEMORY_COMMIT: &str = "memory_commit";
 
 /// The write tool that proposes writing one file of a shared repository.
 pub(crate) const SHARED_CHANGE: &str = ai6::ASSISTANT_SHARED_CHANGE_TOOL;
@@ -167,8 +160,8 @@ pub(crate) fn shared_change<'a>(
 
 impl Proposal {
     /// How the app shows it: the exact request, the summary and the status; with what she
-    /// had read (`read`, when she read anything this turn), `exposed` and `exposed_by` (only
-    /// when the conversation was exposed) and `opens`, the link of the page it changes.
+    /// had read (`read`, when she read anything this turn) and `opens`, the link of the page it
+    /// changes.
     pub(crate) fn shown(&self) -> Value {
         let mut shown = json!({
             "id": self.id,
@@ -185,10 +178,6 @@ impl Proposal {
         });
         if !self.evidence.read.is_empty() {
             shown["read"] = json!(self.evidence.read);
-        }
-        if self.evidence.exposed {
-            shown["exposed"] = Value::Bool(true);
-            shown["exposed_by"] = json!(self.evidence.exposed_by);
         }
         if let Some(route) = super::routes::opens(self.tool, &self.draft.call) {
             shown["opens"] = Value::from(route.to_uri());

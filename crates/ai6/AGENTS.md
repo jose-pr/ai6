@@ -616,7 +616,7 @@ impl AssistantViewLimits {
 pub struct AssistantLimits { pub cable_grants, message_bytes, context_bytes, event_bytes,
     events, change_bytes, change_files, commit_message_bytes, shared_bases, memory_list_files,
     memory_list_bytes, skills, inlined_memory_bytes, memory_file_bytes, memory_files,
-    memory_bytes, memory_walk, memory_import_depth: Limit }   // contract checks; both sides
+    memory_bytes, memory_walk: Limit }   // contract checks; both sides
 pub struct AssistantDeskLimits { pub idle: TimeLimit, pub live, job_bytes, report_queue, parked,
     known, clone_bytes, save_bytes, memory_requests: Limit, pub report_attempts: u32,
     pub token_margin, job_wait, call_margin, job_retry, report_retry, close_wait, remove_retry,
@@ -626,7 +626,7 @@ pub struct AssistantGatewayLimits { pub conversations_per_person, conversations,
     tool_calls_per_minute, memory_requests_per_person, memory_requests, proposals,
     message_bytes, memory_message_bytes, change_message_chars, recap_bytes, ready_entries,
     ready_bytes, socket_message_bytes, route_bytes, result_chars, author_chars,
-    audit_target_bytes, exposed_sources, source_bytes, proposal_reads: Limit, pub conversation_age: TimeLimit, pub event_buffer: u64,
+    audit_target_bytes, proposal_reads: Limit, pub conversation_age: TimeLimit, pub event_buffer: u64,
     pub token_ttl, token_reuse_margin, answer_timeout, answer_deadline, memory_timeout,
     proposal_ttl, hello_timeout, max_wait, sweep_every, shared_base_wait: Seconds }
 pub struct AssistantPageLimits { pub max_file_bytes, max_page_bytes, max_page_files, max_pages,
@@ -638,12 +638,12 @@ pub struct AssistantPageLimits { pub max_file_bytes, max_page_bytes, max_page_fi
 impl AssistantSettings { pub fn pages(&self) -> &AssistantPageLimits;
                          pub fn with_pages(self, pages: AssistantPageLimits) -> Self; }
 // AssistantLimits also page_file_bytes (8 MiB), page_files (200), page_bytes (16 MiB): what a
-// Station reads of a page. AssistantPageFile { path, bytes, sha256, outside_text } is the manifest
+// Station reads of a page. AssistantPageFile { path, bytes, sha256 } is the manifest
 // entry of an upload; page_call_digest(path) -> String matches an upload to its publish_page call;
 // ASSISTANT_PUBLISH_PAGE_TOOL = "publish_page".
 // each: validate() -> Result<(), String> refuses only what cannot work ("assistant.<table>.<key>:
 // at least 1"); weakenings() -> Vec<String>, one line per bound looser than its default
-// (bounds::looser; pace keys left out; memory_import_depth: smaller is looser)
+// (bounds::looser; pace keys left out)
 impl AssistantSettings {
     pub fn new() -> Self;   // keeps nothing, python3 in the sandbox, no host, no skill, refuses elevated Stations
     pub fn with_personal_repo(self, template: impl Into<String>) -> Self; // {person} | {person_digest}
@@ -3817,7 +3817,6 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub token_expires_at: f64, pub session_id: Option<String> /* default */,
     pub close: bool /* default */,
     pub interrupt: bool /* default */,
-    pub exposed: bool /* default: Conversation.exposed at queue time, the one record of it */,
     pub person_id: Option<String> /* default, omitted when None; required with workspace, commit, memory or cables */,
     pub workspace: Option<AssistantWorkspace> /* default, omitted when None */,
     pub commit: Option<AssistantCommit> /* default, omitted when None */,
@@ -3859,12 +3858,10 @@ impl AssistantReach {
     /// denied) with the hosts both reach (an open side reaches what the other lists), and
     /// unsandboxed scripts only when both allow them.
     pub fn capped_by(&self, cap: &AssistantReach) -> AssistantReach;
-    pub fn scripts_reach_hosts(&self) -> bool;   // a network that reaches a host, or unsandboxed
     pub fn validate(&self) -> Result<(), String>;
 }
 pub fn host_pattern(host: &str) -> bool;       // lowercase DNS name with a dot, optional leading "*."
 pub fn interpreter_name(name: &str) -> bool;   // 1-64 letters, digits, . - _, not a path or flag
-pub fn outside_tool(tool: &str, scripts_reach_hosts: bool) -> bool; // WebFetch, WebSearch, or Bash / exec_command when reaching
 pub fn credential_dir_var(name: &str) -> bool; // CLAUDE_CONFIG_DIR, CODEX_HOME or any *_HOME, case ignored
 pub const SCRIPT_ENVIRONMENT: [&str; 14]; // the variables an assistant's sandboxed scripts keep (PATH, HOME, TEMP, LANG, …)
 pub struct AssistantWorkspace { pub personal: String /* the person's repository, expanded */,
@@ -4625,29 +4622,10 @@ removed with it, so the Agent's configuration directory (a shared login, other p
 transcripts) stays out and each conversation keeps its own, and its own temporary directory
 (`<first 12 digest digits>.t` beside it, as `TMPDIR` and `CLAUDE_CODE_TMPDIR`: Claude Code
 derives the sandbox's `$TMPDIR` from the harness's `TMPDIR`, which would otherwise be the
-`/tmp/claude-<uid>` every conversation shares). A `WebFetch` or `WebSearch` call,
-or `Bash` while her scripts reach a host (`outside_tool`), raises a per-conversation `exposed`
-flag at once (so a Cable she sends later the same turn is held, before Universal Exports
-hears) and tells Universal Exports, with or without a workspace.
+`/tmp/claude-<uid>` every conversation shares).
 
-Exposure is Universal Exports' record (`Conversation.exposed`); the desk reads it with `GET
-/v1/station/assistant/exposure?station&conversation` (`{"exposed"}`) when a turn ends and
-raises it with `POST` (`{"station","conversation","source"}`) for what only it sees
-(shared repositories are trusted text and expose nothing): a harness call that can answer
-with a file `.moneypenny/outside-text/` in the personal repository names exposes the turn at
-that call (source `personal:<path> (read by <tool>)`): a `Read` or `Edit` of it, a `Grep` or
-`Glob` whose search covers it (paths compared after `.`/`..`, the filesystem's own spelling
-and case), a `Bash` or Codex `exec_command` call (a script may read any file of her directory), or a call whose input
-(`AgentEvent::data`) the desk cannot read. A
-`memory/MEMORY.md` importing one (`@path`, followed five deep) exposes the conversation as
-its harness starts. Other reads do not. The record is a directory: one entry per file, holding
-the path and named by the Git object ID of that text. A save of an exposed conversation
-records each file it adds or changes in the same commit (`CheckpointSpec::record`, the paths
-taken from what is committed); a turn's end removes the entries of files no longer there
-(`CheckpointSpec::files`, those entries only). So conversations adding to it at once never
-replace each other's entries, and a file is never on `main` without its entry; the desk reads
-the record again at each turn's start and after each save. A failed `GET` counts as exposed; a memory change of a turn the desk found exposed
-is dropped with a `notice` when the `POST` fails.
+Her conversations carry no exposure: nothing she reads marks one, a Session's exposure
+(`medical::exposure`) is for a Mission's Session only.
 
 A job with a `workspace`, a `commit` or `memory` must name `person_id`, and the Station refuses
 one whose repositories its own roster does not give: the personal repository (of a workspace or
@@ -4673,18 +4651,17 @@ harness environment. Its tools are `discover_agents`, `send_cable`, `read_cables
 principal (Agent `job.agent_id`, the call's Operation, this Station, Session
 `assistant-<conversation digest>`, no Mission) `with_on_behalf_of(job.person_id)`;
 `cables.toml` grants for that Agent, the quotas and fan-out apply as for any Agent. Before
-every call the desk asks the same `GET` with `&operation=<id>`, which then also answers `send`
-and `read`, the person's `cable.send` and `cable.read` there now; without an answer the call
-is refused. A send or reply needs the job grant's `send` and `send` now, a read or
+every call the desk asks `GET /v1/station/assistant/cables?station&conversation&operation`,
+which answers `send` and `read`, the person's `cable.send` and `cable.read` there now; without
+an answer the call is refused. A send or reply needs the job grant's `send` and `send` now, a read or
 acknowledgement `read` in both, discovery either; otherwise the answer is the relay's own
 indistinguishable refusal. Reads use `inbox_from` the call's Operation; a reply or
 acknowledgement only touches a Cable of that Operation delivered to the conversation. Retry
 keys are scoped to the conversation. The Session is in the relay's endpoint directory,
 conversation-only, while the harness runs, so replies to its Cables reach it and nothing else
-does. A later job's grants replace the endpoint's; exposure only turns on. A read that returns
-a body first raises the conversation's exposure with the same `POST` (source
-`cable:<sender>`, one per sender) and withholds every body ("Cable inbox is unavailable")
-unless each is acknowledged. Exposed, `send_cable` and `reply_to_cable` send nothing: the
+does. A later job's grants replace the endpoint's. A Cable she reads marks nothing, and a Session
+that reads a Cable from her is not exposed by it: her Session is no Mission's. `send_cable` and
+`reply_to_cable` send nothing, whatever she has read: the
 request (refused if its body holds a character `vetting::is_invisible` names) is held in
 memory for an hour, at most 32 per conversation (the 33rd is refused, none is dropped), a
 `cable_proposal` event carries it as an `AssistantCable` (desk ID, Operation, target,
@@ -4756,7 +4733,6 @@ pub struct CheckpointSpec {
     pub branch: Option<String>,   // commit in place and fast-forward this branch instead (a clone)
     pub fallback: Option<String>, // with `branch`: where the work goes when that branch refuses it
     pub files: Option<Vec<CheckpointFile>>, // with `branch`: commit exactly these, nothing of the working directory
-    pub record: Option<String>, // with `branch`, no `files`: a directory in which the same commit records each file it adds or changes
     pub exclude: Option<Vec<String>>, // with `branch`, no `files`: paths left out with everything under them
     pub max_bytes: Option<u64>, // with `branch`, no `files`: refused, nothing committed, past this many bytes added or changed
 }

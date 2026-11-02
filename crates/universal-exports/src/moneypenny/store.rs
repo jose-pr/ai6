@@ -36,7 +36,7 @@ pub(crate) enum Role {
     /// JSON form. The person opens it; following it only reads.
     Navigation,
     /// A page Moneypenny published; `data` is its summary (`id`, `kind`, `title`, `bytes`,
-    /// `expires_at`, `exposed`, `exposed_by`, `feeds`). The person opens it in a browser tab.
+    /// `expires_at`, `feeds`). The person opens it in a browser tab.
     Page,
     /// What happened to the conversation itself, such as an answer the person stopped.
     Notice,
@@ -99,21 +99,11 @@ pub(crate) struct Conversation {
     pub(crate) token: Option<(String, String, f64)>,
     /// The size of `entries`, as the app is sent them, in bytes.
     pub(crate) bytes: usize,
-    /// A tool answered with text others wrote; for the conversation's life, a memory change
-    /// waits for the person.
-    pub(crate) exposed: bool,
-    /// What exposed it, in the order it happened: `tool:NAME` for a read tool, or the source a
-    /// Station reported as given. At most `[assistant.gateway] exposed_sources`, each at most
-    /// `source_bytes`; a source is listed once.
-    pub(crate) exposed_by: Vec<String>,
     /// The read tools called since the person's last message, oldest first, at most
     /// `[assistant.gateway] proposal_reads`: what a proposal made now is based on.
     pub(crate) turn_reads: Vec<ReadCall>,
     /// The workspace the last job named, for the commits its reports lead to.
     pub(crate) workspace: Option<AssistantWorkspace>,
-    /// Whether any job of the conversation let her scripts reach a host, so a script brings in
-    /// outside text; raised for good, never lowered by a narrower later job.
-    pub(crate) scripts_reach_hosts: bool,
     /// What the Station running the harness reported each shared change call was made from,
     /// oldest first, until the call takes it; at most `[assistant.limits] shared_bases`.
     pub(crate) shared_bases: VecDeque<AssistantSharedBase>,
@@ -153,7 +143,6 @@ impl fmt::Debug for Conversation {
             .field("entries", &self.entries.len())
             .field("station", &self.station)
             .field("busy", &self.busy)
-            .field("exposed", &self.exposed)
             .field("bearer", &"[REDACTED]")
             .finish_non_exhaustive()
     }
@@ -187,24 +176,10 @@ impl Conversation {
             stopping: false,
             token: None,
             bytes: 0,
-            exposed: false,
-            exposed_by: Vec::new(),
             turn_reads: Vec::new(),
             workspace: None,
-            scripts_reach_hosts: false,
             shared_bases: VecDeque::new(),
             cut_off: None,
-        }
-    }
-
-    /// Marks the conversation exposed for good and lists `source` among what exposed it.
-    pub(crate) fn expose_by(&mut self, source: &str, gateway: &ai6::AssistantGatewayLimits) {
-        self.exposed = true;
-        let source = super::cut(source, gateway.source_bytes.or_max());
-        if gateway.exposed_sources.allows(self.exposed_by.len() + 1)
-            && !self.exposed_by.contains(&source)
-        {
-            self.exposed_by.push(source);
         }
     }
 
@@ -224,13 +199,10 @@ impl Conversation {
         }
     }
 
-    /// What a proposal made now rests on: the reads of this turn and whether, and by what,
-    /// the conversation is exposed.
+    /// What a proposal made now rests on: the reads of this turn.
     pub(crate) fn evidence(&self) -> Evidence {
         Evidence {
             read: self.turn_reads.clone(),
-            exposed: self.exposed,
-            exposed_by: self.exposed_by.clone(),
         }
     }
 

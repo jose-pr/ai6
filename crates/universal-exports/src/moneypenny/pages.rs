@@ -6,7 +6,7 @@
 //! a capability link (`{base}/v/{token}/`) and never lets a page act as the app: every page
 //! response carries a CSP `sandbox` without `allow-same-origin`, so the page is an opaque
 //! origin, and `/v1` answers no cross-origin request. A page is shown in the gateway's own
-//! frame under a classification bar that says who made it, what she read and when it expires.
+//! frame under a classification bar that says who made it and when it expires.
 //!
 //! Quotas and options are `[assistant.pages]` in the roster's `assistant` record, read at each
 //! use, so an administrator's change applies to the next publish.
@@ -106,9 +106,6 @@ pub(crate) struct Page {
     pub(crate) created_at: f64,
     /// When it goes; `None` once the person remembers it.
     pub(crate) expires_at: Option<f64>,
-    /// What she read before she made it, in order.
-    pub(crate) exposed_by: Vec<String>,
-    pub(crate) exposed: bool,
     pub(crate) feeds: Vec<Feed>,
     /// Subjects the person shares it with.
     #[serde(default)]
@@ -124,8 +121,6 @@ impl Page {
             "title": self.title,
             "bytes": self.bytes,
             "expires_at": self.expires_at,
-            "exposed": self.exposed,
-            "exposed_by": self.exposed_by,
             "feeds": self.feeds.iter().map(|feed| feed.name.as_str()).collect::<Vec<_>>(),
         })
     }
@@ -800,7 +795,7 @@ impl PageStore {
         conversation: &str,
         digest: &str,
         wait: Duration,
-    ) -> Result<Claimed, String> {
+    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
         let key = (conversation.to_owned(), digest.to_owned());
         let deadline = tokio::time::Instant::now() + wait;
         loop {
@@ -835,15 +830,12 @@ impl PageStore {
     }
 }
 
-/// The files of a claimed upload and its manifest.
-pub(crate) type Claimed = (BTreeMap<String, Vec<u8>>, Vec<AssistantPageFile>);
-
 /// The files a Station sent, held to the manifest it ended with: each listed file arrived with
 /// its size and SHA-256, and nothing else did.
 fn verify(
     files: BTreeMap<String, Vec<u8>>,
     manifest: Vec<AssistantPageFile>,
-) -> Result<Claimed, String> {
+) -> Result<BTreeMap<String, Vec<u8>>, String> {
     if manifest.len() != files.len() {
         return Err("the Station's manifest does not match what it sent".to_owned());
     }
@@ -859,7 +851,7 @@ fn verify(
             }
         }
     }
-    Ok((files, manifest))
+    Ok(files)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1076,46 +1068,24 @@ fn frame_html(page: &Page, link: &Link, limits: &AssistantPageLimits) -> String 
     if link.viewer != page.person_id {
         let _ = write!(note, " Shared by {}.", escape(&page.person_id));
     }
-    if page.exposed {
-        let shown: Vec<String> = page
-            .exposed_by
-            .iter()
-            .take(5)
-            .map(|source| escape(source))
-            .collect();
-        let more = page.exposed_by.len().saturating_sub(5);
-        let _ = write!(
-            note,
-            " <strong>Made after she read text from outside AI6:</strong> {}{}.",
-            shown.join(", "),
-            if more > 0 {
-                format!(" and {more} more")
-            } else {
-                String::new()
-            }
-        );
-    }
     let sandbox = frame_sandbox(limits.scripts);
-    let sources = String::new();
-    let _ = sources;
     let entry = page
         .entry
         .split('/')
         .map(percent)
         .collect::<Vec<_>>()
         .join("/");
-    let class = if page.exposed { "bar warn" } else { "bar" };
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title>\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>\
 html,body{{height:100%;margin:0}}body{{display:flex;flex-direction:column;font:14px system-ui,sans-serif}}\
 .bar{{background:#e8eef7;color:#10233f;padding:.45rem .8rem;display:flex;gap:.8rem;align-items:flex-start;\
-border-bottom:1px solid #9fb3cf}}.bar.warn{{background:#ffe9b3;color:#4a3000;border-color:#d9a400}}\
+border-bottom:1px solid #9fb3cf}}\
 .bar span{{flex:1}}.bar label{{cursor:pointer;font-weight:700;padding:0 .4rem}}\
 #c{{position:absolute;opacity:0;pointer-events:none}}#c:checked~.bar{{display:none}}\
 iframe{{flex:1;border:0;width:100%;background:#fff}}</style></head><body>\
 <input type=\"checkbox\" id=\"c\" aria-label=\"Hide the notice\">\
-<div class=\"{class}\" role=\"note\"><span>{note}</span><label for=\"c\" title=\"Hide for this view\">&#10005;</label></div>\
+<div class=\"bar\" role=\"note\"><span>{note}</span><label for=\"c\" title=\"Hide for this view\">&#10005;</label></div>\
 <iframe src=\"f/{entry}\" sandbox=\"{sandbox}\" allow=\"fullscreen\" referrerpolicy=\"no-referrer\" \
 title=\"{title}\"></iframe></body></html>",
         title = escape(&page.title),
@@ -1168,8 +1138,7 @@ async fn file(
         .get("sec-fetch-dest")
         .and_then(|value| value.to_str().ok())
         == Some("document");
-    let frame_wanted = page.exposed || limits.frame;
-    if top_level && frame_wanted {
+    if top_level && limits.frame {
         let mut response = StatusCode::SEE_OTHER.into_response();
         if let Ok(to) = HeaderValue::from_str(&format!("{base}/v/{token}/")) {
             response.headers_mut().insert(LOCATION, to);

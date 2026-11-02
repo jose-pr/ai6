@@ -50,7 +50,7 @@ origin leaves the public roots alone.
   the Operation overrides the Station definition (`agent.read` on that Operation). The
   Operation ID is encoded as one URL path segment.
 - `ai6ctl pages list` prints `GET /v1/user/pages` as tab-separated `ID KIND BYTES EXPIRES_UNIX
-  EXPOSED TITLE` (`EXPIRES_UNIX` is `remembered` without an expiry, `EXPOSED` `exposed` or `-`);
+  TITLE` (`EXPIRES_UNIX` is `remembered` without an expiry);
   `pages open <ID> [--network none|own]` prints the link `POST /v1/user/pages/{id}/open` gives
   (open it in a browser; it is bound to the access token); `pages remember <ID>` and `pages
   forget <ID>` post `.../remember`; `pages rm <ID>` deletes. The ID is encoded as one path

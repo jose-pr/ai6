@@ -1548,8 +1548,8 @@ impl Gateway {
             .route("/v1/station/assistant/next", get(moneypenny::next))
             .route("/v1/station/assistant/reports", post(moneypenny::reports))
             .route(
-                "/v1/station/assistant/exposure",
-                get(moneypenny::exposure).post(moneypenny::expose),
+                "/v1/station/assistant/cables",
+                get(moneypenny::cable_standing),
             )
             .route("/v1/auth/methods", get(auth_methods))
             .route("/v1/auth/login", post(login))

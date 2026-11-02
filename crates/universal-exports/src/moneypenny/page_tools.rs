@@ -35,11 +35,11 @@ pub(crate) const PUBLISH_DESCRIPTION: &str = "Publish a page the person opens in
     or scratch/; a bundle's entry is index.html unless entry names another) or content (one \
     inline text file of the given format). replace takes your earlier page's id. A page lasts \
     a day unless the person remembers it. Say what you made and that the person opens it from \
-    its card; a page made after you read text from outside AI6 is marked for the person.";
+    its card.";
 
 pub(crate) const UNPUBLISH_DESCRIPTION: &str = "Delete a page you published, by its id.";
-pub(crate) const LIST_DESCRIPTION: &str = "List the person's pages: id, kind, title, size, \
-    expiry and whether each was made after outside text.";
+pub(crate) const LIST_DESCRIPTION: &str = "List the person's pages: id, kind, title, size and \
+    expiry.";
 
 /// The input of `publish_page`.
 pub(crate) fn publish_schema() -> Value {
@@ -160,44 +160,33 @@ impl Assistant {
             },
         };
         // The files.
-        let (files, outside): (BTreeMap<String, Vec<u8>>, Vec<String>) =
-            match (field("path"), field("content")) {
-                (Some(path), None) => {
-                    let digest = page_call_digest(path);
-                    match store
-                        .claim(&granted.conversation_id, &digest, limits.upload_wait.0)
-                        .await
-                    {
-                        Ok((files, manifest)) => {
-                            let outside = manifest
-                                .iter()
-                                .filter(|file| file.outside_text)
-                                .map(|file| format!("file:{}", file.path))
-                                .collect();
-                            (files, outside)
-                        }
-                        Err(reason) => return refused(reason),
-                    }
+        let files: BTreeMap<String, Vec<u8>> = match (field("path"), field("content")) {
+            (Some(path), None) => {
+                let digest = page_call_digest(path);
+                match store
+                    .claim(&granted.conversation_id, &digest, limits.upload_wait.0)
+                    .await
+                {
+                    Ok(files) => files,
+                    Err(reason) => return refused(reason),
                 }
-                (None, Some(content)) => {
-                    let Some(name) = field("format").and_then(pages::inline_name) else {
-                        return refused(
-                            "content needs a format: html, markdown, text, csv, json or svg",
-                        );
-                    };
-                    if !limits.inline_bytes.allows(content.len()) {
-                        return refused(format!(
-                            "inline content is at most {} bytes; write a file and give its path",
-                            limits.inline_bytes
-                        ));
-                    }
-                    (
-                        BTreeMap::from([(name.to_owned(), content.as_bytes().to_vec())]),
-                        Vec::new(),
-                    )
+            }
+            (None, Some(content)) => {
+                let Some(name) = field("format").and_then(pages::inline_name) else {
+                    return refused(
+                        "content needs a format: html, markdown, text, csv, json or svg",
+                    );
+                };
+                if !limits.inline_bytes.allows(content.len()) {
+                    return refused(format!(
+                        "inline content is at most {} bytes; write a file and give its path",
+                        limits.inline_bytes
+                    ));
                 }
-                _ => return refused("give a path or content, not both and not neither"),
-            };
+                BTreeMap::from([(name.to_owned(), content.as_bytes().to_vec())])
+            }
+            _ => return refused("give a path or content, not both and not neither"),
+        };
         for (path, bytes) in &files {
             if matches!(
                 classify(path),
@@ -218,28 +207,6 @@ impl Assistant {
         };
         if !files.contains_key(&entry) {
             return refused(format!("the entry {entry} is not one of the files"));
-        }
-        // What she had read, as the bar will say.
-        let (exposed_now, mut exposed_by) = {
-            let mut desk = self.desk();
-            match desk
-                .store
-                .owned(&granted.conversation_id, &granted.person_id)
-            {
-                Some(conversation) => (conversation.exposed, conversation.exposed_by.clone()),
-                None => return refused("the conversation is gone"),
-            }
-        };
-        for source in &outside {
-            if !exposed_by.contains(source)
-                && self
-                    .config
-                    .gateway
-                    .exposed_sources
-                    .allows(exposed_by.len() + 1)
-            {
-                exposed_by.push(cut(source, self.config.gateway.source_bytes.or_max()));
-            }
         }
         let at = now();
         let id = previous
@@ -263,8 +230,6 @@ impl Assistant {
             bytes: files.values().map(|bytes| bytes.len() as u64).sum(),
             created_at: at,
             expires_at: Some(at + limits.default_ttl.0.as_secs_f64()),
-            exposed: exposed_now || !outside.is_empty(),
-            exposed_by,
             feeds,
             shares: previous.map(|page| page.shares).unwrap_or_default(),
         };
@@ -273,12 +238,11 @@ impl Assistant {
             Err(reason) => return refused(reason),
         };
         let target = format!(
-            "{} {} {} bytes, conversation {}, exposed: {}",
+            "{} {} {} bytes, conversation {}",
             prepared.page.id,
             prepared.page.kind.as_str(),
             prepared.page.bytes,
             granted.conversation_id,
-            prepared.page.exposed
         );
         if let Err(reason) = audit(
             gateway,
@@ -369,19 +333,12 @@ impl Assistant {
         }
     }
 
-    /// Runs `pages`: the person's pages. A listed page that was made after outside text
-    /// exposes the conversation.
+    /// Runs `pages`: the person's pages.
     pub(crate) async fn list_pages(&self, gateway: &Gateway, granted: &Granted) -> Outcome {
         let Some(store) = gateway.pages.clone() else {
             return Outcome::error("This gateway keeps no pages.");
         };
         let pages = store.of(&granted.person_id);
-        if let Some(page) = pages.iter().find(|page| page.exposed) {
-            let mut desk = self.desk();
-            if let Some(conversation) = desk.store.conversations.get_mut(&granted.conversation_id) {
-                conversation.expose_by(&format!("page:{}", page.id), &self.config.gateway);
-            }
-        }
         let list: Vec<Value> = pages.iter().map(Page::summary).collect();
         Outcome {
             text: tools::wrap(
@@ -417,7 +374,7 @@ pub(crate) async fn upload(
     gateway.authenticate_station(bearer(&headers)?)?;
     let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
-    assistant.run_by(&query.station, &query.conversation, None)?;
+    assistant.run_by(&query.station, &query.conversation)?;
     let limits = page_limits(&gateway).await?;
     let bytes = axum::body::to_bytes(body, limits.max_file_bytes.or_max())
         .await
@@ -454,7 +411,7 @@ pub(crate) async fn done(
     gateway.authenticate_station(bearer(&headers)?)?;
     let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
-    assistant.run_by(&query.station, &query.conversation, None)?;
+    assistant.run_by(&query.station, &query.conversation)?;
     let limits = page_limits(&gateway).await?;
     let outcome = match (done.files, done.refused) {
         (Some(files), None) => Ok(files),

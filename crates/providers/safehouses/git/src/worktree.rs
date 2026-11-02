@@ -1175,7 +1175,6 @@ mod tests {
             branch: None,
             fallback: None,
             files: None,
-            record: None,
             exclude: None,
             max_bytes: None,
         }

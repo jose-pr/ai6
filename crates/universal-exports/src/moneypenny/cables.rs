@@ -2,12 +2,12 @@
 //!
 //! The Station serves her Cable tools; Universal Exports decides what they may do. Each job
 //! carries the Operations where the person holds `cable.send` or `cable.read` (at most
-//! `[assistant.limits] cable_grants`) and whether the conversation is exposed
-//! (`Conversation.exposed`, the one record of it). A Station asks again before each send
-//! (`GET /v1/station/assistant/exposure`), so a send in the same turn as a read waits too.
-//! An exposed send reaches the app as a proposal: the person confirms it (audited
-//! `moneypenny.confirmed`, then sent by the Station that holds it) or cancels it. Every Cable
-//! sent for the person is audited `moneypenny.cable.sent`, with the person as actor.
+//! `[assistant.limits] cable_grants`). A Station asks again before each Cable call
+//! (`GET /v1/station/assistant/cables`), so a permission lost mid-turn stops it. Every Cable she
+//! sends reaches the app as a proposal, because a Cable reaches other people and Agents: the
+//! person confirms it (audited `moneypenny.confirmed`, then sent by the Station that holds it)
+//! or cancels it. Every Cable sent for the person is audited `moneypenny.cable.sent`, with the
+//! person as actor.
 
 use std::collections::BTreeSet;
 use std::time::Duration;

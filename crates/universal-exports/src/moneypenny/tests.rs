@@ -1317,8 +1317,20 @@ async fn views_are_shown_only_when_they_fit_the_schema_and_forms_become_proposal
     assert_eq!(proposal["request"]["body"], json!({"priority": 3}));
 }
 
+/// The names of a JSON object's fields, in order of name.
+fn keys(value: &Value) -> Vec<&str> {
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    keys
+}
+
 #[tokio::test]
-async fn a_view_shown_after_reading_outside_text_is_stamped_exposed_and_svg_is_canonical() {
+async fn a_view_carries_no_mark_of_what_she_read_and_svg_is_canonical() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, job) = accepted(&served, &served.operator, "Draw me the Stations.").await;
     let token = &job.mcp_token;
@@ -1327,7 +1339,6 @@ async fn a_view_shown_after_reading_outside_text_is_stamped_exposed_and_svg_is_c
     ))
     .unwrap();
 
-    // Nothing outside AI6 read yet: the field is absent.
     let messy = "<svg viewBox=\"0 0 10 10\">\n  <!-- x -->\n  <title>t</title>\n</svg>";
     let clean = call_tool(
         &served,
@@ -1354,17 +1365,17 @@ async fn a_view_shown_after_reading_outside_text_is_stamped_exposed_and_svg_is_c
         "{refused}"
     );
 
-    // A Mission's brief is outside text; a view after reading it is stamped.
+    // After reading a Mission's brief, a view is the same as one before.
     let missions = call_tool(&served, token, "missions", json!({})).await;
     assert_eq!(missions["isError"], false);
-    let exposed = call_tool(
+    let after = call_tool(
         &served,
         token,
         "show",
         json!({"view": fixture["valid"]["graph"]}),
     )
     .await;
-    assert_eq!(exposed["isError"], false, "{exposed}");
+    assert_eq!(after["isError"], false, "{after}");
 
     let frames = finish(&served, &mut app, &job).await;
     let views: Vec<&Value> = frames
@@ -1373,13 +1384,13 @@ async fn a_view_shown_after_reading_outside_text_is_stamped_exposed_and_svg_is_c
         .map(|frame| &frame["entry"]["data"])
         .collect();
     assert_eq!(views.len(), 2, "the refused view never reached the app");
-    assert!(views[0].get("exposed").is_none(), "{}", views[0]);
     assert_eq!(
         views[0]["view"]["blocks"][0]["svg"],
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><title>t</title></svg>"
     );
-    assert_eq!(views[1]["exposed"], true);
     assert_eq!(views[1]["view"], fixture["valid"]["graph"]);
+    assert_eq!(keys(views[0]), ["id", "view"]);
+    assert_eq!(keys(views[1]), ["id", "view"]);
 }
 
 #[tokio::test]
@@ -1388,7 +1399,7 @@ async fn a_proposal_records_what_she_read_this_turn_and_the_page_it_opens() {
     let (mut app, job) = accepted(&served, &served.operator, "Retry mission-g.").await;
     let token = &job.mcp_token;
 
-    // Quiet reads expose nothing: the card lists them and carries no exposure.
+    // The card lists what she read.
     call_tool(&served, token, "profile", json!({})).await;
     call_tool(
         &served,
@@ -1418,8 +1429,6 @@ async fn a_proposal_records_what_she_read_this_turn_and_the_page_it_opens() {
         proposal["opens"],
         "app:/missions?operation_id=G&mission_id=mission-g"
     );
-    assert!(proposal.get("exposed").is_none(), "{proposal}");
-    assert!(proposal.get("exposed_by").is_none(), "{proposal}");
 
     // A new message starts a new turn: she has read nothing yet.
     say(&mut app, "Now retry it again.", None).await;
@@ -1440,11 +1449,10 @@ async fn a_proposal_records_what_she_read_this_turn_and_the_page_it_opens() {
 }
 
 #[tokio::test]
-async fn an_exposed_proposal_names_the_reads_that_exposed_it_and_keeps_identifiers_only() {
+async fn a_proposal_after_reading_a_brief_lists_identifiers_only_and_carries_no_mark() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, job) = accepted(&served, &served.operator, "Retry mission-g.").await;
     let token = &job.mcp_token;
-    // A Mission's brief is outside text: reading it exposes the conversation.
     let missions = call_tool(&served, token, "missions", json!({"operation_id": "G"})).await;
     assert_eq!(missions["isError"], false, "{missions}");
     let mission = call_tool(
@@ -1472,78 +1480,33 @@ async fn an_exposed_proposal_names_the_reads_that_exposed_it_and_keeps_identifie
             {"tool": "mission", "ids": {"operation_id": "G", "mission_id": "mission-g"}},
         ])
     );
-    assert_eq!(proposal["exposed"], true);
-    assert_eq!(
-        proposal["exposed_by"],
-        json!(["tool:missions", "tool:mission"])
-    );
     assert_eq!(
         proposal["opens"],
         "app:/missions?operation_id=G&mission_id=mission-g"
     );
-}
-
-#[tokio::test]
-async fn a_station_reported_source_is_listed_as_given_and_once() {
-    let served = served(AssistantConfig::default()).await;
-    let (mut app, job) = accepted(&served, &served.operator, "Look at my notes.").await;
-    for _ in 0..2 {
-        let response = reqwest::Client::new()
-            .post(format!("{}/v1/station/assistant/exposure", served.base))
-            .bearer_auth(STATION_TOKEN)
-            .json(&json!({
-                "station": "hq",
-                "conversation": job.conversation_id,
-                "source": "personal:notes/a.md",
-            }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    }
-    call_tool(
-        &served,
-        &job.mcp_token,
-        "propose_mission_control",
-        json!({"operation_id": "G", "mission_id": "mission-g", "action": "cancel"}),
-    )
-    .await;
-    let frames = finish(&served, &mut app, &job).await;
-    let proposal = proposal_of(&frames);
-    assert_eq!(proposal["exposed"], true);
-    assert_eq!(proposal["exposed_by"], json!(["personal:notes/a.md"]));
+    assert_eq!(
+        keys(&proposal),
+        [
+            "id", "needs", "opens", "read", "request", "result", "status", "summary", "tool"
+        ]
+    );
 }
 
 #[test]
-fn exposed_by_keeps_sixteen_sources_of_two_hundred_bytes() {
+fn a_proposal_lists_at_most_the_reads_it_is_allowed() {
     let gateway = ai6::AssistantGatewayLimits::default();
     let mut conversation = Conversation::new("c".into(), "p".into(), "b".into(), 0.0, 8);
-    for index in 0..40 {
-        conversation.expose_by(&format!("tool:{index}-{}", "x".repeat(300)), &gateway);
-    }
-    assert_eq!(conversation.exposed_by.len(), 16);
-    assert!(
-        conversation
-            .exposed_by
-            .iter()
-            .all(|source| source.len() <= 200)
-    );
-    conversation.turn_reads.clear();
     for _ in 0..40 {
         conversation.note_read("missions", BTreeMap::new(), &gateway);
     }
     assert_eq!(conversation.turn_reads.len(), 16);
 
-    let narrow: ai6::AssistantGatewayLimits = ai6::read_definition(
-        &json!({"exposed_sources": 2, "source_bytes": 8, "proposal_reads": 1}),
-    )
-    .unwrap();
+    let narrow: ai6::AssistantGatewayLimits =
+        ai6::read_definition(&json!({"proposal_reads": 1})).unwrap();
     let mut conversation = Conversation::new("c".into(), "p".into(), "b".into(), 0.0, 8);
-    for index in 0..5 {
-        conversation.expose_by(&format!("tool:{index}-long"), &narrow);
+    for _ in 0..5 {
         conversation.note_read("missions", BTreeMap::new(), &narrow);
     }
-    assert_eq!(conversation.exposed_by, ["tool:0-l", "tool:1-l"]);
     assert_eq!(conversation.turn_reads.len(), 1);
 }
 
@@ -1709,7 +1672,6 @@ async fn navigate_offers_each_valid_route_and_refuses_each_invalid_one_with_its_
             entry["data"]["id"].as_str().unwrap().starts_with("nav-"),
             "{entry}"
         );
-        assert!(entry["data"].get("exposed").is_none(), "{entry}");
     }
     assert!(
         audits(&served, "moneypenny.confirmed").is_empty(),
@@ -1782,49 +1744,37 @@ async fn a_navigation_label_is_held_to_its_own_setting() {
 }
 
 #[tokio::test]
-async fn navigation_after_outside_text_is_stamped_and_never_raises_exposure() {
+async fn navigation_after_reading_a_brief_is_the_same_as_before() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, job) = accepted(&served, &served.operator, "Show me G's failures.").await;
     let token = &job.mcp_token;
     let to = json!({"page": "missions", "operation_id": "G", "state": ["failed"]});
-    let clean = call_tool(
+    let before = call_tool(
         &served,
         token,
         "navigate",
         json!({"to": to, "label": "G's failed Missions"}),
     )
     .await;
-    assert_eq!(clean["isError"], false, "{clean}");
-    let still = exposure_of(&served, "hq", &job.conversation_id).await;
-    assert_eq!(
-        still.json::<Value>().await.unwrap(),
-        json!({"exposed": false}),
-        "offering a page reads nothing"
-    );
-    // A Mission's brief is outside text; a page offered after reading it is stamped.
+    assert_eq!(before["isError"], false, "{before}");
     let missions = call_tool(&served, token, "missions", json!({"operation_id": "G"})).await;
     assert_eq!(missions["isError"], false);
-    let stamped = call_tool(
+    let after = call_tool(
         &served,
         token,
         "navigate",
         json!({"to": to, "label": "G's failed Missions"}),
     )
     .await;
-    assert_eq!(stamped["isError"], false, "{stamped}");
-    let now = exposure_of(&served, "hq", &job.conversation_id).await;
-    assert_eq!(now.json::<Value>().await.unwrap(), json!({"exposed": true}));
+    assert_eq!(after["isError"], false, "{after}");
 
     let frames = finish(&served, &mut app, &job).await;
     let entries = navigations(&frames);
     assert_eq!(entries.len(), 2);
-    assert!(
-        entries[0]["data"].get("exposed").is_none(),
-        "{}",
-        entries[0]
-    );
-    assert_eq!(entries[1]["data"]["exposed"], true);
-    assert_eq!(entries[1]["data"]["route"], to);
+    for entry in &entries {
+        assert_eq!(keys(&entry["data"]), ["id", "label", "route"]);
+        assert_eq!(entry["data"]["route"], to);
+    }
 }
 
 #[tokio::test]
@@ -2260,7 +2210,7 @@ async fn a_stopped_message_a_station_took_cuts_its_harness_off() {
     finish(&served, &mut app, &job).await;
     let conversation = job.conversation_id.clone();
     assert_eq!(
-        standing(&served, "hq", &conversation, "G").await["send"],
+        standing(&served, "hq", &conversation, "G").await.1["send"],
         true
     );
 
@@ -2276,8 +2226,8 @@ async fn a_stopped_message_a_station_took_cuts_its_harness_off() {
         "the harness that took it has no tools left"
     );
     assert_eq!(
-        standing(&served, "hq", &conversation, "G").await,
-        json!({"exposed": false, "send": false, "read": false}),
+        standing(&served, "hq", &conversation, "G").await.1,
+        json!({"send": false, "read": false}),
         "and no Cables"
     );
     // A Cable it sent meanwhile is still audited; nothing else it says is taken.
@@ -2332,7 +2282,7 @@ async fn a_stopped_message_a_station_took_cuts_its_harness_off() {
         StatusCode::NO_CONTENT
     );
     assert_eq!(
-        standing(&served, "hq", &conversation, "G").await["send"],
+        standing(&served, "hq", &conversation, "G").await.1["send"],
         true
     );
     let shown = finish(&served, &mut app, &next).await;
@@ -2731,10 +2681,6 @@ async fn each_person_works_in_their_own_repository_and_reads_only_their_groups()
         ["ops", "org"],
         "the group's and the organisation's"
     );
-    assert!(
-        !operator.exposed,
-        "shared repositories are trusted text and expose nothing"
-    );
     let theirs = viewer.workspace.clone().unwrap();
     assert_eq!(theirs.personal, "/srv/mp/viewer-007.git");
     assert_eq!(theirs.shared.keys().collect::<Vec<_>>(), ["org"]);
@@ -2751,28 +2697,60 @@ async fn each_person_works_in_their_own_repository_and_reads_only_their_groups()
 }
 
 #[tokio::test]
-async fn a_clean_conversation_keeps_her_memory_and_an_exposed_one_asks_the_person() {
+async fn her_memory_commits_at_once_after_reading_a_mission() {
     let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
-    let (mut app, job) = accepted(&served, &served.operator, "I like tables.").await;
+    let (mut app, job) = accepted(&served, &served.operator, "What is mission-g about?").await;
 
-    // Clean: the change goes straight back to the Station as a commit, and the person sees it.
-    set_aside(&served, &job).await;
+    // What she reads does not hold the change back: a brief is someone else's text.
+    let read = call_tool(
+        &served,
+        &job.mcp_token,
+        "mission",
+        json!({"operation_id": "G", "mission_id": "mission-g"}),
+    )
+    .await;
+    assert_eq!(read["isError"], false, "{read}");
+    // Made where no such file was, so its commit is refused should one appear on `main`.
+    let change = AssistantChange::based(
+        remembered().files,
+        BTreeMap::from([("memory/prefs.md".to_owned(), None)]),
+    );
+    let mut event = AssistantEvent::new(
+        EVENT_MEMORY_CHANGES,
+        Some("+++ b/memory/prefs.md\n+The person prefers tables.\n".to_owned()),
+    );
+    event.change = Some(change.clone());
+    assert_eq!(
+        report(&served, "hq", &job, None, vec![event]).await,
+        StatusCode::NO_CONTENT
+    );
+
+    // The change goes straight back to the Station as a commit, and the person sees its diff.
     let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "notice").await;
-    let notice = frames.last().unwrap()["entry"]["text"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert!(notice.contains("memory/prefs.md"), "{notice}");
+    let notice = &frames.last().unwrap()["entry"];
+    assert!(
+        notice["text"].as_str().unwrap().contains("memory/prefs.md"),
+        "{notice}"
+    );
+    assert!(
+        notice["data"]["diff"].as_str().unwrap().contains("tables"),
+        "{notice}"
+    );
+    assert!(
+        !frames.iter().any(|frame| frame["type"] == "proposal"),
+        "{frames:?}"
+    );
     let commit_job = take(&served, "hq").await;
     let commit = commit_job.commit.clone().expect("a commit job");
     assert_eq!(commit.kind, COMMIT_MEMORY);
     assert_eq!(commit.repo, "/srv/mp/operator-007.git");
-    assert_eq!(commit.change, remembered());
+    assert_eq!(commit.change, change, "what she read goes with it");
     assert!(commit.message.ends_with(&format!(
         "Via: Moneypenny (conversation {})",
         job.conversation_id
     )));
     assert_eq!(commit.author_name, "operator-007");
+    assert!(audits(&served, "moneypenny.confirmed").is_empty());
     answer_commit(&served, &commit_job, "committed 0123456789ab to main").await;
     receive_until(&mut app, |frame| {
         frame["entry"]["text"]
@@ -2781,95 +2759,65 @@ async fn a_clean_conversation_keeps_her_memory_and_an_exposed_one_asks_the_perso
     })
     .await;
     finish(&served, &mut app, &job).await;
+}
 
-    // A tool that returns others' text exposes the conversation for good.
-    say(&mut app, "What is mission-g about?", None).await;
-    let second = take(&served, "hq").await;
-    assert!(!second.exposed);
+#[tokio::test]
+async fn a_memory_commit_refused_for_a_file_changed_on_main_tells_the_person() {
+    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
+    let (mut app, job) = accepted(&served, &served.operator, "I like tables.").await;
+    set_aside(&served, &job).await;
+    let commit_job = take(&served, "hq").await;
+    assert!(commit_job.commit.is_some());
     report(
         &served,
         "hq",
-        &second,
-        Some(&second.job_id),
-        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+        &commit_job,
+        Some(&commit_job.job_id),
+        vec![AssistantEvent::new(
+            EVENT_REJECTED,
+            Some("memory/prefs.md changed on main".to_owned()),
+        )],
     )
     .await;
-    let read = call_tool(
-        &served,
-        &second.mcp_token,
-        "mission",
-        json!({"operation_id": "G", "mission_id": "mission-g"}),
-    )
-    .await;
-    assert_eq!(read["isError"], false);
-    set_aside(&served, &second).await;
-    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
-    let proposal = proposal_of(&frames);
-    assert_eq!(proposal["tool"], "memory_commit");
-    assert_eq!(proposal["status"], "pending");
-    assert_eq!(
-        proposal["request"]["body"]["files"]["memory/prefs.md"],
-        "The person prefers tables.\n"
-    );
-    assert!(proposal["request"]["body"]["diff"].is_string());
-    assert!(
-        nothing_for(&served, "hq").await,
-        "nothing is committed unasked"
-    );
-    finish(&served, &mut app, &second).await;
-
-    // Confirmed, it is audited and committed.
-    app.send(WsMessage::Text(
-        json!({"type": "confirm", "proposal": proposal["id"]})
-            .to_string()
-            .into(),
-    ))
-    .await
-    .unwrap();
-    let commit_job = take(&served, "hq").await;
-    assert_eq!(commit_job.commit.as_ref().unwrap().change, remembered());
-    assert_eq!(audits(&served, "moneypenny.confirmed").len(), 1);
-    answer_commit(&served, &commit_job, "committed 89abcdef0123 to main").await;
     let frames = receive_until(&mut app, |frame| {
-        frame["type"] == "proposal" && frame["proposal"]["status"] != "confirming"
+        frame["entry"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("changed on main"))
     })
     .await;
-    assert_eq!(proposal_of(&frames)["status"], "done");
+    assert!(
+        frames.last().unwrap()["entry"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("failed"),
+        "{frames:?}"
+    );
+}
 
-    // Cancelled, nothing is sent: the Station set the change aside already.
-    say(&mut app, "And remember this.", None).await;
-    let third = take(&served, "hq").await;
-    assert!(third.exposed, "exposed for good");
+#[tokio::test]
+async fn a_web_tool_or_a_script_changes_nothing_about_her_memory() {
+    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Look it up.").await;
+    for tool in ["WebFetch", "WebSearch", "Bash", "exec_command"] {
+        let mut called = AssistantEvent::new(EVENT_TOOL, None);
+        called.tools = vec![tool.to_owned()];
+        assert_eq!(
+            report(&served, "hq", &job, None, vec![called]).await,
+            StatusCode::NO_CONTENT
+        );
+    }
+    set_aside(&served, &job).await;
+    // The first notice is the saving: none says anything about the tools.
+    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "notice").await;
     assert!(
-        third.message.contains("memory_commit") || third.message.contains("Done"),
-        "she hears how the confirmed change went: {}",
-        third.message
+        frames.last().unwrap()["entry"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("saving to her memory"),
+        "{frames:?}"
     );
-    report(
-        &served,
-        "hq",
-        &third,
-        Some(&third.job_id),
-        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
-    )
-    .await;
-    set_aside(&served, &third).await;
-    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
-    let proposal = proposal_of(&frames);
-    app.send(WsMessage::Text(
-        json!({"type": "cancel", "proposal": proposal["id"]})
-            .to_string()
-            .into(),
-    ))
-    .await
-    .unwrap();
-    let frames = receive_until(&mut app, |frame| frame["type"] == "proposal").await;
-    assert_eq!(proposal_of(&frames)["status"], "cancelled");
-    assert!(
-        nothing_for(&served, "hq").await,
-        "a cancelled change is never sent"
-    );
-    assert_eq!(audits(&served, "moneypenny.confirmed").len(), 1);
+    let commit_job = take(&served, "hq").await;
+    assert!(commit_job.commit.is_some(), "committed at once");
 }
 
 /// What the Station reports for a `propose_shared_change` call that writes `content` to
@@ -3112,32 +3060,6 @@ async fn a_shared_change_waits_for_its_base_and_is_refused_without_one() {
     assert_eq!(proposals, 1, "{frames:?}");
 }
 
-/// `GET /v1/station/assistant/exposure` as `station` asks it.
-async fn exposure_of(served: &Served, station: &str, conversation: &str) -> reqwest::Response {
-    reqwest::Client::new()
-        .get(format!(
-            "{}/v1/station/assistant/exposure?station={station}&conversation={conversation}",
-            served.base
-        ))
-        .bearer_auth(STATION_TOKEN)
-        .send()
-        .await
-        .unwrap()
-}
-
-/// `POST /v1/station/assistant/exposure` as `station` sends it.
-async fn expose_as(served: &Served, station: &str, conversation: &str) -> StatusCode {
-    reqwest::Client::new()
-        .post(format!("{}/v1/station/assistant/exposure", served.base))
-        .bearer_auth(STATION_TOKEN)
-        .json(&json!({"station": station, "conversation": conversation,
-                      "source": "personal:notes/a.md"}))
-        .send()
-        .await
-        .unwrap()
-        .status()
-}
-
 /// A roster whose `[assistant]` runs `python3` and `node`, reaches two hosts, narrows the
 /// `ops` group to `python3` and one host, and denies the viewer any network.
 fn narrowing_roster() -> Arc<dyn ai6::ConfigProvider> {
@@ -3206,175 +3128,7 @@ async fn each_job_carries_what_the_persons_groups_and_own_table_narrow_her_reach
 }
 
 #[tokio::test]
-async fn a_script_counts_as_outside_text_after_the_roster_narrows_her_network() {
-    let reaching = ai6::AssistantSettings::new()
-        .with_personal_repo("/srv/mp/{person}.git")
-        .with_network(ai6::NetworkPolicy::Limited, vec!["pypi.org".to_owned()]);
-    let source = Arc::new(ai6::MemoryProvider::new(
-        ai6::Roster::builder().assistant(reaching).build().unwrap(),
-    ));
-    let served = served_with(AssistantConfig::default(), Some(source.clone())).await;
-    let (mut app, job) = accepted(&served, &served.operator, "Fetch it.").await;
-    assert!(job.reach.scripts_reach_hosts());
-    finish(&served, &mut app, &job).await;
-
-    // The roster narrows her network to nothing; her next job's reach reaches no host.
-    let narrowed = ai6::AssistantSettings::new()
-        .with_personal_repo("/srv/mp/{person}.git")
-        .with_network(ai6::NetworkPolicy::Denied, Vec::new());
-    source.replace(ai6::Roster::builder().assistant(narrowed).build().unwrap());
-    say(&mut app, "And again?", None).await;
-    let second = take(&served, "hq").await;
-    assert!(!second.reach.scripts_reach_hosts());
-    report(
-        &served,
-        "hq",
-        &second,
-        Some(&second.job_id),
-        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
-    )
-    .await;
-    // A script still running from the wider reach brings in outside text all the same.
-    let mut ran = AssistantEvent::new(EVENT_TOOL, None);
-    ran.tools = vec!["Bash".to_owned()];
-    assert_eq!(
-        report(&served, "hq", &second, None, vec![ran]).await,
-        StatusCode::NO_CONTENT
-    );
-    set_aside(&served, &second).await;
-    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
-    assert_eq!(proposal_of(&frames)["tool"], "memory_commit");
-}
-
-#[tokio::test]
-async fn a_web_fetch_she_reports_makes_her_next_memory_change_a_proposal() {
-    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
-    let (mut app, job) = accepted(&served, &served.operator, "Look it up.").await;
-    // By default her scripts reach no host, so running one brings in nothing.
-    assert!(!job.reach.scripts_reach_hosts());
-    let mut ran = AssistantEvent::new(EVENT_TOOL, None);
-    ran.tools = vec!["Bash".to_owned()];
-    assert_eq!(
-        report(&served, "hq", &job, None, vec![ran]).await,
-        StatusCode::NO_CONTENT
-    );
-    set_aside(&served, &job).await;
-    let commit_job = take(&served, "hq").await;
-    assert!(
-        commit_job.commit.is_some(),
-        "a script that reaches nothing exposes nothing"
-    );
-    answer_commit(&served, &commit_job, "committed 0123456789ab to main").await;
-    finish(&served, &mut app, &job).await;
-
-    say(&mut app, "And the docs?", None).await;
-    let second = take(&served, "hq").await;
-    assert!(!second.exposed);
-    report(
-        &served,
-        "hq",
-        &second,
-        Some(&second.job_id),
-        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
-    )
-    .await;
-    let mut fetched = AssistantEvent::new(EVENT_TOOL, None);
-    fetched.tools = vec!["WebFetch".to_owned()];
-    assert_eq!(
-        report(&served, "hq", &second, None, vec![fetched]).await,
-        StatusCode::NO_CONTENT
-    );
-    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "notice").await;
-    let notice = frames.last().unwrap()["entry"]["text"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert!(notice.contains("WebFetch"), "{notice}");
-    set_aside(&served, &second).await;
-    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
-    assert_eq!(proposal_of(&frames)["tool"], "memory_commit");
-    assert!(
-        nothing_for(&served, "hq").await,
-        "nothing is committed unseen"
-    );
-    finish(&served, &mut app, &second).await;
-    say(&mut app, "Thanks.", None).await;
-    assert!(take(&served, "hq").await.exposed, "for good");
-}
-
-#[tokio::test]
-async fn the_station_raises_exposure_it_alone_sees_and_her_memory_then_waits() {
-    let served = served_with(AssistantConfig::default(), Some(personal_roster())).await;
-    let (mut app, job) = accepted(&served, &served.operator, "What did I note?").await;
-    let conversation = &job.conversation_id;
-    let answer = exposure_of(&served, "hq", conversation).await;
-    assert_eq!(answer.status(), StatusCode::OK);
-    assert_eq!(
-        answer.json::<Value>().await.unwrap(),
-        json!({"exposed": false})
-    );
-    // Only the Station running the conversation, and only one this gateway holds.
-    assert_eq!(
-        exposure_of(&served, "worker", conversation).await.status(),
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        expose_as(&served, "worker", conversation).await,
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        exposure_of(&served, "hq", "no-such-conversation")
-            .await
-            .status(),
-        StatusCode::NOT_FOUND
-    );
-    assert_eq!(
-        expose_as(&served, "hq", conversation).await,
-        StatusCode::NO_CONTENT
-    );
-    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "notice").await;
-    let notice = frames.last().unwrap()["entry"]["text"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert!(notice.contains("personal:notes/a.md"), "{notice}");
-    assert_eq!(
-        exposure_of(&served, "hq", conversation)
-            .await
-            .json::<Value>()
-            .await
-            .unwrap(),
-        json!({"exposed": true})
-    );
-    // Her memory change now waits for the person, and the next job says so.
-    set_aside(&served, &job).await;
-    let frames = receive_until(&mut app, |frame| frame["entry"]["role"] == "proposal").await;
-    assert_eq!(proposal_of(&frames)["tool"], "memory_commit");
-    assert!(nothing_for(&served, "hq").await);
-    finish(&served, &mut app, &job).await;
-    say(&mut app, "Thanks.", None).await;
-    assert!(take(&served, "hq").await.exposed);
-}
-
-#[tokio::test]
-async fn a_read_tool_exposes_unless_it_quotes_no_one() {
-    let served = served(AssistantConfig::default()).await;
-    let (_app, job) = accepted(&served, &served.operator, "Who am I?").await;
-    let quiet = call_tool(&served, &job.mcp_token, "profile", json!({})).await;
-    assert_eq!(quiet["isError"], false);
-    let still = exposure_of(&served, "hq", &job.conversation_id).await;
-    assert_eq!(
-        still.json::<Value>().await.unwrap(),
-        json!({"exposed": false})
-    );
-    let board = call_tool(&served, &job.mcp_token, "board", json!({})).await;
-    assert_eq!(board["isError"], false);
-    let now = exposure_of(&served, "hq", &job.conversation_id).await;
-    assert_eq!(now.json::<Value>().await.unwrap(), json!({"exposed": true}));
-}
-
-#[tokio::test]
-async fn a_failed_read_tool_that_quotes_its_answer_exposes_too() {
+async fn a_refusal_that_quotes_its_answer_stays_framed_as_data() {
     let served = served(AssistantConfig::default()).await;
     let (_app, job) = accepted(&served, &served.operator, "What happened?").await;
     // A refusal that says only what the status means quotes no one.
@@ -3386,12 +3140,8 @@ async fn a_failed_read_tool_that_quotes_its_answer_exposes_too() {
     )
     .await;
     assert_eq!(refused["isError"], true);
-    let still = exposure_of(&served, "hq", &job.conversation_id).await;
-    assert_eq!(
-        still.json::<Value>().await.unwrap(),
-        json!({"exposed": false})
-    );
-    // One that quotes the route's answer is read as any result is.
+    assert!(!refused.to_string().contains("ai6-data"), "{refused}");
+    // One that quotes the route's answer holds it as a result is held.
     let quoted = call_tool(
         &served,
         &job.mcp_token,
@@ -3404,21 +3154,12 @@ async fn a_failed_read_tool_that_quotes_its_answer_exposes_too() {
         quoted.to_string().contains("ai6-data"),
         "the refusal quotes the answer: {quoted}"
     );
-    let now = exposure_of(&served, "hq", &job.conversation_id).await;
-    assert_eq!(now.json::<Value>().await.unwrap(), json!({"exposed": true}));
-}
-
-/// What `GET /v1/station/assistant/exposure` answers `station`, with its status.
-async fn exposure(served: &Served, station: &str, conversation: &str) -> (StatusCode, Value) {
-    let response = exposure_of(served, station, conversation).await;
-    let status = response.status();
-    (status, response.json().await.unwrap_or(Value::Null))
 }
 
 #[tokio::test]
-async fn cable_grants_follow_the_persons_permissions_and_outside_text_exposes() {
+async fn cable_grants_follow_the_persons_permissions() {
     let served = served(AssistantConfig::default()).await;
-    let (mut app, job) = accepted(&served, &served.operator, "Ask 008 about the build.").await;
+    let (_app, job) = accepted(&served, &served.operator, "Ask 008 about the build.").await;
     assert_eq!(job.person_id.as_deref(), Some("operator-007"));
     assert_eq!(
         job.cables,
@@ -3428,47 +3169,20 @@ async fn cable_grants_follow_the_persons_permissions_and_outside_text_exposes() 
             read: true,
         }]
     );
-    assert!(!job.exposed);
     let conversation = job.conversation_id.as_str();
     assert_eq!(
-        exposure(&served, "hq", conversation).await,
-        (StatusCode::OK, json!({"exposed": false})),
-        "no Operation named, no permission answered"
-    );
-    assert_eq!(
         standing(&served, "hq", conversation, "G").await,
-        json!({"exposed": false, "send": true, "read": true})
+        (StatusCode::OK, json!({"send": true, "read": true}))
     );
     assert_eq!(
-        exposure(&served, "worker", conversation).await.0,
+        standing(&served, "worker", conversation, "G").await.0,
         StatusCode::FORBIDDEN,
         "only the Station that runs it may ask"
     );
     assert_eq!(
-        exposure(&served, "hq", "no-such-conversation").await.0,
+        standing(&served, "hq", "no-such-conversation", "G").await.0,
         StatusCode::NOT_FOUND
     );
-
-    // The person's own profile quotes nobody; a Mission's brief is someone else's text.
-    call_tool(&served, &job.mcp_token, "profile", json!({})).await;
-    assert_eq!(
-        exposure(&served, "hq", conversation).await.1["exposed"],
-        false
-    );
-    call_tool(
-        &served,
-        &job.mcp_token,
-        "mission",
-        json!({"operation_id": "G", "mission_id": "mission-g"}),
-    )
-    .await;
-    assert_eq!(
-        exposure(&served, "hq", conversation).await.1["exposed"],
-        true
-    );
-    finish(&served, &mut app, &job).await;
-    say(&mut app, "And now?", None).await;
-    assert!(take(&served, "hq").await.exposed, "it stays exposed");
 
     let (_viewer, theirs) = accepted(&served, &served.viewer, "Ask 008.").await;
     assert!(
@@ -3477,22 +3191,26 @@ async fn cable_grants_follow_the_persons_permissions_and_outside_text_exposes() 
     );
 }
 
-/// What `GET /v1/station/assistant/exposure` answers `station` about a conversation and an
-/// Operation.
-async fn standing(served: &Served, station: &str, conversation: &str, operation: &str) -> Value {
-    reqwest::Client::new()
+/// What `GET /v1/station/assistant/cables` answers `station` about a conversation and an
+/// Operation, with its status.
+async fn standing(
+    served: &Served,
+    station: &str,
+    conversation: &str,
+    operation: &str,
+) -> (StatusCode, Value) {
+    let response = reqwest::Client::new()
         .get(format!(
-            "{}/v1/station/assistant/exposure?station={station}&conversation={conversation}\
+            "{}/v1/station/assistant/cables?station={station}&conversation={conversation}\
              &operation={operation}",
             served.base
         ))
         .bearer_auth(STATION_TOKEN)
         .send()
         .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap()
+        .unwrap();
+    let status = response.status();
+    (status, response.json().await.unwrap_or(Value::Null))
 }
 
 #[tokio::test]
@@ -3500,19 +3218,17 @@ async fn a_station_reads_the_persons_cable_permissions_as_they_are_now() {
     let served = served(AssistantConfig::default()).await;
     let (_app, viewer) = accepted(&served, &served.viewer, "Ask 008.").await;
     assert_eq!(
-        standing(&served, "hq", &viewer.conversation_id, "G").await,
-        json!({"exposed": false, "send": false, "read": false}),
+        standing(&served, "hq", &viewer.conversation_id, "G")
+            .await
+            .1,
+        json!({"send": false, "read": false}),
         "a viewer may neither send nor read Cables"
     );
     let (_app, job) = accepted(&served, &served.operator, "Read what 008 sent.").await;
     let conversation = job.conversation_id.as_str();
     assert_eq!(
-        expose_as(&served, "hq", conversation).await,
-        StatusCode::NO_CONTENT
-    );
-    assert_eq!(
-        standing(&served, "hq", conversation, "H").await,
-        json!({"exposed": true, "send": false, "read": false}),
+        standing(&served, "hq", conversation, "H").await.1,
+        json!({"send": false, "read": false}),
         "nothing on an Operation the person holds nothing on"
     );
 }
@@ -3546,7 +3262,7 @@ async fn a_confirmed_cable_no_station_sends_in_time_fails() {
     assert!(audits(&served, "moneypenny.cable.sent").is_empty());
 }
 
-/// The proposal a Station reports when Moneypenny asks to send `body` while exposed.
+/// The proposal a Station reports when Moneypenny asks to send `body`.
 fn held(id: &str, body: &str) -> AssistantEvent {
     AssistantEvent {
         cable: Some(held_cable(id, body)),
@@ -3694,10 +3410,6 @@ async fn decide(app: &mut Socket, kind: &str, proposal: &Value) {
 async fn a_held_cable_is_sent_only_when_the_person_confirms_it() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, job) = accepted(&served, &served.operator, "Tell 008 to deploy.").await;
-    assert_eq!(
-        expose_as(&served, "hq", &job.conversation_id).await,
-        StatusCode::NO_CONTENT
-    );
     report(
         &served,
         "hq",
@@ -3707,10 +3419,6 @@ async fn a_held_cable_is_sent_only_when_the_person_confirms_it() {
     )
     .await;
     let frames = finish(&served, &mut app, &job).await;
-    assert_eq!(
-        exposure(&served, "hq", &job.conversation_id).await.1["exposed"],
-        true
-    );
     let proposal = proposal_of(&frames);
     assert_eq!(proposal["status"], "pending");
     assert_eq!(proposal["tool"], "send_cable");
@@ -4388,24 +4096,18 @@ async fn finish_upload(
         .status()
 }
 
-fn manifest(files: &[(&str, &[u8], bool)]) -> Value {
-    json!({"files": files.iter().map(|(path, bytes, outside)| json!({
+fn manifest(files: &[(&str, &[u8])]) -> Value {
+    json!({"files": files.iter().map(|(path, bytes)| json!({
         "path": path,
         "bytes": bytes.len(),
         "sha256": crate::moneypenny::pages::sha256_hex(bytes),
-        "outside_text": outside,
     })).collect::<Vec<_>>()})
 }
 
 /// What the Station sends for a bundle named by `path`: the files, then its manifest.
-async fn station_bundle(
-    served: &Served,
-    conversation: &str,
-    path: &str,
-    files: &[(&str, &[u8], bool)],
-) {
+async fn station_bundle(served: &Served, conversation: &str, path: &str, files: &[(&str, &[u8])]) {
     let digest = ai6::page_call_digest(path);
-    for (name, bytes, _) in files {
+    for (name, bytes) in files {
         assert_eq!(
             upload_file(served, conversation, &digest, name, bytes.to_vec()).await,
             StatusCode::NO_CONTENT,
@@ -4551,10 +4253,10 @@ async fn pages_a_bundle_comes_from_the_stations_upload_in_either_order() {
     let (_app, job) = accepted(&served, &served.operator, "Bundle.").await;
     let conversation = job.conversation_id.clone();
     let token = job.mcp_token.clone();
-    let files: [(&str, &[u8], bool); 3] = [
-        ("index.html", b"<script src=app.js></script>", false),
-        ("app.js", b"document.title = 'x'", false),
-        ("img/a.png", &[1, 2, 3], false),
+    let files: [(&str, &[u8]); 3] = [
+        ("index.html", b"<script src=app.js></script>"),
+        ("app.js", b"document.title = 'x'"),
+        ("img/a.png", &[1, 2, 3]),
     ];
     // The files arrive before the call.
     station_bundle(&served, &conversation, "personal/site", &files).await;
@@ -4566,7 +4268,7 @@ async fn pages_a_bundle_comes_from_the_stations_upload_in_either_order() {
     .await;
     let id = published_id(&first);
     let url = page_url(&served, &served.operator, &id, None).await;
-    for (name, bytes, _) in files {
+    for (name, bytes) in files {
         let response = plain()
             .get(format!("{url}f/{name}"))
             .header("sec-fetch-dest", "script")
@@ -4602,7 +4304,7 @@ async fn pages_a_bundle_comes_from_the_stations_upload_in_either_order() {
         &served,
         &conversation,
         "scratch/late",
-        &[("index.html", b"<p>late</p>", false)],
+        &[("index.html", b"<p>late</p>")],
     )
     .await;
     let late = waiting.await.unwrap();
@@ -4678,7 +4380,7 @@ async fn pages_publishing_refuses_what_the_quotas_and_rules_forbid() {
         &served,
         &conversation,
         "personal/other",
-        &[("index.html", b"<p>x</p>", false)],
+        &[("index.html", b"<p>x</p>")],
     )
     .await;
     let silent = publish(
@@ -4702,7 +4404,7 @@ async fn pages_publishing_refuses_what_the_quotas_and_rules_forbid() {
         &served,
         &conversation,
         &digest,
-        json!({"files": [{"path": "index.html", "bytes": 11, "sha256": "00", "outside_text": false}]}),
+        json!({"files": [{"path": "index.html", "bytes": 11, "sha256": "00"}]}),
     )
     .await;
     refused(
@@ -5107,11 +4809,7 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
     assert!(html.contains("sandbox=\"allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-scripts\""));
     assert!(!html.contains("allow-same-origin"));
     assert!(!html.contains("<script"));
-    assert!(
-        html.contains("class=\"bar\""),
-        "an unexposed page's bar has no warning: {html}"
-    );
-    assert!(!html.contains("Made after she read"));
+    assert!(html.contains("class=\"bar\""), "{html}");
     // A top-level request for a file goes to the frame.
     let top = plain()
         .get(format!("{url}f/index.html"))
@@ -5355,8 +5053,8 @@ async fn pages_markdown_renders_with_its_source_and_an_unknown_extension_downloa
         &conversation,
         "personal/docs",
         &[
-            ("index.md", b"# Heading\n\n- [x] done\n", false),
-            ("report.pdf", b"%PDF-1.4", false),
+            ("index.md", b"# Heading\n\n- [x] done\n"),
+            ("report.pdf", b"%PDF-1.4"),
         ],
     )
     .await;
@@ -5410,128 +5108,39 @@ async fn pages_markdown_renders_with_its_source_and_an_unknown_extension_downloa
 }
 
 #[tokio::test]
-async fn pages_after_outside_text_the_bar_warns_with_its_sources_and_frame_false_keeps_it() {
+async fn pages_a_page_made_after_reading_a_brief_is_framed_as_any_other() {
     let roster = pages_roster(json!({"frame": false}));
     let served = served_with(AssistantConfig::default(), Some(roster)).await;
-    let (_app, job) = accepted(&served, &served.operator, "Exposed.").await;
+    let (_app, job) = accepted(&served, &served.operator, "Report.").await;
     let token = &job.mcp_token;
-    // A clean page first: with `frame = false` a top-level request is served without the bar.
-    let clean = published_id(
-        &publish(
-            &served,
-            token,
-            json!({"kind": "file", "title": "clean", "content": "<p>clean</p>", "format": "html"}),
-        )
-        .await,
-    );
-    let clean_url = page_url(&served, &served.operator, &clean, None).await;
-    let direct = plain()
-        .get(format!("{clean_url}f/index.html"))
-        .header("sec-fetch-dest", "document")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(direct.status(), StatusCode::OK, "no frame was asked for");
-    // She reads a Mission's brief (exposed by `tool:missions`), then a Station reports a web
-    // tool; the page keeps both, in order, whatever `frame` says.
+    // With `frame = false` a top-level request is served without the bar, whatever she read.
     call_tool(&served, token, "missions", json!({})).await;
-    let marked = reqwest::Client::new()
-        .post(format!("{}/v1/station/assistant/exposure", served.base))
-        .bearer_auth(STATION_TOKEN)
-        .json(
-            &json!({"station": "hq", "conversation": job.conversation_id,
-                      "source": "tool:WebFetch docs.example"}),
-        )
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(marked.status(), StatusCode::NO_CONTENT);
     let id = published_id(
         &publish(
             &served,
             token,
-            json!({"kind": "file", "title": "exposed", "content": "<p>x</p>", "format": "html"}),
+            json!({"kind": "file", "title": "report", "content": "<p>x</p>", "format": "html"}),
         )
         .await,
     );
     let url = page_url(&served, &served.operator, &id, None).await;
-    let top = plain()
+    let direct = plain()
         .get(format!("{url}f/index.html"))
         .header("sec-fetch-dest", "document")
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        top.status(),
-        StatusCode::SEE_OTHER,
-        "an exposed page keeps the frame"
-    );
-    let html = plain()
-        .get(&url)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-    assert!(html.contains("class=\"bar warn\""), "{html}");
-    let heading = html
-        .find("Made after she read text from outside AI6:")
-        .unwrap();
-    let (missions, fetch) = (
-        html.find("tool:missions").unwrap(),
-        html.find("tool:WebFetch docs.example").unwrap(),
-    );
-    assert!(heading < missions && missions < fetch, "in order: {html}");
-    // `pages` on an exposed page marks a conversation that did not know yet.
-    let (_app2, other) = accepted(&served, &served.operator, "Another conversation.").await;
-    let listed = call_tool(&served, &other.mcp_token, "pages", json!({})).await;
-    assert_eq!(listed["isError"], false, "{listed}");
-    assert!(
-        said(&listed).contains("\"exposed\": true"),
-        "{}",
-        said(&listed)
-    );
-    let after = publish(
-        &served,
-        &other.mcp_token,
-        json!({"kind": "file", "title": "later", "content": "x", "format": "text"}),
-    )
-    .await;
-    let later = published_id(&after);
-    let later_url = page_url(&served, &served.operator, &later, None).await;
-    let later_html = plain()
-        .get(&later_url)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-    assert!(later_html.contains(&format!("page:{id}")), "{later_html}");
-}
+    assert_eq!(direct.status(), StatusCode::OK, "no frame was asked for");
 
-#[tokio::test]
-async fn pages_a_bar_lists_at_most_five_sources_then_counts_the_rest() {
-    let served = served(AssistantConfig::default()).await;
-    let (_app, job) = accepted(&served, &served.operator, "Many sources.").await;
-    for index in 0..7 {
-        reqwest::Client::new()
-            .post(format!("{}/v1/station/assistant/exposure", served.base))
-            .bearer_auth(STATION_TOKEN)
-            .json(
-                &json!({"station": "hq", "conversation": job.conversation_id,
-                          "source": format!("personal:note-{index}.md")}),
-            )
-            .send()
-            .await
-            .unwrap();
-    }
+    // With the frame, the bar says who made it and nothing about what she read.
+    let served = served_with(AssistantConfig::default(), None).await;
+    let (_app, job) = accepted(&served, &served.operator, "Report.").await;
+    call_tool(&served, &job.mcp_token, "missions", json!({})).await;
     let id = published_id(
         &publish(
             &served,
             &job.mcp_token,
-            json!({"kind": "file", "title": "t", "content": "x", "format": "text"}),
+            json!({"kind": "file", "title": "report", "content": "<p>x</p>", "format": "html"}),
         )
         .await,
     );
@@ -5544,43 +5153,9 @@ async fn pages_a_bar_lists_at_most_five_sources_then_counts_the_rest() {
         .text()
         .await
         .unwrap();
-    assert!(html.contains("personal:note-4.md"));
-    assert!(!html.contains("personal:note-5.md"));
-    assert!(html.contains("and 2 more"), "{html}");
-}
-
-#[tokio::test]
-async fn pages_an_outside_text_file_exposes_the_page_with_its_path() {
-    let served = served(AssistantConfig::default()).await;
-    let (_app, job) = accepted(&served, &served.operator, "Outside file.").await;
-    station_bundle(
-        &served,
-        &job.conversation_id,
-        "personal/site",
-        &[("index.html", b"<p>from the web</p>", true)],
-    )
-    .await;
-    let id = published_id(
-        &publish(
-            &served,
-            &job.mcp_token,
-            json!({"kind": "report", "title": "t", "path": "personal/site"}),
-        )
-        .await,
-    );
-    let url = page_url(&served, &served.operator, &id, None).await;
-    let html = plain()
-        .get(&url)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-    assert!(
-        html.contains("bar warn") && html.contains("file:index.html"),
-        "{html}"
-    );
+    assert!(html.contains("class=\"bar\""), "{html}");
+    assert!(html.contains("Made by Moneypenny"), "{html}");
+    assert!(!html.contains("tool:missions"), "{html}");
 }
 
 /// A dashboard of `viewer`'s with one feed, its link, and the feed's URL.
@@ -5864,9 +5439,8 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_the_profiles_ho
             (
                 "index.html",
                 probe_page(&served.base, &outside_url).as_bytes(),
-                false,
             ),
-            ("own.json", b"{\"own\":true}", false),
+            ("own.json", b"{\"own\":true}"),
         ],
     )
     .await;
@@ -6078,12 +5652,5 @@ async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation()
             .contains("Agent text"),
         "{read}"
     );
-    let frames = finish(&served, &mut app, &job).await;
-    assert!(
-        !frames
-            .iter()
-            .any(|frame| frame["entry"]["data"]["exposed"] == true),
-        "{frames:?}"
-    );
-    assert!(!tools::exposes("issue_proposals"));
+    finish(&served, &mut app, &job).await;
 }

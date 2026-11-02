@@ -16,8 +16,8 @@
 //! An assistant Session is not a Mission: it has no Operation, and is never on the board. A
 //! job that grants the person Cable actions in some Operations gives the harness a further
 //! MCP server, this Station's Cable endpoint for the conversation
-//! ([`super::cables_mcp::AssistantEndpoint`]), which sends as the assistant for the person and
-//! holds a send for the person's confirmation once the conversation has read outside text.
+//! ([`super::cables_mcp::AssistantEndpoint`]), which holds every Cable she sends until the
+//! person confirms it, and then sends it as the assistant for the person.
 //! It works in a directory of its own, named for its conversation inside
 //! one the desk made readable by the Station's user only: the same directory each time the
 //! conversation's harness starts, because Claude Code finds a Session to resume only from the
@@ -67,8 +67,7 @@ use crate::directorates::section_00::assistant::{
     AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantSharedBase,
     COMMIT_MEMORY, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED,
     EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_MEMORY_CHANGES,
-    EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, outside_tool,
-    page_call_digest,
+    EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAnswer, page_call_digest,
 };
 use crate::guatiao::library::Object;
 use crate::station::publisher::gateway_agent;
@@ -380,15 +379,10 @@ type Logger = Arc<dyn Fn(&str) + Send + Sync>;
 /// pump (a turn ends, the harness closes).
 type SharedWorkspace = Arc<Mutex<Workspace>>;
 
-/// Universal Exports' record of whether a conversation has read outside text
-/// (`Conversation.exposed` there, the one record of it), as the desk reads and raises it.
-pub(super) trait Exposure: Send + Sync {
-    /// Records that `conversation` read outside text from `source`.
-    fn mark(&self, conversation: &str, source: &str) -> Result<(), String>;
-    /// Whether `conversation` is exposed.
-    fn exposed(&self, conversation: &str) -> Result<bool, String>;
-    /// Whether `conversation` is exposed, and whether its person holds `cable.send` and
-    /// `cable.read` on `operation` now, asked before every Cable call.
+/// What the desk asks of Universal Exports while a conversation's harness runs.
+pub(super) trait Exports: Send + Sync {
+    /// Whether the person of `conversation` holds `cable.send` and `cable.read` on `operation`
+    /// now, asked before every Cable call.
     #[cfg(feature = "cables-mcp")]
     fn standing(&self, conversation: &str, operation: &str) -> Result<Standing, String>;
     /// Uploads one file of the page `publish_page` is publishing for `conversation`, the call
@@ -413,45 +407,24 @@ pub(super) trait Exposure: Send + Sync {
     }
 }
 
-/// No Universal Exports to ask: every answer is an error, which the desk reads as exposed.
+/// No Universal Exports to ask: every answer is an error, which refuses the Cable call.
 struct Unreachable;
 
-impl Exposure for Unreachable {
-    fn mark(&self, _conversation: &str, _source: &str) -> Result<(), String> {
-        Err("no Universal Exports to tell".to_owned())
-    }
-
-    fn exposed(&self, _conversation: &str) -> Result<bool, String> {
-        Err("no Universal Exports to ask".to_owned())
-    }
-
+impl Exports for Unreachable {
     #[cfg(feature = "cables-mcp")]
     fn standing(&self, _conversation: &str, _operation: &str) -> Result<Standing, String> {
         Err("no Universal Exports to ask".to_owned())
     }
 }
 
-/// A conversation's Cable endpoint's view of [`Exposure`]: no answer refuses the call, and an
-/// exposure counts once Universal Exports has recorded it, or at once once the desk's own
-/// `exposed` flag is raised (a web tool or a reaching script this turn, which Universal
-/// Exports may not have heard yet).
+/// A conversation's Cable endpoint's view of [`Exports`]: no answer refuses the call.
 #[cfg(feature = "cables-mcp")]
-struct ExportsGate {
-    exposure: Arc<dyn Exposure>,
-    exposed: Arc<AtomicBool>,
-}
+struct ExportsGate(Arc<dyn Exports>);
 
 #[cfg(feature = "cables-mcp")]
 impl CableGate for ExportsGate {
     fn standing(&self, conversation: &str, operation: &str) -> Option<Standing> {
-        let mut standing = self.exposure.standing(conversation, operation).ok()?;
-        standing.exposed |= self.exposed.load(Ordering::Acquire);
-        Some(standing)
-    }
-
-    fn expose(&self, conversation: &str, source: &str) -> bool {
-        self.exposed.store(true, Ordering::Release);
-        self.exposure.mark(conversation, source).is_ok()
+        self.0.standing(conversation, operation).ok()
     }
 }
 
@@ -612,9 +585,6 @@ struct Live {
     /// What the running harness started under ([`Desk::started_under`]): a later job under
     /// anything else restarts the harness rather than reach it warm with what it began with.
     started: String,
-    /// Raised for good once the conversation reads outside text (a web tool, a reaching
-    /// script), shared with the pump and the Cable endpoint; sticky for the harness's life.
-    exposed: Arc<AtomicBool>,
     workspace: Option<SharedWorkspace>,
     /// The conversation's Cable endpoint, while its harness runs.
     #[cfg(feature = "cables-mcp")]
@@ -641,8 +611,8 @@ pub(super) struct Desk {
     /// The probe's answer, asked once; an error counts as elevated.
     elevation: OnceLock<bool>,
     log: Logger,
-    /// Universal Exports' record of exposure.
-    exposure: Arc<dyn Exposure>,
+    /// The conversation's standing at Universal Exports, and where pages are uploaded.
+    exports: Arc<dyn Exports>,
     /// Memory jobs under way, at most `[assistant.desk] memory_requests`.
     memory_jobs: Arc<AtomicUsize>,
 }
@@ -696,7 +666,7 @@ impl Desk {
             elevated: Arc::new(crate::station::elevation::is_elevated),
             elevation: OnceLock::new(),
             log: Arc::new(|line| eprintln!("ai6: {line}")),
-            exposure: Arc::new(Unreachable),
+            exports: Arc::new(Unreachable),
             memory_jobs: Arc::default(),
         }
     }
@@ -729,9 +699,9 @@ impl Desk {
         self
     }
 
-    /// Reads and raises exposure through `exposure`.
-    fn with_exposure(mut self, exposure: Arc<dyn Exposure>) -> Self {
-        self.exposure = exposure;
+    /// Asks Universal Exports through `exports`.
+    fn with_exports(mut self, exports: Arc<dyn Exports>) -> Self {
+        self.exports = exports;
         self
     }
 
@@ -976,21 +946,13 @@ impl Desk {
         // else the harness started with changed, restarts it rather than reach it warm.
         let reach = self.capped_reach(job)?;
         let started = self.started_under(job, &reach);
-        // Universal Exports' record of exposure only ever rises; a running harness's flag (read
-        // by its Cable endpoint) follows it at once.
-        if job.exposed
-            && let Ok(live) = self.live.lock()
-            && let Some(entry) = live.get(&job.conversation_id)
-        {
-            entry.exposed.store(true, Ordering::Release);
-        }
         let running = self.running(&job.conversation_id);
         if let Some((session, flags, expires, started_under, workspace)) = running {
             if expires > unix_now() + desk.token_margin.0.as_secs_f64() && started_under == started
             {
                 #[cfg(feature = "cables-mcp")]
                 if let Some(cables) = self.cables_of(&job.conversation_id) {
-                    cables.update(&job.cables, job.exposed);
+                    cables.update(&job.cables);
                 }
                 flags.interrupting.store(false, Ordering::Release);
                 // A message that reaches a harness still answering (Universal Exports gave the
@@ -1003,7 +965,6 @@ impl Desk {
                     .lock()
                     .map_err(|_| "assistant lock failed".to_owned())? = Instant::now();
                 let text = job.message.clone();
-                let exposed = job.exposed;
                 return tokio::task::spawn_blocking(move || {
                     // The turn's memory copy is taken before the harness can read the message.
                     if let Some(workspace) = &workspace {
@@ -1011,9 +972,7 @@ impl Desk {
                             .lock()
                             .map_err(|_| "assistant workspace lock failed".to_owned())?;
                         if !answering {
-                            workspace.begin_turn(exposed);
-                        } else if exposed {
-                            workspace.mark_exposed();
+                            workspace.begin_turn();
                         }
                     }
                     session
@@ -1191,7 +1150,6 @@ impl Desk {
             environment.insert("TMPDIR".to_owned(), temp.clone());
             environment.insert("CLAUDE_CODE_TMPDIR".to_owned(), temp);
         }
-        let exposed = Arc::new(AtomicBool::new(job.exposed));
         let flags = Arc::new(Flags {
             busy: AtomicBool::new(true),
             alive: AtomicBool::new(true),
@@ -1201,14 +1159,7 @@ impl Desk {
         });
         #[cfg(feature = "cables-mcp")]
         let cables = match self
-            .open_cables(
-                job,
-                &agent.id,
-                &mut mode,
-                &mut environment,
-                &exposed,
-                &flags,
-            )
+            .open_cables(job, &agent.id, &mut mode, &mut environment, &flags)
             .await
         {
             Ok(cables) => cables,
@@ -1239,7 +1190,6 @@ impl Desk {
                  so when the person asks for one."
             )
         }));
-        let reaching = !mode.network.reaches_nothing() || mode.unsandboxed;
         // A resumed harness has the conversation; only one started afresh is given its recap.
         let mut fresh_context = initial_context.clone();
         fresh_context.extend(job.recap.iter().cloned());
@@ -1327,7 +1277,6 @@ impl Desk {
                     token_expires_at: job.token_expires_at,
                     flags: flags.clone(),
                     started: self.started_under(job, &reach),
-                    exposed: exposed.clone(),
                     workspace: workspace.clone(),
                     #[cfg(feature = "cables-mcp")]
                     cables,
@@ -1348,9 +1297,7 @@ impl Desk {
             fallback,
             workspace,
             notices,
-            exposure: self.exposure.clone(),
-            exposed,
-            reaching,
+            exports: self.exports.clone(),
         };
         std::thread::Builder::new()
             .name("ai6-assistant".to_owned())
@@ -1486,7 +1433,6 @@ impl Desk {
         agent: &str,
         mode: &mut AssistantMode,
         environment: &mut BTreeMap<String, String>,
-        exposed: &Arc<AtomicBool>,
         flags: &Arc<Flags>,
     ) -> Result<Option<Arc<AssistantEndpoint>>, String> {
         let Some(person) = job.person_id.clone().filter(|_| !job.cables.is_empty()) else {
@@ -1517,12 +1463,8 @@ impl Desk {
                 person,
             },
             job.cables.clone(),
-            job.exposed,
             reporter,
-            Arc::new(ExportsGate {
-                exposure: self.exposure.clone(),
-                exposed: exposed.clone(),
-            }),
+            Arc::new(ExportsGate(self.exports.clone())),
             // A job with a new token starts the harness again, and this with it; a turn that
             // outlasts the job's token keeps it until the turn ends or the person stops it.
             job.token_expires_at,
@@ -1659,10 +1601,9 @@ impl Desk {
         let houses = self.houses.clone();
         let conversation = job.conversation_id.clone();
         let file = context.clone();
-        let exposed = job.exposed;
         let skills = skills.to_vec();
         let (bounds, limits) = (self.tables)();
-        let (mut workspace, notices) = tokio::task::spawn_blocking(move || {
+        let (workspace, notices) = tokio::task::spawn_blocking(move || {
             Workspace::prepare(
                 &houses,
                 &area,
@@ -1670,7 +1611,6 @@ impl Desk {
                 &file,
                 &conversation,
                 &wanted,
-                exposed,
                 &skills,
                 &limits,
                 &bounds,
@@ -1684,19 +1624,6 @@ impl Desk {
                 "assistant conversation {}: {notice}",
                 conversation_digest(&job.conversation_id)
             ));
-        }
-        // A failure is told again when the turn ends.
-        if let Some(source) = workspace.take_found() {
-            let exposure = self.exposure.clone();
-            let conversation = job.conversation_id.clone();
-            let marked =
-                tokio::task::spawn_blocking(move || exposure.mark(&conversation, &source)).await;
-            if !matches!(marked, Ok(Ok(()))) {
-                (self.log)(&format!(
-                    "assistant conversation {}: exposure not recorded yet",
-                    conversation_digest(&job.conversation_id)
-                ));
-            }
         }
         let mode = AssistantMode {
             files: vec![PERSONAL.to_owned(), SCRATCH.to_owned()],
@@ -1817,39 +1744,8 @@ struct Pump {
     workspace: Option<SharedWorkspace>,
     /// What preparing the workspace left to tell, sent with the first event.
     notices: Vec<String>,
-    exposure: Arc<dyn Exposure>,
-    /// The conversation's exposure flag, shared with the desk and the Cable endpoint; raised
-    /// for good once a web tool or a reaching script brings in outside text.
-    exposed: Arc<AtomicBool>,
-    /// Her scripts can reach a host (a network policy that reaches one, or no sandbox).
-    reaching: bool,
-}
-
-/// The source reported for a call of the outside tool `tool` (`outside_tool`): its name, and
-/// for `WebFetch` the host it fetches (`tool:WebFetch docs.example`). Only the host, never the
-/// path or query, which may hold what the person typed.
-fn outside_source(tool: &str, data: Option<&[u8]>) -> String {
-    let host = (tool == "WebFetch")
-        .then(|| {
-            let value: serde_json::Value = serde_json::from_slice(data?).ok()?;
-            let url = value
-                .pointer("/message/content")?
-                .as_array()?
-                .iter()
-                .find(|block| {
-                    block.get("type").and_then(serde_json::Value::as_str) == Some("tool_use")
-                        && block.get("name").and_then(serde_json::Value::as_str) == Some(tool)
-                })?
-                .pointer("/input/url")?
-                .as_str()?
-                .to_owned();
-            Url::parse(&url).ok()?.host_str().map(str::to_owned)
-        })
-        .flatten();
-    match host {
-        Some(host) => format!("tool:{tool} {host}"),
-        None => format!("tool:{tool}"),
-    }
+    /// Where the pages she publishes are uploaded.
+    exports: Arc<dyn Exports>,
 }
 
 /// A fresh start for a conversation whose harness was resumed.
@@ -1912,7 +1808,6 @@ impl Pump {
                     heard = Instant::now();
                     let mut shared = Vec::new();
                     if !event.tools.is_empty() {
-                        self.note_tools(&event.tools, event.data.as_deref());
                         shared = self.shared_bases(&event);
                         self.publish_pages(&event);
                     }
@@ -2034,40 +1929,17 @@ impl Pump {
         let Some(workspace) = &self.workspace else {
             return Vec::new();
         };
-        // Universal Exports may have marked the conversation during the turn (a tool that
-        // returns others' text); not knowing counts as exposed.
-        let known = self.exposure.exposed(&self.conversation_id);
         let Ok(mut workspace) = workspace.lock() else {
             return vec![AssistantEvent::new(
                 EVENT_NOTICE,
                 Some("Moneypenny's workspace could not be saved: its lock failed.".to_owned()),
             )];
         };
-        if !matches!(known, Ok(false)) {
-            workspace.mark_exposed();
-        }
-        let TurnEnd {
-            mut memory,
-            mut notices,
-        } = if closing {
+        let TurnEnd { memory, notices } = if closing {
             workspace.close()
         } else {
             workspace.end_turn()
         };
-        // Universal Exports decides whether a memory change waits for the person, from its
-        // own record: one the desk found exposed must be recorded there first.
-        if workspace.exposed()
-            && known != Ok(true)
-            && let Err(reason) = self
-                .exposure
-                .mark(&self.conversation_id, "station:workspace")
-            && memory.take().is_some()
-        {
-            notices.push(format!(
-                "Moneypenny's memory change was not kept: the conversation read outside text \
-                 and Universal Exports could not be told ({reason})."
-            ));
-        }
         drop(workspace);
         let mut events: Vec<AssistantEvent> = notices
             .into_iter()
@@ -2081,29 +1953,6 @@ impl Pump {
         events
     }
 
-    /// Notes the tools an event called, with its raw line. A web tool, or a script that can
-    /// reach a host, brings in outside text: it raises the conversation's exposed flag at once
-    /// (so a Cable it sends later this turn, before Universal Exports hears, is held) and tells
-    /// Universal Exports, whether or not there is a workspace. With a workspace, a call that
-    /// answers with a file the personal repository records as written while exposed exposes the
-    /// conversation too. Either way a failure to tell Universal Exports is told again when the
-    /// turn ends.
-    fn note_tools(&self, tools: &[String], data: Option<&[u8]>) {
-        if let Some(tool) = tools.iter().find(|tool| outside_tool(tool, self.reaching)) {
-            self.expose(&outside_source(tool, data));
-        }
-        let Some(workspace) = &self.workspace else {
-            return;
-        };
-        if let Some(source) = workspace
-            .lock()
-            .ok()
-            .and_then(|mut workspace| workspace.note_tools(tools, data))
-        {
-            self.expose(&source);
-        }
-    }
-
     /// Uploads the files of each `publish_page` call of `event` that names a `path`, to
     /// Universal Exports, which holds the page; a call that cannot be read is refused there
     /// with the reason. The upload runs on its own thread: reading and sending a page does not
@@ -2113,7 +1962,7 @@ impl Pump {
             return;
         };
         for path in Workspace::page_calls(event.data.as_deref()) {
-            let (workspace, exposure) = (workspace.clone(), self.exposure.clone());
+            let (workspace, exports) = (workspace.clone(), self.exports.clone());
             let conversation = self.conversation_id.clone();
             let digest = page_call_digest(&path);
             let spawned = std::thread::Builder::new()
@@ -2126,12 +1975,12 @@ impl Pump {
                     let manifest = files.and_then(|files| {
                         let mut manifest = Vec::new();
                         for (file, bytes) in files {
-                            exposure.upload_page_file(&conversation, &digest, &file.path, bytes)?;
+                            exports.upload_page_file(&conversation, &digest, &file.path, bytes)?;
                             manifest.push(file);
                         }
                         Ok(manifest)
                     });
-                    if let Err(reason) = exposure.finish_page(&conversation, &digest, manifest) {
+                    if let Err(reason) = exports.finish_page(&conversation, &digest, manifest) {
                         eprintln!(
                             "ai6: assistant conversation {}: a page was not published: {reason}",
                             conversation_digest(&conversation)
@@ -2152,23 +2001,6 @@ impl Pump {
             .and_then(|workspace| workspace.lock().ok())
             .map(|workspace| workspace.shared_bases(event.data.as_deref()))
             .unwrap_or_default()
-    }
-
-    /// Raises the conversation's exposed flag and tells Universal Exports; logs a failure to
-    /// tell it, which the turn's end tries again.
-    fn expose(&self, source: &str) {
-        self.exposed.store(true, Ordering::Release);
-        if let Some(workspace) = &self.workspace
-            && let Ok(mut workspace) = workspace.lock()
-        {
-            workspace.mark_exposed();
-        }
-        if let Err(reason) = self.exposure.mark(&self.conversation_id, source) {
-            eprintln!(
-                "ai6: assistant conversation {}: exposure not recorded yet: {reason}",
-                conversation_digest(&self.conversation_id)
-            );
-        }
     }
 
     fn remember(&self, session_id: &str) {
@@ -2545,7 +2377,7 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     };
     let running = state.stopping.clone();
     let poll_link = link.clone();
-    let exposure: Arc<dyn Exposure> = Arc::new(link.clone());
+    let exports: Arc<dyn Exports> = Arc::new(link.clone());
     std::thread::Builder::new()
         .name("ai6-assistant-jobs".to_owned())
         .spawn(move || poll_link.take_jobs(&running, &jobs))?;
@@ -2578,7 +2410,7 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
         report,
         mcp_url,
     )
-    .with_exposure(exposure);
+    .with_exports(exports);
     let stopping = state.stopping.clone();
     let mut dispatch = Dispatch::new(Arc::new(desk));
     Ok(Some(tokio::spawn(async move {
@@ -2645,31 +2477,7 @@ struct Link {
     tables: Tables,
 }
 
-/// `GET` and `POST /v1/station/assistant/exposure`.
-impl Exposure for Link {
-    fn mark(&self, conversation: &str, source: &str) -> Result<(), String> {
-        let endpoint = self
-            .origin
-            .join("v1/station/assistant/exposure")
-            .map_err(|error| error.to_string())?;
-        self.agent(Duration::ZERO)
-            .post(endpoint.as_str())
-            .header("Authorization", &format!("Bearer {}", self.token))
-            .send_json(serde_json::json!({
-                "station": self.station,
-                "conversation": conversation,
-                "source": source,
-            }))
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    }
-
-    fn exposed(&self, conversation: &str) -> Result<bool, String> {
-        self.ask(conversation, None)?["exposed"]
-            .as_bool()
-            .ok_or_else(|| "Universal Exports did not say".to_owned())
-    }
-
+impl Exports for Link {
     fn upload_page_file(
         &self,
         conversation: &str,
@@ -2705,16 +2513,33 @@ impl Exposure for Link {
             .map_err(|error| error.to_string())
     }
 
+    /// `GET /v1/station/assistant/cables`.
     #[cfg(feature = "cables-mcp")]
     fn standing(&self, conversation: &str, operation: &str) -> Result<Standing, String> {
-        let answer = self.ask(conversation, Some(operation))?;
+        let mut endpoint = self
+            .origin
+            .join("v1/station/assistant/cables")
+            .map_err(|error| error.to_string())?;
+        endpoint
+            .query_pairs_mut()
+            .append_pair("station", &self.station)
+            .append_pair("conversation", conversation)
+            .append_pair("operation", operation);
+        let answer: serde_json::Value = self
+            .agent(Duration::ZERO)
+            .get(endpoint.as_str())
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .call()
+            .map_err(|error| error.to_string())?
+            .body_mut()
+            .read_json()
+            .map_err(|error| error.to_string())?;
         let flag = |name: &str| {
             answer[name]
                 .as_bool()
                 .ok_or_else(|| "Universal Exports did not say".to_owned())
         };
         Ok(Standing {
-            exposed: flag("exposed")?,
             send: flag("send")?,
             read: flag("read")?,
         })
@@ -2748,36 +2573,6 @@ impl Link {
             .append_pair("station", &self.station)
             .append_pair("conversation", conversation);
         Ok(endpoint)
-    }
-
-    /// `GET /v1/station/assistant/exposure` about `conversation`, and its person's Cable
-    /// permissions on `operation` when one is named.
-    fn ask(
-        &self,
-        conversation: &str,
-        operation: Option<&str>,
-    ) -> Result<serde_json::Value, String> {
-        let mut endpoint = self
-            .origin
-            .join("v1/station/assistant/exposure")
-            .map_err(|error| error.to_string())?;
-        endpoint
-            .query_pairs_mut()
-            .append_pair("station", &self.station)
-            .append_pair("conversation", conversation);
-        if let Some(operation) = operation {
-            endpoint
-                .query_pairs_mut()
-                .append_pair("operation", operation);
-        }
-        self.agent(Duration::ZERO)
-            .get(endpoint.as_str())
-            .header("Authorization", &format!("Bearer {}", self.token))
-            .call()
-            .map_err(|error| error.to_string())?
-            .body_mut()
-            .read_json()
-            .map_err(|error| error.to_string())
     }
 
     /// An agent whose requests may take `wait` and `[assistant.desk] call_margin` more.
@@ -2922,47 +2717,16 @@ mod tests {
         /// Writes `personal/calc.py`, runs it with `Bash`, which writes `personal/out.txt`,
         /// then answers and completes.
         Computes,
-        /// Calls `WebFetch`, then answers and completes; touches no file, so it needs no
-        /// workspace.
-        Fetches,
     }
 
-    /// Universal Exports' exposure record, as a test keeps it.
+    /// Universal Exports as a test keeps it: the person may send and read Cables everywhere.
     #[derive(Default)]
-    struct Recorded {
-        exposed: Mutex<BTreeMap<String, bool>>,
-        /// Each mark, as (conversation, source).
-        marks: Mutex<Vec<(String, String)>>,
-    }
+    struct Recorded;
 
-    impl Exposure for Recorded {
-        fn mark(&self, conversation: &str, source: &str) -> Result<(), String> {
-            self.marks
-                .lock()
-                .unwrap()
-                .push((conversation.to_owned(), source.to_owned()));
-            self.exposed
-                .lock()
-                .unwrap()
-                .insert(conversation.to_owned(), true);
-            Ok(())
-        }
-
-        fn exposed(&self, conversation: &str) -> Result<bool, String> {
-            Ok(self
-                .exposed
-                .lock()
-                .unwrap()
-                .get(conversation)
-                .copied()
-                .unwrap_or(false))
-        }
-
-        /// The person may send and read Cables everywhere.
+    impl Exports for Recorded {
         #[cfg(feature = "cables-mcp")]
-        fn standing(&self, conversation: &str, _operation: &str) -> Result<Standing, String> {
+        fn standing(&self, _conversation: &str, _operation: &str) -> Result<Standing, String> {
             Ok(Standing {
-                exposed: self.exposed(conversation)?,
                 send: true,
                 read: true,
             })
@@ -3095,13 +2859,6 @@ mod tests {
                     events.push_back(event(EVENT_TEXT, Some("It is 42.")));
                     events.push_back(event("completed", Some("It is 42.")));
                 }
-                Script::Fetches => {
-                    let mut fetched = event("tool", None);
-                    fetched.tools = vec!["WebFetch".to_owned()];
-                    events.push_back(fetched);
-                    events.push_back(event(EVENT_TEXT, Some("Fetched.")));
-                    events.push_back(event("completed", Some("Fetched.")));
-                }
             }
         }
     }
@@ -3216,8 +2973,6 @@ mod tests {
         reports: Arc<Mutex<Vec<AssistantReport>>>,
         /// What the desk wrote to the Station's log.
         logged: Arc<Mutex<Vec<String>>>,
-        /// Universal Exports' exposure record.
-        exposure: Arc<Recorded>,
         /// Why the harness's scripts cannot be sandboxed here; `None`, they can.
         no_sandbox: Arc<Mutex<Option<String>>>,
         /// Why the harness cannot keep to her skills; `None`, it can.
@@ -3302,7 +3057,6 @@ mod tests {
         let logged = Arc::new(Mutex::new(Vec::new()));
         let log = logged.clone();
         let elevated = Arc::new(Mutex::new(Some(elevated)));
-        let exposure = Arc::new(Recorded::default());
         let no_sandbox = Arc::new(Mutex::new(None));
         let no_skills = Arc::new(Mutex::new(None));
         let desk = Desk::new(
@@ -3328,13 +3082,12 @@ mod tests {
             Arc::new(move || elevated.lock().unwrap().take().expect("the desk asks once")),
             Arc::new(move |line: &str| log.lock().unwrap().push(line.to_owned())),
         )
-        .with_exposure(exposure.clone());
+        .with_exports(Arc::new(Recorded));
         Fixture {
             desk: Arc::new(desk),
             asked,
             reports,
             logged,
-            exposure,
             no_sandbox,
             no_skills,
             _root: root,
@@ -3473,7 +3226,6 @@ mod tests {
             session_id: None,
             close: false,
             interrupt: false,
-            exposed: false,
             person_id: None,
             workspace: None,
             commit: None,
@@ -3847,7 +3599,8 @@ event_bytes = 7
             station: "hq".to_owned(),
             tables: Arc::new(Default::default),
         };
-        assert!(link(TlsConfig::default()).exposed("c").is_err());
+        let asked = |link: Link| link.finish_page("c", "d", Ok(Vec::new()));
+        assert!(asked(link(TlsConfig::default())).is_err());
         assert_eq!(
             gateway
                 .paths
@@ -3856,7 +3609,7 @@ event_bytes = 7
             None,
             "no request crosses a handshake the desk does not trust"
         );
-        assert!(link(trusting(&gateway.ca)).exposed("c").is_err(), "a 503");
+        assert!(asked(link(trusting(&gateway.ca))).is_err(), "a 503");
         assert!(
             gateway
                 .paths
@@ -4434,34 +4187,14 @@ event_bytes = 7
             "Cable target is unavailable or not authorized",
             "no grant in Operation H"
         );
-        let sent: serde_json::Value =
-            serde_json::from_str(&text(send("G", "k1").await.unwrap())).unwrap();
-        let cable = registry
-            .get_cable(sent["cable_id"].as_str().unwrap())
-            .unwrap()
-            .unwrap();
-        assert_eq!(cable.on_behalf_of(), Some("person-007"));
-        assert!(
-            registry
-                .audit_records()
-                .unwrap()
-                .iter()
-                .any(|record| record.action == "cable.send" && record.actor == "person-007")
-        );
-        until(|| kinds(&fixture, "c-cable").contains(&EVENT_CABLE_SENT.to_owned())).await;
-
-        // The next message says the conversation is exposed: a send waits for the person.
-        let mut exposed = job("c-cable", "Tell 008 to deploy.");
-        exposed.person_id = granted.person_id.clone();
-        exposed.cables = granted.cables.clone();
-        exposed.exposed = true;
-        fixture.desk.handle(exposed).await;
-        let held = text(send("G", "k2").await.unwrap());
+        // A send waits for the person, and nothing has left.
+        let held = text(send("G", "k1").await.unwrap());
         assert!(
             held.starts_with("Held for the person's confirmation"),
             "{held}"
         );
         until(|| kinds(&fixture, "c-cable").contains(&EVENT_CABLE_PROPOSAL.to_owned())).await;
+        assert!(!kinds(&fixture, "c-cable").contains(&EVENT_CABLE_SENT.to_owned()));
         let proposal = fixture
             .reports
             .lock()
@@ -4499,7 +4232,7 @@ event_bytes = 7
         assert_eq!(answer("confirm-late").as_deref(), Some(EVENT_REJECTED));
         fixture.desk.handle(confirm.clone()).await;
         assert_eq!(answer("confirm-1").as_deref(), Some(EVENT_ACCEPTED));
-        let confirmed_sends = fixture
+        let confirmed_sends: Vec<_> = fixture
             .reports
             .lock()
             .unwrap()
@@ -4508,8 +4241,20 @@ event_bytes = 7
             .filter(|event| event.kind == EVENT_CABLE_SENT)
             .filter_map(|event| event.cable.clone())
             .filter(|cable| cable.id == proposal.id)
-            .count();
-        assert_eq!(confirmed_sends, 1);
+            .collect();
+        assert_eq!(confirmed_sends.len(), 1);
+        let cable = registry
+            .get_cable(confirmed_sends[0].cable_id.as_deref().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(cable.on_behalf_of(), Some("person-007"));
+        assert!(
+            registry
+                .audit_records()
+                .unwrap()
+                .iter()
+                .any(|record| record.action == "cable.send" && record.actor == "person-007")
+        );
         confirm.job_id = "confirm-2".to_owned();
         fixture.desk.handle(confirm).await;
         assert_eq!(
@@ -5361,295 +5106,6 @@ event_bytes = 7
         );
     }
 
-    /// The marks of exposure the desk raised for `conversation`, by source.
-    fn marks(fixture: &Fixture, conversation: &str) -> Vec<String> {
-        fixture
-            .exposure
-            .marks
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(marked, _)| marked == conversation)
-            .map(|(_, source)| source.clone())
-            .collect()
-    }
-
-    #[tokio::test]
-    async fn what_she_wrote_while_exposed_exposes_later_turns_and_shared_text_never_does() {
-        let people = tempfile::tempdir().unwrap();
-        let bare = people.path().join("eve.git");
-
-        // A clean conversation that reads her own files is not exposed by it.
-        let reads = git_fixture(people.path(), Script::Reads);
-        reads
-            .desk
-            .handle(working("c-0", "What do I like?", workspace(&bare)))
-            .await;
-        until(|| kinds(&reads, "c-0").contains(&EVENT_COMPLETED.to_owned())).await;
-        assert!(marks(&reads, "c-0").is_empty());
-        assert!(kinds(&reads, "c-0").contains(&EVENT_MEMORY_CHANGES.to_owned()));
-        reads.desk.close_all();
-        until(|| kinds(&reads, "c-0").contains(&EVENT_CLOSED.to_owned())).await;
-
-        // Shared repositories are trusted text: one checked out exposes nothing, and what she
-        // writes beside it is not recorded.
-        let trusted = git_fixture(people.path(), Script::Writes);
-        let mut shared = workspace(&bare);
-        shared.shared.insert(
-            "gone".to_owned(),
-            people
-                .path()
-                .join("gone")
-                .join("missing.git")
-                .to_string_lossy()
-                .into_owned(),
-        );
-        trusted
-            .desk
-            .handle(working("c-r", "Note what the handbook says.", shared))
-            .await;
-        until(|| kinds(&trusted, "c-r").contains(&EVENT_COMPLETED.to_owned())).await;
-        assert!(marks(&trusted, "c-r").is_empty());
-        trusted.desk.close_all();
-        until(|| kinds(&trusted, "c-r").contains(&EVENT_CLOSED.to_owned())).await;
-        assert!(
-            !git(&bare, &["ls-tree", "-r", "--name-only", "main"]).contains("outside-text"),
-            "nothing is recorded as outside text"
-        );
-
-        // In an exposed conversation, what she wrote is recorded as written while exposed.
-        let writes = git_fixture(people.path(), Script::Writes);
-        writes.exposure.mark("c-s", "test").unwrap();
-        let mut exposed = working("c-s", "Note what the brief says.", workspace(&bare));
-        exposed.exposed = true;
-        writes.desk.handle(exposed).await;
-        until(|| kinds(&writes, "c-s").contains(&EVENT_COMPLETED.to_owned())).await;
-        let start = writes.asked.lock().unwrap().starts[0].clone();
-        let agents =
-            std::fs::read_to_string(Path::new(&start.working_directory).join("AGENTS.md")).unwrap();
-        assert!(
-            agents.contains("waits until the person confirms"),
-            "{agents}"
-        );
-        assert_eq!(recorded(&bare), ["notes/a.md"]);
-        // Recorded by the commit that holds the file, from what it commits.
-        let last = |path: &str| git(&bare, &["log", "-1", "--format=%H", "main", "--", path]);
-        assert_eq!(last("notes/a.md"), last(workspace::OUTSIDE_TEXT));
-        writes.desk.close_all();
-        until(|| kinds(&writes, "c-s").contains(&EVENT_CLOSED.to_owned())).await;
-
-        // In a later clean conversation, only a call that answers with a recorded file
-        // exposes it, at once; reading other files does not.
-        let later = git_fixture(people.path(), Script::Reads);
-        let cases = [
-            (
-                "c-o",
-                r#"Read {"file_path":"{area}/personal/memory/MEMORY.md"}"#,
-                None,
-            ),
-            ("c-g", r#"Glob {"pattern":"personal/memory/**/*.md"}"#, None),
-            (
-                "c-h",
-                r#"Grep {"pattern":"x","path":"{area}/scratch"}"#,
-                None,
-            ),
-            (
-                "c-t",
-                r#"Read {"file_path":"{area}/personal/NOTES/./x/../A.md"}"#,
-                Some("personal:notes/a.md (read by Read)"),
-            ),
-            (
-                "c-p",
-                r#"Grep {"pattern":"x","path":"personal"}"#,
-                Some("personal:notes/a.md (read by Grep)"),
-            ),
-            (
-                "c-q",
-                r#"Glob {"pattern":"**/*.md"}"#,
-                Some("personal:notes/a.md (read by Glob)"),
-            ),
-            (
-                "c-e",
-                r#"Edit {"file_path":"{area}/personal/notes/a.md","old_string":"a","new_string":"b"}"#,
-                Some("personal:notes/a.md (read by Edit)"),
-            ),
-            // A call whose input cannot be read reaches every recorded file.
-            (
-                "c-n",
-                "What did I note?",
-                Some("personal:notes/a.md (a file tool call that could not be read)"),
-            ),
-        ];
-        for (conversation, message, expected) in cases {
-            later
-                .desk
-                .handle(working(conversation, message, workspace(&bare)))
-                .await;
-            until(|| kinds(&later, conversation).contains(&EVENT_COMPLETED.to_owned())).await;
-            let raised = marks(&later, conversation);
-            assert_eq!(
-                raised,
-                expected.into_iter().map(str::to_owned).collect::<Vec<_>>(),
-                "{conversation}: {message}"
-            );
-            later.desk.close_all();
-            until(|| kinds(&later, conversation).contains(&EVENT_CLOSED.to_owned())).await;
-        }
-
-        // A memory index that imports a recorded file exposes the conversation as it starts.
-        let imports = AssistantChange::new(BTreeMap::from([(
-            "memory/MEMORY.md".to_owned(),
-            Some("# Memory\n\nSee @../notes/a.md.\n".to_owned()),
-        )]));
-        later
-            .desk
-            .handle(committing("c-i", COMMIT_MEMORY, &bare, imports))
-            .await;
-        let quiet = git_fixture(people.path(), Script::Answers);
-        quiet
-            .desk
-            .handle(working("c-m", "Hello.", workspace(&bare)))
-            .await;
-        until(|| kinds(&quiet, "c-m").contains(&EVENT_COMPLETED.to_owned())).await;
-        assert_eq!(
-            marks(&quiet, "c-m"),
-            ["personal:notes/a.md (imported by memory/MEMORY.md)"]
-        );
-        quiet.desk.close_all();
-
-        // Removing the file clears it from the record.
-        let clears = git_fixture(people.path(), Script::Works);
-        clears
-            .desk
-            .handle(working("c-u", "Tidy up.", workspace(&bare)))
-            .await;
-        until(|| kinds(&clears, "c-u").contains(&EVENT_TEXT.to_owned())).await;
-        let start = clears.asked.lock().unwrap().starts[0].clone();
-        std::fs::remove_file(
-            Path::new(&start.working_directory)
-                .join("personal")
-                .join("notes")
-                .join("a.md"),
-        )
-        .unwrap();
-        clears.desk.handle(interruption("c-u", "done")).await;
-        until(|| kinds(&clears, "c-u").contains(&EVENT_INTERRUPTED.to_owned())).await;
-        assert!(
-            !git(&bare, &["ls-tree", "-r", "--name-only", "main"]).contains("outside-text"),
-            "an empty record is removed"
-        );
-        clears.desk.close_all();
-    }
-
-    /// The paths the record on `main` of `bare` names.
-    fn recorded(bare: &Path) -> Vec<String> {
-        let mut paths: Vec<String> = git(
-            bare,
-            &[
-                "ls-tree",
-                "-r",
-                "--name-only",
-                "main",
-                "--",
-                workspace::OUTSIDE_TEXT,
-            ],
-        )
-        .lines()
-        .map(|entry| {
-            git(bare, &["show", &format!("main:{entry}")])
-                .trim()
-                .to_owned()
-        })
-        .collect();
-        paths.sort();
-        paths
-    }
-
-    #[tokio::test]
-    async fn two_conversations_add_to_the_record_at_once_and_a_third_reads_both() {
-        let people = tempfile::tempdir().unwrap();
-        let bare = people.path().join("eve.git");
-        // A clean conversation that starts before either records anything.
-        let reader = git_fixture(people.path(), Script::Reads);
-        let scratch = r#"Read {"file_path":"{area}/scratch/x.md"}"#;
-        reader
-            .desk
-            .handle(working("c-3", scratch, workspace(&bare)))
-            .await;
-        until(|| kinds(&reader, "c-3").contains(&EVENT_COMPLETED.to_owned())).await;
-
-        // Two exposed conversations of the same person, each writing a file of its own, both
-        // started before either saves.
-        let writers = git_fixture(people.path(), Script::Works);
-        let mut areas = Vec::new();
-        for conversation in ["c-1", "c-2"] {
-            writers.exposure.mark(conversation, "test").unwrap();
-            let mut job = working(conversation, "Note it.", workspace(&bare));
-            job.exposed = true;
-            writers.desk.handle(job).await;
-            until(|| kinds(&writers, conversation).contains(&EVENT_TEXT.to_owned())).await;
-        }
-        for start in writers.asked.lock().unwrap().starts.clone() {
-            areas.push(PathBuf::from(start.working_directory));
-        }
-        for (area, name) in areas.iter().zip(["one", "two"]) {
-            let notes = area.join(PERSONAL).join("notes");
-            std::fs::create_dir_all(&notes).unwrap();
-            std::fs::write(notes.join(format!("{name}.md")), name).unwrap();
-        }
-        for conversation in ["c-1", "c-2"] {
-            writers
-                .desk
-                .handle(interruption(conversation, "done"))
-                .await;
-            until(|| kinds(&writers, conversation).contains(&EVENT_INTERRUPTED.to_owned())).await;
-        }
-        assert_eq!(
-            recorded(&bare),
-            ["notes/one.md", "notes/two.md"],
-            "neither conversation's record replaced the other's"
-        );
-        writers.desk.close_all();
-
-        // The third conversation's next save replays on both; it reads the record again, so
-        // reading either file exposes it.
-        let start = reader.asked.lock().unwrap().starts[0].clone();
-        std::fs::write(
-            Path::new(&start.working_directory)
-                .join(PERSONAL)
-                .join("mine.md"),
-            "mine",
-        )
-        .unwrap();
-        let completed = |count: usize| {
-            kinds(&reader, "c-3")
-                .iter()
-                .filter(|kind| *kind == EVENT_COMPLETED)
-                .count()
-                >= count
-        };
-        reader
-            .desk
-            .handle(working("c-3", scratch, workspace(&bare)))
-            .await;
-        until(|| completed(2)).await;
-        assert!(marks(&reader, "c-3").is_empty());
-        reader
-            .desk
-            .handle(working(
-                "c-3",
-                r#"Read {"file_path":"{area}/personal/notes/one.md"}"#,
-                workspace(&bare),
-            ))
-            .await;
-        until(|| completed(3)).await;
-        assert_eq!(
-            marks(&reader, "c-3"),
-            ["personal:notes/one.md (read by Read)"]
-        );
-        reader.desk.close_all();
-    }
-
     #[tokio::test]
     async fn hidden_files_in_her_repository_are_never_saved_or_set_aside() {
         let people = tempfile::tempdir().unwrap();
@@ -5685,9 +5141,10 @@ event_bytes = 7
         let people = tempfile::tempdir().unwrap();
         let fixture = git_fixture(people.path(), Script::Writes);
         let bare = people.path().join("eve.git");
-        let mut exposed = working("c-x", "Remember this.", workspace(&bare));
-        exposed.exposed = true;
-        fixture.desk.handle(exposed).await;
+        fixture
+            .desk
+            .handle(working("c-x", "Remember this.", workspace(&bare)))
+            .await;
         until(|| kinds(&fixture, "c-x").contains(&EVENT_COMPLETED.to_owned())).await;
         let (change, _) = set_aside(&fixture, "c-x");
         assert_eq!(
@@ -5710,7 +5167,7 @@ event_bytes = 7
             .await;
         assert!(kinds(&fixture, "c-y").contains(&EVENT_ACCEPTED.to_owned()));
 
-        // Confirmed now, the change would replace that: it is refused, and nothing changes.
+        // Committed now, the change would replace that: it is refused, and nothing changes.
         fixture
             .desk
             .handle(committing("c-x", COMMIT_MEMORY, &bare, change))
@@ -5768,13 +5225,14 @@ event_bytes = 7
     }
 
     #[tokio::test]
-    async fn a_memory_change_nobody_lets_through_never_reaches_the_repository() {
+    async fn a_memory_change_reaches_the_repository_only_as_a_commit_it_is_sent_back() {
         let people = tempfile::tempdir().unwrap();
         let fixture = git_fixture(people.path(), Script::Writes);
         let bare = people.path().join("eve.git");
-        let mut exposed = working("c-x", "Remember this.", workspace(&bare));
-        exposed.exposed = true;
-        fixture.desk.handle(exposed).await;
+        fixture
+            .desk
+            .handle(working("c-x", "Remember this.", workspace(&bare)))
+            .await;
         until(|| kinds(&fixture, "c-x").contains(&EVENT_COMPLETED.to_owned())).await;
         let (change, _) = set_aside(&fixture, "c-x");
         assert!(change.files.contains_key("memory/prefs.md"));
@@ -5782,7 +5240,7 @@ event_bytes = 7
         let agents =
             std::fs::read_to_string(Path::new(&start.working_directory).join("AGENTS.md")).unwrap();
         assert!(
-            agents.contains("waits until the person confirms"),
+            agents.contains("is saved after your answer and shown to the person"),
             "{agents}"
         );
         fixture.desk.close_all();
@@ -5795,7 +5253,7 @@ event_bytes = 7
             "the index is the one she started from"
         );
 
-        // Confirmed after her harness closed, it is committed from a clone of its own.
+        // Sent back after her harness closed, it is committed from a clone of its own.
         fixture
             .desk
             .handle(committing("c-x", COMMIT_MEMORY, &bare, change))
@@ -6168,12 +5626,6 @@ event_bytes = 7
             "the script and what it wrote are on main: {files}"
         );
         assert_eq!(git(&bare, &["show", "main:out.txt"]), "42\n");
-        // A script that can reach a host brings in outside text.
-        let marks = fixture.exposure.marks.lock().unwrap().clone();
-        assert!(
-            marks.iter().any(|(conversation, _)| conversation == "c-s"),
-            "{marks:?}"
-        );
         fixture.desk.close_all();
     }
 
@@ -6499,61 +5951,6 @@ event_bytes = 7
         fixture.desk.handle(renewed).await;
         until(|| launched() == 3).await;
         fixture.desk.close_all();
-    }
-
-    #[tokio::test]
-    async fn a_web_tool_exposes_the_turn_even_without_a_workspace() {
-        // The default roster gives no personal repository, so there is no workspace.
-        let fixture = scripted(true, IDLE, Script::Fetches, Script::Answers);
-        let fetching = AssistantJob {
-            reach: crate::directorates::section_00::assistant::AssistantReach {
-                interpreters: Vec::new(),
-                network: crate::directorates::section_00::agent::AssistantNetwork {
-                    policy: "open".to_owned(),
-                    allowed_hosts: Vec::new(),
-                    ..Default::default()
-                },
-                unsandboxed_scripts: false,
-            },
-            person_id: Some("eve".to_owned()),
-            ..job("c-x", "Look it up.")
-        };
-        assert!(fetching.workspace.is_none());
-        fixture.desk.handle(fetching).await;
-        until(|| kinds(&fixture, "c-x").contains(&EVENT_COMPLETED.to_owned())).await;
-        // The desk tells Universal Exports the conversation is exposed, with no workspace.
-        let marks = fixture.exposure.marks.lock().unwrap().clone();
-        assert!(
-            marks
-                .iter()
-                .any(|(conversation, source)| conversation == "c-x"
-                    && source.starts_with("tool:WebFetch")),
-            "{marks:?}"
-        );
-    }
-
-    #[test]
-    fn an_outside_call_is_reported_by_tool_and_for_a_fetch_by_host() {
-        let fetch = serde_json::json!({"message": {"content": [
-            {"type": "tool_use", "name": "WebFetch",
-             "input": {"url": "https://docs.example/a/b?q=secret#x"}}]}})
-        .to_string();
-        assert_eq!(
-            outside_source("WebFetch", Some(fetch.as_bytes())),
-            "tool:WebFetch docs.example",
-            "the host only, never the path or query"
-        );
-        assert_eq!(
-            outside_source("WebFetch", Some(b"not json")),
-            "tool:WebFetch"
-        );
-        assert_eq!(outside_source("WebFetch", None), "tool:WebFetch");
-        assert_eq!(
-            outside_source("WebSearch", Some(fetch.as_bytes())),
-            "tool:WebSearch"
-        );
-        assert_eq!(outside_source("Bash", None), "tool:Bash");
-        assert_eq!(outside_source("exec_command", None), "tool:exec_command");
     }
 
     /// A catalog of two skills under `catalog`, each pinned as `ai6 assistant pin-skill`

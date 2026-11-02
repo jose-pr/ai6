@@ -862,7 +862,6 @@ pub(super) fn checkpoint_due(state: &DaemonState) {
             branch: None,
             fallback: None,
             files: None,
-            record: None,
             exclude: None,
             max_bytes: None,
         };
