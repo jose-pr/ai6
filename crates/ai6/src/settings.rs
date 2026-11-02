@@ -2,7 +2,7 @@
 //!
 //! A section is named by a dotted path: `provider`, `registry.limits.sessions` and `oo.chat` are
 //! sections of `ai6.cfg`, and `record.station.scheduler` or `record.operation.issues` are parts
-//! of a record kind. `ai6 config schema [SECTION]` prints one, and [`reference`] writes the tables
+//! of a record kind. `ai6 config schema [SECTION]` prints one, and [`reference`](mod@reference) writes the tables
 //! of the narrative docs and what Outer Office reads from the same schemas.
 
 pub mod reference;
