@@ -20,6 +20,8 @@ import urllib.request
 from pathlib import Path
 from typing import NamedTuple
 
+import crates
+
 ROOT = Path(__file__).resolve().parents[2]
 GROUPS = {"core", "app", "api", "docs", "test", "system"}
 PLATFORMS = {"windows-x64", "windows-arm64", "linux-x64", "linux-arm64", "macos-arm64", "macos-x64"}
@@ -242,6 +244,21 @@ class Checker:
             return any(entry.startswith(name[:-1]) for entry in self.trees[parent])
         return name in self.trees[parent]
 
+    def check_crates(self) -> None:
+        """The deps commit the lock names holds what Cargo.lock names, and nothing else."""
+        deps = self.find("app", "deps")
+        if len(deps) != 1:
+            return
+        tree = crates.read_ref(ROOT, deps[0].version)
+        if tree is None:
+            self.error(f"deps at {deps[0].version} has no crates/, or is not here", deps[0].line)
+            return
+        for problem in crates.problems(crates.read_lock(ROOT / "Cargo.lock"), tree):
+            self.error(
+                f"deps at {deps[0].version}: {problem}; python3 tools/sdk/crates.py refresh DEPS_DIR",
+                deps[0].line,
+            )
+
     def check_docs(self) -> None:
         requirements = (ROOT / "tools/sdk/docs-requirements.txt").read_text(encoding="utf-8")
         pinned = dict(re.findall(r"^([A-Za-z0-9._-]+)==(\S+)", requirements, re.MULTILINE))
@@ -360,6 +377,7 @@ def main() -> int:
     checker.check_rust()
     checker.check_nightly()
     checker.check_flutter()
+    checker.check_crates()
     checker.check_docs()
     checker.check_postgres()
     checker.check_containers(args.deps_ref)

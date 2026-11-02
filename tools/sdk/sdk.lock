@@ -26,12 +26,13 @@ core rust-target wasm32-unknown-unknown any - -
 core llvm 22.1.8 windows-arm64 de718c58ebbc5f61d58c17b90457fcf42983bc2c4a4aba3e010d108713bfd7f1 https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-aarch64-pc-windows-msvc.tar.xz
 
 # Flutter main, with what that commit is expected to report. deps is the deps branch's commit
-# holding pub/ and cdn/ for this Flutter and clients/outer-office/pubspec.lock.
+# holding pub/ and cdn/ for this Flutter and clients/outer-office/pubspec.lock, and crates/ for
+# Cargo.lock.
 app flutter 2541e508405f5d9728286d6ed3307163a5406e08 any - https://github.com/flutter/flutter.git
 app flutter-version 3.50.0-1.0.pre-230 any - -
 app flutter-engine f8edeef41f4a89dc912421fedbd6102252394dab any - -
 app dart 3.15.0-72.0.dev any - -
-app deps 28f12ac57d6251d672d9c8bd00619ff3b743e6ce any - https://github.com/jose-pr/ai6.git
+app deps 6ed418769c00a429e709a4582a1280ec30389944 any - https://github.com/jose-pr/ai6.git
 
 # Public API snapshots.
 api rust nightly-2026-09-21 any - -
