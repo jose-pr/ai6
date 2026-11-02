@@ -796,13 +796,15 @@ fn cli_audit(action: &str, target: String) -> ai6::AuditRecord {
         action: action.to_owned(),
         operation: String::new(),
         resource: Some("config:roster".to_owned()),
-        target: bounded_line(&target, CLI_AUDIT_TARGET_BYTES),
+        target: bounded_line(
+            &target,
+            ai6::station::limits::AuditLimits::default()
+                .target_bytes
+                .or_max(),
+        ),
         at,
     }
 }
-
-/// What an audit record's target takes.
-const CLI_AUDIT_TARGET_BYTES: usize = 512;
 
 /// `text` on one line, cut at a character boundary to fit `bytes`.
 fn bounded_line(text: &str, bytes: usize) -> String {

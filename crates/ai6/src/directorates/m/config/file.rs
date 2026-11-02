@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -13,15 +12,11 @@ use super::{
     ConfigSnapshot, Layer, assemble, check_placement, conflict, merged,
 };
 use crate::bootstrap::format::{self, EXTENSIONS, Format};
-use crate::bounds::TimeLimit;
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
 use crate::directorates::registry::store::replace_file;
 
 /// The directory of a Station's own family files under the provider's root.
 const STATIONS_DIR: &str = "stations";
-
-/// How long a replacement waits for a reader that has the file open, which Windows refuses.
-const REPLACE_RETRY: TimeLimit = TimeLimit::at(Duration::from_secs(2));
 
 /// Configuration in a directory, one file per family ([`ConfigRecord::file`]), each with the
 /// extension `cfg`, `toml`, `json`, `yaml` or `yml` ([`format`](crate::bootstrap::format)). A
@@ -442,7 +437,7 @@ impl ConfigProvider for FileProvider {
             return Err(conflict(record, key));
         }
         match edited {
-            Some(edited) => replace_file(&path, edited.as_bytes(), REPLACE_RETRY),
+            Some(edited) => replace_file(&path, edited.as_bytes(), self.limits.replace_retry),
             None => fs::remove_file(&path),
         }
         .map_err(|failure| unavailable(&path, &failure))?;

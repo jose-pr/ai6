@@ -149,8 +149,24 @@ const ooSettingsJson = r'''
             "minimum": 1e-6,
             "format": "seconds",
             "title": "Her socket says it is ready within",
-            "description": "Seconds her socket may take to say it is ready before the chat says it failed and offers to try again.",
+            "description": "Seconds her socket may take to say it is ready before it counts as failed.",
             "default": 10
+          },
+          "retry_delay": {
+            "type": "number",
+            "minimum": 1e-6,
+            "format": "seconds",
+            "title": "First reconnect after",
+            "description": "Seconds before her socket's first reconnect; each next one doubles, up to `retry_max_delay`.",
+            "default": 1
+          },
+          "retry_max_delay": {
+            "type": "number",
+            "minimum": 1e-6,
+            "format": "seconds",
+            "title": "Longest wait between reconnects",
+            "description": "The longest wait between reconnects.",
+            "default": 16
           }
         },
         "additionalProperties": false,
@@ -166,7 +182,9 @@ const ooSettingsJson = r'''
           "window_width": 520,
           "window_height": 760,
           "transition_ms": 200,
-          "connect_timeout": 10
+          "connect_timeout": 10,
+          "retry_delay": 1,
+          "retry_max_delay": 16
         }
       },
       "routes": {

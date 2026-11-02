@@ -39,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `[secrets] min_matched_bytes` and `[head_of_station] reason_bytes` and `audit_target_bytes`; the
   `unex` record's `[gateway] socket_buffer_bytes`, `[timeline] audit_page` and `max_audit_page`, and
   `[text] mission_title_chars` and `mission_prompt_bytes`; an Operation's `[issues]`
-  `max_split_children`, `duplicate_window_secs` and `creation_approval_secs`.
+  `max_split_children`, `duplicate_window_secs` and `creation_approval_secs`; `[provider]
+  replace_retry`.
 
 - `ai6 config public [--output PATH]` writes the public `ai6.cfg` a web page reads beside
   `index.html`: `[unex] url` and what the page needs of `[oo]`, from an allow list, so a new key is

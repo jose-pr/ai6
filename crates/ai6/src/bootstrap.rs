@@ -318,6 +318,11 @@ pub struct ProviderSettings {
     #[schema(title = "Access policy", format = "bytes")]
     #[map(default = ConfigLimits::default().access_policy_bytes)]
     pub access_policy_bytes: Limit,
+    /// Seconds a directory provider's replacement of a family file waits for a reader that has the
+    /// file open.
+    #[schema(title = "Wait for a reader of a family file")]
+    #[map(default = ConfigLimits::default().replace_retry)]
+    pub replace_retry: crate::bounds::TimeLimit,
 }
 
 impl Default for ProviderSettings {
@@ -330,6 +335,7 @@ impl Default for ProviderSettings {
             loadout_bytes: limits.loadout_bytes,
             loadout_value_chars: limits.loadout_value_chars,
             access_policy_bytes: limits.access_policy_bytes,
+            replace_retry: limits.replace_retry,
         }
     }
 }
@@ -847,6 +853,7 @@ impl ProviderSettings {
             loadout_bytes: self.loadout_bytes,
             loadout_value_chars: self.loadout_value_chars,
             access_policy_bytes: self.access_policy_bytes,
+            replace_retry: self.replace_retry,
         }
     }
 }
@@ -1198,6 +1205,21 @@ mod tests {
         let path = dir.path().join(FILE_NAME);
         std::fs::write(&path, text).unwrap();
         Bootstrap::find(Some(&path)).unwrap()
+    }
+
+    #[test]
+    fn how_long_a_replacement_waits_is_read_and_is_no_weakening() {
+        let default = located("");
+        assert_eq!(
+            default.value.provider.limits().replace_retry,
+            crate::bounds::TimeLimit::secs(2)
+        );
+        let set = located("[provider]\nreplace_retry = 9\n");
+        assert_eq!(
+            set.value.provider.limits().replace_retry,
+            crate::bounds::TimeLimit::secs(9)
+        );
+        assert!(set.value.provider.limits().weakenings().is_empty());
     }
 
     #[test]

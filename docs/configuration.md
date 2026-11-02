@@ -202,6 +202,7 @@ records = "none"                      # keep every audit record; reported as a w
 | `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool` records together). |
 | `loadout_value_chars` | 4,096 | **One loadout value, in characters.** Characters of one text value in the loadout document. |
 | `access_policy_bytes` | 1 MiB | **Access policy.** Bytes of the access policy (the `access` record). |
+| `replace_retry` | 2 | **Wait for a reader of a family file.** Seconds a directory provider's replacement of a family file waits for a reader that has the file open. |
 <!-- schema:provider:end -->
 
 `[registry]`:
@@ -587,7 +588,9 @@ build; the values above are their defaults, which a test holds them to.
 | `window_width` | 520 | **Width of her own window.** The width her own window opens at (desktop). |
 | `window_height` | 760 | **Height of her own window.** The height her own window opens at (desktop). |
 | `transition_ms` | 200 | **The chat moves in.** Milliseconds the chat takes to move; none when the system asks for no animations. |
-| `connect_timeout` | 10 | **Her socket says it is ready within.** Seconds her socket may take to say it is ready before the chat says it failed and offers to try again. |
+| `connect_timeout` | 10 | **Her socket says it is ready within.** Seconds her socket may take to say it is ready before it counts as failed. |
+| `retry_delay` | 1 | **First reconnect after.** Seconds before her socket's first reconnect; each next one doubles, up to `retry_max_delay`. |
+| `retry_max_delay` | 16 | **Longest wait between reconnects.** The longest wait between reconnects. |
 <!-- schema:oo.chat:end -->
 
 `[oo.routes]`
@@ -825,24 +828,6 @@ pending_per_station = 8
 <!-- schema:record.unex.gateway:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `sessions` | 16 | Live provider Sessions |
-| `clients_per_session` | 12 | Simultaneous browser connections to one Session |
-| `scrollback_events` | 64 | Value frames kept per Session for a client that joins late |
-| `frame_bytes` | 256 KiB | Bytes of one WebSocket or ingress frame. A Station is told at registration how much terminal output that leaves room for, and splits longer output to fit |
-| `input_frames_per_second` | 40 | Browser input frames accepted per connection per second |
-| `input_queue` | 64 | Capacity of the queue between the gateway and its Stations, at least 1 |
-| `fanout` | 8 | Capacity of each per-Session viewer queue, at least 1 |
-| `buffer_budget_bytes` | 512 MiB | Bytes the gateway may hold in buffers; the configuration is refused when its limits could exceed it |
-| `client_slots` | 100,000 | Connections the gateway keeps slots for; refused when Sessions times connections could exceed it |
-| `attach_token_ttl` | 300 | Seconds an attach token lives, more than 0 |
-| `write_lease_ttl` | 30 | Seconds a terminal write lease lives, more than 0 |
-| `station_token_min_bytes` | 32 | Characters the Station token holds at least; smaller is looser |
-| `origin_bytes` | 2,048 | Bytes of the public origin |
-| `access_token_ttl` | 3,600 | Seconds a sign-in that names no lifetime gets, and each renewal gives from then; more than 0, within `access_token_max_ttl`; longer is looser |
-| `access_token_max_ttl` | 86,400 | The longest lifetime a request for a token may name, in seconds |
-| `session_max` | 43,200 | How long renewing keeps a sign-in going, in seconds from when it was made; `0` turns renewal off, `"none"` lets it run on |
-| `session_cookie` | `true` | Whether a browser's sign-in also gets an HttpOnly cookie, so a reload [signs it back in](access.md#staying-signed-in) up to `session_max` after signing in; `false`, or `session_max = 0`, keeps a sign-in in the tab's memory alone |
-| `compartment_audit` | 60 | Seconds between audit records of one person's reads of one resource that only one [compartment](compartments.md#what-is-checked-and-when) allows; `0` writes one for every read |
 | `sessions` | 16 | **Live Sessions.** Live provider Sessions. |
 | `clients_per_session` | 12 | **Browser connections per Session.** Simultaneous browser connections to one provider Session. |
 | `scrollback_events` | 64 | **Frames kept for a late client.** Value frames kept per provider Session for a client that joins late. |
@@ -859,6 +844,7 @@ pending_per_station = 8
 | `access_token_ttl` | 3,600 | **A sign-in lasts.** Seconds a sign-in that names no lifetime gets, and each renewal gives from then, more than 0 and within `access_token_max_ttl`; longer is looser. |
 | `access_token_max_ttl` | 86,400 (a day) | **Longest token a request may ask for.** The longest lifetime a request for a token may name, in seconds. |
 | `session_max` | 43,200 | **Longest renewed sign-in.** How long renewing keeps a sign-in going, in seconds from when it was made; the password is not asked again until then. `0` turns renewal off, `"none"` lets it run on. |
+| `session_cookie` | `true` | **Keep a browser's sign-in in a cookie.** Whether a browser's sign-in also gets an HttpOnly cookie, so a reload signs it back in up to `session_max` after signing in; with `false`, or `session_max` at `0`, a sign-in lives in the app's memory alone. |
 | `compartment_audit` | 60 | **Between audit records of a compartment read.** Seconds between audit records of one person's reads of one resource allowed only by one compartment; the app polls, so `0` writes one for every read. |
 | `socket_buffer_bytes` | 256 KiB | **Smallest socket write buffer.** Bytes the write buffer of a browser's socket holds at least, whatever `frame_bytes` (it holds twice that when that is more). |
 <!-- schema:record.unex.gateway:end -->
@@ -1353,29 +1339,31 @@ change applies to the next publish. A quota changed in either direction is a pla
 never a weakening, and nothing is evicted when one is lowered. Pages are open by default
 (scripts, network, feeds and the frame); each restriction is an option.
 
-| Key | Default | What it bounds |
+<!-- schema:record.assistant.pages:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `max_file_bytes` | 8 MiB | Bytes of one file of a page |
-| `max_page_bytes` | 16 MiB | Bytes of one page |
-| `max_page_files` | 200 | Files of one page |
-| `max_pages` | 50 | Pages one person keeps |
-| `max_person_bytes` | 64 MiB | Bytes of all one person's pages |
-| `max_total_bytes` | 2 GiB | Bytes of all pages on the gateway |
-| `inline_bytes` | 192 KiB | Bytes of an inline page's content |
-| `title_chars` | 120 | Characters of a title |
-| `max_feeds` | 8 | Feeds one dashboard declares |
-| `feed_reads_per_minute` | 60 | Feed reads one link makes in a minute |
-| `staged_uploads` | 64 | Uploads from Stations waiting for their call |
-| `default_ttl` | 86,400 | Seconds a page lives unless remembered |
-| `open_ttl` | 3,600 | Seconds a link to a page is valid |
-| `upload_wait` | 30 | Seconds a publish waits for the Station's files |
-| `stage_ttl` | 300 | Seconds an upload no call claims is kept |
-| `sweep_every` | 60 | Seconds between sweeps of expired pages, links and uploads |
-| `scripts` | true | Whether a page's scripts run |
-| `network` | `"open"` | `open`, `own` (its own files and feeds) or `none` (its own files) |
-| `feeds` | true | Whether dashboards may read live feeds |
-| `frame` | true | Whether pages show in the gateway's frame with the bar |
-| `sharing` | true | Whether a person may share a page |
+| `max_file_bytes` | 8 MiB | **Largest file of a page.** Bytes of one file of a page. |
+| `max_page_bytes` | 16 MiB | **Largest page.** Bytes of one page. |
+| `max_page_files` | 200 | **Files in a page.** Files of one page. |
+| `max_pages` | 50 | **Pages per person.** Pages one person keeps. |
+| `max_person_bytes` | 64 MiB | **All of one person's pages.** Bytes of all one person's pages. |
+| `max_total_bytes` | 2 GiB | **All pages on this gateway.** Bytes of all pages on one gateway. |
+| `inline_bytes` | 192 KiB | **Largest inline page.** Bytes of an inline page's content. |
+| `title_chars` | 120 | **Longest page title.** Characters of a page's title. |
+| `max_feeds` | 8 | **Feeds in a dashboard.** Feeds one dashboard declares. |
+| `feed_reads_per_minute` | 60 | **Feed reads a minute, per link.** Feed reads one link makes in a minute. |
+| `staged_uploads` | 64 | **Uploads held from Stations.** Pages Universal Exports keeps staged from Stations at once. |
+| `default_ttl` | 86,400 (a day) | **Keep a page for.** Seconds a page lives unless remembered. |
+| `open_ttl` | 3,600 | **A link to a page lasts.** Seconds a link to a page is valid. |
+| `upload_wait` | 30 | **Wait for a Station's files.** Seconds a publish waits for the Station's files. |
+| `stage_ttl` | 300 | **Keep an unclaimed upload for.** Seconds a staged upload no call claims is kept. |
+| `sweep_every` | 60 | **Sweep expired pages every.** Seconds between sweeps of expired pages, links and staged uploads. |
+| `scripts` | `true` | **Run pages' scripts.** Whether a page's scripts run. |
+| `network` | `open` | **What a page may reach.** What a page may reach from the browser. |
+| `feeds` | `true` | **Dashboards read live feeds.** Whether dashboards may read live feeds. |
+| `frame` | `true` | **Show pages in the gateway's frame.** Whether a page is shown in the gateway's frame with the classification bar. |
+| `sharing` | `true` | **People may share pages.** Whether a person may share a page. |
+<!-- schema:record.assistant.pages:end -->
 
 A Station reads `[assistant.limits]` `page_file_bytes` (8 MiB), `page_files` (200) and
 `page_bytes` (16 MiB) when it reads a page from her workspace; the gateway's quotas above

@@ -11,7 +11,12 @@ use serde_json::Value;
 use super::{fields, schema};
 
 /// The docs holding generated tables, from the repository's root.
-pub const DOCS: [&str; 2] = ["docs/configuration.md", "docs/operations.md"];
+pub const DOCS: [&str; 4] = [
+    "docs/configuration.md",
+    "docs/operations.md",
+    "docs/assistant.md",
+    "docs/compartments.md",
+];
 
 /// What Outer Office reads of `[oo]`, from the repository's root: the schema, the form and each
 /// default as a constant, since a default is written in a `const` constructor.

@@ -758,23 +758,30 @@ Operation, Mission, Session IDs or brief, in any case.
 The bounds are settings, `[assistant.views]` in the global `agents.toml` (the `views` table of
 the `assistant` record), each at least 1; Universal Exports reads them when it starts:
 
-| Key | Bounds | Default |
+<!-- schema:record.assistant.views:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `blocks` | blocks in a view | 24 |
-| `view_bytes` | bytes of a view as JSON | 65536 |
-| `text_bytes` | bytes of a text block | 8192 |
-| `short_bytes` | bytes of a title, label, cell or other short text | 512 |
-| `columns`, `rows` | columns and rows of a table | 12, 200 |
-| `items` | items of a key-value list or a timeline | 100 |
-| `series`, `points` | series of a chart, points of a series | 8, 200 |
-| `pie_slices` | slices of a pie | 12 |
-| `diff_bytes` | bytes of each side of a diff | 16384 |
-| `fields` | fields of a form or a card | 20 |
-| `schedule_rows` | rows of a schedule | 50 |
-| `graph_nodes`, `graph_edges` | nodes and edges of a graph | 60, 120 |
-| `svg_bytes`, `svg_elements`, `svg_depth` | bytes, elements and nesting of a drawing | 32768, 2000, 16 |
-| `navigate_label_bytes` | bytes of the label of a [page she points to](#pages-she-points-to) | 120 |
-| `svg_id_bytes` | bytes of an `id` in a drawing | 64 |
+| `blocks` | 24 | Blocks in one view. |
+| `view_bytes` | 64 KiB | **Size of one view.** Bytes of one view as JSON. |
+| `text_bytes` | 8 KiB | **Size of a text block.** Bytes of a text block's Markdown. |
+| `short_bytes` | 512 | **Size of a title, label or cell.** Bytes of a title, label, cell or other short text. |
+| `columns` | 12 | Columns of a table. |
+| `rows` | 200 | Rows of a table. |
+| `items` | 100 | **Items of a list or timeline.** Items of a key-value list or a timeline. |
+| `series` | 8 | Series of a chart. |
+| `points` | 200 | Points of one series. |
+| `pie_slices` | 12 | Slices of a pie. |
+| `diff_bytes` | 16 KiB | **Size of each side of a diff.** Bytes of each side of a diff. |
+| `fields` | 20 | **Fields of a form or card.** Fields of a form or a card. |
+| `schedule_rows` | 50 | Rows of a schedule. |
+| `graph_nodes` | 60 | Nodes of a graph. |
+| `graph_edges` | 120 | Edges of a graph. |
+| `svg_bytes` | 32 KiB | **Size of a drawing.** Bytes of an SVG drawing. |
+| `svg_elements` | 2,000 | **Elements of a drawing.** Elements of an SVG drawing. |
+| `svg_depth` | 16 | **Nesting of a drawing.** How deep an SVG drawing nests its elements. |
+| `navigate_label_bytes` | 120 | **Size of a page link's label.** Bytes of the label of a page she offers with `navigate`. |
+| `svg_id_bytes` | 64 | **Size of an id in a drawing.** Bytes of an `id` in an SVG drawing. |
+<!-- schema:record.assistant.views:end -->
 
 ```toml
 [assistant.views]

@@ -387,6 +387,9 @@ pub struct ConfigLimits {
     pub loadout_value_chars: Limit,
     /// Bytes of the access policy (the `access` record).
     pub access_policy_bytes: Limit,
+    /// How long a directory provider's replacement of a family file waits for a reader that has
+    /// the file open.
+    pub replace_retry: crate::bounds::TimeLimit,
 }
 
 impl Default for ConfigLimits {
@@ -395,6 +398,7 @@ impl Default for ConfigLimits {
             loadout_bytes: Limit::at(1024 * 1024),
             loadout_value_chars: Limit::at(4096),
             access_policy_bytes: Limit::at(1024 * 1024),
+            replace_retry: crate::bounds::TimeLimit::secs(2),
         }
     }
 }
@@ -402,11 +406,15 @@ impl Default for ConfigLimits {
 impl ConfigLimits {
     /// One line per limit looser than its default, for the bootstrap file's weakenings.
     pub fn weakenings(&self) -> Vec<String> {
-        let (Some(current), Some(default)) =
+        let (Some(mut current), Some(default)) =
             (records::to_json(self), records::to_json(&Self::default()))
         else {
             return Vec::new();
         };
+        // It paces a write and bounds nothing a person sends.
+        if let Some(table) = current.as_object_mut() {
+            table.remove("replace_retry");
+        }
         crate::bounds::looser("provider", &current, &default, &[])
     }
 }

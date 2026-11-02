@@ -106,7 +106,9 @@ pub struct UnexGatewayLimits {
     pub session_max: TimeLimit,
     /// Whether a browser's sign-in also gets an HttpOnly cookie, so a reload signs it back in up
     /// to `session_max` after signing in; with `false`, or `session_max` at `0`, a sign-in lives
-    /// in the app's memory alone. Default true.
+    /// in the app's memory alone.
+    #[schema(title = "Keep a browser's sign-in in a cookie")]
+    #[map(default = UnexGatewayLimits::default().session_cookie)]
     pub session_cookie: bool,
     /// Seconds between audit records of one person's reads of one resource allowed only by one
     /// compartment; the app polls, so `0` writes one for every read.
@@ -513,7 +515,9 @@ mod tests {
         off.gateway.session_max = TimeLimit::secs(0);
         assert!(off.validate().is_ok(), "no renewal is a choice");
         assert!(off.weakenings().is_empty(), "and a stricter one");
-        let table: UnexLimits = toml::from_str("[gateway]\nsession_cookie = false\n").unwrap();
+        let table = read("[gateway]\nsession_cookie = false\n")
+            .unwrap()
+            .limits();
         assert!(!table.gateway.session_cookie);
         assert!(UnexLimits::default().gateway.session_cookie);
         assert!(table.weakenings().is_empty(), "memory alone is stricter");

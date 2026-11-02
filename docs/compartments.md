@@ -142,14 +142,20 @@ another Operation marks the Session `cable:SENDER`, as ever.
 A `compartment` grant in the `cables` record names only `action = "release"`, for who may release
 what a `hold` mode held; any other action there is invalid.
 
-| Limit | Default | Counts |
+<!-- schema:record.compartment.limits:begin -->
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `max_fanout` | 100 | Recipients of one Cable |
-| `rate`, `burst` | 10.0 a second, 50 | Bucket `compartment:<id>`, shared by every Station on the Registry |
-| `sender_rate`, `sender_burst` | off | Bucket `compartment:<id>:sender:<agent>` |
-| `max_product_bytes` | 65,536 | One text of a product |
+| `max_fanout` | 100 | **Recipients of one Cable.** The most recipients one Cable to the compartment may reach. |
+| `rate` | 10 | **Cables a second.** Cables a second to the compartment, from everyone, across Stations. |
+| `burst` | 50 | **Burst of Cables.** Cables to the compartment in a burst. |
+| `sender_rate` | none | **Cables a second, per sender.** Cables a second from one sender; `none` keeps no per-sender count. |
+| `sender_burst` | none | **Burst per sender.** Cables from one sender in a burst; applies with `sender_rate`. |
+| `max_product_bytes` | 64 KiB | **Size of a product text.** Bytes of one text an Agent reads from a product; the rest is cut with a marker. |
+<!-- schema:record.compartment.limits:end -->
 
-Each takes `none` for no bound. A limit looser than its default is a weakening, shown in the record
+`rate` and `burst` count in the bucket `compartment:<id>`, shared by every Station on the Registry;
+`sender_rate` and `sender_burst` in `compartment:<id>:sender:<agent>`. Each takes `none` for no
+bound. A limit looser than its default is a weakening, shown in the record
 and logged when the configuration is applied. The roster's `max_compartment_rules` (10,000) bounds
 read-ins times covers per compartment; `none` lifts it. The sending Station's per-Agent bucket, the
 one-hop rule and the body limit still apply. A relay sees the Sessions of its own Station, so a

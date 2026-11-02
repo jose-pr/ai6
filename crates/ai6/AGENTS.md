@@ -287,7 +287,7 @@ outcome's other keys (Session IDs, who recovered it) are not part of a product.
 pub fn schema(section: &str) -> Option<serde_json::Value>;   // a dotted path: provider, registry.limits.sessions, record.station.scheduler
 pub fn sections() -> Vec<(String, String)>;                  // every table's path and title
 pub mod reference {
-    pub const DOCS: [&str; 2];                               // the docs holding generated tables
+    pub const DOCS: [&str; 4];                               // the docs holding generated tables
     pub const OO_DART: &str;                                 // Outer Office's copy of [oo]
     pub fn table(section: &str) -> Result<String, String>;   // one section's Markdown table
     pub fn rewritten(text: &str) -> Result<String, String>;  // a doc with each marked table written anew
