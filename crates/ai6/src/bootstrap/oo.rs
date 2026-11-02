@@ -137,11 +137,19 @@ pub struct OoChat {
     #[schema(title = "The chat moves in")]
     #[map(default = OoChat::default().transition_ms)]
     pub transition_ms: u64,
-    /// Seconds her socket may take to say it is ready before the chat says it failed and offers
-    /// to try again.
+    /// Seconds her socket may take to say it is ready before it counts as failed.
     #[schema(title = "Her socket says it is ready within", format = "seconds")]
     #[map(with = seconds_more_than_zero, default = OoChat::default().connect_timeout)]
     pub connect_timeout: f64,
+    /// Seconds before her socket's first reconnect; each next one doubles, up to
+    /// `retry_max_delay`.
+    #[schema(title = "First reconnect after", format = "seconds")]
+    #[map(with = seconds_more_than_zero, default = OoChat::default().retry_delay)]
+    pub retry_delay: f64,
+    /// The longest wait between reconnects.
+    #[schema(title = "Longest wait between reconnects", format = "seconds")]
+    #[map(with = seconds_more_than_zero, default = OoChat::default().retry_max_delay)]
+    pub retry_max_delay: f64,
 }
 
 impl Default for OoChat {
@@ -157,6 +165,8 @@ impl Default for OoChat {
             window_height: 760.0,
             transition_ms: 200,
             connect_timeout: 10.0,
+            retry_delay: 1.0,
+            retry_max_delay: 16.0,
         }
     }
 }

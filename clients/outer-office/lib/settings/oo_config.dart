@@ -7,6 +7,8 @@ import 'package:yaml_edit/yaml_edit.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_art.dart';
 import '../theme/oo_tokens.dart';
+import 'oo_schema.dart';
+import 'oo_settings.g.dart';
 
 /// The formats an `ai6.cfg` can be written in.
 enum OoConfigFormat { toml, json, yaml }
@@ -89,33 +91,28 @@ class OoConfig {
     }
 
     final oo = section('oo');
-    const known = {
-      'appearance',
-      'chat',
-      'routes',
-      'art',
-      'assets',
-      'refresh',
-      'controls',
-      'pages',
-      'terminal',
-      'limits',
-    };
     for (final key in oo.keys) {
-      if (!known.contains(key)) {
+      if (!OoSchema.tables.contains(key)) {
         throw FormatException('ai6.cfg: unknown table [oo.$key]');
       }
     }
-    Map<String, Object?> table(String name, Set<String> keys) {
+    Map<String, Object?> table(String name) {
       final value = oo[name];
       if (value == null) return const {};
       if (value is! Map) {
         throw FormatException('ai6.cfg: [oo.$name] is not a table');
       }
       final entries = value.cast<String, Object?>();
+      final keys = OoSchema.keysOf(name);
       for (final key in entries.keys) {
         if (!keys.contains(key)) {
           throw FormatException('ai6.cfg: unknown key oo.$name.$key');
+        }
+      }
+      for (final MapEntry(:key, value: held) in entries.entries) {
+        if (held == null) continue;
+        if (OoSchema.refusal(name, key, held) case final why?) {
+          throw FormatException('ai6.cfg: oo.$name.$key $why');
         }
       }
       return entries;
@@ -130,18 +127,12 @@ class OoConfig {
       return value;
     }
 
-    double? number(Map<String, Object?> table, String key) {
-      final value = table[key];
-      if (value == null) return null;
-      if (value is! num || value <= 0 || !value.isFinite) {
-        throw FormatException('ai6.cfg: oo.chat.$key is not a positive number');
-      }
-      return value.toDouble();
-    }
+    double? number(Map<String, Object?> table, String key) =>
+        (table[key] as num?)?.toDouble();
 
     final limits = OoLimits._read(table);
     final unex = section('unex');
-    final chatTable = table('chat', ChatSettings.keys);
+    final chatTable = table('chat');
     const defaults = ChatSettings();
     final chat = ChatSettings(
       minWidth: number(chatTable, 'min_width') ?? defaults.minWidth,
@@ -153,14 +144,7 @@ class OoConfig {
       textWidth: number(chatTable, 'text_width') ?? defaults.textWidth,
       windowWidth: number(chatTable, 'window_width') ?? defaults.windowWidth,
       windowHeight: number(chatTable, 'window_height') ?? defaults.windowHeight,
-      transitionMs: chatTable['transition_ms'] == null
-          ? defaults.transitionMs
-          : switch (chatTable['transition_ms']) {
-              final int ms when ms >= 0 => ms,
-              _ => throw const FormatException(
-                'ai6.cfg: oo.chat.transition_ms is not a whole number of 0 or more',
-              ),
-            },
+      transitionMs: chatTable['transition_ms'] as int? ?? defaults.transitionMs,
       connectTimeout: number(chatTable, 'connect_timeout') == null
           ? defaults.connectTimeout
           : _seconds(number(chatTable, 'connect_timeout')!),
@@ -179,20 +163,9 @@ class OoConfig {
         '${chat.minWidth} and chat.max_width ${chat.maxWidth}',
       );
     }
-    final appearance = table('appearance', {'theme'});
-    final routes = table('routes', {'text_bytes'});
-    final textBytes = routes['text_bytes'];
-    if (textBytes != null && (textBytes is! int || textBytes < 1)) {
-      throw const FormatException(
-        'ai6.cfg: oo.routes.text_bytes is not a whole number of bytes, 1 or more',
-      );
-    }
-    final maxWidth = table('art', {'max_width'})['max_width'];
-    if (maxWidth != null && (maxWidth is! int || maxWidth < 1)) {
-      throw const FormatException(
-        'ai6.cfg: oo.art.max_width is not a whole number of pixels, 1 or more',
-      );
-    }
+    final appearance = table('appearance');
+    final textBytes = table('routes')['text_bytes'];
+    final maxWidth = table('art')['max_width'];
     final url = string(unex, 'unex', 'url');
     final origin = url == null ? null : Uri.tryParse(url);
     if (url != null &&
@@ -245,29 +218,16 @@ class RefreshSettings {
     this.renewRetry = defaultRenewRetry,
   });
 
-  static const defaultSessions = Duration(seconds: 3);
-  static const defaultOverview = Duration(seconds: 10);
-  static const defaultTimeline = Duration(seconds: 10);
-  static const defaultPools = Duration(seconds: 15);
-  static const defaultSlow = Duration(seconds: 15);
-  static const defaultProfile = Duration(seconds: 60);
-  static const defaultHidden = Duration(seconds: 60);
-  static const defaultSilentIntervals = 3;
-  static const defaultRenewBefore = Duration(seconds: 600);
-  static const defaultRenewRetry = Duration(seconds: 30);
-
-  static const keys = {
-    'sessions',
-    'overview',
-    'timeline',
-    'pools',
-    'slow',
-    'profile',
-    'hidden',
-    'silent_intervals',
-    'renew_before',
-    'renew_retry',
-  };
+  static const defaultSessions = OoDefaults.refreshSessions;
+  static const defaultOverview = OoDefaults.refreshOverview;
+  static const defaultTimeline = OoDefaults.refreshTimeline;
+  static const defaultPools = OoDefaults.refreshPools;
+  static const defaultSlow = OoDefaults.refreshSlow;
+  static const defaultProfile = OoDefaults.refreshProfile;
+  static const defaultHidden = OoDefaults.refreshHidden;
+  static const defaultSilentIntervals = OoDefaults.refreshSilentIntervals;
+  static const defaultRenewBefore = OoDefaults.refreshRenewBefore;
+  static const defaultRenewRetry = OoDefaults.refreshRenewRetry;
 
   /// `sessions`: what the page shown displays from the board of Sessions, Stations and
   /// Missions.
@@ -317,11 +277,9 @@ class ControlSettings {
     this.confirming = defaultConfirming,
   });
 
-  static const defaultWait = Duration(seconds: 10);
-  static const defaultPoll = Duration(milliseconds: 500);
-  static const defaultConfirming = Duration(seconds: 30);
-
-  static const keys = {'wait', 'poll', 'confirming'};
+  static const defaultWait = OoDefaults.controlsWait;
+  static const defaultPoll = OoDefaults.controlsPoll;
+  static const defaultConfirming = OoDefaults.controlsConfirming;
 
   /// `wait`: how long to follow a control for the Station's outcome; `0` returns once it is
   /// queued.
@@ -338,13 +296,11 @@ class ControlSettings {
 /// How much a page asks for, `ai6.cfg`'s `[oo.pages]` table.
 class PageSettings {
   const PageSettings({
-    this.timeline = 50,
-    this.audit = 100,
-    this.summary = 5,
-    this.search = 24,
+    this.timeline = OoDefaults.pagesTimeline,
+    this.audit = OoDefaults.pagesAudit,
+    this.summary = OoDefaults.pagesSummary,
+    this.search = OoDefaults.pagesSearch,
   });
-
-  static const keys = {'timeline', 'audit', 'summary', 'search'};
 
   /// `timeline`: items in one page of an Operation's timeline.
   final int timeline;
@@ -362,18 +318,11 @@ class PageSettings {
 /// The live terminal's pace, `ai6.cfg`'s `[oo.terminal]` table.
 class TerminalSettings {
   const TerminalSettings({
-    this.scrollbackLines = 10000,
-    this.connectTimeout = const Duration(seconds: 10),
-    this.retryDelay = const Duration(seconds: 1),
-    this.retryMaxDelay = const Duration(seconds: 16),
+    this.scrollbackLines = OoDefaults.terminalScrollbackLines,
+    this.connectTimeout = OoDefaults.terminalConnectTimeout,
+    this.retryDelay = OoDefaults.terminalRetryDelay,
+    this.retryMaxDelay = OoDefaults.terminalRetryMaxDelay,
   });
-
-  static const keys = {
-    'scrollback_lines',
-    'connect_timeout',
-    'retry_delay',
-    'retry_max_delay',
-  };
 
   /// `scrollback_lines`: lines the terminal keeps.
   final int scrollbackLines;
@@ -393,16 +342,10 @@ class TerminalSettings {
 /// bound away.
 class InputSettings {
   const InputSettings({
-    this.missionTitleChars = 512,
-    this.missionPromptChars = 65536,
-    this.reasonChars = 512,
+    this.missionTitleChars = OoDefaults.limitsMissionTitleChars,
+    this.missionPromptChars = OoDefaults.limitsMissionPromptChars,
+    this.reasonChars = OoDefaults.limitsReasonChars,
   });
-
-  static const keys = {
-    'mission_title_chars',
-    'mission_prompt_chars',
-    'reason_chars',
-  };
 
   /// `mission_title_chars`: a new Mission's title.
   final int missionTitleChars;
@@ -435,47 +378,15 @@ class OoLimits {
   final InputSettings inputs;
 
   /// The tables of `[oo]`, [table] being its table reader.
-  factory OoLimits._read(
-    Map<String, Object?> Function(String name, Set<String> keys) table,
-  ) {
-    double? seconds(
-      Map<String, Object?> entries,
-      String name,
-      String key, {
-      bool zero = false,
-    }) {
-      final value = entries[key];
-      if (value == null) return null;
-      if (value is! num ||
-          !value.isFinite ||
-          value < 0 ||
-          (!zero && value == 0)) {
-        throw FormatException(
-          'ai6.cfg: oo.$name.$key is not a number of seconds, '
-          '${zero ? '0' : 'more than 0'} or more',
-        );
-      }
-      return value.toDouble();
-    }
+  factory OoLimits._read(Map<String, Object?> Function(String name) table) {
+    double? seconds(Map<String, Object?> entries, String key) =>
+        (entries[key] as num?)?.toDouble();
 
-    int? whole(
-      Map<String, Object?> entries,
-      String name,
-      String key, {
-      int least = 1,
-    }) {
-      final value = entries[key];
-      if (value == null) return null;
-      if (value is! int || value < least) {
-        throw FormatException(
-          'ai6.cfg: oo.$name.$key is not a whole number of $least or more',
-        );
-      }
-      return value;
-    }
+    int? whole(Map<String, Object?> entries, String key) =>
+        entries[key] as int?;
 
     Duration? refresh(Map<String, Object?> entries, String key, Duration base) {
-      final value = seconds(entries, 'refresh', key, zero: true);
+      final value = seconds(entries, key);
       if (value == null) return base;
       return value == 0 ? null : _seconds(value);
     }
@@ -485,18 +396,18 @@ class OoLimits {
     const pageDefaults = PageSettings();
     const terminalDefaults = TerminalSettings();
     const inputDefaults = InputSettings();
-    final refreshTable = table('refresh', RefreshSettings.keys);
-    final controlsTable = table('controls', ControlSettings.keys);
-    final pagesTable = table('pages', PageSettings.keys);
-    final terminalTable = table('terminal', TerminalSettings.keys);
-    final inputsTable = table('limits', InputSettings.keys);
-    final renewRetry = seconds(refreshTable, 'refresh', 'renew_retry');
-    final wait = seconds(controlsTable, 'controls', 'wait', zero: true);
-    final poll = seconds(controlsTable, 'controls', 'poll');
-    final confirming = seconds(controlsTable, 'controls', 'confirming');
-    final connect = seconds(terminalTable, 'terminal', 'connect_timeout');
-    final retry = seconds(terminalTable, 'terminal', 'retry_delay');
-    final retryMax = seconds(terminalTable, 'terminal', 'retry_max_delay');
+    final refreshTable = table('refresh');
+    final controlsTable = table('controls');
+    final pagesTable = table('pages');
+    final terminalTable = table('terminal');
+    final inputsTable = table('limits');
+    final renewRetry = seconds(refreshTable, 'renew_retry');
+    final wait = seconds(controlsTable, 'wait');
+    final poll = seconds(controlsTable, 'poll');
+    final confirming = seconds(controlsTable, 'confirming');
+    final connect = seconds(terminalTable, 'connect_timeout');
+    final retry = seconds(terminalTable, 'retry_delay');
+    final retryMax = seconds(terminalTable, 'retry_max_delay');
     return OoLimits(
       refresh: RefreshSettings(
         sessions: refresh(refreshTable, 'sessions', refreshDefaults.sessions!),
@@ -507,7 +418,7 @@ class OoLimits {
         profile: refresh(refreshTable, 'profile', refreshDefaults.profile!),
         hidden: refresh(refreshTable, 'hidden', refreshDefaults.hidden!),
         silentIntervals:
-            whole(refreshTable, 'refresh', 'silent_intervals') ??
+            whole(refreshTable, 'silent_intervals') ??
             refreshDefaults.silentIntervals,
         renewBefore: refresh(
           refreshTable,
@@ -526,15 +437,14 @@ class OoLimits {
             : _seconds(confirming),
       ),
       pages: PageSettings(
-        timeline:
-            whole(pagesTable, 'pages', 'timeline') ?? pageDefaults.timeline,
-        audit: whole(pagesTable, 'pages', 'audit') ?? pageDefaults.audit,
-        summary: whole(pagesTable, 'pages', 'summary') ?? pageDefaults.summary,
-        search: whole(pagesTable, 'pages', 'search') ?? pageDefaults.search,
+        timeline: whole(pagesTable, 'timeline') ?? pageDefaults.timeline,
+        audit: whole(pagesTable, 'audit') ?? pageDefaults.audit,
+        summary: whole(pagesTable, 'summary') ?? pageDefaults.summary,
+        search: whole(pagesTable, 'search') ?? pageDefaults.search,
       ),
       terminal: TerminalSettings(
         scrollbackLines:
-            whole(terminalTable, 'terminal', 'scrollback_lines') ??
+            whole(terminalTable, 'scrollback_lines') ??
             terminalDefaults.scrollbackLines,
         connectTimeout: connect == null
             ? terminalDefaults.connectTimeout
@@ -548,14 +458,13 @@ class OoLimits {
       ),
       inputs: InputSettings(
         missionTitleChars:
-            whole(inputsTable, 'limits', 'mission_title_chars', least: 0) ??
+            whole(inputsTable, 'mission_title_chars') ??
             inputDefaults.missionTitleChars,
         missionPromptChars:
-            whole(inputsTable, 'limits', 'mission_prompt_chars', least: 0) ??
+            whole(inputsTable, 'mission_prompt_chars') ??
             inputDefaults.missionPromptChars,
         reasonChars:
-            whole(inputsTable, 'limits', 'reason_chars', least: 0) ??
-            inputDefaults.reasonChars,
+            whole(inputsTable, 'reason_chars') ?? inputDefaults.reasonChars,
       ),
     );
   }
@@ -565,39 +474,23 @@ class OoLimits {
 /// the one here. Widths are logical pixels.
 class ChatSettings {
   const ChatSettings({
-    this.minWidth = 320,
-    this.maxWidth = 720,
-    this.width = 400,
-    this.widthStep = 16,
-    this.minPageWidth = 360,
-    this.textWidth = 960,
-    this.windowWidth = 520,
-    this.windowHeight = 760,
-    this.transitionMs = 200,
+    this.minWidth = OoDefaults.chatMinWidth,
+    this.maxWidth = OoDefaults.chatMaxWidth,
+    this.width = OoDefaults.chatWidth,
+    this.widthStep = OoDefaults.chatWidthStep,
+    this.minPageWidth = OoDefaults.chatMinPageWidth,
+    this.textWidth = OoDefaults.chatTextWidth,
+    this.windowWidth = OoDefaults.chatWindowWidth,
+    this.windowHeight = OoDefaults.chatWindowHeight,
+    this.transitionMs = OoDefaults.chatTransitionMs,
     this.connectTimeout = defaultConnectTimeout,
     this.retryDelay = defaultRetryDelay,
     this.retryMaxDelay = defaultRetryMaxDelay,
   });
 
-  static const defaultConnectTimeout = Duration(seconds: 10);
-  static const defaultRetryDelay = Duration(seconds: 1);
-  static const defaultRetryMaxDelay = Duration(seconds: 16);
-
-  /// The table's keys, in the order above.
-  static const keys = {
-    'min_width',
-    'max_width',
-    'width',
-    'width_step',
-    'min_page_width',
-    'text_width',
-    'window_width',
-    'window_height',
-    'transition_ms',
-    'connect_timeout',
-    'retry_delay',
-    'retry_max_delay',
-  };
+  static const defaultConnectTimeout = OoDefaults.chatConnectTimeout;
+  static const defaultRetryDelay = OoDefaults.chatRetryDelay;
+  static const defaultRetryMaxDelay = OoDefaults.chatRetryMaxDelay;
 
   /// `retry_delay`: the wait before her socket's first reconnect; each next one doubles, up to
   /// [retryMaxDelay].
@@ -795,6 +688,71 @@ String _tomlWithUnexUrl(String body, String origin) {
   }
   lines.insert(at + 1, '$line$newline');
   return lines.join('\n');
+}
+
+/// `text` with its `[oo]` replaced by [oo] (`table` to `key` to value), in the format it declares,
+/// keeping its `#!` line and every other program's section; a table of `[oo]` left out is gone, with
+/// any comment inside it. YAML and TOML keep the comments outside `[oo]`; JSON is written anew.
+///
+/// Throws a [FormatException], rather than risk another program's settings, when the edit would
+/// change anything else; such a file is edited by hand.
+String withOoSettings(String text, Map<String, Object?> oo, {String? path}) {
+  final format = declaredFormat(text, path: path);
+  final fixed = _fixedFormat(path) != null;
+  final firstLine = _withoutBom(text).split('\n').first;
+  final header = !fixed && firstLine.startsWith('#!') ? '$firstLine\n' : '';
+  final body = _body(text, path);
+  final before = decodeOoConfig(text, path: path);
+  final String written;
+  switch (format) {
+    case OoConfigFormat.yaml:
+      final editor = YamlEditor(body.trim().isEmpty ? '{}' : body);
+      if (oo.isNotEmpty) {
+        editor.update(['oo'], oo);
+      } else if (before.containsKey('oo')) {
+        editor.remove(['oo']);
+      }
+      written = '$header${editor.toString()}';
+    case OoConfigFormat.json:
+      final document = Map<String, Object?>.of(before)..remove('oo');
+      if (oo.isNotEmpty) document['oo'] = oo;
+      written =
+          '$header${const JsonEncoder.withIndent('  ').convert(document)}\n';
+    case OoConfigFormat.toml:
+      written = '$header${_tomlWithOo(body, oo)}';
+  }
+  final after = decodeOoConfig(written, path: path);
+  Object? others(Map<String, Object?> document) =>
+      jsonEncode({...document}..remove('oo'));
+  if (others(before) != others(after) ||
+      jsonEncode(after['oo'] ?? const {}) != jsonEncode(oo)) {
+    throw const FormatException(
+      'ai6.cfg: these settings cannot be written here; edit the file by hand',
+    );
+  }
+  return written;
+}
+
+/// The TOML [body] without its `[oo]` tables, with [oo] written after what remains.
+String _tomlWithOo(String body, Map<String, Object?> oo) {
+  final header = RegExp(r'^\s*\[');
+  final ours = RegExp(r'^\s*\[\s*oo\s*(\.[^\]]*)?\]');
+  final kept = <String>[];
+  var inside = false;
+  for (final line in body.split('\n')) {
+    if (header.hasMatch(line)) inside = ours.hasMatch(line);
+    if (!inside) kept.add(line);
+  }
+  var out = kept.join('\n').trimRight();
+  if (out.isNotEmpty) out = '$out\n';
+  for (final MapEntry(key: table, value: keys) in oo.entries) {
+    out = '$out${out.isEmpty ? '' : '\n'}[oo.$table]\n';
+    for (final MapEntry(:key, :value)
+        in (keys as Map).cast<String, Object?>().entries) {
+      out = '$out$key = ${jsonEncode(value)}\n';
+    }
+  }
+  return out;
 }
 
 String _withoutBom(String text) =>

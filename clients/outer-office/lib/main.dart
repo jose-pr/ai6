@@ -36,6 +36,7 @@ import 'routes/oo_filters.dart';
 import 'routes/oo_route.dart';
 import 'routes/oo_router.dart';
 import 'settings/connection_settings.dart';
+import 'settings/oo_settings_section.dart';
 import 'settings/oo_config.dart';
 import 'settings/oo_config_file.dart';
 import 'shell/app_window.dart';
@@ -5752,6 +5753,16 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                   if (!kIsWeb && !board.demo) ...[
                     const SizedBox(height: 18),
                     ConnectionSettings(),
+                  ],
+                  if (!board.demo) ...[
+                    const SizedBox(height: 18),
+                    kIsWeb
+                        ? OoSettingsSection(read: () => webConfigText)
+                        : OoSettingsSection(
+                            read: readDesktopConfig,
+                            write: writeDesktopConfig,
+                            path: desktopConfigPath(),
+                          ),
                   ],
                 ],
               ),

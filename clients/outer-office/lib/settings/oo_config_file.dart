@@ -50,6 +50,10 @@ void trustDesktopCa(OoConfig config) {
   }
 }
 
+/// The text of the `ai6.cfg` beside the web page, as [loadWebConfig] found it; `null` when there
+/// is none. The settings page shows it.
+String? webConfigText;
+
 /// The web page's `ai6.cfg`, beside `index.html` at [page]: a public one, read-only deployment
 /// defaults, that `ai6 config public` writes. [OoConfig.none] when it is missing or unreadable,
 /// which is logged.
@@ -62,6 +66,7 @@ Future<OoConfig> loadWebConfig(Uri page, {http.Client? client}) async {
     if (response.statusCode != 200) {
       throw FormatException('HTTP ${response.statusCode}');
     }
+    webConfigText = response.body;
     return OoConfig.parse(response.body);
   } on Object catch (error) {
     debugPrint('Outer Office: $configFileName: $error; using the defaults');

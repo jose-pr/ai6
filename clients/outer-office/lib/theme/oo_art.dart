@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
 
+import '../settings/oo_settings.g.dart';
+
 /// One picture of an [OoArt], at a real size in pixels.
 @immutable
 class OoArtFile {
@@ -28,7 +30,7 @@ const ooWallpaperBudget = 48 * 1024;
 class OoArtLimits {
   const OoArtLimits({this.maxWidth = defaultMaxWidth});
 
-  static const defaultMaxWidth = 3840;
+  static const defaultMaxWidth = OoDefaults.artMaxWidth;
 
   /// `max_width`: the widest file ever fetched, for a site on slow links.
   final int maxWidth;

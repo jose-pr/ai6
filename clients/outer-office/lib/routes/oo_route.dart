@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../settings/oo_settings.g.dart';
+
 import 'package:flutter/foundation.dart' show immutable, listEquals;
 
 import '../held/held_briefs_page.dart' show isInvisible;
@@ -24,7 +26,7 @@ class OoRouteLimits {
   const OoRouteLimits({this.textBytes = defaultTextBytes});
 
   /// The longest `text` filter by default, in bytes.
-  static const defaultTextBytes = 128;
+  static const defaultTextBytes = OoDefaults.routesTextBytes;
 
   /// The longest `text` filter, in bytes: `ai6.cfg`'s `[oo.routes] text_bytes`.
   final int textBytes;
