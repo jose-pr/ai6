@@ -1,7 +1,7 @@
 //! What is generated from the declarations and kept in the repository: the reference tables of
 //! the narrative docs, between `<!-- schema:SECTION:begin -->` and its end, and Outer Office's
-//! copy of `[oo]`. `cargo run -p ai6 --example settings_reference --features cli` writes them,
-//! and `-- --check` fails when one differs.
+//! copy of `[oo]` ([`OO_DART`]). `cargo run -p ai6 --example settings_reference --features cli`
+//! writes them, and `-- --check` fails when one differs.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -12,6 +12,10 @@ use super::{fields, schema};
 
 /// The docs holding generated tables, from the repository's root.
 pub const DOCS: [&str; 2] = ["docs/configuration.md", "docs/operations.md"];
+
+/// What Outer Office reads of `[oo]`, from the repository's root: the schema, the form and each
+/// default as a constant, since a default is written in a `const` constructor.
+pub const OO_DART: &str = "clients/outer-office/lib/settings/oo_settings.g.dart";
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * 1024;
@@ -197,9 +201,82 @@ pub fn rewritten(text: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// `min_width` in the table `chat` as `chatMinWidth`.
+fn dart_name(table: &str, key: &str) -> String {
+    let mut name = String::new();
+    for (at, word) in table.split('_').chain(key.split('_')).enumerate() {
+        if at == 0 {
+            name.push_str(word);
+        } else {
+            let mut letters = word.chars();
+            name.extend(letters.next().map(|first| first.to_ascii_uppercase()));
+            name.push_str(letters.as_str());
+        }
+    }
+    name
+}
+
+/// A schema's default as a Dart constant: a number of seconds is a `Duration`, as the app holds it.
+fn dart_constant(field: &Value) -> Option<String> {
+    let default = field.get("default")?;
+    if format_of(field) == Some("seconds") {
+        let micros = (default.as_f64()? * 1_000_000.0).round() as u64;
+        return Some(if micros.is_multiple_of(1_000_000) {
+            format!("Duration(seconds: {})", micros / 1_000_000)
+        } else if micros.is_multiple_of(1_000) {
+            format!("Duration(milliseconds: {})", micros / 1_000)
+        } else {
+            format!("Duration(microseconds: {micros})")
+        });
+    }
+    match default {
+        Value::Number(number) if field["type"] == "number" => {
+            Some(format!("{:?}", number.as_f64().unwrap_or_default()))
+        }
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(word) => Some(format!("'{word}'")),
+        _ => None,
+    }
+}
+
+/// The app's generated file, from `[oo]`'s declaration.
+fn oo_dart() -> Result<String, String> {
+    let form =
+        crate::directorates::m::records::oo_settings_form().map_err(|error| error.to_string())?;
+    let json = serde_json::to_string_pretty(&form).map_err(|error| error.to_string())?;
+    if json.contains("'''") {
+        return Err("[oo]'s declaration holds three quotes in a row".to_owned());
+    }
+    let schema = schema("oo").ok_or("no section \"oo\"")?;
+    let tables = fields(&schema).ok_or("[oo] is not a table")?;
+    let mut out = String::from(
+        "// Generated from `OoSettings` in crates/ai6/src/bootstrap/oo.rs; a test there fails when it\n\
+         // differs. To write it: cargo run -p ai6 --features cli --example settings_reference\n\n\
+         /// `[oo]`'s defaults, by table and key.\n\
+         abstract final class OoDefaults {\n",
+    );
+    for (table, node) in tables {
+        for (key, field) in fields(node).ok_or_else(|| format!("[oo.{table}] is not a table"))? {
+            if let Some(constant) = dart_constant(field) {
+                let _ = writeln!(
+                    out,
+                    "  static const {} = {constant};",
+                    dart_name(table, key)
+                );
+            }
+        }
+    }
+    let _ = write!(
+        out,
+        "}}\n\n/// `[oo]`'s schema and form, as `ai6 config schema oo` states them.\n\
+         const ooSettingsJson = r'''\n{json}\n''';\n"
+    );
+    Ok(out)
+}
+
 /// One generated file: its path from the repository's root and what it should hold.
 fn generated(root: &Path) -> Result<Vec<(String, String)>, String> {
-    let mut files = Vec::new();
+    let mut files = vec![(OO_DART.to_owned(), oo_dart()?)];
     for doc in DOCS {
         let text =
             std::fs::read_to_string(root.join(doc)).map_err(|error| format!("{doc}: {error}"))?;
@@ -231,8 +308,8 @@ pub fn write(root: &Path) -> Result<(), String> {
 pub fn stale(root: &Path) -> Result<Vec<String>, String> {
     let mut differing = Vec::new();
     for (path, content) in generated(root)? {
-        let found = std::fs::read_to_string(root.join(&path))
-            .map_err(|error| format!("{path}: {error}"))?;
+        // A copy of the repository may hold no app.
+        let found = std::fs::read_to_string(root.join(&path)).unwrap_or_default();
         if found != content {
             differing.push(path);
         }
@@ -253,10 +330,10 @@ mod tests {
         assert_eq!(stale(repository()), Ok(Vec::<String>::new()));
     }
 
-    /// A copy of the docs under a new root, with `change` applied to one.
+    /// A copy of the generated files under a new root, with `change` applied to one.
     fn copied(doc: &str, change: impl FnOnce(String) -> String) -> tempfile::TempDir {
         let copy = tempfile::tempdir().unwrap();
-        for file in DOCS {
+        for file in DOCS.into_iter().chain([OO_DART]) {
             let to = copy.path().join(file);
             std::fs::create_dir_all(to.parent().unwrap()).unwrap();
             std::fs::copy(repository().join(file), &to).unwrap();
@@ -282,6 +359,31 @@ mod tests {
         assert_eq!(stale(copy.path()), Ok(Vec::<String>::new()));
         let text = std::fs::read_to_string(copy.path().join("docs/configuration.md")).unwrap();
         assert!(text.contains(row));
+    }
+
+    #[test]
+    fn a_stale_copy_of_oo_is_found_and_says_each_default() {
+        let copy = copied(OO_DART, |text| {
+            let row = "static const chatWidth = 400.0;";
+            assert!(text.contains(row), "the row this test changes");
+            text.replace(row, "static const chatWidth = 401.0;")
+        });
+        assert_eq!(stale(copy.path()), Ok(vec![OO_DART.to_owned()]));
+        let dart = oo_dart().unwrap();
+        for row in [
+            "static const chatMinWidth = 320.0;",
+            "static const chatTransitionMs = 200;",
+            "static const chatConnectTimeout = Duration(seconds: 10);",
+            "static const routesTextBytes = 128;",
+            "static const refreshSessions = Duration(seconds: 3);",
+            "static const controlsPoll = Duration(milliseconds: 500);",
+            "static const pagesSearch = 24;",
+            "static const terminalScrollbackLines = 10000;",
+            "static const limitsMissionPromptChars = 65536;",
+            "static const assetsCdn = 'none';",
+        ] {
+            assert!(dart.contains(row), "{row}\n{dart}");
+        }
     }
 
     #[test]

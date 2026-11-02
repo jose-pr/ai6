@@ -120,6 +120,15 @@ fn the_one(title: &str) -> RecordKey {
     }
 }
 
+/// `[oo]`'s schema and form, for Outer Office's settings page.
+///
+/// # Errors
+///
+/// When its declaration does not make a schema and a form that fit; a test holds it to that.
+pub fn oo_settings_form() -> Result<RecordForm, RecordFormError> {
+    built::<crate::bootstrap::oo::OoSettings>(the_one("Outer Office settings"))
+}
+
 impl ConfigRecord {
     /// The form of this kind of record, for a family a person edits with one.
     ///
