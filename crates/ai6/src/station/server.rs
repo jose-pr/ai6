@@ -6066,11 +6066,19 @@ fn apply_event_state(
 /// Queues the status a Mission's new state owes its linked issues (the outbox is sent by the
 /// Headquarters Station).
 fn queue_issue_status(state: &DaemonState, mission_id: &str, mission_state: MissionState) {
-    let reason = state
+    let (reason, branch) = state
         .missions
         .lock()
         .ok()
-        .and_then(|missions| missions.get(mission_id)?.blocked_reason.clone());
+        .and_then(|missions| {
+            let mission = missions.get(mission_id)?;
+            let branch = mission
+                .safe_house
+                .as_ref()
+                .and_then(|house| house.branch.clone());
+            Some((mission.blocked_reason.clone(), branch))
+        })
+        .unwrap_or_default();
     let Some(phase) = crate::station::issues::phase_of(mission_state, reason.as_deref()) else {
         return;
     };
@@ -6079,6 +6087,7 @@ fn queue_issue_status(state: &DaemonState, mission_id: &str, mission_state: Miss
         &state.roster,
         mission_id,
         phase,
+        branch.as_deref(),
         state.clock.now() as f64,
     );
 }

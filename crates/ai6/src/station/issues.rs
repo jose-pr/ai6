@@ -60,12 +60,14 @@ pub(crate) fn phase_of(state: MissionState, blocked_reason: Option<&str>) -> Opt
 ///
 /// `updates = outcome` writes none; `milestones` writes `working`, `waiting` and `paused` on
 /// the source link (the report covers its end); `all` writes every phase on every link.
-/// Entries of one issue coalesce, so a burst of changes sends the last phase once.
+/// Entries of one issue coalesce, so a burst of changes sends the last phase once. `branch` is the
+/// Mission's branch, which the comment names under any cover, as the report does.
 pub(crate) fn queue_status(
     registry: &dyn RegistryBackend,
     roster: &Roster,
     mission_id: &str,
     phase: &str,
+    branch: Option<&str>,
     now: f64,
 ) -> usize {
     let Ok(links) = registry.issue_links(mission_id) else {
@@ -98,6 +100,9 @@ pub(crate) fn queue_status(
             now,
         );
         entry.body = compose_status(disclosure, phase);
+        if let Some(branch) = branch {
+            entry.body.push_str(&format!("\nBranch: `{branch}`"));
+        }
         entry.payload = serde_json::json!({ "phase": phase });
         entry.coalesce = Some(format!("status:{mission_id}:{}", link.name()));
         match registry.queue_outbox(&entry) {

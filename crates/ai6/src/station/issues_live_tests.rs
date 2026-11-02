@@ -192,7 +192,7 @@ fn live_drain_status_split_and_mirror_reach_the_real_trackers() {
     let mut comments = Vec::new();
     for phase in ["working", "waiting", "working"] {
         assert_eq!(
-            queue_status(&live.registry, &live.roster, MISSION, phase, unix()),
+            queue_status(&live.registry, &live.roster, MISSION, phase, None, unix()),
             1,
             "{phase}"
         );

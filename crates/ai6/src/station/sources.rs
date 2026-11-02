@@ -1701,7 +1701,7 @@ mod tests {
 
         for phase in ["working", "waiting", "working"] {
             assert_eq!(
-                crate::station::issues::queue_status(&registry, &roster, mission, phase, 1.0),
+                crate::station::issues::queue_status(&registry, &roster, mission, phase, None, 1.0),
                 1
             );
             pass(&desk, &plugins, &roster, &registry);
@@ -1741,6 +1741,37 @@ mod tests {
     }
 
     #[test]
+    fn a_status_comment_names_the_missions_branch() {
+        let (_dir, roster) = roster_issues("{ fake = { ids = [\"br-1\", \"br-2\"] } }", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins(), &roster, &registry);
+        let status = |mission: &str, branch: Option<&str>| {
+            crate::station::issues::queue_status(
+                &registry, &roster, mission, "working", branch, 1.0,
+            );
+            let entries = registry.outbox_entries(Some(mission)).unwrap();
+            entries
+                .iter()
+                .find(|entry| entry.kind == OutboxKind::Status)
+                .unwrap()
+                .body
+                .clone()
+        };
+        let named = status("source_fake--br-1", Some("agent/br-1"));
+        assert!(
+            named.ends_with(
+                "
+Branch: `agent/br-1`"
+            ),
+            "{named}"
+        );
+        let none = status("source_fake--br-2", None);
+        assert!(!none.contains("Branch"), "{none}");
+    }
+
+    #[test]
     fn status_writes_to_one_issue_are_spaced_by_the_policy() {
         let plugins = plugins();
         let (_dir, roster) = roster_issues("{ fake = { ids = [\"sp-1\"] } }", "");
@@ -1750,9 +1781,9 @@ mod tests {
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
         let mission = "source_fake--sp-1";
-        crate::station::issues::queue_status(&registry, &roster, mission, "working", 1.0);
+        crate::station::issues::queue_status(&registry, &roster, mission, "working", None, 1.0);
         pass(&desk, &plugins, &roster, &registry);
-        crate::station::issues::queue_status(&registry, &roster, mission, "paused", 2.0);
+        crate::station::issues::queue_status(&registry, &roster, mission, "paused", None, 2.0);
         // Not cleared this time: the issue was written a moment ago.
         desk.due.lock().unwrap().clear();
         *desk.next_drain.lock().unwrap() = Instant::now();
@@ -1779,7 +1810,7 @@ mod tests {
             .link_issue(&source_link("G", "m-oc", "fake", "oc-1", None, 1.0))
             .unwrap();
         assert_eq!(
-            crate::station::issues::queue_status(&registry, &roster, "m-oc", "working", 1.0),
+            crate::station::issues::queue_status(&registry, &roster, "m-oc", "working", None, 1.0),
             0
         );
         let (_dir, roster) = roster_issues("{ fake = { ids = [\"al-1\"] } }", "updates = \"all\"");
@@ -1790,11 +1821,11 @@ mod tests {
             .unwrap();
         registry.link_issue(&child).unwrap();
         assert_eq!(
-            crate::station::issues::queue_status(&registry, &roster, "m-al", "working", 1.0),
+            crate::station::issues::queue_status(&registry, &roster, "m-al", "working", None, 1.0),
             2
         );
         assert_eq!(
-            crate::station::issues::queue_status(&registry, &roster, "m-al", "done", 2.0),
+            crate::station::issues::queue_status(&registry, &roster, "m-al", "done", None, 2.0),
             1,
             "the report covers the source's end; the child gets a status"
         );
@@ -1804,11 +1835,11 @@ mod tests {
             .link_issue(&source_link("G", "m-ms", "fake", "ms-1", None, 1.0))
             .unwrap();
         assert_eq!(
-            crate::station::issues::queue_status(&registry, &roster, "m-ms", "waiting", 1.0),
+            crate::station::issues::queue_status(&registry, &roster, "m-ms", "waiting", None, 1.0),
             1
         );
         assert_eq!(
-            crate::station::issues::queue_status(&registry, &roster, "m-ms", "done", 2.0),
+            crate::station::issues::queue_status(&registry, &roster, "m-ms", "done", None, 2.0),
             0
         );
     }
