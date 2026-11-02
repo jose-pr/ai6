@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../routes/oo_route.dart';
+import '../routes/socket_uri.dart';
 import '../settings/oo_config.dart' show ChatSettings;
 import 'assistant_view.dart' show ViewLimits;
 
@@ -42,12 +43,8 @@ class _SocketChannel implements AssistantChannel {
 }
 
 /// `/v1/user/moneypenny` on the gateway's origin, as a WebSocket URL.
-Uri assistantSocketUri(Uri apiOrigin) => apiOrigin.replace(
-  scheme: apiOrigin.scheme == 'https' ? 'wss' : 'ws',
-  path: '/v1/user/moneypenny',
-  query: null,
-  fragment: null,
-);
+Uri assistantSocketUri(Uri apiOrigin) =>
+    socketUri(apiOrigin, '/v1/user/moneypenny');
 
 /// Opens the real socket.
 AssistantChannel connectAssistant(Uri apiOrigin) =>

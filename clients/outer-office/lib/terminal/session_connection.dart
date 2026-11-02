@@ -6,6 +6,7 @@ import 'package:guatiao/wire.dart' as wire;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../main.dart' show MissionBoard, SessionSummary;
+import '../routes/socket_uri.dart';
 import 'socket_connector.dart';
 
 /// What the terminal shows where events of its Session cannot be had: the gateway trimmed them from
@@ -14,6 +15,13 @@ const missingOutputNotice =
     '\r\n\x1b[2m[AI6: output is missing here]\x1b[0m\r\n';
 
 /// Owns one read-only-by-default attachment to an existing provider Session.
+/// The socket of [sessionId] on the gateway's origin, from the output after [after].
+Uri sessionSocketUri(Uri apiOrigin, String sessionId, int after) => socketUri(
+  apiOrigin,
+  '/v1/socket/${Uri.encodeComponent(sessionId)}',
+  {'after': '$after'},
+);
+
 class SessionConnection extends ChangeNotifier {
   SessionConnection({required this.board, required this.session});
 
@@ -85,14 +93,8 @@ class SessionConnection extends ChangeNotifier {
         write: _writeRequested,
       );
       if (_disposed || generation != _generation) return;
-      final socketUri = board.apiOrigin.replace(
-        scheme: board.apiOrigin.scheme == 'https' ? 'wss' : 'ws',
-        path: '/v1/socket/${Uri.encodeComponent(session.sessionId)}',
-        queryParameters: {'after': '$_cursor'},
-        fragment: '',
-      );
       channel = connectSessionSocket(
-        socketUri,
+        sessionSocketUri(board.apiOrigin, session.sessionId, _cursor),
         protocols: const ['ai6.guatiao'],
         origin: board.apiOrigin.origin,
         cookie: cookie,

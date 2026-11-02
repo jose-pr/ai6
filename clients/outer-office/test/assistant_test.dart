@@ -11,6 +11,8 @@ import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/assistant/assistant_view.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/shell/oo_shell.dart';
+import 'package:outer_office/terminal/session_connection.dart'
+    show sessionSocketUri;
 
 /// One view of every kind and the views Universal Exports refuses, shared with its tests.
 final Map<String, Object?> fixture = (jsonDecode(
@@ -758,6 +760,22 @@ void main() {
     expect(
       assistantSocketUri(Uri.parse('http://127.0.0.1:7082')).toString(),
       'ws://127.0.0.1:7082/v1/user/moneypenny',
+    );
+  });
+
+  test('a socket URL takes nothing of the page it was opened from', () {
+    final page = Uri.parse('https://oo.example:8443/app/?x=1#/operations/G');
+    expect(
+      assistantSocketUri(page).toString(),
+      'wss://oo.example:8443/v1/user/moneypenny',
+    );
+    expect(
+      sessionSocketUri(page, 's 1', 7).toString(),
+      'wss://oo.example:8443/v1/socket/s%201?after=7',
+    );
+    expect(
+      sessionSocketUri(Uri.parse('http://127.0.0.1:7082'), 's', 0).toString(),
+      'ws://127.0.0.1:7082/v1/socket/s?after=0',
     );
   });
 
