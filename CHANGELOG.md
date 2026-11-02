@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `send_cable` takes scope `operation`, as its description said it did.
 - An audit record's `resource` may also name `operation:`, `mission:` or `compartment:`.
 
+- A person's avatar shows the initials of their first and last names, not their first two.
 - The green ink gate reads redirections as a shell does, so `git push origin main 2>&1` and `git push
   origin main > log` are the push of `main` rather than a refusal over a ref named `2>`, and `git push
   2>&1 origin main` goes to `origin`, not a remote named `2>`. It holds more of what it could not read

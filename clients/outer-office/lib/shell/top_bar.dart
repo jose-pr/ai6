@@ -603,8 +603,8 @@ String? _name(UserSessionSummary? session) {
   return name == null || name.isEmpty ? null : name;
 }
 
-/// Up to two initials of [name]: the first letter of its first two words that start with
-/// a letter ("Ana Ortiz" is "AO", "Operator 007" is "O").
+/// Up to two initials of [name]: the first letters of its first and last words that start
+/// with a letter ("Ana Maria Ortiz" is "AO", "Operator 007" is "O").
 String? ooInitials(String? name) {
   if (name == null) return null;
   final letters = [
@@ -612,5 +612,6 @@ String? ooInitials(String? name) {
       if (word.isNotEmpty && RegExp(r'^\p{L}', unicode: true).hasMatch(word))
         String.fromCharCode(word.runes.first).toUpperCase(),
   ];
-  return letters.isEmpty ? null : letters.take(2).join();
+  if (letters.isEmpty) return null;
+  return letters.length == 1 ? letters.first : letters.first + letters.last;
 }

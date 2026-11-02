@@ -188,6 +188,9 @@ void main() {
       findsOneWidget,
     );
     expect(ooInitials('Operator 007'), 'O');
+    expect(ooInitials('Ana Maria Ortiz'), 'AO');
+    expect(ooInitials('Ana Ortiz'), 'AO');
+    expect(ooInitials('Ana'), 'A');
   });
 
   testWidgets('on a phone Moneypenny opens full screen, and the Overview card '
