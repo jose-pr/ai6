@@ -10508,6 +10508,8 @@ queue = 1
             labels: Vec::new(),
             author: Some("reporter".to_owned()),
             updated: "2026-10-26T00:00:00Z".to_owned(),
+            code: None,
+            code_tag: None,
         };
         let mut brief = crate::source_brief("G", "github", &item, &Default::default());
         brief.provenance = Some(
@@ -10610,6 +10612,8 @@ queue = 1
             title: "Child".to_owned(),
             body: String::new(),
             id: "agent-proposal".to_owned(),
+            mission_id: None,
+            name: None,
             source: "ai6-agent-proposal".to_owned(),
             operation: Some("G".to_owned()),
             agent: None,
@@ -10641,6 +10645,8 @@ queue = 1
             title: "Review".to_owned(),
             body: String::new(),
             id: "brief-q".to_owned(),
+            mission_id: None,
+            name: None,
             source: "manual".to_owned(),
             operation: Some("G".to_owned()),
             agent: None,

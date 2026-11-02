@@ -1963,10 +1963,21 @@ async fn create_user_mission(
 
     let created = utc_timestamp()?;
     let received_at = unix_timestamp()? as i64;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let book = registry.clone();
+    let entry = operation_id.to_string();
+    let entered = tokio::task::spawn_blocking(move || {
+        book.allot_mission_id(&MissionEntry::person(Some(&entry)))
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
     let mut brief = Brief {
         title: request.title,
         body: request.prompt,
-        id: Uuid::new_v4().to_string(),
+        id: entered.clone(),
+        mission_id: Some(entered),
+        name: None,
         source: "universal-exports".to_owned(),
         operation: Some(operation_id.to_string()),
         agent: request.agent_id,
@@ -1985,7 +1996,6 @@ async fn create_user_mission(
             .with_principal(actor_id.clone()),
     );
     let mission_id = MissionId::new(brief.key()).map_err(|_| ApiError::internal())?;
-    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
         actor: actor_id,
@@ -6023,6 +6033,8 @@ mod tests {
                     title: title.to_owned(),
                     body: "Review this delegated work.".to_owned(),
                     id: "proposal".to_owned(),
+                    mission_id: None,
+                    name: None,
                     source: "agent".to_owned(),
                     operation: None,
                     agent: None,

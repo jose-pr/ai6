@@ -375,7 +375,8 @@ pub(super) mod tests {
     use crate::directorates::q::safehouse::SafeHouseReport;
     use crate::directorates::registry::bona_fides::{Origin, Provenance};
     use crate::directorates::registry::logbook::{Severity, StationFinding, StationFindingKind};
-    use crate::directorates::registry::sleepers::{Fire, sleeper_brief};
+    use crate::directorates::registry::mission_ids::MissionEntry;
+    use crate::directorates::registry::sleepers::{Fire, window_label};
     use crate::directorates::registry::store::{Brief, DEFAULT_LEASE};
 
     pub(in super::super) const AGENTS: &str = "[agent.M]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
@@ -457,7 +458,16 @@ pub(super) mod tests {
                 .unwrap(),
             Fire::Queued
         );
-        let key = sleeper_brief("H", "rounds", &sleeper, window, Some("test")).key();
+        let key = state
+            .intake
+            .entered_mission_id(&MissionEntry::sleeper(
+                "H",
+                "rounds",
+                &window_label(window),
+                Some("test"),
+            ))
+            .unwrap()
+            .expect("the round entered");
         leased(state, &key, "H", mission_id, HEAD_OF_STATION_ROLE);
     }
 

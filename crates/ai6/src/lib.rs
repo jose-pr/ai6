@@ -171,6 +171,7 @@ pub use directorates::registry::logbook::{
     HEAD_OF_STATION_ROLE, Severity, StationFinding, StationFindingKind, StationReport,
     is_head_of_station_role,
 };
+pub use directorates::registry::mission_ids::{MissionEntry, run_id};
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
     NewSession, SessionError, SessionLaunch, SessionRecord, SessionStatus, SessionUpdate,

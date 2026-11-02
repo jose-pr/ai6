@@ -1285,6 +1285,8 @@ impl Jira {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
             updated: fields.get("updated")?.as_str()?.to_owned(),
+            code: Some(key.to_owned()),
+            code_tag: None,
         })
     }
 }

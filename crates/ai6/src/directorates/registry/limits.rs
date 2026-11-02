@@ -240,6 +240,10 @@ pub struct BriefLimits {
     pub records: Limit,
     /// Bytes of a brief's provenance. Default 16 KiB.
     pub provenance_bytes: Limit,
+    /// Bytes of a Mission ID: a longer one keeps its start and adds a short hash. It is a file
+    /// name, so it stays under 240 bytes whatever this says. Default 120, which leaves a
+    /// run's attempt room within `[registry.limits.sessions] id_bytes`.
+    pub mission_id_bytes: Limit,
 }
 
 impl Default for BriefLimits {
@@ -248,6 +252,7 @@ impl Default for BriefLimits {
             record_bytes: Limit::at(MIB),
             records: Limit::at(1_000),
             provenance_bytes: Limit::at(16 * KIB),
+            mission_id_bytes: Limit::at(120),
         }
     }
 }
@@ -584,6 +589,8 @@ pub struct SourceLimits {
     /// Times reporting a finished brief to its Source is tried before it is dropped.
     /// Default 5.
     pub report_attempts: Limit,
+    /// Bytes of the name a brief shows beside its Mission ID. Default 256.
+    pub name_bytes: Limit,
 }
 
 impl Default for SourceLimits {
@@ -591,6 +598,7 @@ impl Default for SourceLimits {
         Self {
             item_text_bytes: Limit::at(64 * KIB),
             report_attempts: Limit::at(5),
+            name_bytes: Limit::at(256),
         }
     }
 }

@@ -269,12 +269,14 @@ fn build_tracker(
 }
 
 /// Polls one source once and queues what it found; the cursor advances after the items
-/// are stored, so a crash repeats work that is already idempotent.
+/// are stored, so a crash repeats work that is already idempotent. `shared` says the instance is
+/// not its provider's only one in the Operation: its name replaces an item's code tag.
 pub(crate) fn poll_source(
     registry: &dyn RegistryBackend,
     station: &str,
     operation: &str,
     provider: &str,
+    shared: bool,
     source: &dyn Source,
 ) -> Result<PollSummary, String> {
     let cursor = registry
@@ -284,7 +286,11 @@ pub(crate) fn poll_source(
         .poll(SourcePoll { cursor })
         .map_err(|error| format!("poll failed: {error}"))?;
     let mut summary = PollSummary::default();
-    for item in &batch.items {
+    for mut item in batch.items {
+        if shared && item.code_tag.is_some() {
+            item.code_tag = Some(provider.to_owned());
+        }
+        let item = &item;
         match registry.ingest_source_item(operation, provider, item, station) {
             Ok(Ingest::Queued) => {
                 summary.queued += 1;
@@ -336,16 +342,15 @@ fn link_source(
     provider: &str,
     item: &crate::directorates::registry::sources::SourceItem,
 ) {
-    let brief = crate::directorates::registry::sources::source_brief(
-        operation,
-        provider,
-        item,
-        &crate::directorates::registry::limits::SourceLimits::default(),
-    );
-    let Ok(mission) = crate::station::server::mission_id_for_brief(&brief) else {
-        return;
+    let entry = crate::directorates::registry::sources::source_entry(operation, provider, item);
+    let mission = match registry.entered_mission_id(&entry) {
+        Ok(Some(mission)) => mission,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("ai6: source {provider}: Mission ID unreadable: {error}");
+            return;
+        }
     };
-    let mission = mission.to_string();
     match registry.issue_links(&mission) {
         Ok(links)
             if links
@@ -823,7 +828,13 @@ impl SourceDesk {
     ) {
         let now = Instant::now();
         for operation in roster.operations() {
-            for setup in source_setups(operation, &self.limits) {
+            let setups = source_setups(operation, &self.limits);
+            let providers: Vec<String> = setups
+                .iter()
+                .flatten()
+                .map(|setup| setup.provider.clone())
+                .collect();
+            for setup in setups {
                 let setup = match setup {
                     Ok(setup) => setup,
                     Err(error) => {
@@ -853,6 +864,7 @@ impl SourceDesk {
                         &self.station,
                         &operation.id,
                         &setup.name,
+                        providers.iter().filter(|p| **p == setup.provider).count() > 1,
                         source.as_ref(),
                     )
                 });
@@ -1019,6 +1031,8 @@ mod tests {
                         labels: Vec::new(),
                         author: None,
                         updated: format!("2026-01-0{next}T00:00:00Z"),
+                        code: None,
+                        code_tag: None,
                     })
                     .collect(),
                 cursor: Some(next.to_string()),
@@ -1154,16 +1168,65 @@ mod tests {
         );
 
         // One item starts running; a further poll leaves it alone and queues no copy.
-        let running = registry.claim_new(Some("source_fake--1")).unwrap().unwrap();
+        let running = registry.claim_new(Some("G-fake-1")).unwrap().unwrap();
         desk.due.lock().unwrap().clear();
         desk.run(&plugins, &roster, &registry);
         let queued = registry.list_new().unwrap();
         assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].key(), "source_fake--2");
+        assert_eq!(queued[0].key(), "G-fake-2");
         assert!(registry.read_claimed(&running.key()).unwrap().is_some());
     }
 
     /// A provider searching behind its cursor returns what it already returned.
+    #[test]
+    fn an_instance_that_shares_its_provider_names_its_items_itself() {
+        struct Coded(&'static str, Option<&'static str>);
+        impl Source for Coded {
+            fn poll(&self, _request: SourcePoll) -> Result<SourceBatch, ProviderError> {
+                Ok(SourceBatch {
+                    items: vec![SourceItem {
+                        id: format!("item-{}", self.0),
+                        title: "Item".to_owned(),
+                        body: "Please look.".to_owned(),
+                        url: None,
+                        labels: Vec::new(),
+                        author: None,
+                        updated: "2026-01-01T00:00:00Z".to_owned(),
+                        code: Some(self.0.to_owned()),
+                        code_tag: self.1.map(str::to_owned),
+                    }],
+                    cursor: None,
+                })
+            }
+        }
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let keys = |instance: &str, shared: bool, source: Coded| {
+            poll_source(&registry, "station-a", "ai6", instance, shared, &source).unwrap();
+            registry
+                .entered_mission_id(&MissionEntry::source(
+                    "ai6",
+                    instance,
+                    &format!("item-{}", source.0),
+                    None,
+                    None,
+                ))
+                .unwrap()
+                .unwrap()
+        };
+        assert_eq!(
+            keys("github", false, Coded("63", Some("gh"))),
+            "ai6-gh-63",
+            "the provider's only instance goes by the provider's short name"
+        );
+        assert_eq!(
+            keys("backend", true, Coded("64", Some("gh"))),
+            "ai6-backend-64"
+        );
+        // A key that names its project needs no instance beside it.
+        assert_eq!(keys("tickets", true, Coded("AI6-65", None)), "ai6-AI6-65");
+    }
+
     #[test]
     fn a_repeated_item_makes_no_second_brief_or_mission() {
         struct Repeating;
@@ -1178,6 +1241,8 @@ mod tests {
                         labels: Vec::new(),
                         author: None,
                         updated: "2026-01-01T00:00:00Z".to_owned(),
+                        code: None,
+                        code_tag: None,
                     }],
                     cursor: Some("2026-01-01T00:00:00Z".to_owned()),
                 })
@@ -1185,7 +1250,8 @@ mod tests {
         }
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
-        let poll = || poll_source(&registry, "station-a", "G", "repeating", &Repeating).unwrap();
+        let poll =
+            || poll_source(&registry, "station-a", "G", "repeating", false, &Repeating).unwrap();
 
         assert_eq!(poll().queued, 1);
         let again = poll();
@@ -1253,7 +1319,7 @@ mod tests {
             true,
             serde_json::json!({
                 "state": "done",
-                "mission_id": "source_fake--report-me",
+                "mission_id": "G-fake-report-me",
                 "session_ids": ["sess-1"],
                 "agent": "007",
                 "branch": "agent/fix",
@@ -1337,7 +1403,7 @@ mod tests {
             1,
             "the intake = false instance is never polled"
         );
-        assert_eq!(queued[0].key(), "source_board--1");
+        assert_eq!(queued[0].key(), "G-board-1");
         assert!(registry.source_cursor("G", "mirror").unwrap().is_none());
         let (_dir, roster) = roster_with("covert", "{ board = { provider = 3 } }");
         assert!(
@@ -1556,6 +1622,8 @@ mod tests {
             labels: Vec::new(),
             author: None,
             updated: "t".to_owned(),
+            code: None,
+            code_tag: None,
         };
         FinishedSourceBrief {
             brief: crate::source_brief("G", "github", &item, &Default::default()),
@@ -1585,6 +1653,8 @@ mod tests {
                     labels: Vec::new(),
                     author: None,
                     updated: "u".to_owned(),
+                    code: None,
+                    code_tag: None,
                 },
                 &Default::default(),
             ),
@@ -1697,7 +1767,7 @@ mod tests {
         let registry = FileRegistry::open(state.path());
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
-        let links = registry.issue_links("source_fake--lk-1").unwrap();
+        let links = registry.issue_links("G-fake-lk-1").unwrap();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].relation, LinkRelation::Source);
         assert_eq!(
@@ -1707,7 +1777,7 @@ mod tests {
         assert_eq!(links[0].linked_by, "m");
         // A person's unlink holds: the next poll does not link it again.
         registry
-            .unlink_issue("source_fake--lk-1", "fake", "lk-1")
+            .unlink_issue("G-fake-lk-1", "fake", "lk-1")
             .unwrap();
         pass(&desk, &plugins, &roster, &registry);
         assert!(registry.active_issue_links().unwrap().is_empty());
@@ -1756,7 +1826,7 @@ Branch: `agent/br-1`"
         registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
-        let mission = "source_fake--st-1";
+        let mission = "G-fake-st-1";
 
         for phase in ["working", "waiting", "working"] {
             assert_eq!(
@@ -1808,7 +1878,7 @@ Branch: `agent/br-1`"
         registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
-        let mission = "source_fake--sp-1";
+        let mission = "G-fake-sp-1";
         crate::station::issues::queue_status(&registry, &roster, mission, "working", None, 1.0);
         pass(&desk, &plugins, &roster, &registry);
         crate::station::issues::queue_status(&registry, &roster, mission, "paused", None, 2.0);
@@ -1884,7 +1954,7 @@ Branch: `agent/br-1`"
         finish_all(
             &registry,
             true,
-            serde_json::json!({ "state": "done", "mission_id": "source_fake--fo-1" }),
+            serde_json::json!({ "state": "done", "mission_id": "G-fake-fo-1" }),
         );
         // The old Headquarters Station queued the report, began sending it, and its comment
         // reached the issue; it died before it recorded that.
@@ -1923,7 +1993,7 @@ Branch: `agent/br-1`"
         registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
-        let mission = "source_fake--fo-2";
+        let mission = "G-fake-fo-2";
         let mut comment =
             OutboxEntry::new("G", mission, "fake", "fo-2", OutboxKind::Comment, "m", 1.0);
         comment.body = "A question.".to_owned();
@@ -1959,7 +2029,7 @@ Branch: `agent/br-1`"
         desk.run(&plugins, &roster, &registry);
         let mut entry = OutboxEntry::new(
             "G",
-            "source_fake--hq-1",
+            "G-fake-hq-1",
             "fake",
             "hq-1",
             OutboxKind::Comment,
@@ -2088,7 +2158,7 @@ Branch: `agent/br-1`"
             poll_replies(&registry, &roster, &build, "station-a", 5.0),
             1
         );
-        let mission = "source_fake--rp-1";
+        let mission = "G-fake-rp-1";
         let stored = registry.issue_replies(mission).unwrap();
         let ids: Vec<&str> = stored.iter().map(|reply| reply.id.as_str()).collect();
         assert_eq!(ids, ["r1", "r2"], "the token's own comment is skipped");

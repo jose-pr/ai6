@@ -884,6 +884,8 @@ fn item_of(repo: &str, issue: &serde_json::Value) -> Option<SourceItem> {
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned),
         updated: text("updated_at")?.to_owned(),
+        code: Some(number.to_string()),
+        code_tag: Some("gh".to_owned()),
     })
 }
 

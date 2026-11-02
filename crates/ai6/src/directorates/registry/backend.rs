@@ -19,6 +19,8 @@ use std::sync::Arc;
 use super::limits::RegistryLimits;
 use super::store::FileRegistry;
 
+pub use super::mission_ids::MissionEntry;
+
 pub use super::accounts::AccountStore;
 pub use super::agent_records::AgentRecordStore;
 pub use super::approvals::ApprovalStore;

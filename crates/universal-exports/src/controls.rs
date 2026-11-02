@@ -321,7 +321,7 @@ fn control_target(
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
     });
-    // A queued brief's Mission ID is its key until a Station places it.
+    // A queued brief's key is its Mission ID.
     let briefed_for: Vec<Option<String>> = registry
         .list_new()?
         .into_iter()
@@ -1075,12 +1075,77 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn two_gateways_on_one_registry_number_their_missions_together() {
+        let roles = ROLES.replace(
+            "\"mission.control\"",
+            "\"mission.control\", \"mission.create\"",
+        );
+        let served = served_with(&roles).await;
+        let second = Gateway::with_access(
+            GatewayConfig::new(
+                "https://localhost",
+                STATION_TOKEN,
+                GatewayLimits::default(),
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .unwrap(),
+            Arc::new(served.registry.clone()),
+            AccessProviders::new(
+                Arc::new(People),
+                Arc::new(People),
+                Arc::new(access_from_toml(&roles, ai6::Limit::UNBOUNDED).unwrap()),
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let other = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, second.router()).await;
+        });
+        let client = reqwest::Client::new();
+        let mut asked = Vec::new();
+        for base in [&served.base, &other] {
+            for _ in 0..10 {
+                let request = client
+                    .post(format!("{base}/v1/user/operations/G/missions"))
+                    .bearer_auth(&served.operator)
+                    .json(&serde_json::json!({"title": "Look", "prompt": "Look around."}))
+                    .send();
+                asked.push(tokio::spawn(request));
+            }
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for request in asked {
+            let created = request.await.unwrap().unwrap();
+            assert_eq!(created.status(), StatusCode::ACCEPTED);
+            let created: serde_json::Value = created.json().await.unwrap();
+            assert!(ids.insert(created["mission_id"].as_str().unwrap().to_owned()));
+        }
+        server.abort();
+        let expected: std::collections::BTreeSet<_> =
+            (1..=20).map(|number| format!("G-{number}")).collect();
+        assert_eq!(ids, expected);
+        let queued = served.registry.list_new().unwrap();
+        assert_eq!(queued.len(), 20);
+        for brief in queued {
+            assert!(expected.contains(&brief.key()));
+            assert_eq!(brief.source, "universal-exports");
+            assert_eq!(
+                brief.provenance.unwrap().principal.as_deref(),
+                Some("operator-007")
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn a_mission_without_a_session_goes_to_the_headquarters_station() {
         let served = served().await;
         let brief = ai6::Brief {
             title: "Queued".to_owned(),
             body: "Not placed yet.".to_owned(),
             id: "mission-new".to_owned(),
+            mission_id: None,
+            name: None,
             source: "universal-exports".to_owned(),
             operation: Some("G".to_owned()),
             agent: None,

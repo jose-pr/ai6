@@ -2,8 +2,9 @@
 //!
 //! A [`Source`] provider polls one external system (an issue tracker, a CI service) for
 //! work and posts the outcome back. The Registry turns each [`SourceItem`] into a queued
-//! brief keyed `source_<provider>--<item>`, so polling the same item again updates the
-//! queued brief and never creates a second Mission for work already claimed or finished.
+//! brief whose Mission ID is fixed by its Operation, instance and item, so polling the same
+//! item again updates the queued brief and never creates a second Mission for work already
+//! claimed or finished.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,7 +18,10 @@ use sha2::{Digest, Sha256};
 
 use super::bona_fides::{Origin, Provenance, now_secs};
 use super::limits::SourceLimits;
-use super::store::{Brief, FileRegistry, hex_digest, invalid_data, safe_component};
+use super::mission_ids::MissionEntry;
+use super::store::{
+    Brief, FileRegistry, hex_digest, invalid_data, one_line_within, safe_component,
+};
 
 /// The Brief `source` prefix that marks a brief as created from a [`Source`] provider.
 pub const SOURCE_BRIEF_PREFIX: &str = "source:";
@@ -50,6 +54,13 @@ pub struct SourceItem {
     pub author: Option<String>,
     /// When the source last changed the item, as the provider spells it (ISO 8601).
     pub updated: String,
+    /// The item's short code at the tracker, as a person writes it: `AI6-64`, `63`. It goes
+    /// into the Mission ID, made safe there; `None` uses the item's `id` instead.
+    pub code: Option<String>,
+    /// What names the tracker for a `code` that does not name it itself (`gh` for GitHub's
+    /// `63`); `None` for one that does (Jira's `AI6-64`). The Station replaces it with the
+    /// instance's name when the provider has several instances in the Operation.
+    pub code_tag: Option<String>,
 }
 
 /// A request for the items that changed since a cursor.
@@ -144,6 +155,8 @@ pub fn source_brief(
         title: format!("Resolve {provider} item {}", one_line(&item.id)),
         body: quoted_material(provider, item, limits),
         id: item.id.clone(),
+        mission_id: None,
+        name: Some(one_line_within(&item.title, limits.name_bytes.or_max())),
         source: format!("{SOURCE_BRIEF_PREFIX}{provider}"),
         operation: Some(operation.to_owned()),
         agent: None,
@@ -159,6 +172,17 @@ pub fn source_brief(
         version: 1,
         provenance: None,
     }
+}
+
+/// Where an item's brief enters.
+pub fn source_entry(operation: &str, instance: &str, item: &SourceItem) -> MissionEntry {
+    MissionEntry::source(
+        operation,
+        instance,
+        &item.id,
+        item.code.as_deref(),
+        item.code_tag.as_deref(),
+    )
 }
 
 /// The provenance of an item's brief: the provider, the item and its link, as the Station
@@ -301,9 +325,19 @@ pub fn settled_cursor(cursor: &str, settling_secs: u64) -> Option<String> {
     ))
 }
 
-/// Whether a finished brief's key marks it as coming from a [`Source`].
-pub(super) fn is_source_key(key: &str) -> bool {
-    key.starts_with(&safe_component(SOURCE_BRIEF_PREFIX))
+/// Marks a finished brief that did not come from a [`Source`] as owing no report, under the
+/// Registry lock. A key says nothing about where a brief came from, so without this every
+/// finished brief would be read on every pass.
+pub(super) fn settle_report(registry: &FileRegistry, state: &str, key: &str) -> io::Result<()> {
+    let bytes = serde_json::to_vec(&ReportMark {
+        attempts: 0,
+        reported: true,
+    })
+    .map_err(io::Error::other)?;
+    registry.write_atomic(
+        &registry.root.join(state).join(format!("{key}.reported")),
+        &bytes,
+    )
 }
 
 impl FileRegistry {
@@ -408,9 +442,10 @@ impl SourceStore for FileRegistry {
     ) -> io::Result<Ingest> {
         let mut brief = source_brief(operation, provider, item, &self.limits.sources);
         brief.validate()?;
+        let _lock = self.lock()?;
+        brief.mission_id = Some(self.allot_locked(&source_entry(operation, provider, item))?);
         brief.provenance = Some(source_provenance(provider, item, &brief, received_by));
         let name = format!("{}.json", brief.key());
-        let _lock = self.lock()?;
         for state in ["done", "failed"] {
             if self.root.join(state).join(&name).exists() {
                 return Ok(Ingest::Finished);
@@ -453,7 +488,7 @@ impl SourceStore for FileRegistry {
                 let Some(key) = name.strip_suffix(".json") else {
                     continue;
                 };
-                if !is_source_key(key) || key.ends_with(".outcome") {
+                if key.ends_with(".outcome") {
                     continue;
                 }
                 if self.report_attempts(state, key)?.is_some_and(|mark| {
@@ -522,6 +557,8 @@ mod tests {
             labels: vec!["ai6:ready".to_owned(), "bug".to_owned()],
             author: None,
             updated: "2026-11-02T00:00:00Z".to_owned(),
+            code: None,
+            code_tag: None,
         };
         let brief = source_brief("G", "gh", &item, &SourceLimits::default());
         assert!(brief.tags.is_empty(), "{:?}", brief.tags);
@@ -550,6 +587,8 @@ mod tests {
             labels: vec!["ai6:ready".to_owned()],
             author: Some("reporter".to_owned()),
             updated: updated.to_owned(),
+            code: None,
+            code_tag: None,
         }
     }
 
@@ -609,7 +648,7 @@ mod tests {
         );
         let queued = registry.list_new().unwrap();
         assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].key(), "source_github--o_r_1");
+        assert_eq!(queued[0].key(), "G-github-o_r_1");
         assert_eq!(queued[0].created, "2026-01-01T00:00:00Z");
         assert!(queued[0].body.contains("It fails on macOS."));
         let provenance = queued[0]
@@ -733,6 +772,8 @@ mod tests {
             title: "manual".to_owned(),
             body: String::new(),
             id: "m1".to_owned(),
+            mission_id: None,
+            name: None,
             source: "manual".to_owned(),
             operation: None,
             agent: None,
@@ -760,7 +801,7 @@ mod tests {
         }
         let listed = registry.unreported_source_briefs().unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].brief.key(), "source_github--o_r_5");
+        assert_eq!(listed[0].brief.key(), "G-github-o_r_5");
         registry.mark_source_reported(&listed[0], true).unwrap();
         assert!(registry.unreported_source_briefs().unwrap().is_empty());
     }

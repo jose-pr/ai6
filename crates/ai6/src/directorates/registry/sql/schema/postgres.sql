@@ -39,6 +39,22 @@ CREATE TABLE ai6_brief_leases (
     revision BIGINT NOT NULL
 );
 
+-- The last number given per Operation (its name folded to lower case); it only grows.
+CREATE TABLE ai6_mission_counters (
+    name TEXT PRIMARY KEY,
+    last BIGINT NOT NULL,
+    revision BIGINT NOT NULL
+);
+
+-- Every Mission ID issued, by its lower-case form, since two that differ only by case are one
+-- file and one branch elsewhere. entry names what can enter again and must get the same ID.
+CREATE TABLE ai6_mission_ids (
+    folded TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL,
+    entry TEXT UNIQUE,
+    revision BIGINT NOT NULL
+);
+
 -- state is pending, approved or rejected.
 CREATE TABLE ai6_mission_proposals (
     operation TEXT NOT NULL,

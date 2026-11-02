@@ -203,9 +203,13 @@ pub(super) fn now_secs() -> i64 {
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
 }
 
-/// The provenance of an approved proposal: the proposing Agent and its Session.
-pub(super) fn proposal_provenance(proposal: &MissionProposal, received_by: &str) -> Provenance {
-    Provenance::new(Origin::Proposal, &proposal.brief, received_by, now_secs())
+/// The provenance of `brief`, an approved proposal's: the proposing Agent and its Session.
+pub(super) fn proposal_provenance(
+    proposal: &MissionProposal,
+    brief: &Brief,
+    received_by: &str,
+) -> Provenance {
+    Provenance::new(Origin::Proposal, brief, received_by, now_secs())
         .with_principal(proposal.proposer_agent_id.clone())
         .with_reference(proposal.proposer_session_id.to_string())
 }

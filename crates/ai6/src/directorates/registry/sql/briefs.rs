@@ -10,9 +10,10 @@ use super::{SqlRegistry, bounded_json, from_json, row_limit, to_json};
 use crate::directorates::m::vetting::{FindingKind, Vetting, content_digest};
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::limits::BriefLimits;
+use crate::directorates::registry::mission_ids::{self, MissionBook, MissionEntry};
 use crate::directorates::registry::sources::{
-    FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore, is_source_key,
-    refresh_queued, source_brief, source_provenance,
+    FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore, refresh_queued,
+    source_brief, source_entry, source_provenance,
 };
 use crate::directorates::registry::store::{
     Brief, BriefStore, Lease, LeaseRecovery, MissionProposal, invalid_data, lost_outcome,
@@ -73,6 +74,72 @@ fn queued(tx: &mut Tx<'_>, limits: &BriefLimits) -> io::Result<Vec<Brief>> {
             .then_with(|| left.key().cmp(&right.key()))
     });
     Ok(briefs)
+}
+
+/// The SQL Registry's Mission IDs, inside the caller's write transaction: `ai6_mission_counters`
+/// per Operation, and `ai6_mission_ids` for every ID issued, by its lower-case form.
+struct SqlBook<'a, 'b> {
+    tx: &'a mut Tx<'b>,
+    revision: i64,
+}
+
+fn entered_in(tx: &mut Tx<'_>, name: &str) -> io::Result<Option<String>> {
+    tx.query_opt(
+        "SELECT mission_id FROM ai6_mission_ids WHERE entry = $1",
+        &[name.into()],
+    )?
+    .map(|row| row.text(0))
+    .transpose()
+}
+
+impl MissionBook for SqlBook<'_, '_> {
+    fn entered(&mut self, name: &str) -> io::Result<Option<String>> {
+        entered_in(self.tx, name)
+    }
+
+    fn taken(&mut self, id: &str) -> io::Result<bool> {
+        let issued = self.tx.query_opt(
+            "SELECT 1 FROM ai6_mission_ids WHERE folded = $1",
+            &[mission_ids::folded(id).into()],
+        )?;
+        Ok(issued.is_some() || brief_state(self.tx, id)?.is_some())
+    }
+
+    fn next_number(&mut self, name: &str) -> io::Result<u64> {
+        let row = self
+            .tx
+            .query_opt(
+                "INSERT INTO ai6_mission_counters (name, last, revision) VALUES ($1, 1, $2) \
+                 ON CONFLICT (name) DO UPDATE SET last = ai6_mission_counters.last + 1, \
+                 revision = excluded.revision RETURNING last",
+                &[name.into(), self.revision.into()],
+            )?
+            .ok_or_else(|| invalid_data("Mission counter did not answer"))?;
+        u64::try_from(row.int(0)?).map_err(|_| invalid_data("invalid Mission counter"))
+    }
+
+    fn issue(&mut self, id: &str, name: Option<&str>) -> io::Result<()> {
+        self.tx.execute(
+            "INSERT INTO ai6_mission_ids (folded, mission_id, entry, revision) \
+             VALUES ($1, $2, $3, $4)",
+            &[
+                mission_ids::folded(id).into(),
+                id.into(),
+                name.into(),
+                self.revision.into(),
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+fn allot_in(
+    tx: &mut Tx<'_>,
+    revision: i64,
+    entry: &MissionEntry,
+    limits: &BriefLimits,
+) -> io::Result<String> {
+    mission_ids::allot(&mut SqlBook { tx, revision }, entry, limits)
 }
 
 fn brief_state(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<String>> {
@@ -185,31 +252,34 @@ fn finish_in(
     let state = if ok { "done" } else { "failed" };
     let key = brief.key();
     let outcome = to_json(outcome)?;
+    // Only a Source's brief owes a report; a key does not say which it is.
+    let reported = !brief.source.starts_with(SOURCE_BRIEF_PREFIX);
     if is_claimed(tx, &key)? {
         // The provenance is spent: a row queued again under this key finds none.
         tx.execute(
             "UPDATE ai6_briefs SET state = $2, outcome = $3, \
              transcript = coalesce($4, transcript), revision = $5, \
-             finished_provenance = provenance, provenance = NULL WHERE key = $1",
+             finished_provenance = provenance, provenance = NULL, reported = $6 WHERE key = $1",
             &[
                 key.as_str().into(),
                 state.into(),
                 outcome.into(),
                 transcript.into(),
                 revision.into(),
+                reported.into(),
             ],
         )?;
     } else {
         tx.execute(
             "INSERT INTO ai6_briefs \
-             (key, state, brief, outcome, transcript, revision, finished_provenance) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             (key, state, brief, outcome, transcript, revision, finished_provenance, reported) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
              ON CONFLICT (key) DO UPDATE SET state = excluded.state, brief = excluded.brief, \
              outcome = excluded.outcome, \
              transcript = coalesce(excluded.transcript, ai6_briefs.transcript), \
              revision = excluded.revision, \
              finished_provenance = coalesce(ai6_briefs.provenance, excluded.finished_provenance), \
-             provenance = NULL",
+             provenance = NULL, reported = excluded.reported",
             &[
                 key.as_str().into(),
                 state.into(),
@@ -218,6 +288,7 @@ fn finish_in(
                 transcript.into(),
                 revision.into(),
                 provenance_json(brief)?.into(),
+                reported.into(),
             ],
         )?;
     }
@@ -301,8 +372,13 @@ fn promote_in(
     };
     match state.as_str() {
         "approved" => {
-            let key = proposal.brief.key();
-            return Ok(stored(tx, key)?.unwrap_or(proposal.brief));
+            let mut brief = proposal.brief;
+            let entry = MissionEntry::proposal(operation, proposal_id);
+            if let Some(name) = entry.book_name() {
+                brief.mission_id = entered_in(tx, &name)?;
+            }
+            let key = brief.key();
+            return Ok(stored(tx, key)?.unwrap_or(brief));
         }
         "rejected" => {
             return Err(io::Error::new(
@@ -313,6 +389,12 @@ fn promote_in(
         _ => {}
     }
     let mut brief = proposal.brief.clone();
+    brief.mission_id = Some(allot_in(
+        tx,
+        revision,
+        &MissionEntry::proposal(operation, proposal_id),
+        limits,
+    )?);
     let key = brief.key();
     match brief_state(tx, &key)?.as_deref() {
         Some("new") => {
@@ -336,7 +418,7 @@ fn promote_in(
             ));
         }
         None => {
-            brief.provenance = Some(proposal_provenance(&proposal, received_by));
+            brief.provenance = Some(proposal_provenance(&proposal, &brief, received_by));
             insert_brief(tx, &brief, revision, limits)?;
         }
     }
@@ -520,6 +602,34 @@ impl BriefStore for SqlRegistry {
                 ));
             }
             insert_brief(tx, brief, revision, &self.limits.briefs)
+        })
+    }
+
+    fn allot_mission_id(&self, entry: &MissionEntry) -> io::Result<String> {
+        self.write(|tx, revision| allot_in(tx, revision, entry, &self.limits.briefs))
+    }
+
+    fn entered_mission_id(&self, entry: &MissionEntry) -> io::Result<Option<String>> {
+        let Some(name) = entry.book_name() else {
+            return Ok(None);
+        };
+        self.read(|tx| entered_in(tx, &name))
+    }
+
+    fn enter_brief(&self, brief: &Brief, entry: &MissionEntry) -> io::Result<Brief> {
+        brief.validate()?;
+        self.write(|tx, revision| {
+            let mut entered = brief.clone();
+            entered.mission_id = Some(allot_in(tx, revision, entry, &self.limits.briefs)?);
+            let key = entered.key();
+            if let Some(state) = brief_state(tx, &key)? {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("brief {key} already exists in {state}"),
+                ));
+            }
+            insert_brief(tx, &entered, revision, &self.limits.briefs)?;
+            Ok(entered)
         })
     }
 
@@ -775,11 +885,18 @@ impl SourceStore for SqlRegistry {
         item: &SourceItem,
         received_by: &str,
     ) -> io::Result<Ingest> {
-        let mut brief = source_brief(operation, provider, item, &self.limits.sources);
+        let brief = source_brief(operation, provider, item, &self.limits.sources);
         brief.validate()?;
-        brief.provenance = Some(source_provenance(provider, item, &brief, received_by));
-        let key = brief.key();
         self.write(|tx, revision| {
+            let mut brief = brief.clone();
+            brief.mission_id = Some(allot_in(
+                tx,
+                revision,
+                &source_entry(operation, provider, item),
+                &self.limits.briefs,
+            )?);
+            brief.provenance = Some(source_provenance(provider, item, &brief, received_by));
+            let key = brief.key();
             let Some(row) = tx.query_opt(
                 "SELECT state, brief FROM ai6_briefs WHERE key = $1",
                 &[key.as_str().into()],
@@ -814,7 +931,7 @@ impl SourceStore for SqlRegistry {
             let rows = tx.query(
                 "SELECT key, state, brief, outcome, finished_provenance FROM ai6_briefs \
                  WHERE state IN ('done', 'failed') AND reported = 0 AND report_attempts < $1 \
-                 AND key LIKE 'source!_%' ESCAPE '!' ORDER BY key LIMIT $2",
+                 ORDER BY key LIMIT $2",
                 &[
                     row_limit(self.limits.sources.report_attempts).into(),
                     row_limit(self.limits.briefs.records)
@@ -824,9 +941,6 @@ impl SourceStore for SqlRegistry {
             )?;
             let mut finished = Vec::new();
             for row in rows {
-                if !is_source_key(&row.text(0)?) {
-                    continue;
-                }
                 let Ok(brief) = stored_brief(&row.text(2)?, row.opt_text(4)?) else {
                     continue;
                 };

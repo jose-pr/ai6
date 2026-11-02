@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use super::bona_fides::{Origin, Provenance, now_secs};
 use super::limits::SleeperLimits;
 use super::logbook::station_key;
+use super::mission_ids::MissionEntry;
 use super::store::{
     Brief, FileRegistry, hex_digest, invalid_data, safe_component, unix_time, validate_station_id,
 };
@@ -346,6 +347,8 @@ pub fn sleeper_brief(
         title: sleeper.title.clone(),
         body: sleeper.prompt.clone(),
         id,
+        mission_id: None,
+        name: None,
         source: SLEEPER_BRIEF_SOURCE.to_owned(),
         operation: Some(operation.to_owned()),
         agent: sleeper.agent.clone(),
@@ -425,6 +428,15 @@ pub trait SleeperStore {
         round: (i64, Option<&str>),
         received_by: &str,
     ) -> io::Result<Fire>;
+}
+
+/// Where one round of a sleeper enters.
+pub(super) fn round_entry(
+    operation: &str,
+    name: &str,
+    (window, station): (i64, Option<&str>),
+) -> MissionEntry {
+    MissionEntry::sleeper(operation, name, &window_label(window), station)
 }
 
 /// The brief a sleeper queues for one window and round, with its provenance.
@@ -511,7 +523,8 @@ impl SleeperStore for FileRegistry {
         round: (i64, Option<&str>),
         received_by: &str,
     ) -> io::Result<Fire> {
-        match self.submit_brief(&fired_brief(operation, name, sleeper, round, received_by)) {
+        let brief = fired_brief(operation, name, sleeper, round, received_by);
+        match self.enter_brief(&brief, &round_entry(operation, name, round)) {
             Ok(_) => Ok(Fire::Queued),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
             Err(error) => Err(error),
@@ -520,7 +533,7 @@ impl SleeperStore for FileRegistry {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::directorates::registry::suite::{Store, backend_tests};
 
@@ -624,7 +637,7 @@ mod tests {
         );
     }
 
-    fn nightly() -> Sleeper {
+    pub(in crate::directorates::registry) fn nightly() -> Sleeper {
         Sleeper {
             schedule: "0 3 * * *".to_owned(),
             title: "Update dependencies".to_owned(),
@@ -704,10 +717,7 @@ mod tests {
         queued.sort_by_key(Brief::key);
         assert_eq!(
             queued.iter().map(Brief::key).collect::<Vec<_>>(),
-            [
-                "sleeper--G.deps.20261025T0300Z.station-a",
-                "sleeper--G.deps.20261025T0300Z.station-b"
-            ]
+            ["G-deps-1", "G-deps-2"]
         );
         assert_eq!(queued[0].stations, ["station-a"]);
         assert_eq!(queued[1].stations, ["station-b"]);
@@ -736,7 +746,7 @@ mod tests {
         );
         let queued = first_hq.list_new().unwrap();
         assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].key(), "sleeper--G.deps.20261025T0300Z");
+        assert_eq!(queued[0].key(), "G-deps-1");
         assert_eq!(queued[0].role.as_deref(), Some("maintenance"));
         assert_eq!(queued[0].operation.as_deref(), Some("G"));
         let provenance = queued[0]

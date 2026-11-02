@@ -2021,6 +2021,8 @@ impl CableTools {
             title: args.title,
             body: args.body,
             id: "agent-proposal".to_owned(),
+            mission_id: None,
+            name: None,
             source: "ai6-agent-proposal".to_owned(),
             operation: Some(principal.operation().to_owned()),
             agent: None,

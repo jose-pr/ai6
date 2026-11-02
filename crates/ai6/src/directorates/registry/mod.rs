@@ -16,6 +16,7 @@ pub mod cables;
 pub mod clearance;
 pub mod limits;
 pub mod logbook;
+pub mod mission_ids;
 pub mod mission_issues;
 pub mod quarantine;
 pub mod sessions;

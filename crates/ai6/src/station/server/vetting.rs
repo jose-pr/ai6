@@ -21,12 +21,14 @@ use crate::directorates::m::approvals::ActionScope;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::roster::{Agent, Operation, Roster};
 use crate::directorates::m::vetting::{
-    CHIEF_OF_STAFF_ROLE, Finding, FindingKind, KnownWork, REVIEW_SOURCE, ReviewTarget, Vetting,
-    VettingContext, VettingVerdict, content_digest, is_review, is_untrusted, read_review,
-    review_brief, review_target, vet,
+    CHIEF_OF_STAFF_ROLE, Finding, FindingKind, KnownWork, ReviewTarget, Vetting, VettingContext,
+    VettingVerdict, content_digest, is_review, is_untrusted, read_review, review_brief,
+    review_target, vet,
 };
 use crate::directorates::medical::exposure::Restriction;
 use crate::directorates::registry::approvals::{ApprovalRequest, ApprovalStatus, Decision};
+use crate::directorates::registry::bona_fides::Origin;
+use crate::directorates::registry::mission_ids::MissionEntry;
 use crate::directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, Lease, MissionProposal,
 };
@@ -197,7 +199,7 @@ impl<'a> Round<'a> {
             None => return Admission::Wait,
         }
         let target = ReviewTarget::brief(brief);
-        if self.running(&target.review_key()) {
+        if self.review_running(operation, &target) {
             return Admission::Wait;
         }
         if !reviewer_available(state, operation) {
@@ -224,7 +226,7 @@ impl<'a> Round<'a> {
             (&work, &state.station.limits().vetting),
             (&state.station_id, state.clock.now()),
         );
-        match self.queue_review(&review) {
+        match self.queue_review(&review, &target.review_entry(&operation.id)) {
             Some(ReviewState::Queued) => {
                 record(state, operation, brief, mission_id, "reviewing", None);
                 Admission::Wait
@@ -243,16 +245,33 @@ impl<'a> Round<'a> {
         }
     }
 
-    /// Whether the review brief `key` was queued or running when the round began.
-    fn running(&self, key: &str) -> bool {
-        self.queued.contains(key) || self.leases.iter().any(|lease| lease.key() == key)
+    /// Whether the review of `target` was queued or running when the round began. A Registry
+    /// that cannot say counts as running: the brief waits for the next round.
+    fn review_running(&self, operation: &Operation, target: &ReviewTarget) -> bool {
+        match self
+            .state
+            .intake
+            .entered_mission_id(&target.review_entry(&operation.id))
+        {
+            Ok(Some(key)) => {
+                self.queued.contains(&key) || self.leases.iter().any(|lease| lease.key() == key)
+            }
+            Ok(None) => false,
+            Err(error) => {
+                eprintln!(
+                    "ai6: review of {:?} unreadable: {error}",
+                    target.review_id()
+                );
+                true
+            }
+        }
     }
 
     /// Queues `review`, which is not running; `Ended` when it already ran. `None` when the
     /// Registry could not be written.
-    fn queue_review(&self, review: &Brief) -> Option<ReviewState> {
-        match self.state.intake.submit_brief(review) {
-            Ok(()) => Some(ReviewState::Queued),
+    fn queue_review(&self, review: &Brief, entry: &MissionEntry) -> Option<ReviewState> {
+        match self.state.intake.enter_brief(review, entry) {
+            Ok(_) => Some(ReviewState::Queued),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 Some(ReviewState::Ended)
             }
@@ -619,7 +638,7 @@ impl<'a> Round<'a> {
             let target = ReviewTarget::Proposal {
                 id: proposal.id.clone(),
             };
-            if self.running(&target.review_key()) {
+            if self.review_running(operation, &target) {
                 return None;
             }
             let over = |limit: Option<u32>, count: u32| limit.is_some_and(|limit| count >= limit);
@@ -657,7 +676,7 @@ impl<'a> Round<'a> {
                     (&work, &state.station.limits().vetting),
                     (&state.station_id, state.clock.now()),
                 );
-                match self.queue_review(&review) {
+                match self.queue_review(&review, &target.review_entry(&operation.id)) {
                     Some(ReviewState::Queued) => {
                         record_proposal_review(state, operation, proposal);
                         if let Some(read) = self.facts(operation).read.as_mut() {
@@ -901,15 +920,14 @@ fn reviewer_available(state: &DaemonState, operation: &Operation) -> bool {
     .is_ok()
 }
 
-/// Whether a Mission is a Chief of Staff review: its ID is its review brief's key and it was
-/// given the `chief-of-staff` role.
+/// Whether a Mission is a Chief of Staff review: it was given the `chief-of-staff` role and its
+/// brief entered as a review, by the provenance AI6 recorded and the Mission keeps.
 pub(super) fn is_review_mission(mission: &Mission) -> bool {
     mission.role_id.as_deref() == Some(CHIEF_OF_STAFF_ROLE)
         && mission
-            .mission_id
-            .as_str()
-            .strip_prefix(REVIEW_SOURCE)
-            .is_some_and(|rest| rest.starts_with("--"))
+            .provenance
+            .as_ref()
+            .is_some_and(|provenance| provenance.origin == Origin::Review)
 }
 
 /// Where a review works: a new directory of its own under the temporary directory, named at
@@ -1492,6 +1510,8 @@ mod tests {
             labels: Vec::new(),
             author: None,
             updated: "2026-10-26T00:00:00Z".to_owned(),
+            code: None,
+            code_tag: None,
         }
     }
 
@@ -1500,13 +1520,13 @@ mod tests {
             .intake
             .ingest_source_item("G", provider, item, "hq")
             .unwrap();
-        crate::directorates::registry::sources::source_brief(
-            "G",
-            provider,
-            item,
-            &Default::default(),
-        )
-        .key()
+        state
+            .intake
+            .entered_mission_id(&crate::directorates::registry::sources::source_entry(
+                "G", provider, item,
+            ))
+            .unwrap()
+            .expect("the item was given a Mission ID")
     }
 
     fn intake_actions(state: &DaemonState) -> Vec<String> {
@@ -1752,7 +1772,13 @@ mod tests {
 
     /// The review brief key of the queued brief `key` as it reads now.
     fn review_of(state: &DaemonState, key: &str) -> String {
-        ReviewTarget::brief(&queued(state, key).expect("queued")).review_key()
+        let brief = queued(state, key).expect("queued");
+        let entry = ReviewTarget::brief(&brief).review_entry(brief.operation.as_deref().unwrap());
+        state
+            .intake
+            .entered_mission_id(&entry)
+            .unwrap()
+            .expect("a review was queued")
     }
 
     /// Queues a Source brief, lets Headquarters queue and place its review, and runs it.
@@ -2107,7 +2133,13 @@ mod tests {
         assert!(
             state
                 .intake
-                .lease(&format!("ai6-agent-proposal--{first}"))
+                .lease(
+                    &state
+                        .intake
+                        .entered_mission_id(&MissionEntry::proposal("G", &first))
+                        .unwrap()
+                        .unwrap()
+                )
                 .unwrap()
                 .is_some()
         );

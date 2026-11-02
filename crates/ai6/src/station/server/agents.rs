@@ -758,12 +758,24 @@ mod tests {
         assert_eq!((record.tally.lost, record.tally.failed), (1, 0));
         assert_eq!(record.tally.failure_rate(), None);
 
-        let review = format!("{}--b-1", crate::directorates::m::vetting::REVIEW_SOURCE);
+        let review = "G-2".to_owned();
         create(
             &state,
             &review,
             Some(crate::directorates::m::vetting::CHIEF_OF_STAFF_ROLE),
         );
+        let reviewing = crate::directorates::registry::bona_fides::Provenance::new(
+            crate::directorates::registry::bona_fides::Origin::Review,
+            &brief("chief-of-staff", None),
+            "hq",
+            1,
+        );
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .record_provenance(&review, reviewing)
+            .unwrap();
         launch(&state, &review, "opus", 1);
         work(&state, &review);
         apply_event_state(&state, &review, &event("completed"));

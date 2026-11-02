@@ -16,6 +16,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::directorates::registry::bona_fides::{Origin, Provenance, record_digest};
+use crate::directorates::registry::mission_ids::MissionEntry;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
 use crate::directorates::registry::store::Brief;
 
@@ -705,9 +706,9 @@ impl ReviewTarget {
         format!("review-{hex}")
     }
 
-    /// The review brief's Registry key.
-    pub fn review_key(&self) -> String {
-        format!("{REVIEW_SOURCE}--{}", self.review_id())
+    /// Where the review brief enters, for `operation`: one review has one Mission ID.
+    pub fn review_entry(&self, operation: &str) -> MissionEntry {
+        MissionEntry::review(operation, &self.review_id())
     }
 }
 
@@ -800,6 +801,8 @@ pub fn review_brief(
         title: format!("Review a brief for Operation {operation}"),
         body,
         id: target.review_id(),
+        mission_id: None,
+        name: None,
         source: REVIEW_SOURCE.to_owned(),
         operation: Some(operation.to_owned()),
         agent: None,
@@ -1368,6 +1371,8 @@ mod tests {
                 labels: vec!["bug".to_owned()],
                 author: Some("someone".to_owned()),
                 updated: "2026-10-26T00:00:00Z".to_owned(),
+                code: None,
+                code_tag: None,
             },
             &Default::default(),
         )
