@@ -72,8 +72,7 @@ grant nothing.
 coordinating its Missions. Such a Session can propose child Missions; proposals wait in a
 separate inbox until an operator with `mission.create` approves them in Outer Office.
 Clearance never grants policy authority or bypasses cover, Q leases or Station policy. It is
-the autonomy axis; [Compartments](compartments.md) are the need-to-know axis, what an Agent may
-know of other Operations' work.
+the autonomy axis; [Compartments](compartments.md) are need-to-know.
 
 ## Conventions
 
@@ -90,10 +89,8 @@ agent reads can steer it, so clearance is least privilege, credentials are per M
 and Cable bodies and briefs are untrusted text.
 
 **Green ink.** The real chief of SIS signs in green ink. In AI6 it is a person's recorded
-approval of one irreversible step (a push to a protected branch, a release, a deletion):
-the Agent asks and waits, an operator signs or refuses, and the Agent is told. A **class
-authorisation**, the real UK term for standing approval of a class of activity, signs a kind
-of step in advance. A step taken without it is refused by the harness gate where AI6 can
+approval of one irreversible step (a push to a protected branch, a release, a deletion). A
+step taken without it is refused by the harness gate where AI6 can
 see it, and the credential it needs is leased only against an approval.
 
 ## Built from the same lore
@@ -141,8 +138,7 @@ see it, and the credential it needs is leased only against an approval.
 | **Loadout** | what Q issues an Agent: tools, sandbox and secret names |
 | **Cover / blown** | an Operation's commit attribution policy / a commit that broke it |
 | **Clearance** | `desk`, `field` or `00`: what an Agent may do without asking |
-| **Compartment** | need-to-know access to other Operations or Missions, apart from clearance; real classification has both, a level and compartments ([Compartments](compartments.md)) |
-| **Read in / read out** | giving a person, group, Operation, Mission or Agent a compartment / taking it away |
+| **Compartment** | need-to-know access to other Operations' work; one is **read in** to it and **read out** |
 | **Green ink** | a person's recorded approval of one irreversible step an Agent asked to take (`request_approval`; an Operation's `green_ink` policy) |
 | **Class authorisation** | a standing approval of a kind of step on matching targets, until it ends or is revoked |
 | **HUMINT / SIGINT** | briefs from people / briefs from signals such as CI failures and alerts |

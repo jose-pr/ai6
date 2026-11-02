@@ -81,7 +81,7 @@ impl CompartmentDesk {
             .config
             .compartments()
             .map_err(|_| UNAVAILABLE.to_owned())?;
-        // An Agent no longer on the roster holds nothing.
+        // An Agent off the roster holds nothing.
         let clearance = agents::effective(&state, Some(&reader.operation), &reader.agent)
             .map_err(|_| UNAVAILABLE.to_owned())?
             .clearance;

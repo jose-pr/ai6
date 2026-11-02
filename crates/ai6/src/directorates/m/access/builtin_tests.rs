@@ -135,10 +135,10 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
 #[test]
 fn the_default_cap_withholds_the_actions_that_must_not_be_delegated() {
     let cap = default_delegable();
-    for withheld in ["access.manage", "approval.class"] {
+    for withheld in ["access.manage", "approval.class", "compartment.cover"] {
         assert!(!cap.iter().any(|action| action == withheld), "{withheld}");
     }
-    assert_eq!(cap.len(), OPERATION_ACTIONS.len() - 2);
+    assert_eq!(cap.len(), OPERATION_ACTIONS.len() - 3);
 }
 
 #[test]

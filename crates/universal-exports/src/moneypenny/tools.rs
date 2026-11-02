@@ -341,8 +341,8 @@ static READ_TOOLS: &[Tool] = &[
         name: "field_guide",
         description: "A page of the AI6 guide. Call it when asked how AI6 works or what a \
                       setting means. Topics: overview, architecture, organization, access, \
-                      operations, stations, theaters, missions, agents, terminals, watchdog, \
-                      medical, hooks.",
+                      operations, stations, theaters, missions, agents, compartments, terminals, \
+                      watchdog, medical, hooks.",
         schema: || {
             let topics: Vec<&str> = guide::GUIDES.iter().map(|(topic, _)| *topic).collect();
             object(

@@ -261,11 +261,14 @@ async fn a_compartment_answers_only_for_what_it_can_grant() {
     assert_eq!(refused.status(), StatusCode::FORBIDDEN);
 }
 
+/// What a [`Broken`] provider says its `compartment` records are.
+type Answer = fn() -> Result<Vec<(String, Value)>, ai6::RosterError>;
+
 /// A provider whose `compartment` records are whatever `answer` says, as a database edited around
 /// its checks, or down, would give.
 struct Broken {
     source: Arc<SqlProvider>,
-    answer: fn() -> Result<Vec<(String, Value)>, ai6::RosterError>,
+    answer: Answer,
 }
 
 impl ConfigProvider for Broken {
@@ -286,9 +289,7 @@ impl ConfigProvider for Broken {
     }
 }
 
-async fn viewer_reads_with(
-    answer: fn() -> Result<Vec<(String, Value)>, ai6::RosterError>,
-) -> Vec<String> {
+async fn viewer_reads_with(answer: Answer) -> Vec<String> {
     let base = fixture(ROLES).await;
     let broken = Arc::new(Broken {
         source: base.source.clone(),
