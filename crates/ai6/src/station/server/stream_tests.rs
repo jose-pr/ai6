@@ -404,6 +404,82 @@ async fn interrupt(state: &DaemonState, mission_id: &str) -> Mission {
     mission
 }
 
+/// Claude Code answers an interrupt with an error result and a clean turn may end with an
+/// ordinary one; neither ends the Mission, which stays blocked until it is resumed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_interrupted_turn_leaves_the_mission_blocked_however_it_ends() {
+    for ending in ["failed", "completed"] {
+        let root = tempfile::tempdir().unwrap();
+        let key = format!("interrupt-{ending}");
+        let state = test_state(
+            root.path(),
+            "",
+            &agent(
+                &key,
+                &format!("MOCK_STREAM_INTERRUPT = \"{ending}\"\n"),
+                "",
+            ),
+        );
+        let _stop = StopOnDrop(state.clone());
+        start_mission_by_id(&state, "mission-1").await;
+        wait_for_session(&state, "mission-1", &format!("stream-{key}")).await;
+        assert_eq!(
+            interrupt(&state, "mission-1").await.state,
+            MissionState::Blocked
+        );
+        wait_until("the interrupted turn's end closes the harness", || {
+            !has_live_session(&state, "mission-1")
+                || mission_state(&state, "mission-1").state != MissionState::Blocked
+        })
+        .await;
+        let mission = mission_state(&state, "mission-1");
+        assert_eq!(mission.state, MissionState::Blocked, "ended by {ending}");
+        assert!(!has_live_session(&state, "mission-1"), "ended by {ending}");
+
+        let (status, _) = resume(&state, "mission-1", Some("go on"))
+            .await
+            .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
+        assert_eq!(status, StatusCode::ACCEPTED);
+        wait_for_state(&state, "mission-1", MissionState::Done).await;
+    }
+}
+
+/// A harness with no running turn says nothing to an interrupt: the Mission waits blocked, not
+/// judged a stall, and a message takes it on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_interrupt_answered_by_silence_leaves_the_mission_waiting() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(
+        root.path(),
+        "",
+        &agent(
+            "quiet",
+            "MOCK_STREAM_INTERRUPT = \"silent\"\n",
+            "[agent.007.limits]\nstall_timeout = 1\n",
+        ),
+    );
+    let _stop = StopOnDrop(state.clone());
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-quiet").await;
+    interrupt(&state, "mission-1").await;
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    assert_eq!(
+        mission_state(&state, "mission-1").state,
+        MissionState::Blocked,
+        "waiting for an operator is not a stall"
+    );
+    send_message(
+        State(state.clone()),
+        axum::extract::Path("mission-1".to_owned()),
+        Json(SendMessage {
+            text: "go on".to_owned(),
+        }),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("the message was refused: {:?}", error.1.0.error));
+    wait_for_state(&state, "mission-1", MissionState::Done).await;
+}
+
 fn stalling_state(root: &Path, key: &str) -> DaemonState {
     let mut state = test_state(
         root,

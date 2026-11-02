@@ -96,14 +96,20 @@ pub(crate) fn resume(
 pub(crate) struct MessageInput {
     session: Arc<Mutex<Object<dyn AgentSession>>>,
     line: Mutex<Vec<u8>>,
+    /// Runs before an interrupt reaches the harness, which may answer it at once.
+    before_interrupt: Box<dyn Fn() + Send + Sync>,
 }
 
 #[cfg(feature = "publisher")]
 impl MessageInput {
-    pub(crate) fn new(session: Arc<Mutex<Object<dyn AgentSession>>>) -> Self {
+    pub(crate) fn new(
+        session: Arc<Mutex<Object<dyn AgentSession>>>,
+        before_interrupt: Box<dyn Fn() + Send + Sync>,
+    ) -> Self {
         Self {
             session,
             line: Mutex::new(Vec::new()),
+            before_interrupt,
         }
     }
 }
@@ -129,6 +135,7 @@ impl crate::directorates::q::terminal::TerminalInputTarget for MessageInput {
                 }
                 0x03 => {
                     line.clear();
+                    (self.before_interrupt)();
                     self.session
                         .lock()
                         .map_err(|_| FAILED)?
@@ -271,7 +278,13 @@ mod tests {
     fn operator_typing_for_a_json_harness_becomes_messages_and_never_raw_bytes() {
         let recorder = Arc::new(Recorder::default());
         let session: Object<dyn AgentSession> = Recording(recorder.clone()).into_object();
-        let input = MessageInput::new(Arc::new(Mutex::new(session)));
+        let held = Arc::new(AtomicUsize::new(0));
+        let input = MessageInput::new(Arc::new(Mutex::new(session)), {
+            let held = held.clone();
+            Box::new(move || {
+                held.fetch_add(1, Ordering::SeqCst);
+            })
+        });
         // Typed in pieces, with a correction, then Enter.
         input.write(b"hel").unwrap();
         input.write(b"lo!\x7f world\r").unwrap();
@@ -285,6 +298,7 @@ mod tests {
         input.write(b"\x03").unwrap();
         assert_eq!(recorder.messages.lock().unwrap().len(), 2);
         assert_eq!(recorder.interrupts.load(Ordering::SeqCst), 1);
+        assert_eq!(held.load(Ordering::SeqCst), 1, "the Mission is held first");
         // An escape sequence (an arrow key) or another control byte is refused, and what was
         // typed before it is dropped, not sent.
         input.write(b"half").unwrap();

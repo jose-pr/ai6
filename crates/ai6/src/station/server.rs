@@ -4533,6 +4533,7 @@ async fn start_mission(
     if !raw_input && let Some(telemetry) = &telemetry {
         telemetry.attach_terminal_target(Arc::new(crate::station::acp::MessageInput::new(
             session.clone(),
+            typed_interrupt(&state, &mission_id),
         )));
     }
     state.sessions.lock().map_err(|_| internal_error())?.insert(
@@ -5136,6 +5137,7 @@ async fn resume_mission(
     if !raw_input && let Some(telemetry) = &telemetry {
         telemetry.attach_terminal_target(Arc::new(crate::station::acp::MessageInput::new(
             resumed.clone(),
+            typed_interrupt(&state, &mission_id),
         )));
     }
     state.sessions.lock().map_err(|_| internal_error())?.insert(
@@ -5189,6 +5191,9 @@ async fn resume_mission(
     ))
 }
 
+/// Why a Mission an operator interrupted is blocked.
+const INTERRUPTED_REASON: &str = "interrupted";
+
 /// Why a resume is refused when the harness reports another Session than it was asked for.
 const RESUME_NOT_RETAINED: &str = "AgentHandler resume did not retain the provider Session ID";
 
@@ -5210,7 +5215,8 @@ fn close_replaced(
         let old_session = old_session
             .lock()
             .map_err(|_| "provider Session lock was poisoned".to_owned())?;
-        old_session.interrupt().map_err(|error| error.to_string())?;
+        // A harness that already exited cannot be interrupted, and need not be.
+        let _ = old_session.interrupt();
         old_session.close().map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -5270,6 +5276,7 @@ async fn send_message(
             missions
                 .transition(&mission_id, MissionState::Working)
                 .map_err(mission_error)?;
+            watchdog.resume();
         }
         revive
     };
@@ -5290,23 +5297,109 @@ async fn interrupt_mission(
         .get(&mission_id)
         .map(|operation| (operation.session.clone(), operation.gate.clone()))
         .ok_or_else(|| mission_error(MissionError::NotFound))?;
-    tokio::task::spawn_blocking(move || {
+    let before = state
+        .missions
+        .lock()
+        .map_err(|_| internal_error())?
+        .get(&mission_id)
+        .map(|mission| mission.state);
+    // Blocked before the harness hears of it: it may answer at once, and the event pump must read
+    // the end of its turn as the end of an interrupted one.
+    let mission = hold_for_interrupt(&state, &mission_id).map_err(mission_error)?;
+    let interrupted = tokio::task::spawn_blocking(move || {
         gate.lock(&session)
             .map_err(|_| "provider Session lock was poisoned".to_owned())?
             .interrupt()
             .map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| runtime_error(format!("interrupt worker failed: {error}")))?
-    .map_err(provider_error)?;
-    let mission = state
-        .missions
-        .lock()
-        .map_err(|_| internal_error())?
-        .transition(&mission_id, MissionState::Blocked)
-        .map_err(mission_error)?;
+    .map_err(|error| runtime_error(format!("interrupt worker failed: {error}")))
+    .and_then(|interrupted| {
+        interrupted.map_err(|error| {
+            eprintln!("ai6: Mission {mission_id:?}: the interrupt failed: {error}");
+            provider_error(error)
+        })
+    });
+    if let Err(error) = interrupted {
+        if before == Some(MissionState::Working) {
+            release_interrupt_hold(&state, &mission_id);
+        }
+        return Err(error);
+    }
     publish_lifecycle(&state, &mission_id, mission.state);
     Ok(Json(mission))
+}
+
+/// What Ctrl-C typed in a Session view does before it interrupts the harness.
+#[cfg(feature = "publisher")]
+fn typed_interrupt(state: &DaemonState, mission_id: &str) -> Box<dyn Fn() + Send + Sync> {
+    let (state, mission_id) = (state.clone(), mission_id.to_owned());
+    Box::new(move || {
+        if let Ok(mission) = hold_for_interrupt(&state, &mission_id) {
+            publish_lifecycle(&state, &mission_id, mission.state);
+        }
+    })
+}
+
+/// Blocks a Mission whose turn is being interrupted, unless it already waits on something else,
+/// and stops judging its Session: waiting for an operator is not a stall.
+fn hold_for_interrupt(state: &DaemonState, mission_id: &str) -> Result<Mission, MissionError> {
+    let mission = {
+        let mut missions = state.missions.lock().map_err(|_| MissionError::NotFound)?;
+        let waiting = missions
+            .get(mission_id)
+            .ok_or(MissionError::NotFound)?
+            .clone();
+        match (waiting.state, waiting.blocked_reason.as_deref()) {
+            (MissionState::Blocked, Some(_)) => waiting,
+            (MissionState::Working | MissionState::Blocked, _) => {
+                missions.block_for(mission_id, INTERRUPTED_REASON)?
+            }
+            _ => missions.transition(mission_id, MissionState::Blocked)?,
+        }
+    };
+    if mission.blocked_reason.as_deref() == Some(INTERRUPTED_REASON)
+        && let Ok(sessions) = state.sessions.lock()
+        && let Some(operation) = sessions.get(mission_id)
+    {
+        operation.watchdog.pause();
+    }
+    sync_session_record(state, mission_id);
+    Ok(mission)
+}
+
+/// Takes back [`hold_for_interrupt`] when the harness could not be told.
+fn release_interrupt_hold(state: &DaemonState, mission_id: &str) {
+    if let Ok(mut missions) = state.missions.lock() {
+        let _ = missions.transition(mission_id, MissionState::Working);
+    }
+    if let Ok(sessions) = state.sessions.lock()
+        && let Some(operation) = sessions.get(mission_id)
+    {
+        operation.watchdog.resume();
+    }
+    sync_session_record(state, mission_id);
+}
+
+/// Stops the Session of a Mission whose interrupted turn just ended, however the harness reported
+/// that: a turn cut short is not the Mission's end. `false` when the Mission is not waiting on an
+/// interrupt.
+fn end_interrupted_turn(
+    state: &DaemonState,
+    mission_id: &str,
+    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+) -> bool {
+    let interrupted = state.missions.lock().is_ok_and(|missions| {
+        missions.get(mission_id).is_some_and(|mission| {
+            mission.state == MissionState::Blocked
+                && mission.blocked_reason.as_deref() == Some(INTERRUPTED_REASON)
+        })
+    });
+    if interrupted {
+        stop_session_keeping_mission(state, mission_id, session);
+        sync_session_record(state, mission_id);
+    }
+    interrupted
 }
 
 async fn next_event(
@@ -5461,6 +5554,24 @@ fn spawn_event_pump_with_monitor(
                         handle_limit(&state, &mission_id, &session, event);
                         break;
                     }
+                    if matches!(event.kind.as_str(), "completed" | "failed")
+                        && end_interrupted_turn(&state, &mission_id, &session)
+                    {
+                        queue_event(
+                            &state,
+                            &mission_id,
+                            AgentEvent {
+                                kind: "blocked".to_owned(),
+                                text: Some("the interrupted turn ended".to_owned()),
+                                data: None,
+                                limit: None,
+                                usage: event.usage,
+                                tools: Vec::new(),
+                                quota: Vec::new(),
+                            },
+                        );
+                        break;
+                    }
                     #[cfg(feature = "cables-mcp")]
                     if event.kind == "completed"
                         && green_ink::end_turn_waiting(&state, &mission_id, &session)
@@ -5517,13 +5628,18 @@ fn spawn_event_pump_with_monitor(
             let current_output_revision = monitor.output_revision();
             if current_output_revision != output_revision {
                 output_revision = current_output_revision;
-                // Output does not end a wait for green ink; only the decision does.
+                // Output does not end a wait for green ink, an answer or an operator's resume:
+                // the end of an interrupted turn is output too.
                 let resumed = state.missions.lock().ok().and_then(|mut missions| {
                     let mission = missions.get(&mission_id)?;
                     (mission.state == MissionState::Blocked
                         && !matches!(
                             mission.blocked_reason.as_deref(),
-                            Some(GREEN_INK_REASON | crate::station::issues::ISSUE_REASON)
+                            Some(
+                                GREEN_INK_REASON
+                                    | crate::station::issues::ISSUE_REASON
+                                    | INTERRUPTED_REASON
+                            )
                         ))
                     .then(|| missions.transition(&mission_id, MissionState::Working).ok())
                     .flatten()

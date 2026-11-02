@@ -52,7 +52,7 @@ its Station:
 | `cancel` | queued, working, blocked, stalled, parked or quarantined | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. |
 | `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined); it continues in the same safe house. |
 | `resume` | parked, blocked or stalled | The Mission resumes now on its provider Session, with `message` sent to the Agent when given. |
-| `interrupt` | working | The Session's current turn stops; the Mission waits, `blocked`, until it is resumed. |
+| `interrupt` | working | The Session's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
 
 There is no pause: providers have none. A quarantined Mission is released by an operator
 (`ai6 quarantine release`), not retried.

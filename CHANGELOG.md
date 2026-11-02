@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- Interrupting a Mission leaves it `blocked` however the harness reports the end of the turn:
+  Claude Code answers an interrupt with a result, which ended the Mission `done`. The Mission is
+  blocked before the harness is told, with reason `interrupted`; the end of that turn closes the
+  harness, and its Watchdog waits for the operator. Ctrl-C in a Session view does the same.
 - A Claude Mission can be resumed: a resume no longer demands the provider Session ID before the
   harness's stream reports it, which Claude Code does only after reading a message. The ID is
   checked when it appears; a harness that resumed another Session is stopped and its Mission stays
