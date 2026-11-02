@@ -2145,6 +2145,14 @@
           "x-advanced": true,
           "default": false
         },
+        "allow_beside_local_missions": {
+          "type": "boolean",
+          "title": "Run beside Missions on the Station's own host",
+          "description": "Let her run on a Station that also runs Missions on its own host. They run as the same OS user, so a command in one can read her tokens from her harness's environment and act as the person she serves. A weakening.",
+          "x-section": "reach",
+          "x-advanced": true,
+          "default": false
+        },
         "interpreters": {
           "type": "array",
           "items": {

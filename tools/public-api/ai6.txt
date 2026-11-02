@@ -567,6 +567,7 @@ impl core::default::Default for ai6::AssistantPageLimits
 pub fn ai6::AssistantPageLimits::default() -> Self
 pub struct ai6::directorates::m::assistant::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
+pub fn ai6::directorates::m::assistant::AssistantSettings::allow_beside_local_missions(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::changes_from(&self, &ai6::directorates::m::assistant::AssistantSettings) -> alloc::vec::Vec<alloc::string::String>
@@ -595,6 +596,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::views(&self) -> &ai6::directorates::m::assistant::AssistantViewLimits
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_beside_local_missions(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_elevated(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_denied_networks(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_desk(self, ai6::AssistantDeskLimits) -> Self
@@ -7293,6 +7295,7 @@ impl ai6::directorates::section_00::assistant::AssistantReport
 pub fn ai6::directorates::section_00::assistant::AssistantReport::cut_texts(&mut self, &ai6::AssistantLimits)
 pub struct ai6::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
+pub fn ai6::directorates::m::assistant::AssistantSettings::allow_beside_local_missions(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_elevated(&self) -> bool
 pub fn ai6::directorates::m::assistant::AssistantSettings::allowed_hosts(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::m::assistant::AssistantSettings::changes_from(&self, &ai6::directorates::m::assistant::AssistantSettings) -> alloc::vec::Vec<alloc::string::String>
@@ -7321,6 +7324,7 @@ pub fn ai6::directorates::m::assistant::AssistantSettings::unsandboxed_scripts(&
 pub fn ai6::directorates::m::assistant::AssistantSettings::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::assistant::AssistantSettings::views(&self) -> &ai6::directorates::m::assistant::AssistantViewLimits
 pub fn ai6::directorates::m::assistant::AssistantSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_beside_local_missions(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_allow_elevated(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_denied_networks(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::assistant::AssistantSettings::with_desk(self, ai6::AssistantDeskLimits) -> Self

@@ -111,6 +111,16 @@ pub struct AssistantSettings {
     #[schema(title = "Run on an elevated Station", section = "reach", advanced)]
     #[map(default)]
     allow_elevated: bool,
+    /// Let her run on a Station that also runs Missions on its own host. They run as the same OS
+    /// user, so a command in one can read her tokens from her harness's environment and act as
+    /// the person she serves. A weakening.
+    #[schema(
+        title = "Run beside Missions on the Station's own host",
+        section = "reach",
+        advanced
+    )]
+    #[map(default)]
+    allow_beside_local_missions: bool,
     /// The programs her scripts may run.
     #[schema(title = "Script programs", section = "reach")]
     #[map(default = AssistantSettings::default().interpreters)]
@@ -196,6 +206,7 @@ impl Default for AssistantSettings {
             shared: BTreeMap::new(),
             org: None,
             allow_elevated: false,
+            allow_beside_local_missions: false,
             interpreters: vec![DEFAULT_INTERPRETER.to_owned()],
             network: NetworkPolicy::Limited,
             allowed_hosts: Vec::new(),
@@ -930,6 +941,14 @@ impl AssistantSettings {
         self
     }
 
+    /// Lets a Station that also runs Missions on its own host run Moneypenny's harness; a
+    /// weakening: those Missions' commands can read her tokens, as the same OS user.
+    #[must_use]
+    pub fn with_allow_beside_local_missions(mut self, allow: bool) -> Self {
+        self.allow_beside_local_missions = allow;
+        self
+    }
+
     /// The interpreters her scripts may run (default `python3`); empty, she runs no script.
     #[must_use]
     pub fn with_interpreters(mut self, interpreters: Vec<String>) -> Self {
@@ -1181,6 +1200,11 @@ impl AssistantSettings {
         self.allow_elevated
     }
 
+    /// Whether a Station that also runs Missions on its own host may run Moneypenny's harness.
+    pub fn allow_beside_local_missions(&self) -> bool {
+        self.allow_beside_local_missions
+    }
+
     /// Refuses a personal repository template that does not name the person exactly once,
     /// inside the repository's path (not its scheme, user or host), or that some person's
     /// identifier would fill in as a shared or the organisation's repository.
@@ -1403,6 +1427,14 @@ impl AssistantSettings {
                     .to_owned(),
             );
         }
+        if self.allow_beside_local_missions {
+            weakened.push(
+                "assistant.allow_beside_local_missions = true: Moneypenny's harness runs beside \
+                 Missions on a Station's own host, whose commands can read her tokens as the same \
+                 OS user and act as the person she serves"
+                    .to_owned(),
+            );
+        }
         for (group, shared) in &self.shared {
             if shared.write {
                 weakened.push(format!(
@@ -1606,6 +1638,7 @@ mod tests {
         let settings = AssistantSettings::default();
         assert_eq!(settings.personal_repo_for("007"), Ok(None));
         assert!(!settings.allow_elevated());
+        assert!(!settings.allow_beside_local_missions());
         assert!(settings.weakenings().is_empty());
         assert_eq!(settings.shared_for(&["ops".to_owned()]).count(), 0);
     }

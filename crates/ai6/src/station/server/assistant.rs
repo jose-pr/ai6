@@ -30,7 +30,9 @@
 //!
 //! A Station running elevated (root, or an administrator's elevated token) refuses every job
 //! unless the roster's `assistant.allow_elevated` is set, which is logged as a weakening each
-//! time a harness starts.
+//! time a harness starts. So does a Station that also runs Missions on its own host, unless
+//! `assistant.allow_beside_local_missions` is set: nothing separates the OS user of her harness,
+//! whose environment holds her tokens, from theirs.
 //!
 //! A job carrying a [`MemoryOp`] is the person reading or changing her memory of them from the
 //! app: no harness is involved, and [`memory`] makes it in a clone of the person's repository.
@@ -597,6 +599,13 @@ struct Live {
 #[cfg(feature = "cables-mcp")]
 type LeftHeld = Arc<Mutex<BTreeMap<String, Arc<AssistantEndpoint>>>>;
 
+/// Why a Station that also runs Missions on its own host refuses her jobs.
+const BESIDE_MISSIONS: &str = "this Station also runs Missions on its own host, as the same OS user \
+     as Moneypenny's harness: a command in one can read her tokens from her harness's environment \
+     and act as the person she serves. So she does not run here. Run her on a Station with no local \
+     Theater, or one without the `execution` role, or set assistant.allow_beside_local_missions to \
+     accept that";
+
 /// The assistant Sessions of one Station.
 pub(super) struct Desk {
     state: DaemonState,
@@ -616,6 +625,9 @@ pub(super) struct Desk {
     /// Opens the safe houses of the workspaces' repositories.
     houses: Houses,
     elevated: ElevationProbe,
+    /// Whether this Station also runs Missions on its own host; asked at each job, as its roster
+    /// can change.
+    beside_missions: Arc<dyn Fn() -> bool + Send + Sync>,
     /// The probe's answer, asked once; an error counts as elevated.
     elevation: OnceLock<bool>,
     log: Logger,
@@ -656,6 +668,10 @@ impl Desk {
     ) -> Self {
         let plugins = state.plugins.clone();
         let tables = roster_tables(&state);
+        let beside_missions: Arc<dyn Fn() -> bool + Send + Sync> = {
+            let state = state.clone();
+            Arc::new(move || runs_local_missions(&state.current()))
+        };
         Self {
             state,
             harness,
@@ -672,6 +688,7 @@ impl Desk {
                     .map_err(|error| error.to_string())
             }),
             elevated: Arc::new(crate::station::elevation::is_elevated),
+            beside_missions,
             elevation: OnceLock::new(),
             log: Arc::new(|line| eprintln!("ai6: {line}")),
             exports: Arc::new(Unreachable),
@@ -700,6 +717,12 @@ impl Desk {
             desk.live = Limit::at(max_live);
             (limits, desk)
         }))
+    }
+
+    #[cfg(test)]
+    fn with_beside_missions(mut self, beside: bool) -> Self {
+        self.beside_missions = Arc::new(move || beside);
+        self
     }
 
     #[cfg(test)]
@@ -732,6 +755,22 @@ impl Desk {
              and assistant.allow_elevated is false, so Moneypenny does not run here"
                 .to_owned(),
         )
+    }
+
+    /// Refuses every job on a Station that also runs Missions on its own host, unless
+    /// `assistant.allow_beside_local_missions` is set.
+    fn check_beside_missions(&self) -> Result<(), String> {
+        if !(self.beside_missions)()
+            || self
+                .state
+                .current()
+                .roster
+                .assistant()
+                .allow_beside_local_missions()
+        {
+            return Ok(());
+        }
+        Err(BESIDE_MISSIONS.to_owned())
     }
 
     /// Refuses a job naming a repository this Station's own roster does not give: the person's
@@ -936,6 +975,7 @@ impl Desk {
         let (bounds, desk) = (self.tables)();
         job.validate(&bounds)?;
         self.check_elevation()?;
+        self.check_beside_missions()?;
         self.check_repositories(job)?;
         self.check_skills(job)?;
         if job.close {
@@ -1080,6 +1120,13 @@ impl Desk {
             (self.log)(
                 "weakening: assistant.allow_elevated = true: Moneypenny's harness starts on \
                  this elevated Station",
+            );
+        }
+        if (self.beside_missions)() {
+            (self.log)(
+                "weakening: assistant.allow_beside_local_missions = true: Moneypenny's harness \
+                 starts on a Station that also runs Missions on its own host, whose commands can \
+                 read her tokens",
             );
         }
         // A harness that cannot keep to the catalog gets none of it, rather than every skill
@@ -2375,6 +2422,16 @@ fn station_elevated() -> bool {
     *ELEVATED.get_or_init(|| crate::station::elevation::is_elevated().unwrap_or(true))
 }
 
+/// Whether a Mission's harness can run on this Station's own host, as the Station's OS user: it has
+/// the role that takes Missions, and an Operation whose Theater is reached with local access.
+fn runs_local_missions(state: &DaemonState) -> bool {
+    state.station.roles.contains(&super::StationRole::Execution)
+        && state
+            .roster
+            .operations()
+            .any(|operation| super::local_theater_of(&state.station.theaters, operation).is_some())
+}
+
 /// Each way the roster's `[assistant]` settings are looser than the default, and this Station
 /// running elevated when they let Moneypenny run on it, as the check-in reports them.
 pub(super) fn weakenings(roster: &crate::directorates::m::roster::Roster) -> Vec<String> {
@@ -2401,6 +2458,9 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     let Some(publisher) = &state.publisher else {
         return Ok(None);
     };
+    if runs_local_missions(state) && !state.roster.assistant().allow_beside_local_missions() {
+        eprintln!("ai6: {BESIDE_MISSIONS}");
+    }
     let tables = roster_tables(state);
     let swept = sweep_stale_roots(&std::env::temp_dir(), tables().1.unlocked_stale.0);
     if swept > 0 {
@@ -3127,6 +3187,7 @@ mod tests {
             "https://exports.example/v1/moneypenny/mcp".to_owned(),
         )
         .with_limits(idle, 2)
+        .with_beside_missions(false)
         .with_elevation(
             Arc::new(move || elevated.lock().unwrap().take().expect("the desk asks once")),
             Arc::new(move |line: &str| log.lock().unwrap().push(line.to_owned())),
@@ -3400,6 +3461,70 @@ mod tests {
         fixture.desk.close_all();
         until(|| kinds(&fixture, "c-1").contains(&EVENT_CLOSED.to_owned())).await;
         until(|| !area.exists()).await;
+    }
+
+    #[tokio::test]
+    async fn a_station_running_missions_on_its_own_host_refuses_her_unless_consented() {
+        let fixture = fixture(true, IDLE);
+        let mut desk = Desk::new(
+            fixture.desk.state.clone(),
+            fixture.desk.harness.clone(),
+            Arc::new(|_, _| {}),
+            "https://unused.example/mcp".to_owned(),
+        );
+        assert!(
+            (desk.beside_missions)(),
+            "by default a Station has the execution role and a local Theater"
+        );
+        desk = desk.with_beside_missions(true);
+        let refused = desk.check_beside_missions().unwrap_err();
+        assert!(
+            refused.contains("read her tokens")
+                && refused.contains("assistant.allow_beside_local_missions"),
+            "{refused}"
+        );
+
+        let mut control = fixture.desk.state.clone();
+        control.station = crate::station::server::StationConfig::default()
+            .with_roles([crate::station::server::StationRole::Control]);
+        assert!(!runs_local_missions(&control), "no Mission is placed here");
+
+        let consent = format!("{AGENTS}[assistant]\nallow_beside_local_missions = true\n");
+        let allowed = on_station(
+            &consent,
+            Ok(false),
+            true,
+            IDLE,
+            Script::Answers,
+            Script::Answers,
+        );
+        assert!(allowed.desk.check_beside_missions().is_ok());
+        let roster = allowed.desk.state.current().roster.clone();
+        assert!(
+            weakenings(&roster)
+                .iter()
+                .any(|line| line.contains("assistant.allow_beside_local_missions")),
+            "the check-in names it as a weakening"
+        );
+        allowed.desk.close_all();
+    }
+
+    #[tokio::test]
+    async fn a_refused_job_starts_no_harness_and_says_why() {
+        let mut fixture = fixture(true, IDLE);
+        fixture.desk_mut().beside_missions = Arc::new(|| true);
+        fixture.desk.handle(job("c-beside", "hello")).await;
+        let rejected = fixture
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|report| report.events.iter())
+            .find(|event| event.kind == EVENT_REJECTED)
+            .and_then(|event| event.text.clone())
+            .expect("the person is told");
+        assert!(rejected.contains("read her tokens"), "{rejected}");
+        assert!(fixture.asked.lock().unwrap().starts.is_empty());
     }
 
     #[tokio::test]

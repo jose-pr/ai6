@@ -101,6 +101,17 @@ true`. That setting is a weakening: each harness started under it logs `ai6: wea
 assistant.allow_elevated = true: …`, and the Station reports it at check-in
 (`assistant_weakened`).
 
+A Station that also runs Missions on its own host refuses her too: it has the `execution` role and an
+Operation whose Theater is reached with local access. Nothing separates them: they run as the same OS
+user as her harness, and its environment holds `AI6_MONEYPENNY_MCP_TOKEN` and, with Cable grants,
+`AI6_ASSISTANT_CABLE_MCP_TOKEN`. A command in such a Mission can read them (`/proc/PID/environ` on
+Linux, the process's memory on Windows; both reproduced with a throwaway process under one user) and
+reach what her tools reach, as the person she serves. So run her on a Station that takes no such
+Mission. The refusal is logged when the Station starts and is the answer to each message. Setting
+`allow_beside_local_missions = true` in `[assistant]` accepts it: that is a weakening, logged as each
+harness starts and reported at check-in. A Mission at `desk` clearance runs no command, but the check
+looks at what the Station can run, not at who runs there now.
+
 ## Her tools
 
 Universal Exports serves her tools on `/v1/moneypenny/mcp`. A message's job carries a random
@@ -196,6 +207,7 @@ the Station. In the global `agents.toml` of a configuration directory:
 [assistant]
 personal_repo = "/srv/moneypenny/{person_digest}.git"   # or {person}
 allow_elevated = false
+allow_beside_local_missions = false
 
 [assistant.shared.ops]          # a directory group
 repo = "ssh://git@git.example/ops/handbook.git"
@@ -886,6 +898,7 @@ answered does nothing.
 | Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml`, or the `assistant` record of a SQL roster |
 | Shared repositories | none | `[assistant.shared.<group>]`, `[assistant.org]` (`write = false`) |
 | Run on an elevated Station | no | `[assistant] allow_elevated` |
+| Run beside Missions on the Station's own host | no | `[assistant] allow_beside_local_missions` |
 | Interpreters her scripts may run | `python3`, in the harness's sandbox | `[assistant] interpreters` |
 | Hosts her web tools and scripts reach | none (`limited` with no host) | `[assistant] network`, `allowed_hosts` |
 | Scripts where the harness has no sandbox | none | `[assistant] unsandboxed_scripts` |

@@ -177,6 +177,7 @@ fn full_example(record: ConfigRecord) -> Value {
             "shared": {"ops": {"repo": "/srv/ops.git", "write": true}},
             "org": {"repo": "/srv/org.git", "write": false},
             "allow_elevated": true,
+            "allow_beside_local_missions": true,
             "interpreters": ["python3"],
             "network": "limited",
             "allowed_hosts": ["a.example"],
