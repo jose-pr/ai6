@@ -106,6 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Stations guide said Stations speak `ai6-station/1` to each other. Nothing dials or listens on
+  it: they coordinate through the Registry. `ai6 identity` and `ai6 peer` stay as they are.
 - A terminal that reconnects replays from what it received. It started from, and followed, the board's
   sequence, so it could skip output the board had seen and it had not. A viewer whose position was
   trimmed from the gateway's history, or whose Session's sequence skips a number, is now told: DipTel

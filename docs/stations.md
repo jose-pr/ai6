@@ -295,18 +295,18 @@ it, and a failed step's output is withheld from the round (`ai6 theater provisio
 
 ## Station identity
 
-With the `station-tls` feature, each Station has a persistent certificate:
-`ai6 identity` prints its fingerprint (`sha256:` and 64 hex digits), `ai6 peer waiting` lists
-peers a listener refused together with the address each came from, and
-`ai6 peer accept FINGERPRINT` pins one. Any spelling of a fingerprint is read, grouped base32
-included.
+Stations do not connect to each other: they coordinate through the Registry, and each publishes to
+Universal Exports. With the `station-tls` feature a Station still has an identity of its own, a
+persistent certificate kept in `identity.pem` in its state directory, with the peers it trusts under
+`peers/`. `ai6 identity` prints its fingerprint (`sha256:` and 64 hex digits), `ai6 peer waiting` lists
+what is waiting in that store, and `ai6 peer accept FINGERPRINT` pins one; any spelling of a
+fingerprint is read, grouped base32 included.
 
-Stations speak the `ai6-station/1` protocol over mutual TLS with the modern policy by default
-(TLS 1.3, SHA-2 pins). A peer is listed as waiting only after it has proved it holds its key,
-and the list is bounded per source address, in total, and by how often one peer from one
-address is written down again. A Station keeps its identity in `identity.pem` and its peers
-under `peers/`, in its state directory. The mechanism is the shared
-[coqui-peer-tls](https://boriken-dev.github.io/coqui-peer-tls/) crate.
+`ai6::station::identity` also holds the mutual TLS configurations for a link between Stations, the
+`ai6-station/1` protocol with the modern policy by default (TLS 1.3, SHA-2 pins), on the shared
+[coqui-peer-tls](https://boriken-dev.github.io/coqui-peer-tls/) crate. Nothing in `ai6 serve` dials or
+listens on it today, so no peer comes to wait through a Station, and accepting one changes nothing
+yet.
 
 ## When Universal Exports goes away
 

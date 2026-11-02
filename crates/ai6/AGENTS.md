@@ -3289,7 +3289,9 @@ Session ID is issued by the provider and stays stable when that Session resumes.
 
 With `station-tls` (`ai6::station::identity`), a Station's mutual TLS is
 [`coqui-peer-tls`](https://github.com/Boriken-Dev/coqui-peer-tls) and `coqui-peer`, and this
-module fixes where AI6 keeps things and the protocol it speaks:
+module fixes where AI6 keeps things and the protocol such a link speaks. `ai6 identity` and `ai6
+peer` use the identity and the store; nothing in `ai6 serve` dials or listens on the protocol, since
+Stations coordinate through the Registry:
 
 ```rust
 pub const STATION_ALPN: &[u8] = b"ai6-station/1";
