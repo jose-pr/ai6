@@ -14,11 +14,14 @@ use guatiao::library::{
     scan_path_with,
 };
 use guatiao::{FromValue as _, Status, ToValue as _, Value};
+use ring::signature::{ED25519, Ed25519KeyPair, KeyPair as _, UnparsedPublicKey};
+use rustls_pki_types::PrivatePkcs8KeyDer;
+use rustls_pki_types::pem::PemObject as _;
 use serde::Serialize;
 use sha2::Digest as _;
 
 use crate::directorates::registry::bona_fides::{
-    LibraryPin, PinCheck, PinSet, PluginProfile, PublisherKey, library_pin,
+    LibraryPin, PinCheck, PinSet, PluginProfile, PublisherKey, library_pin, publisher_message,
 };
 
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
@@ -60,8 +63,9 @@ pub struct PluginScanSummary {
     pub checked: Vec<LibraryCheck>,
     /// Libraries the `strict` profile did not load, and why.
     pub refused: Vec<String>,
-    /// Every way the scan was looser than `strict` with every library pinned: the profile,
-    /// each library that loaded unpinned or unmatched, SHA-1 pins.
+    /// Every way the scan was looser than `strict` with every library pinned to its digest: the
+    /// profile, each library that loaded unpinned or unmatched, SHA-1 pins, a publisher whose
+    /// signature alone is enough.
     pub weakened: Vec<String>,
 }
 
@@ -259,7 +263,7 @@ impl Plugins {
             }
         } else {
             for candidate in candidates(paths, &mut summary) {
-                if let Some(load) = check_candidate(&candidate, policy, &mut summary) {
+                if let Some(load) = check_candidate(&candidate, policy, true, &mut summary) {
                     found_at.insert(load.clone(), candidate);
                     search.push(load);
                 }
@@ -685,10 +689,12 @@ fn candidates(paths: &[PathBuf], summary: &mut PluginScanSummary) -> Vec<PathBuf
 
 /// Checks one candidate against the policy and returns the path to load it from, if it
 /// loads: the verified copy under `strict`, the file itself otherwise. Files that are not
-/// AI6 libraries are passed to Guatiao to report as it does.
+/// AI6 libraries are passed to Guatiao to report as it does. Without `copy` an accepted library
+/// is only recorded, and nothing is returned or written.
 fn check_candidate(
     candidate: &Path,
     policy: &PluginPolicy,
+    copy: bool,
     summary: &mut PluginScanSummary,
 ) -> Option<PathBuf> {
     let shown = candidate.display().to_string();
@@ -741,6 +747,9 @@ fn check_candidate(
     });
     match (policy.profile, check) {
         (PluginProfile::Strict, PinCheck::Accepted(_)) => {
+            if !copy {
+                return None;
+            }
             let Some(directory) = &policy.verified_dir else {
                 summary
                     .refused
@@ -808,9 +817,23 @@ fn copy_verified(directory: &Path, digest: &PeerId, bytes: &[u8]) -> std::io::Re
 
 /// Whether `signature` is `key`'s Ed25519 signature of `message`.
 fn verify_ed25519(key: &PublisherKey, message: &[u8], signature: &[u8]) -> bool {
-    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key.as_bytes())
+    UnparsedPublicKey::new(&ED25519, key.as_bytes())
         .verify(message, signature)
         .is_ok()
+}
+
+/// The file name a pin-set entry or a signature uses for the AI6 provider library at `path`.
+fn provider_library_name(path: &Path) -> std::io::Result<String> {
+    let probed = probe(path)?;
+    if !probed.entry || declares_ai6_kind(&probed.declared).is_err() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not an AI6 provider library",
+        ));
+    }
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))
 }
 
 /// The pin-set entry that accepts the AI6 provider library at `path` by its digest: what
@@ -820,18 +843,126 @@ fn verify_ed25519(key: &PublisherKey, message: &[u8], signature: &[u8]) -> bool 
 ///
 /// Returns an error when the file cannot be read or is not an AI6 provider library.
 pub fn pin_entry(path: &Path) -> std::io::Result<LibraryPin> {
-    let probed = probe(path)?;
-    if !probed.entry || declares_ai6_kind(&probed.declared).is_err() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "not an AI6 provider library",
-        ));
-    }
-    let file = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let file = provider_library_name(path)?;
     Ok(LibraryPin::digest(file, library_pin(&std::fs::read(path)?)))
+}
+
+/// The pin-set entry that accepts whatever `publisher` signed for the name of the AI6 provider
+/// library at `path`: what `ai6 plugins pin --publisher KEY PATH` prints.
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be read or is not an AI6 provider library.
+pub fn publisher_entry(path: &Path, publisher: PublisherKey) -> std::io::Result<LibraryPin> {
+    Ok(LibraryPin::publisher(
+        provider_library_name(path)?,
+        publisher,
+    ))
+}
+
+/// What a `strict` scan would say about the libraries on `paths` under `pins`, with nothing loaded
+/// and no copy written: `checked`, `refused`, `skipped`, `failed`, `unreadable` and `weakened`.
+pub fn check_libraries(paths: &[PathBuf], pins: &PinSet) -> PluginScanSummary {
+    let policy = PluginPolicy {
+        profile: PluginProfile::Strict,
+        pins: pins.clone(),
+        verified_dir: None,
+    };
+    let mut summary = PluginScanSummary {
+        profile: policy.profile.as_str().to_owned(),
+        weakened: policy.pins.weakenings(),
+        ..PluginScanSummary::default()
+    };
+    for candidate in candidates(paths, &mut summary) {
+        check_candidate(&candidate, &policy, false, &mut summary);
+    }
+    summary
+}
+
+/// A publisher's Ed25519 key: what signs provider libraries for a `publisher` entry. It belongs
+/// on the host that builds them; a Station needs only [`PublisherSigner::public_key`].
+#[derive(Debug)]
+pub struct PublisherSigner(Ed25519KeyPair);
+
+impl PublisherSigner {
+    /// Makes a key and writes it to `path` as PKCS#8 DER: `0600` on Unix; on Windows the file
+    /// takes its directory's access list. The key never leaves that file.
+    ///
+    /// # Errors
+    ///
+    /// `AlreadyExists` when `path` exists, which is left as it was; otherwise the filesystem's
+    /// error, or the system's when its random source fails.
+    pub fn generate(path: &Path) -> std::io::Result<Self> {
+        let document = Ed25519KeyPair::generate_pkcs8(&ring::rand::SystemRandom::new())
+            .map_err(|_| std::io::Error::other("the system's random source failed"))?;
+        coqui_peer::file::write_new(path, document.as_ref(), coqui_peer::file::Access::OwnerOnly)?;
+        Self::from_der(document.as_ref())
+    }
+
+    /// Reads a PKCS#8 Ed25519 key, DER or PEM, from `path`: what [`PublisherSigner::generate`] or
+    /// `openssl genpkey -algorithm ed25519` wrote.
+    ///
+    /// # Errors
+    ///
+    /// The filesystem's error, or `InvalidData` when it holds no such key. No message holds any
+    /// of the file's text.
+    pub fn read(path: &Path) -> std::io::Result<Self> {
+        let bytes = zeroize::Zeroizing::new(std::fs::read(path)?);
+        if !bytes.starts_with(b"-----") {
+            return Self::from_der(&bytes);
+        }
+        let der = PrivatePkcs8KeyDer::from_pem_slice(&bytes).map_err(|_| not_a_key())?;
+        Self::from_der(der.secret_pkcs8_der())
+    }
+
+    fn from_der(der: &[u8]) -> std::io::Result<Self> {
+        Ed25519KeyPair::from_pkcs8_maybe_unchecked(der)
+            .map(Self)
+            .map_err(|_| not_a_key())
+    }
+
+    /// The key a `publisher` entry names.
+    ///
+    /// # Panics
+    ///
+    /// Never: an Ed25519 public key is 32 bytes.
+    pub fn public_key(&self) -> PublisherKey {
+        let bytes: [u8; 32] = self
+            .0
+            .public_key()
+            .as_ref()
+            .try_into()
+            .expect("an Ed25519 public key is 32 bytes");
+        PublisherKey::from_bytes(bytes)
+    }
+
+    /// Signs the AI6 provider library at `path`, over [`publisher_message`] for its file name and
+    /// SHA-256, and writes the signature to `FILE.sig` beside it, replacing any there. Returns
+    /// that path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file cannot be read or is not an AI6 provider library, or the
+    /// signature cannot be written.
+    pub fn sign(&self, path: &Path) -> std::io::Result<PathBuf> {
+        let file = provider_library_name(path)?;
+        let sha256: [u8; 32] = sha2::Sha256::digest(std::fs::read(path)?).into();
+        let signature = self.0.sign(&publisher_message(&file, &sha256));
+        let written = path.with_file_name(format!("{file}.sig"));
+        coqui_peer::file::replace(
+            &written,
+            signature.as_ref(),
+            coqui_peer::file::Access::Default,
+        )?;
+        Ok(written)
+    }
+}
+
+fn not_a_key() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "not a PKCS#8 Ed25519 private key",
+    )
 }
 
 fn providers(registry: &Registry, kind: &str) -> Vec<ProviderInfo> {
@@ -1451,6 +1582,170 @@ tty = false
             "{:?}",
             plugins.scan_summary()
         );
+    }
+
+    /// Bytes that still load as the roles plugin and hash differently: a rebuild, to a pin set.
+    fn rebuilt(bytes: &[u8]) -> Vec<u8> {
+        let mut rebuilt = bytes.to_vec();
+        rebuilt.extend_from_slice(b"rebuilt");
+        rebuilt
+    }
+
+    /// A fresh directory holding `bytes` as `roles.EXT`.
+    fn holding(bytes: &[u8]) -> (tempfile::TempDir, PathBuf) {
+        let directory = scratch();
+        let library = directory.path().join(file_name());
+        std::fs::write(&library, bytes).unwrap();
+        (directory, library)
+    }
+
+    fn copy_of(bytes: &[u8], verified: &Path) -> PathBuf {
+        verified.join(format!(
+            "sha256-{}.{DLL_EXTENSION}",
+            library_pin(bytes).hex()
+        ))
+    }
+
+    #[test]
+    fn a_publisher_entry_refuses_a_library_with_no_signature_under_strict() {
+        let (directory, _library, _bytes) = one_library();
+        let (_, key) = publisher();
+        let verified = scratch();
+        let policy = PluginPolicy::new(
+            Some(PinSet::new().with_library(LibraryPin::publisher(file_name(), key))),
+            verified.path(),
+        );
+        let plugins = Plugins::scan_with(&[directory.path().to_path_buf()], &policy);
+        assert!(!has_roles(&plugins));
+        assert!(
+            plugins.scan_summary().refused[0]
+                .contains(&format!("no signature file {}.sig", file_name())),
+            "{:?}",
+            plugins.scan_summary()
+        );
+    }
+
+    #[test]
+    fn a_rebuilt_library_loads_under_the_same_publisher_entry_and_both_refuses_it() {
+        let (first, library, bytes) = one_library();
+        let (pair, key) = publisher();
+        sign(&pair, &library);
+        let new = rebuilt(&bytes);
+        let (second, new_library) = holding(&new);
+        sign(&pair, &new_library);
+        let verified = scratch();
+        let scan = |directory: &Path, entry: LibraryPin| {
+            let pins = PinSet::new().with_library(entry);
+            Plugins::scan_with(
+                &[directory.to_path_buf()],
+                &PluginPolicy::new(Some(pins), verified.path()),
+            )
+        };
+        let entry = LibraryPin::publisher(file_name(), key);
+
+        let plugins = scan(first.path(), entry.clone());
+        assert!(has_roles(&plugins), "{:?}", plugins.scan_summary());
+        let plugins = scan(second.path(), entry);
+        assert!(has_roles(&plugins), "{:?}", plugins.scan_summary());
+        assert_eq!(
+            plugins.scan_summary().checked[0].loaded_from.as_deref(),
+            copy_of(&new, verified.path()).to_str()
+        );
+
+        // Asked for both, the same key's signature does not stand in for the pinned bytes.
+        let both = LibraryPin::digest(file_name(), library_pin(&bytes))
+            .with_publisher(key)
+            .requiring_both();
+        let plugins = scan(first.path(), both.clone());
+        assert!(has_roles(&plugins), "{:?}", plugins.scan_summary());
+        assert!(
+            plugins.scan_summary().checked[0]
+                .verdict
+                .contains(" and publisher "),
+            "{:?}",
+            plugins.scan_summary()
+        );
+        assert!(plugins.scan_summary().weakened.is_empty());
+        let plugins = scan(second.path(), both);
+        assert!(!has_roles(&plugins));
+        assert!(
+            plugins.scan_summary().refused[0].contains(&format!(
+                "expected {}, found {}",
+                library_pin(&bytes),
+                library_pin(&new)
+            )),
+            "{:?}",
+            plugins.scan_summary()
+        );
+    }
+
+    #[test]
+    fn check_libraries_says_what_a_strict_scan_would_and_writes_nothing() {
+        let (directory, library, bytes) = one_library();
+        let pins = PinSet::new().with_library(LibraryPin::digest(file_name(), library_pin(&bytes)));
+        let summary = check_libraries(&[directory.path().to_path_buf()], &pins);
+        assert_eq!(summary.profile, "strict");
+        assert_eq!(summary.checked.len(), 1, "{summary:?}");
+        assert!(summary.checked[0].verdict.starts_with("accepted: pin "));
+        assert_eq!(summary.checked[0].loaded_from, None);
+        assert!(summary.loaded.is_empty() && summary.refused.is_empty());
+
+        let summary = check_libraries(&[library], &PinSet::new());
+        assert_eq!(summary.checked[0].verdict, "unpinned");
+        assert!(summary.refused[0].contains("is not pinned"), "{summary:?}");
+    }
+
+    #[test]
+    fn a_generated_key_refuses_to_overwrite_and_reads_back_as_the_same_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("publisher.key");
+        let made = PublisherSigner::generate(&path).unwrap();
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(
+            PublisherSigner::read(&path).unwrap().public_key(),
+            made.public_key()
+        );
+        assert_eq!(
+            PublisherSigner::generate(&path).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), written, "left as it was");
+        assert!(!format!("{made:?}").contains(&format!("{written:?}")));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn what_a_signer_signs_is_what_the_verifier_accepts_and_only_for_that_name() {
+        let (directory, library, _bytes) = one_library();
+        let key_dir = tempfile::tempdir().unwrap();
+        let signer = PublisherSigner::generate(&key_dir.path().join("publisher.key")).unwrap();
+        let written = signer.sign(&library).unwrap();
+        assert_eq!(
+            written,
+            directory.path().join(format!("{}.sig", file_name()))
+        );
+        assert_eq!(std::fs::read(&written).unwrap().len(), 64);
+
+        let verified = scratch();
+        let pins =
+            PinSet::new().with_library(LibraryPin::publisher(file_name(), signer.public_key()));
+        let plugins = Plugins::scan_with(
+            &[directory.path().to_path_buf()],
+            &PluginPolicy::new(Some(pins), verified.path()),
+        );
+        assert!(has_roles(&plugins), "{:?}", plugins.scan_summary());
+
+        let not_a_library = library.with_file_name("notes.txt");
+        std::fs::write(&not_a_library, "text").unwrap();
+        assert!(signer.sign(&not_a_library).is_err());
+        assert!(!library.with_file_name("notes.txt.sig").exists());
     }
 
     #[test]

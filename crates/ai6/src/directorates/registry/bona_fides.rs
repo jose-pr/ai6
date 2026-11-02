@@ -587,16 +587,33 @@ impl PinSet {
         self.libraries.iter().try_for_each(LibraryPin::validate)
     }
 
-    /// The pins that are weaker than a SHA-256 one: SHA-1 pins.
+    /// Every way this set is weaker than a SHA-256 pin on each library: SHA-1 pins, and one line
+    /// for each publisher whose signature alone is enough. Such an entry admits any file that
+    /// key signed for its name, an older vulnerable build included, for as long as the entry
+    /// stands, and also with a pin beside it unless it says `require = "both"`.
     pub fn weakenings(&self) -> Vec<String> {
-        self.libraries
+        let mut weakened: Vec<String> = self
+            .libraries
             .iter()
             .filter_map(|library| {
                 let pin = library.pin?;
                 (pin.digest() == coqui_peer::Digest::Sha1)
                     .then(|| format!("library {} is pinned by SHA-1 ({pin})", library.file))
             })
-            .collect()
+            .collect();
+        let mut alone = std::collections::BTreeMap::new();
+        for library in &self.libraries {
+            if let (Some(publisher), Require::Either) = (library.publisher, library.require) {
+                *alone.entry(publisher.to_string()).or_insert(0_usize) += 1;
+            }
+        }
+        weakened.extend(alone.into_iter().map(|(publisher, count)| {
+            let libraries = if count == 1 { "library" } else { "libraries" };
+            format!(
+                "publisher {publisher} alone admits {count} {libraries}: anything it signed loads, older builds included"
+            )
+        }));
+        weakened
     }
 
     /// What the pin set says about the library `file` with these `bytes` and the detached
@@ -863,7 +880,14 @@ mod tests {
         assert_eq!(pins.libraries.len(), 3);
         assert_eq!(pins.libraries[1].publisher.unwrap().to_string(), key);
         assert_eq!(pins.libraries[2].require, Require::Both);
-        assert_eq!(pins.weakenings().len(), 1, "a SHA-1 pin is reported");
+        assert_eq!(
+            pins.weakenings()
+                .iter()
+                .filter(|line| line.contains("SHA-1"))
+                .count(),
+            1,
+            "a SHA-1 pin is reported"
+        );
 
         for refused in [
             "[[library]]\nfile = \"a.so\"\n",
@@ -875,6 +899,43 @@ mod tests {
         ] {
             assert!(PinSet::from_toml(refused).is_err(), "{refused}");
         }
+    }
+
+    #[test]
+    fn a_publisher_whose_signature_alone_is_enough_is_a_weakening_and_both_is_not() {
+        let pin = library_pin(b"bytes");
+        let key = PublisherKey::from_bytes([1; 32]);
+        let other = PublisherKey::from_bytes([2; 32]);
+
+        let alone = PinSet::new()
+            .with_library(LibraryPin::publisher("a.so", key))
+            .with_library(LibraryPin::publisher("b.so", key))
+            .with_library(LibraryPin::publisher("c.so", other));
+        assert_eq!(
+            alone.weakenings(),
+            [
+                format!(
+                    "publisher {key} alone admits 2 libraries: anything it signed loads, older builds included"
+                ),
+                format!(
+                    "publisher {other} alone admits 1 library: anything it signed loads, older builds included"
+                ),
+            ]
+        );
+
+        // Beside a pin, the signature alone still loads a file the pin would refuse.
+        let either =
+            PinSet::new().with_library(LibraryPin::digest("a.so", pin).with_publisher(key));
+        assert_eq!(either.weakenings().len(), 1, "{:?}", either.weakenings());
+
+        let both = PinSet::new().with_library(
+            LibraryPin::digest("a.so", pin)
+                .with_publisher(key)
+                .requiring_both(),
+        );
+        assert_eq!(both.weakenings(), Vec::<String>::new());
+        let digest = PinSet::new().with_library(LibraryPin::digest("a.so", pin));
+        assert_eq!(digest.weakenings(), Vec::<String>::new());
     }
 
     #[test]

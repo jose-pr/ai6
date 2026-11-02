@@ -50,19 +50,7 @@ fn serve_help_lists_only_what_starting_needs() {
 
 #[test]
 fn plugins_pin_prints_an_entry_for_a_provider_library_and_refuses_anything_else() {
-    // The access plugins are dev-dependencies, built beside this test binary.
-    let deps = std::env::current_exe().unwrap();
-    let library = std::fs::read_dir(deps.parent().unwrap())
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .find(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == std::env::consts::DLL_EXTENSION)
-                && path
-                    .file_name()
-                    .is_some_and(|name| name.to_string_lossy().contains("coqui_roles_plugin"))
-        })
-        .expect("the roles plugin is built beside the test binary");
+    let library = built_plugin("coqui_roles_plugin");
     let output = ai6()
         .args(["plugins", "pin"])
         .arg(&library)
@@ -79,6 +67,672 @@ fn plugins_pin_prints_an_entry_for_a_provider_library_and_refuses_anything_else(
         .output()
         .expect("the AI6 command should start");
     assert!(!output.status.success());
+}
+
+/// An access plugin Cargo built beside this test binary: they are dev-dependencies.
+fn built_plugin(name: &str) -> std::path::PathBuf {
+    let deps = std::env::current_exe().unwrap();
+    std::fs::read_dir(deps.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == std::env::consts::DLL_EXTENSION)
+                && path
+                    .file_name()
+                    .is_some_and(|name_found| name_found.to_string_lossy().contains(name))
+        })
+        .expect("the plugin is built beside the test binary")
+}
+
+/// Runs `ai6 plugins` with these arguments.
+macro_rules! plugins_run {
+    ($($arg:expr),+ $(,)?) => {{
+        let mut command = ai6();
+        command.arg("plugins");
+        $(command.arg($arg);)+
+        command.output().expect("the AI6 command should start")
+    }};
+}
+
+/// A deployment in a temporary directory: `ai6.cfg` and its records, `plugins/roles.EXT` with a
+/// signature once signed, and a publisher key the test generated there.
+struct Signed {
+    root: tempfile::TempDir,
+    key: std::path::PathBuf,
+    publisher: String,
+    library: std::path::PathBuf,
+    config: std::path::PathBuf,
+}
+
+impl Signed {
+    fn new() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let config = bootstrap(root.path(), "[plugins]\npaths = [\"plugins\"]\n");
+        let plugins = root.path().join("plugins");
+        std::fs::create_dir(&plugins).unwrap();
+        let library = plugins.join(library_name());
+        std::fs::copy(built_plugin("coqui_roles_plugin"), &library).unwrap();
+        let key = root.path().join("publisher.key");
+        let output = plugins_run!("keygen", "--out", &key);
+        assert!(output.status.success(), "{output:?}");
+        let publisher = String::from_utf8(output.stdout)
+            .unwrap()
+            .trim()
+            .strip_prefix("publisher = \"")
+            .unwrap()
+            .strip_suffix('"')
+            .unwrap()
+            .to_owned();
+        Self {
+            root,
+            key,
+            publisher,
+            library,
+            config,
+        }
+    }
+
+    fn sign(&self) {
+        let output = plugins_run!("sign", "--key", &self.key, &self.library);
+        assert!(output.status.success(), "{output:?}");
+    }
+
+    /// Writes `plugins.toml`, the provider's `plugin` records.
+    fn records(&self, text: &str) {
+        std::fs::write(self.root.path().join("plugins.toml"), text).unwrap();
+    }
+
+    fn publisher_entry(&self) -> String {
+        format!(
+            "[[library]]\nfile = \"{}\"\npublisher = \"{}\"\n",
+            library_name(),
+            self.publisher
+        )
+    }
+
+    fn check(&self) -> std::process::Output {
+        plugins_run!("check", "--config", &self.config)
+    }
+}
+
+fn library_name() -> String {
+    format!("roles.{}", std::env::consts::DLL_EXTENSION)
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).into()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Standard base64 with padding: what a PEM file holds.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let group = u32::from(chunk[0]) << 16
+            | u32::from(*chunk.get(1).unwrap_or(&0)) << 8
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for index in 0..4 {
+            if index <= chunk.len() {
+                let digit = (group >> (18 - 6 * index)) & 63;
+                out.push(ALPHABET[digit as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// A random Ed25519 key as OpenSSL writes one, PKCS#8 version 1 with no public key: its DER, its
+/// PEM and its public half.
+fn openssl_style_key() -> (Vec<u8>, String, String) {
+    use ring::rand::SecureRandom;
+    use ring::signature::KeyPair;
+    let mut seed = [0u8; 32];
+    ring::rand::SystemRandom::new().fill(&mut seed).unwrap();
+    let mut der = vec![
+        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
+        0x20,
+    ];
+    der.extend_from_slice(&seed);
+    let pair = ring::signature::Ed25519KeyPair::from_seed_unchecked(&seed).unwrap();
+    let pem = format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+        base64(&der)
+    );
+    let public = format!("ed25519:{}", hex(pair.public_key().as_ref()));
+    (der, pem, public)
+}
+
+#[test]
+fn plugins_keygen_sign_and_check_pass_over_the_tag_the_name_and_the_digest() {
+    let signed = Signed::new();
+    assert_eq!(signed.publisher.len(), "ed25519:".len() + 64);
+
+    let output = plugins_run!("sign", "--key", &signed.key, &signed.library,);
+    assert!(output.status.success(), "{output:?}");
+    let name = library_name();
+    let signature_path = signed.library.with_file_name(format!("{name}.sig"));
+    assert_eq!(
+        text(&output.stdout).trim(),
+        signature_path.display().to_string()
+    );
+
+    // Spelled out here, and not through the crate's own function: the format is the contract.
+    let signature = std::fs::read(&signature_path).unwrap();
+    assert_eq!(signature.len(), 64);
+    let mut message = b"ai6-provider-library-v1\0".to_vec();
+    message.extend_from_slice(name.as_bytes());
+    message.push(0);
+    message.extend_from_slice(&sha256(&std::fs::read(&signed.library).unwrap()));
+    let public = (0..32)
+        .map(|index| {
+            u8::from_str_radix(&signed.publisher["ed25519:".len()..][index * 2..][..2], 16).unwrap()
+        })
+        .collect::<Vec<u8>>();
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, public)
+        .verify(&message, &signature)
+        .expect("the signature is the key's, over the tag, the name and the digest");
+
+    // The entry reads the same from the key text and from the key's file.
+    for key in [
+        std::ffi::OsString::from(&signed.publisher),
+        signed.key.clone().into_os_string(),
+    ] {
+        let output = plugins_run!("pin", "--publisher", &key, &signed.library);
+        assert!(output.status.success(), "{output:?}");
+        let printed = ai6::PinSet::from_toml(&text(&output.stdout)).unwrap();
+        assert_eq!(printed.libraries[0].file, name);
+        assert_eq!(
+            printed.libraries[0].publisher.unwrap().to_string(),
+            signed.publisher
+        );
+        assert_eq!(printed.libraries[0].pin, None);
+        assert_eq!(printed.libraries[0].require, ai6::Require::Either);
+        assert!(
+            text(&output.stderr).contains(&format!(
+                "publisher {} alone admits 1 library: anything it signed loads, older builds included",
+                signed.publisher
+            )),
+            "{output:?}"
+        );
+    }
+    signed.records(&signed.publisher_entry());
+
+    let output = signed.check();
+    assert!(output.status.success(), "{output:?}");
+    let said = text(&output.stdout);
+    assert!(
+        said.contains(&format!(
+            "sha256:{}",
+            hex(&sha256(&std::fs::read(&signed.library).unwrap()))
+        )) && said.contains(&format!("accepted: publisher {}", signed.publisher)),
+        "{said}"
+    );
+    assert!(text(&output.stderr).contains("alone admits"), "{output:?}");
+    assert!(
+        !signed.root.path().join("state/plugins/verified").exists(),
+        "a check writes no copy"
+    );
+}
+
+#[test]
+fn plugins_check_refuses_a_changed_byte_naming_the_digest() {
+    let signed = Signed::new();
+    signed.sign();
+    signed.records(&signed.publisher_entry());
+    assert!(signed.check().status.success());
+
+    let original = std::fs::read(&signed.library).unwrap();
+    let mut changed = original.clone();
+    *changed.last_mut().unwrap() ^= 0x5a;
+    std::fs::write(&signed.library, &changed).unwrap();
+    let output = signed.check();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let said = text(&output.stdout);
+    assert!(
+        said.contains(&format!("sha256:{}", hex(&sha256(&changed)))),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!(
+            "refused: publisher {}: the signature does not verify",
+            signed.publisher
+        )),
+        "{said}"
+    );
+
+    // A digest entry says what it expected as well.
+    signed.records(&format!(
+        "[[library]]\nfile = \"{}\"\npin = \"sha256:{}\"\n",
+        library_name(),
+        hex(&sha256(&original))
+    ));
+    let output = signed.check();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        text(&output.stdout).contains(&format!(
+            "expected sha256:{}, found sha256:{}",
+            hex(&sha256(&original)),
+            hex(&sha256(&changed))
+        )),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn plugins_check_refuses_a_signature_made_for_another_file_name() {
+    let signed = Signed::new();
+    signed.sign();
+    // The same bytes and signature, moved into another provider's slot.
+    let other = format!("other.{}", std::env::consts::DLL_EXTENSION);
+    let plugins = signed.library.parent().unwrap();
+    std::fs::rename(&signed.library, plugins.join(&other)).unwrap();
+    std::fs::rename(
+        plugins.join(format!("{}.sig", library_name())),
+        plugins.join(format!("{other}.sig")),
+    )
+    .unwrap();
+    signed.records(&format!(
+        "[[library]]\nfile = \"{other}\"\npublisher = \"{}\"\n",
+        signed.publisher
+    ));
+    let output = signed.check();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        text(&output.stdout).contains(&format!(
+            "refused: publisher {}: the signature does not verify",
+            signed.publisher
+        )),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn plugins_check_refuses_another_key_a_missing_signature_and_a_library_with_no_entry() {
+    let signed = Signed::new();
+    let (_, _, stranger) = openssl_style_key();
+    signed.sign();
+    signed.records(&format!(
+        "[[library]]\nfile = \"{}\"\npublisher = \"{stranger}\"\n",
+        library_name()
+    ));
+    let output = signed.check();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        text(&output.stdout).contains(&format!(
+            "refused: publisher {stranger}: the signature does not verify"
+        )),
+        "{output:?}"
+    );
+
+    signed.records(&signed.publisher_entry());
+    std::fs::remove_file(
+        signed
+            .library
+            .with_file_name(format!("{}.sig", library_name())),
+    )
+    .unwrap();
+    let output = signed.check();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        text(&output.stdout).contains(&format!("no signature file {}.sig", library_name())),
+        "{output:?}"
+    );
+
+    signed.records("");
+    let output = signed.check();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(text(&output.stdout).contains("unpinned"), "{output:?}");
+
+    // With nothing to look at, a check has shown nothing.
+    std::fs::remove_file(&signed.library).unwrap();
+    let output = signed.check();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        text(&output.stderr).contains("no AI6 provider library to check"),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn plugins_check_under_require_both_wants_the_exact_bytes_and_lists_no_weakening() {
+    let signed = Signed::new();
+    signed.sign();
+    let original = std::fs::read(&signed.library).unwrap();
+    signed.records(&format!(
+        "[[library]]\nfile = \"{}\"\npin = \"sha256:{}\"\npublisher = \"{}\"\nrequire = \"both\"\n",
+        library_name(),
+        hex(&sha256(&original)),
+        signed.publisher
+    ));
+    let output = signed.check();
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text(&output.stdout).contains(&format!(
+            "accepted: pin sha256:{} and publisher {}",
+            hex(&sha256(&original)),
+            signed.publisher
+        )),
+        "{output:?}"
+    );
+    assert!(!text(&output.stderr).contains("alone admits"), "{output:?}");
+
+    // A rebuild its publisher signed is still not the pinned bytes.
+    let mut rebuilt = original.clone();
+    rebuilt.extend_from_slice(b"rebuilt");
+    std::fs::write(&signed.library, &rebuilt).unwrap();
+    signed.sign();
+    let output = signed.check();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        text(&output.stdout).contains(&format!(
+            "expected sha256:{}, found sha256:{}",
+            hex(&sha256(&original)),
+            hex(&sha256(&rebuilt))
+        )),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn plugins_keygen_refuses_to_overwrite() {
+    let signed = Signed::new();
+    let held = std::fs::read(&signed.key).unwrap();
+    let output = plugins_run!("keygen", "--out", &signed.key);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(std::fs::read(&signed.key).unwrap(), held);
+    assert!(output.stdout.is_empty(), "{output:?}");
+}
+
+#[test]
+fn plugins_sign_refuses_what_is_not_a_provider_library_and_a_file_that_is_no_key() {
+    let signed = Signed::new();
+    let notes = signed.root.path().join("notes.txt");
+    std::fs::write(&notes, "text").unwrap();
+    let output = plugins_run!("sign", "--key", &signed.key, &notes);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(!signed.root.path().join("notes.txt.sig").exists());
+
+    let output = plugins_run!("sign", "--key", &notes, &signed.library);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        text(&output.stderr).contains("not a PKCS#8 Ed25519 private key"),
+        "{output:?}"
+    );
+    assert!(
+        !signed
+            .library
+            .with_file_name(format!("{}.sig", library_name()))
+            .exists()
+    );
+}
+
+#[test]
+fn plugins_sign_and_pin_read_a_key_as_openssl_writes_one() {
+    let signed = Signed::new();
+    let (der, pem, public) = openssl_style_key();
+    let der_path = signed.root.path().join("openssl.der");
+    let pem_path = signed.root.path().join("openssl.pem");
+    std::fs::write(&der_path, der).unwrap();
+    std::fs::write(&pem_path, pem).unwrap();
+    signed.records(&format!(
+        "[[library]]\nfile = \"{}\"\npublisher = \"{public}\"\n",
+        library_name()
+    ));
+    for key in [&der_path, &pem_path] {
+        let output = plugins_run!("pin", "--publisher", key, &signed.library);
+        assert!(text(&output.stdout).contains(&public), "{output:?}");
+        let output = plugins_run!("sign", "--key", key, &signed.library);
+        assert!(output.status.success(), "{output:?}");
+        assert!(signed.check().status.success());
+    }
+}
+
+#[test]
+fn plugins_key_text_appears_in_no_output() {
+    let signed = Signed::new();
+    let der = std::fs::read(&signed.key).unwrap();
+    // PKCS#8 version 2 as `ring` writes it: 16 bytes of framing, then the secret seed.
+    let seed = &der[16..48];
+    assert!(
+        signed
+            .publisher
+            .ends_with(&hex(ring::signature::KeyPair::public_key(
+                &ring::signature::Ed25519KeyPair::from_seed_unchecked(seed).unwrap()
+            )
+            .as_ref())),
+        "those are the bytes the assertions below look for"
+    );
+    let pem_path = signed.root.path().join("broken.pem");
+    std::fs::write(
+        &pem_path,
+        format!(
+            "-----BEGIN PRIVATE KEY-----\n{}!\n-----END PRIVATE KEY-----\n",
+            base64(&der)
+        ),
+    )
+    .unwrap();
+    signed.records(&signed.publisher_entry());
+
+    let spilled = |output: std::process::Output| {
+        for stream in [&output.stdout, &output.stderr] {
+            let said = text(stream);
+            assert!(!stream.windows(32).any(|part| part == seed), "{output:?}");
+            assert!(!said.contains(&hex(seed)), "{output:?}");
+            assert!(!said.contains(&hex(&der)), "{output:?}");
+            assert!(!said.contains(&base64(&der)), "{output:?}");
+            assert!(!said.contains(&format!("{der:?}")), "{output:?}");
+            assert!(!said.contains("PRIVATE KEY-----"), "{output:?}");
+        }
+    };
+
+    let fresh = signed.root.path().join("fresh.key");
+    spilled(plugins_run!("keygen", "--out", &fresh));
+    spilled(plugins_run!("keygen", "--out", &signed.key,));
+    spilled(plugins_run!("sign", "--key", &signed.key, &signed.library,));
+    spilled(plugins_run!(
+        "pin",
+        "--publisher",
+        &signed.key,
+        &signed.library,
+    ));
+    spilled(signed.check());
+    // Each way the key file is handed to the wrong place, and a key that does not parse.
+    spilled(plugins_run!("sign", "--key", &signed.key, &signed.key,));
+    spilled(plugins_run!("pin", &signed.key));
+    spilled(plugins_run!("sign", "--key", &pem_path, &signed.library,));
+    spilled(plugins_run!(
+        "pin",
+        "--publisher",
+        &pem_path,
+        &signed.library,
+    ));
+}
+
+/// The library Windows signs in with is the one a deployment pins: the check that decides whether
+/// a file is a provider library accepts it.
+#[cfg(windows)]
+#[test]
+fn plugins_pin_and_sign_accept_the_system_access_plugin() {
+    let signed = Signed::new();
+    let library = signed.root.path().join(format!(
+        "coqui_access_system_plugin.{}",
+        std::env::consts::DLL_EXTENSION
+    ));
+    std::fs::copy(built_plugin("coqui_access_system_plugin"), &library).unwrap();
+    let output = plugins_run!("pin", &library);
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text(&output.stdout).contains("pin = \"sha256:"),
+        "{output:?}"
+    );
+    let output = plugins_run!("sign", "--key", &signed.key, &library);
+    assert!(output.status.success(), "{output:?}");
+    let output = plugins_run!("pin", "--publisher", &signed.key, &library);
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text(&output.stdout).contains(&signed.publisher),
+        "{output:?}"
+    );
+}
+
+/// What a process in a test waits for: generous, since it only ever ends the wait early.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(300);
+
+fn until<T>(what: &str, mut ready: impl FnMut() -> Option<T>) -> T {
+    let deadline = std::time::Instant::now() + PATIENCE;
+    loop {
+        if let Some(value) = ready() {
+            return value;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for {what}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// A process stopped when dropped, so that a failed test leaves nothing running.
+struct Running(std::process::Child);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn verified_copy(state: &std::path::Path, bytes: &[u8]) -> std::path::PathBuf {
+    state.join("plugins").join("verified").join(format!(
+        "sha256-{}.{}",
+        hex(&sha256(bytes)),
+        std::env::consts::DLL_EXTENSION
+    ))
+}
+
+/// Starts a Station on a port of its own, and returns it with what it says about its plugins.
+fn station_plugins(signed: &Signed, log: &std::path::Path) -> (Running, serde_json::Value) {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let log_file = std::fs::File::create(log).unwrap();
+    let station = Running(
+        ai6()
+            .args(["serve", "--listen"])
+            .arg(format!("127.0.0.1:{port}"))
+            .arg("--config")
+            .arg(&signed.config)
+            .stdin(std::process::Stdio::null())
+            .stdout(log_file.try_clone().unwrap())
+            .stderr(log_file)
+            .spawn()
+            .expect("the AI6 command should start"),
+    );
+    let state = signed.root.path().join("state");
+    let summary = until("the Station to answer", || {
+        let token = std::fs::read_to_string(state.join("api-token")).ok()?;
+        ureq::get(format!("http://127.0.0.1:{port}/internal/plugins"))
+            .header("Authorization", format!("Bearer {}", token.trim()))
+            .call()
+            .ok()?
+            .body_mut()
+            .read_json::<serde_json::Value>()
+            .ok()
+    });
+    (station, summary)
+}
+
+/// Every file under `directory` that holds `needle`.
+fn holding_text(directory: &std::path::Path, needle: &str) -> bool {
+    let Ok(listing) = std::fs::read_dir(directory) else {
+        return false;
+    };
+    listing.filter_map(Result::ok).any(|entry| {
+        let path = entry.path();
+        if path.is_dir() {
+            holding_text(&path, needle)
+        } else {
+            std::fs::read(&path).is_ok_and(|bytes| text(&bytes).contains(needle))
+        }
+    })
+}
+
+#[test]
+fn plugins_a_station_under_strict_loads_a_rebuilt_library_with_no_record_change() {
+    let signed = Signed::new();
+    signed.sign();
+    signed.records(&signed.publisher_entry());
+    let records = std::fs::read(signed.root.path().join("plugins.toml")).unwrap();
+    let state = signed.root.path().join("state");
+    let log = signed.root.path().join("station.log");
+    let original = std::fs::read(&signed.library).unwrap();
+
+    let (first, summary) = station_plugins(&signed, &log);
+    let shown = summary.to_string();
+    assert_eq!(summary["profile"], "strict", "{shown}");
+    assert_eq!(
+        summary["checked"][0]["verdict"],
+        format!("accepted: publisher {}", signed.publisher),
+        "{shown}"
+    );
+    let line = format!(
+        "publisher {} alone admits 1 library: anything it signed loads, older builds included",
+        signed.publisher
+    );
+    assert_eq!(summary["weakened"][0], line.as_str(), "{shown}");
+    assert!(verified_copy(&state, &original).exists(), "{shown}");
+    assert!(
+        std::fs::read_to_string(&log).unwrap().contains(&line),
+        "the log says it too"
+    );
+    until("the check-in to carry the weakening", || {
+        holding_text(&state.join("registry"), "alone admits").then_some(())
+    });
+    drop(first);
+
+    // The build changes; the signature follows it; no record does.
+    let mut rebuilt = original.clone();
+    rebuilt.extend_from_slice(b"rebuilt");
+    std::fs::write(&signed.library, &rebuilt).unwrap();
+    signed.sign();
+
+    let (second, summary) = station_plugins(&signed, &log);
+    let shown = summary.to_string();
+    assert_eq!(
+        summary["checked"][0]["digest"],
+        format!("sha256:{}", hex(&sha256(&rebuilt))),
+        "{shown}"
+    );
+    assert_eq!(
+        summary["loaded"][0],
+        signed.library.display().to_string(),
+        "{shown}"
+    );
+    assert!(verified_copy(&state, &rebuilt).exists(), "{shown}");
+    assert!(
+        verified_copy(&state, &original).exists(),
+        "kept by the default: {shown}"
+    );
+    drop(second);
+
+    assert_eq!(
+        std::fs::read(signed.root.path().join("plugins.toml")).unwrap(),
+        records
+    );
 }
 
 #[test]

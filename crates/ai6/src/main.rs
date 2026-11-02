@@ -75,7 +75,7 @@ enum Command {
         #[command(subcommand)]
         command: AssistantCommand,
     },
-    /// Provider library pins (`plugins.toml`).
+    /// Provider library keys, signatures and pins (`plugins.toml`).
     Plugins {
         #[command(subcommand)]
         command: PluginsCommand,
@@ -148,10 +148,41 @@ enum HarnessCommand {
 
 #[derive(Debug, Subcommand)]
 enum PluginsCommand {
-    /// Print the `plugins.toml` entry that pins each AI6 provider library by its SHA-256.
+    /// Make a publisher's Ed25519 key in a new file, and print its `publisher` line and nothing
+    /// of the key itself. It belongs on the host that builds libraries, never on a Station.
+    Keygen {
+        /// The file to write, which must not exist.
+        #[arg(long, value_name = "PATH")]
+        out: PathBuf,
+    },
+    /// Write FILE.sig beside each AI6 provider library: the key's signature of its file name and
+    /// SHA-256, valid for that name alone.
+    Sign {
+        /// The file holding the private key (PKCS#8, DER or PEM).
+        #[arg(long, value_name = "PATH")]
+        key: PathBuf,
+        /// Library files to sign.
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
+    /// Print the `plugins.toml` entry that pins each AI6 provider library by its SHA-256, or
+    /// accepts what a publisher signed for its name.
     Pin {
+        /// Accept whatever this key signed instead of one digest: `ed25519:HEX` or the private
+        /// key's file. Anything it signed for that name then loads, older builds included.
+        #[arg(long, value_name = "KEY")]
+        publisher: Option<String>,
         /// Library files to pin.
         #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
+    /// Print what a strict scan would say about each library under the provider's `plugin`
+    /// records, loading nothing and writing no copy. Exits 1 when one would be refused, or
+    /// there is none to check.
+    Check {
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+        /// Libraries or directories to check (default: the bootstrap file's `[plugins] paths`).
         paths: Vec<PathBuf>,
     },
 }
@@ -482,26 +513,11 @@ async fn main() -> ExitCode {
                 }
             },
         },
-        Command::Plugins {
-            command: PluginsCommand::Pin { paths },
-        } => {
-            let mut pins = ai6::PinSet::new();
-            for path in &paths {
-                match ai6::station::plugins::pin_entry(path) {
-                    Ok(entry) => pins = pins.with_library(entry),
-                    Err(error) => {
-                        eprintln!("ai6: {}: {error}", path.display());
-                        return ExitCode::FAILURE;
-                    }
-                }
-            }
-            match toml::to_string(&pins) {
-                Ok(text) => {
-                    print!("{text}");
-                    ExitCode::SUCCESS
-                }
+        Command::Plugins { command } => {
+            match tokio::task::spawn_blocking(move || plugins_command(command)).await {
+                Ok(code) => code,
                 Err(error) => {
-                    eprintln!("ai6: {error}");
+                    eprintln!("ai6: plugins command failed: {error}");
                     ExitCode::FAILURE
                 }
             }
@@ -741,10 +757,15 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
 /// The Station this command acts for: the bootstrap file's `station`, else the ID a Station
 /// keeps in its state directory, else none (`""`, the global records).
 fn station_of(located: &Located<Bootstrap>, opened: &Opened) -> String {
+    station_in(located, &opened.state_dir)
+}
+
+/// [`station_of`], given the state directory.
+fn station_in(located: &Located<Bootstrap>, state_dir: &Path) -> String {
     if let Some(station) = &located.value.station {
         return station.clone();
     }
-    std::fs::read_to_string(opened.state_dir.join("station-id"))
+    std::fs::read_to_string(state_dir.join("station-id"))
         .map(|text| text.trim().to_owned())
         .unwrap_or_default()
 }
@@ -821,6 +842,145 @@ fn load_plugin_policy(
         state_dir.join("plugins").join("verified"),
     )
     .map_err(|error| error.to_string())
+}
+
+/// Runs `ai6 plugins keygen|sign|pin|check`. Neither a private key nor a command-line `KEY` that
+/// turned out not to be one is ever printed.
+fn plugins_command(command: PluginsCommand) -> ExitCode {
+    use ai6::station::plugins::{self, PublisherSigner};
+    let failed = |subject: &Path, error: std::io::Error| {
+        eprintln!("ai6: {}: {error}", subject.display());
+        ExitCode::FAILURE
+    };
+    match command {
+        PluginsCommand::Keygen { out } => match PublisherSigner::generate(&out) {
+            Ok(signer) => {
+                println!("publisher = \"{}\"", signer.public_key());
+                if cfg!(windows) {
+                    eprintln!(
+                        "ai6: {} takes the access list of its directory: keep it where only you can read it",
+                        out.display()
+                    );
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => failed(&out, error),
+        },
+        PluginsCommand::Sign { key, paths } => {
+            let signer = match PublisherSigner::read(&key) {
+                Ok(signer) => signer,
+                Err(error) => return failed(&key, error),
+            };
+            for path in &paths {
+                match signer.sign(path) {
+                    Ok(signature) => println!("{}", signature.display()),
+                    Err(error) => return failed(path, error),
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        PluginsCommand::Pin { publisher, paths } => {
+            let publisher = match publisher.as_deref().map(publisher_of).transpose() {
+                Ok(publisher) => publisher,
+                Err(error) => {
+                    eprintln!("ai6: --publisher: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let mut pins = ai6::PinSet::new();
+            for path in &paths {
+                let entry = match publisher {
+                    Some(key) => plugins::publisher_entry(path, key),
+                    None => plugins::pin_entry(path),
+                };
+                match entry {
+                    Ok(entry) => pins = pins.with_library(entry),
+                    Err(error) => return failed(path, error),
+                }
+            }
+            for weakening in pins.weakenings() {
+                eprintln!("ai6: warning: {weakening}");
+            }
+            match toml::to_string(&pins) {
+                Ok(text) => {
+                    print!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("ai6: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        PluginsCommand::Check { bootstrap, paths } => match plugins_check(&bootstrap, paths) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("ai6: {error}");
+                ExitCode::FAILURE
+            }
+        },
+    }
+}
+
+/// The publisher `--publisher` names: `ed25519:HEX`, else the public half of the key in that file.
+fn publisher_of(text: &str) -> Result<ai6::PublisherKey, String> {
+    if let Ok(key) = text.parse() {
+        return Ok(key);
+    }
+    ai6::station::plugins::PublisherSigner::read(Path::new(text))
+        .map(|signer| signer.public_key())
+        .map_err(|error| format!("not ed25519:HEX, nor a key file ({})", error.kind()))
+}
+
+/// Prints the verdict on each library named, or on `[plugins] paths`, against the `plugin` records
+/// of this host's Station. Opens the configuration provider and nothing else.
+fn plugins_check(bootstrap: &BootstrapArg, paths: Vec<PathBuf>) -> Result<ExitCode, String> {
+    let located = load_bootstrap(bootstrap)?;
+    let location = located
+        .provider_location()
+        .map_err(|error| error.to_string())?;
+    let provider = open_provider(&location, &located.value)?;
+    let state_dir = located.state_dir().map_err(|error| error.to_string())?;
+    let snapshot = provider
+        .load(&station_in(&located, &state_dir))
+        .map_err(|error| error.to_string())?;
+    let paths = if paths.is_empty() {
+        located.value.plugins.paths.clone()
+    } else {
+        paths
+    };
+    let summary =
+        ai6::station::plugins::check_libraries(&paths, &snapshot.settings.pins.unwrap_or_default());
+    for library in &summary.checked {
+        println!("{}  {}  {}", library.path, library.digest, library.verdict);
+    }
+    for skipped in &summary.skipped {
+        println!("skipped: {skipped}");
+    }
+    for problem in summary.failed.iter().chain(&summary.unreadable) {
+        eprintln!("ai6: {problem}");
+    }
+    for weakening in &summary.weakened {
+        eprintln!("ai6: warning: {weakening}");
+    }
+    if summary.checked.is_empty() {
+        eprintln!("ai6: no AI6 provider library to check");
+    }
+    let refused = summary
+        .checked
+        .iter()
+        .any(|library| !library.verdict.starts_with("accepted"));
+    Ok(
+        if refused
+            || summary.checked.is_empty()
+            || !summary.failed.is_empty()
+            || !summary.unreadable.is_empty()
+        {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        },
+    )
 }
 
 /// Reads the hook input, asks the gate, and prints a denial when it holds the command; a
