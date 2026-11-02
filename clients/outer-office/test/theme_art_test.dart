@@ -245,9 +245,9 @@ void main() {
       OoArtLimits.current = const OoArtLimits(maxWidth: 1536);
       expect(art.pick(const Size(3226, 270)).width, 1536);
       expect(OoArtLimits.defaultMaxWidth, 3840);
-      expect(OoConfig.parse('[art]\nmax_width = 1920\n').art.maxWidth, 1920);
+      expect(OoConfig.parse('[oo.art]\nmax_width = 1920\n').art.maxWidth, 1920);
       expect(
-        () => OoConfig.parse('[art]\nmax_width = 0\n'),
+        () => OoConfig.parse('[oo.art]\nmax_width = 0\n'),
         throwsFormatException,
       );
     });

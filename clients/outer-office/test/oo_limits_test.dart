@@ -28,12 +28,12 @@ void main() {
     'the tables set each value in any format, and 0 turns a refresh off',
     () {
       final limits = OoConfig.parse(
-        '[refresh]\nsessions = 7\noverview = 0\ntimeline = 2.5\n'
-        '[controls]\nwait = 0\npoll = 0.25\n'
-        '[pages]\ntimeline = 20\naudit = 500\n'
-        '[terminal]\nscrollback_lines = 200\nconnect_timeout = 3\n'
+        '[oo.refresh]\nsessions = 7\noverview = 0\ntimeline = 2.5\n'
+        '[oo.controls]\nwait = 0\npoll = 0.25\n'
+        '[oo.pages]\ntimeline = 20\naudit = 500\n'
+        '[oo.terminal]\nscrollback_lines = 200\nconnect_timeout = 3\n'
         'retry_delay = 0.5\nretry_max_delay = 4\n'
-        '[limits]\nmission_title_chars = 80\nmission_prompt_chars = 0\n'
+        '[oo.limits]\nmission_title_chars = 80\nmission_prompt_chars = 0\n'
         'reason_chars = 120\n',
       ).limits;
       expect(limits.refresh.sessions, const Duration(seconds: 7));
@@ -50,22 +50,23 @@ void main() {
       expect(limits.inputs.missionTitleChars, 80);
       expect(InputSettings.field(limits.inputs.missionPromptChars), isNull);
       expect(InputSettings.field(limits.inputs.reasonChars), 120);
-      final json = OoConfig.parse('#!json\n{"refresh": {"pools": 9}}').limits;
+      final json = OoConfig.parse('#!json\n{"oo": {"refresh": {"pools": 9}}}')
+          .limits;
       expect(json.refresh.pools, const Duration(seconds: 9));
     },
   );
 
   test('nonsense and unknown keys are refused, naming the key', () {
     for (final (text, message) in [
-      ('[refresh]\nsessions = -1\n', 'refresh.sessions'),
-      ('[refresh]\nsessions = "soon"\n', 'refresh.sessions'),
-      ('[controls]\npoll = 0\n', 'controls.poll'),
-      ('[pages]\ntimeline = 0\n', 'pages.timeline'),
-      ('[pages]\naudit = 1.5\n', 'pages.audit'),
-      ('[terminal]\nretry_delay = 0\n', 'terminal.retry_delay'),
-      ('[limits]\nreason_chars = -2\n', 'limits.reason_chars'),
-      ('[refresh]\nnever = 1\n', 'refresh.never'),
-      ('[terminal]\nnope = 1\n', 'terminal.nope'),
+      ('[oo.refresh]\nsessions = -1\n', 'refresh.sessions'),
+      ('[oo.refresh]\nsessions = "soon"\n', 'refresh.sessions'),
+      ('[oo.controls]\npoll = 0\n', 'controls.poll'),
+      ('[oo.pages]\ntimeline = 0\n', 'pages.timeline'),
+      ('[oo.pages]\naudit = 1.5\n', 'pages.audit'),
+      ('[oo.terminal]\nretry_delay = 0\n', 'terminal.retry_delay'),
+      ('[oo.limits]\nreason_chars = -2\n', 'limits.reason_chars'),
+      ('[oo.refresh]\nnever = 1\n', 'refresh.never'),
+      ('[oo.terminal]\nnope = 1\n', 'terminal.nope'),
     ]) {
       expect(
         () => OoConfig.parse(text),
@@ -81,10 +82,10 @@ void main() {
     }
   });
 
-  testWidgets('[refresh] sessions = 7 makes the board ask every 7 seconds', (
+  testWidgets('[oo.refresh] sessions = 7 makes the board ask every 7 seconds', (
     tester,
   ) async {
-    final config = OoConfig.parse('[refresh]\nsessions = 7\n');
+    final config = OoConfig.parse('[oo.refresh]\nsessions = 7\n');
     var boards = 0;
     final board = MissionBoard(
       apiOrigin: Uri.parse('https://oo.example'),
@@ -107,7 +108,7 @@ void main() {
   });
 
   testWidgets('a refresh of 0 starts no timer at all', (tester) async {
-    final config = OoConfig.parse('[refresh]\nsessions = 0\n');
+    final config = OoConfig.parse('[oo.refresh]\nsessions = 0\n');
     var boards = 0;
     final board = MissionBoard(
       apiOrigin: Uri.parse('https://oo.example'),
@@ -124,9 +125,9 @@ void main() {
     expect(boards, 0);
   });
 
-  test('[pages] sets what the timeline and the audit log ask for', () async {
+  test('[oo.pages] sets what the timeline and the audit log ask for', () async {
     final asked = <Uri>[];
-    final config = OoConfig.parse('[pages]\ntimeline = 7\naudit = 9\n');
+    final config = OoConfig.parse('[oo.pages]\ntimeline = 7\naudit = 9\n');
     final board = MissionBoard(
       apiOrigin: Uri.parse('https://oo.example'),
       pollInterval: null,
