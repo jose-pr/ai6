@@ -63,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Resuming a Mission whose harness is still running no longer ends it. The old harness answers
+  being stopped with the end of its turn, and that could fail the Mission with the new harness
+  running, or refuse the resume. The old harness is now stopped once the new one has taken its
+  place, and nothing it says after that counts. A Session that truly ends while its resume is
+  under way refuses the resume (`409`), and the harness the resume started is stopped.
 - A person stays signed in past the access token's hour. `POST /v1/auth/renew` moves the token's
   expiry on, up to `[gateway] session_max` (twelve hours) from signing in, with the same value, so
   her chat, her tools and a waiting proposal carry on. Outer Office renews `[refresh] renew_before`

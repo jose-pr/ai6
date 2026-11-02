@@ -33,12 +33,27 @@ pub(super) fn log_of(key: &str) -> StreamLog {
     LOGS.lock().unwrap().get(key).cloned().unwrap_or_default()
 }
 
+/// What a test does at a moment of a key's mock, to see a race go one way. It is told the Session
+/// ID the mock reports.
+type Hook = Arc<dyn Fn(&str) + Send + Sync>;
+
+static ON_RESUME: Mutex<BTreeMap<String, Hook>> = Mutex::new(BTreeMap::new());
+static ON_CLOSE: Mutex<BTreeMap<String, Hook>> = Mutex::new(BTreeMap::new());
+
+fn run_hook(hooks: &Mutex<BTreeMap<String, Hook>>, key: &str, session: &str) {
+    let hook = hooks.lock().unwrap().get(key).cloned();
+    if let Some(hook) = hook {
+        hook(session);
+    }
+}
+
 /// A handler whose Sessions behave as [`StreamSession`] does.
 ///
 /// Its Agent's environment says how: `MOCK_STREAM_KEY` names the log, `MOCK_STREAM_TURN` is what
 /// a first turn does after its initialization (`hold` works on, `complete` ends it),
-/// `MOCK_STREAM_INTERRUPT` is how an interrupted turn ends (`failed`, `completed`, `silent`), and
-/// `MOCK_STREAM_RESUMES_AS` a Session ID a resume reports other than the one asked for.
+/// `MOCK_STREAM_INTERRUPT` is how an interrupted turn ends (`failed`, `completed`, `silent`, or
+/// `late`: silent the first time, then failed), and `MOCK_STREAM_RESUMES_AS` a Session ID a resume
+/// reports other than the one asked for.
 /// `MOCK_STREAM_RESUME_FAILS` refuses a resume with that text, and `MOCK_STREAM_SESSIONLESS` keeps
 /// the harness from ever reporting a Session.
 #[derive(Default, Provider)]
@@ -69,6 +84,11 @@ impl AgentHandler for MockStreamHandler {
         if let Some(reason) = request.environment.get("MOCK_STREAM_RESUME_FAILS") {
             return Err(ProviderError::new(Status::GUATIAO_ERR_INTERNAL, reason));
         }
+        run_hook(
+            &ON_RESUME,
+            &setting(&request.environment, "MOCK_STREAM_KEY", "default"),
+            request.session_id.as_str(),
+        );
         let reports = request
             .environment
             .get("MOCK_STREAM_RESUMES_AS")
@@ -195,9 +215,14 @@ impl AgentSession for StreamSession {
     }
 
     fn interrupt(&self) -> Result<(), ProviderError> {
-        self.log(|log| log.interrupts += 1);
+        let mut interrupts = 0;
+        self.log(|log| {
+            log.interrupts += 1;
+            interrupts = log.interrupts;
+        });
         match self.on_interrupt.as_str() {
-            "failed" => self.stream.lock().unwrap().queue.push_back(stream_event(
+            "late" if interrupts == 1 => {}
+            "failed" | "late" => self.stream.lock().unwrap().queue.push_back(stream_event(
                 "failed",
                 Some("[ede_diagnostic] result_type=user"),
             )),
@@ -213,6 +238,7 @@ impl AgentSession for StreamSession {
     }
 
     fn close(&self) -> Result<(), ProviderError> {
+        run_hook(&ON_CLOSE, &self.key, &self.reports);
         self.log(|log| log.closes += 1);
         Ok(())
     }
@@ -389,6 +415,170 @@ async fn a_resume_that_reports_another_session_is_refused_when_it_appears() {
     );
     // The Mission can be resumed again.
     assert!(log_of("other").closes >= 1);
+}
+
+/// A harness answers being stopped with the end of a turn: it must no longer be the Mission's
+/// Session by then, or that end reads as the end of the Mission.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_replaced_harness_is_stopped_only_once_it_is_replaced() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(
+        root.path(),
+        "",
+        &agent(
+            "replaced",
+            "MOCK_STREAM_RESUMES_AS = \"someone-else\"\n",
+            "",
+        ),
+    );
+    let _stop = StopOnDrop(state.clone());
+    let still_the_missions = Arc::new(Mutex::new(Vec::new()));
+    let (watched, seen) = (state.clone(), still_the_missions.clone());
+    ON_CLOSE.lock().unwrap().insert(
+        "replaced".to_owned(),
+        Arc::new(move |session: &str| {
+            if session == "stream-replaced" {
+                let first_session_live = watched
+                    .sessions
+                    .lock()
+                    .unwrap()
+                    .get("mission-1")
+                    .is_some_and(|operation| !operation.resumed);
+                seen.lock().unwrap().push(first_session_live);
+            }
+        }),
+    );
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-replaced").await;
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition("mission-1", MissionState::Blocked)
+        .unwrap();
+    let _ = resume(&state, "mission-1", Some("go on"))
+        .await
+        .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
+    assert_eq!(*still_the_missions.lock().unwrap(), [false]);
+}
+
+/// An operator who resumes before the interrupted turn has ended gets the resume: the old harness
+/// ending that turn afterwards does not end the Mission.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_resume_before_an_interrupted_turn_ended_goes_on() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(
+        root.path(),
+        "",
+        &agent("slow-end", "MOCK_STREAM_INTERRUPT = \"late\"\n", ""),
+    );
+    let _stop = StopOnDrop(state.clone());
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-slow-end").await;
+    assert_eq!(
+        interrupt(&state, "mission-1").await.state,
+        MissionState::Blocked
+    );
+    let _ = resume(&state, "mission-1", Some("go on"))
+        .await
+        .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
+    wait_for_state(&state, "mission-1", MissionState::Done).await;
+}
+
+/// A pump whose Session is no longer the Mission's has no say in it, however late it gets there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_end_of_a_session_no_longer_the_missions_is_not_the_missions() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(root.path(), "", &agent("stale", "", ""));
+    let _stop = StopOnDrop(state.clone());
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-stale").await;
+    publish_finished_event(
+        &state,
+        "mission-1",
+        stream_event("failed", Some("the old harness ended")),
+        None,
+    );
+    assert_eq!(
+        mission_state(&state, "mission-1").state,
+        MissionState::Working
+    );
+    while let Some(event) = pop_event(&state, "mission-1") {
+        assert_ne!(event.kind, "failed");
+    }
+}
+
+/// A harness whose turn ends while its resume is under way settles the Mission: the resume is
+/// refused and the harness it started stopped, or it would run on with no pump to read it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_that_ends_during_its_resume_takes_the_resume_with_it() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(root.path(), "", &agent("ending", "", ""));
+    let _stop = StopOnDrop(state.clone());
+    let during = state.clone();
+    ON_RESUME.lock().unwrap().insert(
+        "ending".to_owned(),
+        Arc::new(move |_: &str| {
+            let session = during
+                .sessions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .map(|operation| operation.session.clone())
+                .unwrap();
+            session.lock().unwrap().interrupt().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while has_live_session(&during, "mission-1") {
+                assert!(Instant::now() < deadline, "the turn never ended");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }),
+    );
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-ending").await;
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition("mission-1", MissionState::Blocked)
+        .unwrap();
+    assert!(resume(&state, "mission-1", Some("go on")).await.is_err());
+    assert!(!has_live_session(&state, "mission-1"));
+    wait_for_state(&state, "mission-1", MissionState::Failed).await;
+    wait_until("both harnesses are closed", || log_of("ending").closes >= 2).await;
+}
+
+/// A Mission that ends while its resume is under way leaves no harness behind.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_mission_that_ends_during_its_resume_leaves_no_harness() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(root.path(), "", &agent("abandoned", "", ""));
+    let _stop = StopOnDrop(state.clone());
+    let during = state.clone();
+    ON_RESUME.lock().unwrap().insert(
+        "abandoned".to_owned(),
+        Arc::new(move |_: &str| {
+            during
+                .missions
+                .lock()
+                .unwrap()
+                .transition("mission-1", MissionState::Abandoned)
+                .unwrap();
+        }),
+    );
+    start_mission_by_id(&state, "mission-1").await;
+    wait_for_session(&state, "mission-1", "stream-abandoned").await;
+    interrupt(&state, "mission-1").await;
+    wait_until("the interrupted turn's end closes the harness", || {
+        !has_live_session(&state, "mission-1")
+    })
+    .await;
+    assert!(resume(&state, "mission-1", Some("go on")).await.is_err());
+    assert!(!has_live_session(&state, "mission-1"));
+    wait_until("the resumed harness is closed", || {
+        log_of("abandoned").closes >= 2
+    })
+    .await;
 }
 
 async fn interrupt(state: &DaemonState, mission_id: &str) -> Mission {

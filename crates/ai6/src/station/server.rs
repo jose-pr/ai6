@@ -5056,7 +5056,6 @@ async fn resume_mission(
                     let _ = resumed.close();
                     return Err(RESUME_NOT_RETAINED.to_owned());
                 }
-                close_replaced(old_session)?;
                 Ok::<_, String>(resumed)
             })
             .await
@@ -5117,7 +5116,6 @@ async fn resume_mission(
                         .send_message(AgentMessage { text })
                         .map_err(|error| error.to_string())?;
                 }
-                close_replaced(old_session)?;
                 Ok::<_, String>(resumed)
             })
             .await
@@ -5155,46 +5153,72 @@ async fn resume_mission(
             typed_interrupt(&state, &mission_id),
         )));
     }
-    state.sessions.lock().map_err(|_| internal_error())?.insert(
-        mission_id.clone(),
-        AgentOperation {
-            handler_provider: handler_provider.clone(),
-            terminal_provider: terminal_provider.clone(),
-            working_directory,
-            environment,
-            model,
-            effort,
-            cover: cover_audit,
-            safe_house,
-            session: resumed.clone(),
-            watchdog,
-            exposure,
-            gate: SessionGate::default(),
-            session_id: Some(session_id.clone()),
-            resumed: true,
-            runner: attachment,
-            reach,
-            #[cfg(feature = "cables-mcp")]
-            cables_mcp,
-            #[cfg(feature = "cables-mcp")]
-            _theater_mcp: theater_mcp,
-            #[cfg(feature = "publisher")]
-            telemetry: telemetry.clone(),
-        },
-    );
+    // The sessions lock orders this against a pump finishing the replaced Session: either the pump
+    // took it first and the resume is refused, or the pump finds it is no longer the Mission's.
+    let replaced = {
+        let mut sessions = state.sessions.lock().map_err(|_| internal_error())?;
+        let ended = old_session.as_ref().is_some_and(|old| {
+            !sessions
+                .get(&mission_id)
+                .is_some_and(|operation| Arc::ptr_eq(&operation.session, old))
+        });
+        (!ended).then(|| {
+            sessions.insert(
+                mission_id.clone(),
+                AgentOperation {
+                    handler_provider: handler_provider.clone(),
+                    terminal_provider: terminal_provider.clone(),
+                    working_directory,
+                    environment,
+                    model,
+                    effort,
+                    cover: cover_audit,
+                    safe_house,
+                    session: resumed.clone(),
+                    watchdog,
+                    exposure,
+                    gate: SessionGate::default(),
+                    session_id: Some(session_id.clone()),
+                    resumed: true,
+                    runner: attachment,
+                    reach,
+                    #[cfg(feature = "cables-mcp")]
+                    cables_mcp,
+                    #[cfg(feature = "cables-mcp")]
+                    _theater_mcp: theater_mcp,
+                    #[cfg(feature = "publisher")]
+                    telemetry: telemetry.clone(),
+                },
+            )
+        })
+    };
+    let Some(replaced) = replaced else {
+        stop_refused_resume(&state, &mission_id, resumed).await;
+        return Err(conflict(
+            "The Mission's Session ended while it was being resumed",
+        ));
+    };
     let working = state
         .missions
         .lock()
         .map_err(|_| internal_error())?
-        .transition(&mission_id, MissionState::Working)
-        .map_err(mission_error)?;
+        .transition(&mission_id, MissionState::Working);
+    let working = match working {
+        Ok(working) => working,
+        Err(error) => {
+            stop_refused_resume(&state, &mission_id, resumed).await;
+            close_replaced(&mission_id, replaced).await;
+            return Err(mission_error(error));
+        }
+    };
     sync_session_record(&state, &mission_id);
     recovery::record_launch(&state, &mission_id);
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = &telemetry {
         telemetry.publish_lifecycle("working");
     }
-    spawn_event_pump(state.clone(), mission_id, resumed);
+    spawn_event_pump(state.clone(), mission_id.clone(), resumed);
+    close_replaced(&mission_id, replaced).await;
     Ok((
         StatusCode::ACCEPTED,
         Json(StartedMission {
@@ -5225,19 +5249,54 @@ fn another_session(reported: Option<&SessionId>, expected: &SessionId) -> bool {
     reported.is_some_and(|reported| reported != expected)
 }
 
-/// Stops the Session a resume replaces, once the new one runs.
-fn close_replaced(
-    old_session: Option<Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>>,
-) -> Result<(), String> {
-    if let Some(old_session) = old_session {
-        let old_session = old_session
+/// Stops the harness of a Session a resume has replaced. Not before: a harness answers being
+/// stopped with the end of its turn, which must not read as the Mission's. The resume stands
+/// whatever this says, since its own harness already runs.
+async fn close_replaced(mission_id: &str, replaced: Option<AgentOperation>) {
+    let Some(replaced) = replaced else {
+        return;
+    };
+    replaced.gate.close();
+    let closed = tokio::task::spawn_blocking(move || {
+        let session = replaced
+            .session
             .lock()
             .map_err(|_| "provider Session lock was poisoned".to_owned())?;
         // A harness that already exited cannot be interrupted, and need not be.
-        let _ = old_session.interrupt();
-        old_session.close().map_err(|error| error.to_string())?;
+        let _ = session.interrupt();
+        session.close().map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(|closed| closed);
+    if let Err(error) = closed {
+        eprintln!("ai6: Mission {mission_id:?}: the replaced harness was not closed: {error}");
     }
-    Ok(())
+}
+
+/// Stops the harness of a resume refused after it started, which leaves the Mission as it is.
+async fn stop_refused_resume(
+    state: &DaemonState,
+    mission_id: &str,
+    resumed: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+) {
+    if let Ok(mut sessions) = state.sessions.lock()
+        && sessions
+            .get(mission_id)
+            .is_some_and(|operation| Arc::ptr_eq(&operation.session, &resumed))
+    {
+        sessions.remove(mission_id);
+    }
+    credentials::release(state, mission_id);
+    let closed = tokio::task::spawn_blocking(move || {
+        if let Ok(session) = resumed.lock() {
+            let _ = session.close();
+        }
+    })
+    .await;
+    if let Err(error) = closed {
+        eprintln!("ai6: Mission {mission_id:?}: the refused harness was not closed: {error}");
+    }
 }
 
 async fn send_message(
@@ -5567,6 +5626,11 @@ fn spawn_event_pump_with_monitor(
                     {
                         queue_event(&state, &mission_id, event);
                         medical::stop_for_budget(&state, &mission_id, &session);
+                        break;
+                    }
+                    // The writes above take time, in which a resume can replace this Session; what
+                    // its harness says from here on would be taken for the Mission's.
+                    if !is_current_session(&state, &mission_id, &session) {
                         break;
                     }
                     if event.kind == LIMIT_EVENT {
@@ -6403,18 +6467,15 @@ fn publish_finished_event(
     event: AgentEvent,
     finished: Option<FinishOutcome>,
 ) {
-    let cover_blown = finished
-        .as_ref()
-        .is_some_and(|finished| finished.cover_blown);
-    let event = if let Some(finished) = &finished {
-        apply_finish_outcome(event, finished)
-    } else {
-        event
+    // Nothing was finished: the Session is no longer the Mission's, and whoever took it over says
+    // how the Mission goes on. A resume's new harness may be running by now.
+    let Some(finished) = finished else {
+        return;
     };
+    let cover_blown = finished.cover_blown;
+    let event = apply_finish_outcome(event, &finished);
     #[cfg(feature = "publisher")]
-    if let Some(finished) = finished
-        && let Some(telemetry) = finished.telemetry
-    {
+    if let Some(telemetry) = finished.telemetry {
         let state = match event.kind.as_str() {
             "completed" => Some("done"),
             "failed" | "blown" => Some("failed"),
