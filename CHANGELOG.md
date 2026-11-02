@@ -106,6 +106,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A lowered clearance reaches a running harness. A person lowering it, a quarantine taking back a
+  raise, desk duty beginning or a retirement left the harness its tools until it next ended. It is now
+  stopped at the Station's next check-in, the Mission `blocked` with reason `clearance-lowered` and an
+  `agent.clearance.stop` audit record, and a resume goes on at the clearance the Agent has then. A
+  harness a field runner kept is stopped as soon as a Station re-attaches to it: its Session record
+  (`SessionLaunch::clearance`) now says what it was launched at. A failed Registry read stops nothing.
 - A Codex thread in remote-hands mode no longer keeps a command tool on the Station. Its read-only
   sandbox left `exec_command` reading any file the Station's user can read on Linux (measured with
   Codex 0.164.0; on Windows such commands were refused by policy). `features.shell_tool=false` now

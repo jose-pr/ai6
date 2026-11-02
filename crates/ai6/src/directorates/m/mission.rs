@@ -124,6 +124,9 @@ pub(crate) struct LaunchManifest {
     /// The key of the Session on the Theater's runner, when a runner supervises the harness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) runner: Option<String>,
+    /// The clearance the harness was launched at, which fixed its tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) clearance: Option<String>,
 }
 
 /// What a Station needs to act on its Session record: the record's ID and the fencing token
@@ -780,6 +783,7 @@ mod tests {
                 mode: ExecutionMode::Field,
                 session: None,
                 runner: Some("key-1".to_owned()),
+                clearance: None,
             },
         )
         .unwrap();
@@ -983,6 +987,7 @@ mod tests {
                     mode: ExecutionMode::Field,
                     session: None,
                     runner: None,
+                    clearance: None,
                 },
             )
             .unwrap();
@@ -1038,6 +1043,7 @@ mod tests {
                     mode: ExecutionMode::Field,
                     session: None,
                     runner: None,
+                    clearance: None,
                 },
             )
             .unwrap();
@@ -1197,6 +1203,7 @@ mod tests {
                     mode: ExecutionMode::Field,
                     session: None,
                     runner: None,
+                    clearance: None,
                 },
             )
             .unwrap();

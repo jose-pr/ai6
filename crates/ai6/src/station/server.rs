@@ -1565,6 +1565,7 @@ async fn scheduler_loop(base: DaemonState) {
                 accounts::tend(&tick);
                 recovery::checkpoint_due(&tick);
                 ephemeral::sweep(&tick);
+                agents::enforce_clearances(&tick);
             }
             medical::enforce_quarantines(&tick);
         })
@@ -3411,6 +3412,9 @@ struct AgentOperation {
     exposure: ExposureGate,
     gate: SessionGate,
     session_id: Option<SessionId>,
+    /// The clearance the harness was launched at, which fixed its tools. One taken up from a
+    /// runner holds what its launch gave it, or `00` when no record says.
+    clearance: String,
     /// Whether `session_id` is the Session this harness was asked to resume, which what its stream
     /// reports must match.
     resumed: bool,
@@ -4250,6 +4254,11 @@ async fn start_mission(
     let runner_key = runner
         .as_ref()
         .map(|_| uuid::Uuid::new_v4().simple().to_string());
+    let launch_clearance = if review {
+        "desk".to_owned()
+    } else {
+        agent.clearance.clone()
+    };
     let operation = LaunchManifest {
         handler_provider: handler_provider.clone(),
         terminal_provider: terminal_provider.clone(),
@@ -4262,6 +4271,7 @@ async fn start_mission(
         mode: plan.mode,
         session: previous_hold.clone(),
         runner: runner_key.clone(),
+        clearance: Some(launch_clearance.clone()),
     };
     let persisted = state
         .missions
@@ -4600,6 +4610,7 @@ async fn start_mission(
             exposure,
             gate: SessionGate::default(),
             session_id: session_id.clone(),
+            clearance: launch_clearance.clone(),
             resumed: false,
             runner: attachment,
             reach,
@@ -4823,7 +4834,9 @@ async fn resume_mission(
         ExecutionMode::RemoteHands => None,
     };
     // A Session its runner still supervises, or still has unread events of, is re-attached
-    // instead of started again. A parked Mission's Session ended at its limit.
+    // instead of started again. A parked Mission's Session ended at its limit, and one stopped for
+    // its clearance must start again under the new one.
+    let stopped_for_clearance = mission.blocked_reason.as_deref() == Some(CLEARANCE_REASON);
     let reattach = match (
         &runner,
         resume_manifest
@@ -4831,7 +4844,9 @@ async fn resume_mission(
             .and_then(|manifest| manifest.runner.clone()),
         &old_session,
     ) {
-        (Some(link), Some(key), None) if mission.state != MissionState::Parked => {
+        (Some(link), Some(key), None)
+            if mission.state != MissionState::Parked && !stopped_for_clearance =>
+        {
             let link = link.clone();
             tokio::task::spawn_blocking(move || link.status(&key))
                 .await
@@ -4842,6 +4857,18 @@ async fn resume_mission(
                 .filter(|report| !report.ended || report.last > report.cursor)
         }
         _ => None,
+    };
+    // A harness taken up as it runs holds what it was launched with; a record that does not say
+    // counts as the most, so a lowered clearance still reaches it.
+    let launched_clearance = if reattach.is_some() {
+        resume_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.clearance.clone())
+            .unwrap_or_else(|| "00".to_owned())
+    } else if review {
+        "desk".to_owned()
+    } else {
+        resume_agent.clearance.clone()
     };
     let session_id = stored_session_id
         .or_else(|| mission.session_ids.last().cloned())
@@ -5233,6 +5260,7 @@ async fn resume_mission(
                     exposure,
                     gate: SessionGate::default(),
                     session_id: Some(session_id.clone()),
+                    clearance: launched_clearance.clone(),
                     resumed: true,
                     runner: attachment,
                     reach,
@@ -5266,6 +5294,14 @@ async fn resume_mission(
         }
     };
     sync_session_record(&state, &mission_id);
+    if let Ok(mut missions) = state.missions.lock()
+        && let Some(mut manifest) = missions.operation(&mission_id)
+    {
+        manifest.clearance = Some(launched_clearance.clone());
+        if let Err(error) = missions.set_operation(&mission_id, manifest) {
+            eprintln!("ai6: Mission {mission_id:?} launch clearance not recorded: {error:?}");
+        }
+    }
     recovery::record_launch(&state, &mission_id);
     #[cfg(feature = "publisher")]
     {
@@ -5276,6 +5312,12 @@ async fn resume_mission(
     }
     spawn_event_pump(state.clone(), mission_id.clone(), resumed);
     close_replaced(&mission_id, replaced).await;
+    // A Station that took up a running harness has not read its Agent's clearance since it was
+    // launched, maybe long ago.
+    if reattach.is_some() {
+        let enforcing = state.clone();
+        let _ = tokio::task::spawn_blocking(move || agents::enforce_clearances(&enforcing)).await;
+    }
     Ok((
         StatusCode::ACCEPTED,
         Json(StartedMission {
@@ -5321,6 +5363,10 @@ const DENIED_REASON: &str = "permission-denied";
 
 /// Why a Mission an operator interrupted is blocked.
 const INTERRUPTED_REASON: &str = "interrupted";
+
+/// Why a Mission is blocked after its harness was stopped for holding more than its Agent's
+/// clearance now gives.
+pub(crate) const CLEARANCE_REASON: &str = "clearance-lowered";
 
 /// What a resume that names no message tells the Agent.
 const RESUMED_MESSAGE: &str = "Carry on with the Mission from where it stopped.";
@@ -5980,6 +6026,69 @@ fn refuse_resumed_session(
     );
 }
 
+/// Stops a harness launched at more than its Agent's clearance now shows, and leaves the Mission
+/// waiting: a resume launches it again at what the Agent works at then.
+fn stop_for_clearance(
+    state: &DaemonState,
+    mission_id: &str,
+    operation: &str,
+    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    launched: &str,
+    now: &str,
+) {
+    let text = format!(
+        "the Agent's clearance fell from {launched} to {now}, so its harness was stopped; resuming \
+         the Mission goes on at {now}"
+    );
+    eprintln!("ai6: Mission {mission_id:?}: {text}");
+    #[cfg(feature = "publisher")]
+    let telemetry = state
+        .sessions
+        .lock()
+        .ok()
+        .and_then(|sessions| sessions.get(mission_id)?.telemetry.clone());
+    if let Ok(session) = session.lock() {
+        let _ = session.interrupt();
+    }
+    stop_session_keeping_mission(state, mission_id, session);
+    let blocked = state
+        .missions
+        .lock()
+        .is_ok_and(|mut missions| missions.block_for(mission_id, CLEARANCE_REASON).is_ok());
+    if blocked {
+        sync_session_record(state, mission_id);
+        #[cfg(feature = "publisher")]
+        if let Some(telemetry) = &telemetry {
+            telemetry.publish_lifecycle_for("blocked", Some(CLEARANCE_REASON));
+        }
+    }
+    let record = crate::directorates::registry::store::AuditRecord {
+        id: format!("agent.clearance.stop-{}", uuid::Uuid::new_v4().simple()),
+        actor: format!("station:{}", state.station_id),
+        action: "agent.clearance.stop".to_owned(),
+        operation: operation.to_owned(),
+        resource: None,
+        target: format!("{mission_id}:{launched}:{now}"),
+        at: state.clock.now() as f64,
+    };
+    if let Err(error) = state.intake.record_audit(&record) {
+        eprintln!("ai6: clearance stop audit record was not written: {error}");
+    }
+    queue_event(
+        state,
+        mission_id,
+        AgentEvent {
+            kind: "blocked".to_owned(),
+            text: Some(text),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+            quota: Vec::new(),
+        },
+    );
+}
+
 /// Stops a Session whose Mission goes on waiting: its harness is closed and its credentials
 /// released, while the Mission's state and safe house stay for the resume that continues it.
 fn stop_session_keeping_mission(
@@ -6240,6 +6349,7 @@ fn held_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
         GREEN_INK_REASON,
         crate::station::issues::ISSUE_REASON,
         medical::BUDGET_REASON,
+        CLEARANCE_REASON,
     ]
     .into_iter()
     .find(|reason| mission.blocked_reason.as_deref() == Some(*reason))
@@ -7249,6 +7359,7 @@ queue = 1
                     exposure: ExposureGate::default(),
                     gate: SessionGate::default(),
                     session_id: Some(session),
+                    clearance: "field".to_owned(),
                     resumed: false,
                     runner: None,
                     reach: ReachWatch::default(),
@@ -9760,6 +9871,7 @@ queue = 1
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                clearance: "field".to_owned(),
                 resumed: false,
                 runner: None,
                 reach: ReachWatch::default(),
@@ -9870,6 +9982,7 @@ queue = 1
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                clearance: "field".to_owned(),
                 resumed: false,
                 runner: None,
                 reach: ReachWatch::default(),
@@ -10060,6 +10173,7 @@ queue = 1
                 exposure: ExposureGate::default(),
                 gate,
                 session_id: Some(session_id),
+                clearance: "field".to_owned(),
                 resumed: false,
                 runner: None,
                 reach: ReachWatch::default(),
@@ -10456,6 +10570,7 @@ queue = 1
                 exposure: ExposureGate::default(),
                 gate: SessionGate::default(),
                 session_id: Some(session_id),
+                clearance: "field".to_owned(),
                 resumed: false,
                 runner: None,
                 reach: ReachWatch::default(),
@@ -11225,6 +11340,255 @@ queue = 1
             .await
             .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
         let _ = fs::remove_dir_all(&scratch);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_lowered_clearance_stops_a_running_harness_and_a_resume_goes_on_under_it() {
+        use crate::directorates::registry::clearance::ClearanceGrant;
+
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n",
+        );
+        let mission = format!("clearance-fallen-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission).unwrap(),
+                Some("G".to_owned()),
+                "work".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path(mission.clone()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+        let live = |state: &DaemonState| state.sessions.lock().unwrap().contains_key(&mission);
+        assert!(live(&state));
+
+        // What the Agent still holds stops nothing, nor does what cannot be read.
+        agents::enforce_clearances(&state);
+        assert!(live(&state), "the clearance it was launched at");
+        let grants = root.path().join("registry/clearance-grants/G");
+        fs::create_dir_all(&grants).unwrap();
+        fs::write(grants.join("007.json"), "not a grant").unwrap();
+        agents::enforce_clearances(&state);
+        assert!(live(&state), "a failed read shows no lowered clearance");
+        fs::remove_file(grants.join("007.json")).unwrap();
+
+        // Lowered: the harness goes, the Mission waits and says why, and the stop is on record.
+        let now = state.clock.now() as f64;
+        state
+            .intake
+            .put_clearance_grant(&ClearanceGrant::lower("007", "G", "desk", "ops", now))
+            .unwrap();
+        agents::enforce_clearances(&state);
+        assert!(!live(&state), "the harness was stopped");
+        let blocked = state
+            .missions
+            .lock()
+            .unwrap()
+            .get(&mission)
+            .cloned()
+            .unwrap();
+        assert_eq!(blocked.state, MissionState::Blocked);
+        assert_eq!(blocked.blocked_reason.as_deref(), Some(CLEARANCE_REASON));
+        assert!(
+            state
+                .intake
+                .audit_records()
+                .unwrap()
+                .iter()
+                .any(|record| record.action == "agent.clearance.stop"
+                    && record.actor.starts_with("station:")
+                    && record.target == format!("{mission}:field:desk")),
+            "the stop is audited"
+        );
+        let mut said = None;
+        tokio::time::timeout(Duration::from_secs(60), async {
+            while said.is_none() {
+                said = state
+                    .events
+                    .lock()
+                    .unwrap()
+                    .get(&mission)
+                    .into_iter()
+                    .flatten()
+                    .rev()
+                    .find(|event| event.kind == "blocked")
+                    .and_then(|event| event.text.clone());
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the Mission's stream says why");
+        assert!(said.unwrap().contains("fell from field to desk"));
+
+        // A resume launches it under the new clearance, which the next round leaves alone.
+        let _ = resume_mission(
+            State(state.clone()),
+            axum::extract::Path(mission.clone()),
+            Json(ResumeMission {
+                message: Some("carry on".to_owned()),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+        let resumed = RECORDED_RESUMES
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|request| request.mission_id.as_str() == mission)
+            .expect("the handler was resumed")
+            .clearance
+            .clone();
+        assert_eq!(resumed, "desk");
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+        agents::enforce_clearances(&state);
+        assert!(live(&state), "it now holds what its Agent may use");
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .operation(&mission)
+                .unwrap()
+                .clearance
+                .as_deref(),
+            Some("desk")
+        );
+
+        finalize_mission_resources(&state, &mission, true, false)
+            .await
+            .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_check_in_round_reads_the_clearance_of_what_runs() {
+        use crate::directorates::registry::clearance::ClearanceGrant;
+
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n",
+        );
+        let mut limits = crate::station::limits::StationLimits::default();
+        limits.scheduler.check_in = crate::bounds::Seconds(Duration::from_millis(50));
+        state.station = StationConfig::default().with_limits(limits);
+        let mission = format!("clearance-round-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission).unwrap(),
+                Some("G".to_owned()),
+                "work".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path(mission.clone()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+        let scheduler = tokio::spawn(scheduler_loop(state.clone()));
+        let now = state.clock.now() as f64;
+        state
+            .intake
+            .put_clearance_grant(&ClearanceGrant::lower("007", "G", "desk", "ops", now))
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(120), async {
+            while state.sessions.lock().unwrap().contains_key(&mission) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("a check-in round stops the harness");
+        state.stopping.store(true, Ordering::Release);
+        let _ = scheduler.await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_retirement_stops_a_running_harness_like_a_lowered_clearance() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\nretire_on = \"2027-01-31\"\non_retire = \"desk\"\n",
+        );
+        let mission = format!("clearance-retired-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission).unwrap(),
+                Some("G".to_owned()),
+                "work".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        // Well before the date.
+        state.clock = Clock(Arc::new(|| 1_700_000_000));
+        let _ = start_mission(
+            State(state.clone()),
+            axum::extract::Path(mission.clone()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+        agents::enforce_clearances(&state);
+        assert!(state.sessions.lock().unwrap().contains_key(&mission));
+
+        // Past it.
+        state.clock = Clock(Arc::new(|| 1_900_000_000));
+        agents::enforce_clearances(&state);
+        assert!(!state.sessions.lock().unwrap().contains_key(&mission));
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get(&mission)
+                .unwrap()
+                .blocked_reason
+                .as_deref(),
+            Some(CLEARANCE_REASON)
+        );
+        state.stopping.store(true, Ordering::Release);
     }
 
     #[tokio::test]

@@ -417,11 +417,19 @@ Answer-only Sessions and Moneypenny have limits of their own at any clearance. N
 isolates a command an Agent may run: [a command reaches what the Theater's OS user
 can](#what-a-claude-code-mission-may-call).
 
-The clearance is read when a harness starts and when it resumes, so a lowered one reaches the
-harness then, with a resumed Claude Code or Codex Session offered what the new clearance allows. A
-harness already running keeps the tools it started with until then, and so does one a field runner
-kept running that a Station attaches to again. AI6's own tools are not so late: a proposal, an issue
-tool and a request for green ink each look at the clearance when called.
+The clearance is read when a harness starts and when it resumes, which fixes its tools. A running
+harness cannot be given fewer, so one whose Agent's clearance has fallen below what it was launched
+at is stopped, at the Station's next check-in (`[scheduler] check_in`, 15 seconds by default): a person
+lowering the clearance, a quarantine taking back a raise, desk duty beginning or a retirement. The
+Mission waits, `blocked` with reason `clearance-lowered`, with an `agent.clearance.stop` audit record
+naming both clearances. Resuming it goes on at the clearance the Agent has then. A Registry read that
+fails shows nothing lower and stops nothing; a start or a resume at that moment counts the Agent as
+`desk`.
+
+A harness a field runner kept running holds what it was launched with, as its Session record says, so
+a Station that attaches to it again stops it at once if the clearance has fallen since. Until a
+Station attaches, nothing reads the clearance for it and it keeps its tools. AI6's own tools are not so
+late: a proposal, an issue tool and a request for green ink each look at the clearance when called.
 
 An Operation refuses an Agent above its clearance or outside its roster. M retains
 authorization authority; Agent role policy is guidance only. Q Branch controls which

@@ -569,6 +569,7 @@ fn record_adopted(
             fence: record.fence,
         }),
         runner: launch.runner,
+        clearance: launch.clearance,
     };
     let mut missions = state
         .missions
@@ -680,7 +681,8 @@ pub(super) fn launch_of(manifest: &LaunchManifest) -> SessionLaunch {
         manifest.working_directory.clone(),
     )
     .with_model(manifest.model.clone(), manifest.effort.clone())
-    .with_mode(manifest.mode);
+    .with_mode(manifest.mode)
+    .with_clearance(manifest.clearance.clone());
     if let Some(runner) = &manifest.runner {
         launch = launch.with_runner(runner.clone());
     }
@@ -1034,6 +1036,122 @@ mod tests {
         })
         .await
         .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_harness_a_runner_kept_is_stopped_on_re_attach_when_its_agents_clearance_fell() {
+        use crate::directorates::registry::clearance::ClearanceGrant;
+
+        let root = tempfile::tempdir().unwrap();
+        let registry = root.path().join("registry");
+        let runner_dir = root.path().join("runner");
+        let _runner = start_test_runner(&runner_dir).await;
+        let field = field_theater(root.path(), &runner_dir);
+        let agents = "[agent.007]\nhandler = \"mock-drip\"\nclearance = \"field\"\n";
+        let operation = "theater = \"field\"\n";
+        let a = station(
+            root.path(),
+            "station-a",
+            &registry,
+            operation,
+            agents,
+            Some(field.clone()),
+        );
+        let b = station(
+            root.path(),
+            "station-b",
+            &registry,
+            operation,
+            agents,
+            Some(field),
+        );
+        let mission_id = submit(a.intake.as_ref(), &format!("fallen-{}", std::process::id()));
+        publish_station_check_in(&a);
+        publish_station_check_in(&b);
+        assert!(schedule_intake_once(&a));
+        schedule_queued_once(&a).await;
+        let mut seen = Vec::new();
+        until("ticks on station-a", || {
+            while let Some(event) = pop_event(&a, &mission_id) {
+                seen.push(event);
+            }
+            ticks(&seen).0.len() >= 2
+        })
+        .await;
+        let first = session_hold(&a, &mission_id).unwrap();
+        let record = a.intake.session(&first.id).unwrap().unwrap();
+        let launch = record.launch.as_ref().unwrap();
+        assert_eq!(launch.clearance.as_deref(), Some("field"));
+        let key = launch.runner.clone().unwrap();
+
+        // Station A goes dark with the harness at work; meanwhile the Agent is held to `desk`.
+        go_dark(&a, &mission_id);
+        let now = a.clock.now() as f64;
+        b.intake
+            .put_clearance_grant(&ClearanceGrant::lower("007", "G", "desk", "ops", now))
+            .unwrap();
+        publish_station_check_in(&b);
+        assert!(schedule_intake_once(&b));
+        schedule_queued_once(&b).await;
+        schedule_recovered_once(&b).await;
+
+        let link = RunnerLink::local(runner_dir.clone(), PathBuf::from("unused"));
+        until("the harness on the runner to be stopped", || {
+            link.status(&key).unwrap().is_none_or(|report| report.ended)
+        })
+        .await;
+        until("the Mission to wait with the reason", || {
+            b.missions
+                .lock()
+                .unwrap()
+                .get(&mission_id)
+                .is_some_and(|mission| {
+                    mission.state == MissionState::Blocked
+                        && mission.blocked_reason.as_deref()
+                            == Some(crate::station::server::CLEARANCE_REASON)
+                })
+        })
+        .await;
+        assert!(!b.sessions.lock().unwrap().contains_key(&mission_id));
+        assert!(
+            b.intake
+                .audit_records()
+                .unwrap()
+                .iter()
+                .any(|record| record.action == "agent.clearance.stop"
+                    && record.target.starts_with(&mission_id)),
+            "the stop is audited"
+        );
+
+        // A resume starts the harness again under the new clearance, instead of taking up the
+        // stopped one, which would hold what it was launched with and be stopped again.
+        let launched = |state: &DaemonState| {
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .operation(&mission_id)
+                .and_then(|manifest| manifest.clearance)
+        };
+        assert_eq!(launched(&b).as_deref(), Some("field"));
+        let _ = super::super::resume_mission(
+            axum::extract::State(b.clone()),
+            axum::extract::Path(mission_id.clone()),
+            axum::Json(super::super::ResumeMission {
+                message: Some("carry on".to_owned()),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+        assert_eq!(launched(&b).as_deref(), Some("desk"));
+        assert_eq!(
+            mission_state(&b, &mission_id),
+            Some(MissionState::Working),
+            "it runs under what its Agent may now use"
+        );
+        a.stopping.store(true, Ordering::Release);
+        b.stopping.store(true, Ordering::Release);
     }
 
     #[tokio::test(flavor = "multi_thread")]

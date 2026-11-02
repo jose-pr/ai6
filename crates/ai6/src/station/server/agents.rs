@@ -6,6 +6,7 @@ use super::promotion::{PROMOTION_SESSION, promotion_mission, promotion_target};
 use super::{DaemonState, medical};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::promotion::CLEARANCE_KIND;
+use crate::directorates::m::roster::clearance_rank;
 use crate::directorates::m::roster::{Agent, AgentQuery, Retirement, Roster, RosterError};
 use crate::directorates::registry::agent_records::{AgentOutcome, AgentOutcomeReport};
 use crate::directorates::registry::approvals::{ApprovalStatus, Decision, EXPIRY_SIGNER};
@@ -82,17 +83,23 @@ fn unreadable(state: &DaemonState, operation: &str, agent: &str) -> ClearanceGra
 /// promotion request for exactly this Agent, clearance and Operation, approved by a person
 /// (not a class authorisation, not an expiry), spent, and not revoked.
 pub(super) fn is_backed(state: &DaemonState, grant: &ClearanceGrant) -> bool {
+    backing(state, grant).unwrap_or(false)
+}
+
+/// [`is_backed`], with a failed read of the approval told apart from an approval that does not back
+/// the grant.
+fn backing(state: &DaemonState, grant: &ClearanceGrant) -> std::io::Result<bool> {
     let Some(id) = &grant.approval else {
-        return true;
+        return Ok(true);
     };
     let now = state.clock.now() as f64;
-    let Ok(Some(ApprovalStatus::Decided(approval))) =
-        state.intake.approval(&grant.operation, id, now)
+    let Some(ApprovalStatus::Decided(approval)) =
+        state.intake.approval(&grant.operation, id, now)?
     else {
-        return false;
+        return Ok(false);
     };
     let request = &approval.request;
-    approval.decision == Decision::Approved
+    Ok(approval.decision == Decision::Approved
         && approval.revoked.is_none()
         && approval.spent_at.is_some()
         && approval.signer != EXPIRY_SIGNER
@@ -104,7 +111,7 @@ pub(super) fn is_backed(state: &DaemonState, grant: &ClearanceGrant) -> bool {
         && request.mission.as_str() == promotion_mission(&grant.agent)
         && request.scope.kind == CLEARANCE_KIND
         && request.scope.target
-            == promotion_target(&grant.agent, &grant.clearance, &grant.operation)
+            == promotion_target(&grant.agent, &grant.clearance, &grant.operation))
 }
 
 /// The Agent's grant in `operation`; `None` (logged) when it cannot be read. A codename that
@@ -122,6 +129,66 @@ pub(super) fn grant_of(
                 "ai6: clearance grant of Agent {agent:?} in {operation:?} unreadable: {error}"
             );
             None
+        }
+    }
+}
+
+/// The clearance the Registry shows the Agent `key` works at in `operation` now; `None` when a read
+/// failed. [`effective`] holds such an Agent at `desk`, which is right for what is about to start:
+/// here it would stop every running harness on one Registry hiccup.
+fn clearance_shown(state: &DaemonState, operation: &str, key: &str) -> Option<String> {
+    let agent = state.roster.agent(Some(operation), key).ok()?;
+    let operation = state.roster.operation(operation).ok()?;
+    let grant = grant_of(state, &operation.id, &agent.id)?;
+    let grant = match grant {
+        Some(grant) => match backing(state, &grant) {
+            Ok(true) => Some(grant),
+            Ok(false) => None,
+            Err(error) => {
+                eprintln!(
+                    "ai6: the approval behind Agent {key:?}'s clearance is unreadable: {error}"
+                );
+                return None;
+            }
+        },
+        None => None,
+    };
+    Some(agent.effective_clearance(operation, grant.as_ref(), state.clock.now()))
+}
+
+/// Stops each running harness launched at more than its Agent's clearance shows now: a harness's
+/// tools are fixed at launch, so a lowered clearance, desk duty or a retirement reaches it no other
+/// way. A harness a runner kept counts from the clearance it was launched at, whenever this Station
+/// took it up.
+pub(super) fn enforce_clearances(state: &DaemonState) {
+    let running: Vec<_> = state.sessions.lock().map_or_else(
+        |_| Vec::new(),
+        |sessions| {
+            sessions
+                .iter()
+                .map(|(mission_id, operation)| {
+                    (
+                        mission_id.clone(),
+                        operation.clearance.clone(),
+                        operation.session.clone(),
+                    )
+                })
+                .collect()
+        },
+    );
+    let rank = |clearance: &str| clearance_rank(clearance).unwrap_or(0);
+    for (mission_id, launched, session) in running {
+        let Some((operation, agent)) = state.missions.lock().ok().and_then(|missions| {
+            let mission = missions.get(&mission_id)?;
+            Some((mission.operation_id.clone()?, mission.agent_id.clone()?))
+        }) else {
+            continue;
+        };
+        let Some(now) = clearance_shown(state, &operation, &agent) else {
+            continue;
+        };
+        if rank(&now) < rank(&launched) {
+            super::stop_for_clearance(state, &mission_id, &operation, &session, &launched, &now);
         }
     }
 }
@@ -620,6 +687,7 @@ mod tests {
                 fence: record.fence,
             }),
             runner: None,
+            clearance: None,
         };
         state
             .missions

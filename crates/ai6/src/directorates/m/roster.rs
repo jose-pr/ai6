@@ -2327,7 +2327,7 @@ fn validate_codename(id: &str) -> Result<(), RosterError> {
     Ok(())
 }
 
-fn clearance_rank(clearance: &str) -> Result<usize, RosterError> {
+pub(crate) fn clearance_rank(clearance: &str) -> Result<usize, RosterError> {
     CLEARANCES
         .iter()
         .position(|known| *known == clearance)

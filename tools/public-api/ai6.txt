@@ -4394,6 +4394,7 @@ pub fn ai6::directorates::registry::sessions::NewSession::with_operation(self, i
 pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionLaunch
+pub ai6::directorates::registry::sessions::SessionLaunch::clearance: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::handler: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionLaunch::mode: ai6::directorates::m::placement::ExecutionMode
@@ -4403,6 +4404,7 @@ pub ai6::directorates::registry::sessions::SessionLaunch::terminal: alloc::strin
 pub ai6::directorates::registry::sessions::SessionLaunch::working_directory: alloc::string::String
 impl ai6::directorates::registry::sessions::SessionLaunch
 pub fn ai6::directorates::registry::sessions::SessionLaunch::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_clearance(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -9003,6 +9005,7 @@ pub fn ai6::directorates::m::identity::SessionId::from_value(&guatiao::value::va
 impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::SessionId
 pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
 #[non_exhaustive] pub struct ai6::SessionLaunch
+pub ai6::SessionLaunch::clearance: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::effort: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::handler: alloc::string::String
 pub ai6::SessionLaunch::mode: ai6::directorates::m::placement::ExecutionMode
@@ -9012,6 +9015,7 @@ pub ai6::SessionLaunch::terminal: alloc::string::String
 pub ai6::SessionLaunch::working_directory: alloc::string::String
 impl ai6::directorates::registry::sessions::SessionLaunch
 pub fn ai6::directorates::registry::sessions::SessionLaunch::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_clearance(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self

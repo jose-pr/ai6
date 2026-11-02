@@ -372,6 +372,7 @@ mod tests {
                         mode: Default::default(),
                         session: None,
                         runner: None,
+                        clearance: None,
                     },
                 )
                 .unwrap();

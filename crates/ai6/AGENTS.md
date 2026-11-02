@@ -2130,10 +2130,12 @@ impl SessionStatus { pub fn is_closed(self) -> bool }   // Ended or Lost
     pub model: Option<String>, pub effort: Option<String>,
     pub mode: ExecutionMode,                 // default Field
     pub runner: Option<String>,              // the runner's Session key; only these are adopted
+    pub clearance: Option<String>,           // what the harness was launched at, which fixed its tools
 }
 impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub fn with_model(self, Option<String>, Option<String>) -> Self;
-    pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self; }
+    pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self;
+    pub fn with_clearance(self, Option<String>) -> Self; }
 #[non_exhaustive] pub struct SessionRecord {
     pub session_id: String,                  // AI6's ID, `<mission>.<attempt>` (not the provider's)
     pub mission_id: String,

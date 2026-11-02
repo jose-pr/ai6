@@ -70,6 +70,9 @@ pub struct SessionLaunch {
     /// only such a Session can be re-attached by another Station.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<String>,
+    /// The clearance the harness was launched at, which fixed its tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clearance: Option<String>,
 }
 
 impl SessionLaunch {
@@ -87,6 +90,7 @@ impl SessionLaunch {
             effort: None,
             mode: ExecutionMode::default(),
             runner: None,
+            clearance: None,
         }
     }
 
@@ -100,6 +104,12 @@ impl SessionLaunch {
     /// Records the execution mode.
     pub fn with_mode(mut self, mode: ExecutionMode) -> Self {
         self.mode = mode;
+        self
+    }
+
+    /// Records the clearance the harness was launched at.
+    pub fn with_clearance(mut self, clearance: Option<String>) -> Self {
+        self.clearance = clearance;
         self
     }
 
