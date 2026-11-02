@@ -263,8 +263,8 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
     .await;
     assert!(mission.status.success());
     let mission = String::from_utf8(mission.stdout).unwrap();
-    assert!(mission.contains("SESSION\tSTATE\tSEQUENCE\tEXPOSURE"));
-    assert!(mission.contains("provider-session-007\tworking\t1\t-"));
+    assert!(mission.contains("SESSION\tSTATE\tREASON\tSEQUENCE\tEXPOSURE"));
+    assert!(mission.contains("provider-session-007\tworking\t-\t1\t-"));
 
     let sessions = ai6ctl(
         server.clone(),
@@ -327,6 +327,39 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
 }
 
 const STATION_TOKEN: &str = "exports-test-credential-with-more-than-32-bytes";
+
+#[tokio::test]
+async fn mission_prints_the_reason_a_station_gave_for_a_sessions_state() {
+    let (server, shutdown, access_token, _registry_dir) = start_gateway().await;
+    let published = reqwest::Client::new()
+        .post(format!(
+            "{server}/v1/station/sessions/provider-session-007/lifecycle/2"
+        ))
+        .bearer_auth(STATION_TOKEN)
+        .json(&serde_json::json!({
+            "operation_id": "station-01",
+            "mission_id": "mission-007",
+            "state": "done",
+            "reason": "permission-denied",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(published.status().is_success(), "{}", published.status());
+
+    let mission = ai6ctl(server, Some(access_token), &["mission", "mission-007"]).await;
+    assert!(
+        mission.status.success(),
+        "{}",
+        String::from_utf8_lossy(&mission.stderr)
+    );
+    let mission = String::from_utf8(mission.stdout).unwrap();
+    assert!(
+        mission.contains("provider-session-007\tdone\tpermission-denied\t2\t-"),
+        "{mission}"
+    );
+    let _ = shutdown.send(());
+}
 
 fn decode_control(schema: &[u8], frame: &[u8]) -> MissionControl {
     let mut receiver = FrameReceiver::new();

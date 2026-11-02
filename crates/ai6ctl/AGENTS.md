@@ -89,7 +89,9 @@ origin leaves the public roots alone.
   NAME g,h` and `reset-password NAME` use `/v1/user/accounts`; a generated password is printed
   once as `password\t…`, to stdout only. Accounts are never deleted through the API.
 - `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission and its provider
-  Sessions; `--operation` disambiguates a Mission ID used by several Operations.
+  Sessions (`SESSION STATE REASON SEQUENCE EXPOSURE`; `REASON` is the lifecycle reason the
+  Station published, such as `permission-denied`, or `-`); `--operation` disambiguates a Mission
+  ID used by several Operations.
 - `ai6ctl sessions [--operation <ID>] [--mission <ID>] [--state <STATE>]` filters the
   authorized `GET /v1/board` response.
 - `ai6ctl session <SESSION_ID>` prints one provider Session.

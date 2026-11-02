@@ -642,6 +642,9 @@ struct BoardSession {
     mission_id: String,
     session_id: String,
     state: Option<String>,
+    /// Why the Session is in its state, as its Station reported it (`permission-denied`).
+    #[serde(default)]
+    reason: Option<String>,
     sequence: u64,
     #[serde(default)]
     exposure: Vec<String>,
@@ -2540,16 +2543,20 @@ fn print_mission(mission: &BoardMission) {
         plain(&mission.mission_id),
         mission.sessions.len()
     );
-    println!("SESSION\tSTATE\tSEQUENCE\tEXPOSURE");
+    println!("SESSION\tSTATE\tREASON\tSEQUENCE\tEXPOSURE");
     for session in &mission.sessions {
         println!(
-            "{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}",
             plain(&session.session_id),
             session
                 .state
                 .as_deref()
                 .map(plain)
                 .unwrap_or_else(|| "awaiting lifecycle".to_owned()),
+            session
+                .reason
+                .as_deref()
+                .map_or_else(|| "-".to_owned(), plain),
             session.sequence,
             exposure_column(&session.exposure)
         );
