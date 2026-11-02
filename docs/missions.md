@@ -45,6 +45,16 @@ from it:
 - A brief dropped into the Registry's queue by hand goes through none of this: its ID is
   `<source>--<id>` from its own fields.
 
+A **run** is one Session record of a Mission, and its ID is `<mission>.<attempt>`: `ai6-42.1`,
+`ai6-42.2`. It stays through a resume, and the provider's Session ID stays apart from it, shown
+as it always was.
+
+A **name** sits beside the ID and is no part of it: a person's title, or an issue's title on one
+line and cut to `[registry.limits.sources] name_bytes`. Whoever can open an issue writes that
+title, so it is data: it reaches a prompt only inside the fence with the rest of the issue's text,
+and Outer Office and `ai6ctl` show it as plain text. Outer Office and `ai6ctl mission` also link
+to the issue, and search matches the ID, the run and the name.
+
 ```json
 {
   "title": "Fix the flaky watchdog test",
@@ -317,7 +327,7 @@ tradecraft word is *extraction*).
 ### Session records and fencing
 
 Besides the Station's own `missions.json`, every Session has a record in the shared
-Registry (`sessions/`). It holds AI6's Session ID (distinct from the provider's), the
+Registry (`sessions/`). It holds AI6's Session ID, the run's `<mission>.<attempt>` (distinct from the provider's), the
 provider Session ID, the Station that supervises it, its Theater, the attempt number and the
 ID of the Session it replaced, its exposure to untrusted input, its status (`active`,
 `parked`, `ended` or `lost`), how its harness was launched (handler, terminal, working

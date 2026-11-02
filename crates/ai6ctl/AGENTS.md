@@ -65,7 +65,8 @@ origin leaves the public roots alone.
 - `ai6ctl pools clear-limit <POOL> <ACCOUNT> --operation <OPERATION_ID>` posts
   `.../pools/{pool}/{account}/clear-limit` and prints `pool/account: limit cleared`; 403 names
   `pool.manage`, 404 an account not declared for the Operation.
-- `ai6ctl missions [--operation <ID> [--subtree]]` lists visible Missions and Session counts;
+- `ai6ctl missions [--operation <ID> [--subtree]]` lists visible Missions, Session counts and
+  the name beside each ID (`-` before a Station published one; an issue's title, as data);
   `--operation` asks the gateway for that Operation's (`GET /v1/missions?operation=`), and
   `--subtree` also for every Operation under it (`&subtree=true`).
 - `ai6ctl operations` reads `GET /v1/user/profile` and prints `OPERATION\tACTIONS`, each

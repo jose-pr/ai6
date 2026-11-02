@@ -167,7 +167,7 @@ pub struct BoardMission {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MissionAttempt {
     pub attempt: u32,
-    pub session_id: String,                  // AI6's Session ID
+    pub session_id: String,                  // AI6's Session ID, `<mission>.<attempt>`
     pub provider_session_id: Option<String>,
     pub predecessor: Option<String>,         // AI6 ID of the attempt it replaced
     pub station: String, pub theater: Option<String>,
@@ -261,6 +261,7 @@ pub struct PlacementPreview {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct LaunchManifest {
+    pub name: Option<String>,        // what to show beside the Mission ID: a person's title or an issue's, as data
     pub prompt: String,
     pub agent_id: Option<String>,
     pub role_id: Option<String>,

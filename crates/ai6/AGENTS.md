@@ -1930,7 +1930,9 @@ finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<
 A Mission ID is chosen once, where a brief enters, by the rule in `registry::mission_ids`, and
 kept in `Brief::mission_id`; `Brief::key()` is that ID, or `{source}--{id}` for a brief that has
 none (one dropped into the queue by hand). `Brief::id` stays what the brief is called where it
-came from.
+came from. `Brief::name` is what to show beside the ID when the title is not (an issue's title);
+`Brief::display_name(bytes)` gives it, or the title, on one line. A Mission keeps it as
+`Mission::name` and a published brief as `name`; it is never part of `Brief::prompt`.
 
 ```rust
 pub struct MissionEntry;  // where a brief enters; all of these are the only way an ID is made
@@ -2132,7 +2134,7 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub fn with_model(self, Option<String>, Option<String>) -> Self;
     pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self; }
 #[non_exhaustive] pub struct SessionRecord {
-    pub session_id: String,                  // AI6's ID (not the provider's)
+    pub session_id: String,                  // AI6's ID, `<mission>.<attempt>` (not the provider's)
     pub mission_id: String,
     pub operation: Option<String>,           // the Mission's Operation, as the opening Station knew it
     pub provider_session_id: Option<String>,
@@ -2152,7 +2154,8 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub account: Option<AccountRef>,         // the pool account it runs on, when pooled
 }
 impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }   // false once closed
-pub struct NewSession   // NewSession::new(session_id, mission_id, station)
+pub fn run_id(mission_id: &str, attempt: u32, bytes: usize) -> String;  // `<mission>.<attempt>` within bytes
+pub struct NewSession   // NewSession::new(session_id, mission_id, station); next_attempt(id_bytes) -> Option<Self>
                         //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
                         //   .with_operation(id)
                         //   .with_exposure(Vec<Exposure>) .with_launch(SessionLaunch) .with_account(AccountRef)

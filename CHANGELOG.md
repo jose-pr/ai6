@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `entered_mission_id` and `enter_brief`, `Brief::mission_id`, `SourceItem::code` and `code_tag`,
   `[registry.limits.briefs] mission_id_bytes`. Removed: `ReviewTarget::review_key`. A PostgreSQL
   Registry already in use needs two new tables.
+- A run's Session record is `<mission>.<attempt>` (`ai6-42.1`), not a random ID; the provider's
+  Session ID stays apart. A Mission shows a name beside its ID, an issue's title as data or a
+  person's title, with a link to the issue, in Outer Office and `ai6ctl`, whose `missions` table
+  gains a `NAME` column. Search matches the ID, the run and the name. New: `Brief::name`,
+  `Mission::name`, `LaunchManifest::name`, `[registry.limits.sources] name_bytes`.
 - Moneypenny's conversations carry no exposure: it is for an Agent doing work, and a Mission's
   Session keeps it unchanged. **This weakens what protected you.** Nothing she reads marks her
   conversation, so text she reads can steer her with nothing to show it happened. Her memory
