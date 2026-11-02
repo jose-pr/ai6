@@ -10862,6 +10862,35 @@ queue = 1
         );
         assert_eq!(resumed["PATH"], "/opt/tools/bin");
         assert!(!resumed.contains_key("FORGE_TOKEN"));
+
+        // A Station with no live Session of it, after a restart, starts from the records again.
+        RECORDED_RESUMES
+            .lock()
+            .unwrap()
+            .retain(|request| request.mission_id.as_str() != mission_id);
+        state.sessions.lock().unwrap().remove(&mission_id);
+        let _ = resume_mission(
+            State(state.clone()),
+            axum::extract::Path(mission_id.clone()),
+            Json(ResumeMission {
+                message: Some("carry on".to_owned()),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let resumed = recorded(
+            RECORDED_RESUMES
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|request| request.mission_id.as_str() == mission_id)
+                .map(|request| request.environment.clone())
+                .collect(),
+        );
+        assert_eq!(resumed["PATH"], "/opt/tools/bin");
+        assert!(!resumed.contains_key("FORGE_TOKEN"));
         state.stopping.store(true, Ordering::Release);
     }
 
