@@ -983,7 +983,9 @@ impl Gateway {
     /// Consumes a connection ticket and grants one bounded viewer slot.
     ///
     /// The returned replay starts with the latest schema announcement for each
-    /// channel, followed by scrollback newer than `after_sequence`.
+    /// channel, followed by scrollback newer than `after_sequence`. Where that scrollback starts
+    /// later than `after_sequence` or skips a sequence, a [`TerminalGap`](ai6_diptel::TerminalGap)
+    /// says so, ahead of the frame after it.
     pub async fn attach(
         &self,
         session_id: &SessionId,
@@ -1030,13 +1032,18 @@ impl Gateway {
             });
         }
         let mut replay: Vec<_> = session.schemas.values().cloned().collect();
-        replay.extend(
-            session
-                .history
-                .iter()
-                .filter(|(sequence, _)| *sequence > after_sequence)
-                .map(|(_, frame)| frame.clone()),
-        );
+        let mut position = after_sequence;
+        for (sequence, frame) in session
+            .history
+            .iter()
+            .filter(|(sequence, _)| *sequence > after_sequence)
+        {
+            if let Some([schema, gap]) = gap_between(session_id, position, *sequence)? {
+                replay.extend([schema, gap]);
+            }
+            replay.push(frame.clone());
+            position = *sequence;
+        }
         let events = session.events.subscribe();
         session.active_clients += 1;
         inner.connections.insert(
@@ -1174,6 +1181,13 @@ impl Gateway {
         }
         let mut transition = None;
         if is_value {
+            // A viewer that is past the gap's start ignores it, so there is no need to know here
+            // what each has seen.
+            if let Some(frames) = gap_between(session_id, session.last_sequence, sequence)? {
+                for frame in frames {
+                    let _ = session.events.send(frame);
+                }
+            }
             session.last_sequence = sequence;
             if let Some((state, reason)) = lifecycle_state {
                 let at = SystemTime::now()
@@ -4583,9 +4597,10 @@ fn validate_input_frame(session_id: &SessionId, frame: &[u8]) -> Result<u64, Gat
             Ok(resize.sequence())
         }
         IncomingFrame::Terminal(_) | IncomingFrame::Resize(_) => Err(GatewayError::Forbidden),
-        IncomingFrame::Lifecycle(_) | IncomingFrame::Control(_) | IncomingFrame::Closed(_) => {
-            Err(GatewayError::InvalidFrame)
-        }
+        IncomingFrame::Lifecycle(_)
+        | IncomingFrame::Control(_)
+        | IncomingFrame::Gap(_)
+        | IncomingFrame::Closed(_) => Err(GatewayError::InvalidFrame),
     }
 }
 
@@ -4611,6 +4626,19 @@ fn validate_lifecycle_value(
         return Err(GatewayError::Forbidden);
     }
     Ok(())
+}
+
+/// The schema and value of a gap, when a sequence lies between `after` and `before`.
+fn gap_between(
+    session_id: &SessionId,
+    after: u64,
+    before: u64,
+) -> Result<Option<[Vec<u8>; 2]>, GatewayError> {
+    let Ok(gap) = ai6_diptel::TerminalGap::new(session_id.clone(), after, before) else {
+        return Ok(None);
+    };
+    let (schema, value) = ai6_diptel::gap_frames(&gap).map_err(|_| GatewayError::InvalidFrame)?;
+    Ok(Some([schema, value]))
 }
 
 fn validate_terminal_output(
@@ -5094,6 +5122,136 @@ mod tests {
             gateway.terminal_bytes(&SessionId::new("session").unwrap()),
             ai6_diptel::MAX_TERMINAL_BYTES
         );
+    }
+
+    /// The gaps in `frames`, as (after, before), and the sequences of its other values, in order.
+    fn gaps_and_values(frames: &[Vec<u8>]) -> (Vec<(u64, u64)>, Vec<u64>) {
+        let mut receiver = FrameReceiver::new();
+        let (mut gaps, mut values) = (Vec::new(), Vec::new());
+        for frame in frames {
+            match receiver.accept(frame).unwrap() {
+                Some(IncomingFrame::Gap(gap)) => {
+                    gaps.push((gap.after(), gap.before()));
+                    // Where it falls: nothing older follows.
+                    values.push(gap.before() * 1000);
+                }
+                Some(IncomingFrame::Terminal(data)) => values.push(data.sequence()),
+                _ => {}
+            }
+        }
+        (gaps, values)
+    }
+
+    /// Publishes output at each of `sequences`, then attaches after `after`.
+    async fn attach_after(
+        gateway: &Gateway,
+        session: &SessionId,
+        sequences: &[u64],
+        after: u64,
+    ) -> Attachment {
+        let token = "m-token-that-is-long-enough-for-testing";
+        for sequence in sequences {
+            gateway
+                .publish_terminal_output(token, session.clone(), *sequence, vec![1])
+                .await
+                .unwrap();
+        }
+        let grant = grant(gateway, AttachMode::Read).await;
+        let ticket = gateway.exchange_attach_token(&grant).await.unwrap();
+        gateway.attach(session, &ticket, after).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_viewer_whose_position_was_trimmed_is_told_of_the_gap() {
+        let gateway = gateway();
+        let (_, _, session) = register(&gateway).await;
+        // The test's scrollback holds two events.
+        let attachment = attach_after(&gateway, &session, &[1, 2, 3, 4, 5], 1).await;
+        let (gaps, values) = gaps_and_values(&attachment.replay);
+        assert_eq!(gaps, [(1, 4)], "2 and 3 are gone");
+        assert_eq!(
+            values,
+            [4000, 4, 5],
+            "the gap comes ahead of what follows it"
+        );
+        gateway.disconnect(attachment).await;
+
+        let attachment = attach_after(&gateway, &session, &[], 0).await;
+        assert_eq!(
+            gaps_and_values(&attachment.replay).0,
+            [(0, 4)],
+            "from the start too"
+        );
+        gateway.disconnect(attachment).await;
+
+        let attachment = attach_after(&gateway, &session, &[], 3).await;
+        assert_eq!(
+            gaps_and_values(&attachment.replay).0,
+            [],
+            "nothing it lacks is gone"
+        );
+        gateway.disconnect(attachment).await;
+
+        let attachment = attach_after(&gateway, &session, &[], 5).await;
+        let (gaps, values) = gaps_and_values(&attachment.replay);
+        assert_eq!(
+            (gaps, values),
+            (Vec::new(), Vec::new()),
+            "it has everything"
+        );
+        gateway.disconnect(attachment).await;
+    }
+
+    #[tokio::test]
+    async fn a_hole_in_the_sequence_is_a_gap_on_replay_and_live() {
+        // Room for a gap's two frames and the one after them in a viewer's queue.
+        let gateway = Gateway::new(
+            GatewayConfig::new(
+                "https://localhost",
+                "m-token-that-is-long-enough-for-testing",
+                GatewayLimits {
+                    fanout_capacity: 8,
+                    ..test_limits()
+                },
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .unwrap(),
+        );
+        let (_, _, session) = register(&gateway).await;
+        let mut attachment = attach_after(&gateway, &session, &[1, 4], 0).await;
+        let (gaps, values) = gaps_and_values(&attachment.replay);
+        assert_eq!(gaps, [(1, 4)], "the Station dropped 2 and 3");
+        assert_eq!(values, [1, 4000, 4]);
+
+        let token = "m-token-that-is-long-enough-for-testing";
+        gateway
+            .publish_terminal_output(token, session.clone(), 7, vec![1])
+            .await
+            .unwrap();
+        let mut live = attachment.replay.clone();
+        while let Ok(frame) = attachment.events.try_recv() {
+            live.push(frame);
+        }
+        assert_eq!(
+            gaps_and_values(&live).0,
+            [(1, 4), (4, 7)],
+            "a viewer already attached hears of it before the frame that follows it"
+        );
+        gateway.disconnect(attachment).await;
+    }
+
+    #[tokio::test]
+    async fn a_gateway_that_restarted_tells_a_new_viewer_and_spares_one_that_has_it_all() {
+        let gateway = gateway();
+        let (_, _, session) = register(&gateway).await;
+        // A Station's first event after this gateway restarted, its sequence going on from 40.
+        let attachment = attach_after(&gateway, &session, &[41], 0).await;
+        assert_eq!(gaps_and_values(&attachment.replay).0, [(0, 41)]);
+        gateway.disconnect(attachment).await;
+        let attachment = attach_after(&gateway, &session, &[], 40).await;
+        assert_eq!(gaps_and_values(&attachment.replay).0, []);
+        gateway.disconnect(attachment).await;
     }
 
     #[tokio::test]

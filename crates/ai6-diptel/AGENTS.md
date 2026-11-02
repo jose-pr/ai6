@@ -186,8 +186,8 @@ impl FrameReceiver {
 Each function returns a schema announcement followed by a schema-checked value
 frame on a stable channel. A transport supplies message boundaries; WebSocket
 uses one guatiao frame per binary message. Channel IDs are `1` for lifecycle
-events, `2` for terminal data, `3` for terminal resize and `4` for operator
-controls; a control's schema does not depend on its values, so a receiver may build
+events, `2` for terminal data, `3` for terminal resize, `4` for operator
+controls and `5` for gaps; a control's schema does not depend on its values, so a receiver may build
 it from any control. Terminal data includes
 raw bytes and an `input` or `output` direction; resize values carry bounded,
 non-zero columns and rows.
@@ -195,6 +195,23 @@ non-zero columns and rows.
 `FrameReceiver` retains channel schemas between frames, validates received values,
 and decodes lifecycle records and bounded terminal bytes. Schema announcements
 return `Ok(None)`; unknown channels, malformed values and invalid identities fail.
+
+```rust
+pub struct TerminalGap { /* private */ }
+impl TerminalGap {
+    pub fn new(session_id: SessionId, after: u64, before: u64) -> Result<Self, InvalidGap>;
+    pub fn session_id(&self) -> &SessionId;
+    pub const fn after(&self) -> u64;
+    pub const fn before(&self) -> u64;
+}
+pub fn gap_frames(gap: &TerminalGap) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError>;
+```
+
+A gap says a Session's events after `after` and before `before` cannot be had. The gateway sends one
+on attach when what it holds starts later than the viewer's position or skips a sequence, and live
+when a Session's next event skips one; `new` refuses ends with no sequence between them. A viewer
+already at `before - 1` or past it has missed nothing, and ignores the frame. A gap has no sequence
+of its own and moves no cursor but a viewer's own. A gap's schema may be announced again.
 
 ## Constants
 
@@ -209,7 +226,7 @@ shared with the Dart client and checked by the vectors, so they are not settings
 
 ## Errors
 
-`InvalidIdentity`, `InvalidControl`, `FrameTooLarge`, `InvalidSize` and `FrameDecodeError` are
+`InvalidIdentity`, `InvalidControl`, `FrameTooLarge`, `InvalidSize`, `InvalidGap` and `FrameDecodeError` are
 non-exhaustive error types implementing `core::error::Error`. They do not include
 rejected payload bytes. Frame construction may also return guatiao's `ValueError`.
 

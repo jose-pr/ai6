@@ -126,3 +126,12 @@ line. They also ask for the widest terminal ConPTY takes (32767 columns, `STREAM
 which `pipe` ignores. An OSC sequence with no end stops at the line break, and a CSI at the
 first byte no CSI holds or after 64 bytes.
 ([`ai6::directorates::q::terminal`](https://jose-pr.github.io/ai6/rust/ai6/directorates/q/terminal/)).
+
+## A viewer reconnects from what it has
+
+A terminal attaches with the sequence of the last event it received, starting from 0, and Universal
+Exports replays what it still holds past that. It holds the last `scrollback_events` frames of a
+Session, in memory. Older ones are gone, and a gateway that restarted holds none. When what it holds
+starts later than the position, or skips a sequence, the replay says so with a gap frame, and it does
+so live when a Session's next event skips one: a Station dropped output while the gateway was away.
+Outer Office shows `[AI6: output is missing here]` at that point in the terminal.

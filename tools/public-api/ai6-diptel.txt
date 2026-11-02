@@ -11,6 +11,7 @@ pub fn ai6_diptel::ControlAction::parse(&str) -> core::option::Option<Self>
 pub enum ai6_diptel::IncomingFrame
 pub ai6_diptel::IncomingFrame::Closed(u64)
 pub ai6_diptel::IncomingFrame::Control(ai6_diptel::MissionControl)
+pub ai6_diptel::IncomingFrame::Gap(ai6_diptel::TerminalGap)
 pub ai6_diptel::IncomingFrame::Lifecycle(ai6_diptel::LifecycleEvent)
 pub ai6_diptel::IncomingFrame::Resize(ai6_diptel::TerminalResize)
 pub ai6_diptel::IncomingFrame::Terminal(ai6_diptel::TerminalData)
@@ -52,6 +53,10 @@ pub fn ai6_diptel::FrameTooLarge::fmt(&self, &mut core::fmt::Formatter<'_>) -> c
 impl core::error::Error for ai6_diptel::InvalidControl
 impl core::fmt::Display for ai6_diptel::InvalidControl
 pub fn ai6_diptel::InvalidControl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6_diptel::InvalidGap
+impl core::error::Error for ai6_diptel::InvalidGap
+impl core::fmt::Display for ai6_diptel::InvalidGap
+pub fn ai6_diptel::InvalidGap::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6_diptel::InvalidIdentity
 impl core::error::Error for ai6_diptel::InvalidIdentity
 impl core::fmt::Display for ai6_diptel::InvalidIdentity
@@ -115,6 +120,12 @@ pub const fn ai6_diptel::TerminalData::sequence(&self) -> u64
 pub fn ai6_diptel::TerminalData::session_id(&self) -> &ai6_diptel::SessionId
 impl core::fmt::Debug for ai6_diptel::TerminalData
 pub fn ai6_diptel::TerminalData::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6_diptel::TerminalGap
+impl ai6_diptel::TerminalGap
+pub const fn ai6_diptel::TerminalGap::after(&self) -> u64
+pub const fn ai6_diptel::TerminalGap::before(&self) -> u64
+pub fn ai6_diptel::TerminalGap::new(ai6_diptel::SessionId, u64, u64) -> core::result::Result<Self, ai6_diptel::InvalidGap>
+pub fn ai6_diptel::TerminalGap::session_id(&self) -> &ai6_diptel::SessionId
 pub struct ai6_diptel::TerminalResize
 impl ai6_diptel::TerminalResize
 pub const fn ai6_diptel::TerminalResize::columns(&self) -> u16
@@ -127,6 +138,7 @@ pub const ai6_diptel::MAX_ID_BYTES: usize
 pub const ai6_diptel::MAX_REASON_BYTES: usize
 pub const ai6_diptel::MAX_TERMINAL_BYTES: usize
 pub fn ai6_diptel::control_frames(&ai6_diptel::MissionControl) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
+pub fn ai6_diptel::gap_frames(&ai6_diptel::TerminalGap) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::lifecycle_frames(&ai6_diptel::LifecycleEvent) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::resize_frames(&ai6_diptel::TerminalResize) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>
 pub fn ai6_diptel::terminal_frames(&ai6_diptel::TerminalData) -> core::result::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>), guatiao::value::error::ValueError>

@@ -797,6 +797,9 @@ monotonic sequence and match their Station/Mission/Session identity and terminal
 direction. Frames are bounded before fanout. Socket write buffers are bounded
 too, and their configured capacity counts toward the aggregate budget.
 
+`attach`'s replay holds a `TerminalGap` (`ai6-diptel`) ahead of any frame that follows a position or
+a frame with a sequence skipped between them, and a frame published past a skipped sequence is
+preceded by one on the live stream; the gateway keeps no record of gaps but its history.
 `terminal_bytes` is the most terminal output one event of the Session may carry, at any sequence;
 `POST /v1/station/sessions` answers it beside `next_sequence`, and a Station splits longer output.
 `publish_lifecycle` and `publish_terminal_output` are the higher-level M path:

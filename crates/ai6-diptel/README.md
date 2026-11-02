@@ -19,7 +19,7 @@ Session lifecycle events, terminal bytes, terminal geometry and operator control
 - No process-global state or custom wire codec.
 
 `FrameReceiver` validates gateway frames against their channel schemas and yields
-decoded lifecycle events, terminal bytes, resize events, operator controls or channel closure. Schema announcements
+decoded lifecycle events, terminal bytes, resize events, operator controls, gaps or channel closure. Schema announcements
 are consumed internally and return `None`.
 
 ## Installation

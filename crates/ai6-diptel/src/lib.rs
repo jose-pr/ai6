@@ -24,6 +24,7 @@ const LIFECYCLE_CHANNEL: u64 = 1;
 const TERMINAL_CHANNEL: u64 = 2;
 const RESIZE_CHANNEL: u64 = 3;
 const CONTROL_CHANNEL: u64 = 4;
+const GAP_CHANNEL: u64 = 5;
 
 /// An invalid or over-limit protocol identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -445,6 +446,75 @@ impl TerminalDirection {
     }
 }
 
+/// Events of a Session that a viewer cannot have: those after `after` and before `before`.
+///
+/// The gateway says so on attach, when what it still holds starts later than the viewer's position
+/// or skips a sequence, and live, when a Session's next event skips one. It trimmed them from its
+/// history, lost them restarting, or the Station dropped them while the gateway was away. A viewer
+/// already at `before - 1` or past it has missed nothing, and ignores the frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalGap {
+    session_id: SessionId,
+    after: u64,
+    before: u64,
+}
+
+impl TerminalGap {
+    /// Creates a gap; at least one sequence must lie between `after` and `before`.
+    pub fn new(session_id: SessionId, after: u64, before: u64) -> Result<Self, InvalidGap> {
+        if after.checked_add(1).is_none_or(|next| next >= before) {
+            return Err(InvalidGap);
+        }
+        Ok(Self {
+            session_id,
+            after,
+            before,
+        })
+    }
+
+    /// The provider-issued Session ID.
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    /// The last sequence before what is missing; 0 when it starts at the Session's beginning.
+    pub const fn after(&self) -> u64 {
+        self.after
+    }
+
+    /// The first sequence past what is missing.
+    pub const fn before(&self) -> u64 {
+        self.before
+    }
+}
+
+/// No sequence lies between a gap's two ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct InvalidGap;
+
+impl fmt::Display for InvalidGap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a gap must have a sequence between its ends")
+    }
+}
+
+impl core::error::Error for InvalidGap {}
+
+/// Creates a guatiao schema announcement and value frame for a gap.
+pub fn gap_frames(gap: &TerminalGap) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError> {
+    let schema = SchemaBuilder::new()
+        .field(FieldBuilder::new("session_id", KindBuilder::string()).required())
+        .field(FieldBuilder::new("after", KindBuilder::int()).required())
+        .field(FieldBuilder::new("before", KindBuilder::int()).required())
+        .finish()?;
+    let mut value = Map::new();
+    value.set("session_id", gap.session_id.as_str());
+    value.set("after", gap.after);
+    value.set("before", gap.before);
+    frames(GAP_CHANNEL, &schema, &value.into())
+}
+
 /// Creates a guatiao schema announcement and value frame for a lifecycle event.
 pub fn lifecycle_frames(
     event: &LifecycleEvent,
@@ -549,6 +619,8 @@ pub enum IncomingFrame {
     Resize(TerminalResize),
     /// An operator control for the Station holding a Mission.
     Control(MissionControl),
+    /// Events of a provider Session the viewer cannot have.
+    Gap(TerminalGap),
     /// The remote side closed a channel.
     Closed(u64),
 }
@@ -651,6 +723,18 @@ impl FrameReceiver {
                 let map = Map::try_from(value)
                     .map_err(|_| FrameDecodeError("control frame must be a map".into()))?;
                 Ok(Some(IncomingFrame::Control(decode_control(&map)?)))
+            }
+            Received::Value { channel, value } if channel == GAP_CHANNEL => {
+                let map = Map::try_from(value)
+                    .map_err(|_| FrameDecodeError("gap frame must be a map".into()))?;
+                let gap = TerminalGap::new(
+                    SessionId::new(text(&map, "session_id")?)
+                        .map_err(|error| FrameDecodeError(error.to_string()))?,
+                    number(&map, "after")?,
+                    number(&map, "before")?,
+                )
+                .map_err(|error| FrameDecodeError(error.to_string()))?;
+                Ok(Some(IncomingFrame::Gap(gap)))
             }
             Received::Value { channel, .. } => Err(FrameDecodeError(format!(
                 "unsupported Universal Exports channel {channel}"
@@ -1045,6 +1129,33 @@ mod tests {
         assert!(!valid_reason(&"x".repeat(MAX_REASON_BYTES + 1)));
     }
 
+    fn sample_gap() -> TerminalGap {
+        TerminalGap::new(SessionId::new("provider-run-3").unwrap(), 0, 5).unwrap()
+    }
+
+    #[test]
+    fn a_gap_decodes_as_it_was_made_and_needs_a_sequence_between_its_ends() {
+        let gap = sample_gap();
+        assert_eq!(gap.session_id().as_str(), "provider-run-3");
+        assert_eq!((gap.after(), gap.before()), (0, 5));
+        let (schema, value) = gap_frames(&gap).unwrap();
+        let mut receiver = FrameReceiver::new();
+        assert_eq!(receiver.accept(&schema).unwrap(), None);
+        assert_eq!(
+            receiver.accept(&value).unwrap(),
+            Some(IncomingFrame::Gap(gap))
+        );
+        let session = || SessionId::new("provider-run-3").unwrap();
+        for (after, before) in [(5, 6), (6, 5), (5, 5), (u64::MAX, u64::MAX)] {
+            assert_eq!(
+                TerminalGap::new(session(), after, before),
+                Err(InvalidGap),
+                "{after}..{before}"
+            );
+        }
+        assert!(TerminalGap::new(session(), 4, 6).is_ok());
+    }
+
     fn sample_control() -> MissionControl {
         MissionControl::new(
             ControlId::new("control-1").unwrap(),
@@ -1140,6 +1251,7 @@ mod tests {
         let terminal_frames = terminal_frames(&terminal).unwrap();
         let resize_frames = resize_frames(&resize).unwrap();
         let control_frames = control_frames(&sample_control()).unwrap();
+        let gap_frames = gap_frames(&sample_gap()).unwrap();
         let expected = include_str!("../tests/vectors/frames.txt");
         for line in expected.lines() {
             let (name, encoded) = line.split_once('=').unwrap();
@@ -1152,6 +1264,8 @@ mod tests {
                 "resize_value" => &resize_frames.1,
                 "control_schema" => &control_frames.0,
                 "control_value" => &control_frames.1,
+                "gap_schema" => &gap_frames.0,
+                "gap_value" => &gap_frames.1,
                 "lifecycle_value_quarantined" | "lifecycle_value_green_ink" => continue,
                 _ => panic!("unknown vector name"),
             };

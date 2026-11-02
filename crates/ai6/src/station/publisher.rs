@@ -1040,6 +1040,7 @@ fn decode_input_frame(frame: &[u8]) -> Option<(SessionId, u64, TerminalInput)> {
         | IncomingFrame::Terminal(_)
         | IncomingFrame::Resize(_)
         | IncomingFrame::Control(_)
+        | IncomingFrame::Gap(_)
         | IncomingFrame::Closed(_) => None,
     }
 }

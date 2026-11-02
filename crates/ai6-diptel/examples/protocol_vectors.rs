@@ -1,7 +1,7 @@
 use ai6_diptel::{
     ControlAction, ControlId, LifecycleEvent, MissionControl, MissionId, OperationId, SessionId,
-    SessionState, TerminalData, TerminalDirection, TerminalResize, control_frames,
-    lifecycle_frames, resize_frames, terminal_frames,
+    SessionState, TerminalData, TerminalDirection, TerminalGap, TerminalResize, control_frames,
+    gap_frames, lifecycle_frames, resize_frames, terminal_frames,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,6 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .with_session(SessionId::new("provider-run-3")?)
     .with_agent("008")?;
+    let gap = TerminalGap::new(SessionId::new("provider-run-3")?, 0, 5)?;
 
     let quarantined = LifecycleEvent {
         state: SessionState::Quarantined,
@@ -53,6 +54,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("resize_value", resize_frames(&resize)?.1),
         ("control_schema", control_frames(&control)?.0),
         ("control_value", control_frames(&control)?.1),
+        ("gap_schema", gap_frames(&gap)?.0),
+        ("gap_value", gap_frames(&gap)?.1),
     ] {
         println!("{name}={}", hex(&frame));
     }

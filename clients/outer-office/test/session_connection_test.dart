@@ -131,7 +131,7 @@ void main() {
       );
       await _waitUntilConnected(connection);
       expect(first.path, '/v1/socket/provider-run-3');
-      expect(first.after, '3');
+      expect(first.after, '0');
       expect(first.cookie, 'ai6_attach=ticket-1');
       expect(first.origin, origin.origin);
       expect(first.forwardedProto, 'https');
@@ -206,6 +206,123 @@ void main() {
       expect(attachRequests[4]['mode'], 'read');
     },
   );
+
+  test('A reconnect replays from what the terminal received, not what the board saw', () async {
+    final frames = await _readProtocolFrames();
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final attaches = List.generate(2, (_) => Completer<String?>());
+    server.listen((request) async {
+      final index = attaches.indexWhere((attach) => !attach.isCompleted);
+      final socket = await WebSocketTransformer.upgrade(
+        request,
+        protocolSelector: (protocols) =>
+            protocols.contains('ai6.guatiao') ? 'ai6.guatiao' : null,
+      );
+      attaches[index].complete(request.uri.queryParameters['after']);
+      socket.add(frames['terminal_schema']!);
+      if (index == 0) {
+        socket.add(frames['terminal_value']!);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await socket.close();
+      }
+    });
+    final board = _board(server);
+    const session = SessionSummary(
+      operationId: 'operation-a',
+      missionId: 'mission-17',
+      sessionId: 'provider-run-3',
+      state: 'working',
+      sequence: 40,
+    );
+    board.sessions = [session];
+    final connection = SessionConnection(board: board, session: session);
+    final received = connection.output.first;
+    addTearDown(() async {
+      connection.dispose();
+      board.dispose();
+      await server.close(force: true);
+    });
+
+    connection.start();
+    expect(
+      await attaches[0].future.timeout(const Duration(seconds: 60)),
+      '0',
+      reason:
+          'the board has seen 40 events; this terminal has shown none of them',
+    );
+    await received.timeout(const Duration(seconds: 60));
+    expect(
+      await attaches[1].future.timeout(const Duration(seconds: 60)),
+      '5',
+      reason: 'the last frame this terminal received, whatever the board moved on to',
+    );
+  });
+
+  test('A gap the gateway reports is shown once, where it happened', () async {
+    final frames = await _readProtocolFrames();
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      final socket = await WebSocketTransformer.upgrade(
+        request,
+        protocolSelector: (protocols) =>
+            protocols.contains('ai6.guatiao') ? 'ai6.guatiao' : null,
+      );
+      socket.add(frames['gap_schema']!);
+      socket.add(frames['gap_value']!);
+      socket.add(frames['terminal_schema']!);
+      socket.add(frames['terminal_value']!);
+      // Again, as a live frame after a position it no longer applies to.
+      socket.add(frames['gap_value']!);
+    });
+    final board = _board(server);
+    const session = SessionSummary(
+      operationId: 'operation-a',
+      missionId: 'mission-17',
+      sessionId: 'provider-run-3',
+      state: 'working',
+      sequence: 0,
+    );
+    board.sessions = [session];
+    final connection = SessionConnection(board: board, session: session);
+    final shown = <List<int>>[];
+    final subscription = connection.output.listen(shown.add);
+    addTearDown(() async {
+      connection.dispose();
+      await subscription.cancel();
+      board.dispose();
+      await server.close(force: true);
+    });
+
+    connection.start();
+    final deadline = DateTime.now().add(const Duration(seconds: 60));
+    while (shown.length < 2 && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(shown, hasLength(2));
+    expect(utf8.decode(shown[0]), contains('output is missing here'));
+    expect(shown[1], [255, 0, 128]);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(shown, hasLength(2), reason: 'a gap behind the position is no news');
+  });
+}
+
+MissionBoard _board(HttpServer server) {
+  final board = MissionBoard(
+    apiOrigin: Uri.parse('http://127.0.0.1:${server.port}'),
+    pollInterval: null,
+    client: MockClient((request) async {
+      if (request.url.path == '/v1/user/attach-grants') {
+        return http.Response(jsonEncode({'token': 'grant'}), 201);
+      }
+      return http.Response(
+        '',
+        204,
+        headers: {'set-cookie': 'ai6_attach=ticket; Path=/v1/socket; HttpOnly'},
+      );
+    }),
+  );
+  board.accessToken = 'user-token';
+  return board;
 }
 
 Future<void> _waitUntilConnected(SessionConnection connection) async {

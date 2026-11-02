@@ -337,6 +337,10 @@ What is lost while it is away:
 
 The Session itself loses nothing: its harness and its record of the work are on the Station.
 
+A viewer is told when output is missing: a sequence that skips a number, or a position older than
+what the gateway holds, [reaches its terminal as a notice](terminals.md#a-viewer-reconnects-from-what-it-has).
+A state skipped in the timeline is not announced.
+
 ## Provider libraries: pins and publishers
 
 A Station runs every provider library it loads with its own privileges, so it checks them

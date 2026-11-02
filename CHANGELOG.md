@@ -106,6 +106,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A terminal that reconnects replays from what it received. It started from, and followed, the board's
+  sequence, so it could skip output the board had seen and it had not. A viewer whose position was
+  trimmed from the gateway's history, or whose Session's sequence skips a number, is now told: DipTel
+  gains `TerminalGap`, on a new channel 5 with `gap_frames` and `IncomingFrame::Gap`, which Universal
+  Exports sends on attach and live, and Outer Office shows `[AI6: output is missing here]` there.
 - Terminal output longer than the gateway takes in one frame arrives whole. `[publisher]
   terminal_bytes` defaulted to 1 MiB against the gateway's `frame_bytes` of 256 KiB, and the gateway's
   refusal ended publishing. It now defaults to 192 KiB, which with room for a frame's header is that

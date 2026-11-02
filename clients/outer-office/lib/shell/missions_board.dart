@@ -905,14 +905,6 @@ class _LiveSessionTerminalState extends State<_LiveSessionTerminal> {
   }
 
   @override
-  void didUpdateWidget(_LiveSessionTerminal oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.session.sequence != widget.session.sequence) {
-      _connection.advanceCursor(widget.session.sequence);
-    }
-  }
-
-  @override
   void dispose() {
     _connection.removeListener(_changed);
     _connection.dispose();

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:guatiao/wire.dart' as wire;
@@ -7,10 +8,14 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../main.dart' show MissionBoard, SessionSummary;
 import 'socket_connector.dart';
 
+/// What the terminal shows where events of its Session cannot be had: the gateway trimmed them from
+/// its history or lost them restarting, or the Station dropped them while the gateway was away.
+const missingOutputNotice =
+    '\r\n\x1b[2m[AI6: output is missing here]\x1b[0m\r\n';
+
 /// Owns one read-only-by-default attachment to an existing provider Session.
 class SessionConnection extends ChangeNotifier {
-  SessionConnection({required this.board, required this.session})
-    : _cursor = session.sequence;
+  SessionConnection({required this.board, required this.session});
 
   final MissionBoard board;
   final SessionSummary session;
@@ -37,7 +42,10 @@ class SessionConnection extends ChangeNotifier {
   wire.Receiver? _receiver;
   Timer? _retry;
   late Duration _retryDelay = board.limits.terminal.retryDelay;
-  int _cursor;
+
+  /// The last event this connection received, so a reconnect replays what it has not shown. The
+  /// board's sequence says nothing of that: it moves on with events this terminal never saw.
+  int _cursor = 0;
   int _inputSequence = 0;
   int _generation = 0;
   bool _connected = false;
@@ -50,12 +58,6 @@ class SessionConnection extends ChangeNotifier {
       return;
     }
     unawaited(_connect(++_generation));
-  }
-
-  void advanceCursor(int sequence) {
-    if (sequence > _cursor) {
-      _cursor = sequence;
-    }
   }
 
   Future<void> setWriteLease(bool requested) async {
@@ -147,6 +149,10 @@ class SessionConnection extends ChangeNotifier {
         if (raw is! Map) return;
         final frame = Map<String, Object?>.from(raw);
         if (frame['session_id'] != session.sessionId) return;
+        if (event.channel == 5) {
+          _gap(frame['before']);
+          return;
+        }
         final sequence = frame['sequence'];
         if (sequence is! int) return;
         if (sequence > _cursor) {
@@ -175,6 +181,13 @@ class SessionConnection extends ChangeNotifier {
     } on Object {
       _connectionEnded(generation);
     }
+  }
+
+  /// Shows that events before [before] are gone, unless this connection has what came before.
+  void _gap(Object? before) {
+    if (before is! int || before - 1 <= _cursor) return;
+    _cursor = before - 1;
+    _output.add(utf8.encode(missingOutputNotice));
   }
 
   void sendInput(List<int> bytes) {
