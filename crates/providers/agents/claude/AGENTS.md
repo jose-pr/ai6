@@ -140,8 +140,9 @@ The handler then registers that server as `ai6-theater` (same placeholder scheme
 tools (`mcp__ai6-theater`) and keeps Claude's own shell and file tools off (below) so nothing it
 does lands on the Station. This applies to resume as well.
 
-A field Session, one neither answer-only nor an assistant, on start and resume gets, each variadic
-list closed by the next flag:
+A field Session, one neither answer-only nor an assistant, on start and resume gets, by
+`AgentStart::clearance` or `AgentResume::clearance`, each variadic list closed by the next flag. At
+`field` and `00`:
 
 ```text
 --tools Read,Glob,Grep,Edit,Write,NotebookEdit,Bash,PowerShell,TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate[,the tool of each allowed_tools rule]
@@ -150,12 +151,35 @@ list closed by the next flag:
 --allowedTools [mcp__ai6-cables,][mcp__ai6-theater,]Read,Glob,Grep,Edit(/**),Bash,PowerShell,TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate[,allowed_tools]
 ```
 
+At `desk` and any clearance that is not one of the three (`ai6::clearance_runs_commands`), an empty
+one included:
+
+```text
+--tools Read,Glob,Grep,Edit,Write,NotebookEdit,TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate[,the tool of each allowed_tools rule]
+--permission-mode dontAsk
+--disallowedTools WebFetch,WebSearch,Agent,Bash,PowerShell[,denied_tools]
+--allowedTools [mcp__ai6-cables,][mcp__ai6-theater,]Read,Glob,Grep,Edit(/**),TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate[,allowed_tools]
+```
+
 An `allowed_tools` rule for a tool on the deny list takes that tool off it; an `mcp__` rule offers
 nothing, since `--tools` is about built-in tools. In remote-hands mode the eight tools
 `Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep` leave `--tools` and the default allow
-rules and join the deny list, and `allowed_tools` cannot bring them back. `AgentHandler::weakenings`
-answers one line per `allowed_tools` rule neither on the default allow list nor denied by
-`denied_tools`.
+rules and join the deny list, and `allowed_tools` cannot bring them back; at `desk` the deny list
+also takes `mcp__ai6-theater__theater_run` and `mcp__ai6-theater__theater_write`, which a rule naming
+one lifts. `AgentHandler::weakenings` answers one line per `allowed_tools` rule not denied by
+`denied_tools` that is for `Bash`, `PowerShell` or one of those two tools (`allowed_tools adds RULE
+to what its desk Sessions may call`, whatever the Agent's configured clearance, since it can come to
+work at `desk`), or that is not on the default allow list (`… its field Sessions …`).
+
+Measured at `desk` with 2.1.316 against the same stand-in, on Windows: `Bash` and `PowerShell`
+answered `No such tool available`, with `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` set and with a
+`PreToolUse` hook that never saw a call, and nothing ran; `Write` inside the working directory,
+`Read`, `Glob`, `Grep`, `TaskCreate` and a tool of `mcp__ai6-cables` ran; `Write` outside it, through
+`..`, to `.git/x` and to `.claude/settings.json` was denied. With `allowed_tools = ["Bash"]` it ran,
+through the hook, and `PowerShell` stayed out. A tool of an allowed server denied by name
+(`mcp__ai6-cables__echo`) answered `No such tool available`. A Session started at `field` and resumed
+with the `desk` flags was offered no `Bash` or `PowerShell`, and one started at `desk` and resumed
+with the `field` flags was offered both: the flags of the launch decide.
 
 `--tools` is there because `dontAsk` denies only what would prompt. Measured with 2.1.316 against a
 loopback stand-in for the API (no model reached), on Windows and on Linux. With `dontAsk` and the

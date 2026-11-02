@@ -24,9 +24,9 @@ provider-issued Session ID for resume.
 - Holds a shell command that pushes to a protected ref, merges or releases until green ink
   covers it, through a `PreToolUse` hook (`ai6 green-ink gate`) passed with `--settings`.
 - Runs a Mission under `--permission-mode dontAsk` with an explicit list of tools: reading,
-  editing inside the working directory, commands and AI6's MCP servers. An Agent's
-  `handler_settings` (`allowed_tools`, `denied_tools`) change it, and a turn's refused calls are
-  reported as an event of kind `denied`.
+  editing inside the working directory, AI6's MCP servers and, at `field` and `00` clearance,
+  commands. An Agent's `handler_settings` (`allowed_tools`, `denied_tools`) change it, and a turn's
+  refused calls are reported as an event of kind `denied`.
 - Leaves out the working directory's own settings and `.mcp.json` unless AI6 allows them
   (`--setting-sources user --strict-mcp-config`), so a checkout cannot add hooks or MCP
   servers to an Agent.

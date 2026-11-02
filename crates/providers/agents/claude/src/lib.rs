@@ -17,7 +17,7 @@ use ai6::directorates::q::terminal::{
 };
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    DENIED_EVENT, LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
+    DENIED_EVENT, LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit, clearance_runs_commands,
 };
 use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
 use ai6::directorates::section_00::denied::DenyList;
@@ -76,14 +76,15 @@ impl Default for ClaudeConfig {
     }
 }
 
-/// What an Agent's `handler_settings` change about a field Session's tools, on top of
-/// [`FIELD_ALLOWED`] and [`FIELD_DENIED`]. Answer-only and assistant Sessions ignore them. Unknown
-/// keys are refused.
+/// What an Agent's `handler_settings` change about a Mission's tools, on top of [`FIELD_ALLOWED`]
+/// and [`FIELD_DENIED`] and, at `desk`, [`DESK_DENIED`]. Answer-only and assistant Sessions ignore
+/// them. Unknown keys are refused.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ClaudeSettings {
     /// Claude Code permission rules added to the allow list. A rule for a tool the list keeps
-    /// out (`WebFetch(domain:example.com)`) offers that tool and lifts its default denial.
+    /// out (`WebFetch(domain:example.com)`, or `Bash` at `desk`) offers that tool and lifts its
+    /// default denial.
     #[serde(default)]
     allowed_tools: Vec<String>,
     /// Claude Code permission rules added to the deny list; a deny rule beats an allow rule.
@@ -170,16 +171,29 @@ impl AgentHandler for ClaudeHandler {
         Ok(None)
     }
 
-    /// Each rule of `allowed_tools` that the default list does not hold. A rule the settings deny
-    /// as well allows nothing, so it is not one.
+    /// Each rule of `allowed_tools` that a default list does not hold. A rule the settings deny as
+    /// well allows nothing, so it is not one. A rule for what only `desk` keeps out is one however
+    /// the Agent is configured, since any Agent can come to work at `desk`.
     fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
         let denied = &self.settings.denied_tools;
         Ok(self
             .settings
             .allowed_tools
             .iter()
-            .filter(|rule| !FIELD_ALLOWED.contains(&rule.as_str()) && !denied.contains(rule))
-            .map(|rule| format!("allowed_tools adds {rule} to what its field Sessions may call"))
+            .filter(|rule| !denied.contains(rule))
+            .filter_map(|rule| {
+                if DESK_DENIED.contains(&rule_tool(rule)) {
+                    Some(format!(
+                        "allowed_tools adds {rule} to what its desk Sessions may call"
+                    ))
+                } else if FIELD_ALLOWED.contains(&rule.as_str()) {
+                    None
+                } else {
+                    Some(format!(
+                        "allowed_tools adds {rule} to what its field Sessions may call"
+                    ))
+                }
+            })
             .collect())
     }
 
@@ -209,6 +223,7 @@ impl AgentHandler for ClaudeHandler {
             project_settings: request.project_settings,
             project_mcp: request.project_mcp,
             answer_only: request.answer_only,
+            commands: clearance_runs_commands(&request.clearance),
         };
         add_settings(
             &mut argv,
@@ -263,10 +278,13 @@ impl AgentHandler for ClaudeHandler {
             request.effort.as_deref(),
         );
         add_budget(&mut argv, request.max_cost_micro_usd);
+        // Flags, not the Session's record, decide the tools: Claude Code 2.1.316 resumed a Session
+        // started with `Bash` and without it on the flags of each launch, either way round.
         let mode = Mode {
             project_settings: request.project_settings,
             project_mcp: request.project_mcp,
             answer_only: request.answer_only,
+            commands: clearance_runs_commands(&request.clearance),
         };
         add_settings(
             &mut argv,
@@ -334,7 +352,8 @@ const OWN_TOOLS: [&str; 8] = [
     "Grep",
 ];
 
-/// The built-in tools a field Session is offered (`--tools`). `dontAsk` does not stop a tool that
+/// The built-in tools a Mission's Session is offered at `field` and `00` (`--tools`), and at `desk`
+/// less [`DESK_DENIED`]. `dontAsk` does not stop a tool that
 /// needs no approval: without this list Claude Code 2.1.316 ran `Agent`, `CronCreate` and
 /// `SendMessage` under it, and fetched `docs.python.org` with `WebFetch`, its rules empty. By
 /// default it offers the four `Task` tools in place of `TodoWrite`
@@ -355,7 +374,8 @@ const FIELD_TOOLS: [&str; 13] = [
     "TaskUpdate",
 ];
 
-/// A field Session's allow rules, besides its own MCP servers. `Edit(/**)` is rooted at the
+/// A Mission Session's allow rules at `field` and `00`, besides its own MCP servers, and at `desk`
+/// less [`DESK_DENIED`]. `Edit(/**)` is rooted at the
 /// working directory for a rule given as a flag, and covers `Write` and `NotebookEdit`
 /// (code.claude.com/docs/en/permissions, "Read and Edit").
 const FIELD_ALLOWED: [&str; 11] = [
@@ -375,6 +395,16 @@ const FIELD_ALLOWED: [&str; 11] = [
 /// What a field Session is denied by name, besides not being offered it: a deny rule beats any
 /// allow rule the user's or a pinned project's settings hold.
 const FIELD_DENIED: [&str; 3] = ["WebFetch", "WebSearch", "Agent"];
+
+/// What a `desk` Session is denied besides [`FIELD_DENIED`]: anything that runs a command, and
+/// `theater_write`, which takes any path on the Theater where `Edit(/**)` stays in the working
+/// directory. A rule in `allowed_tools` lifts each, as a weakening.
+const DESK_DENIED: [&str; 4] = [
+    "Bash",
+    "PowerShell",
+    "mcp__ai6-theater__theater_run",
+    "mcp__ai6-theater__theater_write",
+];
 
 /// Every tool an answer-only Session is denied by name, besides `--tools=` turning the
 /// built-in ones off: Claude's own tools, its web and sub-agent tools, and any MCP tool.
@@ -471,6 +501,8 @@ struct Mode {
     project_settings: bool,
     project_mcp: bool,
     answer_only: bool,
+    /// Whether the clearance allows a command tool ([`clearance_runs_commands`]).
+    commands: bool,
 }
 
 /// Every built-in tool an assistant Session is denied by name, besides `--tools=` turning the
@@ -514,7 +546,7 @@ fn add_settings(
         add_answer_only(argv);
     } else {
         add_project_settings(argv, mode.project_settings, mode.project_mcp);
-        add_field_tools(argv, environment, settings);
+        add_field_tools(argv, environment, settings, mode.commands);
         add_mcp(argv, environment);
         add_gate(argv, environment);
     }
@@ -1056,27 +1088,35 @@ fn rule_tool(rule: &str) -> &str {
 /// `--permission-mode dontAsk` a call no rule allows is denied, with no prompt nobody is there to
 /// answer (code.claude.com/docs/en/permissions). In remote-hands mode, when the Station serves a
 /// Theater's tools, Claude's own shell and file tools are neither offered nor allowed and stay
-/// denied whatever the settings say, so that nothing the harness does lands on the Station.
+/// denied whatever the settings say, so that nothing the harness does lands on the Station. With
+/// `commands` false, the clearance's, the tools of [`DESK_DENIED`] are neither offered nor allowed
+/// and are denied by name, unless a rule of the settings names one.
 fn add_field_tools(
     argv: &mut Vec<String>,
     environment: &BTreeMap<String, String>,
     settings: &ClaudeSettings,
+    commands: bool,
 ) {
     let remote_hands = has_endpoint(environment, "AI6_THEATER_MCP");
     let own = |tool: &str| remote_hands && OWN_TOOLS.contains(&tool);
+    let kept_out = |tool: &str| !commands && DESK_DENIED.contains(&tool);
     let mut offered: Vec<&str> = FIELD_TOOLS
         .iter()
         .copied()
-        .filter(|tool| !own(tool))
+        .filter(|tool| !own(tool) && !kept_out(tool))
         .collect();
     for tool in settings.allowed_tools.iter().map(|rule| rule_tool(rule)) {
         if !tool.starts_with("mcp__") && !own(tool) && !offered.contains(&tool) {
             offered.push(tool);
         }
     }
+    let desk_denied = DESK_DENIED.iter().copied().filter(|tool| {
+        kept_out(tool) && !own(tool) && (remote_hands || !tool.starts_with("mcp__"))
+    });
     let mut denied: Vec<&str> = FIELD_DENIED
         .iter()
         .copied()
+        .chain(desk_denied)
         .filter(|tool| {
             !settings
                 .allowed_tools
@@ -1101,7 +1141,7 @@ fn add_field_tools(
         FIELD_ALLOWED
             .iter()
             .copied()
-            .filter(|rule| !own(rule_tool(rule))),
+            .filter(|rule| !own(rule_tool(rule)) && !kept_out(rule_tool(rule))),
     );
     allowed.extend(settings.allowed_tools.iter().map(String::as_str));
     argv.extend([
@@ -2129,7 +2169,7 @@ mod tests {
                         .unwrap()
                         .to_string_lossy()
                         .into_owned(),
-                    clearance: "developer".to_owned(),
+                    clearance: "field".to_owned(),
                     environment: environment.clone(),
                     model: Some("sonnet".to_owned()),
                     effort: Some("high".to_owned()),
@@ -3013,7 +3053,7 @@ mod tests {
             ("AI6_THEATER_MCP_TOKEN".to_owned(), "b".to_owned()),
         ]);
         let mut argv = vec!["claude".to_owned()];
-        add_field_tools(&mut argv, &environment, &ClaudeSettings::default());
+        add_field_tools(&mut argv, &environment, &ClaudeSettings::default(), true);
         let allowed = argv
             .iter()
             .position(|argument| argument == "--allowedTools")
@@ -3042,7 +3082,12 @@ mod tests {
         let mut argv = vec!["claude".to_owned()];
         add_mcp(&mut argv, &BTreeMap::new());
         assert_eq!(argv, ["claude"]);
-        add_field_tools(&mut argv, &BTreeMap::new(), &ClaudeSettings::default());
+        add_field_tools(
+            &mut argv,
+            &BTreeMap::new(),
+            &ClaudeSettings::default(),
+            true,
+        );
         assert!(!argv.iter().any(|argument| argument.contains("mcp__")));
     }
 
@@ -3064,7 +3109,7 @@ mod tests {
             denied_tools: Vec::new(),
         };
 
-        add_field_tools(&mut argv, &environment, &settings);
+        add_field_tools(&mut argv, &environment, &settings, true);
         add_mcp(&mut argv, &environment);
 
         let position = |flag: &str| argv.iter().position(|argument| argument == flag).unwrap();
@@ -3198,6 +3243,7 @@ mod tests {
                 project_settings: false,
                 project_mcp: false,
                 answer_only: false,
+                commands: true,
             },
             &ClaudeSettings::default(),
             None,
@@ -3218,7 +3264,7 @@ mod tests {
         })
         .unwrap();
         let mut argv = Vec::new();
-        add_field_tools(&mut argv, &BTreeMap::new(), &handler.settings);
+        add_field_tools(&mut argv, &BTreeMap::new(), &handler.settings, true);
         let (offered, denied, allowed) = field_flags(&argv);
         assert_eq!(offered, format!("{DEFAULT_OFFERED},WebFetch,Skill"));
         assert_eq!(
@@ -3252,7 +3298,7 @@ mod tests {
         };
         assert!(weakenings("").is_empty());
         assert!(weakenings("denied_tools = [\"Bash\", \"Read\"]").is_empty());
-        assert!(weakenings("allowed_tools = [\"Bash\", \"Edit(/**)\"]").is_empty());
+        assert!(weakenings("allowed_tools = [\"Read\", \"Edit(/**)\"]").is_empty());
         assert!(
             weakenings("allowed_tools = [\"WebFetch\"]\ndenied_tools = [\"WebFetch\"]").is_empty(),
             "a deny rule beats the allow rule"
@@ -3261,6 +3307,241 @@ mod tests {
             weakenings("allowed_tools = [\"Write\"]").len(),
             1,
             "a bare Write reaches outside the working directory"
+        );
+    }
+
+    const DESK_OFFERED: &str = "Read,Glob,Grep,Edit,Write,NotebookEdit,\
+                                TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate";
+    const DESK_ALLOWED: &str = "Read,Glob,Grep,Edit(/**),\
+                                TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate";
+
+    /// The tool flags of a start, then a resume, at `clearance` under `settings_toml`.
+    fn flags_at(clearance: &str, settings_toml: &str) -> Vec<(String, String, String)> {
+        let mut environment = cable_environment();
+        environment.insert(
+            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
+            "claude-clearance-session".to_owned(),
+        );
+        let terminal = ProcessTerminal::new();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-field-fixture".to_owned(),
+            settings_toml: settings_toml.to_owned(),
+            ..ClaudeConfig::default()
+        })
+        .unwrap();
+        let working_directory = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let started = handler
+            .start(
+                AgentStart {
+                    mission_id: "mission-clearance".parse().unwrap(),
+                    agent_id: "007".to_owned(),
+                    prompt: "work".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: working_directory.clone(),
+                    clearance: clearance.to_owned(),
+                    environment: environment.clone(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&started);
+        started.close().unwrap();
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-clearance".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-clearance-session").unwrap(),
+                    message: None,
+                    working_directory,
+                    clearance: clearance.to_owned(),
+                    environment,
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        resumed.close().unwrap();
+        let specs = terminal.specs.lock().unwrap();
+        assert_eq!(specs.len(), 2);
+        specs.iter().map(|spec| field_flags(&spec.argv)).collect()
+    }
+
+    #[test]
+    fn a_sessions_tools_follow_its_clearance_on_start_and_resume() {
+        let field = (
+            DEFAULT_OFFERED.to_owned(),
+            "WebFetch,WebSearch,Agent".to_owned(),
+            format!("mcp__ai6-cables,{DEFAULT_ALLOWED}"),
+        );
+        let desk = (
+            DESK_OFFERED.to_owned(),
+            "WebFetch,WebSearch,Agent,Bash,PowerShell".to_owned(),
+            format!("mcp__ai6-cables,{DESK_ALLOWED}"),
+        );
+        for clearance in ["field", "00"] {
+            assert_eq!(flags_at(clearance, ""), [field.clone(), field.clone()]);
+        }
+        // A value the handler does not know, an empty one included, gets the least it can give.
+        for clearance in ["desk", "developer", ""] {
+            assert_eq!(
+                flags_at(clearance, ""),
+                [desk.clone(), desk.clone()],
+                "{clearance:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_desk_session_is_given_a_command_tool_only_by_a_rule_reported_as_a_weakening() {
+        let settings = "allowed_tools = [\"Bash(git status)\"]\n";
+        let flags = flags_at("desk", settings);
+        assert_eq!(
+            flags[0],
+            (
+                format!("{DESK_OFFERED},Bash"),
+                "WebFetch,WebSearch,Agent,PowerShell".to_owned(),
+                format!("mcp__ai6-cables,{DESK_ALLOWED},Bash(git status)"),
+            ),
+            "the tool it names, and no other"
+        );
+        assert_eq!(flags[1], flags[0]);
+        let weakenings = |settings_toml: &str| {
+            ClaudeHandler::try_from(ClaudeConfig {
+                settings_toml: settings_toml.to_owned(),
+                ..ClaudeConfig::default()
+            })
+            .unwrap()
+            .weakenings()
+            .unwrap()
+        };
+        assert_eq!(
+            weakenings(settings),
+            ["allowed_tools adds Bash(git status) to what its desk Sessions may call"]
+        );
+        assert_eq!(
+            weakenings("allowed_tools = [\"PowerShell\"]"),
+            ["allowed_tools adds PowerShell to what its desk Sessions may call"]
+        );
+        assert_eq!(
+            weakenings("allowed_tools = [\"mcp__ai6-theater__theater_run\"]"),
+            ["allowed_tools adds mcp__ai6-theater__theater_run to what its desk Sessions may call"]
+        );
+        assert!(
+            weakenings("allowed_tools = [\"Bash\"]\ndenied_tools = [\"Bash\"]").is_empty(),
+            "a deny rule beats the allow rule"
+        );
+    }
+
+    #[test]
+    fn a_desk_session_on_a_remote_theater_may_read_it_but_not_run_or_write() {
+        let environment = BTreeMap::from([
+            ("AI6_THEATER_MCP_URL".to_owned(), "http://b/mcp".to_owned()),
+            ("AI6_THEATER_MCP_TOKEN".to_owned(), "b".to_owned()),
+        ]);
+        let flags = |commands: bool, settings: &ClaudeSettings| {
+            let mut argv = Vec::new();
+            add_field_tools(&mut argv, &environment, settings, commands);
+            field_flags(&argv)
+        };
+        let tasks = "TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate";
+        let own = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep";
+        assert_eq!(
+            flags(false, &ClaudeSettings::default()),
+            (
+                tasks.to_owned(),
+                format!(
+                    "WebFetch,WebSearch,Agent,mcp__ai6-theater__theater_run,\
+                     mcp__ai6-theater__theater_write,{own}"
+                ),
+                format!("mcp__ai6-theater,{tasks}"),
+            )
+        );
+        assert_eq!(
+            flags(true, &ClaudeSettings::default()).1,
+            format!("WebFetch,WebSearch,Agent,{own}"),
+            "field keeps every Theater tool"
+        );
+        let consent = ClaudeSettings {
+            allowed_tools: vec![
+                "mcp__ai6-theater__theater_run".to_owned(),
+                "Bash".to_owned(),
+            ],
+            denied_tools: Vec::new(),
+        };
+        let (offered, denied, _) = flags(false, &consent);
+        assert_eq!(
+            denied,
+            format!("WebFetch,WebSearch,Agent,mcp__ai6-theater__theater_write,{own}"),
+            "a rule lifts the Theater tool it names, and never Claude's own shell on the Station"
+        );
+        assert_eq!(offered, tasks);
+    }
+
+    #[test]
+    fn a_desk_session_without_a_station_has_no_server_and_no_command_tool() {
+        let mut argv = Vec::new();
+        add_settings(
+            &mut argv,
+            &BTreeMap::new(),
+            "wd",
+            Mode {
+                project_settings: false,
+                project_mcp: false,
+                answer_only: false,
+                commands: false,
+            },
+            &ClaudeSettings::default(),
+            None,
+        )
+        .unwrap();
+        let (offered, denied, allowed) = field_flags(&argv);
+        assert_eq!(offered, DESK_OFFERED);
+        assert_eq!(denied, "WebFetch,WebSearch,Agent,Bash,PowerShell");
+        assert_eq!(allowed, DESK_ALLOWED);
+    }
+
+    #[test]
+    fn answer_only_and_assistant_flags_do_not_depend_on_the_clearance() {
+        let flags = |commands: bool, answer_only: bool, assistant: Option<&AssistantMode>| {
+            let mut argv = Vec::new();
+            add_settings(
+                &mut argv,
+                &assistant_environment(),
+                "wd",
+                Mode {
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only,
+                    commands,
+                },
+                &ClaudeSettings::default(),
+                assistant,
+            )
+            .unwrap();
+            argv
+        };
+        assert_eq!(flags(true, true, None), flags(false, true, None));
+        let mode = AssistantMode::moneypenny();
+        assert_eq!(
+            flags(true, false, Some(&mode)),
+            flags(false, false, Some(&mode))
         );
     }
 
@@ -3303,6 +3584,7 @@ mod tests {
                         project_settings: false,
                         project_mcp: false,
                         answer_only,
+                        commands: true,
                     },
                     settings,
                     assistant,
