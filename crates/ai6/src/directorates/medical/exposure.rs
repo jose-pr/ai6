@@ -27,6 +27,10 @@ pub const STATION_REPORT: &str = "station:report";
 /// The source of a Head of Station round given its Station's logbook: reports earlier rounds
 /// wrote after reading other Missions' text.
 pub const STATION_LOGBOOK: &str = "station:logbook";
+/// The source of a Mission proposed into this Operation from another through a compartment.
+pub const BRIEF_COMPARTMENT: &str = "brief:compartment";
+/// What starts the source of a Session that read another Operation's brief or product.
+pub const PRODUCT_PREFIX: &str = "product:";
 /// The Brief `data` key under which a proposal carries its parent's exposure sources.
 pub const BRIEF_EXPOSURE_KEY: &str = "exposure";
 
@@ -43,6 +47,11 @@ pub fn cable_source(sender: &str, limit: Limit) -> String {
 /// cut to `limit` bytes.
 pub fn issue_source(tracker: &str, limit: Limit) -> String {
     bounded(format!("issue:{tracker}"), limit)
+}
+
+/// The source for a Session that read a brief or a product of `operation`, cut to `limit` bytes.
+pub fn product_source(operation: &str, limit: Limit) -> String {
+    bounded(format!("{PRODUCT_PREFIX}{operation}"), limit)
 }
 
 /// The source for a Session whose tool call named `tool`, cut to `limit` bytes.
@@ -64,7 +73,8 @@ fn bounded(mut source: String, limit: Limit) -> String {
 /// One way a Session was exposed, and when.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Exposure {
-    /// `brief:source`, `cable:SENDER`, `issue:TRACKER`, `tool:NAME` or `review`.
+    /// `brief:source`, `brief:compartment`, `cable:SENDER`, `issue:TRACKER`, `product:OPERATION`,
+    /// `tool:NAME` or `review`.
     pub source: String,
     /// When it happened, as Unix seconds.
     pub at: f64,

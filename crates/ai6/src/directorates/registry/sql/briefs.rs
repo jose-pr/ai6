@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
 
-use super::db::Tx;
+use super::db::{Row, Tx};
 use super::{SqlRegistry, bounded_json, from_json, row_limit, to_json};
 use crate::directorates::m::vetting::{FindingKind, Vetting, content_digest};
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
@@ -16,8 +16,8 @@ use crate::directorates::registry::sources::{
     source_brief, source_entry, source_provenance,
 };
 use crate::directorates::registry::store::{
-    Brief, BriefStore, Lease, LeaseRecovery, MissionProposal, invalid_data, lost_outcome,
-    unix_time, validate_registry_key,
+    Brief, BriefStore, FiledBrief, Lease, LeaseRecovery, MissionProposal, invalid_data,
+    lost_outcome, newest_first, unix_time, validate_registry_key,
 };
 use crate::directorates::registry::vetting::{
     Clearance, HeldBrief, VettingStore, already_decided, check_actor, check_limit, merge_clearance,
@@ -44,6 +44,20 @@ fn stored_brief(record: &str, provenance: Option<String>) -> io::Result<Brief> {
     let kept = provenance.and_then(|text| serde_json::from_str::<Provenance>(&text).ok());
     bona_fides::unseal(&mut brief, kept);
     Ok(brief)
+}
+
+/// One row of `SELECT brief, provenance, state, attempts, outcome`.
+fn filed_row(row: &Row) -> io::Result<FiledBrief> {
+    let brief = stored_brief(&row.text(0)?, row.opt_text(1)?)?;
+    brief.validate()?;
+    Ok(FiledBrief {
+        brief,
+        state: row.text(2)?,
+        attempts: u32::try_from(row.int(3)?).unwrap_or(u32::MAX),
+        outcome: row
+            .opt_text(4)?
+            .and_then(|text| serde_json::from_str(&text).ok()),
+    })
 }
 
 /// The queued briefs in Registry order: priority, creation time, key.
@@ -691,6 +705,36 @@ impl BriefStore for SqlRegistry {
     fn lease(&self, key: &str) -> io::Result<Option<Lease>> {
         validate_registry_key(key)?;
         self.read(|tx| lease_in(tx, key))
+    }
+
+    fn filed_brief(&self, key: &str) -> io::Result<Option<FiledBrief>> {
+        validate_registry_key(key)?;
+        self.read(|tx| {
+            tx.query_opt(
+                "SELECT brief, provenance, state, attempts, outcome FROM ai6_briefs WHERE key = $1",
+                &[key.into()],
+            )?
+            .map(|row| filed_row(&row))
+            .transpose()
+        })
+    }
+
+    fn filed_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<FiledBrief>> {
+        // The Operation is inside the record, so every state's newest rows are read to find it.
+        let scan = row_limit(self.limits.briefs.records).saturating_mul(5);
+        let rows = self.read(|tx| {
+            tx.query(
+                "SELECT brief, provenance, state, attempts, outcome FROM ai6_briefs \
+                 ORDER BY revision DESC LIMIT $1",
+                &[scan.into()],
+            )
+        })?;
+        let found = rows
+            .iter()
+            .filter_map(|row| filed_row(row).ok())
+            .filter(|filed| filed.brief.operation.as_deref() == Some(operation))
+            .collect();
+        Ok(newest_first(found, limit))
     }
 
     fn read_claimed(&self, key: &str) -> io::Result<Option<Brief>> {

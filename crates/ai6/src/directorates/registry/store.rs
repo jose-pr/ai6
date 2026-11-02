@@ -308,6 +308,15 @@ impl MissionProposal {
     }
 }
 
+/// The scopes an audit record's `resource` may use.
+const AUDIT_RESOURCE_KINDS: [&str; 5] = [
+    "station:",
+    "config:",
+    "operation:",
+    "mission:",
+    "compartment:",
+];
+
 /// Metadata-only audit event stored in the shared file-backed Registry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -320,8 +329,9 @@ pub struct AuditRecord {
     pub action: String,
     /// Operation that authorized the action.
     pub operation: String,
-    /// Explicit non-Operation resource for Station-scoped (`station:<id>`) or roster
-    /// (`config:roster`) administrative changes.
+    /// Explicit resource beside the Operation: a Station (`station:<id>`), a configuration
+    /// record (`config:roster`), or what a crossing touched (`operation:<id>`, `mission:<id>`,
+    /// `compartment:<id>`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
     /// Safe identifier for the affected resource; never a prompt or payload.
@@ -353,7 +363,10 @@ impl AuditRecord {
         }
         if let Some(resource) = &self.resource {
             validate_audit_text(resource, 512, "resource")?;
-            if !resource.starts_with("station:") && !resource.starts_with("config:") {
+            if !AUDIT_RESOURCE_KINDS
+                .iter()
+                .any(|kind| resource.starts_with(kind))
+            {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "audit resource must use a supported scope",
@@ -975,6 +988,24 @@ impl FileRegistry {
     }
 }
 
+/// The state directories a brief can be in, furthest along first: a brief finished without a
+/// claim leaves its queued copy behind.
+const BRIEF_STATES: [&str; 5] = ["done", "failed", "claimed", "held", "new"];
+
+/// A brief as the Registry holds it, in whatever state it is.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiledBrief {
+    /// The brief.
+    pub brief: Brief,
+    /// `new`, `held`, `claimed`, `done` or `failed`.
+    pub state: String,
+    /// How many times it was claimed.
+    pub attempts: u32,
+    /// The outcome filed for it, once it finished.
+    pub outcome: Option<serde_json::Value>,
+}
+
 /// The brief queue: Mission proposals, queued briefs, their leases and outcomes.
 pub trait BriefStore {
     /// Stores an Agent-authored Mission proposal outside the scheduler's queue.
@@ -1172,9 +1203,119 @@ pub trait BriefStore {
         transcript: Option<&[u8]>,
         station: Option<&str>,
     ) -> io::Result<bool>;
+
+    /// The brief filed under `key`, in whatever state it is.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid key or Registry I/O failures.
+    fn filed_brief(&self, key: &str) -> io::Result<Option<FiledBrief>>;
+
+    /// The briefs of `operation`, newest first, at most `limit` of them. Every brief is read to
+    /// find them, up to `[registry.limits.briefs] records` per state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be read.
+    fn filed_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<FiledBrief>>;
+}
+
+/// The newest `limit` of `briefs`.
+pub(crate) fn newest_first(mut briefs: Vec<FiledBrief>, limit: usize) -> Vec<FiledBrief> {
+    briefs.sort_by(|left, right| {
+        right
+            .brief
+            .created
+            .cmp(&left.brief.created)
+            .then_with(|| right.brief.key().cmp(&left.brief.key()))
+    });
+    briefs.truncate(limit);
+    briefs
+}
+
+impl FileRegistry {
+    /// The attempts recorded for `key`.
+    fn attempts_of(&self, key: &str) -> u32 {
+        fs::read_to_string(self.root.join("attempts").join(format!("{key}.json")))
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// The brief in state directory `state` under `key`.
+    fn filed_in(&self, state: &str, key: &str) -> io::Result<Option<FiledBrief>> {
+        let path = self.root.join(state).join(format!("{key}.json"));
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        if !self.limits.held_record_bytes().allows(bytes.len()) {
+            return Err(invalid_data("filed brief exceeds the size limit"));
+        }
+        let brief = if state == "held" {
+            serde_json::from_slice::<super::vetting::HeldBrief>(&bytes)
+                .map_err(|error| invalid_data(error.to_string()))?
+                .brief
+        } else {
+            serde_json::from_slice::<Brief>(&bytes)
+                .map_err(|error| invalid_data(error.to_string()))?
+        };
+        brief.validate()?;
+        let outcome = match fs::read(self.root.join(state).join(format!("{key}.outcome.json"))) {
+            Ok(bytes) => serde_json::from_slice(&bytes).ok(),
+            Err(_) => None,
+        };
+        Ok(Some(FiledBrief {
+            brief,
+            state: state.to_owned(),
+            attempts: self.attempts_of(key),
+            outcome,
+        }))
+    }
 }
 
 impl BriefStore for FileRegistry {
+    fn filed_brief(&self, key: &str) -> io::Result<Option<FiledBrief>> {
+        validate_registry_key(key)?;
+        for state in BRIEF_STATES {
+            if let Some(filed) = self.filed_in(state, key)? {
+                return Ok(Some(filed));
+            }
+        }
+        Ok(None)
+    }
+
+    fn filed_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<FiledBrief>> {
+        let mut found = Vec::new();
+        let mut seen = BTreeSet::new();
+        for state in BRIEF_STATES {
+            let entries = match fs::read_dir(self.root.join(state)) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            // A finished brief has an outcome, a provenance and a transcript beside it.
+            for entry in entries.take(self.limits.briefs.records.or_max().saturating_mul(4)) {
+                let name = entry?.file_name().to_string_lossy().into_owned();
+                let Some(key) = name.strip_suffix(".json") else {
+                    continue;
+                };
+                if key.ends_with(".outcome") || seen.contains(key) {
+                    continue;
+                }
+                // A record this cannot read is passed over, as a listing of the queue does.
+                if let Ok(Some(filed)) = self.filed_in(state, key)
+                    && filed.brief.operation.as_deref() == Some(operation)
+                {
+                    seen.insert(key.to_owned());
+                    found.push(filed);
+                }
+            }
+        }
+        Ok(newest_first(found, limit))
+    }
+
     fn submit_mission_proposal(&self, proposal: &MissionProposal) -> io::Result<()> {
         proposal.validate()?;
         let _registry_lock = self.lock()?;
@@ -3362,6 +3503,7 @@ mod tests {
         one_station_claims_a_brief,
         a_leased_claim_is_listed_and_renewed_only_by_its_holder,
         finish_requires_the_current_station_and_files_the_outcome,
+        a_filed_brief_is_read_in_any_state,
         expired_leases_requeue_or_fail_at_the_attempt_limit,
         an_expired_lease_is_handed_over_once_with_its_claim_and_attempt,
         leased_claim_is_exclusive_and_registry_keys_are_checked,
@@ -3848,6 +3990,62 @@ mod tests {
                 .renew("manual--absent", "operation-01", DEFAULT_LEASE)
                 .unwrap()
         );
+    }
+
+    fn a_filed_brief_is_read_in_any_state(store: &dyn Store) {
+        let registry = store.handle();
+        let of = |id: &str, operation: &str| {
+            let mut queued = brief(id);
+            queued.operation = Some(operation.to_owned());
+            queued
+        };
+        let queued = of("queued", "B");
+        registry.submit_brief(&queued).unwrap();
+        let filed = registry.filed_brief(&queued.key()).unwrap().unwrap();
+        assert_eq!((filed.state.as_str(), filed.attempts), ("new", 0));
+        assert_eq!(filed.outcome, None);
+        assert_eq!(filed.brief.title, queued.title);
+
+        let worked = of("worked", "B");
+        registry.submit_brief(&worked).unwrap();
+        let lease = registry
+            .claim_with_lease(
+                Some(&worked.key()),
+                "station-a",
+                Duration::from_secs(60),
+                BTreeMap::new(),
+            )
+            .unwrap()
+            .unwrap();
+        let claimed = registry.filed_brief(lease.key()).unwrap().unwrap();
+        assert_eq!((claimed.state.as_str(), claimed.attempts), ("claimed", 1));
+        registry
+            .finish(
+                &claimed.brief,
+                &serde_json::json!({"state": "done", "branch": "work"}),
+                true,
+                None,
+                Some("station-a"),
+            )
+            .unwrap();
+        let done = registry.filed_brief(&worked.key()).unwrap().unwrap();
+        assert_eq!((done.state.as_str(), done.attempts), ("done", 1));
+        assert_eq!(done.outcome.unwrap()["branch"], "work");
+
+        let elsewhere = of("elsewhere", "C");
+        registry.submit_brief(&elsewhere).unwrap();
+        let mut listed: Vec<String> = registry
+            .filed_briefs("B", 10)
+            .unwrap()
+            .into_iter()
+            .map(|filed| filed.brief.id)
+            .collect();
+        listed.sort();
+        assert_eq!(listed, ["queued", "worked"]);
+        assert_eq!(registry.filed_briefs("B", 1).unwrap().len(), 1);
+        assert!(registry.filed_briefs("nowhere", 10).unwrap().is_empty());
+        assert_eq!(registry.filed_brief("no-such-key").unwrap(), None);
+        assert!(registry.filed_brief("../escape").is_err());
     }
 
     fn finish_requires_the_current_station_and_files_the_outcome(store: &dyn Store) {

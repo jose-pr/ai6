@@ -191,8 +191,8 @@ pub use directorates::registry::sources::{
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::registry::sql::{SqlOptions, SqlRegistry};
 pub use directorates::registry::store::{
-    AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, HeadquartersLease, Lease, LeaseRecovery,
-    MissionProposal, StationRecord, StationSettings,
+    AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, FiledBrief, HeadquartersLease, Lease,
+    LeaseRecovery, MissionProposal, StationRecord, StationSettings,
 };
 pub use directorates::registry::timeline::TimelineEvent;
 pub use directorates::registry::tracker::{
