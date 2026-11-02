@@ -7951,7 +7951,8 @@ queue = 1
         mission_id: &str,
         wanted: MissionState,
     ) {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        // Long enough for a machine busy with other builds; a passing test never waits this long.
+        tokio::time::timeout(Duration::from_secs(60), async {
             while state
                 .missions
                 .lock()

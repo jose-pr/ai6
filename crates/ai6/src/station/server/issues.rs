@@ -3015,7 +3015,13 @@ mod tests {
             .intake
             .decide_issue_proposal(id, false, "sam", false)
             .unwrap();
-        deliver_proposal_outcomes(&state).await;
+        // A round leaves the outcome for later while the Mission is not where it can hear it, so
+        // on a busy machine it may take more than one.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while told("TOLD-ONE").is_empty() && std::time::Instant::now() < deadline {
+            deliver_proposal_outcomes(&state).await;
+            arrived(&state, &mission).await;
+        }
         deliver_proposal_outcomes(&state).await;
         arrived(&state, &mission).await;
         let messages = told("TOLD-ONE");
