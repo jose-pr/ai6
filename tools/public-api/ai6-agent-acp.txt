@@ -9,6 +9,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_acp::AcpHa
 pub fn ai6_agent_acp::AcpHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_acp::AcpHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_acp::AcpHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_acp::AcpHandler::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 impl core::convert::TryFrom<ai6_agent_acp::AcpConfig> for ai6_agent_acp::AcpHandler
 pub type ai6_agent_acp::AcpHandler::Error = guatiao::library::kind::ProviderError
 pub fn ai6_agent_acp::AcpHandler::try_from(ai6_agent_acp::AcpConfig) -> core::result::Result<Self, Self::Error>
@@ -29,5 +30,6 @@ pub ai6_agent_acp::AcpSettings::poll_ms: i64
 pub ai6_agent_acp::AcpSettings::protocol: alloc::string::String
 pub ai6_agent_acp::AcpSettings::request_timeout_ms: u64
 pub ai6_agent_acp::AcpSettings::start_timeout_ms: u64
+pub ai6_agent_acp::AcpSettings::unconfined_desk: bool
 #[no_mangle] pub static ai6_agent_acp::guatiao_declares: [u8; 24]
 #[no_mangle] pub unsafe c fn ai6_agent_acp::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

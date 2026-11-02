@@ -5385,6 +5385,7 @@ pub fn ai6::directorates::section_00::acp::RefuseAll::decide(&self, &ai6::direct
 #[non_exhaustive] pub struct ai6::directorates::section_00::acp::ResumeMeta
 pub ai6::directorates::section_00::acp::ResumeMeta::answer_only: bool
 pub ai6::directorates::section_00::acp::ResumeMeta::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
+pub ai6::directorates::section_00::acp::ResumeMeta::clearance: alloc::string::String
 pub ai6::directorates::section_00::acp::ResumeMeta::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::ResumeMeta::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::section_00::acp::ResumeMeta::handler: core::option::Option<ai6::directorates::section_00::acp::HandlerSpec>
@@ -5450,6 +5451,7 @@ pub ai6::directorates::section_00::agent::AgentMessage::text: alloc::string::Str
 pub struct ai6::directorates::section_00::agent::AgentResume
 pub ai6::directorates::section_00::agent::AgentResume::answer_only: bool
 pub ai6::directorates::section_00::agent::AgentResume::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
+pub ai6::directorates::section_00::agent::AgentResume::clearance: alloc::string::String
 pub ai6::directorates::section_00::agent::AgentResume::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::initial_context: alloc::vec::Vec<alloc::string::String>
@@ -5565,6 +5567,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentSession>::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::clearance_runs_commands(&str) -> bool
 pub mod ai6::directorates::section_00::assistant
 pub enum ai6::directorates::section_00::assistant::MemoryAction
 pub ai6::directorates::section_00::assistant::MemoryAction::Forget
@@ -6887,6 +6890,7 @@ pub fn ai6::directorates::registry::agent_records::AgentRecord::new(impl core::c
 pub struct ai6::AgentResume
 pub ai6::AgentResume::answer_only: bool
 pub ai6::AgentResume::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
+pub ai6::AgentResume::clearance: alloc::string::String
 pub ai6::AgentResume::effort: core::option::Option<alloc::string::String>
 pub ai6::AgentResume::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub ai6::AgentResume::initial_context: alloc::vec::Vec<alloc::string::String>
@@ -10565,6 +10569,7 @@ pub fn ai6::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6:
 pub fn ai6::classify(&str, &dyn ai6::directorates::m::approvals::Repository, usize) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::approvals::ActionScope>, alloc::string::String>
 pub fn ai6::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
 pub fn ai6::clearance_at_least(&str, &str) -> bool
+pub fn ai6::clearance_runs_commands(&str) -> bool
 pub fn ai6::compile(&ai6::AccessPolicy, &[alloc::string::String]) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::compile_with_operations(&ai6::AccessPolicy, &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>, &ai6::Lineage) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::content_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
