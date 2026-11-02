@@ -153,6 +153,23 @@ fn a_refusal_and_an_error_fail_the_session() {
 }
 
 #[test]
+fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_blocks() {
+    let session = handler("")
+        .start(start(environment(&[("FAKE_HOLD", "1")])), terminal())
+        .expect("the agent starts");
+    session.interrupt().unwrap();
+    until(&session, &["completed"]);
+
+    let session = handler("")
+        .start(
+            start(environment(&[("FAKE_STOP", "cancelled")])),
+            terminal(),
+        )
+        .expect("the agent starts");
+    until(&session, &["blocked"]);
+}
+
+#[test]
 fn an_agent_that_dies_is_reported_with_its_exit_status_and_last_words() {
     let (_, events) = run(&[("FAKE_DIE", "1")], "");
     let last = events.last().unwrap();

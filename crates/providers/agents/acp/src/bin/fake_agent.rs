@@ -6,13 +6,18 @@
 //! `FAKE_NO_HTTP=1` leaves out HTTP MCP support, `FAKE_INIT_DELAY_MS=N` delays `initialize`,
 //! `FAKE_RESUME=1` advertises `session/resume`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{
-    Agent, Client, ConnectionTo, Responder, UntypedMessage, on_receive_request,
+    Agent, Client, ConnectionTo, Responder, UntypedMessage, on_receive_notification,
+    on_receive_request,
 };
 use ai6::directorates::section_00::acp::lines_over_io;
 use serde_json::{Value, json};
+
+/// The answer to a prompt `FAKE_HOLD` keeps until `session/cancel`, as a real agent's model turn,
+/// and whether that has arrived already.
+type Held = Arc<Mutex<(Option<Responder<Value>>, bool)>>;
 
 fn var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
@@ -32,6 +37,7 @@ fn handle(
     responder: Responder<Value>,
     cx: ConnectionTo<Client>,
     cwd: &Arc<std::sync::Mutex<String>>,
+    held: &Held,
 ) {
     let params = message.params().clone();
     match message.method() {
@@ -61,6 +67,7 @@ fn handle(
         }
         "session/prompt" => {
             let cwd = cwd.lock().unwrap().clone();
+            let held = held.clone();
             std::thread::spawn(move || {
                 let prompt = params["prompt"][0]["text"].as_str().unwrap_or_default();
                 if var("FAKE_ERROR").is_some() {
@@ -68,6 +75,15 @@ fn handle(
                         agent_client_protocol::Error::internal_error()
                             .data("the fake model is down"),
                     );
+                    return;
+                }
+                if var("FAKE_HOLD").is_some() {
+                    let mut held = held.lock().unwrap();
+                    if held.1 {
+                        let _ = responder.respond(json!({"stopReason": "cancelled"}));
+                    } else {
+                        held.0 = Some(responder);
+                    }
                     return;
                 }
                 if var("FAKE_DIE").is_some() {
@@ -134,6 +150,8 @@ fn handle(
 fn main() {
     let (lines, _) = lines_over_io(std::io::stdin(), std::io::stdout(), 0);
     let cwd = Arc::new(std::sync::Mutex::new(String::new()));
+    let held: Held = Arc::default();
+    let for_prompts = held.clone();
     let _ = futures::executor::block_on(
         Agent
             .builder()
@@ -141,10 +159,23 @@ fn main() {
                 async move |message: UntypedMessage,
                             responder: Responder<Value>,
                             cx: ConnectionTo<Client>| {
-                    handle(message, responder, cx, &cwd);
+                    handle(message, responder, cx, &cwd, &for_prompts);
                     Ok(())
                 },
                 on_receive_request!(),
+            )
+            .on_receive_notification(
+                async move |message: UntypedMessage, _cx: ConnectionTo<Client>| {
+                    if message.method() == "session/cancel" {
+                        let mut held = held.lock().unwrap();
+                        held.1 = true;
+                        if let Some(responder) = held.0.take() {
+                            let _ = responder.respond(json!({"stopReason": "cancelled"}));
+                        }
+                    }
+                    Ok(())
+                },
+                on_receive_notification!(),
             )
             .connect_to(lines),
     );

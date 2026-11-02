@@ -222,6 +222,8 @@ struct Inner {
     unacked: Option<u64>,
     /// A completed, failed or limit event ended the current turn.
     finished: bool,
+    /// This side asked the agent to cancel the current turn.
+    cancelling: bool,
     text: String,
     kinds: HashMap<String, String>,
 }
@@ -280,7 +282,18 @@ impl Shared {
     fn begin_turn(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.finished = false;
+            inner.cancelling = false;
         }
+    }
+
+    fn asked_to_cancel(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.cancelling = true;
+        }
+    }
+
+    fn cancelling(&self) -> bool {
+        self.inner.lock().is_ok_and(|inner| inner.cancelling)
     }
 
     fn finished(&self) -> bool {
@@ -326,6 +339,9 @@ impl Shared {
                 Some("refusal") => {
                     event("failed", Some("the agent refused to continue".to_owned()))
                 }
+                // An interrupted turn ends as a native handler's does; one the agent gave up
+                // by itself is another matter.
+                Some("cancelled") if self.cancelling() => event("completed", None),
                 Some("cancelled") => event("blocked", Some("the turn was cancelled".to_owned())),
                 other => event(
                     "failed",
@@ -1091,6 +1107,7 @@ async fn main_task(
                 }
             }
             Some(Command::Cancel) => {
+                shared.asked_to_cancel();
                 if let Ok(message) =
                     UntypedMessage::new("session/cancel", json!({"sessionId": session}))
                 {
