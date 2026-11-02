@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `ai6 config public [--output PATH]` writes the public `ai6.cfg` a web page reads beside
+  `index.html`: `[unex] url` and what the page needs of `[oo]`, from an allow list, so a new key is
+  private until someone says otherwise. Text under `[oo]` other than `[oo.appearance] theme` and
+  `[oo.assets] cdn` is left out and named on standard error, and a `url` holding a credential, a query
+  or a fragment is refused.
+
 ### Changed
 
 - Provider libraries can be signed with no tooling but `ai6`, so a rebuild needs no record change:
@@ -30,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `PluginPolicy::with_keep_verified`, `ServeConfig::with_keep_verified`,
   `PluginScanSummary::verified_removed` and `verified_held`.
 
+- **Outer Office reads `ai6.cfg`.** `OO.cfg` and `OO_CONFIG` are gone: on the desktop it reads the one
+  file the other programs read (`AI6_CONFIG`, else the same directories, with an extension or first
+  line choosing the format as they do) and takes `[unex] url`, `[unex] ca_file`, now trusted as well
+  as the system's roots, and `[oo]`, which holds the tables `OO.cfg` had: `[oo.appearance]`,
+  `[oo.chat]`, `[oo.refresh]` and the rest. On the web it reads the public `ai6.cfg` beside the page.
+  Saving an address edits only the `url` line, keeping comments and every other section. A message
+  names a key or a position and never quotes the file. `#!cfg` is no longer a format line.
 - **One bootstrap file.** `ai6.cfg` serves every program on a host or for a user, and `unex.cfg`,
   `UNEX_CONFIG`, `UnexBootstrap` and `UNEX_FILE_NAME` are gone. Shared: `[provider]` and `[registry]`.
   `[station]` holds `id` (the old `station`), `state_dir`, `listen`, and `[station.plugins]`,

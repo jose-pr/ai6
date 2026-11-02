@@ -62,7 +62,7 @@ const _apiOverride = String.fromEnvironment('OO_API');
 const _demoMode = bool.fromEnvironment('OO_DEMO');
 
 /// Universal Exports' origin: the `OO_API` define, else on the web the page's own origin, else
-/// `OO.cfg`'s `[unex] url`, else the loopback default.
+/// `ai6.cfg`'s `[unex] url`, else the loopback default.
 Uri _apiOrigin(OoConfig config) => _apiOverride.isNotEmpty
     ? Uri.parse(_apiOverride)
     : kIsWeb
@@ -135,6 +135,7 @@ Future<void> _startWeb() async {
 
 void _startDesktop() {
   final config = loadDesktopConfig();
+  trustDesktopCa(config);
   OoRouteLimits.current = config.routeLimits;
   OoArtLimits.current = config.art;
   final appearance = AppearancePreferences(SharedPreferences.getInstance());
@@ -173,7 +174,7 @@ class AppearancePreferences {
   }
 
   /// Applies the stored choices to [board]: a stored theme wins over the one it started
-  /// with (`OO.cfg`'s default), and an unknown one is Night Ops.
+  /// with (`ai6.cfg`'s default), and an unknown one is Night Ops.
   Future<void> restore(MissionBoard board) async {
     final preferences = await _preferences;
     final theme = preferences.getString(themeKey);
@@ -374,7 +375,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   /// How often the board reads again; `null` reads only when asked.
   final Duration? pollInterval;
 
-  /// `OO.cfg`'s refresh, control, page, terminal and input settings.
+  /// `ai6.cfg`'s refresh, control, page, terminal and input settings.
   final OoLimits limits;
   final String? terminalRuntimeError;
   final Future<void> Function(String themeId)? onThemeChanged;
@@ -406,7 +407,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   List<HeldBriefSummary> heldBriefs = const [];
 
   /// The Mission proposals waiting for a decision, in the Operations where this account may
-  /// decide them; read at most every `OO.cfg`'s `[refresh] slow`, not with each refresh.
+  /// decide them; read at most every `ai6.cfg`'s `[oo.refresh] slow`, not with each refresh.
   List<MissionProposalSummary> missionProposals = const [];
 
   /// The green ink requests waiting for a decision, in the Operations where this account may
@@ -508,7 +509,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
   double? _tokenEndsAt;
 
   /// The token's next step: its renewal, or telling the person once nothing can move it. It
-  /// does not rest on the board's poll, which `OO.cfg` may turn off.
+  /// does not rest on the board's poll, which `ai6.cfg` may turn off.
   Timer? _tokenTimer;
 
   /// When the sign-in ends, from the moment the person is told until they dismiss it.
@@ -3732,7 +3733,7 @@ class OuterOfficeApp extends StatefulWidget {
   final MissionBoard board;
   final bool desktopWindows;
 
-  /// Moneypenny's chat sizes and timing, `OO.cfg`'s `[chat]`.
+  /// Moneypenny's chat sizes and timing, `ai6.cfg`'s `[oo.chat]`.
   final ChatSettings chatSettings;
 
   @override
@@ -5775,7 +5776,7 @@ class _ThemeChooser extends StatelessWidget {
 /// What Settings says on a deployment that does not serve Moneypenny.
 const moneypennyOffNote =
     'Moneypenny is off on this deployment. Whoever runs its Universal Exports can turn her '
-    'on (assistant in unex.cfg).';
+    'on (assistant in its unex record).';
 
 /// Asks the gateway where a Mission for an Operation would run and shows the
 /// reason for every Station, Theater or Agent it would not.

@@ -182,14 +182,14 @@ class MoneypennyChat extends ChangeNotifier {
     controller.addListener(_heard);
   }
 
-  /// Sizes and timing, from `OO.cfg`'s `[chat]`.
+  /// Sizes and timing, from `ai6.cfg`'s `[oo.chat]`.
   final ChatSettings settings;
 
   /// What this conversation is, shown in the chat, such as the preview's sample.
   final String? label;
 
   /// How long a proposal may stay applying before its card says the outcome is unknown
-  /// (`OO.cfg`'s `[controls] confirming`).
+  /// (`ai6.cfg`'s `[oo.controls] confirming`).
   final Duration proposalWait;
 
   /// What the page cards ask of Universal Exports; none where there are no pages (the demo).

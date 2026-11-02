@@ -4,8 +4,8 @@ import 'oo_config.dart';
 import 'oo_config_file.dart';
 
 /// The operator menu's connection setting on desktop: Universal Exports' address, written
-/// back to `OO.cfg` as `[unex] url` in the format the file declares, keeping its `#!` line.
-/// It applies at the next start.
+/// back to `ai6.cfg` as `[unex] url` in the format the file declares, keeping its `#!` line and
+/// every other program's section. It applies at the next start.
 class ConnectionSettings extends StatefulWidget {
   ConnectionSettings({
     super.key,
@@ -16,13 +16,13 @@ class ConnectionSettings extends StatefulWidget {
        write = write ?? writeDesktopConfig,
        path = path ?? desktopConfigPath();
 
-  /// The current `OO.cfg` text, `null` when there is none.
+  /// The current `ai6.cfg` text, `null` when there is none.
   final String? Function() read;
 
-  /// Replaces the `OO.cfg` text.
+  /// Replaces the `ai6.cfg` text.
   final Future<void> Function(String text) write;
 
-  /// Where `OO.cfg` is, shown to the person.
+  /// Where `ai6.cfg` is, shown to the person.
   final String? path;
 
   @override
@@ -39,7 +39,9 @@ class _ConnectionSettingsState extends State<ConnectionSettings> {
     super.initState();
     try {
       final text = widget.read();
-      final url = text == null ? null : OoConfig.parse(text).unexUrl;
+      final url = text == null
+          ? null
+          : OoConfig.parse(text, path: widget.path).unexUrl;
       _url.text = url?.toString() ?? '';
     } on Object catch (error) {
       _message = '$error';
@@ -63,7 +65,9 @@ class _ConnectionSettingsState extends State<ConnectionSettings> {
     setState(() => _saving = true);
     String message;
     try {
-      await widget.write(withUnexUrl(widget.read() ?? '', url));
+      await widget.write(
+        withUnexUrl(widget.read() ?? '', url, path: widget.path),
+      );
       message = 'Saved. Outer Office uses it from its next start.';
     } on Object catch (error) {
       message = 'Not saved: $error';
@@ -86,7 +90,7 @@ class _ConnectionSettingsState extends State<ConnectionSettings> {
           labelText: 'Address',
           helperText: widget.path == null
               ? null
-              : 'Kept in ${widget.path}; comments in a TOML or JSON file are not kept',
+              : 'Kept in ${widget.path}, which other programs here may read too',
         ),
       ),
       Align(

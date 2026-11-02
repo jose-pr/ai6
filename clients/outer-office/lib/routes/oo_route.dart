@@ -26,10 +26,10 @@ class OoRouteLimits {
   /// The longest `text` filter by default, in bytes.
   static const defaultTextBytes = 128;
 
-  /// The longest `text` filter, in bytes: `OO.cfg`'s `[routes] text_bytes`.
+  /// The longest `text` filter, in bytes: `ai6.cfg`'s `[oo.routes] text_bytes`.
   final int textBytes;
 
-  /// The limits in force, set once at start from `OO.cfg`.
+  /// The limits in force, set once at start from `ai6.cfg`.
   static OoRouteLimits current = const OoRouteLimits();
 }
 

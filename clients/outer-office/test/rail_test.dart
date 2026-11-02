@@ -339,7 +339,7 @@ void main() {
       expect(find.text('L › mission-021'), findsOneWidget);
     });
 
-    testWidgets('search lists as many results as OO.cfg says, and says so', (
+    testWidgets('search lists as many results as ai6.cfg says, and says so', (
       tester,
     ) async {
       tester.view.physicalSize = wide;

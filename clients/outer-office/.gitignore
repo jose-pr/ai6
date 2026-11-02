@@ -1,3 +1,6 @@
+# A web build reads a public ai6.cfg written after the build; a host's own is never bundled.
+/web/ai6.cfg
+
 # Miscellaneous
 *.class
 *.log

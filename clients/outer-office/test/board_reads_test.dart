@@ -199,8 +199,8 @@ void main() {
       board.dispose();
     });
 
-    test('OO.cfg sets the new refreshes', () {
-      final config = OoConfig.parse('[refresh]\nprofile = 30\nhidden = 0\n');
+    test('ai6.cfg sets the new refreshes', () {
+      final config = OoConfig.parse('[oo.refresh]\nprofile = 30\nhidden = 0\n');
       expect(config.limits.refresh.profile, const Duration(seconds: 30));
       expect(config.limits.refresh.hidden, isNull);
       expect(const RefreshSettings().hidden, RefreshSettings.defaultHidden);

@@ -365,7 +365,7 @@ class _RolesTab extends StatelessWidget {
           const SizedBox(height: 16),
           Text('Chief', style: Theme.of(context).textTheme.titleSmall),
           for (final subject in view.chiefHost)
-            Text('$subject (from unex.cfg, fixed)'),
+            Text('$subject (from ai6.cfg, fixed)'),
           for (final subject in view.chiefStored) Text(subject),
         ],
       ],

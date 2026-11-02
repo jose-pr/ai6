@@ -501,7 +501,7 @@ void main() {
     expect(narrow.lastOpen, ChatLayout.expanded);
   });
 
-  testWidgets('OO.cfg [chat] sizes the docked chat and its limits', (
+  testWidgets('ai6.cfg [oo.chat] sizes the docked chat and its limits', (
     tester,
   ) async {
     await atSize(tester, const Size(1400, 900));
@@ -509,7 +509,7 @@ void main() {
     final board = signedIn(channel);
     addTearDown(board.dispose);
     final settings = OoConfig.parse(
-      '[chat]\nmin_width = 300\nmax_width = 500\nwidth = 450\nwidth_step = 25\n',
+      '[oo.chat]\nmin_width = 300\nmax_width = 500\nwidth = 450\nwidth_step = 25\n',
     ).chat;
     await tester.pumpWidget(
       OuterOfficeApp(

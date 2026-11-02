@@ -73,7 +73,7 @@ class AssistantPanel extends StatefulWidget {
   final String? label;
 
   /// How long a proposal may stay applying before its card says the outcome is unknown
-  /// (`OO.cfg`'s `[controls] confirming`).
+  /// (`ai6.cfg`'s `[oo.controls] confirming`).
   final Duration proposalWait;
 
   /// What the cards of pages she published ask of Universal Exports; without it a page card

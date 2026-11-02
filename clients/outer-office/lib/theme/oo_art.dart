@@ -23,7 +23,7 @@ int ooArtBudget(int width) => width <= 1536
 /// The most bytes one wallpaper drawing may take.
 const ooWallpaperBudget = 48 * 1024;
 
-/// `OO.cfg`'s `[art]` settings.
+/// `ai6.cfg`'s `[oo.art]` settings.
 @immutable
 class OoArtLimits {
   const OoArtLimits({this.maxWidth = defaultMaxWidth});
@@ -33,7 +33,7 @@ class OoArtLimits {
   /// `max_width`: the widest file ever fetched, for a site on slow links.
   final int maxWidth;
 
-  /// The limits in force, set once at start from `OO.cfg`.
+  /// The limits in force, set once at start from `ai6.cfg`.
   static OoArtLimits current = const OoArtLimits();
 }
 

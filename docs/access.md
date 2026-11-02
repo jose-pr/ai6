@@ -151,7 +151,7 @@ every request under `/v1/` the proxy must:
 The app fetches only from its own origin, so its page can carry this policy: `default-src 'self';
 script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;
 connect-src 'self'; frame-ancestors 'none'; base-uri 'self'`. The engine compiles WebAssembly and
-sets inline styles, and a bootstrap's `[assets] cdn` other than `none` needs those hosts added. Run
+sets inline styles, and a public `ai6.cfg`'s `[oo.assets] cdn` other than `none` needs those hosts added. Run
 `dart run tool/build_guatiao_wasm.dart` before the build, or Session terminals say the protocol
 could not be initialized. Serve `.wasm` as `application/wasm`.
 ## Roles, the chief and who may change them

@@ -205,7 +205,7 @@ void main() {
     },
   );
 
-  test('the text limit is the one OO.cfg sets', () {
+  test('the text limit is the one ai6.cfg sets', () {
     addTearDown(() => OoRouteLimits.current = const OoRouteLimits());
     final long = 'app:/missions?text=${'a' * 200}';
     expect(

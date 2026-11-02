@@ -490,13 +490,13 @@ audit = 100                           # records in the audit log
 summary = 5                           # recent activity, and Operations and Stations, a summary lists
 search = 24                           # results the top bar's search lists at once
 
-[oo.terminal]                            # the live Session terminal
+[oo.terminal]                         # the live Session terminal
 scrollback_lines = 10000
 connect_timeout = 10                  # seconds the socket may take to open
 retry_delay = 1                       # seconds before the first reconnect; each next one doubles
 retry_max_delay = 16                  # seconds, the longest wait between reconnects
 
-[oo.limits]                              # characters a text field takes; 0 takes the bound away
+[oo.limits]                           # characters a text field takes; 0 takes the bound away
 mission_title_chars = 512
 mission_prompt_chars = 65536
 reason_chars = 512                    # the reason for lowering an Agent's clearance
@@ -505,28 +505,27 @@ reason_chars = 512                    # the reason for lowering an Agent's clear
 cdn = "none"                          # web only: none, fonts or all (read by the page's bootstrap)
 ```
 
-Every value of `[refresh]` is a number of seconds, whole or fractional, `0` or more; `[controls]`
-`wait` likewise, and the other seconds are more than 0. The counts of `[pages]`,
-`silent_intervals` and `scrollback_lines` are whole numbers of 1 or more, and `[limits]` takes whole numbers of 0 or
-more. An unknown table or key, or a value that is not what its key takes, refuses the file. These
+Every value of `[oo.refresh]` is a number of seconds, whole or fractional, `0` or more; `[oo.controls]`
+`wait` likewise, and the other seconds are more than 0. The counts of `[oo.pages]`,
+`silent_intervals` and `scrollback_lines` are whole numbers of 1 or more, and `[oo.limits]` takes whole numbers of 0 or
+more. An unknown table or key of `[oo]`, or a value that is not what its key takes, refuses the file. These
 are what Outer Office asks of Universal Exports and how it paces itself; what the gateway allows
 is the `unex` record's ([Universal Exports limits](#universal-exports-limits)), and Moneypenny's
 view bounds come from the gateway's `[assistant.views]`.
 
 The build define `OO_API` beats `[unex] url`, which beats the loopback default. A theme the
-person chooses (`oo.theme`, kept on the device or in the browser) beats `[appearance] theme`,
-which beats Night Ops; an unknown theme id is logged and read as the default. In `[chat]`
+person chooses (`oo.theme`, kept on the device or in the browser) beats `[oo.appearance] theme`,
+which beats Night Ops; an unknown theme id is logged and read as the default. In `[oo.chat]`
 each value is a positive number (`transition_ms` a whole one, 0 allowed; `connect_timeout` in seconds) and `width` lies
 between `min_width` and `max_width`, or the file is refused; a width the person drags to
 (`oo.chat.<person ID>`) beats `width` and is kept within the limits. The system's reduced
 motion setting turns transitions off whatever `transition_ms` says.
-`[routes] text_bytes` (1 or more, default 128) bounds the `text` filter of a page link: a web
+`[oo.routes] text_bytes` (1 or more, default 128) bounds the `text` filter of a page link: a web
 URL or one of Moneypenny's links with a longer one is refused like any other bad link. Keep it
 equal to the `unex` record's `route_text_bytes`, or her links that one accepts and this one
 does not show as a refused view. The operator
 menu on desktop writes `[unex] url` back in the format the file declares, keeping its `#!`
-line; a YAML file keeps its comments, a TOML or JSON one does not. The address applies at the
-next start.
+line, its comments and every other program's section. The address applies at the next start.
 
 ## Agent handler settings
 

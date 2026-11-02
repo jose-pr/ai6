@@ -150,7 +150,7 @@ class AccessView {
   final List<String> weakenings;
   final List<String> chiefStored;
 
-  /// From `unex.cfg`: always chief, never changed here.
+  /// From `ai6.cfg`: always chief, never changed here.
   final List<String> chiefHost;
   final String? managedBy;
   final String? invalid;

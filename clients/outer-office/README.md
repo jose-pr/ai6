@@ -286,7 +286,7 @@ default the browser fetches nothing from any origin but the one serving the app.
 builds never use a CDN: the operating system's fonts cover other scripts and emoji there.
 
 The hero art in `assets/heroes/`, each file named by its width and chosen at run time by the
-box's physical size (`OoArt`; `[art] max_width` in `OO.cfg` caps it): `map-940.jpg` and
+box's physical size (`OoArt`; `[oo.art] max_width` in `ai6.cfg` caps it): `map-940.jpg` and
 `skyline-774.jpg` cut from the AI6 brand banners; `paper-1536.jpg`, the bottom 454 px of a
 1536×1024 picture, and `paper-940.jpg`, its 940×278 crop at the left edge, 746 px down, made with a built-in image generation tool on 2026-10-29 from a written prompt and no
 reference images (pale ivory paper, thin taupe coast-like contours and drafting arcs at the
@@ -320,8 +320,8 @@ otherwise take from a CDN, with its host, path, size, SHA-256 and licence, and
   Flutter engine, after `flutter build web`, from the engine's own fallback font table and
   the build's `canvaskit/` files.
 
-A web deployment may opt in with `[assets] cdn` in an `OO.cfg` beside `index.html`, read
-by `web/flutter_bootstrap.js` before the engine starts:
+A web deployment may opt in with `[oo.assets] cdn` in the public `ai6.cfg` beside `index.html`,
+read by `web/flutter_bootstrap.js` before the engine starts:
 
 | `cdn` | Fetched from outside |
 | --- | --- |
@@ -330,9 +330,13 @@ by `web/flutter_bootstrap.js` before the engine starts:
 | `"all"` | those fonts, and the engine from Flutter's CDN (`www.gstatic.com`) |
 
 ```toml
-[assets]
+[oo.assets]
 cdn = "fonts"
 ```
+
+That file is `ai6 config public --config /etc/ai6/ai6.cfg --output build/web/ai6.cfg`, written after
+the build: it holds `[unex] url` and what the page needs of `[oo]`, from an allow list. A web
+build never bundles a host's own `ai6.cfg`, and `test/oo_config_test.dart` fails if `web/` holds one.
 
 `test/no_cdn_test.dart` fails if the page or the bootstrap names a CDN host, if the
 default stops loading the engine and fallback fonts from the app's origin, or, given a
@@ -352,15 +356,17 @@ pages sit in a bottom bar, **More** opens the same drawer, and the top bar keeps
 search, Moneypenny, the bell and the person's initials; Overview is one column, tables are
 lists, and Moneypenny's chat fills the screen.
 
-How often each page asks again (`[refresh]`), how a Mission control is followed
-(`[controls]`), how much the timeline and audit log ask for (`[pages]`), the live terminal's
-scrollback and reconnects (`[terminal]`) and how much a text field takes (`[limits]`) are `OO.cfg`
-tables too; every key is optional and the example shows the defaults.
+How often each page asks again (`[oo.refresh]`), how a Mission control is followed
+(`[oo.controls]`), how much the timeline and audit log ask for (`[oo.pages]`), the live terminal's
+scrollback and reconnects (`[oo.terminal]`) and how much a text field takes (`[oo.limits]`) are
+`ai6.cfg` tables too; every key is optional and the example shows the defaults. On the desktop the
+app reads the same `ai6.cfg` as the other programs on the machine (`AI6_CONFIG`, else the user's
+then the system's configuration directory), and takes `[unex] url`, `[unex] ca_file` and `[oo]`.
 
 Moneypenny's chat is hidden behind the top bar's Moneypenny button until opened; a dot on
 the button says she answered or proposed something meanwhile. Docked, it sits beside the
 page from 1200 px wide (drag the handle, or focus it and use the arrow keys, to make it 320
-to 720 px wide; `OO.cfg`'s `[chat]` changes these and its other sizes, see
+to 720 px wide; `ai6.cfg`'s `[oo.chat]` changes these and its other sizes, see
 [Configuration](https://jose-pr.github.io/ai6/configuration/)), is a modal sheet over the
 page from 900 px, and fills the screen below
 that. Expanded, it takes the centre, the rail stays, and the page keeps its scroll and
