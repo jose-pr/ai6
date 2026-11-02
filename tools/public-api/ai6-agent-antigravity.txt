@@ -1,0 +1,32 @@
+pub mod ai6_agent_antigravity
+pub struct ai6_agent_antigravity::AntigravityConfig
+pub ai6_agent_antigravity::AntigravityConfig::close_wait_ms: u64
+pub ai6_agent_antigravity::AntigravityConfig::context_file_bytes: u64
+pub ai6_agent_antigravity::AntigravityConfig::csi_bytes: u64
+pub ai6_agent_antigravity::AntigravityConfig::executable: alloc::string::String
+pub ai6_agent_antigravity::AntigravityConfig::exit_wait_ms: u64
+pub ai6_agent_antigravity::AntigravityConfig::gate_timeout_secs: u64
+pub ai6_agent_antigravity::AntigravityConfig::json_line_bytes: u64
+pub ai6_agent_antigravity::AntigravityConfig::mcp_timeout_secs: i64
+pub ai6_agent_antigravity::AntigravityConfig::settings_toml: alloc::string::String
+pub ai6_agent_antigravity::AntigravityConfig::tail_line_bytes: u64
+pub ai6_agent_antigravity::AntigravityConfig::tail_lines: u64
+impl core::convert::TryFrom<ai6_agent_antigravity::AntigravityConfig> for ai6_agent_antigravity::AntigravityHandler
+pub type ai6_agent_antigravity::AntigravityHandler::Error = guatiao::library::kind::ProviderError
+pub fn ai6_agent_antigravity::AntigravityHandler::try_from(ai6_agent_antigravity::AntigravityConfig) -> core::result::Result<Self, Self::Error>
+impl core::default::Default for ai6_agent_antigravity::AntigravityConfig
+pub fn ai6_agent_antigravity::AntigravityConfig::default() -> Self
+pub struct ai6_agent_antigravity::AntigravityHandler
+impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_antigravity::AntigravityHandler
+pub fn ai6_agent_antigravity::AntigravityHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_antigravity::AntigravityHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_antigravity::AntigravityHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_antigravity::AntigravityHandler::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
+impl core::convert::TryFrom<ai6_agent_antigravity::AntigravityConfig> for ai6_agent_antigravity::AntigravityHandler
+pub type ai6_agent_antigravity::AntigravityHandler::Error = guatiao::library::kind::ProviderError
+pub fn ai6_agent_antigravity::AntigravityHandler::try_from(ai6_agent_antigravity::AntigravityConfig) -> core::result::Result<Self, Self::Error>
+impl guatiao::library::kind::parts::ProviderDecl for ai6_agent_antigravity::AntigravityHandler
+pub const ai6_agent_antigravity::AntigravityHandler::KINDS: &'static [&'static str]
+pub fn ai6_agent_antigravity::AntigravityHandler::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+#[no_mangle] pub static ai6_agent_antigravity::guatiao_declares: [u8; 24]
+#[no_mangle] pub unsafe c fn ai6_agent_antigravity::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

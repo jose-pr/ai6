@@ -1254,8 +1254,8 @@ pub fn ai6::directorates::m::harness::ProjectManifest::read(&std::path::Path) ->
 pub fn ai6::directorates::m::harness::ProjectManifest::read_tree(&std::path::Path) -> core::result::Result<Self, alloc::string::String>
 pub fn ai6::directorates::m::harness::ProjectManifest::read_tree_within(&std::path::Path, &ai6::station::limits::HarnessLimits) -> core::result::Result<Self, alloc::string::String>
 pub fn ai6::directorates::m::harness::ProjectManifest::read_within(&std::path::Path, &ai6::station::limits::HarnessLimits) -> core::result::Result<Self, alloc::string::String>
-pub const ai6::directorates::m::harness::PROJECT_DIRECTORIES: [&str; 2]
-pub const ai6::directorates::m::harness::PROJECT_FILES: [&str; 1]
+pub const ai6::directorates::m::harness::PROJECT_DIRECTORIES: [&str; 4]
+pub const ai6::directorates::m::harness::PROJECT_FILES: [&str; 5]
 pub mod ai6::directorates::m::identity
 pub struct ai6::directorates::m::identity::AccessTokenRecord
 impl ai6::directorates::m::identity::AccessTokenRecord
@@ -10671,8 +10671,8 @@ pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::NOT_DELEGABLE: [&str; 3]
 pub const ai6::NO_OPERATION: &str
 pub const ai6::OPERATION_ACTIONS: &[&str]
-pub const ai6::PROJECT_DIRECTORIES: [&str; 2]
-pub const ai6::PROJECT_FILES: [&str; 1]
+pub const ai6::PROJECT_DIRECTORIES: [&str; 4]
+pub const ai6::PROJECT_FILES: [&str; 5]
 pub const ai6::PROPOSAL_SOURCE: &str
 pub const ai6::READ_TIMED_OUT: i64
 pub const ai6::RESERVED_ROLES: [&str; 4]
