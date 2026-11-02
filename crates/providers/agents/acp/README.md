@@ -21,12 +21,14 @@ handler_settings = { command = "npx", args = ["-y", "@agentclientprotocol/claude
 `session/new._meta`, for an adapter's options), `model_option` and `effort_option` (config option
 ids), `protocol` (`"v1"`), and the timeouts `initialize_timeout_ms` (20000), `request_timeout_ms`
 (30000), `start_timeout_ms` (60000) and `close_grace_ms` (2000), `diagnostic_lines` (20) and
-`poll_ms` (200). Unknown keys are refused when the handler loads.
+`poll_ms` (200), and `unconfined_desk` (false). Unknown keys are refused when the handler loads.
 
 ## Behaviour
 
 - Permission requests go through the green-ink gate; restricted Sessions (answer only, assistant)
   refuse every request for a tool that edits, deletes, moves or executes.
+- A Mission's Session at `desk` clearance is refused, because AI6 does not choose an external
+  agent's tools, unless `unconfined_desk = true`, reported as a weakening.
 - Cable and assistant MCP servers are passed as HTTP `mcpServers`; an agent without HTTP MCP
   support is refused when the Session needs it. Remote-hands mode is refused.
 - The Agent's context and a restricted Session's limits go in front of the first prompt (ACP v1

@@ -264,6 +264,92 @@ fn a_session_resumes_when_the_agent_can() {
     );
 }
 
+/// What starting and resuming a Session at `clearance` answers, the refusal's text on failure.
+fn launched(clearance: &str, extra: &str) -> [Result<(), String>; 2] {
+    let mut started = start(environment(&[]));
+    started.clearance = clearance.to_owned();
+    let resumed = AgentResume {
+        mission_id: MissionId::try_new("mission-acp").unwrap(),
+        session_id: SessionId::try_new("fake-1").unwrap(),
+        message: Some("carry on".to_owned()),
+        working_directory: std::env::temp_dir().to_string_lossy().into_owned(),
+        clearance: clearance.to_owned(),
+        environment: environment(&[("FAKE_RESUME", "1")]),
+        model: None,
+        effort: None,
+        max_cost_micro_usd: None,
+        project_settings: false,
+        project_mcp: false,
+        answer_only: false,
+        assistant: None,
+        initial_context: Vec::new(),
+    };
+    let handler = handler(extra);
+    [
+        handler.start(started, terminal()).map(|session| {
+            let _ = session.close();
+        }),
+        handler.resume(resumed, terminal()).map(|session| {
+            let _ = session.close();
+        }),
+    ]
+    .map(|result| result.map_err(|error| error.to_string()))
+}
+
+#[test]
+fn a_session_at_desk_or_an_unknown_clearance_is_refused_at_start_and_resume() {
+    for clearance in ["desk", "developer", ""] {
+        for answer in launched(clearance, "") {
+            let refused = answer.expect_err(clearance);
+            assert!(
+                refused.contains("desk clearance") && refused.contains("unconfined_desk"),
+                "{clearance:?}: {refused}"
+            );
+        }
+    }
+    for clearance in ["field", "00"] {
+        for answer in launched(clearance, "") {
+            assert_eq!(answer, Ok(()), "{clearance}");
+        }
+    }
+}
+
+#[test]
+fn a_desk_session_starts_only_on_a_setting_reported_as_a_weakening() {
+    for answer in launched("desk", "unconfined_desk = true\n") {
+        assert_eq!(answer, Ok(()));
+    }
+    let weakenings = handler("unconfined_desk = true\n").weakenings().unwrap();
+    assert_eq!(weakenings.len(), 1, "{weakenings:?}");
+    assert!(weakenings[0].contains("unconfined_desk"), "{weakenings:?}");
+    assert_eq!(handler("").weakenings().unwrap(), Vec::<String>::new());
+    let unset = AcpHandler::try_from(AcpConfig {
+        settings_toml: String::new(),
+    })
+    .unwrap();
+    assert_eq!(unset.weakenings().unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn answer_only_and_assistant_sessions_are_not_refused_at_desk() {
+    let mut request = start(environment(&[]));
+    request.clearance = "desk".to_owned();
+    request.answer_only = true;
+    handler("")
+        .start(request, terminal())
+        .expect("answer-only keeps its own limits")
+        .close()
+        .unwrap();
+    let mut request = start(environment(&[]));
+    request.clearance = "desk".to_owned();
+    request.assistant = Some(ai6::AssistantMode::moneypenny());
+    handler("")
+        .start(request, terminal())
+        .expect("an assistant keeps its own limits")
+        .close()
+        .unwrap();
+}
+
 #[test]
 fn settings_are_validated_when_the_handler_loads() {
     let build = |settings: &str| {

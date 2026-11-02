@@ -15,7 +15,7 @@ use ai6::directorates::section_00::acp::{
     AcpOptions, AcpSession, GateDecider, TerminalIo, lines_over_io,
 };
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentSession, AgentStart, AssistantMode,
+    AgentHandler, AgentResume, AgentSession, AgentStart, AssistantMode, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV};
 use ai6::guatiao::library::{Object, ProviderError};
@@ -75,6 +75,11 @@ pub struct AcpSettings {
     /// How often, in milliseconds, a silent agent's output is checked for a stop request.
     #[serde(default = "poll")]
     pub poll_ms: i64,
+    /// Starts a `desk` Session with whatever tools the agent has: AI6 does not choose an ACP
+    /// agent's tools, so it cannot keep commands from one, and without this the Session is
+    /// refused. Reported as a weakening.
+    #[serde(default)]
+    pub unconfined_desk: bool,
 }
 
 fn v1() -> String {
@@ -208,6 +213,8 @@ struct Launch<'a> {
     effort: Option<&'a String>,
     restricted: bool,
     assistant: Option<&'a AssistantMode>,
+    /// The Session is a Mission's at a clearance that may not run commands.
+    desk: bool,
     prompt: Option<String>,
     resume: Option<String>,
 }
@@ -219,6 +226,15 @@ impl AcpHandler {
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
         let settings = self.settings()?;
+        if launch.desk && !settings.unconfined_desk {
+            return Err(ProviderError::new(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "this Agent works at desk clearance, which allows no command tool, and AI6 does \
+                 not choose an ACP agent's tools, so the Session was not started: give the Agent \
+                 field clearance, or set unconfined_desk = true in its handler_settings to start \
+                 it with whatever tools the agent has",
+            ));
+        }
         let mut environment = settings.env.clone();
         environment.extend(launch.environment.clone());
         let mut argv = vec![settings.command.clone()];
@@ -289,6 +305,21 @@ impl AgentHandler for AcpHandler {
         Ok(HarnessStdio::Json)
     }
 
+    /// `unconfined_desk`: a `desk` Session runs with the agent's own tools.
+    fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
+        Ok(self
+            .settings
+            .as_ref()
+            .filter(|settings| settings.unconfined_desk)
+            .map(|_| {
+                "unconfined_desk starts its desk Sessions with whatever tools the ACP agent has, \
+                 commands among them"
+                    .to_owned()
+            })
+            .into_iter()
+            .collect())
+    }
+
     fn start(
         &self,
         request: AgentStart,
@@ -303,6 +334,7 @@ impl AgentHandler for AcpHandler {
                 effort: request.effort.as_ref(),
                 restricted,
                 assistant: request.assistant.as_ref(),
+                desk: !restricted && !clearance_runs_commands(&request.clearance),
                 prompt: Some(briefing(
                     &request.initial_context,
                     restricted,
@@ -328,6 +360,7 @@ impl AgentHandler for AcpHandler {
                 effort: request.effort.as_ref(),
                 restricted,
                 assistant: request.assistant.as_ref(),
+                desk: !restricted && !clearance_runs_commands(&request.clearance),
                 prompt: request.message.clone(),
                 resume: Some(request.session_id.to_string()),
             },

@@ -20,6 +20,7 @@ pub struct AcpSettings {
     pub close_grace_ms: u64,                    // 2000
     pub diagnostic_lines: usize,                // 20
     pub poll_ms: i64,                           // 200
+    pub unconfined_desk: bool,                  // false
 }
 pub struct AcpHandler;                           // AgentHandler provider id "acp"; stdio() = Json (pipe)
 ```
@@ -34,5 +35,9 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
 - MCP servers: `AI6_CABLE_MCP_{URL,TOKEN}` and an assistant's `<prefix>_{URL,TOKEN}` become HTTP
   `mcpServers`; `AI6_THEATER_MCP_URL` (remote hands) is refused.
 - Permissions: `GateDecider` (green ink); restricted Sessions refuse edit/delete/move/execute.
+- Clearance: a Mission's `start` or `resume` at a clearance `ai6::clearance_runs_commands` denies
+  (`desk`, anything else) fails with `GUATIAO_ERR_UNSUPPORTED`, before the agent starts, unless
+  `unconfined_desk` is set; answer-only and assistant Sessions are not refused. `weakenings` answers
+  one line when `unconfined_desk` is set, whatever the Agent's clearance.
 - `assistant_scripts` and `assistant_skills` keep the trait defaults (none).
 - A failed open appends the agent's last non-protocol output lines to the error.
