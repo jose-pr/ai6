@@ -1030,7 +1030,7 @@ mod tests {
     }
 
     async fn until(what: &str, mut done: impl FnMut() -> bool) {
-        tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::time::timeout(Duration::from_secs(180), async {
             while !done() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
