@@ -82,6 +82,10 @@ tool that edits, deletes, moves or executes is refused without asking, and a too
 that runs without a request ends the Session. Remote-hands mode, which replaces the harness's own
 tools, is refused: an ACP agent cannot be made to give them up.
 
+A request that does not parse, or that cannot be decided or answered for any other reason, is answered
+with outcome `cancelled` and a `blocked` event, never with a JSON-RPC error: the Claude ACP adapter
+0.99.1 has been seen to go ahead with the tool on an error answer.
+
 A Mission's Session at [`desk` clearance](agents.md#clearance), or a clearance the handler does not
 know, is refused at start and resume: `desk` allows no command tool, and AI6 does not choose an
 external agent's tools. Give the Agent `field` clearance, or set `unconfined_desk = true`, which

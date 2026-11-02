@@ -3257,7 +3257,8 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
   `cost_micro_usd` (token counts are not guessed); `end_turn|max_tokens|max_turn_requests` ->
   `completed`, `refusal` -> `failed`, `cancelled` -> `blocked`, a JSON-RPC error -> `failed`.
   No limit or quota detection for external agents.
-- **Permissions.** `session/request_permission` goes to the decider on its own thread. With
+- **Permissions.** `session/request_permission` always gets an outcome: what cannot be parsed,
+  decided or answered is `cancelled` with a `blocked` event, never an error. It goes to the decider on its own thread. With
   `restricted`, a request for a tool of kind `edit|delete|move|execute` is refused without asking
   the decider, and a tool of those kinds that runs without a request ends the Session (`failed`).
   An answer with no option of the needed kind cancels the request and emits `blocked`.

@@ -113,6 +113,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Security.** An ACP permission request AI6 cannot decide is refused, not answered with an error: one
+  that does not parse, a decision that cannot start or an answer that cannot be written now answers
+  outcome `cancelled` with a `blocked` event saying why. The Claude ACP adapter 0.99.1 has been seen to
+  go ahead with the tool on an error answer, in Manual mode (not checked by AI6 against that adapter).
 - A person's confirmation of a Cable works after Moneypenny's harness has gone. A held Cable waits an
   hour and an idle harness closes after ten minutes, and its closing dropped what it held, so the
   confirmation failed; every Cable she sends is held now. The desk keeps what is held past the harness,

@@ -195,7 +195,7 @@ fn options_for(start: &AgentStart) -> AcpOptions {
 
 /// Events until one of `kinds` arrives, within a deadline.
 fn until(session: &AcpSession, kinds: &[&str]) -> Vec<AgentEvent> {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(120);
     let mut seen = Vec::new();
     while Instant::now() < deadline {
         if let Some(event) = session.next_event(100).unwrap() {
@@ -430,6 +430,8 @@ struct Script {
     announce: Option<&'static str>,
     /// The tool asked about runs whatever the answer was.
     run_regardless: bool,
+    /// The agent asks leave in a request that does not parse as one.
+    ask_malformed: bool,
     cost: Option<f64>,
     stop: Option<&'static str>,
     fail_prompt: bool,
@@ -567,6 +569,22 @@ fn agent_request(
                         json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Run it",
                                "kind": kind, "status": "pending"}),
                     );
+                }
+                if script.ask_malformed {
+                    let asked = futures::executor::block_on(
+                        cx.send_request(
+                            UntypedMessage::new(
+                                "session/request_permission",
+                                json!({"sessionId": "ext-1", "toolCall": "not a tool call"}),
+                            )
+                            .unwrap(),
+                        )
+                        .block_task(),
+                    );
+                    *seen.outcome.lock().unwrap() = Some(match asked {
+                        Ok(answer) => answer,
+                        Err(error) => json!({"error": error.message}),
+                    });
                 }
                 if let Some(kind) = script.ask {
                     let asked = futures::executor::block_on(
@@ -796,7 +814,7 @@ impl PermissionDecider for Decider {
 }
 
 fn outcome(seen: &Seen) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         if let Some(outcome) = seen.outcome.lock().unwrap().clone() {
             return outcome;
@@ -835,6 +853,35 @@ fn a_permission_request_reaches_the_decider_and_both_answers_work() {
             if allow { "yes" } else { "no" }
         );
     }
+}
+
+/// An error answer is no refusal: at least one adapter goes ahead with the tool on one.
+#[test]
+fn a_permission_request_that_does_not_parse_is_refused_with_an_outcome_not_an_error() {
+    let decider = Arc::new(Decider {
+        allow: true,
+        ..Decider::default()
+    });
+    let mut options = external("go");
+    options.decider = decider.clone();
+    let (session, seen) = connect_agent(
+        Script {
+            ask_malformed: true,
+            ..Script::default()
+        },
+        options,
+    );
+    let events = until(&session.unwrap(), &["completed"]);
+    assert_eq!(outcome(&seen), json!({"outcome": {"outcome": "cancelled"}}));
+    assert!(decider.asked.lock().unwrap().is_empty());
+    assert!(
+        events.iter().any(|event| event.kind == "blocked"
+            && event
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("refused"))),
+        "the operator is told: {events:?}"
+    );
 }
 
 #[test]

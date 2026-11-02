@@ -492,11 +492,44 @@ fn error_text(error: &Error) -> String {
     }
 }
 
-/// Answers `session/request_permission` through the decider, on a thread of its own: the
-/// decision may wait for the operator.
-async fn permission(shared: &Arc<Shared>, params: Value) -> Result<Value, Error> {
+/// Starts `work` on a thread of its own.
+type StartDecider = fn(Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
+
+fn decider_thread(work: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("ai6-acp-permission".to_owned())
+        .spawn(work)
+        .map(|_| ())
+}
+
+/// The answer to `session/request_permission`, always an outcome. An error answer is no refusal:
+/// the Claude ACP adapter 0.99.1 has been seen to go ahead with the tool on one, so whatever keeps
+/// this from reaching a decision refuses, and the operator is told.
+async fn answer_permission(shared: &Arc<Shared>, params: Value, start: StartDecider) -> Value {
+    match permission(shared, params, start).await {
+        Ok(answer) => answer,
+        Err(reason) => {
+            shared.emit(event_text(
+                "blocked",
+                format!("a permission request was refused: {reason}"),
+            ));
+            serde_json::to_value(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ))
+            .unwrap_or_else(|_| serde_json::json!({"outcome": {"outcome": "cancelled"}}))
+        }
+    }
+}
+
+/// Decides `session/request_permission` through the decider, on a thread of its own: the decision
+/// may wait for the operator. `Err` says why no decision could be reached or sent.
+async fn permission(
+    shared: &Arc<Shared>,
+    params: Value,
+    start: StartDecider,
+) -> Result<Value, String> {
     let request: RequestPermissionRequest =
-        serde_json::from_value(params).map_err(|_| Error::invalid_params())?;
+        serde_json::from_value(params).map_err(|error| format!("it could not be read: {error}"))?;
     let id = request.tool_call.tool_call_id.0.to_string();
     let kind = shared.settled_kind(&id, request.tool_call.fields.kind.as_ref().map(kind_name));
     let asked = PermissionRequest {
@@ -527,12 +560,10 @@ async fn permission(shared: &Arc<Shared>, params: Value) -> Result<Value, Error>
         let (answer, decided) = oneshot::channel();
         let decider = shared.decider.clone();
         let for_decider = asked.clone();
-        std::thread::Builder::new()
-            .name("ai6-acp-permission".to_owned())
-            .spawn(move || {
-                let _ = answer.send(decider.decide(&for_decider));
-            })
-            .map_err(|error| Error::internal_error().data(error.to_string()))?;
+        start(Box::new(move || {
+            let _ = answer.send(decider.decide(&for_decider));
+        }))
+        .map_err(|error| format!("its decision could not start: {error}"))?;
         decided
             .await
             .unwrap_or_else(|_| PermissionDecision::Deny("the decision was lost".to_owned()))
@@ -572,7 +603,7 @@ async fn permission(shared: &Arc<Shared>, params: Value) -> Result<Value, Error>
         }
     };
     serde_json::to_value(RequestPermissionResponse::new(outcome))
-        .map_err(|error| Error::internal_error().data(error.to_string()))
+        .map_err(|error| format!("its answer could not be written: {error}"))
 }
 
 async fn request(
@@ -583,10 +614,7 @@ async fn request(
     match message.method() {
         "session/request_permission" => {
             let params = message.params().clone();
-            match permission(shared, params).await {
-                Ok(value) => responder.respond(value),
-                Err(error) => responder.respond_with_error(error),
-            }
+            responder.respond(answer_permission(shared, params, decider_thread).await)
         }
         _ => responder.respond_with_error(Error::method_not_found()),
     }
@@ -1412,5 +1440,90 @@ impl AcpSession {
     /// This session as the object handle a Station holds.
     pub fn into_handle(self) -> Object<dyn AgentSession> {
         self.into_object()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shared(decider: Arc<dyn PermissionDecider>) -> (Arc<Shared>, mpsc::Receiver<Queued>) {
+        let (events, received) = mpsc::channel();
+        let (commands, _) = async_mpsc::unbounded();
+        let (lifecycle, _) = async_mpsc::unbounded();
+        (
+            Arc::new(Shared {
+                events,
+                lost: AtomicBool::new(false),
+                commands,
+                lifecycle,
+                decider,
+                restricted: false,
+                close_on_drop: false,
+                fail_on_disconnect: false,
+                closing: AtomicBool::new(false),
+                inner: Mutex::default(),
+            }),
+            received,
+        )
+    }
+
+    /// The decider that would let anything through, were it asked.
+    struct Allows;
+
+    impl PermissionDecider for Allows {
+        fn decide(&self, _request: &PermissionRequest) -> PermissionDecision {
+            PermissionDecision::Allow
+        }
+    }
+
+    fn request() -> Value {
+        serde_json::json!({
+            "sessionId": "s",
+            "toolCall": {"toolCallId": "t", "title": "Run it", "kind": "execute"},
+            "options": [{"optionId": "yes", "name": "Allow", "kind": "allow_once"}],
+        })
+    }
+
+    fn refuses_with_the_reason(answer: &Value, events: &mpsc::Receiver<Queued>, reason: &str) {
+        assert_eq!(
+            *answer,
+            serde_json::json!({"outcome": {"outcome": "cancelled"}})
+        );
+        let (_, told) = events.try_recv().expect("the operator is told");
+        assert_eq!(told.kind, "blocked");
+        let text = told.text.unwrap();
+        assert!(text.contains(reason), "{text}");
+    }
+
+    #[test]
+    fn a_decider_that_cannot_start_refuses_the_tool() {
+        let (shared, events) = shared(Arc::new(Allows));
+        let answer = futures::executor::block_on(answer_permission(&shared, request(), |_| {
+            Err(std::io::Error::other("no thread today"))
+        }));
+        refuses_with_the_reason(&answer, &events, "no thread today");
+    }
+
+    #[test]
+    fn a_request_that_does_not_parse_refuses_the_tool() {
+        let (shared, events) = shared(Arc::new(Allows));
+        let started = |_: Box<dyn FnOnce() + Send>| -> std::io::Result<()> {
+            panic!("nothing is decided on a request that cannot be read")
+        };
+        let answer = futures::executor::block_on(answer_permission(
+            &shared,
+            serde_json::json!({"sessionId": "s", "toolCall": 7}),
+            started,
+        ));
+        refuses_with_the_reason(&answer, &events, "could not be read");
+    }
+
+    #[test]
+    fn a_request_that_parses_still_reaches_the_decider() {
+        let (shared, _events) = shared(Arc::new(Allows));
+        let answer =
+            futures::executor::block_on(answer_permission(&shared, request(), decider_thread));
+        assert_eq!(answer["outcome"]["optionId"], "yes");
     }
 }
