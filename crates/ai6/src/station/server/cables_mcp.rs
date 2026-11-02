@@ -3,6 +3,7 @@
 //! Cable tools, acting for the person of one conversation ([`AssistantEndpoint`]).
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
@@ -2581,6 +2582,9 @@ pub(super) struct AssistantEndpoint {
     url: String,
     server: JoinHandle<()>,
     registered: CableEndpoint,
+    /// Whether it has left the relay's directory, where a later endpoint of the conversation may
+    /// stand now under the same name.
+    stopped: AtomicBool,
 }
 
 impl AssistantEndpoint {
@@ -2651,7 +2655,32 @@ impl AssistantEndpoint {
             url: format!("http://{address}/mcp"),
             server,
             registered,
+            stopped: AtomicBool::new(false),
         })
+    }
+
+    /// Whether a Cable waits for the person, within its hour.
+    pub(super) fn holds_cables(&self) -> bool {
+        self.desk.held.lock().is_ok_and(|mut held| {
+            held.retain(|_, cable| cable.held_at.elapsed() < HELD_TTL);
+            !held.is_empty()
+        })
+    }
+
+    /// Ends what the conversation's harness used: the port and the entry in the relay's directory.
+    /// What is held stays, for the person to decide when the harness has gone.
+    pub(super) fn stop_serving(&self) {
+        if !self.stopped.swap(true, Ordering::AcqRel) {
+            let _ = self.desk.relay.unregister_endpoint(&self.registered);
+            self.server.abort();
+        }
+    }
+
+    /// Takes over what `earlier`, the endpoint of the conversation's closed harness, still holds.
+    pub(super) fn adopt_held(&self, earlier: &Self) {
+        if let (Ok(mut held), Ok(mut older)) = (self.desk.held.lock(), earlier.desk.held.lock()) {
+            held.append(&mut older);
+        }
     }
 
     /// Gives the harness the endpoint's URL and token.
@@ -2677,8 +2706,8 @@ impl AssistantEndpoint {
             .map_err(|_| "the held Cables could not be read".to_owned())?;
         let cable = held.remove(&decision.id).ok_or_else(|| {
             format!(
-                "no Cable is held as {} here: it was sent, dropped or expired, or the \
-                 conversation's harness closed",
+                "no Cable is held as {} here: it was sent, dropped or expired, or the Station \
+                 restarted, which drops what it holds; nothing was sent",
                 decision.id
             )
         })?;
@@ -2725,8 +2754,7 @@ impl AssistantEndpoint {
 
 impl Drop for AssistantEndpoint {
     fn drop(&mut self) {
-        let _ = self.desk.relay.unregister_endpoint(&self.registered);
-        self.server.abort();
+        self.stop_serving();
     }
 }
 

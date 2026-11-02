@@ -106,6 +106,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A person's confirmation of a Cable works after Moneypenny's harness has gone. A held Cable waits an
+  hour and an idle harness closes after ten minutes, and its closing dropped what it held, so the
+  confirmation failed; every Cable she sends is held now. The desk keeps what is held past the harness,
+  a harness that starts again carries it on, and a confirmation that sends nothing says why. A Station
+  restart still drops what is held.
 - A lowered clearance reaches a running harness. A person lowering it, a quarantine taking back a
   raise, desk duty beginning or a retirement left the harness its tools until it next ended. It is now
   stopped at the Station's next check-in, the Mission `blocked` with reason `clearance-lowered` and an

@@ -648,8 +648,9 @@ shows is what the Station holds (a digest of all of it) and shows nothing otherw
 and your permission is checked again, the confirmation is audited (`moneypenny.confirmed`),
 and the Station holding it sends it if it hears within the answer timeout (a minute by
 default); otherwise the proposal fails and nothing is sent. Cancel, or leave it for an hour,
-and nothing is sent. A held Cable lives only in that Station's memory: if her session there
-closes first, confirming it fails and says why. A body with a character that renders as
+and nothing is sent. A held Cable lives in that Station's memory, apart from her harness: it waits its
+hour whether or not her session there stays open, and goes on waiting when she starts again. A Station
+restart drops it, and confirming it then fails and says why. A body with a character that renders as
 nothing is refused before it can become a proposal. With 32 Cables already held, or 32
 proposals waiting, she is told so and the new one is refused; nothing waiting for you is
 dropped to make room.

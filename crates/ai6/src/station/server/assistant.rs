@@ -17,7 +17,9 @@
 //! job that grants the person Cable actions in some Operations gives the harness a further
 //! MCP server, this Station's Cable endpoint for the conversation
 //! ([`super::cables_mcp::AssistantEndpoint`]), which holds every Cable she sends until the
-//! person confirms it, and then sends it as the assistant for the person.
+//! person confirms it, and then sends it as the assistant for the person. A harness that closes
+//! leaves what is held with the desk: the person's confirmation needs no harness, and the Cable
+//! waits its hour whether or not one runs.
 //! It works in a directory of its own, named for its conversation inside
 //! one the desk made readable by the Station's user only: the same directory each time the
 //! conversation's harness starts, because Claude Code finds a Session to resume only from the
@@ -591,6 +593,10 @@ struct Live {
     cables: Option<Arc<AssistantEndpoint>>,
 }
 
+/// The endpoints of closed harnesses whose Cables still wait for their person, by conversation.
+#[cfg(feature = "cables-mcp")]
+type LeftHeld = Arc<Mutex<BTreeMap<String, Arc<AssistantEndpoint>>>>;
+
 /// The assistant Sessions of one Station.
 pub(super) struct Desk {
     state: DaemonState,
@@ -600,6 +606,8 @@ pub(super) struct Desk {
     /// `[assistant.limits]` and `[assistant.desk]`, read at each job and harness start.
     tables: Tables,
     live: Arc<Mutex<BTreeMap<String, Live>>>,
+    #[cfg(feature = "cables-mcp")]
+    left_held: LeftHeld,
     /// Harnesses being started, not yet in `live`.
     starting: AtomicUsize,
     known: Arc<Mutex<BTreeMap<String, String>>>,
@@ -668,6 +676,8 @@ impl Desk {
             log: Arc::new(|line| eprintln!("ai6: {line}")),
             exports: Arc::new(Unreachable),
             memory_jobs: Arc::default(),
+            #[cfg(feature = "cables-mcp")]
+            left_held: Arc::default(),
         }
     }
 
@@ -1284,6 +1294,8 @@ impl Desk {
                 },
             );
         let pump = Pump {
+            #[cfg(feature = "cables-mcp")]
+            left_held: self.left_held.clone(),
             conversation_id: job.conversation_id.clone(),
             station_id: state.station_id.clone(),
             session,
@@ -1481,16 +1493,35 @@ impl Desk {
         .map_err(|error| format!("the conversation's Cable endpoint did not start: {error}"))?;
         endpoint.add_environment(environment);
         *mode = std::mem::replace(mode, AssistantMode::moneypenny()).with_cables();
+        if let Some(earlier) = self
+            .left_held
+            .lock()
+            .ok()
+            .and_then(|mut left| left.remove(&job.conversation_id))
+        {
+            endpoint.adopt_held(&earlier);
+        }
         Ok(Some(Arc::new(endpoint)))
     }
 
     #[cfg(feature = "cables-mcp")]
     fn cables_of(&self, conversation: &str) -> Option<Arc<AssistantEndpoint>> {
-        self.live
+        let running = self
+            .live
             .lock()
             .ok()?
             .get(conversation)
-            .and_then(|live| live.cables.clone())
+            .and_then(|live| live.cables.clone());
+        running.or_else(|| self.left_held.lock().ok()?.get(conversation).cloned())
+    }
+
+    /// Forgets the endpoints with nothing left to decide; each is otherwise kept for the Cables'
+    /// time limit, however long no job comes.
+    #[cfg(feature = "cables-mcp")]
+    fn sweep_left_held(&self) {
+        if let Ok(mut left) = self.left_held.lock() {
+            left.retain(|_, endpoint| endpoint.holds_cables());
+        }
     }
 
     /// Sends or drops the Cable the conversation's endpoint holds for the person; a confirm
@@ -1503,12 +1534,13 @@ impl Desk {
                 if let Some(cables) = cables {
                     cables.discard(&decision.id);
                 }
+                self.sweep_left_held();
                 return Ok(());
             }
             let (Some(cables), Some(decision)) = (cables, job.cable_confirm.clone()) else {
                 return Err(
-                    "nothing is held here: the conversation's harness closed, so the Cable was \
-                     dropped"
+                    "nothing is held here: the Cable was sent, dropped or expired, or the \
+                     Station restarted, which drops what it holds; nothing was sent"
                         .to_owned(),
                 );
             };
@@ -1516,10 +1548,12 @@ impl Desk {
             if job.token_expires_at <= unix_now() {
                 return Err("the confirmation came too late; nothing was sent".to_owned());
             }
-            tokio::task::spawn_blocking(move || cables.confirm(&decision))
+            let sent = tokio::task::spawn_blocking(move || cables.confirm(&decision))
                 .await
                 .map_err(|error| error.to_string())?
-                .map(|_| ())
+                .map(|_| ());
+            self.sweep_left_held();
+            sent
         }
         #[cfg(not(feature = "cables-mcp"))]
         {
@@ -1725,6 +1759,8 @@ impl Drop for Starting<'_> {
 
 /// Reads one harness's events until it ends, idles out or is closed.
 struct Pump {
+    #[cfg(feature = "cables-mcp")]
+    left_held: LeftHeld,
     conversation_id: String,
     station_id: String,
     session: SharedSession,
@@ -1893,7 +1929,16 @@ impl Pump {
                 .get(&self.conversation_id)
                 .is_some_and(|entry| Arc::ptr_eq(&entry.flags, &self.flags))
         {
-            live.remove(&self.conversation_id);
+            let _closed = live.remove(&self.conversation_id);
+            #[cfg(feature = "cables-mcp")]
+            if let Some(cables) = _closed.and_then(|closed| closed.cables)
+                && cables.holds_cables()
+            {
+                cables.stop_serving();
+                if let Ok(mut left) = self.left_held.lock() {
+                    left.insert(self.conversation_id.clone(), cables);
+                }
+            }
         }
         self.send(
             session_id.as_ref(),
@@ -2421,7 +2466,10 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
                     Some(job) => dispatch.send(job),
                     None => break,
                 },
-                () = tokio::time::sleep(STOP_CHECK) => {}
+                () = tokio::time::sleep(STOP_CHECK) => {
+                    #[cfg(feature = "cables-mcp")]
+                    dispatch.desk.sweep_left_held();
+                }
             }
         }
         dispatch.desk.close_all();
@@ -4092,23 +4140,15 @@ event_bytes = 7
     }
 
     #[cfg(feature = "cables-mcp")]
-    #[tokio::test]
-    async fn cable_grants_give_her_a_cable_server_that_sends_for_the_person() {
-        use rmcp::ServiceExt;
-        use rmcp::model::{CallToolRequestParams, ContentBlock};
-        use rmcp::transport::StreamableHttpClientTransport;
-        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-
+    /// A desk whose harnesses close after `idle` on a Station where `moneypenny` may send to `008`.
+    #[cfg(feature = "cables-mcp")]
+    fn cable_fixture(idle: Duration) -> Fixture {
         use crate::directorates::registry::cables::{
             CableAction, CableEndpoint, CableGrant, CablePolicy, CableRelay, CableScope,
             CableTarget,
         };
-        use crate::directorates::section_00::assistant::{
-            ASSISTANT_CABLE_MCP_TOKEN_ENV, ASSISTANT_CABLE_MCP_URL_ENV, AssistantCableDecision,
-            AssistantCableGrant,
-        };
 
-        let mut fixture = fixture(true, IDLE);
+        let mut fixture = fixture(true, idle);
         let registry = fixture.desk.state.intake.clone();
         let station = CableTarget::try_new(CableScope::Station, Some("test".to_owned())).unwrap();
         let grants = ["moneypenny", "008"]
@@ -4144,6 +4184,198 @@ event_bytes = 7
             }),
         );
 
+        fixture
+    }
+
+    /// The harness of conversation `conversation` holds one Cable for the person, as Claude Code
+    /// would call the tool; what the person is shown, and how they would confirm it.
+    #[cfg(feature = "cables-mcp")]
+    async fn hold_a_cable(fixture: &Fixture, conversation: &str, key: &str) -> AssistantJob {
+        use rmcp::ServiceExt;
+        use rmcp::model::CallToolRequestParams;
+        use rmcp::transport::StreamableHttpClientTransport;
+        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+
+        use crate::directorates::section_00::assistant::{
+            ASSISTANT_CABLE_MCP_TOKEN_ENV, ASSISTANT_CABLE_MCP_URL_ENV, AssistantCableDecision,
+            AssistantCableGrant,
+        };
+
+        let mut granted = job(conversation, "Ask 008 whether the build is green.");
+        granted.person_id = Some("person-007".to_owned());
+        granted.cables = vec![AssistantCableGrant {
+            operation: "G".to_owned(),
+            send: true,
+            read: true,
+        }];
+        let launches = || {
+            let asked = fixture.asked.lock().unwrap();
+            asked.starts.len() + asked.resumes.len()
+        };
+        let before = launches();
+        fixture.desk.handle(granted).await;
+        until(|| launches() > before).await;
+        let environment = {
+            let asked = fixture.asked.lock().unwrap();
+            match asked.resumes.last() {
+                Some(resume) => resume.environment.clone(),
+                None => asked.starts[0].environment.clone(),
+            }
+        };
+        let client = ()
+            .serve(StreamableHttpClientTransport::from_config(
+                StreamableHttpClientTransportConfig::with_uri(
+                    environment[ASSISTANT_CABLE_MCP_URL_ENV].clone(),
+                )
+                .auth_header(environment[ASSISTANT_CABLE_MCP_TOKEN_ENV].clone()),
+            ))
+            .await
+            .unwrap();
+        let arguments = serde_json::json!({
+            "operation": "G", "scope": "agent", "target": "008",
+            "body": format!("Is the build green? {key}"), "idempotency_key": key
+        });
+        client
+            .call_tool(
+                CallToolRequestParams::new("send_cable")
+                    .with_arguments(serde_json::from_value(arguments).unwrap()),
+            )
+            .await
+            .unwrap();
+        client.cancel().await.unwrap();
+        let proposal = || {
+            fixture
+                .reports
+                .lock()
+                .unwrap()
+                .iter()
+                .flat_map(|report| report.events.iter())
+                .filter(|event| event.kind == EVENT_CABLE_PROPOSAL)
+                .filter_map(|event| event.cable.clone())
+                .find(|cable| cable.body.as_deref().is_some_and(|body| body.contains(key)))
+        };
+        until(|| proposal().is_some()).await;
+        let proposal = proposal().unwrap();
+        let mut confirm = job(conversation, "unused");
+        confirm.job_id = format!("confirm-{key}");
+        confirm.message = String::new();
+        confirm.cable_confirm = Some(AssistantCableDecision {
+            id: proposal.id,
+            digest: proposal.digest,
+        });
+        confirm
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    fn job_answer(fixture: &Fixture, job_id: &str) -> Option<(String, Option<String>)> {
+        fixture
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|report| report.job_id.as_deref() == Some(job_id))
+            .map(|report| (report.events[0].kind.clone(), report.events[0].text.clone()))
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn what_she_held_goes_on_waiting_when_the_next_message_starts_her_again() {
+        let fixture = cable_fixture(Duration::from_millis(100));
+        let first = hold_a_cable(&fixture, "c-next", "k-first").await;
+        until(|| kinds(&fixture, "c-next").contains(&EVENT_CLOSED.to_owned())).await;
+        until(|| fixture.desk.live.lock().unwrap().is_empty()).await;
+
+        // She resumes, holds a second, and both stay for the person, across the two harnesses.
+        let second = hold_a_cable(&fixture, "c-next", "k-second").await;
+        fixture.desk.handle(second).await;
+        let answer = job_answer(&fixture, "confirm-k-second").unwrap();
+        assert_eq!(answer.0, EVENT_ACCEPTED, "{answer:?}");
+        fixture.desk.handle(first).await;
+        let answer = job_answer(&fixture, "confirm-k-first").unwrap();
+        assert_eq!(answer.0, EVENT_ACCEPTED, "{answer:?}");
+        fixture.desk.close_all();
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_cable_cancelled_after_her_harness_closed_is_gone_and_so_is_its_endpoint() {
+        use crate::directorates::section_00::assistant::AssistantCableDecision;
+
+        let fixture = cable_fixture(Duration::from_millis(100));
+        let confirm = hold_a_cable(&fixture, "c-gone", "k-gone").await;
+        until(|| kinds(&fixture, "c-gone").contains(&EVENT_CLOSED.to_owned())).await;
+        until(|| !fixture.desk.left_held.lock().unwrap().is_empty()).await;
+        let decision: &AssistantCableDecision = confirm.cable_confirm.as_ref().unwrap();
+        let mut cancel = job("c-gone", "unused");
+        cancel.job_id = "cancel-k-gone".to_owned();
+        cancel.message = String::new();
+        cancel.cable_discard = Some(decision.clone());
+        fixture.desk.handle(cancel).await;
+        assert!(
+            fixture.desk.left_held.lock().unwrap().is_empty(),
+            "nothing is kept for a conversation with nothing left to decide"
+        );
+        fixture.desk.handle(confirm).await;
+        let answer = job_answer(&fixture, "confirm-k-gone").unwrap();
+        assert_eq!(answer.0, EVENT_REJECTED);
+        assert!(answer.1.unwrap().contains("nothing was sent"));
+        assert!(!kinds(&fixture, "c-gone").contains(&EVENT_CABLE_SENT.to_owned()));
+    }
+
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_person_confirms_a_cable_after_her_idle_harness_has_closed() {
+        let fixture = cable_fixture(Duration::from_millis(100));
+        let confirm = hold_a_cable(&fixture, "c-idle", "k-idle").await;
+        until(|| kinds(&fixture, "c-idle").contains(&EVENT_CLOSED.to_owned())).await;
+        assert!(
+            fixture.desk.live.lock().unwrap().is_empty(),
+            "no harness runs"
+        );
+
+        fixture.desk.handle(confirm.clone()).await;
+        let answer = job_answer(&fixture, "confirm-k-idle").unwrap();
+        assert_eq!(answer.0, EVENT_ACCEPTED, "{answer:?}");
+        assert!(kinds(&fixture, "c-idle").contains(&EVENT_CABLE_SENT.to_owned()));
+        assert_eq!(
+            fixture
+                .desk
+                .state
+                .intake
+                .audit_records()
+                .unwrap()
+                .iter()
+                .filter(|record| record.action == "cable.send" && record.actor == "person-007")
+                .count(),
+            1
+        );
+
+        // It went once, and the same holds with nothing left held.
+        let mut again = confirm;
+        again.job_id = "confirm-again".to_owned();
+        fixture.desk.handle(again).await;
+        let answer = job_answer(&fixture, "confirm-again").unwrap();
+        assert_eq!(answer.0, EVENT_REJECTED);
+        assert!(
+            answer.1.unwrap().contains("sent, dropped or expired"),
+            "the person is told plainly"
+        );
+    }
+
+    #[tokio::test]
+    async fn cable_grants_give_her_a_cable_server_that_sends_for_the_person() {
+        use rmcp::ServiceExt;
+        use rmcp::model::{CallToolRequestParams, ContentBlock};
+        use rmcp::transport::StreamableHttpClientTransport;
+        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+
+        use crate::directorates::section_00::assistant::{
+            ASSISTANT_CABLE_MCP_TOKEN_ENV, ASSISTANT_CABLE_MCP_URL_ENV, AssistantCableDecision,
+            AssistantCableGrant,
+        };
+
+        let fixture = cable_fixture(IDLE);
+        let registry = fixture.desk.state.intake.clone();
         let mut granted = job("c-cable", "Ask 008 whether the build is green.");
         granted.person_id = Some("person-007".to_owned());
         granted.cables = vec![AssistantCableGrant {
