@@ -5,7 +5,7 @@ signature, contract and gotchas, so a consuming agent skips the source. It ships
 the package and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
-No features. MSRV: Rust 1.89. The crate depends on `ai6`, `serde` and `serde_json`.
+No features. MSRV: Rust 1.89. The crate depends on `ai6`, `serde`, `serde_json` and `toml`.
 It exposes `ClaudeHandler` and `ClaudeConfig` from the root. The crate contains no
 `unsafe` code.
 
@@ -24,8 +24,11 @@ milliseconds.
 | `tail_line_bytes` | 512 | Bytes of each of those lines |
 | `close_wait_ms` | 2000 | How long `close` waits for Claude Code to have exited |
 | `exit_wait_ms` | 1000 | How long the end of the output waits for the exit status |
+| `settings_toml` | empty | The Agent's `handler_settings` as TOML; the Station fills it in |
 
-A Station sets them in `[providers.claude]` of its `station` record.
+A Station sets them in `[providers.claude]` of its `station` record. The keys of `settings_toml`
+are `allowed_tools` and `denied_tools`, lists of Claude Code permission rules; an unknown key, or
+a rule that does not start with a letter, makes the build fail with `GUATIAO_ERR_BAD_VALUE`.
 
 ## `ClaudeHandler`
 
@@ -128,17 +131,60 @@ counter. An `assistant` message with tool-call blocks (above) becomes kind `tool
 When AI6 supplies both `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, the handler adds
 the authenticated Streamable HTTP Cable server through `--mcp-config`. The config contains
 environment placeholders; the bearer token never appears in argv, and its tools are allowed by
-server (`--allowedTools mcp__ai6-cables`): under `-p` Claude Code 2.1.316 denies a tool no rule
-allows instead of asking. If either variable is absent, no AI6 MCP configuration is added.
+server (`mcp__ai6-cables` in `--allowedTools`). If either variable is absent, no AI6 MCP
+configuration is added.
 
 When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
 remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
-The handler then registers that server as `ai6-theater` (same placeholder scheme), allows
-its tools (`--allowedTools` lists `mcp__ai6-theater` beside any other server of AI6's) and denies
-Claude's own shell and file tools
-(`--disallowedTools Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep`) so
-nothing it does lands on the Station. Both flags are variadic, so each is followed by another
-flag. This applies to resume as well.
+The handler then registers that server as `ai6-theater` (same placeholder scheme), allows its
+tools (`mcp__ai6-theater`) and keeps Claude's own shell and file tools off (below) so nothing it
+does lands on the Station. This applies to resume as well.
+
+A field Session, one neither answer-only nor an assistant, on start and resume gets, each variadic
+list closed by the next flag:
+
+```text
+--tools Read,Glob,Grep,Edit,Write,NotebookEdit,Bash,PowerShell,TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate[,the tool of each allowed_tools rule]
+--permission-mode dontAsk
+--disallowedTools WebFetch,WebSearch,Agent[,denied_tools]
+--allowedTools [mcp__ai6-cables,][mcp__ai6-theater,]Read,Glob,Grep,Edit(/**),Bash,PowerShell,TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate[,allowed_tools]
+```
+
+An `allowed_tools` rule for a tool on the deny list takes that tool off it; an `mcp__` rule offers
+nothing, since `--tools` is about built-in tools. In remote-hands mode the eight tools
+`Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep` leave `--tools` and the default allow
+rules and join the deny list, and `allowed_tools` cannot bring them back. `AgentHandler::weakenings`
+answers one line per `allowed_tools` rule neither on the default allow list nor denied by
+`denied_tools`.
+
+`--tools` is there because `dontAsk` denies only what would prompt. Measured with 2.1.316 against a
+loopback stand-in for the API (no model reached), on Windows and on Linux. With `dontAsk` and the
+allow rules alone, on Windows, `Agent`, `CronCreate` and `SendMessage` ran, and `WebFetch` fetched
+`docs.python.org`. With the flags above:
+
+- `Write` inside the working directory and below it, `Bash`, `git add` and `git commit` through
+  `Bash`, `Read`, `Glob`, `Grep`, `TaskCreate` and a tool of `mcp__ai6-cables` ran; so did
+  `PowerShell` on Windows with `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`, a variable without which Claude
+  Code does not offer it (`No such tool available`, on Linux too, where naming it does no harm);
+- `Write` outside the working directory, through `..`, and to `.git/x` and `.claude/settings.json`
+  in it was denied under `dontAsk`, as was a tool of an MCP server no rule names, and each of those
+  is in `result.permission_denials`;
+- `WebFetch`, `WebSearch`, `Agent`, `Skill`, `CronCreate`, `RemoteTrigger`, `EnterWorktree`,
+  `SendMessage` and `TodoWrite` answered `No such tool available`: that is a failed call the model
+  sees, not a denial, and none is in `permission_denials`. `TodoWrite` is there only under
+  `CLAUDE_CODE_ENABLE_TASKS=0`, in place of the `Task` tools;
+- `Read` outside the working directory ran, as a bare `Read` rule says, and `Bash` wrote outside it
+  with a redirect: the rules bind the file tools, not what a command does;
+- a `PreToolUse` hook with the matcher `Bash|PowerShell` ran for each call of either tool, and a
+  command it denied did not run, ended up in `permission_denials` as `Bash`, and left the turn a
+  success.
+
+MCP tools are offered directly under `--tools`: without `ToolSearch` Claude Code does not defer them.
+
+`result.permission_denials` lists a turn's refused calls, per turn (a second turn in the same process
+listed none). A `result` with any becomes two events: first one of kind `denied` (`DENIED_EVENT`)
+whose text names each tool once, `Write, Bash`, with no `data` or `tools`, since the calls' input
+may hold anything and they did not run; then its `completed` or `failed`.
 
 With the Cable endpoint present, start and resume also pass `--settings` with the green ink
 gate: `{"disableAllHooks": false, "hooks": {"PreToolUse": [{"matcher": "Bash|PowerShell",
@@ -151,8 +197,9 @@ only makes the gate hold). `PROGRAM` is `AI6_GREEN_INK_GATE` from the Session en
 handler (`ai6` on a Station or field runner). The hook asks the Station whether a live green ink approval covers
 each governed step of a shell command and denies the call otherwise
 (`ai6::directorates::section_00::gate`). `onFailure` needs Claude Code 2.1.295 or later; a
-hook that cannot start or times out then blocks the call. The settings follow the Claude
-Code hooks reference and are not exercised against a live Claude Code.
+hook that cannot start or times out then blocks the call. Seen with Claude Code 2.1.316 and a real
+model turn: the gate refused a `git push` to a protected ref, the turn's `result` listed `Bash` under
+`permission_denials`, and the same command ran after a person approved the step.
 
 When `AgentStart::project_settings` (or `AgentResume::project_settings`) is `false`, the
 default AI6 decides for an Operation, start and resume add `--setting-sources user`: Claude

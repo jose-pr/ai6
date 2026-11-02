@@ -559,8 +559,9 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
   transition): the outcome, plus what the
   Operation's cover policy allows. `covert` says only that the work finished or could not
   be completed, and the branch; `partial` adds that AI helped and the Mission ID; `overt`
-  also names the Agent and the provider Session IDs. A report that fails is retried a few
-  times, then dropped.
+  also names the Agent and the provider Session IDs. `partial` and `overt` also list the tools
+  the harness [refused in its last turn](agents.md#what-a-claude-code-mission-may-call). A report
+  that fails is retried a few times, then dropped.
 - **Limits.** Review comments on a pull request are not forwarded to the Mission's
   Session. Jira issues are not transitioned when a Mission starts, only when it ends.
 
@@ -613,8 +614,8 @@ What the Station writes by itself follows the Operation's [`updates`](operations
 by default one **status comment** on the source issue, posted when the Mission starts working
 and edited in place as it waits for input or is paused, at most once a minute, with the
 instance's `status_labels` swapped and its `status_transitions` made when the issue offers
-them (one it does not offer is a timeline event). When the Mission ends the report is a new
-comment, so people are notified. Every word follows the Operation's cover policy.
+them (one it does not offer is a timeline event). It names the Mission's branch once it has one.
+When the Mission ends the report is a new comment, so people are notified. Every word follows the Operation's cover policy.
 
 **Creating, splitting and mirroring.** An Agent asks for issues with `issue_create`,
 `issue_split` and `issue_mirror`; its text passes the same check as a comment, and it carries on

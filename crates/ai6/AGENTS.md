@@ -3639,12 +3639,18 @@ Codex's runs `codex sandbox -P` once in 15 minutes. `AgentHandler::assistant_ski
 Result<Option<String>, ProviderError>`, a further appended slot: `None` when the harness loads
 exactly `AssistantMode::skills` and no other skill, else why not (default: it cannot; Claude
 answers `None`, Codex why not); a Station installs no skill for a handler that cannot.
+`AgentHandler::weakenings(&self) -> Result<Vec<String>, ProviderError>`, a further appended slot:
+each way this handler's settings are looser than its default, one line each (default: none). The
+Station prefixes each with `Agent "ID" is weakened: `, logs them at start and on a roster change
+and publishes them at check-in as `agents_weakened`, leaving out an Agent whose handler it cannot
+build; a field runner logs them at each launch.
 `AgentStart`, `AgentResume`, `AgentMessage`,
 `AgentEvent`, `UsageLimit` and `TokenUsage` are also serde `Serialize` and `Deserialize`
 (field names as declared): a runner's API carries them as JSON.
 
 ```rust
 pub const LIMIT_EVENT: &str = "limit";
+pub const DENIED_EVENT: &str = "denied";
 pub struct UsageLimit { pub resets_at: Option<i64> /* Unix seconds */, pub window: Option<String> }
 pub struct TokenUsage { pub input: u64, pub output: u64, pub cache_read: u64, pub cache_write: u64,
                         pub cost_micro_usd: u64, pub cumulative: bool }
@@ -3937,6 +3943,13 @@ otherwise produce; `limit` is `None` on every other event. `resets_at` is `None`
 provider names no reset time. The daemon parks the Mission (or posts a backup Agent) and
 closes the Session.
 
+A handler reports calls its harness refused by its permission rules in a turn as an event of kind
+`DENIED_EVENT`, before that turn's `completed` or `failed`: `text` names the tools, separated by
+`, `, and `tools` stays empty, since they did not run. The daemon records them in
+`Mission.denied_tools`, logs them, keeps the event, publishes the Mission's end with the reason
+`permission-denied`, and gives them to a source Mission's outcome (`denied_tools`), which the CX
+report quotes unless the disclosure is `Hidden`. The Mission's state is whatever the turn ended in.
+
 `usage` is what the provider reported with the event (Claude Code on `result`, Codex on its
 token-usage notification); `cumulative` says whether the figures are running totals for the
 provider process (`true`) or only what the last step added. `UsageTracker` turns either into
@@ -4045,7 +4058,9 @@ quarantined: `MissionStore::quarantine(id)` moves a `Working`, `Blocked`, `Stall
 `Parked` Mission there (repeating it is a no-op), it leaves only through `requeue_for`
 (back to `Queued`, for the next Agent) or `Abandoned`, and `reassign(id, agent)` gives a
 queued Mission another Agent. `block_for(id, reason)` blocks an active Mission and records
-`Mission.blocked_reason` (`"budget"`; cleared by the next state change); `expose(id, sources)`
+`Mission.blocked_reason` (`"budget"`; cleared by the next state change);
+`note_denied_tools(id, tools)` records `Mission.denied_tools` (`Vec<String>`, serde default empty,
+cleared by a transition to `Working`); `expose(id, sources)`
 records `Mission.exposure`, the untrusted input the Mission itself came from;
 `record_provenance(id, provenance)` records `Mission.provenance` (`Option<Provenance>`, the
 first record stands; `None` for a Mission started on the Station rather than from the queue).
@@ -4844,6 +4859,10 @@ the operating system's loader (on Windows also beside the executable, in the cur
 directory and on `PATH`). Under `report` libraries load from where they were found and each
 unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-in carries
 `plugins_weakened` when the list is not empty.
+
+`Plugins::handler_with(provider, settings)` builds a handler with an Agent's `handler_settings`
+beside its provider's `[providers.<id>]` table: `HandlerConfig`'s `settings_toml` is one more key of
+that table, so a provider with a configuration of its own declares it too.
 
 ## Command line
 

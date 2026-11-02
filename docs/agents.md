@@ -115,6 +115,61 @@ See the [SIS intelligence officer role descriptions](https://www.sis.gov.uk/inte
 and policy per Operation in Outer Office. An Operation's local `.ai6/agents.toml` may refine
 Agent entries but cannot change role policy or grant permissions.
 
+## What a Claude Code Mission may call
+
+A Mission on the `claude` handler runs under `--permission-mode dontAsk`: a call no rule allows
+is refused, with no prompt that nobody is there to answer. Claude Code is offered only the tools
+in the first two rows (`--tools`), so anything else is not there to call.
+
+| | By default |
+| --- | --- |
+| Allowed | Reading and searching: `Read`, `Glob`, `Grep`, anywhere the Station's user can read |
+| Allowed | Editing inside the working directory: `Edit`, `Write`, `NotebookEdit`, by the one rule `Edit(/**)`; `.git` and `.claude` stay refused to these tools. Commands: `Bash`, `PowerShell`. A checklist: `TodoWrite` and the `Task` tools that replace it. AI6's own MCP servers |
+| Not allowed | `WebFetch`, `WebSearch`, `Agent` sub-agents, skills, any other MCP server, every other built-in tool, and writing outside the working directory through the file tools |
+
+`PowerShell` is allowed but only there when Claude Code has it on: set
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1` in the Agent's `env`. [Green ink](missions.md#green-ink) stays
+the check on commands: its hook decides each `Bash` and `PowerShell` call of a gated Session, under
+the same list. In remote-hands mode Claude's own shell and file tools are neither offered nor
+allowed, whatever the settings say, so that nothing lands on the Station. Answer-only Sessions and
+[Moneypenny](assistant.md) have lists of their own, which this does not change.
+
+**What this does not give.** `Bash` runs as the Theater's OS user. On a local Theater that is the
+Station's user, so a command reaches whatever the Station can, inside the working directory or
+not, and a harness can read its own environment, the model credential among them. A deny rule
+matches the command Claude writes, not the program it runs. Where that matters, isolate the work
+with a [container Theater](theaters.md); no list of tools does it.
+
+An Agent's `handler_settings` change the list:
+
+```toml
+[agent.007.handler_settings]
+allowed_tools = ["WebFetch(domain:docs.example.com)", "mcp__docs"]
+denied_tools = ["Bash(git push *)"]
+```
+
+Each entry is a [Claude Code permission
+rule](https://code.claude.com/docs/en/permissions#permission-rule-syntax). A rule in `allowed_tools`
+offers its tool and lifts that tool's default denial, and a deny rule beats an allow rule. Each
+allowed rule beyond the default list is a weakening: the Station logs `Agent "007" is weakened:
+allowed_tools adds …` at start and when the roster changes and reports it at check-in
+(`agents_weakened`), and a field runner hosting the handler logs it at each launch. Three things
+the rules do not say for themselves: a bare `Write` or `Edit` reaches outside the working
+directory; with any `WebFetch` rule, Claude Code also fetches its own pre-approved documentation
+sites; and on Windows with Git Bash any deny rule on `Bash` turns `PowerShell` off unless
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1` is set
+([tools reference](https://code.claude.com/docs/en/tools-reference#bash-deny-rules-also-turn-off-the-powershell-tool)).
+With an Operation's project settings loaded, their allow rules count too, but neither they nor the
+user's settings can lift these deny rules or offer a tool `--tools` leaves out.
+
+A turn that had calls refused by these rules can still end in success: the Agent may have worked
+around them, or given up. So it is reported on the Mission whatever its state: a `denied` event
+naming the tools, the Mission's `denied_tools` until it works again, the reason
+`permission-denied` on its end on the board (`/v1/board`, Outer Office's Mission page), and, unless
+the Operation's cover hides it, a line in the report on its source issue. A log line on the Station
+says the same. A command the green ink gate held is listed too, since the harness refuses it the
+same way; a resume clears the list, so a held command that later ran is not in the report.
+
 ## 00 coordination
 
 The coordinating 00 Agent is an Operation-assigned Agent identity with `00` clearance, not a
@@ -378,7 +433,7 @@ meanwhile does not overwrite it. A grant a Station cannot read counts as `desk`,
 `desk` with a note.
 
 Clearance is enforced at the harness as well as by policy. The Claude handler passes Claude
-Code a `PreToolUse` hook (through `--settings`) that runs `ai6 green-ink gate` before each
+Code [its list of tools](#what-a-claude-code-mission-may-call) and a `PreToolUse` hook (through `--settings`) that runs `ai6 green-ink gate` before each
 `Bash` or `PowerShell` call, and the Codex handler answers Codex's command approval requests
 the same way: a command that pushes to a protected ref, deletes a ref, merges a pull request
 or creates a release without a live approval is refused, and the Agent is told what to ask

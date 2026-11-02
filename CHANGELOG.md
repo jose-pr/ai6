@@ -29,6 +29,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   /v1/station/assistant/cables` for the person's Cable permissions. A roster or database record
   that sets one of those settings is refused until it goes. Files already under
   `.moneypenny/outside-text/` in a person's repository are left there, unread.
+- A Mission on the `claude` handler can edit files and run commands. It runs under `--permission-mode
+  dontAsk` with an explicit list: reading and searching, editing inside the working directory,
+  `Bash` and `PowerShell`, a checklist and AI6's MCP servers; `WebFetch`, `WebSearch`, sub-agents and
+  other MCP servers stay out. Before this it could only read and call AI6's tools, unless the
+  operator allowed more in the harness's user settings, and it still reported `done`. Green ink
+  still decides each command. An Agent's `handler_settings` (`allowed_tools`, `denied_tools`) change
+  the list, and a rule that adds to it is reported as a weakening (`agents_weakened`). A harness
+  with `Bash` runs as the Theater's OS user and can read its own environment: isolate with a
+  container Theater where that matters.
+- An Agent's `handler_settings` go beside the `station` record's `[providers.<id>]` table for its
+  handler, which they used to replace.
+- A turn whose calls the Claude Code harness refused is reported on the Mission, also when it ends
+  `done`: a `denied` event, `denied_tools` on the Mission, the lifecycle reason `permission-denied`,
+  and a line in the report on its source issue unless the cover hides it.
+- After a refused resume the gateway shows the Mission's own state. It used to show its Session
+  `working`, while the Mission was blocked.
 - CI's app jobs and the documentation build use the SDKs `tools/sdk/sdk.lock` names instead of
   floating ones: Flutter at a commit rather than `channel: main`, Python and the docs tooling
   hash-locked, PostgreSQL's image by digest. One Rust leg stays on floating stable.

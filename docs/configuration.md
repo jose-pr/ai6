@@ -508,7 +508,11 @@ next start.
 ## Agent handler settings
 
 An Agent's `handler_settings` table in the roster (`agents` family) configures its handler
-provider; it is empty for the Claude and Codex handlers. The `acp` handler's keys (`command`,
+provider, beside what the `station` record's `[providers.<id>]` table says; a handler refuses a
+key it does not know. Codex takes none. The Claude handler takes `allowed_tools` and
+`denied_tools`, lists of Claude Code permission rules that change what a Mission may call: both
+empty by default, and a rule that adds to the list is reported as a weakening ([What a Claude Code
+Mission may call](agents.md#what-a-claude-code-mission-may-call)). The `acp` handler's keys (`command`,
 `args`, `env`, `meta`, `model_option`, `effort_option`, `protocol` and the timeouts
 `initialize_timeout_ms` 20000, `request_timeout_ms` 30000, `start_timeout_ms` 60000,
 `close_grace_ms` 2000) are in [the Agent Client Protocol](acp.md#settings). A Theater's `runner`
