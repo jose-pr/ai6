@@ -34,6 +34,8 @@ use crate::directorates::m::roster::{
 /// The role every compiled rule of one compartment binds. One role per authorizer makes the
 /// first matching rule the same answer as any matching rule.
 const ROLE: &str = "compartment";
+/// An action no request names, for a role with nothing to grant to one kind of subject.
+const NOTHING: &str = "ai6.none";
 /// The scope kinds compiled rules use: an Operation alone, it and everything under it, a Mission.
 const SCOPE_KINDS: [&str; 3] = ["operation", "mission", "subtree"];
 
@@ -906,12 +908,16 @@ impl CompiledOne {
         }
         let scopes: Vec<String> = compartment.covers.iter().map(cover_scope).collect();
         let build = |subjects: Vec<String>, keep: fn(CompartmentAction) -> bool| {
-            let names: Vec<&str> = actions
+            let mut names: Vec<&str> = actions
                 .iter()
                 .copied()
                 .filter(|action| keep(*action))
                 .map(CompartmentAction::as_str)
                 .collect();
+            // A compartment of only cable.read grants a Session nothing, and is still valid.
+            if names.is_empty() {
+                names.push(NOTHING);
+            }
             let mut builder = RoleAuthorizer::builder()
                 .scope_kinds(SCOPE_KINDS)
                 .role(ROLE, names)

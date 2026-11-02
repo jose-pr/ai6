@@ -7,6 +7,8 @@ mod assistant;
 mod bona_fides;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
+#[cfg(feature = "cables-mcp")]
+mod compartments;
 #[cfg(feature = "publisher")]
 mod controls;
 mod credentials;
@@ -780,6 +782,7 @@ where
         ));
     }
     let cable_config = snapshot.settings.cables.clone();
+    let snapshot_compartments = snapshot.settings.compartments.clone();
     let provider_loadouts = snapshot.settings.loadouts.clone();
     let roster = snapshot.roster;
     let mut theaters = snapshot.settings.theaters;
@@ -903,6 +906,9 @@ where
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
     agents::log_handler_weakenings(&plugins, &roster);
+    for weakened in snapshot_compartments.weakenings() {
+        eprintln!("ai6: {weakened}");
+    }
     vetting::log_weakenings(&roster);
     crate::station::issues::log_weakenings(&roster);
     for weakened in roster.settings().weakenings() {
@@ -4192,6 +4198,7 @@ async fn start_mission(
             .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
             endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
             endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
+            endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
             if let Some(role) = mission.role_id.as_deref() {
                 endpoint.set_mission_role(role);
             }
@@ -4969,6 +4976,7 @@ async fn resume_mission(
         .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
         endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
         endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
+        endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
         }

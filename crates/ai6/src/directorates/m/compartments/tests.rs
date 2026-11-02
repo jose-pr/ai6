@@ -214,6 +214,38 @@ fn reading_a_brief_implies_its_status_and_nothing_else() {
 }
 
 #[test]
+fn an_action_for_one_kind_of_subject_alone_is_valid_and_grants_the_other_nothing() {
+    let proposing = compile([Compartment::new("K")
+        .with_actions([CompartmentAction::MissionPropose])
+        .with_cover(operation("Q"))
+        .with_read_in(subject("operation:A"))
+        .with_read_in(subject("group:release"))]);
+    assert_eq!(
+        proposing.field_allows(
+            &session("007", "A"),
+            CompartmentAction::MissionPropose,
+            &on("Q")
+        ),
+        Some("K")
+    );
+    let person = Person {
+        groups: vec!["release".to_owned()],
+        ..Person::default()
+    };
+    assert_eq!(
+        proposing.person_compartments(&person, "Q"),
+        Vec::<&str>::new()
+    );
+    let reading = compile([Compartment::new("K")
+        .with_actions([CompartmentAction::CableRead])
+        .with_cover(operation("Q"))
+        .with_read_in(subject("operation:A"))
+        .with_read_in(subject("group:release"))]);
+    assert!(reading.held(&session("007", "A")).is_empty());
+    assert_eq!(reading.person_compartments(&person, "Q"), vec!["K"]);
+}
+
+#[test]
 fn people_and_sessions_are_asked_of_different_rules() {
     let compiled = compile([Compartment::new("KESTREL")
         .with_actions(CompartmentAction::ALL)

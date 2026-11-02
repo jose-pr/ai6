@@ -15,10 +15,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use super::{DaemonState, accounts, publish_station_check_in};
+use crate::directorates::m::compartments::{self, CompiledCompartments};
 use crate::directorates::m::config::{
     ConfigProvider, ConfigRevision, ConfigSnapshot, ConfigStatus,
 };
-use crate::directorates::m::roster::{Roster, RosterErrorKind};
+use crate::directorates::m::roster::{Roster, RosterError, RosterErrorKind};
 use crate::directorates::q::LoadoutCatalog;
 use crate::directorates::registry::store::AuditRecord;
 
@@ -85,6 +86,19 @@ impl LiveConfig {
     /// The roster the Station runs now, when it reads one.
     pub(super) fn roster(&self) -> Option<Arc<Roster>> {
         self.lock().roster.clone()
+    }
+
+    /// The compartments as the provider holds them at this moment; none when the Station reads
+    /// no provider.
+    ///
+    /// # Errors
+    ///
+    /// When the provider cannot be read: the caller refuses, and nothing answers from memory.
+    pub(super) fn compartments(&self) -> Result<CompiledCompartments, RosterError> {
+        match &self.source {
+            Some(source) => compartments::current(source.as_ref()),
+            None => Ok(CompiledCompartments::default()),
+        }
     }
 
     /// What the Station reports at check-in.
@@ -176,6 +190,7 @@ pub(super) fn poll(state: &DaemonState) -> bool {
         for weakened in current.roster.settings().weakenings() {
             eprintln!("ai6: {weakened}");
         }
+        log_compartment_weakenings(&current);
         #[cfg(feature = "publisher")]
         super::assistant::log_weakenings(&current.roster);
         super::agents::log_retirements(&current.roster, current.clock.now());
@@ -188,6 +203,22 @@ pub(super) fn poll(state: &DaemonState) -> bool {
     accounts::declare(&current);
     publish_station_check_in(&current);
     true
+}
+
+/// Logs each compartment limit looser than its default, and a record that grants nothing because
+/// it cannot be read.
+pub(super) fn log_compartment_weakenings(state: &DaemonState) {
+    let Ok(compiled) = state.config.compartments() else {
+        return;
+    };
+    for compartment in compiled.iter() {
+        for weakened in compartment.weakenings() {
+            eprintln!("ai6: {weakened}");
+        }
+    }
+    for reason in compiled.refused().values() {
+        eprintln!("ai6: a compartment grants nothing: {reason}");
+    }
 }
 
 /// Whether a new revision was applied, and whether the loadouts changed with it.
