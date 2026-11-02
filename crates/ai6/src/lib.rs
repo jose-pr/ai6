@@ -12,7 +12,7 @@ extern crate alloc;
 pub mod bootstrap;
 pub mod bounds;
 
-pub use bounds::{Limit, Seconds, TimeLimit};
+pub use bounds::{Limit, Rate, Seconds, TimeLimit};
 pub mod directorates;
 pub mod station;
 
@@ -36,6 +36,11 @@ pub use directorates::m::assistant::{
     AssistantDeskLimits, AssistantGatewayLimits, AssistantLimits, AssistantNarrowing,
     AssistantPageLimits, AssistantSettings, AssistantViewLimits, NetworkPolicy, PageNetwork,
     RepoKind, SharedRepo, SkillEntry,
+};
+pub use directorates::m::compartments::{
+    Compartment, CompartmentAction, CompartmentCover, CompartmentLimits, CompartmentResource,
+    CompartmentSettings, Compartments, CompiledCompartments, CoverTarget, FieldPrincipal,
+    HeldCompartment, ReadIn, ReadInSubject,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::m::config::SqlProvider;

@@ -10,6 +10,7 @@ use guatiao_serde::{Serializable, from_serde};
 use serde::Serialize;
 
 use crate::directorates::m::assistant::AssistantSettings;
+use crate::directorates::m::compartments::CompartmentSettings;
 use crate::directorates::m::config::ConfigRecord;
 use crate::directorates::m::cover::CoverDefinition;
 use crate::directorates::m::roster::{
@@ -148,6 +149,10 @@ impl ConfigRecord {
             )),
             Self::Assistant => built::<AssistantSettings>(the_one("Moneypenny's settings")),
             Self::Roster => built::<RosterSettings>(the_one("Roster settings")),
+            Self::Compartment => built::<CompartmentSettings>(named(
+                "Codeword",
+                "What this compartment is known by, such as KESTREL. It cannot be changed later.",
+            )),
             _ => return Ok(None),
         }
         .map(Some)

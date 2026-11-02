@@ -227,6 +227,72 @@ fn seconds_from(seconds: f64) -> Result<Duration, &'static str> {
     Duration::try_from_secs_f64(seconds).map_err(|_| "seconds must be a finite number, 0 or more")
 }
 
+/// A rate that may be unbounded: a number per second, or null or `"none"` for none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rate(Option<f64>);
+
+impl Rate {
+    /// No bound.
+    pub const UNBOUNDED: Self = Self(None);
+
+    /// A bound of `per_second`.
+    pub const fn at(per_second: f64) -> Self {
+        Self(Some(per_second))
+    }
+
+    /// The bound, `None` when there is none.
+    pub const fn get(self) -> Option<f64> {
+        self.0
+    }
+}
+
+impl ToValue for Rate {
+    fn to_value_in(&self, alloc: Alloc) -> Result<Value, ValueError> {
+        match self.0 {
+            Some(rate) => Ok(Number::new_in(alloc, &format!("{rate:?}"))?.into()),
+            None => unbounded_in(alloc),
+        }
+    }
+}
+
+impl FromValue for Rate {
+    fn from_value(value: &Value) -> Result<Self, MapError> {
+        if is_no_bound(value) {
+            return Ok(Self::UNBOUNDED);
+        }
+        let rate = f64::from_value(value)?;
+        if !rate.is_finite() || rate < 0.0 {
+            return Err(MapError::bad_value(
+                "a rate must be a finite number, 0 or more",
+            ));
+        }
+        Ok(Self::at(rate))
+    }
+}
+
+/// A number per second, or the word for no bound.
+impl Schema for Rate {
+    fn kind(alloc: Alloc) -> KindBuilder {
+        KindBuilder::union_in(
+            alloc,
+            vec![
+                KindBuilder::float_bounds_in(alloc, Some(0.0), None),
+                KindBuilder::enumeration_in(alloc, &[(NO_BOUND, NO_BOUND_LABEL)]),
+            ],
+        )
+    }
+}
+
+impl fmt::Display for Rate {
+    /// The number, or `none`.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(rate) => write!(formatter, "{rate}"),
+            None => formatter.write_str("none"),
+        }
+    }
+}
+
 /// A duration that may be unbounded: a number of seconds, or null or `"none"` for none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TimeLimit(Option<Duration>);

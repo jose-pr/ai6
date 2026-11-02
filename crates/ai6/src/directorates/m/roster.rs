@@ -548,6 +548,9 @@ pub struct Roster {
 /// being the first.
 pub const DEFAULT_MAX_OPERATION_DEPTH: usize = 64;
 
+/// How many read-in and cover pairs one compartment may have by default.
+pub const DEFAULT_MAX_COMPARTMENT_RULES: usize = 10_000;
+
 /// Settings that apply to the whole roster: the `roster` record (a `[roster]` table in the
 /// global `operations` file).
 #[non_exhaustive]
@@ -559,6 +562,10 @@ pub struct RosterSettings {
     #[schema(title = "Deepest Operation tree")]
     #[map(default = RosterSettings::default().max_operation_depth)]
     pub max_operation_depth: Limit,
+    /// How many read-in and cover pairs one compartment may have.
+    #[schema(title = "Largest compartment")]
+    #[map(default = RosterSettings::default().max_compartment_rules)]
+    pub max_compartment_rules: Limit,
 }
 
 impl Default for RosterSettings {
@@ -566,6 +573,7 @@ impl Default for RosterSettings {
     fn default() -> Self {
         Self {
             max_operation_depth: Limit::at(DEFAULT_MAX_OPERATION_DEPTH as u64),
+            max_compartment_rules: Limit::at(DEFAULT_MAX_COMPARTMENT_RULES as u64),
         }
     }
 }
@@ -580,6 +588,13 @@ impl RosterSettings {
     #[must_use]
     pub fn with_max_operation_depth(mut self, depth: Limit) -> Self {
         self.max_operation_depth = depth;
+        self
+    }
+
+    /// These settings with `max_compartment_rules` set.
+    #[must_use]
+    pub fn with_max_compartment_rules(mut self, rules: Limit) -> Self {
+        self.max_compartment_rules = rules;
         self
     }
 
@@ -599,18 +614,30 @@ impl RosterSettings {
 
     /// Each value looser than its default, worded for a log line.
     pub fn weakenings(&self) -> Vec<String> {
-        if self
+        let mut weakened = Vec::new();
+        if !self
             .max_operation_depth
             .get()
             .is_some_and(|depth| depth <= DEFAULT_MAX_OPERATION_DEPTH as u64)
         {
-            return Vec::new();
+            weakened.push(format!(
+                "roster.max_operation_depth {} is looser than the default \
+                 {DEFAULT_MAX_OPERATION_DEPTH}",
+                self.max_operation_depth
+            ));
         }
-        vec![format!(
-            "roster.max_operation_depth {} is looser than the default \
-             {DEFAULT_MAX_OPERATION_DEPTH}",
-            self.max_operation_depth
-        )]
+        if !self
+            .max_compartment_rules
+            .get()
+            .is_some_and(|rules| rules <= DEFAULT_MAX_COMPARTMENT_RULES as u64)
+        {
+            weakened.push(format!(
+                "roster.max_compartment_rules {} is looser than the default \
+                 {DEFAULT_MAX_COMPARTMENT_RULES}",
+                self.max_compartment_rules
+            ));
+        }
+        weakened
     }
 }
 
@@ -721,6 +748,13 @@ impl RosterBuilder {
     /// is [`DEFAULT_MAX_OPERATION_DEPTH`].
     pub fn max_operation_depth(mut self, depth: Limit) -> Self {
         self.settings.max_operation_depth = depth;
+        self
+    }
+
+    /// Sets how many read-in and cover pairs one compartment may have. The default is
+    /// [`DEFAULT_MAX_COMPARTMENT_RULES`].
+    pub fn max_compartment_rules(mut self, rules: Limit) -> Self {
+        self.settings.max_compartment_rules = rules;
         self
     }
 

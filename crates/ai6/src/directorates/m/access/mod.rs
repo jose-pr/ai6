@@ -44,8 +44,9 @@ use crate::bounds::Limit;
 
 /// The resource kinds a role rule may be scoped to in AI6: `station:<id>`, `operation:<id>`,
 /// `theater:<id>`, `config:<name>` (the roster every Station reads, the assistant's
-/// repositories, the access policy and the accounts). A rule may also name `*`.
-pub const SCOPE_KINDS: [&str; 4] = ["station", "operation", "theater", "config"];
+/// repositories, the access policy and the accounts), `compartment:<id>`. A rule may also name
+/// `*`.
+pub const SCOPE_KINDS: [&str; 5] = ["station", "operation", "theater", "config", "compartment"];
 
 /// The scope of the global access policy.
 pub const CONFIG_ACCESS: &str = "config:access";

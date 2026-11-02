@@ -398,6 +398,14 @@ CREATE TABLE ai6_config_roster (
     PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE ai6_config_compartment (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
+);
+
 -- The issues a Mission is linked to, as one JSON list per Mission.
 CREATE TABLE ai6_mission_issues (
     mission_id TEXT PRIMARY KEY,

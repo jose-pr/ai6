@@ -4,13 +4,14 @@ use serde_json::{Value, json};
 
 use super::*;
 
-const KINDS: [ConfigRecord; 6] = [
+const KINDS: [ConfigRecord; 7] = [
     ConfigRecord::Operation,
     ConfigRecord::Agent,
     ConfigRecord::Role,
     ConfigRecord::Cover,
     ConfigRecord::Assistant,
     ConfigRecord::Roster,
+    ConfigRecord::Compartment,
 ];
 
 /// Every key of an Operation's `issues`, apart, since a single `json!` has a recursion limit.
@@ -201,7 +202,20 @@ fn full_example(record: ConfigRecord) -> Value {
             "gateway": {"conversations": 3, "conversation_age": 60, "token_ttl": 60},
             "pages": {"max_pages": 3, "network": "own", "scripts": false, "open_ttl": 60}
         }),
-        ConfigRecord::Roster => json!({"max_operation_depth": 3}),
+        ConfigRecord::Roster => json!({"max_operation_depth": 3, "max_compartment_rules": 100}),
+        ConfigRecord::Compartment => json!({
+            "description": "Release work",
+            "actions": ["mission.status", "product.read"],
+            "min_clearance": "field",
+            "limits": {
+                "max_fanout": 10,
+                "rate": 1.5,
+                "burst": 5,
+                "sender_rate": "none",
+                "sender_burst": 2,
+                "max_product_bytes": 1024
+            }
+        }),
         other => panic!("no example for {other:?}"),
     }
 }
@@ -341,6 +355,7 @@ fn records_parse(record: ConfigRecord, definition: &Value) -> Result<(), String>
         ConfigRecord::Cover => from_json::<CoverDefinition>(definition).map(drop),
         ConfigRecord::Assistant => from_json::<AssistantSettings>(definition).map(drop),
         ConfigRecord::Roster => from_json::<RosterSettings>(definition).map(drop),
+        ConfigRecord::Compartment => from_json::<CompartmentSettings>(definition).map(drop),
         other => panic!("no type for {other:?}"),
     }
 }
@@ -465,6 +480,7 @@ fn the_app_s_copy_of_the_forms_is_current() {
         ("covers", ConfigRecord::Cover),
         ("assistant", ConfigRecord::Assistant),
         ("roster", ConfigRecord::Roster),
+        ("compartments", ConfigRecord::Compartment),
     ]
     .into_iter()
     .map(|(kind, record)| {

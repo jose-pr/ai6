@@ -211,6 +211,57 @@ live in memory. `coqui_access_ldap` also takes `cache` (on by default). The host
 beside the test binary; after removing or renaming a plugin, clean `target/`, because the host
 loads every library it finds.
 
+## Compartments (`ai6::directorates::m::compartments`)
+
+Need-to-know access across Operations; clearance stays the autonomy level. A compartment carries
+no policy authority. The `compartment` family is global and applies live.
+
+```rust
+#[non_exhaustive] pub enum CompartmentAction { MissionStatus, MissionRead /* implies status */,
+    ProductRead, CableSend, CableRead /* people */, MissionPropose /* Agents */ }
+    // written mission.status ...; ALL, as_str(), parse(name) -> Option; anything else is Invalid
+#[non_exhaustive] pub enum CoverTarget { Operation(String), Mission(String) } // Display, parse(text)
+#[non_exhaustive] pub struct CompartmentCover { pub target: CoverTarget, pub propagate: bool } // new, with_propagate
+#[non_exhaustive] pub enum ReadInSubject { Person(String), Group(String), Account(String),
+    Operation(String), Mission(String), Agent(String) }      // Display, parse(text), is_people()
+#[non_exhaustive] pub struct ReadIn { pub subject: ReadInSubject, pub propagate: bool } // Operation only
+#[non_exhaustive] pub struct CompartmentLimits { pub max_fanout: Limit /* 100 */, pub rate: Rate /* 10.0 */,
+    pub burst: Limit /* 50 */, pub sender_rate: Rate /* off */, pub sender_burst: Limit /* off */,
+    pub max_product_bytes: Limit /* 65 536 */ }
+#[non_exhaustive] pub struct Compartment { pub id, pub description, pub actions: BTreeSet<CompartmentAction>,
+    pub covers: Vec<CompartmentCover>, pub read_in: Vec<ReadIn>, pub min_clearance: Option<String>,
+    pub limits: CompartmentLimits }
+impl Compartment { pub fn new(id) -> Self; /* with_description, with_actions, with_cover, with_read_in,
+    with_min_clearance, with_limits */ pub fn validate(&self) -> Result<(), RosterError>;
+    pub fn weakenings(&self) -> Vec<String>; pub fn to_definition(&self) -> Value;
+    pub fn from_definition(id, &Value) -> Result<Self, RosterError>; }
+pub struct CompartmentSettings { pub description, pub actions, pub limits, .. } // the form: from_json, apply(id, base)
+pub struct Compartments;   // of(iter), from_records(iter), get, iter, is_empty, weakenings,
+                           // compile(&Roster) -> Result<CompiledCompartments, RosterError>
+pub struct CompiledCompartments; // Default grants nothing
+impl CompiledCompartments {
+    pub fn field_allows(&self, &FieldPrincipal, CompartmentAction, &CompartmentResource) -> Option<&str>; // the compartment
+    pub fn field_allows_in(&self, id, &FieldPrincipal, CompartmentAction, &CompartmentResource) -> bool;
+    pub fn person_allows(&self, &Person, CompartmentAction, &CompartmentResource) -> Option<&str>;
+    pub fn person_compartments(&self, &Person, operation) -> Vec<&str>;
+    pub fn reachable(&self, &FieldPrincipal, CompartmentAction) -> Vec<CompartmentResource>;
+    pub fn person_reachable(&self, &Person, CompartmentAction) -> Vec<CompartmentResource>;
+    pub fn held(&self, &FieldPrincipal) -> Vec<HeldCompartment>;
+    pub fn get(&self, id) -> Option<&Compartment>; pub fn iter(&self); pub fn refused(&self) -> &BTreeMap<String, String>;
+    pub fn lineage(&self) -> &Lineage; }
+#[non_exhaustive] pub enum CompartmentResource { Operation(String), Mission { id, operation } }
+#[non_exhaustive] pub struct FieldPrincipal { pub agent, pub operation, pub mission: Option<String>, pub clearance } // new
+pub fn current(provider: &dyn ConfigProvider) -> Result<CompiledCompartments, RosterError>;
+```
+
+**Ask `current` for every decision and keep nothing.** It reads the records from the provider, so a
+removed grant holds from the next call; a record that cannot be read grants nothing and is named in
+`refused()`; a provider that cannot be read is an error, and the caller refuses. `compile` is the
+stricter check a provider's `put` and a snapshot go through: an Operation a compartment names must
+exist, past `RosterSettings::max_compartment_rules` (10 000 pairs per compartment; `none` for no
+bound) is refused. A cover or read-in of an Operation reaches down the tree unless `propagate =
+false`; nothing reaches upward. Union across compartments; first match inside one is any match.
+
 ## Station runtime limits (`ai6::station::limits`)
 
 The `station` record's tables, kept by a Station as it starts (they apply at restart). Each
@@ -574,6 +625,7 @@ impl RosterBuilder {
     pub fn assistant(self, settings: AssistantSettings) -> Self;
     pub fn settings(self, settings: RosterSettings) -> Self;
     pub fn max_operation_depth(self, depth: Limit) -> Self;   // Limit::UNBOUNDED: no bound
+    pub fn max_compartment_rules(self, rules: Limit) -> Self; // pairs per compartment
     pub fn build(self) -> Result<Roster, RosterError>;   // Roster::from_parts; settings validated
 }
 /// The `roster` record: a `[roster]` table in the global `operations` file (serde; unknown

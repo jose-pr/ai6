@@ -4458,6 +4458,26 @@
           "title": "Deepest Operation tree",
           "description": "How many levels the tree of Operations may have, a root being the first. A missing parent or a cycle is refused whatever this says.",
           "default": 64
+        },
+        "max_compartment_rules": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Largest compartment",
+          "description": "How many read-in and cover pairs one compartment may have.",
+          "default": 10000
         }
       },
       "additionalProperties": false
@@ -4467,6 +4487,216 @@
       "title": "Roster settings",
       "description": "",
       "fixed": "settings"
+    }
+  },
+  "compartments": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "title": "Description",
+          "description": "What this compartment is for.",
+          "default": ""
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "mission.status",
+              "mission.read",
+              "product.read",
+              "cable.send",
+              "cable.read",
+              "mission.propose"
+            ],
+            "x-enum-labels": {
+              "mission.status": "See status: IDs, states, roles, times; no text",
+              "mission.read": "Read briefs",
+              "product.read": "Read products: outcome, report, refs",
+              "cable.send": "Send Cables",
+              "cable.read": "Read Cables, through Moneypenny (people)",
+              "mission.propose": "Propose Missions (Agents)"
+            }
+          },
+          "title": "What it grants",
+          "description": "What it grants on what it covers.",
+          "default": []
+        },
+        "min_clearance": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "desk",
+                "field",
+                "00"
+              ],
+              "x-enum-labels": {
+                "desk": "Desk: reads and reports",
+                "field": "Field: does the work",
+                "00": "00: acts unattended where the Operation allows"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Clearance floor",
+          "description": "The clearance a Session needs for the compartment to apply to it."
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "max_fanout": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Recipients of one Cable",
+              "description": "The most recipients one Cable to the compartment may reach.",
+              "default": 100
+            },
+            "rate": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Cables a second",
+              "description": "Cables a second to the compartment, from everyone, across Stations.",
+              "default": 10.0
+            },
+            "burst": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Burst of Cables",
+              "description": "Cables to the compartment in a burst.",
+              "default": 50
+            },
+            "sender_rate": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Cables a second, per sender",
+              "description": "Cables a second from one sender; `none` keeps no per-sender count.",
+              "default": "none"
+            },
+            "sender_burst": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Burst per sender",
+              "description": "Cables from one sender in a burst; applies with `sender_rate`.",
+              "default": "none"
+            },
+            "max_product_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Size of a product text",
+              "description": "Bytes of one text an Agent reads from a product; the rest is cut with a marker.",
+              "default": 65536
+            }
+          },
+          "additionalProperties": false,
+          "title": "Limits",
+          "description": "How much it may carry.",
+          "default": {
+            "max_fanout": 100,
+            "rate": 10.0,
+            "burst": 50,
+            "sender_rate": "none",
+            "sender_burst": "none",
+            "max_product_bytes": 65536
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "fields": {
+        "description": {
+          "widget": "textarea"
+        }
+      }
+    },
+    "key": {
+      "title": "Codeword",
+      "description": "What this compartment is known by, such as KESTREL. It cannot be changed later."
     }
   }
 }

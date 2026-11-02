@@ -36,6 +36,7 @@ use sha2::{Digest, Sha256};
 
 use crate::bounds::Limit;
 use crate::directorates::m::access::{AccessPolicy, OperationAccess, compile};
+use crate::directorates::m::compartments::Compartments;
 use crate::directorates::m::cover::{Covers, cover_from};
 use crate::directorates::m::roster::{
     Roster, RosterDefinitions, RosterError, RosterErrorKind, error, error_of,
@@ -101,11 +102,14 @@ pub enum ConfigRecord {
     /// deep the tree of Operations may be: the keys of the `[roster]` table of the
     /// `operations` file; a singleton.
     Roster,
+    /// A Compartment ([`Compartment`](crate::Compartment)): the keys of a `[compartment.<id>]`
+    /// table; global only.
+    Compartment,
 }
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Roster,
         Self::Operation,
         Self::Agent,
@@ -125,6 +129,7 @@ impl ConfigRecord {
         Self::Access,
         Self::OperationAccess,
         Self::Unex,
+        Self::Compartment,
     ];
 
     /// The key of a singleton family's one record.
@@ -132,7 +137,7 @@ impl ConfigRecord {
 
     /// The family's name: `operation`, `agent`, `role`, `assistant`, `cover`, `theater`,
     /// `loadout`, `sandbox`, `mcp`, `secret`, `pool`, `cables`, `plugin`, `station`, `tls`,
-    /// `access`, `unex` or `roster`. For a family that shares its file, it is also its table there.
+    /// `access`, `unex`, `roster` or `compartment`. For a family that shares its file, it is also its table there.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Operation => "operation",
@@ -154,6 +159,7 @@ impl ConfigRecord {
             Self::OperationAccess => "operation_access",
             Self::Unex => "unex",
             Self::Roster => "roster",
+            Self::Compartment => "compartment",
         }
     }
 
@@ -177,6 +183,7 @@ impl ConfigRecord {
             Self::Access => "access",
             Self::OperationAccess => "operation_access",
             Self::Unex => "unex",
+            Self::Compartment => "compartments",
         }
     }
 
@@ -414,6 +421,8 @@ pub struct Settings {
     pub operation_access: BTreeMap<String, OperationAccess>,
     /// Universal Exports' sign-in, limits and assistant (the `unex` record).
     pub unex: UnexRecord,
+    /// Need-to-know access across Operations (the `compartment` records).
+    pub compartments: Compartments,
     /// The limits the provider read these settings within.
     pub limits: ConfigLimits,
 }
@@ -1029,7 +1038,7 @@ pub trait ConfigProvider: Send + Sync {
 
 /// The families in the order an import stores them, so each refers only to records already
 /// stored: roles before the Agents that hold them, Agents before the Operations that name them.
-pub const IMPORT_ORDER: [ConfigRecord; 19] = [
+pub const IMPORT_ORDER: [ConfigRecord; 20] = [
     ConfigRecord::Roster,
     ConfigRecord::Role,
     ConfigRecord::Cover,
@@ -1049,6 +1058,7 @@ pub const IMPORT_ORDER: [ConfigRecord; 19] = [
     ConfigRecord::Access,
     ConfigRecord::OperationAccess,
     ConfigRecord::Unex,
+    ConfigRecord::Compartment,
 ];
 
 /// One family's records as the part of its family file they make: `[name.<key>]` tables, a
@@ -1414,6 +1424,11 @@ pub(crate) fn assemble(
             .map_err(|reason| error(format!("{source}: unex: {reason}")))?,
         None => UnexRecord::default(),
     };
+    let compartments = Compartments::from_records(family(ConfigRecord::Compartment))
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
+    compartments
+        .compile(&roster)
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
     let fingerprints = ConfigRecord::ALL
         .into_iter()
         .map(|record| {
@@ -1434,6 +1449,7 @@ pub(crate) fn assemble(
             access,
             operation_access,
             unex,
+            compartments,
             limits: limits.clone(),
         },
         fingerprints,

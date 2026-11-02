@@ -4,6 +4,7 @@
 pub mod access;
 pub mod approvals;
 pub mod assistant;
+pub mod compartments;
 pub mod config;
 pub mod cover;
 pub mod harness;
