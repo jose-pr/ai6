@@ -1,0 +1,3 @@
+{"event":"step_update","step_update":{"conversation_id":"00000000-0000-4000-8000-00000000c0de","step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"00000000-0000-4000-8000-00000000c0de","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"K\n","duration_seconds":0.048560474,"usage":{"input_tokens":40,"output_tokens":35,"thinking_tokens":5,"cache_read_tokens":70,"total_tokens":75}}}
+{"event":"result","result":{"conversation_id":"00000000-0000-4000-8000-00000000c0de","status":"SUCCESS","response":"K\n","duration_seconds":0.087539134,"num_turns":1,"usage":{"input_tokens":40,"output_tokens":35,"thinking_tokens":5,"cache_read_tokens":70,"total_tokens":75}}}
