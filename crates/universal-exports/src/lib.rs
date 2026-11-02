@@ -3977,6 +3977,9 @@ fn is_zero(count: &usize) -> bool {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct LaunchManifest {
+    /// What to show beside the Mission ID: a person's title, or an issue's title as data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Exact task instructions provided to the configured Agent.
     pub prompt: String,
     /// Configured AI6 Agent identity, if assigned.
@@ -6101,6 +6104,7 @@ mod tests {
                 OperationId::new("G").unwrap(),
                 MissionId::new("mission-g").unwrap(),
                 LaunchManifest {
+                    name: None,
                     prompt: "Review the requested change".to_owned(),
                     agent_id: Some("technical-officer".to_owned()),
                     role_id: Some("case-officer".to_owned()),

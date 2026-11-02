@@ -71,8 +71,9 @@ use crate::directorates::registry::cables::{
     CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay, CableRelayError,
     CableRelease, CableSendRequest, CableTarget,
 };
+use crate::directorates::registry::mission_ids::run_id;
 use crate::directorates::registry::sessions::{
-    NewSession, SessionError, SessionStatus, SessionUpdate,
+    NewSession, SessionError, SessionRecord, SessionStatus, SessionUpdate,
 };
 use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
@@ -1889,23 +1890,21 @@ fn acquire_session_hold(
     let record = match taken {
         Ok(record) => record,
         Err(SessionError::NotFound) => {
+            let attempt = existing.as_ref().map_or(1, |hold| hold.attempt);
             let mut new_session = NewSession::new(
-                uuid::Uuid::new_v4().to_string(),
+                run_record_id(state, mission_id, attempt),
                 mission_id,
                 state.station_id.as_str(),
             )
             .with_provider_session(provider_session.as_str())
-            .with_attempt(existing.as_ref().map_or(1, |hold| hold.attempt), None);
+            .with_attempt(attempt, None);
             if let Some(operation) = &mission.operation_id {
                 new_session = new_session.with_operation(operation.as_str());
             }
             if let Ok(theater) = session_theater(state, mission.operation_id.as_deref()) {
                 new_session = new_session.with_theater(theater);
             }
-            state
-                .intake
-                .open_session(new_session, DEFAULT_LEASE)
-                .map_err(session_error)?
+            open_run(state, new_session).map_err(session_error)?
         }
         Err(error) => return Err(session_error(error)),
     };
@@ -1923,6 +1922,30 @@ fn acquire_session_hold(
             .map_err(mission_error)?;
     }
     Ok(hold)
+}
+
+/// A run's Session record ID, `<mission>.<attempt>`.
+fn run_record_id(state: &DaemonState, mission_id: &str, attempt: u32) -> String {
+    run_id(
+        mission_id,
+        attempt,
+        state.intake.limits().sessions.id_bytes.or_max(),
+    )
+}
+
+/// Opens a run's Session record, as the next attempt when this one already has a record: one
+/// another Station wrote, for a Mission this Station knows of no earlier attempt at.
+fn open_run(state: &DaemonState, mut run: NewSession) -> Result<SessionRecord, SessionError> {
+    loop {
+        match state.intake.open_session(run.clone(), DEFAULT_LEASE) {
+            Err(SessionError::Exists) => {
+                run = run
+                    .next_attempt(state.intake.limits().sessions.id_bytes.or_max())
+                    .ok_or(SessionError::Exists)?;
+            }
+            opened => return opened,
+        }
+    }
 }
 
 fn session_error(error: SessionError) -> ApiErrorResponse {
@@ -3157,6 +3180,12 @@ fn create_intake_mission(
         )
         .map_err(|error| format!("could not create Mission from brief: {error:?}"))?;
     missions
+        .record_name(
+            mission_id.as_str(),
+            brief.display_name(state.intake.limits().sources.name_bytes.or_max()),
+        )
+        .map_err(|error| format!("could not record the Mission's name: {error:?}"))?;
+    missions
         .expose(mission_id.as_str(), &medical::brief_exposure(brief))
         .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))?;
     bona_fides::record_origin(state, &mut missions, mission_id.as_str(), brief)
@@ -4250,6 +4279,7 @@ async fn start_mission(
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = &telemetry {
         telemetry.set_mission_publication(MissionPublication {
+            name: mission.name.clone(),
             prompt: mission.prompt.clone(),
             agent_id: Some(agent.id.clone()),
             role_id: mission.role_id.clone(),
@@ -4466,7 +4496,7 @@ async fn start_mission(
         })
         .map_or((1, None), |(attempt, id)| (attempt + 1, Some(id)));
     let mut new_session = NewSession::new(
-        uuid::Uuid::new_v4().to_string(),
+        run_record_id(&state, mission_id.as_str(), attempt),
         mission_id.as_str(),
         state.station_id.as_str(),
     )
@@ -4492,7 +4522,7 @@ async fn start_mission(
     {
         new_session = new_session.with_launch(recovery::launch_of(&manifest));
     }
-    let hold = match state.intake.open_session(new_session, DEFAULT_LEASE) {
+    let hold = match open_run(&state, new_session) {
         Ok(record) => SessionHold {
             id: record.session_id,
             attempt: record.attempt,
@@ -4827,6 +4857,7 @@ async fn resume_mission(
         mission.operation_id.as_ref().map(|operation_id| {
             let telemetry = publisher.session(operation_id.clone(), mission.mission_id.clone());
             telemetry.set_mission_publication(MissionPublication {
+                name: mission.name.clone(),
                 prompt: mission.prompt.clone(),
                 agent_id: mission.agent_id.clone(),
                 role_id: mission.role_id.clone(),
@@ -10497,6 +10528,55 @@ queue = 1
     }
 
     #[tokio::test]
+    async fn a_run_whose_attempt_already_has_a_record_takes_the_next() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", "[agent.007]\nhandler = \"mock-spend\"\n");
+        let brief: Brief = serde_json::from_value(serde_json::json!({
+            "title": "Look", "id": "taken", "operation": "G", "agent": "007",
+        }))
+        .unwrap();
+        create_intake_mission(
+            &state,
+            &brief,
+            &MissionId::try_new("mission-t").unwrap(),
+            "G".to_owned(),
+            "007".to_owned(),
+            None,
+        )
+        .unwrap();
+        // Another Station's first attempt: this one holds nothing and its record is closed to
+        // nobody's knowledge here, so the start must not fail on the ID it would have used.
+        let other = NewSession::new("mission-t.1", "mission-t", "other").with_attempt(1, None);
+        let open = state.intake.open_session(other, DEFAULT_LEASE).unwrap();
+        state
+            .intake
+            .update_session(
+                &open.session_id,
+                "other",
+                open.fence,
+                SessionUpdate::default().status(SessionStatus::Ended),
+            )
+            .unwrap();
+        start_mission_by_id(&state, "mission-t").await;
+        let hold = session_hold(&state, "mission-t").unwrap();
+        assert_eq!(hold.id, "mission-t.2");
+        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        assert_eq!(record.predecessor.as_deref(), Some("mission-t.1"));
+
+        let opened = open_run(
+            &state,
+            NewSession::new("mission-t.2", "mission-t", "here").with_attempt(2, None),
+        )
+        .unwrap();
+        assert_eq!(
+            opened.session_id, "mission-t.3",
+            "two records never share an ID"
+        );
+        assert_eq!(opened.attempt, 3);
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
     async fn a_source_born_mission_has_an_exposed_session_from_the_start() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", "[agent.007]\nhandler = \"mock-spend\"\n");
@@ -10537,9 +10617,22 @@ queue = 1
             ["brief:source"]
         );
 
+        let mission = state.missions.lock().unwrap().get("mission-s").cloned();
+        let mission = mission.unwrap();
+        assert_eq!(mission.name.as_deref(), Some("Fix the build"));
+        assert!(
+            !mission.prompt.starts_with("Fix the build"),
+            "{}",
+            mission.prompt
+        );
+
         start_mission_by_id(&state, "mission-s").await;
         assert_eq!(exposure_sources(&state, "mission-s"), ["brief:source"]);
         let hold = session_hold(&state, "mission-s").unwrap();
+        assert_eq!(
+            hold.id, "mission-s.1",
+            "a run is the Mission and its attempt"
+        );
         let record = state.intake.session(&hold.id).unwrap().unwrap();
         assert_eq!(record.exposure.len(), 1);
 

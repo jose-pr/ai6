@@ -606,6 +606,8 @@ struct SessionTelemetryState {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MissionPublication {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
     pub(crate) prompt: String,
     pub(crate) agent_id: Option<String>,
     pub(crate) role_id: Option<String>,
@@ -1398,6 +1400,7 @@ mod tests {
             MissionId::try_new("mission-a").unwrap(),
         );
         telemetry.set_mission_publication(MissionPublication {
+            name: None,
             prompt: "Inspect this change".to_owned(),
             agent_id: Some("analyst".to_owned()),
             role_id: Some("case-officer".to_owned()),

@@ -20,7 +20,7 @@ use crate::bounds::Limit;
 use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::m::roster::AgentRole;
-use crate::directorates::m::vetting::Vetting;
+use crate::directorates::m::vetting::{Vetting, is_invisible};
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::cables::{Cable, CableError, CableState};
 use crate::directorates::registry::limits::{ProposalLimits, RegistryLimits, StationLimits};
@@ -152,10 +152,12 @@ impl Brief {
     }
 }
 
-/// `text` with its control characters replaced by spaces and cut to `bytes` at a character.
+/// `text` on one line for a person to read: control characters become spaces, characters that
+/// show nothing or reorder what is shown go, and it is cut to `bytes` at a character.
 pub(super) fn one_line_within(text: &str, bytes: usize) -> String {
     let line: String = text
         .chars()
+        .filter(|character| !is_invisible(*character))
         .map(|character| {
             if character.is_control() {
                 ' '

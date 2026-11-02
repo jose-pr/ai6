@@ -20,6 +20,7 @@ use crate::directorates::q::safehouse::SafeHouseCheckpoint;
 use super::accounts::AccountRef;
 
 use super::limits::SessionLimits;
+use super::mission_ids::run_id;
 use super::store::{FileRegistry, invalid_data, read_headquarters, unix_time};
 
 /// Where a Session stands, as far as the Registry knows.
@@ -250,6 +251,15 @@ impl NewSession {
         self.attempt = attempt.max(1);
         self.predecessor = predecessor;
         self
+    }
+
+    /// This Session as the attempt after it, the run ID within `id_bytes`, replacing the record
+    /// this one would have been; `None` past the last attempt a record can count.
+    pub fn next_attempt(mut self, id_bytes: usize) -> Option<Self> {
+        self.attempt = self.attempt.checked_add(1)?;
+        let id = run_id(&self.mission_id, self.attempt, id_bytes);
+        self.predecessor = Some(std::mem::replace(&mut self.session_id, id));
+        Some(self)
     }
 }
 

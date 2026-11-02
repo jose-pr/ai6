@@ -1135,7 +1135,10 @@ async fn operations_prints_the_tree_shows_an_effective_policy_and_missions_take_
         )
         .await,
     );
-    assert_eq!(subtree, ["STATION\tMISSION\tSESSIONS", "SOUTH\tm-south\t1"]);
+    assert_eq!(
+        subtree,
+        ["STATION\tMISSION\tSESSIONS\tNAME", "SOUTH\tm-south\t1\t-"]
+    );
     let own = lines(
         &ai6ctl(
             server.clone(),
@@ -1144,7 +1147,7 @@ async fn operations_prints_the_tree_shows_an_effective_policy_and_missions_take_
         )
         .await,
     );
-    assert_eq!(own, ["STATION\tMISSION\tSESSIONS"]);
+    assert_eq!(own, ["STATION\tMISSION\tSESSIONS\tNAME"]);
     let _ = shutdown.send(());
 }
 

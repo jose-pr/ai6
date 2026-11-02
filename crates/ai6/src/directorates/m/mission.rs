@@ -46,6 +46,10 @@ pub enum MissionState {
 pub struct Mission {
     /// AI6-owned identifier for the unit of work.
     pub mission_id: MissionId,
+    /// What to show beside the ID: a person's title, or an issue's title as data. It is no
+    /// part of what the Agent is told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Registered Operation that owns the work, when specified.
     pub operation_id: Option<String>,
     /// Task instruction for the selected Agent.
@@ -204,6 +208,7 @@ impl MissionStore {
         }
         let mission = Mission {
             mission_id,
+            name: None,
             operation_id,
             prompt,
             agent_id,
@@ -395,6 +400,18 @@ impl MissionStore {
             return Ok(());
         }
         mission.provenance = Some(provenance);
+        mission.revision += 1;
+        self.commit(next)
+    }
+
+    /// Records the name to show beside the Mission's ID, once.
+    pub fn record_name(&mut self, mission_id: &str, name: String) -> Result<(), MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.name.is_some() {
+            return Ok(());
+        }
+        mission.name = Some(name);
         mission.revision += 1;
         self.commit(next)
     }

@@ -285,6 +285,7 @@ async fn served_full(
             operation,
             mission,
             crate::LaunchManifest {
+                name: None,
                 prompt: INJECTED.to_owned(),
                 agent_id: Some("007".to_owned()),
                 role_id: None,
