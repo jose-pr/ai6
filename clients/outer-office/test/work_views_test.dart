@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -298,6 +299,72 @@ void main() {
       expect(find.text('s-latest'), findsOneWidget);
     },
   );
+
+  group('a Session row', () {
+    const short = 's-1234';
+    final long = 'a' * 40;
+
+    SessionSummary row(String id) => SessionSummary(
+      operationId: 'G',
+      missionId: 'm-$id',
+      sessionId: id,
+      state: 'blocked',
+      reason: 'green-ink',
+      sequence: 3,
+      exposure: const ['web'],
+    );
+
+    int lines(WidgetTester tester, String text) {
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(text));
+      final boxes = paragraph.getBoxesForSelection(
+        TextSelection(baseOffset: 0, extentOffset: text.length),
+      );
+      return {for (final box in boxes) box.top}.length;
+    }
+
+    Rect exposed(WidgetTester tester, String id) => tester.getRect(
+      find
+          .descendant(
+            of: find
+                .ancestor(of: find.text(id), matching: find.byType(InkWell))
+                .first,
+            matching: find.byType(Chip),
+          )
+          .first,
+    );
+
+    testWidgets('at 390 px its ID reads across the row, the chips under it', (
+      tester,
+    ) async {
+      final board = demoBoard();
+      board.sessions = [row(short), row(long)];
+      await openAt(tester, board, '/missions', size: const Size(390, 2400));
+      expect(lines(tester, short), 1);
+      expect(
+        lines(tester, long),
+        lessThan(long.length ~/ 4),
+        reason: 'a long ID wraps by the row, not a letter at a time',
+      );
+      for (final id in [short, long]) {
+        expect(
+          exposed(tester, id).top,
+          greaterThanOrEqualTo(tester.getRect(find.text(id)).bottom),
+          reason: '$id: the chips go under the ID',
+        );
+      }
+    });
+
+    testWidgets('with room the chips stay beside its ID', (tester) async {
+      final board = demoBoard();
+      board.sessions = [row(short)];
+      await openAt(tester, board, '/missions', size: const Size(1400, 1600));
+      expect(lines(tester, short), 1);
+      final id = tester.getRect(find.text(short));
+      final chip = exposed(tester, short);
+      expect(chip.left, greaterThanOrEqualTo(id.right));
+      expect(chip.top, lessThan(id.bottom));
+    });
+  });
 
   testWidgets(
     'a Mission detail lists every attempt with links to its Stations',
