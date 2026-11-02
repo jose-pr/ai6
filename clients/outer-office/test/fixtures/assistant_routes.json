@@ -54,7 +54,10 @@
     {"json": {"page": "access"}, "uri": "app:/access"},
     {"json": {"page": "access", "tab": "accounts"}, "uri": "app:/access?tab=accounts"},
     {"json": {"page": "access", "tab": "rules", "operation_id": "G"}, "uri": "app:/access?tab=rules&operation_id=G"},
-    {"json": {"page": "memory"}, "uri": "app:/memory"}
+    {"json": {"page": "memory"}, "uri": "app:/memory"},
+    {"json": {"page": "missions", "compartment": "KESTREL"}, "uri": "app:/missions?compartment=KESTREL"},
+    {"json": {"page": "compartments"}, "uri": "app:/compartments"},
+    {"json": {"page": "compartments", "compartment_id": "KESTREL"}, "uri": "app:/compartments?compartment_id=KESTREL"}
   ],
   "invalid": [
     {"json": ["missions"], "reason": "a route is an object naming its page"},

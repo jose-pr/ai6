@@ -63,6 +63,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('order', _Kind.oneOf, _orders),
     _Field('mission_id', _Kind.identifier),
     _Field('subtree', _Kind.oneOf, ['true']),
+    _Field('compartment', _Kind.identifier),
   ],
   OoPage.sessions: [
     _Field('operation_id', _Kind.identifier),
@@ -126,6 +127,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('operation_id', _Kind.identifier),
   ],
   OoPage.memory: [],
+  OoPage.compartments: [_Field('compartment_id', _Kind.identifier)],
 };
 
 /// Whether [rune] is a control character (Unicode category Cc), as Rust's `char::is_control`.

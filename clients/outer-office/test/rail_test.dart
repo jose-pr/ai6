@@ -117,7 +117,7 @@ void main() {
       expect(tester.getSize(find.byType(OoRail)).width, OoRail.compactWidth);
       expect(find.text('WORK'), findsNothing);
       for (final page in OoRailGroup.values.expand((group) => group.pages)) {
-        if (page == OoPage.access) continue;
+        if (page == OoPage.access || page == OoPage.compartments) continue;
         expect(
           find.descendant(
             of: find.byType(OoRail),

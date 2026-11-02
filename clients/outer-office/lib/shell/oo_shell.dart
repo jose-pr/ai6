@@ -75,6 +75,13 @@ enum OoPage {
     'Who may do what, and the accounts.',
   ),
 
+  compartments(
+    'compartments',
+    'Compartments',
+    OoIconName.settings,
+    'Need-to-know access to other Operations: what each grants, and who is read in.',
+  ),
+
   /// Her memory of the person; opened from her chat, not the rail.
   memory('memory', "Moneypenny's memory", OoIconName.moneypenny, '');
 
@@ -108,6 +115,7 @@ enum OoRailGroup {
     OoPage.roster,
     OoPage.pools,
     OoPage.access,
+    OoPage.compartments,
   ]),
   machines('Machines', [OoPage.stations]),
   record('Record', [OoPage.timeline, OoPage.audit]);

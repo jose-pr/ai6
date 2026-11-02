@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
@@ -47,6 +50,38 @@ class MissionsPage extends StatefulWidget {
 class _MissionsPageState extends State<MissionsPage> {
   SessionSummary? _selectedWebSession;
 
+  /// The Missions the route's compartment covers, as (Operation, Mission), once read.
+  Set<(String, String)>? _inCompartment;
+
+  /// Asks the gateway what the route's compartment covers, which only it can say.
+  Future<void> _readCompartment() async {
+    final compartment = route['compartment'];
+    if (compartment == null) {
+      setState(() => _inCompartment = null);
+      return;
+    }
+    final response = await board.accessRequest(
+      'GET',
+      '/v1/missions?compartment=${Uri.encodeQueryComponent(compartment)}',
+    );
+    if (!mounted || route['compartment'] != compartment) return;
+    final listed = response.statusCode == 200
+        ? jsonDecode(response.body) as List<dynamic>
+        : const <dynamic>[];
+    setState(
+      () => _inCompartment = {
+        for (final mission in listed.cast<Map<String, dynamic>>())
+          (mission['operation_id'] as String, mission['mission_id'] as String),
+      },
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (route['compartment'] != null) unawaited(_readCompartment());
+  }
+
   /// The "Mission details" button of each row, by (Operation, Mission).
   final _focus = <(String, String), FocusNode>{};
 
@@ -59,6 +94,9 @@ class _MissionsPageState extends State<MissionsPage> {
   @override
   void didUpdateWidget(MissionsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['compartment'] != route['compartment']) {
+      unawaited(_readCompartment());
+    }
     final was = oldWidget.route['mission_id'];
     if (was != null && route['mission_id'] == null) {
       final node = _focus[(oldWidget.route['operation_id']!, was)];
@@ -150,7 +188,15 @@ class _MissionsPageState extends State<MissionsPage> {
     bool showSessionPane,
     MissionGroup? open,
   ) {
-    final missions = routeMissions(board, listRoute);
+    final inCompartment = listRoute['compartment'] == null
+        ? null
+        : _inCompartment ?? const <(String, String)>{};
+    final missions = [
+      for (final mission in routeMissions(board, listRoute))
+        if (inCompartment == null ||
+            inCompartment.contains((mission.operationId, mission.missionId)))
+          mission,
+    ];
     final waiting = _alsoWaiting(context, listRoute);
     final boardView = CustomScrollView(
       slivers: [

@@ -21,6 +21,7 @@ const _labels = {
   'key': 'Record',
   'pool': 'Pool',
   'subtree': 'Subtree',
+  'compartment': 'Compartment',
 };
 
 /// Field [key] of [route] as a chip says it, such as `State: failed, blocked`.

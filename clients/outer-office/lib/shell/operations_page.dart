@@ -227,6 +227,10 @@ class _OperationsPageState extends State<OperationsPage>
                         .withField('operation_id', operation.operationId),
                   )
                 : null,
+            onCompartment: (compartment) => onRoute(
+              OoRoute(OoPage.compartments)
+                  .withField('compartment_id', compartment),
+            ),
             onEdit: canChangeRecords
                 ? () => unawaited(editRecord(operation.operationId))
                 : null,
@@ -251,11 +255,15 @@ class _OperationCard extends StatelessWidget {
     required this.onToggle,
     required this.onSubtree,
     required this.onAccess,
+    required this.onCompartment,
     this.onEdit,
     this.onRemove,
   });
 
   final UserOperationAccess operation;
+
+  /// Opens a compartment that gives this person something here.
+  final ValueChanged<String> onCompartment;
 
   /// Opens its record's form, and removes the record; `null` without `roster.manage`.
   final VoidCallback? onEdit;
@@ -334,6 +342,21 @@ class _OperationCard extends StatelessWidget {
                   ),
               ],
             ),
+            if (operation.compartments.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final compartment in operation.compartments)
+                    ActionChip(
+                      key: Key('compartment-chip-$compartment'),
+                      label: Text(compartment),
+                      tooltip: 'Compartment $compartment gives you access here',
+                      onPressed: () => onCompartment(compartment),
+                    ),
+                ],
+              ),
+            ],
             if (subordinates > 0) ...[
               const SizedBox(height: 8),
               Row(

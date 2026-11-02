@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guatiao/guatiao.dart' as guatiao;
 
 import 'access/access_page.dart';
+import 'compartments/compartments_page.dart';
 import 'access/access_words.dart';
 import 'agents/agents_page.dart';
 import 'assistant/assistant_controller.dart';
@@ -1361,6 +1362,17 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       globalActions.contains('account.manage') ||
       (userSession?.operations.any(
             (operation) => operation.actions.contains('access.read'),
+          ) ??
+          false);
+
+  /// Whether the Compartments page has anything to show this person: they manage compartments,
+  /// may consent to a cover, or are read into one.
+  bool get canOpenCompartments =>
+      globalActions.contains('compartment.manage') ||
+      (userSession?.operations.any(
+            (operation) =>
+                operation.actions.contains('compartment.cover') ||
+                operation.compartments.isNotEmpty,
           ) ??
           false);
 
@@ -3269,6 +3281,7 @@ class UserOperationAccess {
     required this.operationId,
     required this.actions,
     this.parent,
+    this.compartments = const [],
   });
 
   final String operationId;
@@ -3278,11 +3291,16 @@ class UserOperationAccess {
   /// ancestor is hidden from the person.
   final String? parent;
 
+  /// The compartments that give the person something here.
+  final List<String> compartments;
+
   factory UserOperationAccess.fromJson(Map<String, dynamic> json) =>
       UserOperationAccess(
         operationId: json['operation_id'] as String,
         actions: (json['actions'] as List<dynamic>).cast<String>(),
         parent: json['parent'] as String?,
+        compartments: (json['compartments'] as List<dynamic>? ?? const [])
+            .cast<String>(),
       );
 }
 
@@ -4043,6 +4061,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     if (board.timelineOperations.isNotEmpty) OoPage.timeline,
     if (board.demo || board.canReadAudit) OoPage.audit,
     if (board.canOpenAccess) OoPage.access,
+    if (board.canOpenCompartments) OoPage.compartments,
   ];
 
   void _openSession(BuildContext context, SessionSummary session) {
@@ -4242,6 +4261,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               onRoute: onRoute,
             ),
             OoPage.access => AccessPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.compartments => CompartmentsPage(
               board: board,
               route: route,
               onRoute: onRoute,
