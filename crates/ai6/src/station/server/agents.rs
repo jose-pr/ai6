@@ -11,6 +11,7 @@ use crate::directorates::registry::agent_records::{AgentOutcome, AgentOutcomeRep
 use crate::directorates::registry::approvals::{ApprovalStatus, Decision, EXPIRY_SIGNER};
 use crate::directorates::registry::clearance::ClearanceGrant;
 use crate::directorates::registry::timeline::TimelineEvent;
+use crate::station::plugins::Plugins;
 
 /// The highest-priority Agent posted to `operation` for `role` and `tags` whose handler is
 /// among `handlers` (any when `None`), passing over quarantined and retired Agents and those
@@ -270,6 +271,39 @@ pub(super) fn clearances(state: &DaemonState) -> serde_json::Value {
 }
 
 /// Logs each Agent whose retirement is due or near at `now`.
+/// Each way an Agent's `handler_settings` are looser than its handler's default, as the handler
+/// says. An Agent whose handler this Station cannot build is left out: a field runner hosting that
+/// handler logs the same lines at each launch, and starting a Session reports settings that do
+/// not read.
+pub(super) fn handler_weakenings(plugins: &Plugins, roster: &Roster) -> Vec<String> {
+    let mut weakened = Vec::new();
+    for id in roster.agent_ids() {
+        let Ok(agent) = roster.agent(None, id) else {
+            continue;
+        };
+        let Some(provider) = agent.handler.as_deref() else {
+            continue;
+        };
+        if agent.handler_settings.is_empty() {
+            continue;
+        }
+        let Ok(handler) = plugins.handler_with(provider, &agent.handler_settings) else {
+            continue;
+        };
+        for line in handler.weakenings().unwrap_or_default() {
+            weakened.push(format!("Agent {id:?} is weakened: {line}"));
+        }
+    }
+    weakened
+}
+
+/// Prints [`handler_weakenings`] for the operator.
+pub(super) fn log_handler_weakenings(plugins: &Plugins, roster: &Roster) {
+    for line in handler_weakenings(plugins, roster) {
+        eprintln!("ai6: {line}");
+    }
+}
+
 pub(super) fn log_retirements(roster: &Roster, now: i64) {
     for notice in retirements(roster, now) {
         eprintln!(
@@ -389,6 +423,7 @@ mod tests {
 
     use super::super::tests::test_state;
     use super::super::{Clock, apply_event_state, resolve_brief_assignment};
+    use super::handler_weakenings;
     use crate::MissionId;
     use crate::directorates::m::mission::{LaunchManifest, MissionState, SessionHold};
     use crate::directorates::registry::sessions::NewSession;
@@ -399,6 +434,20 @@ mod tests {
     const AFTER_RETIREMENT: i64 = 1_801_353_660;
 
     const RETIRING: &str = "[role.case-officer]\npurpose = \"Run a Mission.\"\npolicy = \"Report back.\"\n[agent.007]\nhandler = \"mock-agent\"\nroles = [\"case-officer\"]\nclearance = \"00\"\npriority = 10\nretire_on = \"2027-01-31\"\non_retire = \"retired\"\n[agent.008]\nhandler = \"mock-agent\"\nroles = [\"case-officer\"]\nclearance = \"field\"\npriority = 5\nretire_on = \"2027-01-31\"\n";
+
+    #[test]
+    fn an_agents_handler_settings_are_reported_as_its_handlers_weakenings() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-denied\"\n             [agent.007.handler_settings]\nallowed_tools = [\"WebFetch\"]\n             [agent.008]\nhandler = \"mock-denied\"\n             [agent.009]\nhandler = \"not-on-this-station\"\n             [agent.009.handler_settings]\nallowed_tools = [\"WebFetch\"]\n",
+        );
+        assert_eq!(
+            handler_weakenings(&state.plugins, &state.roster),
+            ["Agent \"007\" is weakened: allowed_tools = [\"WebFetch\"]"]
+        );
+    }
 
     fn brief(role: &str, agent: Option<&str>) -> Brief {
         serde_json::from_value(serde_json::json!({

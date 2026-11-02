@@ -13,7 +13,7 @@ use guatiao::library::{
     Declared, Instance, Kind, KindMismatch, Order, Registry, SearchPath, bundle_binary, probe,
     scan_path_with,
 };
-use guatiao::{Status, ToValue as _, Value};
+use guatiao::{FromValue as _, Status, ToValue as _, Value};
 use serde::Serialize;
 use sha2::Digest as _;
 
@@ -407,7 +407,8 @@ impl Plugins {
     }
 
     /// Constructs an AgentHandler from its provider ID and an Agent's `handler_settings`;
-    /// empty settings build it with its defaults.
+    /// empty settings build it with its defaults. The settings go beside what the `station`
+    /// record's `[providers.<id>]` table says, which they do not replace.
     pub fn handler_with(
         &self,
         provider: &str,
@@ -423,6 +424,17 @@ impl Plugins {
         let settings_toml = toml::to_string(settings)
             .map_err(|error| invalid(format!("handler_settings: {error}")))?;
         let config = crate::directorates::section_00::agent::HandlerConfig { settings_toml }
+            .to_value()
+            .map_err(|error| invalid(error.to_string()))?;
+        let read = |value: &Value| {
+            BTreeMap::<String, Value>::from_value(value).map_err(|error| invalid(error.to_string()))
+        };
+        let mut table = match self.defaults.get(provider) {
+            Some(defaults) => read(defaults)?,
+            None => BTreeMap::new(),
+        };
+        table.extend(read(&config)?);
+        let config = table
             .to_value()
             .map_err(|error| invalid(error.to_string()))?;
         self.handler(provider, Some(&config))

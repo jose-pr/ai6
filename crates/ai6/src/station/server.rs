@@ -77,7 +77,7 @@ use crate::directorates::registry::sessions::{
 use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
 use crate::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
+    AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, DENIED_EVENT, LIMIT_EVENT,
 };
 use crate::station::limits::StationLimits;
 use crate::station::plugins;
@@ -885,6 +885,7 @@ where
     #[cfg(feature = "cables-mcp")]
     green_ink::log_weakenings(&roster);
     harness::log_weakenings(&roster);
+    agents::log_handler_weakenings(&plugins, &roster);
     vetting::log_weakenings(&roster);
     crate::station::issues::log_weakenings(&roster);
     for weakened in roster.settings().weakenings() {
@@ -2187,6 +2188,13 @@ fn publish_station_check_in(state: &DaemonState) {
             serde_json::json!(issues_weakened),
         );
     }
+    let agents_weakened = agents::handler_weakenings(&state.plugins, &state.roster);
+    if !agents_weakened.is_empty() {
+        info.insert(
+            "agents_weakened".to_owned(),
+            serde_json::json!(agents_weakened),
+        );
+    }
     let plugins_weakened = &state.plugins.scan_summary().weakened;
     if !plugins_weakened.is_empty() {
         info.insert(
@@ -3241,6 +3249,7 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
         "session_ids": mission.session_ids,
         "agent": mission.agent_id,
         "branch": mission.safe_house.as_ref().map(|safe_house| safe_house.branch.clone()),
+        "denied_tools": mission.denied_tools,
     });
     finish_intake_claim(state, lease, &outcome, mission.state == MissionState::Done)
 }
@@ -5637,6 +5646,9 @@ fn spawn_event_pump_with_monitor(
                         handle_limit(&state, &mission_id, &session, event);
                         break;
                     }
+                    if event.kind == DENIED_EVENT {
+                        note_denied_tools(&state, &mission_id, &event);
+                    }
                     if matches!(event.kind.as_str(), "completed" | "failed")
                         && end_interrupted_turn(&state, &mission_id, &session)
                     {
@@ -6092,6 +6104,25 @@ fn queue_issue_status(state: &DaemonState, mission_id: &str, mission_state: Miss
     );
 }
 
+/// Records on the Mission the tools its harness refused in a turn, and logs them.
+fn note_denied_tools(state: &DaemonState, mission_id: &str, event: &AgentEvent) {
+    let text = event.text.as_deref().unwrap_or_default();
+    eprintln!("ai6: Mission {mission_id:?}: its harness refused calls of {text}");
+    let tools = text.split(", ").map(str::to_owned).collect();
+    let noted = state
+        .missions
+        .lock()
+        .map_err(|_| "the Mission book's lock was poisoned".to_owned())
+        .and_then(|mut missions| {
+            missions
+                .note_denied_tools(mission_id, tools)
+                .map_err(|error| format!("{error:?}"))
+        });
+    if let Err(error) = noted {
+        eprintln!("ai6: Mission {mission_id:?}: its refused tools were not recorded: {error}");
+    }
+}
+
 fn publish_lifecycle(state: &DaemonState, mission_id: &str, mission_state: MissionState) {
     queue_issue_status(state, mission_id, mission_state);
     #[cfg(feature = "publisher")]
@@ -6107,6 +6138,14 @@ fn publish_lifecycle(state: &DaemonState, mission_id: &str, mission_state: Missi
     }
     #[cfg(not(feature = "publisher"))]
     let _ = (state, mission_id, mission_state);
+}
+
+/// The reason a Mission's end is published with when its harness refused calls in its last turn.
+#[cfg(feature = "publisher")]
+fn denied_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
+    let missions = state.missions.lock().ok()?;
+    let denied = !missions.get(mission_id)?.denied_tools.is_empty();
+    denied.then_some(DENIED_REASON)
 }
 
 /// Why AI6 itself holds a blocked Mission, as the lifecycle reports it.
@@ -6485,13 +6524,13 @@ fn publish_finished_event(
     let event = apply_finish_outcome(event, &finished);
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = finished.telemetry {
-        let state = match event.kind.as_str() {
+        let name = match event.kind.as_str() {
             "completed" => Some("done"),
             "failed" | "blown" => Some("failed"),
             _ => None,
         };
-        if let Some(state) = state {
-            telemetry.publish_lifecycle(state);
+        if let Some(name) = name {
+            telemetry.publish_lifecycle_for(name, denied_reason(state, mission_id));
         }
     }
     apply_event_state(state, mission_id, &event);
@@ -7329,6 +7368,203 @@ queue = 1
         }
     }
 
+    /// What a [`MockDeniedHandler`] is built with: an Agent's `handler_settings`, as a handler
+    /// that takes them is.
+    #[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema, Debug, Clone, Default)]
+    #[map(crate = crate::guatiao)]
+    pub(super) struct MockDeniedConfig {
+        #[map(default = String::new())]
+        settings_toml: String,
+    }
+
+    /// A provider whose harness refuses calls of `Write` and `Bash` in a turn that then completes,
+    /// and which reports each line of its settings as a weakening.
+    #[derive(Provider)]
+    #[provider(
+        AgentHandler,
+        id = "mock-denied",
+        name = "Mock Denied",
+        crate = crate::guatiao,
+        config = MockDeniedConfig
+    )]
+    pub(super) struct MockDeniedHandler {
+        settings_toml: String,
+    }
+
+    impl TryFrom<MockDeniedConfig> for MockDeniedHandler {
+        type Error = ProviderError;
+
+        fn try_from(config: MockDeniedConfig) -> Result<Self, ProviderError> {
+            Ok(Self {
+                settings_toml: config.settings_toml,
+            })
+        }
+    }
+
+    impl AgentHandler for MockDeniedHandler {
+        fn start(
+            &self,
+            _request: AgentStart,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            let event = |kind: &str, text: &str| AgentEvent {
+                kind: kind.to_owned(),
+                text: Some(text.to_owned()),
+                data: None,
+                limit: None,
+                usage: None,
+                tools: Vec::new(),
+                quota: Vec::new(),
+            };
+            Ok(MockSession {
+                session_id: SessionId::try_new("provider-session-denied")
+                    .map_err(|error| test_provider_error(&error.to_string()))?,
+                events: Mutex::new(VecDeque::from([
+                    event(DENIED_EVENT, "Write, Bash"),
+                    event("completed", "finished"),
+                ])),
+            }
+            .into_object())
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(MockSession::new(request.session_id, "completed").into_object())
+        }
+
+        fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
+            Ok(self.settings_toml.lines().map(str::to_owned).collect())
+        }
+    }
+
+    /// A gateway that accepts every publication and sends each `(path, body)` down the channel;
+    /// it runs until the test process ends.
+    #[cfg(feature = "publisher")]
+    pub(super) fn recording_gateway() -> (
+        String,
+        std::sync::mpsc::Receiver<(String, serde_json::Value)>,
+    ) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let Ok(clone) = stream.try_clone() else {
+                    continue;
+                };
+                let mut reader = BufReader::new(clone);
+                let mut request_line = String::new();
+                let mut length = 0;
+                if reader.read_line(&mut request_line).is_err() {
+                    continue;
+                }
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).is_err() || line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("content-length")
+                    {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0; length];
+                if reader.read_exact(&mut body).is_err() {
+                    continue;
+                }
+                let path = request_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_owned();
+                let response = if path.starts_with("/v1/station/inputs/next") {
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else if path == "/v1/station/sessions" {
+                    "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 19\r\nConnection: close\r\n\r\n{\"next_sequence\":1}"
+                } else {
+                    "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                let _ = stream.write_all(response.as_bytes());
+                if !path.starts_with("/v1/station/inputs/next") {
+                    let body = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                    let _ = sender.send((path, body));
+                }
+            }
+        });
+        (origin, receiver)
+    }
+
+    /// Reads publications until `wanted` matches one, and answers it; a publication comes from
+    /// another thread, so this waits as long as a loaded machine may need.
+    #[cfg(feature = "publisher")]
+    pub(super) fn wait_for_publication(
+        requests: &std::sync::mpsc::Receiver<(String, serde_json::Value)>,
+        mut wanted: impl FnMut(&str, &serde_json::Value) -> bool,
+    ) -> Option<serde_json::Value> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+            let (path, body) = requests.recv_timeout(left).ok()?;
+            if wanted(&path, &body) {
+                return Some(body);
+            }
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn a_denied_call_is_recorded_on_the_mission_and_reported() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", "[agent.007]\nhandler = \"mock-denied\"\n");
+        #[cfg(feature = "publisher")]
+        let requests = {
+            let (origin, requests) = recording_gateway();
+            state.publisher = Some(
+                Publisher::start(PublisherConfig::try_new(&origin, "test-token").unwrap()).unwrap(),
+            );
+            requests
+        };
+        #[cfg(not(feature = "publisher"))]
+        let _ = &mut state;
+        start_mission_by_id(&state, "mission-1").await;
+        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        assert_eq!(
+            mission_state(&state, "mission-1").denied_tools,
+            ["Write", "Bash"]
+        );
+        // The state changes just before its event is queued.
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        let mut kinds = Vec::new();
+        while !kinds.iter().any(|kind| kind == "completed") {
+            assert!(std::time::Instant::now() < deadline, "{kinds:?}");
+            match pop_event(&state, "mission-1") {
+                Some(event) => {
+                    if event.kind == DENIED_EVENT {
+                        assert_eq!(event.text.as_deref(), Some("Write, Bash"));
+                    }
+                    kinds.push(event.kind);
+                }
+                None => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        }
+        let denied = kinds.iter().position(|kind| kind == DENIED_EVENT).unwrap();
+        let completed = kinds.iter().position(|kind| kind == "completed").unwrap();
+        assert!(denied < completed, "{kinds:?}");
+        #[cfg(feature = "publisher")]
+        {
+            let done = wait_for_publication(&requests, |path, body| {
+                path.contains("/lifecycle/") && body["state"] == "done"
+            })
+            .expect("the end is published");
+            assert_eq!(done["reason"], "permission-denied");
+        }
+    }
+
     /// The reset time the limited mock reports, unless its Agent sets `MOCK_LIMIT_RESET=none`.
     const MOCK_RESET: i64 = 1_790_000_000;
 
@@ -7679,6 +7915,7 @@ queue = 1
             MockRecordingHandler,
             MockDripHandler,
             MockLinesHandler,
+            MockDeniedHandler,
             MockTerminalProvider,
             MockSafeHouseProvider,
             MockPlainProvider,
@@ -8601,6 +8838,7 @@ queue = 1
             stations[0].info()["handlers"],
             serde_json::json!([
                 "mock-agent",
+                "mock-denied",
                 "mock-drip",
                 "mock-limit",
                 "mock-lines",
@@ -8673,6 +8911,9 @@ queue = 1
             missions
                 .transition(mission_id, MissionState::Working)
                 .unwrap();
+            missions
+                .note_denied_tools(mission_id, vec!["Write".to_owned()])
+                .unwrap();
             missions.transition(mission_id, MissionState::Done).unwrap();
         }
         schedule_intake_once(&state);
@@ -8684,6 +8925,7 @@ queue = 1
         assert_eq!(outcome["state"], "done");
         assert_eq!(outcome["mission_id"], mission_id);
         assert_eq!(outcome["agent"], "007");
+        assert_eq!(outcome["denied_tools"], serde_json::json!(["Write"]));
         assert!(!claimed.exists());
 
         state.stopping.store(true, Ordering::Release);

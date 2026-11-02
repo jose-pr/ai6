@@ -234,6 +234,11 @@ pub struct AgentMessage {
 /// resets. The event carries the details in [`AgentEvent::limit`].
 pub const LIMIT_EVENT: &str = "limit";
 
+/// The event kind a handler emits, before a turn's `completed` or `failed` event, when the harness
+/// refused calls in that turn by its permission rules. The event's text names the tools, separated
+/// by `, `; [`AgentEvent::tools`] stays empty, since these calls did not run.
+pub const DENIED_EVENT: &str = "denied";
+
 /// A provider usage or rate limit that stopped the Session.
 ///
 /// A handler emits it as an [`AgentEvent`] of kind [`LIMIT_EVENT`] in place of the
@@ -355,6 +360,12 @@ pub trait AgentHandler: Send + Sync {
         Ok(Some(
             "this handler loads no skill for an assistant".to_owned(),
         ))
+    }
+
+    /// Each way this handler's settings are looser than its default, one line each, for the
+    /// Station to report. The default: none.
+    fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
+        Ok(Vec::new())
     }
 }
 

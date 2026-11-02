@@ -172,6 +172,7 @@ pub(super) fn poll(state: &DaemonState) -> bool {
     }
     if roster {
         super::vetting::log_weakenings(&current.roster);
+        super::agents::log_handler_weakenings(&current.plugins, &current.roster);
         for weakened in current.roster.settings().weakenings() {
             eprintln!("ai6: {weakened}");
         }

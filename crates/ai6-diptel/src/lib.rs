@@ -351,7 +351,8 @@ pub struct LifecycleEvent {
     /// Updated board state.
     pub state: SessionState,
     /// Why AI6 holds the Session in this state, when it says: `green-ink` while a step waits
-    /// for a person's approval, `budget` after a spending limit. A lowercase name of at most
+    /// for a person's approval, `budget` after a spending limit, `permission-denied` at the end
+    /// of a Mission whose harness refused calls in its last turn. A lowercase name of at most
     /// [`MAX_REASON_BYTES`].
     pub reason: Option<String>,
     /// Monotonically increasing event cursor for this Session.

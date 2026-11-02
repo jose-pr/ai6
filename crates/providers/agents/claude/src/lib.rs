@@ -17,7 +17,7 @@ use ai6::directorates::q::terminal::{
 };
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
+    DENIED_EVENT, LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
 };
 use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
 use ai6::directorates::section_00::denied::DenyList;
@@ -26,7 +26,7 @@ use ai6::directorates::section_00::programs;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Claude Code AgentHandler configuration.
@@ -55,6 +55,10 @@ pub struct ClaudeConfig {
     /// Milliseconds the end of the output waits for Claude Code's exit status. Default 1000.
     #[map(default = 1_000)]
     pub exit_wait_ms: u64,
+    /// The Agent's `handler_settings` table as TOML (`allowed_tools`, `denied_tools`), which the
+    /// Station fills in. Empty keeps the default list of tools.
+    #[map(default = String::new())]
+    pub settings_toml: String,
 }
 
 impl Default for ClaudeConfig {
@@ -67,7 +71,37 @@ impl Default for ClaudeConfig {
             tail_line_bytes: 512,
             close_wait_ms: 2_000,
             exit_wait_ms: 1_000,
+            settings_toml: String::new(),
         }
+    }
+}
+
+/// What an Agent's `handler_settings` change about a field Session's tools, on top of
+/// [`FIELD_ALLOWED`] and [`FIELD_DENIED`]. Answer-only and assistant Sessions ignore them. Unknown
+/// keys are refused.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudeSettings {
+    /// Claude Code permission rules added to the allow list. A rule for a tool the list keeps
+    /// out (`WebFetch(domain:example.com)`) offers that tool and lifts its default denial.
+    #[serde(default)]
+    allowed_tools: Vec<String>,
+    /// Claude Code permission rules added to the deny list; a deny rule beats an allow rule.
+    #[serde(default)]
+    denied_tools: Vec<String>,
+}
+
+impl ClaudeSettings {
+    /// Reads an Agent's settings. Each rule must start with a letter, so that none is read as
+    /// another option of the variadic flag it goes in.
+    fn parse(toml_text: &str) -> Result<Self, String> {
+        let settings: Self = toml::from_str(toml_text).map_err(|error| error.to_string())?;
+        for rule in settings.allowed_tools.iter().chain(&settings.denied_tools) {
+            if !rule.starts_with(|first: char| first.is_ascii_alphabetic()) {
+                return Err(format!("{rule:?} is not a Claude Code permission rule"));
+            }
+        }
+        Ok(settings)
     }
 }
 
@@ -82,6 +116,7 @@ impl Default for ClaudeConfig {
 )]
 pub struct ClaudeHandler {
     config: ClaudeConfig,
+    settings: ClaudeSettings,
 }
 
 impl TryFrom<ClaudeConfig> for ClaudeHandler {
@@ -94,7 +129,13 @@ impl TryFrom<ClaudeConfig> for ClaudeHandler {
                 "Claude executable is empty",
             ));
         }
-        Ok(Self { config })
+        let settings = ClaudeSettings::parse(&config.settings_toml).map_err(|reason| {
+            refuse(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                format!("handler_settings: {reason}"),
+            )
+        })?;
+        Ok(Self { config, settings })
     }
 }
 
@@ -129,6 +170,19 @@ impl AgentHandler for ClaudeHandler {
         Ok(None)
     }
 
+    /// Each rule of `allowed_tools` that the default list does not hold. A rule the settings deny
+    /// as well allows nothing, so it is not one.
+    fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
+        let denied = &self.settings.denied_tools;
+        Ok(self
+            .settings
+            .allowed_tools
+            .iter()
+            .filter(|rule| !FIELD_ALLOWED.contains(&rule.as_str()) && !denied.contains(rule))
+            .map(|rule| format!("allowed_tools adds {rule} to what its field Sessions may call"))
+            .collect())
+    }
+
     fn start(
         &self,
         request: AgentStart,
@@ -161,6 +215,7 @@ impl AgentHandler for ClaudeHandler {
             &request.environment,
             &request.working_directory,
             mode,
+            &self.settings,
             request.assistant.as_ref(),
         )?;
         let session = spawn(
@@ -218,6 +273,7 @@ impl AgentHandler for ClaudeHandler {
             &request.environment,
             &request.working_directory,
             mode,
+            &self.settings,
             request.assistant.as_ref(),
         )?;
         let session = spawn(
@@ -267,7 +323,58 @@ fn add_launch_options(
 
 /// Claude's own shell and file tools, turned off in remote-hands mode so that nothing the
 /// harness does lands on the Station.
-const OWN_TOOLS: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep";
+const OWN_TOOLS: [&str; 8] = [
+    "Bash",
+    "PowerShell",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Read",
+    "Glob",
+    "Grep",
+];
+
+/// The built-in tools a field Session is offered (`--tools`). `dontAsk` does not stop a tool that
+/// needs no approval: without this list Claude Code 2.1.316 ran `Agent`, `CronCreate` and
+/// `SendMessage` under it, and fetched `docs.python.org` with `WebFetch`, its rules empty. By
+/// default it offers the four `Task` tools in place of `TodoWrite`
+/// (code.claude.com/docs/en/tools-reference, "Task tool availability"), so both are named.
+const FIELD_TOOLS: [&str; 13] = [
+    "Read",
+    "Glob",
+    "Grep",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Bash",
+    "PowerShell",
+    "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+];
+
+/// A field Session's allow rules, besides its own MCP servers. `Edit(/**)` is rooted at the
+/// working directory for a rule given as a flag, and covers `Write` and `NotebookEdit`
+/// (code.claude.com/docs/en/permissions, "Read and Edit").
+const FIELD_ALLOWED: [&str; 11] = [
+    "Read",
+    "Glob",
+    "Grep",
+    "Edit(/**)",
+    "Bash",
+    "PowerShell",
+    "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+];
+
+/// What a field Session is denied by name, besides not being offered it: a deny rule beats any
+/// allow rule the user's or a pinned project's settings hold.
+const FIELD_DENIED: [&str; 3] = ["WebFetch", "WebSearch", "Agent"];
 
 /// Every tool an answer-only Session is denied by name, besides `--tools=` turning the
 /// built-in ones off: Claude's own tools, its web and sub-agent tools, and any MCP tool.
@@ -398,6 +505,7 @@ fn add_settings(
     environment: &BTreeMap<String, String>,
     working_directory: &str,
     mode: Mode,
+    settings: &ClaudeSettings,
     assistant: Option<&AssistantMode>,
 ) -> Result<(), ProviderError> {
     if let Some(assistant) = assistant {
@@ -406,6 +514,7 @@ fn add_settings(
         add_answer_only(argv);
     } else {
         add_project_settings(argv, mode.project_settings, mode.project_mcp);
+        add_field_tools(argv, environment, settings);
         add_mcp(argv, environment);
         add_gate(argv, environment);
     }
@@ -938,30 +1047,88 @@ fn http_server(prefix: &str) -> Value {
     })
 }
 
-/// Adds the Station's MCP servers: Cable tools, and, when the Station serves a Theater's
-/// tools (remote-hands mode), those in place of Claude's own shell and file tools. Their tools,
-/// and no others, are allowed by server (`--allowedTools mcp__<name>`,
-/// code.claude.com/docs/en/permissions): under `-p` a tool no rule allows is denied, not asked.
+/// The tool a permission rule is for: `WebFetch` for `WebFetch(domain:example.com)`.
+fn rule_tool(rule: &str) -> &str {
+    rule.split('(').next().unwrap_or(rule).trim()
+}
+
+/// A field Session's tools, each list closed by the next flag since all are variadic: under
+/// `--permission-mode dontAsk` a call no rule allows is denied, with no prompt nobody is there to
+/// answer (code.claude.com/docs/en/permissions). In remote-hands mode, when the Station serves a
+/// Theater's tools, Claude's own shell and file tools are neither offered nor allowed and stay
+/// denied whatever the settings say, so that nothing the harness does lands on the Station.
+fn add_field_tools(
+    argv: &mut Vec<String>,
+    environment: &BTreeMap<String, String>,
+    settings: &ClaudeSettings,
+) {
+    let remote_hands = has_endpoint(environment, "AI6_THEATER_MCP");
+    let own = |tool: &str| remote_hands && OWN_TOOLS.contains(&tool);
+    let mut offered: Vec<&str> = FIELD_TOOLS
+        .iter()
+        .copied()
+        .filter(|tool| !own(tool))
+        .collect();
+    for tool in settings.allowed_tools.iter().map(|rule| rule_tool(rule)) {
+        if !tool.starts_with("mcp__") && !own(tool) && !offered.contains(&tool) {
+            offered.push(tool);
+        }
+    }
+    let mut denied: Vec<&str> = FIELD_DENIED
+        .iter()
+        .copied()
+        .filter(|tool| {
+            !settings
+                .allowed_tools
+                .iter()
+                .any(|rule| rule_tool(rule) == *tool)
+        })
+        .collect();
+    if remote_hands {
+        denied.extend(OWN_TOOLS);
+    }
+    denied.extend(settings.denied_tools.iter().map(String::as_str));
+    let mut allowed = Vec::new();
+    for (prefix, rule) in [
+        ("AI6_CABLE_MCP", "mcp__ai6-cables"),
+        ("AI6_THEATER_MCP", "mcp__ai6-theater"),
+    ] {
+        if has_endpoint(environment, prefix) {
+            allowed.push(rule);
+        }
+    }
+    allowed.extend(
+        FIELD_ALLOWED
+            .iter()
+            .copied()
+            .filter(|rule| !own(rule_tool(rule))),
+    );
+    allowed.extend(settings.allowed_tools.iter().map(String::as_str));
+    argv.extend([
+        "--tools".to_owned(),
+        offered.join(","),
+        "--permission-mode".to_owned(),
+        "dontAsk".to_owned(),
+        "--disallowedTools".to_owned(),
+        denied.join(","),
+        "--allowedTools".to_owned(),
+        allowed.join(","),
+    ]);
+}
+
+/// Adds the Station's MCP servers: Cable tools, and, when the Station serves a Theater's tools
+/// (remote-hands mode), those. [`add_field_tools`] allows them by server.
 fn add_mcp(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
     let mut servers = serde_json::Map::new();
-    let mut allowed = Vec::new();
     if has_endpoint(environment, "AI6_CABLE_MCP") {
         servers.insert("ai6-cables".to_owned(), http_server("AI6_CABLE_MCP"));
-        allowed.push("mcp__ai6-cables");
     }
     if has_endpoint(environment, "AI6_THEATER_MCP") {
         servers.insert("ai6-theater".to_owned(), http_server("AI6_THEATER_MCP"));
-        allowed.push("mcp__ai6-theater");
-        argv.extend(["--disallowedTools".to_owned(), OWN_TOOLS.to_owned()]);
     }
     if !servers.is_empty() {
         let config = json!({ "mcpServers": servers });
-        argv.extend([
-            "--allowedTools".to_owned(),
-            allowed.join(","),
-            "--mcp-config".to_owned(),
-            config.to_string(),
-        ]);
+        argv.extend(["--mcp-config".to_owned(), config.to_string()]);
     }
 }
 
@@ -1073,6 +1240,8 @@ struct ClaudeSession {
     /// The last lines Claude wrote that were not JSON: its own diagnostics, which say why it
     /// exited when it exits.
     tail: Mutex<VecDeque<String>>,
+    /// The event a `result` line owes after the [`DENIED_EVENT`] read from the same line.
+    pending: Mutex<Option<AgentEvent>>,
     /// Numbers the control requests written to Claude, for their `request_id`.
     requests: AtomicU64,
     /// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
@@ -1097,6 +1266,7 @@ impl ClaudeSession {
             restricted: None,
             tripped: AtomicBool::new(false),
             tail: Mutex::new(VecDeque::new()),
+            pending: Mutex::new(None),
             requests: AtomicU64::new(0),
             tail_lines: 8,
             tail_line_bytes: 512,
@@ -1224,6 +1394,9 @@ impl ClaudeSession {
         if self.tripped.load(Ordering::Acquire) {
             return Ok(None);
         }
+        if let Some(event) = lock(&self.pending)?.take() {
+            return Ok(Some(event));
+        }
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
         let line = loop {
@@ -1311,6 +1484,10 @@ impl ClaudeSession {
         if let Some(event) = decode_event(&value, line.clone()) {
             if let Some(ended) = self.tripped(&event, &value) {
                 return Ok(Some(ended));
+            }
+            if let Some(denied) = decode_denials(&value) {
+                *lock(&self.pending)? = Some(event);
+                return Ok(Some(denied));
             }
             return Ok(Some(event));
         }
@@ -1567,6 +1744,24 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
         tools,
         quota: decode_quota(value),
     })
+}
+
+/// The event for the calls a `result` lists under `permission_denials`, a turn that otherwise
+/// reads as a success: its text names each tool once, in the order first refused. A call's input
+/// stays out, since it may hold anything the model wrote.
+fn decode_denials(value: &Value) -> Option<AgentEvent> {
+    if value.get("type").and_then(Value::as_str) != Some("result") {
+        return None;
+    }
+    let mut tools: Vec<&str> = Vec::new();
+    for denial in value.get("permission_denials")?.as_array()? {
+        if let Some(tool) = denial.get("tool_name").and_then(Value::as_str)
+            && !tools.contains(&tool)
+        {
+            tools.push(tool);
+        }
+    }
+    (!tools.is_empty()).then(|| event(DENIED_EVENT, Some(tools.join(", "))))
 }
 
 /// Whether a `result` reports that the turn did not do its work: `is_error`, which Claude Code
@@ -2800,10 +2995,6 @@ mod tests {
         assert!(config.contains("${AI6_CABLE_MCP_URL}"));
         assert!(config.contains("${AI6_CABLE_MCP_TOKEN}"));
         assert!(!config.contains("session-secret-token"));
-        assert!(!argv.iter().any(|argument| argument == "--disallowedTools"));
-        // Under -p Claude Code denies a tool no rule allows, and an MCP tool is no exception.
-        assert_eq!(argv[position("--allowedTools") + 1], "mcp__ai6-cables");
-        assert!(position("--allowedTools") < position("--mcp-config"));
     }
 
     #[test]
@@ -2815,12 +3006,22 @@ mod tests {
             ("AI6_THEATER_MCP_TOKEN".to_owned(), "b".to_owned()),
         ]);
         let mut argv = vec!["claude".to_owned()];
-        add_mcp(&mut argv, &environment);
+        add_field_tools(&mut argv, &environment, &ClaudeSettings::default());
         let allowed = argv
             .iter()
             .position(|argument| argument == "--allowedTools")
             .unwrap();
-        assert_eq!(argv[allowed + 1], "mcp__ai6-cables,mcp__ai6-theater");
+        // Under dontAsk a tool no rule allows is denied, and an MCP tool is no exception. No
+        // other server is named, so another server's tools stay denied.
+        let rules: Vec<&str> = argv[allowed + 1].split(',').collect();
+        assert_eq!(&rules[..2], ["mcp__ai6-cables", "mcp__ai6-theater"]);
+        assert_eq!(
+            rules
+                .iter()
+                .filter(|rule| rule.starts_with("mcp__"))
+                .count(),
+            2
+        );
         assert_eq!(
             argv.iter()
                 .filter(|argument| *argument == "--allowedTools")
@@ -2830,10 +3031,12 @@ mod tests {
     }
 
     #[test]
-    fn a_session_without_ai6_servers_allows_nothing_extra() {
+    fn a_session_without_ai6_servers_allows_no_server() {
         let mut argv = vec!["claude".to_owned()];
         add_mcp(&mut argv, &BTreeMap::new());
         assert_eq!(argv, ["claude"]);
+        add_field_tools(&mut argv, &BTreeMap::new(), &ClaudeSettings::default());
+        assert!(!argv.iter().any(|argument| argument.contains("mcp__")));
     }
 
     #[test]
@@ -2849,7 +3052,12 @@ mod tests {
             ),
         ]);
         let mut argv = vec!["claude".to_owned()];
+        let settings = ClaudeSettings {
+            allowed_tools: vec!["Bash".to_owned(), "Edit(/src/**)".to_owned()],
+            denied_tools: Vec::new(),
+        };
 
+        add_field_tools(&mut argv, &environment, &settings);
         add_mcp(&mut argv, &environment);
 
         let position = |flag: &str| argv.iter().position(|argument| argument == flag).unwrap();
@@ -2857,7 +3065,16 @@ mod tests {
         for tool in ["Bash", "Edit", "Write", "Read", "Grep"] {
             assert!(disallowed.split(',').any(|name| name == tool), "{tool}");
         }
-        assert_eq!(argv[position("--allowedTools") + 1], "mcp__ai6-theater");
+        let offered = &argv[position("--tools") + 1];
+        for tool in OWN_TOOLS {
+            assert!(!offered.split(',').any(|name| name == tool), "{offered}");
+        }
+        // A setting's rule goes on the list, and the deny rule beats it.
+        let allowed = &argv[position("--allowedTools") + 1];
+        assert_eq!(
+            allowed,
+            "mcp__ai6-theater,TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate,Bash,Edit(/src/**)"
+        );
         let config = &argv[position("--mcp-config") + 1];
         assert!(config.contains("ai6-theater") && !config.contains("ai6-cables"));
         assert!(config.contains("${AI6_THEATER_MCP_TOKEN}"));
@@ -2867,8 +3084,314 @@ mod tests {
                 .any(|argument| argument.contains("theater-secret-token"))
         );
         // A variadic flag is closed by the next flag, so no value runs on into another.
+        assert!(position("--tools") < position("--permission-mode"));
         assert!(position("--disallowedTools") < position("--allowedTools"));
         assert!(position("--allowedTools") < position("--mcp-config"));
+    }
+
+    /// What a field Session's tool flags say, as `(offered, denied, allowed)`, after a start.
+    fn field_flags(argv: &[String]) -> (String, String, String) {
+        assert_eq!(flag(argv, "--permission-mode").as_deref(), Some("dontAsk"));
+        (
+            flag(argv, "--tools").unwrap(),
+            flag(argv, "--disallowedTools").unwrap(),
+            flag(argv, "--allowedTools").unwrap(),
+        )
+    }
+
+    const DEFAULT_OFFERED: &str = "Read,Glob,Grep,Edit,Write,NotebookEdit,Bash,PowerShell,\
+                                   TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate";
+    const DEFAULT_ALLOWED: &str = "Read,Glob,Grep,Edit(/**),Bash,PowerShell,\
+                                   TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate";
+
+    #[test]
+    fn a_field_session_runs_by_the_explicit_list_on_start_and_resume() {
+        let mut environment = cable_environment();
+        environment.insert(
+            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
+            "claude-field-session".to_owned(),
+        );
+        let terminal = ProcessTerminal::new();
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-field-fixture".to_owned(),
+            ..ClaudeConfig::default()
+        })
+        .unwrap();
+        let working_directory = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let started = handler
+            .start(
+                AgentStart {
+                    mission_id: "mission-field".parse().unwrap(),
+                    agent_id: "007".to_owned(),
+                    prompt: "work".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: working_directory.clone(),
+                    clearance: "field".to_owned(),
+                    environment: environment.clone(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        read_to_completion(&started);
+        started.close().unwrap();
+        let resumed = handler
+            .resume(
+                AgentResume {
+                    mission_id: "mission-field".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-field-session").unwrap(),
+                    message: None,
+                    working_directory,
+                    environment,
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.clone().into_object(),
+            )
+            .unwrap();
+        resumed.close().unwrap();
+        let specs = terminal.specs.lock().unwrap();
+        for spec in specs.iter() {
+            let (offered, denied, allowed) = field_flags(&spec.argv);
+            assert_eq!(offered, DEFAULT_OFFERED);
+            assert_eq!(denied, "WebFetch,WebSearch,Agent");
+            assert_eq!(allowed, format!("mcp__ai6-cables,{DEFAULT_ALLOWED}"));
+            // A gated Session keeps the same list: the gate decides each command.
+            let settings = settings_of(&spec.argv).expect("the gate");
+            let hook = &settings["hooks"]["PreToolUse"][0];
+            assert_eq!(hook["matcher"], "Bash|PowerShell");
+        }
+        assert_eq!(specs.len(), 2);
+    }
+
+    #[test]
+    fn a_field_session_without_a_station_keeps_the_list_and_has_no_gate() {
+        let mut argv = Vec::new();
+        add_settings(
+            &mut argv,
+            &BTreeMap::new(),
+            "wd",
+            Mode {
+                project_settings: false,
+                project_mcp: false,
+                answer_only: false,
+            },
+            &ClaudeSettings::default(),
+            None,
+        )
+        .unwrap();
+        let (offered, _, allowed) = field_flags(&argv);
+        assert_eq!(offered, DEFAULT_OFFERED);
+        assert_eq!(allowed, DEFAULT_ALLOWED);
+        assert!(!argv.iter().any(|argument| argument == "--settings"));
+    }
+
+    #[test]
+    fn an_agents_settings_change_the_list_and_a_tool_they_add_is_offered() {
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            settings_toml: "allowed_tools = [\"WebFetch(domain:example.com)\", \"Skill\",                             \"mcp__docs\"]\ndenied_tools = [\"Bash(rm *)\"]\n"
+                .to_owned(),
+            ..ClaudeConfig::default()
+        })
+        .unwrap();
+        let mut argv = Vec::new();
+        add_field_tools(&mut argv, &BTreeMap::new(), &handler.settings);
+        let (offered, denied, allowed) = field_flags(&argv);
+        assert_eq!(offered, format!("{DEFAULT_OFFERED},WebFetch,Skill"));
+        assert_eq!(
+            denied, "WebSearch,Agent,Bash(rm *)",
+            "the rule lifts its denial"
+        );
+        assert_eq!(
+            allowed,
+            format!("{DEFAULT_ALLOWED},WebFetch(domain:example.com),Skill,mcp__docs")
+        );
+        assert_eq!(
+            handler.weakenings().unwrap(),
+            [
+                "allowed_tools adds WebFetch(domain:example.com) to what its field Sessions may call",
+                "allowed_tools adds Skill to what its field Sessions may call",
+                "allowed_tools adds mcp__docs to what its field Sessions may call",
+            ]
+        );
+    }
+
+    #[test]
+    fn only_a_rule_beyond_the_default_list_weakens_a_session() {
+        let weakenings = |settings_toml: &str| {
+            ClaudeHandler::try_from(ClaudeConfig {
+                settings_toml: settings_toml.to_owned(),
+                ..ClaudeConfig::default()
+            })
+            .unwrap()
+            .weakenings()
+            .unwrap()
+        };
+        assert!(weakenings("").is_empty());
+        assert!(weakenings("denied_tools = [\"Bash\", \"Read\"]").is_empty());
+        assert!(weakenings("allowed_tools = [\"Bash\", \"Edit(/**)\"]").is_empty());
+        assert!(
+            weakenings("allowed_tools = [\"WebFetch\"]\ndenied_tools = [\"WebFetch\"]").is_empty(),
+            "a deny rule beats the allow rule"
+        );
+        assert_eq!(
+            weakenings("allowed_tools = [\"Write\"]").len(),
+            1,
+            "a bare Write reaches outside the working directory"
+        );
+    }
+
+    #[test]
+    fn handler_settings_it_cannot_read_are_refused() {
+        for settings_toml in [
+            "allowed = [\"Bash\"]",
+            "allowed_tools = \"Bash\"",
+            "allowed_tools = [\"--dangerously-skip-permissions\"]",
+            "denied_tools = [\"\"]",
+        ] {
+            let error = ClaudeHandler::try_from(ClaudeConfig {
+                settings_toml: settings_toml.to_owned(),
+                ..ClaudeConfig::default()
+            })
+            .err()
+            .unwrap_or_else(|| panic!("{settings_toml} was accepted"));
+            assert_eq!(
+                error.status,
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "{settings_toml}"
+            );
+        }
+    }
+
+    #[test]
+    fn answer_only_and_assistant_sessions_ignore_the_settings() {
+        let settings = ClaudeSettings {
+            allowed_tools: vec!["WebFetch".to_owned()],
+            denied_tools: vec!["Read".to_owned()],
+        };
+        let flags =
+            |answer_only: bool, assistant: Option<&AssistantMode>, settings: &ClaudeSettings| {
+                let mut argv = Vec::new();
+                add_settings(
+                    &mut argv,
+                    &assistant_environment(),
+                    "wd",
+                    Mode {
+                        project_settings: false,
+                        project_mcp: false,
+                        answer_only,
+                    },
+                    settings,
+                    assistant,
+                )
+                .unwrap();
+                argv
+            };
+        let answer_only = flags(true, None, &settings);
+        assert_eq!(answer_only, flags(true, None, &ClaudeSettings::default()));
+        assert!(
+            !answer_only
+                .iter()
+                .any(|argument| argument == "--permission-mode")
+        );
+        let (_, _, mode) = script_mode("denied", &[], false);
+        assert_eq!(
+            flags(false, Some(&mode), &settings),
+            flags(false, Some(&mode), &ClaudeSettings::default())
+        );
+    }
+
+    /// Terminal output holding one `result` line, as a resumed Session reads it.
+    fn result_session(result: Value) -> Object<dyn AgentSession> {
+        let mut input = result.to_string().into_bytes();
+        input.push(b'\n');
+        let terminal = ResumeTerminal {
+            spec: Arc::new(Mutex::new(None)),
+            input,
+            writes: Arc::new(Mutex::new(Vec::new())),
+        };
+        ClaudeHandler::try_from(ClaudeConfig::default())
+            .unwrap()
+            .resume(
+                AgentResume {
+                    mission_id: "mission-denied".parse().unwrap(),
+                    session_id: SessionId::try_new("claude-session-denied").unwrap(),
+                    message: None,
+                    working_directory: "wd".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap()
+    }
+
+    /// The shape Claude Code 2.1.316 writes after a turn whose calls were refused: a success.
+    #[test]
+    fn a_denied_call_is_reported_before_the_turn_ends_and_its_input_stays_out() {
+        let session = result_session(json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "result": "finished",
+            "permission_denials": [
+                {"tool_name": "Write", "tool_use_id": "t1", "tool_input": {"content": "secret"}},
+                {"tool_name": "Bash", "tool_use_id": "t2", "tool_input": {"command": "secret"}},
+                {"tool_name": "Write", "tool_use_id": "t3", "tool_input": {"content": "secret"}},
+            ],
+        }));
+        let events = std::iter::from_fn(|| session.next_event(50).unwrap()).collect::<Vec<_>>();
+        let kinds_and_texts = events
+            .iter()
+            .map(|event| (event.kind.as_str(), event.text.as_deref()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds_and_texts,
+            [
+                (DENIED_EVENT, Some("Write, Bash")),
+                ("completed", Some("finished")),
+            ]
+        );
+        assert!(events[0].tools.is_empty(), "a refused call did not run");
+        assert_eq!(events[0].data, None, "the raw line holds the calls' input");
+    }
+
+    #[test]
+    fn a_turn_with_nothing_denied_reports_only_its_end() {
+        for denials in [json!([]), Value::Null] {
+            let session = result_session(json!({
+                "type": "result",
+                "subtype": "success",
+                "result": "finished",
+                "permission_denials": denials,
+            }));
+            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+                .map(|event| event.kind)
+                .collect::<Vec<_>>();
+            assert_eq!(kinds, ["completed"]);
+        }
     }
 
     fn cable_environment() -> BTreeMap<String, String> {
@@ -3106,6 +3629,10 @@ mod tests {
         assert!(!has(answer_only, "--settings"), "no gate: nothing to gate");
         assert!(!answer_only.iter().any(|a| a.contains("ai6-cables")));
         assert!(shut_out(ignored), "{ignored:?}");
+        assert!(
+            !answer_only.iter().any(|a| a.contains("dontAsk")),
+            "answer-only has no mode"
+        );
         assert!(has(ignored, "--settings") && has(ignored, "--mcp-config"));
         assert!(!has(loaded, "--setting-sources") && !has(loaded, "--strict-mcp-config"));
         assert!(
@@ -3137,7 +3664,13 @@ mod tests {
     /// tool.
     #[test]
     fn deny_lists_name_only_tools_claude_code_knows() {
-        for list in [OWN_TOOLS, ANSWER_ONLY_DENIED, ASSISTANT_DENIED] {
+        let lists = [
+            OWN_TOOLS.join(","),
+            ANSWER_ONLY_DENIED.to_owned(),
+            ASSISTANT_DENIED.to_owned(),
+            FIELD_DENIED.join(","),
+        ];
+        for list in lists {
             for gone in ["MultiEdit", "LS"] {
                 assert!(
                     !list.split(',').any(|name| name == gone),

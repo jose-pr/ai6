@@ -893,6 +893,9 @@ impl Runner {
             .plugins
             .handler_with(&handler.id, &settings)
             .map_err(|error| error.to_string())?;
+        for line in built.weakenings().unwrap_or_default() {
+            eprintln!("ai6: Session {key:?} is weakened: {line}");
+        }
         let stdio = built.stdio().map_err(|error| {
             format!(
                 "handler `{}` did not declare its harness's stdio: {error}",

@@ -475,6 +475,18 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
     if let Some(branch) = &branch {
         lines.push(format!("Branch: `{branch}`"));
     }
+    let denied_tools: Vec<&str> = finished
+        .outcome
+        .get("denied_tools")
+        .and_then(serde_json::Value::as_array)
+        .map(|tools| tools.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    if disclosure != Disclosure::Hidden && !denied_tools.is_empty() {
+        lines.push(format!(
+            "Refused by its permission rules: {}",
+            denied_tools.join(", ")
+        ));
+    }
     if disclosure == Disclosure::Full {
         if let Some(agent) = outcome_text("agent") {
             lines.push(format!("Agent: {agent}"));
@@ -1592,6 +1604,22 @@ mod tests {
     }
 
     #[test]
+    fn a_report_says_what_the_harness_refused_unless_the_cover_is_hidden() {
+        let mut entry = finished(true);
+        entry.outcome["denied_tools"] = serde_json::json!(["Write", "Bash"]);
+        let line = "Refused by its permission rules: Write, Bash";
+        for disclosure in [Disclosure::Assisted, Disclosure::Full] {
+            let body = compose_report(disclosure, &entry).body;
+            assert!(body.contains(line), "{body}");
+        }
+        let hidden = compose_report(Disclosure::Hidden, &entry).body;
+        assert!(!hidden.contains("Write"), "{hidden}");
+        entry.outcome["denied_tools"] = serde_json::json!([]);
+        let none = compose_report(Disclosure::Full, &entry).body;
+        assert!(!none.contains("Refused"), "{none}");
+    }
+
+    #[test]
     fn covert_and_partial_reports_name_neither_agent_nor_session() {
         for disclosure in [Disclosure::Hidden, Disclosure::Assisted] {
             let report = compose_report(disclosure, &finished(true));
@@ -1686,6 +1714,37 @@ mod tests {
     }
 
     #[test]
+    fn a_status_comment_names_the_missions_branch() {
+        let (_dir, roster) = roster_issues("{ fake = { ids = [\"br-1\", \"br-2\"] } }", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let desk = SourceDesk::new("station-a", SourceLimits::default());
+        desk.run(&plugins(), &roster, &registry);
+        let status = |mission: &str, branch: Option<&str>| {
+            crate::station::issues::queue_status(
+                &registry, &roster, mission, "working", branch, 1.0,
+            );
+            let entries = registry.outbox_entries(Some(mission)).unwrap();
+            entries
+                .iter()
+                .find(|entry| entry.kind == OutboxKind::Status)
+                .unwrap()
+                .body
+                .clone()
+        };
+        let named = status("source_fake--br-1", Some("agent/br-1"));
+        assert!(
+            named.ends_with(
+                "
+Branch: `agent/br-1`"
+            ),
+            "{named}"
+        );
+        let none = status("source_fake--br-2", None);
+        assert!(!none.contains("Branch"), "{none}");
+    }
+
+    #[test]
     fn one_status_comment_is_posted_then_edited_through_working_waiting_working() {
         let plugins = plugins();
         let (_dir, roster) = roster_issues(
@@ -1738,37 +1797,6 @@ mod tests {
                 .all(|entry| entry.state == OutboxState::Posted)
         );
         assert_eq!(entries.len(), 3);
-    }
-
-    #[test]
-    fn a_status_comment_names_the_missions_branch() {
-        let (_dir, roster) = roster_issues("{ fake = { ids = [\"br-1\", \"br-2\"] } }", "");
-        let state = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(state.path());
-        let desk = SourceDesk::new("station-a", SourceLimits::default());
-        desk.run(&plugins(), &roster, &registry);
-        let status = |mission: &str, branch: Option<&str>| {
-            crate::station::issues::queue_status(
-                &registry, &roster, mission, "working", branch, 1.0,
-            );
-            let entries = registry.outbox_entries(Some(mission)).unwrap();
-            entries
-                .iter()
-                .find(|entry| entry.kind == OutboxKind::Status)
-                .unwrap()
-                .body
-                .clone()
-        };
-        let named = status("source_fake--br-1", Some("agent/br-1"));
-        assert!(
-            named.ends_with(
-                "
-Branch: `agent/br-1`"
-            ),
-            "{named}"
-        );
-        let none = status("source_fake--br-2", None);
-        assert!(!none.contains("Branch"), "{none}");
     }
 
     #[test]
