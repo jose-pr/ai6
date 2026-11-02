@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- An Agent can list routes in place of one handler, `[[agent.<id>.route]]`: a handler, what that
+  source calls the model, and an account source, with `effort`, `handler_settings`, `pool`, `env`,
+  `secrets` and `priority`; what one leaves out comes from the Agent. `balance` chooses among them:
+  `headroom` (the default), `round_robin` or `priority`. A route counts when its handler runs on the
+  Station, it can hold the Session's clearance (`AgentHandler::clearance_refusal`), what it names is
+  configured and its source has room; with none the Mission waits, naming each route and why. The
+  plain form is one route, and both forms together are refused. A Session keeps its route: a resume
+  stays, moves only to a route of the same handler whose accounts carry its history, or is a new
+  attempt, and a limit moves work by the same rule. A route's `env` passes exposure and a review; its
+  `secrets` are issued whatever the Session read. The Session record's `launch` gains `pool`; the
+  board's attempts gain `route` and `account`, and `ai6ctl mission`, `ai6ctl agents`, the Agents page
+  and the timeline (`route` / `chosen`, `moved`) show them.
+- Moneypenny's Sessions use routes and account pools. A harness's limit marks its route for every
+  Station and her next message takes another; her conversation resumes on the same route while it
+  has room and otherwise starts afresh with its recap, and the person is told. A Station with none of
+  her routes' handlers refuses the message, so another can take it. `AssistantJob` and
+  `AssistantReport` gain `route`; `[assistant.desk] limit_fallback` says how long a limit with no
+  reset time lasts, 30 minutes by default.
+- The account kind `harness-login`, which hands over nothing and counts use and limits of the login
+  a harness already has, and `named_only` on a pool, which keeps it from an Agent or route that does
+  not name it. A `loadouts.toml` may hold only `[secret.<name>]` tables.
+- The `acp` handler's `limit_phrases`: the words that mark a failed turn as a provider's limit, by
+  default those the Grok CLI and others use, so `Rate limited` from Grok parks a Session rather than
+  failing it.
 - `ai6 config rm FAMILY KEY [--scope station:ID] [--force]` removes one record, from a directory of
   files, SQLite or PostgreSQL. It reads every family at every scope first, so a read error removes
   nothing; while another record names it, it refuses and lists them. `--force` goes ahead, says what
@@ -246,6 +270,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A gateway's 429 through Claude Code (`API Error: Request rejected (429)`, `api_error_status`) is a
+  limit, not a failed turn.
 - A program the `pipe` terminal starts outlives the thread that asked for it. The Grok CLI asks to
   be signalled when the thread that started it ends, which ended Moneypenny's harness on Linux with
   "the agent closed its connection" as soon as her first prompt was sent.

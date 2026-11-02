@@ -41,6 +41,68 @@ asks leave for beyond reading and her own MCP tools, and the rest is the agent's
 is not restricted on Grok without the [agent profile](acp.md#grok) that takes its own tools away.
 An answer whose tool was refused may end there, which Grok does; the conversation says so.
 
+### Routes and quota
+
+Her Agent may list [routes](agents.md#routes) like any other, and draws a pool account like any
+other: a claim under `assistant--<conversation digest>`, held while her harness runs, freed when it
+closes. To try sources in order as quota is available:
+
+```toml
+[agent.moneypenny]
+clearance = "field"
+balance = "priority"            # the first with room, in the order listed
+
+[[agent.moneypenny.route]]
+handler = "acp"
+model = "grok-4.7"
+pool = "grok-free"
+[agent.moneypenny.route.handler_settings]
+command = "/var/lib/ai6/.grok/bin/grok"
+args = ["--no-auto-update", "--disable-web-search", "agent", "--agent-profile", "/etc/ai6/moneypenny-grok.md", "stdio"]
+env = { HOME = "/var/lib/ai6", GROK_DISABLE_AUTOUPDATER = "1" }
+
+[[agent.moneypenny.route]]
+handler = "claude"
+model = "gemini-free"
+effort = "low"
+secrets = ["litellm"]
+env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL = "gemini-free", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1" }
+```
+
+```toml
+# loadouts.toml
+[pool.grok-free]
+handler = "acp"
+named_only = true               # no other acp Agent draws its budget
+[pool.grok-free.account.free]
+kind = "harness-login"
+
+[secret.litellm]
+env = "ANTHROPIC_AUTH_TOKEN"
+from = { file = "/etc/ai6/litellm.key" }
+```
+
+- **A limit moves the next message.** When a harness reports a limit the route's account is marked
+  for every Station, the person is told, and the harness closes. Her next message takes the next
+  route with room. The message that met the limit is not sent again by itself. With no reset time
+  (the Grok CLI gives none) the mark lasts `[assistant.desk] limit_fallback`, 30 minutes by default.
+- **Her conversation stays on its route while it can.** Universal Exports keeps the route beside the
+  provider Session and sends both with each message. A Session resumes only on its own route, even
+  if another comes first in order. Otherwise she starts afresh with the conversation's recap, and
+  the person is told what she moved from and to.
+- **A route's handler missing on a Station** rules that route out there. With no route left the
+  Station refuses the message, naming each route and why, and Universal Exports offers it to the
+  next healthy Station, as it does any refusal.
+- **A route's harness that does not start**, its login gone say, gives way to the next route with
+  room, within the same message, and the Station's log says why. A limit does not, since the harness
+  may have done something by then.
+- **Her environment** keeps only what reaches the model; a route's `env` and `secrets` are that by
+  definition, whatever their names. She is given no loadout secret. For the `acp` handler the
+  Session's environment wins over `handler_settings.env`, so an Agent `env` setting `HOME` hides a
+  route's own.
+- A `config-dir` account for the `claude` handler does not work for her: her harness has a
+  configuration directory of its own, and the sandbox denies it the Agent's.
+
 An assistant Session is not a Mission: it has no Operation, and never appears on the board;
 it reaches Agents only through [Cables](#cables), for the person. It works in a directory of
 its own, the same one each time its conversation's harness starts on that Station, because

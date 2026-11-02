@@ -153,6 +153,13 @@ args = ["--no-auto-update", "--disable-web-search", "agent", "--agent-profile", 
 env = { HOME = "/var/lib/ai6", GROK_DISABLE_AUTOUPDATER = "1", GROK_MEMORY = "0", DISABLE_TELEMETRY = "1", DISABLE_ERROR_REPORTING = "1" }
 ```
 
+Past its free quota Grok 1.0.70 answers `session/prompt` with JSON-RPC error `-32003`, `Rate limited`,
+with xAI's text beside it (`subscription:free-usage-exhausted: You've used all the included free usage
+...`) and no reset time. The handler's `limit_phrases` setting says what words mark a failed turn as a limit, found in
+that error without regard to case; its default names Grok's and those other agents commonly use. Such
+a Session stops as limited rather than failed, so [its route](agents.md#routes) or account is passed
+over.
+
 `--no-auto-update` and `--disable-web-search` go before `agent`. AI6 cannot tell whether a profile
 is set, so nothing warns of an Agent without one. xAI's server-side search for this model is not in
 that list and is not settled here: a turn's text goes to xAI either way.

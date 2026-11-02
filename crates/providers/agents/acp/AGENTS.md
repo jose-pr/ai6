@@ -22,6 +22,7 @@ pub struct AcpSettings {
     pub exit_wait_ms: i64,                      // 1000
     pub poll_ms: i64,                           // 200
     pub unconfined_desk: bool,                  // false
+    pub limit_phrases: Vec<String>,             // "rate limited", "rate limit exceeded", "usage-exhausted", "usage limit", "quota exceeded"
 }
 pub struct AcpHandler;                           // AgentHandler provider id "acp"; stdio() = Json (pipe)
 ```
@@ -42,6 +43,10 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
   (`desk`, anything else) fails with `GUATIAO_ERR_UNSUPPORTED`, before the agent starts, unless
   `unconfined_desk` is set; answer-only and assistant Sessions are not refused. `weakenings` answers
   one line when `unconfined_desk` is set, whatever the Agent's clearance.
+- `clearance_refusal` answers why a clearance `clearance_runs_commands` denies is refused, unless
+  `unconfined_desk` is set, so a route of this handler is passed over before a Session starts.
+- A prompt whose error contains one of `limit_phrases`, without regard to case, ends as a limit
+  event (`resets_at` and `window` unset), not `failed`.
 - `assistant_scripts` and `assistant_skills` keep the trait defaults (none).
 - A failed open appends the agent's last non-protocol output lines to the error; a connection
   lost later is `failed` with the agent's exit status and those lines.

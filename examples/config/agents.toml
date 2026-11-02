@@ -25,6 +25,22 @@ priority = 10
 # retire_on = "2027-01-31"
 # on_retire = "retired"
 
+# An Agent can list routes instead of one handler: one model under several names and account
+# sources, the Station balancing between them. docs/agents.md, "Routes".
+# [agent.0013]
+# roles = ["technical-officer"]
+# effort = "high"
+# balance = "headroom"           # or "round_robin" or "priority"
+# [[agent.0013.route]]
+# handler = "claude"
+# model = "sonnet"
+# pool = "claude-team"
+# [[agent.0013.route]]
+# handler = "claude"
+# model = "anthropic/sonnet"     # what this source calls it
+# env = { ANTHROPIC_BASE_URL = "https://llm.example" }
+# secrets = ["litellm"]          # [secret.litellm] in loadouts.toml
+
 [agent.Tanner]
 handler = "claude"
 model = "sonnet"

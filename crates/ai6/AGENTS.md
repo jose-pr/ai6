@@ -485,11 +485,37 @@ pub struct Agent {
     pub budget: Budget,                           // layered over the Operation's
     pub max_concurrent: Option<usize>,
     pub pool: Option<String>,                     // pins one account pool; inherited through `extends`
+    pub routes: Vec<AgentRoute>,                  // `[[agent.ID.route]]`, in place of `handler`; empty for one handler
+    pub balance: RouteBalance,                    // Headroom (default) | RoundRobin | Priority
     pub retire_on: Option<String>,                // UTC date YYYY-MM-DD the model reaches end of life
     pub on_retire: OnRetire,                      // Desk (default) | Retired
     pub retire_warning_days: u32,                 // DEFAULT_RETIRE_WARNING_DAYS = 14; 0 = no warning
 }
+#[non_exhaustive] pub struct AgentRoute {        // one way to its model; ToValue, FromValue, Schema, Form
+    pub handler: String,                          // required
+    pub model: Option<String>, pub effort: Option<String>,
+    pub handler_settings: serde_json::Map<String, serde_json::Value>,
+    pub pool: Option<String>,
+    pub env: SessionEnv,                          // no credential's or AI6's variable (refused)
+    pub secrets: Vec<String>,                     // `[secret.NAME]`s, issued whatever the Session read
+    pub priority: i64,
+}
+impl AgentRoute { pub fn new(handler: impl Into<String>) -> Self; pub fn reference(&self) -> RouteRef; }
+/// Which route ran; serde; Display `handler model (pool name)`.
+#[non_exhaustive] pub struct RouteRef { pub handler: String, pub model: Option<String>, pub pool: Option<String> }
+impl RouteRef { pub fn new(handler: impl Into<String>, model: Option<String>, pool: Option<String>) -> Self; }
+#[non_exhaustive] pub enum RouteBalance { Headroom, RoundRobin, Priority }
+impl RouteBalance { pub fn strategy(self) -> PoolStrategy; }
 impl Agent {
+    pub fn is_routed(&self) -> bool;
+    /// Complete: what a route leaves out from the Agent. One `handler` is one route; neither, none.
+    pub fn route_list(&self) -> Vec<AgentRoute>;
+    pub fn runs_on(&self, handlers: &[String]) -> bool;
+    /// As a Session on `route` works: its handler, model, effort, settings and pool; its env over the Agent's.
+    #[must_use] pub fn on_route(&self, route: &AgentRoute) -> Self;
+    pub fn route_named(&self, reference: &RouteRef) -> Option<AgentRoute>;
+    /// Its model, or for routes every model they name: what a clearance raise is signed for.
+    pub fn occupant_model(&self) -> Option<String>;
     /// The defaults a file gives `[agent.ID]`: clearance "field", priority 0, nothing else.
     pub fn new(id: impl Into<String>) -> Self;
     /// Serving | Retiring (within the warning window) | DeskDuty | Retired, judged by UTC day.
@@ -3471,7 +3497,7 @@ impl Loadout {
     pub fn for_account(pool: &AccountPool, account: &Account) -> Option<Self>;
 }
 #[non_exhaustive] pub enum AccountKind { ClaudeOauthToken, AnthropicApiKey, AnthropicAuthToken,
-    OpenaiApiKey, CodexAccessToken, ConfigDir }   // as_str()/parse(): "claude-oauth-token", …, "config-dir"
+    OpenaiApiKey, CodexAccessToken, ConfigDir, HarnessLogin }   // as_str()/parse(): "claude-oauth-token", …, "config-dir"
 impl AccountKind {
     pub fn env(self) -> Option<&'static str>;          // CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN
     pub fn login_flag(self) -> Option<&'static str>;   // --with-api-key, --with-access-token
@@ -3497,11 +3523,16 @@ impl AccountPool { pub fn id(&self) -> &str; pub fn handler(&self) -> &str;
 pub enum PoolChoice<'a> { Unpooled, Pools(Vec<&'a AccountPool>), Refused(String) }
 /// The three-way rule: a pool is usable when it serves `handler`, its globs admit
 /// `operation` or one of its `ancestors` (nearest first), and `allowed` (the Operation's
-/// `pools`; None = every pool) names it; `pinned` (the Agent's `pool`) narrows to one.
-/// Refused names each pool and why.
+/// `pools`; None = every pool) names it; `pinned` (the Agent's or route's `pool`) narrows to one,
+/// the only way to a `named_only` pool. Refused names each pool and why.
 pub fn choose_pools<'a>(pools: impl IntoIterator<Item = &'a AccountPool>, handler: Option<&str>,
     operation: Option<&str>, ancestors: &[String], allowed: Option<&[String]>,
     pinned: Option<&str>) -> PoolChoice<'a>;
+/// What `choose_route` compares of a route with room; `used_permille: None` counts as `unknown_use`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RouteStanding { pub used_permille: Option<u16>, pub active: usize, pub last_used: Option<f64>, pub priority: i64 }
+/// Which of `open` a Session takes; an earlier entry wins every tie. `None` when empty.
+pub fn choose_route(strategy: PoolStrategy, open: &[RouteStanding], unknown_use: u16) -> Option<usize>;
 pub trait AccountLogin: Send + Sync {
     fn login(&self, pool: &AccountPool, account: &Account, home: &Path, credential: &str) -> Result<(), String>;
 }
@@ -3790,6 +3821,9 @@ over its selected `Terminal` provider. `AgentHandler::stdio(&self) -> Result<Har
 ProviderError>` is an appended slot (default `Ok(HarnessStdio::Terminal)`): a handler whose
 harness speaks JSON over standard input and output answers `Json` (the `claude` and `codex`
 handlers do), and the Station gives it a provider without a terminal.
+`AgentHandler::clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError>`
+says why the handler, with its settings, would refuse a Mission's Session at that clearance; a route
+that would be refused is passed over (default: `None`).
 `AgentHandler::assistant_scripts(&self, environment: BTreeMap<String, String>) ->
 Result<Option<String>, ProviderError>` is another appended slot: `None` when the harness,
 started with `environment`, can run an assistant's interpreters inside its own sandbox on this
@@ -3984,6 +4018,7 @@ pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal"; // `cable`: held, body 
 pub const EVENT_CABLE_SENT: &str = "cable_sent";      // `cable`: sent, `cable_id` set
 pub const COMMIT_MEMORY: &str = "memory"; pub const COMMIT_SHARED: &str = "shared";
 pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
+    pub route: Option<RouteRef> /* default, omitted when None: the route `session_id` ran on, the only one it resumes on */,
     pub message: String, pub context: Vec<String> /* default: standing context */,
     pub recap: Option<String> /* default, omitted when None: for a harness started afresh only */,
     pub mcp_token: String,
@@ -4069,7 +4104,9 @@ pub struct AssistantCable { pub id: String /* desk's held ID, or the Cable ID wh
 impl AssistantCable { pub fn request_digest(&self) -> String; } // SHA-256 hex of operation,
     // target, recipient, ttl and body, each prefixed with its byte length and `:`
 pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
-    pub job_id: Option<String>, pub session_id: Option<String>, pub events: Vec<AssistantEvent> }
+    pub job_id: Option<String>, pub session_id: Option<String>,
+    pub route: Option<RouteRef> /* default, omitted when None: the route that Session runs on */,
+    pub events: Vec<AssistantEvent> }
 impl AssistantReport { pub fn cut_texts(&mut self, limits: &AssistantLimits); } // each text to
     // event_bytes, on a char boundary; the desk cuts every report it sends
 pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,
@@ -4482,6 +4519,15 @@ failed start or resume, and when a later issue for the Mission replaces them. Ea
 `credential`/`leased` timeline event (`secrets` = names, `approval` = request ID). Values are
 never written: the launch record and publication carry variable names only, the detached
 wrapper passes the environment through a FIFO, and a runner keeps it in memory.
+Routes: for an Agent with `routes` the Station surveys each at the start (handler available,
+`AgentHandler::clearance_refusal` when it hosts the handler, secrets and `env` acceptable, account
+source with room), picks by `balance` (`choose_route`) and goes on as `Agent::on_route`. The route's
+`env` passes a review's filter, its `secrets` are leased through `Loadout::for_route` whatever the
+Session read, and one with no pool claims an account of its own (`route-<digest>`/`login`,
+`AccountKind::HarnessLogin`), so its limit is shared. `LaunchManifest` and `SessionLaunch` carry the
+`pool`. With no route open the Mission waits, naming each. A resume stays, moves to a route of the
+same handler whose accounts carry the history, or queues a new attempt.
+
 Pool accounts: when the Agent's handler has pools (`choose_pools` with the Operation's
 `pools` and the Agent's `pool`), loadout secrets whose `env` is a credential variable are not
 issued (logged), and after the loadout the issue removes `CREDENTIAL_VARIABLES` and every

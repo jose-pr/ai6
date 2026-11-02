@@ -21,8 +21,8 @@ handler_settings = { command = "npx", args = ["-y", "@agentclientprotocol/claude
 `session/new._meta`, for an adapter's options), `model_option` and `effort_option` (config option
 ids), `protocol` (`"v1"`), and the timeouts `initialize_timeout_ms` (20000), `request_timeout_ms`
 (30000), `start_timeout_ms` (60000) and `close_grace_ms` (2000), `diagnostic_lines` (20),
-`exit_wait_ms` (1000) and `poll_ms` (200), and `unconfined_desk` (false). Unknown keys are refused
-when the handler loads.
+`exit_wait_ms` (1000) and `poll_ms` (200), `unconfined_desk` (false), and `limit_phrases` (the words
+that mark a failed turn as a provider's limit). Unknown keys are refused when the handler loads.
 
 ## Behaviour
 
@@ -37,7 +37,8 @@ when the handler loads.
   support is refused when the Session needs it. Remote-hands mode is refused.
 - The Agent's context and a restricted Session's limits go in front of the first prompt (ACP v1
   has no system prompt).
-- No token counts and no limit or quota detection: cost is reported when the agent sends it.
+- No token counts or quota windows: cost is reported when the agent sends it. A failed turn whose
+  error holds one of `limit_phrases` stops as limited, so its route or account is passed over.
 
 ## Development
 

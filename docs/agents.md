@@ -641,6 +641,7 @@ kind = "openai-api-key"
 | `anthropic-auth-token` | `ANTHROPIC_AUTH_TOKEN` |
 | `openai-api-key`, `codex-access-token` | a `CODEX_HOME` the Station makes for the Mission and logs in with `codex login --with-api-key` or `--with-access-token`, the value on standard input |
 | `config-dir` | `dir` as `CLAUDE_CONFIG_DIR` (handler `claude`) or `CODEX_HOME` (`codex`) |
+| `harness-login` | nothing is handed over: the harness uses the login it has where it runs, and the account only counts its use and its limits, so several routes can share one budget |
 
 `env = "VAR"` puts the value (or directory) in another variable; a handler other than
 `claude` or `codex` needs it for `config-dir`. Each account's secret is an ordinary loadout
@@ -653,7 +654,9 @@ a person approved.
   the Operation, and the Operation's `pools` (default: every pool) must name it. An Agent may
   pin one with `pool = "<id>"`. An Agent whose handler has pools, none of which may be used,
   does not start, and the reason names each pool and why; an Agent whose handler has no pool
-  keeps its loadout alone.
+  keeps its loadout alone. `named_only = true` on a pool keeps it from every Agent and route
+  that does not name it, so a pool of one source is not drawn by every other Agent of its
+  handler.
 - **One account per Session**: the Station removes every provider credential variable from the
   Session's environment (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
   `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`,
@@ -700,6 +703,85 @@ given; pooled Sessions always get one. Other variables that point a harness else
 (`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) are left as the
 Agent's environment sets them: an Agent that sets them sends its pooled Sessions there with
 the account's credential.
+
+### Routes
+
+An Agent can reach its model several ways: a handler, what that source calls the model, and where
+its accounts come from. List them in place of `handler`, and the Station balances between them:
+
+```toml
+[agent.007]
+roles = ["case-officer"]
+effort = "high"
+balance = "headroom"            # or "round_robin" or "priority"; the pool strategies' words
+
+[[agent.007.route]]
+handler = "claude"
+model = "claude-opus-5-5"
+pool = "claude-team"
+
+[[agent.007.route]]
+handler = "claude"
+model = "anthropic/claude-opus-5-5"   # what this source calls it
+env = { ANTHROPIC_BASE_URL = "https://llm.example" }
+secrets = ["litellm"]           # [secret.litellm], with env = "ANTHROPIC_AUTH_TOKEN"
+priority = 1
+
+[[agent.007.route]]
+handler = "codex"
+model = "gpt-6.1-sol"
+pool = "codex-team"
+```
+
+`handler` is required on a route. `model`, `effort`, `handler_settings` and `pool` it leaves out it
+takes from the Agent; `env` goes over the Agent's. An Agent with `handler` and no routes is one
+route, and both together are refused, as are two routes with the same handler, model and pool, since
+those names tell routes apart. With `extends`, what a record sets replaces the other form of what it
+extends.
+
+Identity stays the Agent's: its codename, roles, clearance, tags and Cables do not change with the
+route. Routes of one Agent are meant to be one model. AI6 does not check that, as it does not check
+a model at all; an Agent that needs another model's behaviour is another Agent.
+
+- **Which routes count**: a route counts when its handler is available on this Station, it can hold
+  the Session's clearance (the `acp` handler cannot hold `desk` without `unconfined_desk`), what it
+  names is configured, and its account source has room. Pools follow the rules above, on the
+  route's handler and `pool`. The Station and placement take an Agent while any of its routes can
+  run.
+- **Balancing**: `headroom` compares routes by their best account, by the numbers pools keep; a
+  route with no reported use counts as `[accounts] unknown_use_permille`. Then fewest Sessions, the
+  least recently used, the highest `priority`, and the order listed. `round_robin` takes the least
+  recently used, and `priority` the highest priority with room, then the order listed. The default
+  is `headroom`.
+- **A route with no pool** has one account of its own that hands over nothing, kept in the Registry
+  under a `route-…` ID and labelled with the Agent, handler and model. So every Station sees its
+  limit, its Sessions count and the board shows it as `harness-login`.
+- **Its `env`** is values anyone who reads the roster can read: a credential's variable or AI6's own
+  is refused at load. Exposure does not take them away, and a review keeps them.
+- **Its `secrets`** are `[secret.<name>]` definitions in `loadouts.toml`, leased per Session and
+  handed to the harness as any loadout secret, and issued whatever the Session has read, since the
+  harness reaches its model with them. A file of `[secret.<name>]` tables and no loadout or pool is
+  acceptable. A secret that is not configured, or a green ink one, rules the route out. A variable
+  a pool account also supplies is left to the account.
+- **All limited**: the Mission waits, and its `waiting` reason names each route and why. A brief
+  waits only when no route has room on any handler the deciding Station can judge: which Station
+  runs it, and so which handlers it has, is decided later.
+- **A Session keeps its route.** A resume stays on it, since history belongs to the harness and the
+  source. Without room there, a resume moves only to a route of the same handler whose accounts
+  carry the history, from an account that does; otherwise it is a new attempt on another route, and
+  the Agent is told, as a limit moves work. A running harness is never moved.
+- **`on_limit`**: `rotate` (the default) moves a limited Session by the rule above; `wait` parks it
+  and `backup` hands it to the next Agent, whatever other routes it has.
+- **What is shown**: the Session record's `launch` names the handler, model and pool, and its
+  `account` the account. So do the board's attempts, `ai6ctl mission` and the Mission page. The
+  timeline has `route` / `chosen` and `route` / `moved`, and the Agents page and `ai6ctl agents` list
+  each route.
+- **A review** is issued no credential, so a route that needs one is not chosen for it, and an
+  Operation's own `agents.toml` may not change a reviewer's routes.
+- **A clearance raise** is signed for what occupies the codename: with routes, every model they
+  name. Changing them ends the raise.
+
+[Moneypenny](assistant.md#routes-and-quota) takes routes too.
 
 ## Commands
 
