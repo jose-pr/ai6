@@ -67,8 +67,9 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
 - The Station (`ai6`) owns Missions, Agent Sessions and policy. Universal Exports owns the
   authenticated public API; Outer Office and `ai6ctl` are its clients and never reach a
   Station directly.
-- An Agent (codename) owns its handler, model and effort; a role is purpose and policy
-  only. The Station picks an available terminal provider that meets the handler's stdio
+- An Agent (codename) owns its handler, model and effort, or several routes to its model
+  (`[[agent.<id>.route]]`), each a handler, a model name and an account source; a role is purpose
+  and policy only. The Station picks an available terminal provider that meets the handler's stdio
   requirement (a JSON handler gets one without a terminal, `pipe`; otherwise `pty` is
   preferred) unless the `station` record pins `terminal`, and refuses a pin that does not meet it; the
   handler declares the requirement, and neither the Agent nor the handler names a provider.

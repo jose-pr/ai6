@@ -174,6 +174,8 @@ pub struct MissionAttempt {
     pub status: String,                      // "active" | "parked" | "ended" | "lost"
     pub lost: Option<String>,                // why, when lost
     pub checkpoint_branch: Option<String>,   // where its work was last checkpointed
+    pub route: Option<ai6::RouteRef>,        // the handler, model and pool it ran on, once launched
+    pub account: Option<ai6::AccountRef>,    // the account it drew from, a route's own included
 }
 
 #[non_exhaustive]
