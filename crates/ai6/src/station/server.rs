@@ -3342,7 +3342,11 @@ async fn schedule_queued_once(state: &DaemonState) {
                 }
             }
             Err(ApiErrorResponse(StatusCode::TOO_MANY_REQUESTS, _)) => break,
-            Err(_) => {
+            Err(ApiErrorResponse(_, Json(error))) => {
+                eprintln!(
+                    "ai6: Mission {mission_id:?} did not start and will be tried again: {}",
+                    error.error
+                );
                 if let Ok(mut retries) = state.retry_after.lock() {
                     retries.insert(
                         mission_id,
