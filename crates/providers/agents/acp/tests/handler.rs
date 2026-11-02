@@ -219,6 +219,7 @@ fn a_slow_initialize_is_a_setting_not_a_hang() {
 #[test]
 fn a_session_resumes_when_the_agent_can() {
     let request = AgentResume {
+        clearance: "field".to_owned(),
         mission_id: MissionId::try_new("mission-acp").unwrap(),
         session_id: SessionId::try_new("fake-1").unwrap(),
         message: Some("carry on".to_owned()),
@@ -238,6 +239,7 @@ fn a_session_resumes_when_the_agent_can() {
     assert!(text(&events).contains("prompt:carry on"), "{events:?}");
     // An agent that cannot resume or load says so.
     let request = AgentResume {
+        clearance: "field".to_owned(),
         mission_id: MissionId::try_new("mission-acp").unwrap(),
         session_id: SessionId::try_new("fake-1").unwrap(),
         message: None,

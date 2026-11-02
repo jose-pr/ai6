@@ -31,7 +31,8 @@ pub struct AgentStart {
     pub initial_context: Vec<String>,
     /// The Operation checkout or Mission safe house.
     pub working_directory: String,
-    /// The clearance selected by AI6; the handler maps it to harness policy.
+    /// The clearance selected by AI6; the handler maps it to harness policy. A clearance it does
+    /// not know counts as `desk` ([`clearance_runs_commands`]).
     pub clearance: String,
     /// Environment values issued for this provider operation.
     pub environment: BTreeMap<String, String>,
@@ -177,6 +178,14 @@ pub struct McpServerRef {
     pub env_prefix: String,
 }
 
+/// Whether a Session at `clearance` may have a command tool: `field` and `00`. Anything else,
+/// `desk` and a clearance this build does not know alike, may not, because a command reaches
+/// whatever the harness's OS user can. A handler that cannot keep commands from a Session refuses
+/// to start it.
+pub fn clearance_runs_commands(clearance: &str) -> bool {
+    crate::directorates::m::approvals::clearance_at_least(clearance, "field")
+}
+
 /// How AI6 resumes a provider-issued Session.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
@@ -189,6 +198,11 @@ pub struct AgentResume {
     pub message: Option<String>,
     /// The Mission checkout or safe house containing the saved Session.
     pub working_directory: String,
+    /// The clearance the Agent works at now, decided again on every resume, so that a Session
+    /// resumed after a change gets what the new clearance allows. Absent counts as `desk`
+    /// ([`clearance_runs_commands`]).
+    #[serde(default)]
+    pub clearance: String,
     /// Environment values issued for the resumed provider operation.
     pub environment: BTreeMap<String, String>,
     /// The requested model when the harness supports changing it on resume.

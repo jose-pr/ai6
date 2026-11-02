@@ -2260,6 +2260,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-process-42".parse().unwrap(),
                     session_id: session_id.clone(),
                     message: Some("resumed process turn".to_owned()),
@@ -2795,6 +2796,7 @@ mod tests {
         let session = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
                     session_id: session_id.clone(),
                     message: Some("continue the same Session".to_owned()),
@@ -2887,6 +2889,7 @@ mod tests {
         let session = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
                     session_id: SessionId::try_new("codex-thread-42").unwrap(),
                     message: None,
@@ -2931,6 +2934,7 @@ mod tests {
 
         let result = handler.resume(
             AgentResume {
+                clearance: "field".to_owned(),
                 mission_id: "mission-42".parse().unwrap(),
                 session_id: SessionId::try_new("codex-thread-42").unwrap(),
                 message: None,
@@ -3310,6 +3314,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "desk".to_owned(),
                     mission_id: "assistant-conversation".parse().unwrap(),
                     session_id,
                     message: Some("And now?".to_owned()),
@@ -3573,6 +3578,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "desk".to_owned(),
                     mission_id: start.mission_id.clone(),
                     session_id: SessionId::try_new("codex-scripts-thread").unwrap(),
                     message: Some("Again.".to_owned()),
@@ -3627,6 +3633,7 @@ mod tests {
             let refused = handler
                 .resume(
                     AgentResume {
+                        clearance: "desk".to_owned(),
                         mission_id: start.mission_id.clone(),
                         session_id: SessionId::try_new("codex-scripts-thread").unwrap(),
                         message: None,

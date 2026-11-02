@@ -1216,6 +1216,7 @@ impl Desk {
                 session_id,
                 message: Some(job.message.clone()),
                 working_directory: area.clone(),
+                clearance: "desk".to_owned(),
                 environment,
                 model: agent.model.clone(),
                 effort: agent.effort.clone(),

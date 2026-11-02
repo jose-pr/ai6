@@ -3167,7 +3167,7 @@ pub fn duplex() -> (Channel, Channel);                       // in-memory pair (
 impl LaunchMeta { pub fn from_start(&AgentStart) -> Self; pub fn into_start(self, prompt: String,
     working_directory: String) -> AgentStart; pub fn with_handler(self, HandlerSpec) -> Self;
     pub fn with_terminal(self, Option<String>) -> Self; pub fn to_value(&self) -> Value }
-#[non_exhaustive] pub struct ResumeMeta { /* as AgentResume: session_id, message, environment, ... */ }
+#[non_exhaustive] pub struct ResumeMeta { /* as AgentResume: session_id, message, clearance, environment, ... */ }
 impl ResumeMeta { pub fn from_resume(&AgentResume) -> Self; pub fn into_resume(self, working_directory: String)
     -> AgentResume; /* with_handler, with_terminal, to_value as LaunchMeta */ }
 
@@ -3682,6 +3682,12 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
 // no gate.
 // And `assistant: Option<AssistantMode>` (serde default None), set for Moneypenny: wins over
 // `answer_only` and is built from the mode's parts below.
+// Both carry `clearance: String`, the Agent's effective clearance at that launch (on
+// AgentResume serde default empty, which counts as `desk`). A Station passes `desk` for a Chief of
+// Staff review and for Moneypenny, whose limits are the two above.
+pub fn clearance_runs_commands(clearance: &str) -> bool; // field and 00 true; desk and anything else
+                                                         // false. A handler keeps commands from such a
+                                                         // Session, or refuses to start it.
 // AgentResume also carries `initial_context: Vec<String>` (serde default empty): the standing
 // part of the start-up context (the Agent's context, its role's purpose and policy; for
 // Moneypenny her instructions, never the conversation recap), which Claude Code is given again

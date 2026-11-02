@@ -174,6 +174,9 @@ pub struct ResumeMeta {
     pub session_id: SessionId,
     /// A message to submit after resuming.
     pub message: Option<String>,
+    /// The clearance the Agent works at now; absent counts as `desk`.
+    #[serde(default)]
+    pub clearance: String,
     /// Environment issued for the resumed operation.
     pub environment: BTreeMap<String, String>,
     /// The requested model.
@@ -215,6 +218,7 @@ impl ResumeMeta {
             mission_id: resume.mission_id.clone(),
             session_id: resume.session_id.clone(),
             message: resume.message.clone(),
+            clearance: resume.clearance.clone(),
             environment: resume.environment.clone(),
             model: resume.model.clone(),
             effort: resume.effort.clone(),
@@ -258,6 +262,7 @@ impl ResumeMeta {
             session_id: self.session_id,
             message: self.message,
             working_directory,
+            clearance: self.clearance,
             environment: self.environment,
             model: self.model,
             effort: self.effort,
@@ -281,6 +286,7 @@ impl fmt::Debug for ResumeMeta {
         f.debug_struct("ResumeMeta")
             .field("mission_id", &self.mission_id)
             .field("session_id", &self.session_id)
+            .field("clearance", &self.clearance)
             .field("environment", &self.environment.keys().collect::<Vec<_>>())
             .field("model", &self.model)
             .field("effort", &self.effort)

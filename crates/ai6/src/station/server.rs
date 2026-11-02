@@ -5007,6 +5007,13 @@ async fn resume_mission(
         session_id: session_id.clone(),
         message: message.clone(),
         working_directory: working_directory.clone(),
+        // What the Agent works at now, not at the start: a lowered clearance reaches the harness
+        // here, since each handler builds its tools from this request.
+        clearance: if review {
+            "desk".to_owned()
+        } else {
+            resume_agent.clearance.clone()
+        },
         environment: environment.clone(),
         model: model.clone(),
         effort: effort.clone(),
@@ -11115,6 +11122,118 @@ queue = 1
             .await
             .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
         let _ = fs::remove_dir_all(&scratch);
+    }
+
+    #[tokio::test]
+    async fn a_handler_is_given_the_clearance_the_agent_works_at_when_it_starts_and_resumes() {
+        use crate::directorates::registry::clearance::ClearanceGrant;
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n",
+        );
+        let mission = format!("clearance-at-launch-{}", std::process::id());
+        let other = format!("clearance-at-start-{}", std::process::id());
+        for id in [&mission, &other] {
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .create(
+                    MissionId::try_new(id).unwrap(),
+                    Some("G".to_owned()),
+                    "work".to_owned(),
+                    Some("007".to_owned()),
+                    None,
+                )
+                .unwrap();
+        }
+        let start = |id: String| {
+            let state = state.clone();
+            async move {
+                let _ = start_mission(
+                    State(state),
+                    axum::extract::Path(id),
+                    Json(StartMission {
+                        working_directory: None,
+                        initial_context: Vec::new(),
+                        environment: BTreeMap::new(),
+                    }),
+                )
+                .await
+                .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
+            }
+        };
+        let resume = |id: String| {
+            let state = state.clone();
+            async move {
+                let _ = resume_mission(
+                    State(state),
+                    axum::extract::Path(id),
+                    Json(ResumeMission {
+                        message: Some("carry on".to_owned()),
+                        environment: BTreeMap::new(),
+                    }),
+                )
+                .await
+                .unwrap_or_else(|error| panic!("resume failed: {:?}", error.1.0.error));
+            }
+        };
+        let started_at = |id: &str| {
+            RECORDED_STARTS
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|request| request.mission_id.as_str() == id)
+                .expect("the handler was started")
+                .clearance
+                .clone()
+        };
+        let resumed_at = |id: &str| {
+            RECORDED_RESUMES
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|request| request.mission_id.as_str() == id)
+                .expect("the handler was resumed")
+                .clearance
+                .clone()
+        };
+
+        start(mission.clone()).await;
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+        assert_eq!(started_at(&mission), "field");
+        resume(mission.clone()).await;
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+        assert_eq!(resumed_at(&mission), "field");
+
+        // Lowered between launches: the next resume and the next start carry it.
+        let now = state.clock.now() as f64;
+        state
+            .intake
+            .put_clearance_grant(&ClearanceGrant::lower("007", "G", "desk", "ops", now))
+            .unwrap();
+        resume(mission.clone()).await;
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+        assert_eq!(resumed_at(&mission), "desk");
+        start(other.clone()).await;
+        wait_for_state(&state, &other, MissionState::Blocked).await;
+        assert_eq!(started_at(&other), "desk");
+
+        // Removed: a resume takes the configured clearance back.
+        state.intake.remove_clearance_grant("G", "007").unwrap();
+        resume(mission.clone()).await;
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+        assert_eq!(resumed_at(&mission), "field");
+
+        for id in [&mission, &other] {
+            finalize_mission_resources(&state, id, true, false)
+                .await
+                .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
+        }
+        state.stopping.store(true, Ordering::Release);
     }
 
     /// A secret backend that hands out fake values and remembers what it revoked.

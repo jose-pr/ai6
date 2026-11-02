@@ -2152,6 +2152,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-process-42".parse().unwrap(),
                     session_id: session_id.clone(),
                     message: Some("resumed process turn".to_owned()),
@@ -2325,6 +2326,7 @@ mod tests {
         let session = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
                     session_id: session_id.clone(),
                     message: Some("continue the same Session".to_owned()),
@@ -2409,6 +2411,7 @@ mod tests {
         let session = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
                     session_id: SessionId::try_new("claude-session-42").unwrap(),
                     message: None,
@@ -2470,6 +2473,7 @@ mod tests {
         let session = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
                     session_id: SessionId::try_new("claude-session-42").unwrap(),
                     message: None,
@@ -2556,6 +2560,7 @@ mod tests {
             let session = handler
                 .resume(
                     AgentResume {
+                        clearance: "desk".to_owned(),
                         mission_id: "mission-42".parse().unwrap(),
                         session_id: SessionId::try_new("s-1").unwrap(),
                         message: None,
@@ -2613,6 +2618,7 @@ mod tests {
         let session = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
                     session_id: SessionId::try_new("claude-session-42").unwrap(),
                     message: None,
@@ -2659,6 +2665,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-silent".parse().unwrap(),
                     session_id: SessionId::try_new("claude-silent-session").unwrap(),
                     message: Some("are you there?".to_owned()),
@@ -3147,6 +3154,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-field".parse().unwrap(),
                     session_id: SessionId::try_new("claude-field-session").unwrap(),
                     message: None,
@@ -3329,6 +3337,7 @@ mod tests {
             .unwrap()
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-denied".parse().unwrap(),
                     session_id: SessionId::try_new("claude-session-denied").unwrap(),
                     message: None,
@@ -3499,6 +3508,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-gate".parse().unwrap(),
                     session_id: SessionId::try_new("claude-gate-session").unwrap(),
                     message: Some("approved".to_owned()),
@@ -3579,6 +3589,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "field".to_owned(),
                     mission_id: "mission-settings".parse().unwrap(),
                     session_id: SessionId::try_new("claude-settings-session").unwrap(),
                     message: None,
@@ -3742,6 +3753,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "desk".to_owned(),
                     mission_id: "assistant-conversation".parse().unwrap(),
                     session_id: SessionId::try_new("claude-assistant-session").unwrap(),
                     message: Some("And now?".to_owned()),
@@ -3878,6 +3890,7 @@ mod tests {
         let resumed = handler
             .resume(
                 AgentResume {
+                    clearance: "desk".to_owned(),
                     mission_id: "assistant-conversation".parse().unwrap(),
                     session_id: SessionId::try_new("claude-assistant-session").unwrap(),
                     message: Some("And now?".to_owned()),
