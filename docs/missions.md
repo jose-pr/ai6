@@ -227,8 +227,11 @@ settings mean:
   calls that merge a pull request.
 
 It reads through shell keywords (`if`, `do`, `{`, `!`), wrappers (`sudo`, `env`, `timeout`,
-`nice`, `nohup`, …), `sh -c`, `pwsh -Command`, `cmd /c`, `eval` and git aliases, and follows
-`cd`, `git -C` and `GIT_DIR` to the right repository. It then asks the Station whether the
+`nice`, `nohup`, …), `sh -c`, `pwsh -Command`, `cmd /c`, `eval`, `iex` and git aliases, and
+substitutions and here-documents, and follows `cd`, `git -C` and `GIT_DIR` to the right
+repository. A redirection (`2>&1`, `> log`) is neither an argument nor the end of the arguments.
+What it cannot read is held: a word only the shell can fill in (`git push origin HEAD:$BRANCH`),
+a quote that never closes, an encoded PowerShell command. It then asks the Station whether the
 Operation's policy and a live approval of the Mission cover each step. If not, the command is
 refused and the Agent is told the exact `kind` and `target` to pass to `request_approval`:
 

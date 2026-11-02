@@ -499,8 +499,12 @@ start or resume request cannot set it), and it is given the Session's Cable URL 
 arguments. The Station sets `AI6_GREEN_INK_TIMEOUT` and `AI6_GREEN_INK_NESTING` in the
 Session's environment from its `station` record (`[green_ink] gate_timeout`, `[approvals]
 classify_nesting`): how long the gate waits for the Station and how deep it reads nested
-shells and git aliases. It needs Claude Code 2.1.295 or later, which blocks the call when the hook cannot
+shells and git aliases; one nested deeper is held. It needs Claude Code 2.1.295 or later, which blocks the call when the hook cannot
 run.
+
+The gate reads a command line for POSIX shells, PowerShell and cmd at once: `git push origin main
+2>&1 | tee x` is a push of `main`, and `git push origin HEAD:$BRANCH` is held, since only the shell
+knows where it goes. Give a governed step literal names.
 
 ## Credentials
 

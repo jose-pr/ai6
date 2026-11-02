@@ -2592,13 +2592,20 @@ pub fn classify(command: &str, repo: &dyn Repository, nesting: usize)
                                            // and git aliases followed `nesting` deep
 ```
 
-`classify` reads a command line as a shell splits it (quotes, `;` `&&` `||` `|`, newlines,
-parentheses, backticks) and, for each simple command, drops shell keywords (`if then elif else
+`classify` reads a command line as POSIX shells, PowerShell and cmd split it (quotes, `;` `&&`
+`||` `|`, newlines, parentheses). A redirection and its target (`2>&1`, `> log`, `&>log`, `<<<x`,
+`2>$null`) are no argument, and the words after them still are; a single digit 0-6 joined to the
+operator is its stream, and `*>` leaves `*` an argument, since a POSIX shell expands it. Commands in
+`$(...)`, backticks, `<(...)` and `>(...)`, quoted or not, and in the lines of a here-document, are
+read as well; a comment's and a here-document line's quotes end with the line. For each simple
+command it drops shell keywords (`if then elif else
 while until do { !`), assignments (`GIT_DIR`, `GIT_WORK_TREE`, `GH_REPO` are used) and
 wrappers with their own options (`sudo`/`doas` incl. `-D`, `env` incl. `-C` and `-S LINE`,
 `timeout` and its duration, `nice`, `ionice`, `stdbuf`, `xargs`, `command`, `exec`,
 `nohup`, `setsid`, `time`); `command -v` runs nothing. It follows `cd`/`pushd`/`export` for
-later commands and reads `sh -c`, `bash -lc`, `pwsh -Command`, `cmd /c` and `eval`. It names,
+later commands and reads `sh -c`, `bash -lc`, `pwsh -Command` (any shortening; a bare argument of
+`powershell`), `cmd /c` (`/c"..."` too), `eval`, `iex` and `Invoke-Expression`. `git.cmd`,
+`C:\Git\cmd\git.exe` and `.\git.exe` are `git`. It names,
 deduplicated in order, always with the remote:
 - each ref a `git push` updates (`push`, `REMOTE:refs/...`; `--force`, `+ref`, `-u` change
   nothing; `--all`/`--branches` `refs/heads/*`, `--tags` and `--follow-tags`/`push.followTags`
@@ -2620,8 +2627,14 @@ naming no pull request or tag, a changing `gh api` call on releases, refs, tags,
 contents or branches (or a GraphQL mutation, or deleting a repository), arguments from
 `xargs`, `git send-pack`, submodule pushes (`--recurse-submodules=on-demand|only`),
 configuration through `--config-env` or `GIT_CONFIG_*`, and any other command that names
-`git … push` or `gh … merge|release|api` (`find -exec`, `parallel`, `Start-Process`). Not
-seen: arguments built at run time, `gh` aliases, other programs that push.
+`git … push` or `gh … merge|release|api` (`find -exec`, `parallel`, `Start-Process`). So is a
+word only the shell can fill in: in a push (`$X`, `$(x)`, a backtick, `%X%`, `{a,b}`, a backslash,
+`^` in a destination), a `git` subcommand with anything but letters, digits, `-`, `_` and `.`, a
+`gh` release tag, repository or changing `gh api` path, a program named by one word of that kind
+before `push`, `merge`, `release` or `api`, and a shell whose whole script is one (`eval "$X"`).
+So are a quote or substitution that never closes around `git` or `gh`, `pwsh -EncodedCommand`, and
+a shell nested deeper than `nesting`. Not seen: a program named by a variable with no such word
+after it, a script a command runs, `gh` aliases, other programs that push.
 
 `strict` asks for every governed kind at every clearance and refuses requests from `desk`;
 `licensed` also lets `00` push and merge unattended. A push needs green ink only to a

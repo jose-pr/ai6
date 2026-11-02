@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `send_cable` takes scope `operation`, as its description said it did.
 - An audit record's `resource` may also name `operation:`, `mission:` or `compartment:`.
 
+- The green ink gate reads redirections as a shell does, so `git push origin main 2>&1` and `git push
+  origin main > log` are the push of `main` rather than a refusal over a ref named `2>`, and `git push
+  2>&1 origin main` goes to `origin`, not a remote named `2>`. It holds more of what it could not read
+  and used to pass: a word only the shell can fill in, in any shell's spelling (`git push origin
+  HEAD:$BRANCH` was read as a push to a branch literally called `$BRANCH`, so no protected ref was
+  asked about), a command in a double-quoted `$(...)`, one after a comment or here-document holding an
+  apostrophe, `git.cmd`, an unquoted `C:\Git\cmd\git.exe`, `iex`, shortened `pwsh -Command` flags,
+  `pwsh -EncodedCommand`, `cmd /c"..."`, a `^` inside a word for cmd, and a shell nested deeper than
+  `[approvals] classify_nesting`, which was skipped. A commit message in a here-document that has a
+  line reading like a governed command is held, as one without an apostrophe was.
 - Provider libraries can be signed with no tooling but `ai6`, so a rebuild needs no record change:
   `ai6 plugins keygen --out PATH` once on the build host, `ai6 plugins sign --key PATH FILE...` in
   every build (`FILE.sig` beside each library, valid for that file name alone), and `ai6 plugins pin

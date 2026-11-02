@@ -4,9 +4,10 @@
 //! The classifier reads the words of a command line the way a shell splits them and asks the
 //! repository the command acts on what its refs and push configuration mean. It errs towards
 //! holding: a step it cannot pin down, or a `git`/`gh` it cannot place, is an error the gate
-//! turns into a refusal. Still best effort: a command that builds its arguments at run time,
-//! a `gh` alias, or a program other than `git` and `gh` that pushes, is not seen. The
-//! credential an approval unlocks is the guarantee; this turns attempts into requests early.
+//! turns into a refusal, and so is a governed step with a word only the shell can fill in. Still
+//! best effort: a command named only by a variable, a script a command runs, a `gh` alias, or a
+//! program other than `git` and `gh` that pushes, is not seen. The credential an approval unlocks
+//! is the guarantee; this turns attempts into requests early.
 
 use std::collections::BTreeMap;
 
@@ -51,7 +52,10 @@ pub trait Repository {
 /// merges a pull request. Commands inside `sh -c`, `bash -c`, `pwsh -Command`, `cmd /c`,
 /// `eval`, `env -S` and behind wrappers (`sudo`, `env`, `timeout`, `nice`, `ionice`,
 /// `stdbuf`, `nohup`, `setsid`, `time`, `command`, `exec`) or shell keywords are read too, up
-/// to `nesting` levels deep, and a `cd` before a command moves where its repository is asked.
+/// to `nesting` levels deep (deeper is held), and a `cd` before a command moves where its
+/// repository is asked. So are commands in substitutions and here-documents, and in PowerShell's `iex`. The command
+/// line is read as POSIX shells, PowerShell and cmd would each read it: a redirection and its
+/// target are no argument, and the words after them still are.
 ///
 /// A `git push` without refspecs follows the repository's configuration (`remote.R.push`,
 /// `push.default`, `remote.R.mirror`, `push.followTags`, the push remote of the current
@@ -61,8 +65,10 @@ pub trait Repository {
 ///
 /// A sentence for the Agent when a step cannot be pinned down: a ref the repository cannot
 /// name, a repository that cannot be read, a merge or release naming no pull request or tag, a
-/// `gh api` call that changes refs or releases, arguments supplied by `xargs`, or a `git` or
-/// `gh` the classifier cannot place in the command.
+/// `gh api` call that changes refs or releases, arguments supplied by `xargs`, a `git` or `gh`
+/// the classifier cannot place in the command, a governed step with a word known only at run
+/// time, a quote or substitution that never closes around a `git` or `gh`, a PowerShell
+/// `-EncodedCommand`, or a shell whose whole script is a variable.
 pub fn classify(
     command: &str,
     repo: &dyn Repository,
@@ -111,7 +117,7 @@ impl Shell {
 struct Walk<'a> {
     repo: &'a dyn Repository,
     steps: Vec<ActionScope>,
-    /// How deep `sh -c "sh -c ..."` and git aliases are followed.
+    /// How deep `sh -c "sh -c ..."` and git aliases are followed; deeper is held.
     nesting: usize,
 }
 
@@ -128,16 +134,22 @@ struct Simple {
 
 impl Walk<'_> {
     fn command(&mut self, command: &str, shell: &mut Shell, depth: usize) -> Result<(), String> {
-        for words in split(command) {
+        let lexed = split(command);
+        if lexed.unfinished() && names_git(command) {
+            return Err(
+                "a quote or substitution in this command never closes, so the green ink gate \
+                 cannot read what follows it"
+                    .to_owned(),
+            );
+        }
+        for words in lexed.commands {
             let mut local = shell.clone();
             let simple = peel(&words, &mut local)?;
             if simple.inert {
                 continue;
             }
             if let Some(inner) = simple.nested {
-                if depth < self.nesting {
-                    self.command(&inner, &mut local.clone(), depth + 1)?;
-                }
+                self.deeper(&inner, &local, depth)?;
                 continue;
             }
             let Some(program) = simple.words.first().map(|word| program_name(word)) else {
@@ -165,11 +177,18 @@ impl Walk<'_> {
                 "git" => self.git(args, &local, simple.unseen_args, depth)?,
                 "gh" => self.gh(args, &local, simple.unseen_args)?,
                 _ => {
+                    if encoded_script(&program, args) {
+                        return Err(
+                            "the green ink gate cannot read an encoded command; give it as text"
+                                .to_owned(),
+                        );
+                    }
                     if let Some(inner) = nested(&program, args) {
-                        if depth < self.nesting {
-                            self.command(&inner, &mut local.clone(), depth + 1)?;
+                        if unknown_script(&inner) {
+                            return Err(run_time_refusal());
                         }
-                    } else if unplaced(&simple.words) {
+                        self.deeper(&inner, &local, depth)?;
+                    } else if unplaced(&simple.words) || unnamed_program(&simple.words) {
                         return Err(
                             "this command runs git or gh in a way the green ink gate cannot read; \
                              run the git or gh command directly"
@@ -180,6 +199,18 @@ impl Walk<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Reads a command line inside another. One deeper than `nesting` is held, not skipped.
+    fn deeper(&mut self, inner: &str, shell: &Shell, depth: usize) -> Result<(), String> {
+        if depth >= self.nesting {
+            return Err(
+                "this command nests shells deeper than the green ink gate reads; run the git or \
+                 gh command directly"
+                    .to_owned(),
+            );
+        }
+        self.command(inner, &mut shell.clone(), depth + 1)
     }
 
     fn git(
@@ -229,6 +260,12 @@ impl Walk<'_> {
         let Some(subcommand) = args.get(index) else {
             return Ok(());
         };
+        if !subcommand
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        {
+            return Err(run_time_refusal());
+        }
         let rest = &args[index + 1..];
         let git = Git {
             repo: self.repo,
@@ -239,6 +276,11 @@ impl Walk<'_> {
             "push" => {
                 if unseen_args {
                     return Err(xargs_refusal());
+                }
+                if args[..index].iter().any(|arg| at_run_time(arg))
+                    || rest.iter().any(|arg| unreadable_ref(arg))
+                {
+                    return Err(run_time_refusal());
                 }
                 if opaque {
                     return Err(
@@ -256,20 +298,13 @@ impl Walk<'_> {
                     return Ok(());
                 };
                 if let Some(script) = expansion.strip_prefix('!') {
-                    if depth < self.nesting {
-                        return self.command(
-                            &format!("{script} {}", rest.join(" ")),
-                            &mut shell.clone(),
-                            depth + 1,
-                        );
-                    }
-                    return Ok(());
+                    return self.deeper(&format!("{script} {}", rest.join(" ")), shell, depth);
                 }
                 if depth >= self.nesting {
                     return Err(format!("the git alias {alias:?} expands too deeply"));
                 }
                 let mut expanded = args[..index].to_vec();
-                expanded.extend(split(&expansion).into_iter().flatten());
+                expanded.extend(split(&expansion).commands.into_iter().flatten());
                 expanded.extend(rest.iter().cloned());
                 self.git(&expanded, shell, unseen_args, depth + 1)
             }
@@ -395,6 +430,10 @@ impl Walk<'_> {
                 Some((source, destination)) => (source, destination),
                 None => (refspec, refspec),
             };
+            // No ref holds one, and cmd takes it away.
+            if destination.contains('^') {
+                return Err(run_time_refusal());
+            }
             if delete || source.is_empty() {
                 let reference = git.destination(destination, None, head.as_deref())?;
                 self.steps.push(scope("delete", &reference)?);
@@ -455,6 +494,9 @@ impl Walk<'_> {
                 let tag = rest
                     .first()
                     .ok_or("name the release's tag, as in gh release create v1.2.0")?;
+                if at_run_time(tag) {
+                    return Err(run_time_refusal());
+                }
                 self.steps.push(
                     ActionScope::try_new("release", format!("tag {tag}"))
                         .map_err(|e| e.to_string())?,
@@ -466,6 +508,9 @@ impl Walk<'_> {
                 if matches!(method.as_str(), "GET" | "HEAD") {
                     return Ok(());
                 }
+                if at_run_time(path) {
+                    return Err(run_time_refusal());
+                }
                 self.api(path.trim_start_matches('/'), &method, args)?;
             }
             _ => {}
@@ -474,6 +519,9 @@ impl Walk<'_> {
     }
 
     fn merge(&mut self, repository: Option<String>, number: &str) -> Result<(), String> {
+        if repository.as_deref().is_some_and(at_run_time) {
+            return Err(run_time_refusal());
+        }
         let target = match repository {
             Some(repository) => format!("PR {repository}#{number}"),
             None => format!("PR {number}"),
@@ -575,6 +623,12 @@ fn submodules(mode: Option<&str>) -> Result<(), String> {
 fn xargs_refusal() -> String {
     "the arguments of this command come from xargs, which the green ink gate cannot see; run \
      it directly"
+        .to_owned()
+}
+
+fn run_time_refusal() -> String {
+    "a word of this command is known only when the shell runs it, so green ink cannot tell what \
+     it would change; name the remote, the refs and the command literally"
         .to_owned()
 }
 
@@ -694,68 +748,376 @@ impl Git<'_> {
     }
 }
 
-/// Splits a command line into simple commands of words, honouring quotes. Separators are
-/// `;`, `&`, `|`, newlines, parentheses and backticks outside quotes.
-fn split(command: &str) -> Vec<Vec<String>> {
-    let mut commands = Vec::new();
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut in_word = false;
-    let mut chars = command.chars().peekable();
-    let end_word = |word: &mut String, words: &mut Vec<String>, in_word: &mut bool| {
-        if *in_word {
-            words.push(std::mem::take(word));
-            *in_word = false;
+/// What [`split`] reads of a command line.
+#[derive(Debug, Default)]
+struct Lexed {
+    /// The simple commands, a substitution's before the command it is an argument of.
+    commands: Vec<Vec<String>>,
+    /// A quote that never closes.
+    open_quote: bool,
+    /// A `$(`, `<(`, `>(` or backtick that never closes.
+    open_substitution: bool,
+}
+
+impl Lexed {
+    /// Whether the line runs past its end, which leaves what follows the opening unread.
+    fn unfinished(&self) -> bool {
+        self.open_quote || self.open_substitution
+    }
+}
+
+/// Stands for a substitution in the word that holds it; [`at_run_time`] reads it.
+const SUBSTITUTED: &str = "$()";
+
+/// What the next word of a command is, after a redirection operator.
+#[derive(Debug, Clone, Copy)]
+enum Target {
+    /// A file or stream, which is no argument.
+    File,
+    /// A here-document's delimiter; `true` when `<<-` takes tabs off its lines.
+    HereDocument(bool),
+}
+
+/// One level of command being read: the line, or the inside of a substitution. Levels are kept
+/// on a stack, so a deep line cannot overflow the thread's.
+#[derive(Debug, Default)]
+struct Level {
+    words: Vec<String>,
+    word: String,
+    in_word: bool,
+    /// Part of the word was quoted, so it is not a stream number and not a closing `}`.
+    quoted: bool,
+    last_quoted: bool,
+    in_double_quotes: bool,
+    target: Option<Target>,
+    /// What closes this level: `)` or a backtick.
+    closes: Option<char>,
+    /// Parentheses opened inside a `$(`.
+    parens: usize,
+}
+
+impl Level {
+    fn end_word(&mut self, here_documents: &mut Vec<(String, bool)>) {
+        if !self.in_word {
+            return;
         }
-    };
-    while let Some(c) = chars.next() {
+        self.in_word = false;
+        let word = std::mem::take(&mut self.word);
+        match self.target.take() {
+            Some(Target::File) => {}
+            Some(Target::HereDocument(strip)) => here_documents.push((word, strip)),
+            None => {
+                self.words.push(word);
+                self.last_quoted = self.quoted;
+            }
+        }
+        self.quoted = false;
+    }
+
+    fn end_command(
+        &mut self,
+        here_documents: &mut Vec<(String, bool)>,
+        commands: &mut Vec<Vec<String>>,
+    ) {
+        self.end_word(here_documents);
+        self.target = None;
+        // PowerShell's `{ git push origin main }` closes with no separator before the brace.
+        if self.words.len() > 1 && !self.last_quoted && self.words.last().is_some_and(|w| w == "}")
+        {
+            self.words.pop();
+        }
+        if !self.words.is_empty() {
+            commands.push(std::mem::take(&mut self.words));
+        }
+    }
+}
+
+/// Splits a command line into simple commands of words, honouring quotes, for POSIX shells,
+/// PowerShell and cmd alike. Separators are `;`, `&`, `|`, newlines and parentheses outside
+/// quotes. A redirection and its target are no argument, and the arguments go on after them. A
+/// `$(...)`, backtick or process substitution, in double quotes or not, adds its own commands,
+/// and leaves [`SUBSTITUTED`] in the word. A comment's quotes and a here-document's end with the
+/// line, since neither hides what follows: its words stay, for a shell without comments and for
+/// a here-document fed to a shell.
+fn split(command: &str) -> Lexed {
+    let chars: Vec<char> = command.chars().collect();
+    read(&chars, true)
+}
+
+/// [`split`] of `chars`; `comments` is off inside a comment, which has no more to find.
+fn read(chars: &[char], comments: bool) -> Lexed {
+    let mut lexed = Lexed::default();
+    let mut here_documents = Vec::new();
+    let mut levels = vec![Level::default()];
+    let mut at = 0;
+    while let Some(&c) = chars.get(at) {
+        at += 1;
+        let next = chars.get(at).copied();
+        let top = levels.len() - 1;
+        let level = &mut levels[top];
+        if level.in_double_quotes {
+            match c {
+                '"' => level.in_double_quotes = false,
+                '\\' if matches!(next, Some('"' | '\\' | '$' | '`')) => {
+                    level.word.extend(next);
+                    at += 1;
+                }
+                '\\' if next == Some('\n') => at += 1,
+                '$' if next == Some('(') => {
+                    at += 1;
+                    levels.push(substitution(')'));
+                }
+                '`' => levels.push(substitution('`')),
+                _ => level.word.push(c),
+            }
+            continue;
+        }
         match c {
+            ')' if level.closes == Some(')') && level.parens == 0 => {
+                close(&mut levels, &mut here_documents, &mut lexed.commands);
+            }
+            '`' if level.closes == Some('`') => {
+                close(&mut levels, &mut here_documents, &mut lexed.commands);
+            }
             '\'' => {
-                in_word = true;
-                for c in chars.by_ref() {
+                level.in_word = true;
+                level.quoted = true;
+                let mut closed = false;
+                while let Some(&c) = chars.get(at) {
+                    at += 1;
                     if c == '\'' {
+                        closed = true;
                         break;
                     }
-                    word.push(c);
+                    level.word.push(c);
                 }
+                lexed.open_quote |= !closed;
             }
             '"' => {
-                in_word = true;
-                while let Some(c) = chars.next() {
-                    match c {
-                        '"' => break,
-                        '\\' if matches!(chars.peek(), Some('"' | '\\' | '$' | '`')) => {
-                            word.extend(chars.next());
-                        }
-                        _ => word.push(c),
-                    }
-                }
+                level.in_word = true;
+                level.quoted = true;
+                level.in_double_quotes = true;
             }
             '\\' => {
-                in_word = true;
-                match chars.next() {
-                    Some('\n') | None => {}
-                    Some(next) => word.push(next),
+                level.in_word = true;
+                match next {
+                    Some('\n') => at += 1,
+                    // A path to PowerShell, and a pointless escape to a POSIX shell: both
+                    // readings stay, for `program_name` and `at_run_time`.
+                    Some(letter) if letter.is_ascii_alphanumeric() => level.word.push('\\'),
+                    Some(other) => {
+                        level.word.push(other);
+                        at += 1;
+                    }
+                    None => {}
                 }
             }
-            ';' | '&' | '|' | '\n' | '(' | ')' | '`' => {
-                end_word(&mut word, &mut words, &mut in_word);
-                if !words.is_empty() {
-                    commands.push(std::mem::take(&mut words));
+            '$' if next == Some('(') => {
+                at += 1;
+                levels.push(substitution(')'));
+            }
+            '`' => levels.push(substitution('`')),
+            '<' | '>' => {
+                let stream = level.in_word
+                    && !level.quoted
+                    && matches!(level.word.as_str(), "0" | "1" | "2" | "3" | "4" | "5" | "6");
+                if stream {
+                    level.word.clear();
+                    level.in_word = false;
+                } else {
+                    level.end_word(&mut here_documents);
+                }
+                match (c, next, chars.get(at + 1).copied()) {
+                    (_, Some('('), _) => {
+                        at += 1;
+                        levels.push(substitution(')'));
+                    }
+                    ('<', Some('#'), _) => {
+                        // PowerShell's block comment, a syntax error to a POSIX shell.
+                        at = block_comment_end(chars, at);
+                    }
+                    ('<', Some('<'), Some('<')) => {
+                        at += 2;
+                        level.target = Some(Target::File);
+                    }
+                    ('<', Some('<'), Some('-')) => {
+                        at += 2;
+                        level.target = Some(Target::HereDocument(true));
+                    }
+                    ('<', Some('<'), _) => {
+                        at += 1;
+                        level.target = Some(Target::HereDocument(false));
+                    }
+                    ('<', Some('>' | '&'), _) | ('>', Some('>' | '|' | '&'), _) => {
+                        at += 1;
+                        level.target = Some(Target::File);
+                    }
+                    _ => level.target = Some(Target::File),
                 }
             }
-            c if c.is_whitespace() => end_word(&mut word, &mut words, &mut in_word),
+            '&' if next == Some('>') => {
+                level.end_word(&mut here_documents);
+                at += if chars.get(at + 1) == Some(&'>') {
+                    2
+                } else {
+                    1
+                };
+                level.target = Some(Target::File);
+            }
+            '(' | ')' => {
+                if level.closes == Some(')') {
+                    if c == '(' {
+                        level.parens += 1;
+                    } else {
+                        level.parens -= 1;
+                    }
+                }
+                level.end_command(&mut here_documents, &mut lexed.commands);
+            }
+            ';' | '&' | '|' => level.end_command(&mut here_documents, &mut lexed.commands),
+            '\n' => {
+                level.end_command(&mut here_documents, &mut lexed.commands);
+                for (delimiter, strip) in std::mem::take(&mut here_documents) {
+                    at = here_document(chars, at, &delimiter, strip, &mut lexed);
+                }
+            }
+            '#' if comments && !level.in_word => {
+                let end = line_end(chars, at);
+                let token = chars[at..end]
+                    .iter()
+                    .position(|c| c.is_whitespace())
+                    .map_or(end, |position| at + position);
+                level.word.push('#');
+                level.word.extend(&chars[at..token]);
+                level.in_word = true;
+                level.end_word(&mut here_documents);
+                let inside = read(&chars[token..end], false);
+                lexed.commands.extend(inside.commands);
+                at = end;
+            }
+            c if c.is_whitespace() => level.end_word(&mut here_documents),
             c => {
-                in_word = true;
-                word.push(c);
+                level.in_word = true;
+                level.word.push(c);
             }
         }
     }
-    end_word(&mut word, &mut words, &mut in_word);
-    if !words.is_empty() {
-        commands.push(words);
+    for mut level in levels {
+        level.end_command(&mut here_documents, &mut lexed.commands);
+        lexed.open_quote |= level.in_double_quotes;
+        lexed.open_substitution |= level.closes.is_some();
     }
-    commands
+    lexed
+}
+
+fn substitution(closes: char) -> Level {
+    Level {
+        closes: Some(closes),
+        ..Level::default()
+    }
+}
+
+/// Ends the top level, leaving [`SUBSTITUTED`] in the word of the one below.
+fn close(
+    levels: &mut Vec<Level>,
+    here_documents: &mut Vec<(String, bool)>,
+    commands: &mut Vec<Vec<String>>,
+) {
+    if let Some(mut inner) = levels.pop() {
+        inner.end_command(here_documents, commands);
+    }
+    if let Some(outer) = levels.last_mut() {
+        outer.word.push_str(SUBSTITUTED);
+        outer.in_word = true;
+        outer.quoted = true;
+    }
+}
+
+/// Where the line holding `at` ends: its newline, or the end.
+fn line_end(chars: &[char], at: usize) -> usize {
+    chars[at..]
+        .iter()
+        .position(|c| *c == '\n')
+        .map_or(chars.len(), |position| at + position)
+}
+
+/// Where a `<#` comment opened at `at` ends: after its `#>`, or nowhere, which a shell refuses.
+fn block_comment_end(chars: &[char], at: usize) -> usize {
+    chars[at..]
+        .windows(2)
+        .position(|pair| pair == ['#', '>'])
+        .map_or(chars.len(), |position| at + position + 2)
+}
+
+/// Reads the here-document whose lines start at `at`, each as a line of commands, up to its
+/// delimiter; answers where it ends. A substitution left open there is unread text.
+fn here_document(
+    chars: &[char],
+    mut at: usize,
+    delimiter: &str,
+    strip: bool,
+    lexed: &mut Lexed,
+) -> usize {
+    while at < chars.len() {
+        let end = line_end(chars, at);
+        let line: String = chars[at..end].iter().collect();
+        at = (end + 1).min(chars.len());
+        let text = line.strip_suffix('\r').unwrap_or(&line);
+        let text = if strip {
+            text.trim_start_matches('\t')
+        } else {
+            text
+        };
+        if text == delimiter {
+            break;
+        }
+        let inside = split(text);
+        lexed.commands.extend(inside.commands);
+        lexed.open_substitution |= inside.open_substitution;
+    }
+    at
+}
+
+/// Whether a word's value is known only when the shell runs it: a variable or substitution in
+/// any shell's spelling (`$X`, `$(x)`, a backtick, `%X%`). A POSIX shell may also split one into
+/// several words.
+fn at_run_time(word: &str) -> bool {
+    word.contains(['$', '`', '%'])
+}
+
+/// Whether a remote, refspec or option of a push cannot be taken as written: [`at_run_time`],
+/// a brace expansion, or a backslash, an escape to one shell and a character to another.
+fn unreadable_ref(word: &str) -> bool {
+    at_run_time(word) || word.contains(['{', '}', '\\'])
+}
+
+/// Whether a command names a word only the shell can fill in as its program and a governed
+/// subcommand after it (`$GIT push origin main`).
+fn unnamed_program(words: &[String]) -> bool {
+    let Some((first, rest)) = words.split_first() else {
+        return false;
+    };
+    (first.starts_with('$') || first.starts_with('`'))
+        && !first.contains(['/', '\\'])
+        && rest
+            .iter()
+            .any(|word| matches!(word.as_str(), "push" | "merge" | "release" | "api"))
+}
+
+/// Whether a shell's whole command is one word only it can fill in (`eval "$COMMAND"`).
+fn unknown_script(script: &str) -> bool {
+    match split(script).commands.as_slice() {
+        [only] => {
+            matches!(only.as_slice(), [word] if word.starts_with('$') && !word.contains(['/', '\\']))
+        }
+        _ => false,
+    }
+}
+
+/// Whether `text` holds the word `git` or `gh`, as a program may be spelled.
+fn names_git(text: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word.eq_ignore_ascii_case("git") || word.eq_ignore_ascii_case("gh"))
 }
 
 /// Shell keywords a command may follow; `time` is read as a wrapper.
@@ -948,12 +1310,29 @@ fn assignment(word: &str) -> Option<(&str, &str)> {
     .then_some((name, value))
 }
 
-/// A program's name without its directory or `.exe`, in lower case.
+/// A program's name without its directory or Windows extension, in lower case. A backslash
+/// before a letter is a POSIX shell's escape or a Windows directory: the first reading wins when
+/// it names a program this reads, so both `g\\it` and `C:\\Git\\cmd\\git.exe` are `git`.
 fn program_name(word: &str) -> String {
-    let base = word.rsplit(['/', '\\']).next().unwrap_or(word);
-    let base = base.to_ascii_lowercase();
-    base.strip_suffix(".exe")
-        .map_or(base.clone(), str::to_owned)
+    let name = |word: &str| {
+        let base = word
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(word)
+            .to_ascii_lowercase();
+        [".exe", ".cmd", ".bat", ".com"]
+            .into_iter()
+            .find_map(|extension| base.strip_suffix(extension).map(str::to_owned))
+            .unwrap_or(base)
+    };
+    if !word.contains('\\') {
+        return name(word);
+    }
+    let escaped = name(&word.replace('\\', ""));
+    let read_here = matches!(escaped.as_str(), "git" | "gh" | "cmd" | "eval")
+        || wrapper(&escaped).is_some()
+        || nested(&escaped, &["-c".to_owned()]).is_some();
+    if read_here { escaped } else { name(word) }
 }
 
 /// Whether a command that is neither `git` nor `gh` still names one with a governed
@@ -973,12 +1352,6 @@ fn unplaced(words: &[String]) -> bool {
 
 /// The command a shell or `eval` runs from its arguments.
 fn nested(program: &str, args: &[String]) -> Option<String> {
-    let after = |flags: &[&str]| {
-        let position = args
-            .iter()
-            .position(|arg| flags.iter().any(|flag| arg.eq_ignore_ascii_case(flag)))?;
-        Some(args[position + 1..].join(" "))
-    };
     match program {
         "sh" | "bash" | "zsh" | "dash" | "ksh" => {
             let position = args.iter().position(|arg| {
@@ -986,11 +1359,50 @@ fn nested(program: &str, args: &[String]) -> Option<String> {
             })?;
             args.get(position + 1).cloned()
         }
-        "pwsh" | "powershell" => after(&["-c", "-command"]),
-        "cmd" => after(&["/c", "/k"]),
-        "eval" => Some(args.join(" ")),
+        "pwsh" | "powershell" => {
+            if let Some(position) = args.iter().position(|arg| powershell_flag(arg, "-command")) {
+                return Some(args[position + 1..].join(" "));
+            }
+            // Windows PowerShell runs a bare argument as a command, and pwsh as a file.
+            let file = args.iter().any(|arg| powershell_flag(arg, "-file"));
+            let script: Vec<&str> = args
+                .iter()
+                .map(String::as_str)
+                .filter(|arg| !arg.starts_with('-'))
+                .collect();
+            (program == "powershell" && !file && !script.is_empty()).then(|| script.join(" "))
+        }
+        "cmd" => {
+            // cmd takes the command with or without a space: `/c"git push"`.
+            let position = args.iter().position(|arg| {
+                let lower = arg.to_ascii_lowercase();
+                lower.starts_with("/c") || lower.starts_with("/k")
+            })?;
+            let glued = &args[position][2..];
+            let rest = args[position + 1..].join(" ");
+            Some(format!("{glued} {rest}"))
+        }
+        "eval" | "iex" | "invoke-expression" => Some(args.join(" ")),
         _ => None,
     }
+}
+
+/// Whether `arg` is PowerShell's `flag`, which it takes shortened, and after `/` or `--` too.
+fn powershell_flag(arg: &str, flag: &str) -> bool {
+    let lower = arg.to_ascii_lowercase();
+    let spelled = match lower.strip_prefix("--").or_else(|| lower.strip_prefix('/')) {
+        Some(rest) => format!("-{rest}"),
+        None => lower,
+    };
+    spelled.len() > 1 && flag.starts_with(&spelled)
+}
+
+/// Whether PowerShell is given its command in base64 (`-EncodedCommand`, `-enc`, `-ec`, `-e`).
+fn encoded_script(program: &str, args: &[String]) -> bool {
+    matches!(program, "pwsh" | "powershell")
+        && args
+            .iter()
+            .any(|arg| powershell_flag(arg, "-encodedcommand") || arg.eq_ignore_ascii_case("-ec"))
 }
 
 /// `gh` options, global or of the subcommands read here, that take the next word as their
@@ -1569,6 +1981,292 @@ mod tests {
         ] {
             held(command);
         }
+    }
+
+    #[test]
+    fn a_redirection_is_neither_an_argument_nor_the_end_of_the_arguments() {
+        for command in [
+            "git push origin main 2>&1",
+            "git push origin main 2>& 1",
+            "git push origin main > log",
+            "git push origin main >log",
+            "git push origin main >> log",
+            "git push origin main 2> log",
+            "git push origin main 2>log",
+            "git push origin main 2>>log",
+            "git push origin main >log 2>&1",
+            "git push origin main >\"my log\" 2>&1",
+            "git push origin main &> log",
+            "git push origin main &>> log",
+            "git push origin main >& log",
+            "git push origin main >&2",
+            "git push origin main 2>&-",
+            "git push origin main < in",
+            "git push origin main <in",
+            "git push origin main <<< word",
+            "git push origin main >| log",
+            "git push origin main>log",
+            "git push origin main | tee x",
+            "git push origin main 2>&1 | tee x",
+            "git push origin main |& tee x",
+            "git push origin main 2>&1 &",
+            "git push origin main 2>/dev/null",
+            "git push origin main 2>$null",
+            "git push origin main 1>$null 2>&1",
+            "git push origin main > $null",
+            // The arguments go on after a redirection, so stopping there would read this as a
+            // plain `git push` of the current branch.
+            "git push 2>&1 origin main",
+            "git push > log origin main",
+            "git push origin > 'my log' main",
+            "git push >log origin 2>&1 main",
+            "> log git push origin main",
+            "2>&1 git push origin main",
+            "GIT_TRACE=1 2>&1 git push origin main",
+            // PowerShell and cmd.
+            "git push origin main 2>&1 | Out-Null",
+            "git push origin main | Tee-Object x",
+            "& git push origin main 2>&1",
+            "& 'C:\\Program Files\\Git\\cmd\\git.exe' push origin main",
+            "C:\\Git\\cmd\\git.exe push origin main",
+            ".\\git.exe push origin main",
+            "g\\it push origin main",
+            "git.cmd push origin main",
+            "if ($x) { git push origin main }",
+            "& { git push origin main }",
+            "iex 'git push origin main'",
+            "Invoke-Expression \"git push origin main\"",
+            "pwsh -Comm 'git push origin main'",
+            "powershell 'git push origin main'",
+            "powershell -NoProfile \"git push origin main\"",
+            "pwsh /c 'git push origin main'",
+            "cmd /c git push origin main >nul 2>&1",
+            "cmd /c \"git push origin main 2>nul\"",
+            "cmd /c\"git push origin main\"",
+            "cmd.exe /S /C \"git push origin main\"",
+        ] {
+            assert_eq!(
+                steps(command),
+                one("push", "origin:refs/heads/main"),
+                "{command}"
+            );
+        }
+        // A number joined to a word, or quoted, is an argument, not a stream.
+        for command in [
+            "git push origin main2>log",
+            "git push origin '2'>log",
+            "git push origin 7>log",
+        ] {
+            held(command);
+        }
+        // In PowerShell `*>` is every stream; in a POSIX shell the `*` is an argument, which
+        // can expand to any file's name.
+        assert_eq!(
+            steps("git push origin main *>log"),
+            pushes(&["origin:refs/heads/main", "origin:refs/heads/*"])
+        );
+    }
+
+    #[test]
+    fn every_command_after_an_operator_is_read() {
+        for command in [
+            "git push origin main; git push origin feature",
+            "git push origin main && git push origin feature",
+            "git push origin main || git push origin feature",
+            "git push origin main & git push origin feature",
+            "git push origin main | git push origin feature",
+            "git push origin main\ngit push origin feature",
+            "git push origin main 2>&1; git push origin feature",
+            "git push origin main 2>&1 && git push origin feature",
+            "git push origin main 2>&1 & git push origin feature",
+            "git push origin main 2>&1 | git push origin feature",
+            "git push origin main > log; git push origin feature",
+            "git push origin main > log && git push origin feature",
+            "git push origin main &> log; git push origin feature",
+            "git push origin main <<< word; git push origin feature",
+        ] {
+            assert_eq!(
+                steps(command),
+                pushes(&["origin:refs/heads/main", "origin:refs/heads/feature"]),
+                "{command}"
+            );
+        }
+        for command in [
+            "git push origin main && rm -rf x",
+            "git push origin main 2>&1 && rm -rf x",
+            "x && git push origin main",
+            "x || git push origin main",
+            "x; git push origin main",
+            "x & git push origin main",
+            "x | git push origin main",
+            "x 2>&1 | git push origin main",
+            "ls > log && git push origin main",
+            "echo hi >log; git push origin main",
+            "ls 2>&1 | tee x | git push origin main",
+            "git status > log & git push origin main",
+            "rm -rf x &> log; git push origin main",
+        ] {
+            assert_eq!(
+                steps(command),
+                one("push", "origin:refs/heads/main"),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_inside_a_substitution_is_read() {
+        for command in [
+            "echo $(git push origin main)",
+            "echo \"$(git push origin main)\"",
+            "echo `git push origin main`",
+            "echo \"`git push origin main`\"",
+            "x=$(git push origin main)",
+            "cat <(git push origin main)",
+            "ls > >(git push origin main)",
+            "ls 2> >(git push origin main)",
+            "ls > \"$(git push origin main)\"",
+            "ls 2> $(git push origin main)",
+            "echo \"a $(echo \"b $(git push origin main)\")\"",
+            "echo $( (git push origin main) )",
+            "echo $(git push origin main 2>&1)",
+        ] {
+            assert_eq!(
+                steps(command),
+                one("push", "origin:refs/heads/main"),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_quote_in_a_comment_or_a_here_document_does_not_hide_what_follows() {
+        for command in [
+            "# don't\ngit push origin main",
+            "ls # don't\ngit push origin main",
+            "cat <<EOF\ndon't\nEOF\ngit push origin main",
+            "cat <<-EOF\n\tdon't\n\tEOF\ngit push origin main",
+            "git commit -m \"$(cat <<'EOF'\ndon't\nEOF\n)\" && git push origin main",
+            "bash <<'EOF'\ngit push origin main\nEOF",
+            "cat <<EOF | sh\ngit push origin main\nEOF",
+            "cat <<EOF\n$(git push origin main)\nEOF",
+            "<# don't #> git push origin main",
+            "echo # & git push origin main",
+        ] {
+            assert_eq!(
+                steps(command),
+                one("push", "origin:refs/heads/main"),
+                "{command}"
+            );
+        }
+        for command in [
+            "git commit -m \"$(cat <<'EOF'\ndon't\nEOF\n)\"",
+            "git commit -F - <<EOF\nit's done\nEOF",
+            "cat <<EOF\nit's fine\nEOF",
+            "# don't touch this\nls",
+            "ls # it's fine",
+        ] {
+            assert!(steps(command).is_empty(), "{command}");
+        }
+    }
+
+    #[test]
+    fn what_only_the_shell_can_tell_is_held() {
+        for command in [
+            "git push origin \"$(evil)\"",
+            "git push origin $(evil)",
+            "git push origin `evil`",
+            "git push origin HEAD:$(evil)",
+            "git push origin HEAD:\"$(evil)\"",
+            "git push origin HEAD:`evil`",
+            "git push origin HEAD:$BRANCH",
+            "git push origin \"HEAD:$BRANCH\"",
+            "git push origin $BRANCH",
+            "git push origin \"$env:BRANCH\"",
+            "git push origin HEAD:%BRANCH%",
+            "git push origin HEAD:{main,other}",
+            "git push origin HEAD:ma^in",
+            "git push $REMOTE main",
+            "git push \"$(evil)\" main",
+            "git push $OPTS origin main",
+            "git push --$(echo tags) origin main",
+            "git -c \"$SETTING\" push origin main",
+            "git $SUBCOMMAND origin main",
+            "git pu^sh origin main",
+            "cmd /c git pu^sh origin main",
+            "git pu`sh origin main",
+            "git p\\ush origin main",
+            "git push o\\rigin main",
+            "git push ma\\in",
+            "$GIT push origin main",
+            "\"$(which git)\" push origin main",
+            "`which git` push origin main",
+            "eval \"$COMMAND\"",
+            "bash -c \"$COMMAND\"",
+            "iex $COMMAND",
+            "pwsh -EncodedCommand ZwBpAHQA",
+            "powershell -enc ZwBpAHQA",
+            "git push origin main \"unterminated",
+            "git push origin main 'unterminated",
+            "git push origin \"$(evil",
+            "echo $(git push origin main",
+            "echo `git push origin main",
+            "git push origin main # HEAD:other",
+            "gh pr merge \"$NUMBER\"",
+            "gh release create \"$TAG\"",
+            "gh api -X PUT \"$PATH_OF_IT\"",
+            "gh api -X PUT repos/o/r/$THING/merge",
+        ] {
+            held(command);
+        }
+        // A word from single quotes is still only a word a ref cannot be read from.
+        held("git push origin '$(evil)'");
+    }
+
+    #[test]
+    fn what_is_not_governed_stays_free_whatever_the_operators_around_it() {
+        for command in [
+            "echo 'git push origin main'",
+            "echo \"git push origin main\"",
+            "echo \"a > b\" 2>&1",
+            "git log > log",
+            "git status 2>&1",
+            "git commit -m 'x > y' 2>&1",
+            "git log --format='%h' > out",
+            "git diff --stat | tee x",
+            "ls 2>&1",
+            "cargo test 2>&1 | tail -3",
+            "$PYTHON build.py",
+            "$HOME/bin/tool --flag",
+            "$x = 'a'; $x | Out-File y",
+            "echo it's",
+            "pwsh -NoProfile -File build.ps1",
+            "powershell -File build.ps1",
+        ] {
+            assert!(steps(command).is_empty(), "{command}");
+        }
+    }
+
+    #[test]
+    fn a_shell_nested_deeper_than_the_setting_is_held_not_skipped() {
+        let nested = "sh -c \"sh -c 'git push origin main'\"";
+        assert_eq!(
+            classify(nested, &Fake::default(), 2)
+                .unwrap()
+                .into_iter()
+                .map(|scope| scope.target)
+                .collect::<Vec<_>>(),
+            ["origin:refs/heads/main"]
+        );
+        assert!(classify(nested, &Fake::default(), 1).is_err());
+    }
+
+    #[test]
+    fn a_very_deep_line_is_held_and_does_not_overflow_the_stack() {
+        let deep = format!("{}git push origin main", "$(".repeat(200_000));
+        held(&deep);
+        let deep = format!("{}git push origin main", "\"$(".repeat(200_000));
+        held(&deep);
     }
 
     #[test]
