@@ -90,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (ten minutes) ahead on its own timer, says once when the sign-in is about to end, and goes back
   to its last conversation after signing in again. `session_max = 0` turns renewal off
   ([Access and sign-in](https://jose-pr.github.io/ai6/access/#staying-signed-in)).
+  (the Access and sign-in guide, "Staying signed in").
 - A long answer no longer loses Moneypenny's tools when her tool token's time passes: past it, the
   token of a running turn stays accepted while its Station is heard from within `answer_deadline`,
   and until the person stops it. Her Cable token follows the same rule.
