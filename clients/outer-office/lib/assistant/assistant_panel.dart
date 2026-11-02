@@ -508,20 +508,28 @@ class _EntryView extends StatelessWidget {
             ? null
             : (values) => controller.submit(entry.id!, values),
       ),
-      'notice' => Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      'notice' => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         spacing: 6,
         children: [
-          Icon(Icons.stop_circle_outlined, size: 16, color: colors.outline),
-          Flexible(
-            child: Text(
-              revealInvisible(entry.text),
-              style: TextStyle(
-                color: colors.outline,
-                fontStyle: FontStyle.italic,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            spacing: 6,
+            children: [
+              Icon(Icons.stop_circle_outlined, size: 16, color: colors.outline),
+              Flexible(
+                child: Text(
+                  revealInvisible(entry.text),
+                  style: TextStyle(
+                    color: colors.outline,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
+          if (entry.data?['diff'] case final String diff when diff.isNotEmpty)
+            _UnifiedDiff(diff),
         ],
       ),
       _ => Text(
@@ -529,6 +537,43 @@ class _EntryView extends StatelessWidget {
         style: TextStyle(color: colors.error),
       ),
     };
+  }
+}
+
+/// A unified diff as a notice carries it: what she kept in her memory, line by line. It is taller
+/// than a chat line, so it scrolls within a bound of its own.
+class _UnifiedDiff extends StatelessWidget {
+  const _UnifiedDiff(this.diff);
+
+  final String diff;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 240),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final line in const LineSplitter().convert(diff))
+              Container(
+                color: switch (line) {
+                  _ when line.startsWith('+++') || line.startsWith('---') =>
+                    null,
+                  _ when line.startsWith('+') => colors.tertiaryContainer,
+                  _ when line.startsWith('-') => colors.errorContainer,
+                  _ => null,
+                },
+                child: Text(
+                  revealInvisible(line),
+                  style: const TextStyle(fontFamily: 'monospace'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

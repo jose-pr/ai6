@@ -396,6 +396,45 @@ void main() {
     expect(find.text('View refused'), findsOneWidget);
   });
 
+  testWidgets('a memory change shows its diff in the chat', (tester) async {
+    final channel = FakeChannel();
+    final controller = AssistantController(
+      token: 'user-token',
+      connect: () => channel,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AssistantPanel(controller: controller)),
+      ),
+    );
+    channel.answer({
+      'type': 'ready',
+      'conversation': 'c-1',
+      'busy': false,
+      'entries': [
+        {
+          'role': 'notice',
+          'text': 'Moneypenny is saving to her memory: memory/prefs.md.',
+          'at': 1.0,
+          'data': {
+            'diff': '--- /dev/null\n+++ b/memory/prefs.md\n+Prefers\u200b tables.\n',
+          },
+        },
+        {'role': 'notice', 'text': 'Stopped.', 'at': 2.0},
+      ],
+    });
+    await tester.pumpAndSettle();
+    expect(find.textContaining('saving to her memory'), findsOneWidget);
+    expect(find.text('+++ b/memory/prefs.md'), findsOneWidget);
+    expect(
+      find.text('+Prefers<U+200B> tables.'),
+      findsOneWidget,
+      reason: 'a character that renders as nothing shows here as anywhere',
+    );
+    expect(find.text('Stopped.'), findsOneWidget);
+  });
+
   testWidgets('no view carries a strip, whatever an entry says', (
     tester,
   ) async {
