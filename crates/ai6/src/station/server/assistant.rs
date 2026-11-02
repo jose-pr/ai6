@@ -5104,6 +5104,8 @@ event_bytes = 7
 
     #[test]
     fn empty_assistant_polls_are_paced_even_when_the_gateway_answers_immediately() {
+        const PACE: Duration = Duration::from_millis(400);
+
         use std::io::{BufRead, BufReader, Write};
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -5157,19 +5159,22 @@ event_bytes = 7
                 let mut desk = AssistantDeskLimits::default();
                 // Past the server's deadline: pacing by this would lose the second poll.
                 desk.job_wait.0 = Duration::from_secs(30);
-                desk.job_retry.0 = Duration::from_millis(100);
+                desk.job_retry.0 = PACE;
                 (AssistantLimits::default(), desk)
             }),
         };
         let (jobs, _receiver) = mpsc::channel(1);
         let stop = stopping.clone();
+        let began = Instant::now();
         let polling = std::thread::spawn(move || link.take_jobs(&stop, &jobs));
         let polls = served.join();
         stopping.store(true, Ordering::Release);
         polling.join().unwrap();
         let polls = polls.unwrap();
         assert_eq!(polls.len(), 2);
-        assert!(polls[1].duration_since(polls[0]) >= Duration::from_millis(80));
+        // Pacing runs from a poll's start, so a late first arrival would shrink the gap between
+        // arrivals on a loaded machine; the second can never arrive sooner than this after the start.
+        assert!(polls[1].duration_since(began) >= PACE);
     }
 
     /// A gateway that answers every report with `status` and counts them.
