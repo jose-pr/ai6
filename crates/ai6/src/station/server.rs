@@ -8579,11 +8579,14 @@ queue = 1
         .await
         .expect("the limited Mission is handed to Agent 008");
         let first = session_hold(&state, "mission-1").unwrap();
-        assert_eq!(
-            state.intake.session(&first.id).unwrap().unwrap().status,
-            SessionStatus::Ended,
-            "the limited attempt is closed"
-        );
+        // The hand-off queues the Mission before it ends the Session.
+        tokio::time::timeout(Duration::from_secs(60), async {
+            while state.intake.session(&first.id).unwrap().unwrap().status != SessionStatus::Ended {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the limited attempt is closed");
 
         schedule_queued_once(&state).await;
         wait_for_state(&state, "mission-1", MissionState::Blocked).await;
