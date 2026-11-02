@@ -43,6 +43,7 @@ nav:
       - Theaters: theaters.md
       - Missions and intake: missions.md
       - Agents and clearance: agents.md
+      - Compartments: compartments.md
       - The Agent Client Protocol: acp.md
       - Moneypenny, the assistant: assistant.md
       - Terminals: terminals.md

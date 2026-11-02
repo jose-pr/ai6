@@ -392,6 +392,10 @@ authority. A2A remains an external interoperability boundary; it cannot bypass A
 relay policy. See [Agent Cables](architecture.md#agent-cables) for the message and
 permission contract.
 
+Across Operations, a Cable needs a [compartment](compartments.md#cables) as well as these grants,
+and a Session holding one also has `compartments`, `missions_in`, `mission_brief` and
+`mission_products`.
+
 ## Clearance
 
 | Clearance | May |

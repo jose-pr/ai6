@@ -71,7 +71,9 @@ grant nothing.
 **The 00 coordinator.** An Operation may give an Agent with `00` clearance the job of
 coordinating its Missions. Such a Session can propose child Missions; proposals wait in a
 separate inbox until an operator with `mission.create` approves them in Outer Office.
-Clearance never grants policy authority or bypasses cover, Q leases or Station policy.
+Clearance never grants policy authority or bypasses cover, Q leases or Station policy. It is
+the autonomy axis; [Compartments](compartments.md) are the need-to-know axis, what an Agent may
+know of other Operations' work.
 
 ## Conventions
 
@@ -139,6 +141,8 @@ see it, and the credential it needs is leased only against an approval.
 | **Loadout** | what Q issues an Agent: tools, sandbox and secret names |
 | **Cover / blown** | an Operation's commit attribution policy / a commit that broke it |
 | **Clearance** | `desk`, `field` or `00`: what an Agent may do without asking |
+| **Compartment** | need-to-know access to other Operations or Missions, apart from clearance; real classification has both, a level and compartments ([Compartments](compartments.md)) |
+| **Read in / read out** | giving a person, group, Operation, Mission or Agent a compartment / taking it away |
 | **Green ink** | a person's recorded approval of one irreversible step an Agent asked to take (`request_approval`; an Operation's `green_ink` policy) |
 | **Class authorisation** | a standing approval of a kind of step on matching targets, until it ends or is revoked |
 | **HUMINT / SIGINT** | briefs from people / briefs from signals such as CI failures and alerts |

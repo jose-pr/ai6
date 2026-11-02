@@ -129,6 +129,7 @@ says so. When the person signs out, her tools stop working.
 
 | Tool | Reads |
 | --- | --- |
+| `compartments` | The compartments you may read: what each grants, what it covers and who is read in, leaving out what you may not see |
 | `board` | Stations (health, running and capacity, resources, Theaters, the Headquarters Station) and every visible Session |
 | `missions`, `mission` | Missions with their Sessions, attempts, brief and usage; `mission` also the issues it is linked to and what it posted |
 | `timeline` | An Operation's activity |
@@ -618,7 +619,8 @@ read the Cables sent to her there ([access policy](access.md#the-access-policy))
 neither anywhere she has no Cable tools at all. Universal Exports works out those Operations
 with each message you send, and the Station asks it again before every Cable call, so a
 permission taken away holds from her next call; when Universal Exports does not answer, the
-call is refused.
+call is refused. A [compartment](compartments.md#people) that gives you `cable.send` or `cable.read`
+counts; her Cables stay per Operation, and she has no audience of a whole compartment.
 
 The Station running her gives her a second MCP server, `cables`, with `discover_agents`,
 `send_cable`, `read_cables`, `acknowledge_cable` and `reply_to_cable`; every call names an

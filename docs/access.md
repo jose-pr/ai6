@@ -184,6 +184,7 @@ A request is allowed when any tier allows it; within a tier the first matching r
 | --- | --- | --- | --- |
 | Chief | `ai6.cfg`, the chief list | every action, anywhere | be removed through the API, or shadowed |
 | Global (`access`) | whoever holds `access.manage` at `config:access` | any action at any scope; a role bound at `operation:<id>` grants only its Operation actions there | grant what the writer does not hold |
+| Compartment (`compartment`) | whoever holds `compartment.manage` on it, with `compartment.cover` on what it covers | `mission.status`, `mission.read`, `product.read`, `cable.send`, `cable.read` on what it covers; [Compartments](compartments.md) | grant anything else, or count towards what an editor may hand out |
 | Operation (`operation_access`) | whoever holds `access.manage` at that Operation | Operation roles within the global `delegable` cap, bound at the Operation or one under it | narrow or shadow a global grant, bind at `*`, `station:` or `config:`, or reuse a built-in role name |
 
 An Operation policy therefore only adds. Its administrator is the built-in `controller` bound
@@ -196,9 +197,10 @@ An editor may add an action to a role, or bind a role at a scope, only if they h
 there through the access tiers. A rule that reaches down
 the tree needs the action held at every Operation it reaches. Removing an action or a rule needs
 only `access.manage`. The global `delegable` cap lists the Operation actions an Operation's own
-roles may hold; by default every one but `access.manage` and `approval.class`, so a delegate
-cannot appoint deputies or give standing green ink. A cap that adds either of those is shown as a
-weakening. What a changed tree or cap leaves without effect
+roles may hold; by default every one but `access.manage`, `approval.class` and
+`compartment.cover`, so a delegate cannot appoint deputies, give standing green ink or open the
+Operation to a compartment. A cap that adds any of those is shown as a weakening. A compartment
+grant does not count towards what an editor may hand out. What a changed tree or cap leaves without effect
 is skipped and listed as orphaned; the rest of the record stays in force.
 
 ### Changing them: routes

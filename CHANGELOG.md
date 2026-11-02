@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **A Cable no longer crosses an Operation on a Station grant alone.** A recipient in another Operation
+  needs a compartment giving the sender `cable.send` there, as well as the grants; `cross_operation =
+  "station_grants"` in the `cables` record keeps the grants alone, logged and reported at check-in as
+  `cables_weakened`. `discover_agents` follows the same line, and `CableRelay` keeps no such log by
+  default: `with_person_audit` is now `with_durable_audit`, and without one nothing crosses.
+- `send_cable` takes scope `operation`, as its description said it did.
+- An audit record's `resource` may also name `operation:`, `mission:` or `compartment:`.
+
 - Provider libraries can be signed with no tooling but `ai6`, so a rebuild needs no record change:
   `ai6 plugins keygen --out PATH` once on the build host, `ai6 plugins sign --key PATH FILE...` in
   every build (`FILE.sig` beside each library, valid for that file name alone), and `ai6 plugins pin
@@ -283,6 +291,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   "Connecting…" and an uncaught exception.
 
 ### Added
+
+- **Compartments: need-to-know access across Operations.** Clearance stays how far an Agent may act
+  in its own work; a compartment says what one may know of, and say to, other Operations' work. It
+  names what it grants (`mission.status`, `mission.read`, `product.read`, `cable.send`, `cable.read`,
+  `mission.propose`; anything else is refused), what it covers (Operations, with what is under them
+  unless `propagate = false`, or single Missions) and who is read in (`person:`, `group:`, `account:`,
+  `operation:`, `mission:`, `agent:`). The record is the new `compartment` family, global, with a
+  `min_clearance` and limits that each take `none`; looser than the default is a weakening. Every read
+  and every Cable asks the provider what is granted at that moment, so a removed grant holds from the
+  next call; a record that cannot be read grants nothing, and a provider that cannot be read refuses.
+  Every crossing is written to the audit log before it returns, and a failed write refuses it.
+- An Agent holding a compartment has `compartments`, `missions_in`, `mission_brief` and
+  `mission_products` on its Session's MCP server. A brief or a product marks the Session
+  `product:<operation>`. `propose_mission` takes `operation`, needing `mission.propose` there and
+  clearance `00`; the proposal is untrusted intake in the target, exposed `brief:compartment`.
+- Cable scope `compartment`, with its own fan-out and buckets across Stations, and replies that stay on
+  the grant that opened the conversation. `discover_agents` shows Agents reached through a compartment
+  by codename, Operation and Mission only.
+- People: a compartment adds to the access policy for `mission.status`, `mission.read`, `product.read`,
+  `cable.send` and `cable.read`, and nothing else. New actions `compartment.read`, `compartment.manage`,
+  `compartment.cover` (an Operation's consent to be covered, not delegable by default), `mission.status`
+  and `product.read`; routes `/v1/user/compartments`, `/v1/missions/{id}/products` and
+  `/v1/missions?compartment=K`; `[gateway] compartment_audit`; `ai6ctl compartments` and `ai6ctl
+  missions products`; a Compartments page in Outer Office, a chip on an Operation and a Missions filter;
+  Moneypenny's `compartments` tool.
+- A PostgreSQL configuration provider needs the new table `ai6_config_compartment` before the new
+  binaries start: `CREATE TABLE ai6_config_compartment (scope TEXT NOT NULL DEFAULT '', key TEXT NOT
+  NULL, definition TEXT NOT NULL, revision BIGINT NOT NULL, PRIMARY KEY (scope, key))`, as role `ai6`.
 
 - `tools/sdk/`: `sdk.lock` names every SDK a build needs at exact versions, `bootstrap.sh` and
   `bootstrap.ps1` install them under one directory, verified, without touching the system or the

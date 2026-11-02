@@ -135,6 +135,11 @@ audience scope to list body-free held metadata and release it; the relay checks 
 recipient's current receive grant again, refusing any whose grant was revoked. Hidden
 recipients are not disclosed by denial errors.
 
+A recipient in another Operation needs a [compartment](compartments.md#cables) giving the sender
+`cable.send` there, as well as the grants; a `compartment` recipient is what one covers, under its
+own fan-out and buckets. The Cable grants alone reach across only with `cross_operation =
+"station_grants"`, a weakening.
+
 The lifecycle is `queued`, `delivered`, `held`, `refused`, `acked`, `expired` or
 `failed`. Retries preserve the Cable ID and are idempotent. The default TTL is 15 minutes
 and the maximum is 24 hours (the `cables` record's `default_ttl` and `max_ttl`); broadcast
