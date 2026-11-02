@@ -4965,7 +4965,11 @@ async fn resume_mission(
         )
         .map_err(configuration_error)?;
     }
-    let message = request.message;
+    // A harness that is started again does nothing until it reads a message; one still running
+    // on its runner is in its turn.
+    let message = request
+        .message
+        .or_else(|| reattach.is_none().then(|| RESUMED_MESSAGE.to_owned()));
     let (project_settings, project_mcp) = if review {
         (false, false)
     } else {
@@ -5201,6 +5205,9 @@ async fn resume_mission(
 /// Why a Mission an operator interrupted is blocked.
 const INTERRUPTED_REASON: &str = "interrupted";
 
+/// What a resume that names no message tells the Agent.
+const RESUMED_MESSAGE: &str = "Carry on with the Mission from where it stopped.";
+
 /// Why a resume is refused when the harness reports another Session than it was asked for.
 const RESUME_NOT_RETAINED: &str = "AgentHandler resume did not retain the provider Session ID";
 
@@ -5390,7 +5397,7 @@ fn release_interrupt_hold(state: &DaemonState, mission_id: &str) {
 
 /// Stops the Session of a Mission whose interrupted turn just ended, however the harness reported
 /// that: a turn cut short is not the Mission's end. `false` when the Mission is not waiting on an
-/// interrupt.
+/// interrupt, or when no Session was reported and so nothing could ever resume it.
 fn end_interrupted_turn(
     state: &DaemonState,
     mission_id: &str,
@@ -5400,6 +5407,7 @@ fn end_interrupted_turn(
         missions.get(mission_id).is_some_and(|mission| {
             mission.state == MissionState::Blocked
                 && mission.blocked_reason.as_deref() == Some(INTERRUPTED_REASON)
+                && !mission.session_ids.is_empty()
         })
     });
     if interrupted {

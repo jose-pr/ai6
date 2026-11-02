@@ -51,7 +51,7 @@ its Station:
 | --- | --- | --- |
 | `cancel` | queued, working, blocked, stalled, parked or quarantined | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. |
 | `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined); it continues in the same safe house. |
-| `resume` | parked, blocked or stalled | The Mission resumes now on its provider Session, with `message` sent to the Agent when given. |
+| `resume` | parked, blocked or stalled | The Mission resumes now on its provider Session, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
 | `interrupt` | working | The Session's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
 
 There is no pause: providers have none. A quarantined Mission is released by an operator

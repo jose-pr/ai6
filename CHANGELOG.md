@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and until the person stops it. Her Cable token follows the same rule.
 - The access token's default and the ceiling of `ttl_seconds` are settings, `[gateway]
   access_token_ttl` and `access_token_max_ttl`, and a request may name a lifetime under a minute.
+- A resume with no message of its own (a restarted Station's, or an operator's) tells the harness
+  to carry on: Claude Code and Codex do nothing until they read a message, so the Mission sat
+  `working` until it stalled. An interrupted turn that ends before the harness reported any
+  Session is not left waiting for a resume that could never run.
 - `ai6 runner connect` no longer waits for ever on a runner that accepts and stays silent: the
   `[runner]` setting `answer_wait` (10 s by default) bounds the read of its answer.
 - A gated Codex thread's `apply_patch` no longer waits for a stall:

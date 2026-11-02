@@ -39,7 +39,8 @@ pub(super) fn log_of(key: &str) -> StreamLog {
 /// a first turn does after its initialization (`hold` works on, `complete` ends it),
 /// `MOCK_STREAM_INTERRUPT` is how an interrupted turn ends (`failed`, `completed`, `silent`), and
 /// `MOCK_STREAM_RESUMES_AS` a Session ID a resume reports other than the one asked for.
-/// `MOCK_STREAM_RESUME_FAILS` refuses a resume with that text.
+/// `MOCK_STREAM_RESUME_FAILS` refuses a resume with that text, and `MOCK_STREAM_SESSIONLESS` keeps
+/// the harness from ever reporting a Session.
 #[derive(Default, Provider)]
 #[provider(AgentHandler, id = "mock-stream", name = "Mock Stream", crate = crate::guatiao)]
 pub(super) struct MockStreamHandler;
@@ -118,6 +119,7 @@ struct StreamSession {
     reports: String,
     turn: String,
     on_interrupt: String,
+    sessionless: bool,
     stream: Mutex<Stream>,
 }
 
@@ -128,6 +130,7 @@ impl StreamSession {
             reports,
             turn,
             on_interrupt: setting(environment, "MOCK_STREAM_INTERRUPT", "failed"),
+            sessionless: environment.contains_key("MOCK_STREAM_SESSIONLESS"),
             stream: Mutex::new(Stream::default()),
         }
     }
@@ -166,9 +169,10 @@ impl AgentSession for StreamSession {
         let waited = Duration::from_millis(u64::try_from(timeout_ms).unwrap_or(0).min(10));
         {
             let mut stream = self.stream.lock().unwrap();
-            let first_line_due = stream
-                .read_at
-                .is_some_and(|read| read.elapsed() >= FIRST_LINE_AFTER);
+            let first_line_due = !self.sessionless
+                && stream
+                    .read_at
+                    .is_some_and(|read| read.elapsed() >= FIRST_LINE_AFTER);
             if first_line_due && !stream.initialized {
                 stream.initialized = true;
                 stream.session_id = Some(SessionId::try_new(self.reports.clone()).map_err(
@@ -318,10 +322,10 @@ async fn a_resume_is_accepted_before_the_stream_reports_its_session() {
     assert_eq!(log_of("resume").resumed, vec![Some("go on".to_owned())]);
 }
 
-/// With no message Claude Code writes nothing at all: the resume cannot wait for its stream, and
-/// the first message starts it.
+/// Claude Code and Codex do nothing until they read a message, so a resume with none of its own
+/// (a restarted Station's, an operator's) tells the harness to go on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_resume_with_no_message_runs_once_a_message_reaches_the_silent_harness() {
+async fn a_resume_with_no_message_tells_the_silent_harness_to_go_on() {
     let root = tempfile::tempdir().unwrap();
     let state = test_state(root.path(), "", &agent("silent", "", ""));
     let _stop = StopOnDrop(state.clone());
@@ -336,20 +340,9 @@ async fn a_resume_with_no_message_runs_once_a_message_reaches_the_silent_harness
     let _ = resume(&state, "mission-1", None)
         .await
         .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
-    assert_eq!(
-        mission_state(&state, "mission-1").state,
-        MissionState::Working
-    );
-    send_message(
-        State(state.clone()),
-        axum::extract::Path("mission-1".to_owned()),
-        Json(SendMessage {
-            text: "now".to_owned(),
-        }),
-    )
-    .await
-    .unwrap_or_else(|error| panic!("the message was refused: {:?}", error.1.0.error));
     wait_for_state(&state, "mission-1", MissionState::Done).await;
+    let resumed = log_of("silent").resumed;
+    assert!(resumed[0].is_some(), "{resumed:?}");
 }
 
 /// A harness that resumes another Session than the one asked for is refused when it says so: no
@@ -442,6 +435,23 @@ async fn an_interrupted_turn_leaves_the_mission_blocked_however_it_ends() {
         assert_eq!(status, StatusCode::ACCEPTED);
         wait_for_state(&state, "mission-1", MissionState::Done).await;
     }
+}
+
+/// With no Session ID there is nothing to resume: an interrupted turn that ends before the
+/// harness reported one must not leave the Mission waiting for a resume that can never run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_interrupted_turn_with_no_session_to_resume_is_not_left_waiting() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(
+        root.path(),
+        "",
+        &agent("nosession", "MOCK_STREAM_SESSIONLESS = \"1\"\n", ""),
+    );
+    let _stop = StopOnDrop(state.clone());
+    start_mission_by_id(&state, "mission-1").await;
+    assert!(mission_state(&state, "mission-1").session_ids.is_empty());
+    interrupt(&state, "mission-1").await;
+    wait_for_state(&state, "mission-1", MissionState::Failed).await;
 }
 
 /// A harness with no running turn says nothing to an interrupt: the Mission waits blocked, not
