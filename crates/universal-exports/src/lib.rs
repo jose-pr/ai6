@@ -57,7 +57,7 @@ use tree::{OperationTree, operation_request, resource_request};
 use uuid::Uuid;
 
 pub use access_admin::{EitherAuthorizer, LiveAccess};
-pub use agents::{AgentView, RetirementNotice};
+pub use agents::{AgentRoute, AgentView, RetirementNotice};
 use controls::ControlBook;
 pub use controls::ControlStatus;
 pub use held::{HeldBriefDecision, HeldBriefEntry};
@@ -3171,17 +3171,27 @@ async fn authorize_resource_action(
     resource: String,
     action: &'static str,
 ) -> Result<(), ApiError> {
+    if resource_action_allowed(gateway, person, resource, action).await? {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden())
+    }
+}
+
+/// Whether `person` holds `action` on `resource`, for what a view only shows to who does.
+async fn resource_action_allowed(
+    gateway: &Gateway,
+    person: Person,
+    resource: String,
+    action: &'static str,
+) -> Result<bool, ApiError> {
     let authorizer = gateway.authorizer()?;
     let request = resource_request(person, action, resource, &operation_tree(gateway).await?);
     let decision = tokio::task::spawn_blocking(move || authorizer.authorize(request))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
-    if decision.allowed {
-        Ok(())
-    } else {
-        Err(ApiError::forbidden())
-    }
+    Ok(decision.allowed)
 }
 
 async fn ensure_station_registered(

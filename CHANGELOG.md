@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `send_cable` takes scope `operation`, as its description said it did.
 - An audit record's `resource` may also name `operation:`, `mission:` or `compartment:`.
 
+- The Agents page and `ai6ctl agents` show the model an Agent's roster record sets, which said
+  `default` for an Agent with no finished Mission and the old model after a change. The handler's
+  default is said only when the record sets none, a date only from a tenure of that model, and what ran
+  stays below as history. `AgentView.routes` carries it, for a person who also holds `roster.read`;
+  without it, only what ran, as `agent.read` gives. `AgentFacts` gains `model`.
 - A SQL Registry or roster gets a table or index it lacks when it is opened, so a new one needs no
   script: every statement of the schema can run again, and only what is missing runs, under the lock
   two Stations opening together already wait on. The version stays 1. A role with no `CREATE` right

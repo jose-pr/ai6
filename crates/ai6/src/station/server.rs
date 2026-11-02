@@ -10769,6 +10769,31 @@ queue = 1
         state.stopping.store(true, Ordering::Release);
     }
 
+    #[test]
+    fn an_operation_policy_says_the_model_each_agent_s_record_sets() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-agent\"\nmodel = \"opus\"\n\
+             [agent.008]\nhandler = \"mock-agent\"\n",
+        );
+        let policy =
+            serde_json::to_value(OperationPolicy::from_roster(&state.roster, "G").unwrap())
+                .unwrap();
+        let model = |id: &str| {
+            policy["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|agent| agent["id"] == id)
+                .unwrap()["model"]
+                .clone()
+        };
+        assert_eq!(model("007"), "opus");
+        assert_eq!(model("008"), serde_json::Value::Null);
+    }
+
     /// A Source Mission under the default `strict` policy is exposed from its start, which takes
     /// every secret but the model credential: its loadout's `env` is what still reaches it.
     #[tokio::test]

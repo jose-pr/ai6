@@ -1601,7 +1601,7 @@ impl OperationPolicy {
     pub fn from_roster(roster: &Roster, operation_key: &str) -> Result<Self, RosterError>;
 }
 #[non_exhaustive]
-pub struct AgentFacts { pub id: String, pub handler: Option<String>, pub priority: i64, pub roles: Vec<String>, pub tags: Vec<String> }
+pub struct AgentFacts { pub id: String, pub handler: Option<String>, pub model: Option<String>, pub priority: i64, pub roles: Vec<String>, pub tags: Vec<String> }
 #[non_exhaustive]
 pub struct StationFacts {
     pub station: String, pub healthy: bool, pub silent_for: u64, pub roles: Vec<String>,

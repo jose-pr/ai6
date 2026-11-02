@@ -100,6 +100,9 @@ pub struct AgentFacts {
     /// The AgentHandler provider the Agent needs, when configured.
     #[serde(default)]
     pub handler: Option<String>,
+    /// The model its record sets; none is the handler's default.
+    #[serde(default)]
+    pub model: Option<String>,
     /// Higher priority is preferred.
     #[serde(default)]
     pub priority: i64,
@@ -116,6 +119,7 @@ impl From<&Agent> for AgentFacts {
         Self {
             id: agent.id.clone(),
             handler: agent.handler.clone(),
+            model: agent.model.clone(),
             priority: agent.priority,
             roles: agent.roles.clone(),
             tags: agent.tags.clone(),
@@ -991,6 +995,7 @@ mod tests {
         AgentFacts {
             id: id.to_owned(),
             handler: Some(handler.to_owned()),
+            model: None,
             priority,
             roles: vec!["case-officer".to_owned()],
             tags: Vec::new(),

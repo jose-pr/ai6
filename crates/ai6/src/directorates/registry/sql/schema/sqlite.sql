@@ -404,7 +404,7 @@ CREATE TABLE IF NOT EXISTS ai6_config_roster (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE ai6_config_compartment (
+CREATE TABLE IF NOT EXISTS ai6_config_compartment (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,

@@ -145,6 +145,47 @@ class ClearanceGrantSummary {
       : 'Held at $clearance by $signer${reason == null ? '' : ': $reason'}';
 }
 
+const _defaultModel = "The handler's default model";
+
+/// One way an Agent's roster record says it reaches its model.
+@immutable
+class AgentRouteSummary {
+  const AgentRouteSummary({this.handler, this.model});
+
+  final String? handler;
+
+  /// Null when the record sets none, so the handler's default.
+  final String? model;
+
+  factory AgentRouteSummary.fromJson(Map<String, dynamic> json) =>
+      AgentRouteSummary(
+        handler: json['handler'] as String?,
+        model: json['model'] as String?,
+      );
+}
+
+/// A model that ran in the codename in this Operation.
+@immutable
+class ModelTenureSummary {
+  const ModelTenureSummary({required this.from, this.model, this.to});
+
+  /// Null for the handler's default.
+  final String? model;
+
+  /// Unix seconds of its first counted outcome.
+  final double from;
+
+  /// Unix seconds when another model's outcome was first counted.
+  final double? to;
+
+  factory ModelTenureSummary.fromJson(Map<String, dynamic> json) =>
+      ModelTenureSummary(
+        model: json['model'] as String?,
+        from: (json['from'] as num).toDouble(),
+        to: (json['to'] as num?)?.toDouble(),
+      );
+}
+
 /// One Agent of an Operation and its record there.
 @immutable
 class AgentSummary {
@@ -154,8 +195,8 @@ class AgentSummary {
     required this.operation,
     this.everyOperation = const AgentTallySummary(),
     this.lastMissionAt,
-    this.model,
-    this.modelSince,
+    this.routes = const [],
+    this.modelHistory = const [],
     this.clearance,
     this.configuredClearance,
     this.retirement,
@@ -176,11 +217,13 @@ class AgentSummary {
   /// Unix seconds.
   final double? lastMissionAt;
 
-  /// The model that occupies the codename now; null is the handler's default.
-  final String? model;
+  /// How its roster record says it reaches its model; empty for an Agent no longer posted and
+  /// for a person who may not read the roster.
+  final List<AgentRouteSummary> routes;
 
-  /// Unix seconds since that model's first counted outcome.
-  final double? modelSince;
+  /// The models that ran in the codename here, oldest first; a model with no finished Mission
+  /// is not among them.
+  final List<ModelTenureSummary> modelHistory;
 
   /// The clearance it works at in this Operation.
   final String? clearance;
@@ -195,10 +238,6 @@ class AgentSummary {
   final bool grantUnreadable;
 
   factory AgentSummary.fromJson(Map<String, dynamic> json) {
-    final history = json['model_history'] as List<dynamic>? ?? const [];
-    final current = history.isEmpty
-        ? null
-        : history.last as Map<String, dynamic>;
     final promotion = json['promotion'] as Map<String, dynamic>?;
     final target =
         (promotion?['scope'] as Map<String, dynamic>?)?['target'] as String?;
@@ -212,8 +251,15 @@ class AgentSummary {
         json['every_operation'] as Map<String, dynamic>?,
       ),
       lastMissionAt: (json['last_mission_at'] as num?)?.toDouble(),
-      model: current?['model'] as String?,
-      modelSince: (current?['from'] as num?)?.toDouble(),
+      routes: [
+        for (final route in json['routes'] as List<dynamic>? ?? const [])
+          AgentRouteSummary.fromJson(route as Map<String, dynamic>),
+      ],
+      modelHistory: [
+        for (final tenure
+            in json['model_history'] as List<dynamic>? ?? const [])
+          ModelTenureSummary.fromJson(tenure as Map<String, dynamic>),
+      ],
       clearance: json['clearance'] as String?,
       configuredClearance: json['configured_clearance'] as String?,
       retirement: switch (json['retirement']) {
@@ -234,6 +280,54 @@ class AgentSummary {
           ? null
           : RegExp(r':([^@]+)@').firstMatch(target)?.group(1),
     );
+  }
+
+  /// What the card says of its model: each route its record gives, the date only from a tenure
+  /// of that same model. With no record to read, what ran last, and nothing when nothing did:
+  /// an empty history does not mean the handler's default.
+  List<String> get modelLabels {
+    String name(String? model) => model == null ? '' : 'Model $model';
+    String since(String? model) {
+      final last = modelHistory.lastOrNull;
+      return last == null || last.model != model
+          ? ''
+          : ' since ${_date(last.from)}';
+    }
+
+    if (routes.isEmpty) {
+      final last = modelHistory.lastOrNull;
+      if (last == null) return const [];
+      return [
+        '${last.model == null ? _defaultModel : name(last.model)}'
+            '${since(last.model)}',
+      ];
+    }
+    return [
+      for (final route in routes)
+        [
+          '${route.model == null ? _defaultModel : name(route.model)}'
+              '${since(route.model)}',
+          if (route.handler case final handler?) 'handler $handler',
+        ].join(', '),
+    ];
+  }
+
+  /// The models that ran here before the one it has now, oldest first.
+  List<String> get earlierModels {
+    final now = routes.map((route) => route.model).toSet();
+    final last = modelHistory.lastOrNull;
+    return [
+      for (final tenure in modelHistory)
+        if (!identical(tenure, last) ||
+            (routes.isNotEmpty && !now.contains(tenure.model)))
+          [
+            tenure.model ?? _defaultModel,
+            if (tenure.to case final to?)
+              '${_date(tenure.from)} to ${_date(to)}'
+            else
+              'from ${_date(tenure.from)}',
+          ].join(' '),
+    ];
   }
 
   /// The clearances it may be lowered to: those below the one it works at.
@@ -606,14 +700,18 @@ class _AgentTile extends StatelessWidget {
               Text('$quarantinedEverywhere quarantined in every Operation'),
             Text(
               [
-                'Model ${agent.model ?? 'default'}'
-                    '${agent.modelSince == null ? '' : ' since ${_date(agent.modelSince!)}'}',
+                ...agent.modelLabels,
                 if (agent.lastMissionAt case final at?)
                   'last Mission ${_date(at)}',
                 if (!agent.posted) 'not posted',
               ].join(' · '),
               style: theme.textTheme.bodySmall,
             ),
+            if (agent.earlierModels case final earlier when earlier.isNotEmpty)
+              Text(
+                'Earlier: ${earlier.join(', ')}',
+                style: theme.textTheme.bodySmall,
+              ),
             if (agent.retirement case final retirement?)
               Padding(
                 padding: const EdgeInsets.only(top: 6),

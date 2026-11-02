@@ -2074,6 +2074,12 @@ struct PoolWindow {
     used_permille: Option<u16>,
 }
 
+/// How an Agent's roster record says it reaches its model.
+#[derive(Debug, Deserialize)]
+struct AgentRoute {
+    model: Option<String>,
+}
+
 /// One Agent of an Operation and its record there, as Universal Exports serves it.
 #[derive(Debug, Deserialize)]
 struct AgentView {
@@ -2085,6 +2091,8 @@ struct AgentView {
     last_mission_at: Option<f64>,
     #[serde(default)]
     model_history: Vec<ModelTenure>,
+    #[serde(default)]
+    routes: Vec<AgentRoute>,
     retirement: Option<RetirementNotice>,
     clearance: Option<String>,
     configured_clearance: Option<String>,
@@ -2123,6 +2131,22 @@ struct ModelTenure {
     model: Option<String>,
 }
 
+/// The MODEL column: what the record says, when the person may read it; else what ran last, and
+/// `-` when neither says, since an empty history does not mean the handler's default.
+fn model_shown(view: &AgentView) -> String {
+    view.routes
+        .first()
+        .map(|route| route.model.as_deref())
+        .or_else(|| {
+            view.model_history
+                .last()
+                .map(|tenure| tenure.model.as_deref())
+        })
+        .map_or("-".to_owned(), |model| {
+            model.map_or("default".to_owned(), plain)
+        })
+}
+
 fn print_agents(agents: &[AgentView]) {
     println!(
         "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tLOST\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION"
@@ -2151,9 +2175,7 @@ fn print_agents(agents: &[AgentView]) {
             tally.green_ink_rejected,
             view.last_mission_at
                 .map_or_else(|| "-".to_owned(), |at| format!("{at:.0}")),
-            view.model_history.last().map_or("-".to_owned(), |tenure| {
-                tenure.model.as_deref().map_or("default".to_owned(), plain)
-            }),
+            model_shown(view),
             view.retirement.as_ref().map_or("-".to_owned(), |notice| {
                 format!("{}:{}", plain(&notice.status), plain(&notice.retire_on))
             }),
@@ -2722,6 +2744,27 @@ fn plain(value: &str) -> String {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn the_model_column_prefers_the_record_and_guesses_nothing() {
+        let view = |routes: serde_json::Value, history: serde_json::Value| -> AgentView {
+            serde_json::from_value(serde_json::json!({
+                "agent": "007", "posted": true, "operation": {}, "retirement": null,
+                "clearance": null, "configured_clearance": null, "promotion": null,
+                "routes": routes, "model_history": history,
+            }))
+            .unwrap()
+        };
+        let ran = serde_json::json!([{"model": "old", "from": 1.0, "to": null}]);
+        let set = serde_json::json!([{"handler": "claude", "model": "new"}]);
+        let unset = serde_json::json!([{"handler": "claude", "model": null}]);
+        let none = serde_json::json!([]);
+        assert_eq!(model_shown(&view(set.clone(), none.clone())), "new");
+        assert_eq!(model_shown(&view(set, ran.clone())), "new");
+        assert_eq!(model_shown(&view(unset, none.clone())), "default");
+        assert_eq!(model_shown(&view(none.clone(), ran)), "old");
+        assert_eq!(model_shown(&view(none.clone(), none)), "-");
+    }
 
     #[test]
     fn a_mission_shows_its_name_and_issue_as_data_and_its_runs_apart() {

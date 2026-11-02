@@ -448,6 +448,8 @@ launched with. A Session lost with its Station or runner counts as `lost`, never
 Agent's failure; Chief of Staff reviews are not counted. Outer Office's Agents view and `ai6ctl
 agents --operation ID` show an Operation's records (`agent.read`), nothing of other
 Operations'. Promotion counts only the Missions of the model that occupies the codename now.
+A person who also holds `roster.read` sees the handler and model the Agent's record sets, whether or
+not it has finished a Mission, with what ran before it below; without it, only what ran.
 
 Autonomy is earned per Operation and signed by a person. An Agent configured at `desk` starts
 there and can be promoted. When an Agent's record in an

@@ -165,6 +165,7 @@ mod tests {
         policy.agents = vec![AgentFacts {
             id: "007".to_owned(),
             handler: Some("claude".to_owned()),
+            model: None,
             priority: 0,
             roles: Vec::new(),
             tags: Vec::new(),

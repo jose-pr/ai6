@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
     show DropdownButton, Tab, TextField;
+import 'package:outer_office/agents/agents_page.dart' show AgentSummary;
 import 'package:outer_office/main.dart';
 
 import 'shell_navigation.dart';
@@ -61,6 +62,17 @@ const _agents = [
     'clearance': 'desk',
     'configured_clearance': 'desk',
     'grant_unreadable': true,
+  },
+  {
+    'agent': '009',
+    'posted': true,
+    'operation': {'done': 3},
+    'routes': [
+      {'handler': 'claude', 'model': 'fable'},
+    ],
+    'model_history': [
+      {'model': 'sonnet', 'from': 1_850_000_000.0, 'to': null},
+    ],
   },
 ];
 
@@ -146,6 +158,21 @@ void main() {
         find.textContaining('Model sonnet since 2028-08-'),
         findsOneWidget,
       );
+      expect(
+        find.text('Earlier: opus 2027-01-15 to 2028-08-16'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('default'), findsNothing);
+      expect(
+        find.textContaining('Model fable, handler claude'),
+        findsOneWidget,
+      );
+      expect(find.text('Earlier: sonnet from 2028-08-16'), findsOneWidget);
+      expect(
+        find.textContaining('Model fable, handler claude'),
+        findsOneWidget,
+      );
+      expect(find.text('Earlier: sonnet from 2028-08-16'), findsOneWidget);
       expect(find.text('field (configured desk)'), findsOneWidget);
       expect(find.text('Desk duty from 2030-01-31'), findsOneWidget);
       expect(find.text('Raised to field by alice'), findsOneWidget);
@@ -194,4 +221,87 @@ void main() {
       expect(restored.url.path, '/v1/user/operations/G/agents/007/clearance');
     },
   );
+
+  group('the model an Agent card shows', () {
+    AgentSummary summary(Map<String, dynamic> fields) => AgentSummary.fromJson({
+      'agent': '007',
+      'posted': true,
+      'operation': const {'done': 0},
+      ...fields,
+    });
+    const opus = {
+      'model': 'opus',
+      'from': 1_800_000_000.0,
+      'to': 1_850_000_000.0,
+    };
+    const sonnet = {'model': 'sonnet', 'from': 1_850_000_000.0, 'to': null};
+
+    test('with a model and no Missions, the record says', () {
+      final agent = summary({
+        'routes': [
+          {'handler': 'claude', 'model': 'fable'},
+        ],
+        'model_history': const [],
+      });
+      expect(agent.modelLabels, ['Model fable, handler claude']);
+      expect(agent.earlierModels, isEmpty);
+    });
+
+    test('a changed model: the record wins and what ran stays as history', () {
+      final agent = summary({
+        'routes': [
+          {'handler': 'claude', 'model': 'fable'},
+        ],
+        'model_history': const [opus, sonnet],
+      });
+      expect(agent.modelLabels, ['Model fable, handler claude']);
+      expect(agent.earlierModels, [
+        'opus 2027-01-15 to 2028-08-16',
+        'sonnet from 2028-08-16',
+      ]);
+    });
+
+    test('the date is of a tenure of that same model', () {
+      final agent = summary({
+        'routes': [
+          {'handler': 'claude', 'model': 'sonnet'},
+        ],
+        'model_history': const [opus, sonnet],
+      });
+      expect(agent.modelLabels, [
+        'Model sonnet since 2028-08-16, handler claude',
+      ]);
+      expect(agent.earlierModels, ['opus 2027-01-15 to 2028-08-16']);
+    });
+
+    test('no model set: the handler\'s default, and only then', () {
+      final agent = summary({
+        'routes': [
+          {'handler': 'claude', 'model': null},
+        ],
+        'model_history': const [],
+      });
+      expect(agent.modelLabels, [
+        "The handler's default model, handler claude",
+      ]);
+    });
+
+    test(
+      'a person who may not read the record sees what ran, and no guess',
+      () {
+        expect(
+          summary({
+            'routes': const [],
+            'model_history': const [sonnet],
+          }).modelLabels,
+          ['Model sonnet since 2028-08-16'],
+        );
+        expect(
+          summary({'routes': const [], 'model_history': const []}).modelLabels,
+          isEmpty,
+          reason: 'not "default": nothing here says so',
+        );
+      },
+    );
+  });
 }

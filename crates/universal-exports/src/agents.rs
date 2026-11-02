@@ -4,7 +4,8 @@
 //! Records come from the Registry, where Stations count each Mission's outcome and each
 //! incident. The Agents posted to the Operation come from the Headquarters Station's
 //! check-in, so an Agent with no record yet is listed too, with the clearance it works at
-//! there. Reading needs `agent.read` on the Operation.
+//! there. Reading needs `agent.read` on the Operation; what the Agent's roster record says of its
+//! handler and model also needs `roster.read`, so that action alone decides who reads a record.
 //!
 //! A person with `agent.configure` may lower an Agent's clearance in the Operation or remove
 //! its grant, returning it to its configured clearance; raising one is never done here: it
@@ -27,7 +28,7 @@ use uuid::Uuid;
 
 use crate::{
     ApiError, Gateway, GatewayError, authorize_operation_action, bearer,
-    ensure_operation_registered, resolve_user, unix_timestamp,
+    ensure_operation_registered, resolve_user, resource_action_allowed, unix_timestamp,
 };
 
 const CLEARANCES: [&str; 3] = ["desk", "field", "00"];
@@ -49,8 +50,11 @@ pub struct AgentView {
     /// When its latest Mission in this Operation ended, as Unix seconds.
     pub last_mission_at: Option<f64>,
     /// The models that occupied the codename in this Operation, oldest first, with what each
-    /// did here.
+    /// did here. A model that has finished no Mission here is not among them.
     pub model_history: Vec<ModelTenure>,
+    /// How its roster record says it reaches its model, from the Headquarters Station's check-in.
+    /// Empty for an Agent the check-in does not post, and for a person without `roster.read`.
+    pub routes: Vec<AgentRoute>,
     /// Its retirement, from the Headquarters Station's check-in, once it is near or due.
     pub retirement: Option<RetirementNotice>,
     /// The clearance it works at in this Operation, from the Headquarters Station's check-in.
@@ -63,6 +67,16 @@ pub struct AgentView {
     pub promotion: Option<ApprovalRequest>,
     /// Its grant could not be read: Stations work it at `desk`, and so does this view.
     pub grant_unreadable: bool,
+}
+
+/// One way an Agent's roster record says it reaches its model.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgentRoute {
+    /// The AgentHandler provider, when the record names one.
+    pub handler: Option<String>,
+    /// The model; `None` when the record sets none, so the handler's default.
+    pub model: Option<String>,
 }
 
 /// An Agent whose `retire_on` date is near or has come.
@@ -92,6 +106,7 @@ impl AgentView {
             by_clearance: here.by_clearance,
             last_mission_at: here.last_mission_at,
             model_history: here.model_history,
+            routes: Vec::new(),
             retirement: None,
             clearance: None,
             configured_clearance: None,
@@ -136,6 +151,29 @@ impl Headquarters {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// How the check-in's roster says the Agent reaches its model in `operation`.
+    fn routes(&self, operation: &str, agent: &str) -> Vec<AgentRoute> {
+        let text = |entry: &serde_json::Value, name: &str| {
+            entry
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        self.0
+            .get("operation_policies")
+            .and_then(|policies| policies.get(operation))
+            .and_then(|policy| policy.get("agents"))
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.get("id").and_then(serde_json::Value::as_str) == Some(agent))
+            .map(|entry| AgentRoute {
+                handler: text(entry, "handler"),
+                model: text(entry, "model"),
+            })
+            .collect()
     }
 
     /// The clearance the Agent works at in `operation` and its configured one.
@@ -206,7 +244,14 @@ pub(crate) async fn list(
 ) -> Result<Json<Vec<AgentView>>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
-    authorize_operation_action(&gateway, person, &operation_id, "agent.read").await?;
+    authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.read").await?;
+    let reads_roster = resource_action_allowed(
+        &gateway,
+        person,
+        crate::roster::ROSTER_RESOURCE.to_owned(),
+        "roster.read",
+    )
+    .await?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     ensure_operation_registered(&registry, &operation_id).await?;
     let operation = operation_id.to_string();
@@ -238,6 +283,9 @@ pub(crate) async fn list(
             .collect::<Vec<_>>();
         for view in views.values_mut() {
             view.retirement = headquarters.retirement(&view.agent);
+            if reads_roster {
+                view.routes = headquarters.routes(&operation, &view.agent);
+            }
             (view.clearance, view.configured_clearance) =
                 headquarters.clearance(&operation, &view.agent);
             match registry.clearance_grant(&operation, &view.agent) {
@@ -601,6 +649,132 @@ mod tests {
         assert_eq!(views[1]["operation"]["done"], 0);
         assert_eq!(views[0]["retirement"]["status"], "retiring");
         assert_eq!(views[1]["retirement"], serde_json::Value::Null);
+    }
+
+    /// Operator 007 may read G's Agents and the roster; viewer 007 may read G's Agents alone.
+    const ROSTER_READERS: &str = r#"
+        [role.agent-reader]
+        actions = ["agent.read"]
+
+        [role.roster-reader]
+        actions = ["roster.read"]
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "operation:G"
+        role = "agent-reader"
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "config:roster"
+        role = "roster-reader"
+
+        [[rule]]
+        subject = "person:viewer-007"
+        scope = "operation:G"
+        role = "agent-reader"
+    "#;
+
+    #[tokio::test]
+    async fn the_record_s_model_reaches_who_may_read_the_roster_and_nobody_else() {
+        let served = served_with(ROSTER_READERS).await;
+        served
+            .registry
+            .check_in(
+                "hq",
+                BTreeMap::from([(
+                    "operation_policies".to_owned(),
+                    serde_json::json!({"G": {"operation": "G", "agents": [
+                        {"id": "no-missions", "handler": "claude", "model": "opus-5", "roles": ["secret-role"]},
+                        {"id": "changed", "handler": "codex", "model": "new-model"},
+                        {"id": "unset", "handler": "claude", "model": null},
+                    ]}}),
+                )]),
+            )
+            .unwrap();
+        served
+            .registry
+            .record_agent_outcome(
+                &AgentOutcomeReport::new(
+                    "changed",
+                    Some("G".into()),
+                    AgentOutcome::Done,
+                    "m#1",
+                    10.0,
+                )
+                .with_model(Some("old-model".into())),
+            )
+            .unwrap();
+        served
+            .registry
+            .record_agent_outcome(
+                &AgentOutcomeReport::new(
+                    "retired",
+                    Some("G".into()),
+                    AgentOutcome::Done,
+                    "m#2",
+                    11.0,
+                )
+                .with_model(Some("gone-model".into())),
+            )
+            .unwrap();
+
+        let views: serde_json::Value = agents(&served.base, &served.operator)
+            .await
+            .json()
+            .await
+            .unwrap();
+        let view = |agent: &str| {
+            views
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|view| view["agent"] == agent)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(
+            view("no-missions")["routes"],
+            serde_json::json!([{"handler": "claude", "model": "opus-5"}]),
+            "with no Mission there is no history, and the record still says"
+        );
+        assert_eq!(view("no-missions")["model_history"], serde_json::json!([]));
+        assert_eq!(
+            view("changed")["routes"],
+            serde_json::json!([{"handler": "codex", "model": "new-model"}])
+        );
+        assert_eq!(view("changed")["model_history"][0]["model"], "old-model");
+        assert_eq!(
+            view("unset")["routes"],
+            serde_json::json!([{"handler": "claude", "model": null}])
+        );
+        assert_eq!(
+            view("retired")["routes"],
+            serde_json::json!([]),
+            "not posted: no record to read here"
+        );
+
+        let response = agents(&served.base, &served.viewer).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let text = response.text().await.unwrap();
+        for hidden in ["opus-5", "new-model", "claude", "codex", "secret-role"] {
+            assert!(
+                !text.contains(hidden),
+                "{hidden} without roster.read: {text}"
+            );
+        }
+        let views: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(views[0]["routes"], serde_json::json!([]));
+        let changed = views
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|view| view["agent"] == "changed")
+            .unwrap();
+        assert_eq!(
+            changed["model_history"][0]["model"], "old-model",
+            "what ran stays hers to read with agent.read"
+        );
     }
 
     /// Operator 007 may configure G's Agents and sign green ink; viewer 007 may only sign.

@@ -1650,7 +1650,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
           agent: '007',
           posted: true,
           operation: AgentTallySummary(done: 12, failed: 1, stalled: 1),
-          model: 'sonnet',
+          routes: [AgentRouteSummary(handler: 'claude', model: 'sonnet')],
           clearance: 'field',
           configuredClearance: 'desk',
           grant: ClearanceGrantSummary(
@@ -1668,7 +1668,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
           agent: '008',
           posted: true,
           operation: AgentTallySummary(done: 4),
-          model: 'gpt-5.6',
+          routes: [AgentRouteSummary(handler: 'codex', model: 'gpt-5.6')],
           clearance: 'field',
           configuredClearance: 'field',
         ),
