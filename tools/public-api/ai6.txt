@@ -5755,21 +5755,26 @@ pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &st
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub mod ai6::directorates::section_00
 pub mod ai6::directorates::section_00::acp
+pub use ai6::directorates::section_00::acp::Authenticate
 pub use ai6::directorates::section_00::acp::Channel
-pub enum ai6::directorates::section_00::acp::PermissionDecision
-pub ai6::directorates::section_00::acp::PermissionDecision::Allow
-pub ai6::directorates::section_00::acp::PermissionDecision::Deny(alloc::string::String)
+pub use ai6::directorates::section_00::acp::PermissionDecider
+pub use ai6::directorates::section_00::acp::PermissionDecision
+pub use ai6::directorates::section_00::acp::PermissionOption
+pub use ai6::directorates::section_00::acp::PermissionRequest
+pub use ai6::directorates::section_00::acp::RefuseAll
+pub use ai6::directorates::section_00::acp::RpcFailure
+pub use ai6::directorates::section_00::acp::exchange
 pub struct ai6::directorates::section_00::acp::AcpFacade
 impl ai6::directorates::section_00::acp::AcpFacade
 pub fn ai6::directorates::section_00::acp::AcpFacade::new(alloc::sync::Arc<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::directorates::section_00::acp::TerminalFactory) -> Self
 pub fn ai6::directorates::section_00::acp::AcpFacade::serve(&self, impl agent_client_protocol::component::ConnectTo<agent_client_protocol::role::acp::Agent> + 'static) -> std::thread::join_handle::JoinHandle<()>
 pub fn ai6::directorates::section_00::acp::AcpFacade::with_auth(self, ai6::directorates::section_00::acp::FacadeAuth) -> Self
 pub struct ai6::directorates::section_00::acp::AcpOptions
-pub ai6::directorates::section_00::acp::AcpOptions::authenticate: core::option::Option<ai6::directorates::section_00::acp::Authenticate>
+pub ai6::directorates::section_00::acp::AcpOptions::authenticate: core::option::Option<coqui_acp::client::Authenticate>
 pub ai6::directorates::section_00::acp::AcpOptions::close_grace_ms: u64
 pub ai6::directorates::section_00::acp::AcpOptions::close_on_drop: bool
 pub ai6::directorates::section_00::acp::AcpOptions::cwd: alloc::string::String
-pub ai6::directorates::section_00::acp::AcpOptions::decider: alloc::sync::Arc<dyn ai6::directorates::section_00::acp::PermissionDecider>
+pub ai6::directorates::section_00::acp::AcpOptions::decider: alloc::sync::Arc<dyn coqui_acp::decider::Decider>
 pub ai6::directorates::section_00::acp::AcpOptions::disconnect_detail: core::option::Option<ai6::directorates::section_00::acp::DisconnectDetail>
 pub ai6::directorates::section_00::acp::AcpOptions::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::effort_option: core::option::Option<alloc::string::String>
@@ -5803,11 +5808,6 @@ pub fn ai6::directorates::section_00::acp::AcpSession::into_object(self) -> guat
 pub fn ai6::directorates::section_00::acp::AcpSession::next_event(&self, i64) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::AgentEvent>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::acp::AcpSession::send_message(&self, ai6::directorates::section_00::agent::AgentMessage) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::acp::AcpSession::session_id(&self) -> core::result::Result<core::option::Option<ai6::directorates::m::identity::SessionId>, guatiao::library::kind::ProviderError>
-impl core::ops::drop::Drop for ai6::directorates::section_00::acp::AcpSession
-pub fn ai6::directorates::section_00::acp::AcpSession::drop(&mut self)
-pub struct ai6::directorates::section_00::acp::Authenticate
-pub ai6::directorates::section_00::acp::Authenticate::meta: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
-pub ai6::directorates::section_00::acp::Authenticate::method: alloc::string::String
 pub struct ai6::directorates::section_00::acp::FacadeAuth
 pub ai6::directorates::section_00::acp::FacadeAuth::check: alloc::sync::Arc<ai6::directorates::section_00::acp::Credential>
 pub ai6::directorates::section_00::acp::FacadeAuth::method: alloc::string::String
@@ -5815,8 +5815,8 @@ pub ai6::directorates::section_00::acp::FacadeAuth::name: alloc::string::String
 pub struct ai6::directorates::section_00::acp::GateDecider
 impl ai6::directorates::section_00::acp::GateDecider
 pub fn ai6::directorates::section_00::acp::GateDecider::from_environment(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, impl core::convert::Into<std::path::PathBuf>) -> Self
-impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::GateDecider
-pub fn ai6::directorates::section_00::acp::GateDecider::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
+impl coqui_acp::decider::Decider for ai6::directorates::section_00::acp::GateDecider
+pub fn ai6::directorates::section_00::acp::GateDecider::decide(&self, &coqui_acp::decider::PermissionRequest) -> coqui_acp::decider::Decision
 #[non_exhaustive] pub struct ai6::directorates::section_00::acp::HandlerSpec
 pub ai6::directorates::section_00::acp::HandlerSpec::config: serde_json::value::Value
 pub ai6::directorates::section_00::acp::HandlerSpec::id: alloc::string::String
@@ -5847,19 +5847,6 @@ pub fn ai6::directorates::section_00::acp::LaunchMeta::with_key(self, impl core:
 pub fn ai6::directorates::section_00::acp::LaunchMeta::with_terminal(self, core::option::Option<alloc::string::String>) -> Self
 impl core::fmt::Debug for ai6::directorates::section_00::acp::LaunchMeta
 pub fn ai6::directorates::section_00::acp::LaunchMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::section_00::acp::PermissionOption
-pub ai6::directorates::section_00::acp::PermissionOption::kind: alloc::string::String
-pub ai6::directorates::section_00::acp::PermissionOption::option_id: alloc::string::String
-#[non_exhaustive] pub struct ai6::directorates::section_00::acp::PermissionRequest
-pub ai6::directorates::section_00::acp::PermissionRequest::kind: core::option::Option<alloc::string::String>
-pub ai6::directorates::section_00::acp::PermissionRequest::options: alloc::vec::Vec<ai6::directorates::section_00::acp::PermissionOption>
-pub ai6::directorates::section_00::acp::PermissionRequest::raw_input: core::option::Option<serde_json::value::Value>
-pub ai6::directorates::section_00::acp::PermissionRequest::session_id: alloc::string::String
-pub ai6::directorates::section_00::acp::PermissionRequest::title: core::option::Option<alloc::string::String>
-pub ai6::directorates::section_00::acp::PermissionRequest::tool_call_id: alloc::string::String
-pub struct ai6::directorates::section_00::acp::RefuseAll
-impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::RefuseAll
-pub fn ai6::directorates::section_00::acp::RefuseAll::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
 #[non_exhaustive] pub struct ai6::directorates::section_00::acp::ResumeMeta
 pub ai6::directorates::section_00::acp::ResumeMeta::answer_only: bool
 pub ai6::directorates::section_00::acp::ResumeMeta::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
@@ -5886,9 +5873,6 @@ pub fn ai6::directorates::section_00::acp::ResumeMeta::with_key(self, impl core:
 pub fn ai6::directorates::section_00::acp::ResumeMeta::with_terminal(self, core::option::Option<alloc::string::String>) -> Self
 impl core::fmt::Debug for ai6::directorates::section_00::acp::ResumeMeta
 pub fn ai6::directorates::section_00::acp::ResumeMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::section_00::acp::RpcFailure
-pub ai6::directorates::section_00::acp::RpcFailure::code: i32
-pub ai6::directorates::section_00::acp::RpcFailure::message: alloc::string::String
 pub struct ai6::directorates::section_00::acp::TerminalIo
 impl ai6::directorates::section_00::acp::TerminalIo
 pub fn ai6::directorates::section_00::acp::TerminalIo::new(alloc::sync::Arc<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>>, i64) -> Self
@@ -5902,20 +5886,11 @@ pub const ai6::directorates::section_00::acp::EVENTS_CAPABILITY: &str
 pub const ai6::directorates::section_00::acp::EVENT_NOTIFICATION: &str
 pub const ai6::directorates::section_00::acp::LAUNCH_META_KEY: &str
 pub const ai6::directorates::section_00::acp::RUNNER_TOKEN_METHOD: &str
+pub const ai6::directorates::section_00::acp::UNBOUNDED_LINE_BYTES: u64
 pub const ai6::directorates::section_00::acp::UNBOUNDED_MS: u64
-pub trait ai6::directorates::section_00::acp::PermissionDecider: core::marker::Send + core::marker::Sync
-pub fn ai6::directorates::section_00::acp::PermissionDecider::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
-impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::GateDecider
-pub fn ai6::directorates::section_00::acp::GateDecider::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
-impl ai6::directorates::section_00::acp::PermissionDecider for ai6::directorates::section_00::acp::RefuseAll
-pub fn ai6::directorates::section_00::acp::RefuseAll::decide(&self, &ai6::directorates::section_00::acp::PermissionRequest) -> ai6::directorates::section_00::acp::PermissionDecision
 pub fn ai6::directorates::section_00::acp::duplex() -> (agent_client_protocol::jsonrpc::Channel, agent_client_protocol::jsonrpc::Channel)
-pub fn ai6::directorates::section_00::acp::exchange(impl agent_client_protocol::component::ConnectTo<agent_client_protocol::role::acp::Client> + 'static, core::option::Option<ai6::directorates::section_00::acp::Authenticate>, u64, u64, alloc::vec::Vec<(alloc::string::String, serde_json::value::Value)>) -> core::result::Result<alloc::vec::Vec<core::result::Result<serde_json::value::Value, ai6::directorates::section_00::acp::RpcFailure>>, alloc::string::String>
-pub fn ai6::directorates::section_00::acp::lines_over_io(impl alloc::io::read::Read + core::marker::Send + 'static, impl core::io::write::Write + core::marker::Send + 'static, usize) -> (ai6::directorates::section_00::acp::IoLines, ai6::directorates::section_00::acp::Diagnostics)
 pub type ai6::directorates::section_00::acp::Credential = (dyn core::ops::function::Fn(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> bool + core::marker::Send + core::marker::Sync)
-pub type ai6::directorates::section_00::acp::Diagnostics = alloc::sync::Arc<std::sync::poison::mutex::Mutex<alloc::collections::vec_deque::VecDeque<alloc::string::String>>>
 pub type ai6::directorates::section_00::acp::DisconnectDetail = alloc::boxed::Box<(dyn core::ops::function::Fn() -> core::option::Option<alloc::string::String> + core::marker::Send + core::marker::Sync)>
-pub type ai6::directorates::section_00::acp::IoLines = agent_client_protocol::jsonrpc::Lines<futures_util::sink::map_err::SinkMapErr<futures_channel::mpsc::UnboundedSender<alloc::string::String>, fn(futures_channel::mpsc::SendError) -> core::io::error::Error>, futures_channel::mpsc::UnboundedReceiver<core::io::error::Result<alloc::string::String>>>
 pub type ai6::directorates::section_00::acp::TerminalFactory = alloc::sync::Arc<(dyn core::ops::function::Fn() -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>, guatiao::library::kind::ProviderError> + core::marker::Send + core::marker::Sync)>
 pub mod ai6::directorates::section_00::agent
 pub struct ai6::directorates::section_00::agent::AgentEvent

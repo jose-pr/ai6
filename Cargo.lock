@@ -107,6 +107,7 @@ dependencies = [
  "coqui-access-password-plugin",
  "coqui-access-proxy-plugin",
  "coqui-access-system-plugin",
+ "coqui-acp",
  "coqui-peer",
  "coqui-peer-tls",
  "coqui-roles",
@@ -157,6 +158,7 @@ dependencies = [
  "agent-client-protocol",
  "ai6",
  "ai6-terminal-pipe",
+ "coqui-acp",
  "futures",
  "serde",
  "serde_json",
@@ -990,6 +992,16 @@ source = "git+https://github.com/Boriken-Dev/coqui-access?rev=e43061d82cf0e845a3
 dependencies = [
  "coqui-access",
  "coqui-access-system",
+]
+
+[[package]]
+name = "coqui-acp"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=59ecf70c28181a41c856ade747cfc4725684228a#59ecf70c28181a41c856ade747cfc4725684228a"
+dependencies = [
+ "agent-client-protocol",
+ "futures",
+ "serde_json",
 ]
 
 [[package]]

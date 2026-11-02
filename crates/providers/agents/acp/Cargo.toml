@@ -22,6 +22,7 @@ test = false
 ai6 = { path = "../../../ai6", default-features = false, features = ["acp", "gate"] }
 # The fake agent the tests start speaks ACP through the SDK.
 agent-client-protocol.workspace = true
+coqui-acp.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true

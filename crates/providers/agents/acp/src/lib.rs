@@ -12,7 +12,7 @@ use std::sync::Arc;
 use ai6::HarnessStdio;
 use ai6::directorates::q::terminal::{AgentTerminal, ExitInfo, STREAM_COLS, Spec, TerminalSession};
 use ai6::directorates::section_00::acp::{
-    AcpOptions, AcpSession, Diagnostics, GateDecider, TerminalIo, lines_over_io,
+    AcpOptions, AcpSession, GateDecider, TerminalIo, UNBOUNDED_LINE_BYTES,
 };
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentSession, AgentStart, AssistantMode, clearance_runs_commands,
@@ -20,6 +20,7 @@ use ai6::directorates::section_00::agent::{
 use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
+use coqui_acp::lines::{Diagnostics, over_io};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
@@ -307,7 +308,13 @@ impl AcpHandler {
         let process: Arc<Object<dyn TerminalSession>> =
             Arc::new(terminal.spawn(&spec.to_value().map_err(refuse)?)?);
         let io = TerminalIo::new(process.clone(), settings.poll_ms);
-        let (lines, diagnostics) = lines_over_io(io.clone(), io.clone(), settings.diagnostic_lines);
+        let (lines, diagnostics) = over_io(
+            io.clone(),
+            io.clone(),
+            settings.diagnostic_lines,
+            UNBOUNDED_LINE_BYTES,
+        )
+        .map_err(|error| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string()))?;
         let options = AcpOptions {
             cwd: launch.working_directory.to_owned(),
             mcp_servers: mcp_servers(launch.environment, launch.assistant)?,

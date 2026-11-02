@@ -10,7 +10,7 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | `daemon` | The Station's HTTP service, scheduler and Guatiao provider host, and the field runner. | No |
 | `publisher` | Bounded lifecycle and raw terminal-byte publication to Universal Exports. | No |
 | `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
-| `acp` | The Agent Client Protocol wire (`section_00::acp`): `AcpSession`, `AcpFacade`; part of `daemon`. Adds `agent-client-protocol` and `futures`; no async runtime. | No |
+| `acp` | The Agent Client Protocol wire (`section_00::acp`): `AcpSession`, `AcpFacade`; part of `daemon`. Adds `agent-client-protocol`, `coqui-acp` and `futures`; no async runtime. | No |
 | `gate` | The green ink gate's client of a Station (`section_00::gate`), for agent providers; part of `daemon`. | No |
 | `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS (`coqui-peer-tls`). | No |
 | `sqlite` | `SqlRegistry` and `SqlProvider` in a SQLite file. | No |
@@ -3338,9 +3338,14 @@ impl LaunchMeta { pub fn from_start(&AgentStart) -> Self; pub fn into_start(self
 impl ResumeMeta { pub fn from_resume(&AgentResume) -> Self; pub fn into_resume(self, working_directory: String)
     -> AgentResume; /* with_handler, with_terminal, to_value as LaunchMeta */ }
 
+// Re-exported from `coqui_acp`, the ACP client the Session is built on (pinned by revision):
+// `Decider` as PermissionDecider, `Decision` as PermissionDecision, PermissionRequest,
+// PermissionOption, RefuseAll (the default decider), Authenticate, RpcFailure and
+// `exchange(transport, authenticate, initialize: Option<Duration>, request: Option<Duration>, calls)`.
 pub trait PermissionDecider: Send + Sync { fn decide(&self, &PermissionRequest) -> PermissionDecision; }
 pub enum PermissionDecision { Allow, Deny(String) }   // Allow -> the first allow_once option, Deny -> reject_once
-pub struct RefuseAll;                                   // the default decider
+pub const UNBOUNDED_MS: u64 = u64::MAX;               // a timeout that never fires
+pub const UNBOUNDED_LINE_BYTES: u64 = u64::MAX;       // a line length that never fires
 
 pub struct AcpOptions {          // Default: timeouts 20000 / 30000 / 2000 ms, no floors
     pub cwd: String, pub mcp_servers: Vec<Value>, pub meta: Map<String, Value>,
@@ -3366,12 +3371,14 @@ impl AcpFacade {
     pub fn with_auth(self, FacadeAuth) -> Self;           // authenticate required before session/*
     pub fn serve(&self, transport: impl ConnectTo<Agent> + 'static) -> JoinHandle<()>;
 }
-pub fn lines_over_io(reader, writer, diagnostic_lines: usize) -> (IoLines, Diagnostics);  // NDJSON transport
-pub type Diagnostics = Arc<Mutex<VecDeque<String>>>;  // the peer's last non-protocol lines
+// NDJSON transports are `coqui_acp::lines::over_io(reader, writer, diagnostic_lines, max_line)`;
+// `UNBOUNDED_LINE_BYTES` as `max_line` sets no limit.
 pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
 ```
 
-- **Client behaviour.** Client capabilities: no `fs`, no `terminal`. `session/resume` is used
+- **Client behaviour.** The protocol state machine is `coqui_acp`'s (connect, resume, turns,
+  permissions, refused kinds, line transports); `AcpSession` adds the launch extension, the
+  runner's sequence numbers and the words of `limit`, `blocked` and `failed`. Client capabilities: no `fs`, no `terminal`. `session/resume` is used
   when advertised, else `session/load` (replayed `session/update`s before its answer are dropped),
   else the connect fails. `authenticate` is sent only when `AcpOptions::authenticate` is set; a
   session error mentioning auth lists the agent's `authMethods`. MCP servers of `type` `http`/`sse`
@@ -3385,7 +3392,9 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
   `cost_micro_usd` (token counts are not guessed); `end_turn|max_tokens|max_turn_requests` ->
   `completed`, `refusal` -> `failed`, `cancelled` -> `completed` after `interrupt`, else `blocked`
   with the text `TURN_CANCELLED`, a JSON-RPC error -> `failed`. A connection that ends unclosed
-  is `failed`: `the agent closed its connection`, then `disconnect_detail`'s answer.
+  while the turn is not over is `failed`: `the agent closed its connection`, then
+  `disconnect_detail`'s answer; a turn the façade already ended is not failed by the agent leaving.
+  An agent answering `initialize` with a protocol version other than 1 is refused.
 - **Restricted.** With `AcpOptions::restricted`, only a request of kind `read`, `search` or `think`
   or for a tool of a server in `mcp_servers` (the Grok CLI's `UseTool` input, else a title
   `mcp__<server>__`) reaches the decider; every other is refused. A tool of a `RESTRICTED_KINDS`

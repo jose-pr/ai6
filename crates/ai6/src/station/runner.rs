@@ -1174,8 +1174,9 @@ mod tests {
 
     use crate::directorates::section_00::acp::{
         AcpOptions, AcpSession, Authenticate, LAUNCH_META_KEY, LaunchMeta, RUNNER_TOKEN_METHOD,
-        exchange, lines_over_io,
+        UNBOUNDED_LINE_BYTES, exchange,
     };
+    use coqui_acp::lines::{IoLines, over_io};
 
     /// A runner serving a directory on a loopback port, stopped when `stop` is dropped.
     struct Serving {
@@ -1229,9 +1230,11 @@ mod tests {
                 .to_owned()
         }
 
-        fn transport(&self) -> crate::directorates::section_00::acp::IoLines {
+        fn transport(&self) -> IoLines {
             let stream = std::net::TcpStream::connect(self.address()).unwrap();
-            lines_over_io(stream.try_clone().unwrap(), stream, 0).0
+            over_io(stream.try_clone().unwrap(), stream, 0, UNBOUNDED_LINE_BYTES)
+                .unwrap()
+                .0
         }
 
         fn authenticate(&self, token: &str) -> Authenticate {
@@ -1558,8 +1561,8 @@ mod tests {
             exchange(
                 transport,
                 Some(auth),
-                20_000,
-                30_000,
+                Some(Duration::from_millis(20_000)),
+                Some(Duration::from_millis(30_000)),
                 vec![(
                     "_ai6/session_status".to_owned(),
                     serde_json::json!({"key": "none"}),
@@ -1578,8 +1581,8 @@ mod tests {
             exchange(
                 transport,
                 Some(auth),
-                20_000,
-                30_000,
+                Some(Duration::from_millis(20_000)),
+                Some(Duration::from_millis(30_000)),
                 vec![(
                     "_ai6/session_status".to_owned(),
                     serde_json::json!({"key": "none"}),

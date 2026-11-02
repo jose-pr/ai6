@@ -21,12 +21,14 @@ use crate::directorates::m::theaters::{RunnerSettings, Theater, TheaterAccess};
 use crate::directorates::q::terminal::{STREAM_COLS, Spec, TerminalSession};
 use crate::directorates::q::transport::{RunSpec, TransportClient, describe};
 use crate::directorates::section_00::acp::{
-    AcpOptions, AcpSession, Authenticate, HandlerSpec, IoLines, LAUNCH_META_KEY, LaunchMeta,
-    RUNNER_TOKEN_METHOD, ResumeMeta, RpcFailure, TerminalIo, UNBOUNDED_MS, exchange, lines_over_io,
+    AcpOptions, AcpSession, Authenticate, HandlerSpec, LAUNCH_META_KEY, LaunchMeta,
+    RUNNER_TOKEN_METHOD, ResumeMeta, RpcFailure, TerminalIo, UNBOUNDED_LINE_BYTES, UNBOUNDED_MS,
+    duration_of, exchange,
 };
 use crate::directorates::section_00::agent::{AgentEvent, AgentMessage, AgentSession};
 use crate::station::limits::RunnerLimits;
 use crate::station::reach::ReachWatch;
+use coqui_acp::lines::{IoLines, over_io};
 
 /// The line `ai6 runner connect` prints once its terminal is raw and it is authenticated, so
 /// the Station writes nothing a cooked terminal would echo.
@@ -216,7 +218,9 @@ impl RunnerLink {
                     .try_clone()
                     .map_err(|error| not_running(error.to_string()))?;
                 Ok(Connection {
-                    lines: lines_over_io(reader, stream, 0).0,
+                    lines: over_io(reader, stream, 0, UNBOUNDED_LINE_BYTES)
+                        .map_err(|error| not_running(error.to_string()))?
+                        .0,
                     authenticate: Some(token_auth(&token)),
                     on_close: None,
                 })
@@ -250,7 +254,8 @@ impl RunnerLink {
                     return Err(Unreachable(why));
                 }
                 let io = TerminalIo::new(process.clone(), poll_ms);
-                let (lines, _) = lines_over_io(io.clone(), io.clone(), 0);
+                let (lines, _) = over_io(io.clone(), io.clone(), 0, UNBOUNDED_LINE_BYTES)
+                    .map_err(|error| Unreachable(error.to_string()))?;
                 let stopper = io;
                 Ok(Connection {
                     lines,
@@ -273,14 +278,14 @@ impl RunnerLink {
         let answered = exchange(
             connection.lines,
             connection.authenticate,
-            self.timeouts.initialize_ms,
-            self.timeouts.request_ms,
+            duration_of(self.timeouts.initialize_ms),
+            duration_of(self.timeouts.request_ms),
             calls,
         );
         if let Some(on_close) = connection.on_close {
             on_close();
         }
-        answered.map_err(Unreachable)
+        answered.map_err(|error| Unreachable(error.to_string()))
     }
 
     /// Whether a runner answers.

@@ -12,7 +12,8 @@ use agent_client_protocol::{
     Agent, Client, ConnectionTo, Responder, UntypedMessage, on_receive_notification,
     on_receive_request,
 };
-use ai6::directorates::section_00::acp::lines_over_io;
+use ai6::directorates::section_00::acp::UNBOUNDED_LINE_BYTES;
+use coqui_acp::lines::over_io;
 use serde_json::{Value, json};
 
 /// The answer to a prompt `FAKE_HOLD` keeps until `session/cancel`, as a real agent's model turn,
@@ -150,7 +151,10 @@ fn handle(
 }
 
 fn main() {
-    let (lines, _) = lines_over_io(std::io::stdin(), std::io::stdout(), 0);
+    let Ok((lines, _)) = over_io(std::io::stdin(), std::io::stdout(), 0, UNBOUNDED_LINE_BYTES)
+    else {
+        return;
+    };
     let cwd = Arc::new(std::sync::Mutex::new(String::new()));
     let held: Held = Arc::default();
     let for_prompts = held.clone();

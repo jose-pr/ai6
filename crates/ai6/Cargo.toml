@@ -16,7 +16,7 @@ default = []
 daemon = ["gate", "acp","dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "guatiao/load"]
 # The Agent Client Protocol wire (`ai6::directorates::section_00::acp`): the client a Station
 # and the `acp` handler drive agents with, and the agent side serving any AgentHandler.
-acp = ["dep:agent-client-protocol", "dep:futures"]
+acp = ["dep:agent-client-protocol", "dep:coqui-acp", "dep:futures"]
 # The harness gate's client of a Station's Cable endpoint (`ai6::directorates::section_00::gate`).
 gate = ["dep:ureq", "dep:url"]
 # Adds bounded background event publication to the Universal Exports gateway.
@@ -65,6 +65,7 @@ required-features = ["cli"]
 
 [dependencies]
 agent-client-protocol = { workspace = true, optional = true }
+coqui-acp = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }

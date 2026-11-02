@@ -16,9 +16,10 @@ use subtle::ConstantTimeEq;
 use super::{Hosted, Launch, Runner, lock_of};
 use crate::directorates::section_00::acp::{
     EVENT_NOTIFICATION, EVENTS_CAPABILITY, LAUNCH_META_KEY, LaunchMeta, RUNNER_TOKEN_METHOD,
-    ResumeMeta, lines_over_io,
+    ResumeMeta, UNBOUNDED_LINE_BYTES,
 };
 use crate::directorates::section_00::agent::{AgentMessage, LIMIT_EVENT};
+use coqui_acp::lines::over_io;
 
 /// The `_meta` key of `session/load`: replay what follows this sequence number.
 const AFTER_KEY: &str = "dev.coqui.ai6/after";
@@ -56,7 +57,9 @@ pub(super) fn serve_connection(
     else {
         return;
     };
-    let (lines, _) = lines_over_io(reader, writer, 0);
+    let Ok((lines, _)) = over_io(reader, writer, 0, UNBOUNDED_LINE_BYTES) else {
+        return;
+    };
     let connection = Arc::new(Connection {
         runner,
         token,
