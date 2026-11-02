@@ -77,6 +77,8 @@ pub(crate) struct Conversation {
     pub(crate) station: Option<String>,
     /// The provider Session of the harness, for a resume.
     pub(crate) session_id: Option<String>,
+    /// The route that Session runs on, when the assistant Agent has routes.
+    pub(crate) route: Option<ai6::RouteRef>,
     /// A message is being answered.
     pub(crate) busy: bool,
     /// Moneypenny wrote text since the person's last message.
@@ -164,6 +166,7 @@ impl Conversation {
             entries: VecDeque::new(),
             station: None,
             session_id: None,
+            route: None,
             busy: false,
             answered: false,
             pending: None,

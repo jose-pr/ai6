@@ -430,6 +430,7 @@ impl Assistant {
     /// The memory job of `op` for `person`, checked as a Station will check it.
     fn memory_job(&self, person: &str, op: MemoryOp) -> Result<AssistantJob, Refused> {
         let job = AssistantJob {
+            route: None,
             job_id: Uuid::new_v4().to_string(),
             conversation_id: format!("memory-{}", Uuid::new_v4().simple()),
             agent_id: self.config.agent_id.clone(),

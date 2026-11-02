@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 
 use super::agent::{AssistantMode, AssistantNetwork, McpServerRef};
 use crate::directorates::m::assistant::{AssistantLimits, RepoKind, file_safe, skill_name};
+use crate::directorates::m::roster::RouteRef;
 
 /// The prefix of the environment variables holding the assistant's MCP endpoint
 /// (`AI6_MONEYPENNY_MCP_URL`, `AI6_MONEYPENNY_MCP_TOKEN`).
@@ -813,6 +814,9 @@ pub struct AssistantJob {
     /// The provider Session the conversation last ran, which a new harness resumes.
     #[serde(default)]
     pub session_id: Option<String>,
+    /// The route that Session ran on, when its Agent has routes: it resumes only there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<RouteRef>,
     /// Close the conversation's harness instead of sending a message; `message` is empty.
     #[serde(default)]
     pub close: bool,
@@ -942,6 +946,18 @@ impl AssistantJob {
             && !valid_identity(session)
         {
             return Err("session_id is empty, too long or has control characters".to_owned());
+        }
+        if let Some(route) = &self.route
+            && ![
+                Some(&route.handler),
+                route.model.as_ref(),
+                route.pool.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .all(|part| valid_identity(part))
+        {
+            return Err("route is empty, too long or has control characters".to_owned());
         }
         let controls = [
             self.close,
@@ -1138,6 +1154,9 @@ pub struct AssistantReport {
     /// The provider Session the harness runs, once the provider has issued it.
     #[serde(default)]
     pub session_id: Option<String>,
+    /// The route that Session runs on, when its Agent has routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<RouteRef>,
     /// The events, oldest first; at most [`AssistantLimits::events`].
     pub events: Vec<AssistantEvent>,
 }
@@ -1268,6 +1287,7 @@ mod tests {
 
     fn job() -> AssistantJob {
         AssistantJob {
+            route: None,
             job_id: "job-1".to_owned(),
             conversation_id: "conversation-1".to_owned(),
             agent_id: "moneypenny".to_owned(),
@@ -1797,6 +1817,7 @@ mod tests {
         let mut limits = limits();
         limits.event_bytes = Limit::at(5);
         let mut report = AssistantReport {
+            route: None,
             station_id: "s".to_owned(),
             conversation_id: "c".to_owned(),
             job_id: None,

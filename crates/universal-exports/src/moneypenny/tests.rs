@@ -457,6 +457,7 @@ async fn report(
         .post(format!("{}/v1/station/assistant/reports", served.base))
         .bearer_auth(STATION_TOKEN)
         .json(&AssistantReport {
+            route: None,
             station_id: station.to_owned(),
             conversation_id: job.conversation_id.clone(),
             job_id: job_id.map(str::to_owned),
@@ -467,6 +468,97 @@ async fn report(
         .await
         .unwrap()
         .status()
+}
+
+#[tokio::test]
+async fn a_conversation_sends_each_job_the_route_its_session_ran_on() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, _ready) = open(&served, &served.operator).await;
+    say(&mut app, "First.", None).await;
+    let job = take(&served, "hq").await;
+    assert_eq!(job.route, None, "a new conversation has run on none");
+    let route = ai6::RouteRef::new("acp", Some("grok-4.7".to_owned()), None);
+    let sent = |route: Option<ai6::RouteRef>, session: Option<&str>, kinds: Vec<AssistantEvent>| {
+        AssistantReport {
+            route,
+            station_id: "hq".to_owned(),
+            conversation_id: job.conversation_id.clone(),
+            job_id: None,
+            session_id: session.map(str::to_owned),
+            events: kinds,
+        }
+    };
+    let client = reqwest::Client::new();
+    let post = |report: AssistantReport| {
+        client
+            .post(format!("{}/v1/station/assistant/reports", served.base))
+            .bearer_auth(STATION_TOKEN)
+            .json(&report)
+            .send()
+    };
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &job,
+            Some(&job.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    let answered = post(sent(
+        Some(route.clone()),
+        Some("provider-on-grok"),
+        vec![AssistantEvent::new(
+            EVENT_COMPLETED,
+            Some("Done.".to_owned()),
+        )],
+    ))
+    .await
+    .unwrap();
+    assert_eq!(answered.status(), StatusCode::NO_CONTENT);
+    receive_until(&mut app, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+
+    say(&mut app, "Second.", None).await;
+    let second = take(&served, "hq").await;
+    assert_eq!(second.session_id.as_deref(), Some("provider-on-grok"));
+    assert_eq!(second.route, Some(route), "it resumes only there");
+
+    // A new Session on another route replaces both together.
+    let moved = ai6::RouteRef::new("claude", Some("gemini-free".to_owned()), None);
+    assert_eq!(
+        report(
+            &served,
+            "hq",
+            &second,
+            Some(&second.job_id),
+            vec![AssistantEvent::new(EVENT_ACCEPTED, None)]
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    post(sent(
+        Some(moved.clone()),
+        Some("provider-on-gemini"),
+        vec![AssistantEvent::new(
+            EVENT_COMPLETED,
+            Some("Done.".to_owned()),
+        )],
+    ))
+    .await
+    .unwrap();
+    receive_until(&mut app, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+    say(&mut app, "Third.", None).await;
+    let third = take(&served, "hq").await;
+    assert_eq!(third.session_id.as_deref(), Some("provider-on-gemini"));
+    assert_eq!(third.route, Some(moved));
 }
 
 /// One JSON-RPC request to the MCP endpoint with `token`.

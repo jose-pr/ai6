@@ -198,6 +198,10 @@ pub struct AssistantDeskLimits {
     #[schema(title = "Wait for a closing harness")]
     #[map(default = AssistantDeskLimits::default().close_wait)]
     pub close_wait: Seconds,
+    /// Seconds a route or account stays out when a harness reports a limit with no reset time.
+    #[schema(title = "Out for this long at a limit with no reset time")]
+    #[map(default = AssistantDeskLimits::default().limit_fallback)]
+    pub limit_fallback: Seconds,
     /// Seconds removing a closed harness's directory is tried again.
     #[schema(title = "Retry removing a directory for")]
     #[map(default = AssistantDeskLimits::default().remove_retry)]
@@ -256,6 +260,9 @@ impl Default for AssistantDeskLimits {
             parked: Limit::at(64),
             known: Limit::at(1_024),
             close_wait: Seconds::new(10),
+            limit_fallback: Seconds::new(
+                crate::directorates::m::limits::DEFAULT_LIMIT_FALLBACK_SECS,
+            ),
             remove_retry: Seconds::new(2),
             unlocked_stale: Seconds::new(3_600),
             clone_timeout: Seconds::new(120),
@@ -672,6 +679,7 @@ const DESK_PACE: &[&str] = &[
     "report_attempts",
     "report_retry",
     "close_wait",
+    "limit_fallback",
     "remove_retry",
     "unlocked_stale",
     "page_upload_timeout",

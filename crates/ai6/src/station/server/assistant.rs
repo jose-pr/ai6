@@ -55,12 +55,16 @@ use tokio::task::JoinHandle;
 use ureq::tls::TlsConfig;
 use url::Url;
 
+use super::accounts::{self, Holder, Site};
 #[cfg(feature = "cables-mcp")]
 use super::cables_mcp::{AssistantEndpoint, AssistantIdentity, CableGate, Standing};
-use super::{DaemonState, medical, station_terminal, unix_now, vetting};
+use super::routes::{self, OnRoute};
+use super::{DaemonState, credentials, medical, station_terminal, unix_now, vetting};
 use crate::bounds::{Limit, TimeLimit};
 use crate::directorates::m::assistant::{AssistantDeskLimits, AssistantLimits, AssistantSettings};
 use crate::directorates::m::identity::{MissionId, SessionId};
+use crate::directorates::m::roster::{Agent, RouteRef};
+use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
@@ -317,6 +321,30 @@ impl Outbox {
         }
     }
 
+    /// Sends at once the reports waiting for `conversation`'s message that only say a harness
+    /// closed: called with no harness running, so that harness is the one the message replaces.
+    /// Told after the message's `accepted` they would read as her closing before she answered.
+    fn release_closed(&self, conversation: &str) {
+        let closed = |report: &AssistantReport| {
+            !report.events.is_empty()
+                && report.events.iter().all(|event| event.kind == EVENT_CLOSED)
+        };
+        let released: Vec<AssistantReport> = match self.held.lock() {
+            Ok(mut held) => match held.get_mut(conversation) {
+                Some(Held::Waiting(waiting)) => {
+                    let (released, kept) = std::mem::take(waiting).into_iter().partition(closed);
+                    *waiting = kept;
+                    released
+                }
+                _ => Vec::new(),
+            },
+            Err(_) => Vec::new(),
+        };
+        for report in released {
+            self.deliver(report);
+        }
+    }
+
     /// Sends a job's answer behind every report queued before it and waits until it was sent;
     /// answers whether Universal Exports refused it. For a `message` job the reports held
     /// meanwhile follow it, or, when it was a refused `accepted`, are dropped with all later
@@ -445,18 +473,25 @@ type Running = (
     Option<SharedWorkspace>,
 );
 
+/// The settings a handler starts with: its route's, or its Agent's.
+type HandlerSettings = serde_json::Map<String, serde_json::Value>;
+
 /// Starts and resumes harnesses: the Station's own handlers and terminal, or a test's.
 pub(super) trait Harness: Send + Sync {
     /// Whether `handler` can be started here.
     fn available(&self, handler: &str) -> bool;
-    /// Starts a harness with `handler`.
-    fn start(&self, handler: &str, request: AgentStart)
-    -> Result<Object<dyn AgentSession>, String>;
-    /// Resumes a provider Session of `agent` with `handler`.
+    /// Starts a harness with `handler` and its `settings`.
+    fn start(
+        &self,
+        handler: &str,
+        settings: &HandlerSettings,
+        request: AgentStart,
+    ) -> Result<Object<dyn AgentSession>, String>;
+    /// Resumes a provider Session with `handler` and its `settings`.
     fn resume(
         &self,
         handler: &str,
-        agent: &str,
+        settings: &HandlerSettings,
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String>;
     /// Why `handler`'s harness, started with `environment`, cannot run scripts in its own
@@ -495,15 +530,12 @@ fn log_start(session: &MissionId, how: &str, handler: &str, terminal: &str) {
 }
 
 impl StationHarness {
-    /// `handler` with `agent`'s settings, and a terminal that suits what it declares.
-    fn handler(&self, handler: &str, agent: &str) -> Result<Launch, String> {
-        let settings = super::agents::effective(&self.0, None, agent)
-            .map(|agent| agent.handler_settings)
-            .unwrap_or_default();
+    /// `handler` with `settings`, and a terminal that suits what it declares.
+    fn handler(&self, handler: &str, settings: &HandlerSettings) -> Result<Launch, String> {
         let handler = self
             .0
             .plugins
-            .handler_with(handler, &settings)
+            .handler_with(handler, settings)
             .map_err(|error| error.to_string())?;
         let stdio = handler.stdio().map_err(|error| error.to_string())?;
         let provider = station_terminal(&self.0, stdio)?;
@@ -526,9 +558,10 @@ impl Harness for StationHarness {
     fn start(
         &self,
         handler: &str,
+        settings: &HandlerSettings,
         request: AgentStart,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let (launch, terminal, provider) = self.handler(handler, &request.agent_id)?;
+        let (launch, terminal, provider) = self.handler(handler, settings)?;
         let session = request.mission_id.clone();
         let started = crate::station::acp::start(launch, terminal, request)
             .map_err(|error| error.to_string())?;
@@ -539,10 +572,10 @@ impl Harness for StationHarness {
     fn resume(
         &self,
         handler: &str,
-        agent: &str,
+        settings: &HandlerSettings,
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String> {
-        let (launch, terminal, provider) = self.handler(handler, agent)?;
+        let (launch, terminal, provider) = self.handler(handler, settings)?;
         let session = request.mission_id.clone();
         let resumed = crate::station::acp::resume(launch, terminal, request)
             .map_err(|error| error.to_string())?;
@@ -608,6 +641,29 @@ const BESIDE_MISSIONS: &str = "this Station also runs Missions on its own host, 
      Theater, or one without the `execution` role, or set assistant.allow_beside_local_missions to \
      accept that";
 
+/// The provider Session each conversation last ran, and on which route, by conversation.
+type Known = Arc<Mutex<BTreeMap<String, (String, Option<RouteRef>)>>>;
+
+/// Frees what was issued to a harness unless it comes to run, when its pump frees it instead.
+struct Issued {
+    state: DaemonState,
+    session: String,
+    running: bool,
+}
+
+impl Drop for Issued {
+    fn drop(&mut self) {
+        if !self.running {
+            credentials::release(&self.state, &self.session);
+        }
+    }
+}
+
+/// The name a conversation's harness, its claims and its leases go under.
+fn session_name(conversation: &str) -> String {
+    format!("assistant--{}", conversation_digest(conversation))
+}
+
 /// The assistant Sessions of one Station.
 pub(super) struct Desk {
     state: DaemonState,
@@ -621,7 +677,7 @@ pub(super) struct Desk {
     left_held: LeftHeld,
     /// Harnesses being started, not yet in `live`.
     starting: AtomicUsize,
-    known: Arc<Mutex<BTreeMap<String, String>>>,
+    known: Known,
     /// Where the conversations' working directories go, made at the first start.
     areas: Mutex<Option<Root>>,
     /// Opens the safe houses of the workspaces' repositories.
@@ -873,10 +929,12 @@ impl Desk {
             Err(reason) => AssistantEvent::new(EVENT_REJECTED, Some(reason)),
         };
         let session_id = self.known_session(&job.conversation_id);
+        let route = self.known_route(&job.conversation_id);
         let refused = self
             .outbox
             .answer(
                 AssistantReport {
+                    route,
                     station_id: self.state.station_id.clone(),
                     conversation_id: job.conversation_id.clone(),
                     job_id: Some(job.job_id),
@@ -961,6 +1019,7 @@ impl Desk {
             outbox
                 .answer(
                     AssistantReport {
+                        route: None,
                         station_id,
                         conversation_id: job.conversation_id,
                         job_id: Some(job.job_id),
@@ -1052,6 +1111,7 @@ impl Desk {
         {
             return Err("the conversation's previous harness is still closing".to_owned());
         }
+        self.outbox.release_closed(&job.conversation_id);
         self.begin(job).await.map(|()| None)
     }
 
@@ -1086,8 +1146,37 @@ impl Desk {
         .map_err(|error| error.to_string())?
     }
 
-    /// Starts or resumes the conversation's harness with the job's message.
+    /// Starts or resumes the conversation's harness with the job's message: on the next route with
+    /// room when a route's harness does not start (its login gone, say), so one source's trouble
+    /// does not stop her. Each route is tried once.
     async fn begin(&self, job: &AssistantJob) -> Result<(), String> {
+        let mut failed: Vec<(RouteRef, String)> = Vec::new();
+        loop {
+            let mut failing = None;
+            match self.begin_on(job, &failed, &mut failing).await {
+                Ok(()) => return Ok(()),
+                Err(reason) => match failing {
+                    Some(route) => {
+                        (self.log)(&format!(
+                            "assistant conversation {}: route {route} did not start: {reason}",
+                            conversation_digest(&job.conversation_id)
+                        ));
+                        failed.push((route, reason));
+                    }
+                    None => return Err(reason),
+                },
+            }
+        }
+    }
+
+    /// [`Desk::begin`] on one route, none of `failed`. A harness on a route that does not start
+    /// names the route in `failing`.
+    async fn begin_on(
+        &self,
+        job: &AssistantJob,
+        failed: &[(RouteRef, String)],
+        failing: &mut Option<RouteRef>,
+    ) -> Result<(), String> {
         let state = self.state.current();
         let agent = state
             .roster
@@ -1096,6 +1185,11 @@ impl Desk {
         if medical::is_quarantined(&state, &agent.id, None) {
             return Err(format!("Agent {:?} is quarantined", agent.id));
         }
+        let earlier = job
+            .route
+            .clone()
+            .or_else(|| self.known_route(&job.conversation_id));
+        let (agent, on, same_route) = self.route_for(&state, agent, earlier.as_ref(), failed)?;
         let handler = agent
             .handler
             .clone()
@@ -1103,6 +1197,7 @@ impl Desk {
         if !self.harness.available(&handler) {
             return Err(format!("this Station has no {handler:?} handler"));
         }
+        let handler_settings = agent.handler_settings.clone();
         let desk = (self.tables)().1;
         let retry = desk.remove_retry.0;
         // Conversations start at once, so one starting holds its place until it runs.
@@ -1165,6 +1260,13 @@ impl Desk {
                 }
             };
         notices.extend(installed.notices);
+        if let (Some(earlier), Some(on), false) = (&earlier, &on, same_route) {
+            notices.push(format!(
+                "Moneypenny moved from {earlier} to {}: she has this conversation's recap, not \
+                 its full history.",
+                on.route.reference()
+            ));
+        }
         if let Some(dir) = installed.dir {
             mode.skills = installed.names;
             mode.skills_dir = Some(dir.to_string_lossy().into_owned());
@@ -1178,9 +1280,38 @@ impl Desk {
             }
         };
         // As a Chief of Staff review, the harness keeps only what reaches its model.
-        let mut environment = vetting::review_environment(
-            &super::credentials::session_environment(&state, &agent.id, &agent.env),
-        );
+        let mut environment = vetting::review_environment(&credentials::session_environment(
+            &state, &agent.id, &agent.env,
+        ));
+        // What a route sets is how it reaches its model, whatever its name.
+        if let Some(on) = &on {
+            environment.extend(on.route.env.values().clone());
+        }
+        let session_key = session_name(&job.conversation_id);
+        // Before her own directories below: an account's variables make way for no one else's.
+        let site = Site {
+            resuming: false,
+            on_station: true,
+        };
+        if let Err(reason) = credentials::issue_for_assistant(
+            &state,
+            Holder {
+                id: &session_key,
+                operation: None,
+            },
+            &agent,
+            on.as_ref(),
+            site,
+            &mut environment,
+        ) {
+            remove_area(&area, retry);
+            return Err(reason);
+        }
+        let mut issued = Issued {
+            state: state.clone(),
+            session: session_key.clone(),
+            running: false,
+        };
         environment.insert(ASSISTANT_MCP_URL_ENV.to_owned(), self.mcp_url.clone());
         environment.insert(ASSISTANT_MCP_TOKEN_ENV.to_owned(), job.mcp_token.clone());
         // Her own Claude Code configuration directory, beside the working directory: the
@@ -1230,15 +1361,16 @@ impl Desk {
             }
         };
         let unavailable = self.arm(&mut mode, job, &reach, &handler, &environment);
-        let mission_id = MissionId::try_new(format!(
-            "assistant--{}",
-            conversation_digest(&job.conversation_id)
-        ))
-        .map_err(|_| "the conversation cannot name a Session".to_owned())?;
-        let previous = job
-            .session_id
-            .clone()
-            .or_else(|| self.known_session(&job.conversation_id));
+        let mission_id = MissionId::try_new(session_key.clone())
+            .map_err(|_| "the conversation cannot name a Session".to_owned())?;
+        // A provider Session belongs to the source it ran on.
+        let previous = same_route
+            .then(|| {
+                job.session_id
+                    .clone()
+                    .or_else(|| self.known_session(&job.conversation_id))
+            })
+            .flatten();
         let mut initial_context: Vec<String> = Some(agent.context.clone())
             .filter(|context| !context.trim().is_empty())
             .into_iter()
@@ -1293,11 +1425,11 @@ impl Desk {
         let started = tokio::task::spawn_blocking(move || {
             let Some(resume) = resume else {
                 return harness
-                    .start(&handler, start)
+                    .start(&handler, &handler_settings, start)
                     .map(|session| (session, None));
             };
             let resumed = resume.session_id.as_str().to_owned();
-            match harness.resume(&handler, &start.agent_id, resume) {
+            match harness.resume(&handler, &handler_settings, resume) {
                 // A resumed harness can still fail before it confirms the Session (Claude Code
                 // reads the message first): the pump then starts afresh with `start`.
                 Ok(session) => Ok((
@@ -1305,6 +1437,7 @@ impl Desk {
                     Some(Fallback {
                         harness,
                         handler,
+                        settings: handler_settings,
                         start,
                         resumed,
                     }),
@@ -1313,7 +1446,7 @@ impl Desk {
                 Err(error) => {
                     report_resume_failure(&conversation, &resumed, &error);
                     harness
-                        .start(&handler, start)
+                        .start(&handler, &handler_settings, start)
                         .map(|session| (session, None))
                 }
             }
@@ -1325,6 +1458,7 @@ impl Desk {
             Ok(started) => started,
             Err(error) => {
                 remove_area(&area, retry);
+                *failing = on.as_ref().map(|on| on.route.reference());
                 return Err(format!("the assistant harness did not start: {error}"));
             }
         };
@@ -1347,6 +1481,10 @@ impl Desk {
         let pump = Pump {
             #[cfg(feature = "cables-mcp")]
             left_held: self.left_held.clone(),
+            state: state.clone(),
+            session_name: session_key,
+            route: on.map(|on| on.route.reference()),
+            usage: UsageTracker::default(),
             conversation_id: job.conversation_id.clone(),
             station_id: state.station_id.clone(),
             session,
@@ -1367,7 +1505,45 @@ impl Desk {
             .name("ai6-assistant".to_owned())
             .spawn(move || pump.run())
             .map_err(|error| format!("the assistant pump did not start: {error}"))?;
+        issued.running = true;
         Ok(())
+    }
+
+    /// The route a job of the routed `agent` runs on, and `agent` as it works there; `agent` as it
+    /// is for one handler. Whether it stays on `earlier`, the route the conversation last ran on,
+    /// and so can resume its provider Session. A route counts when its handler can be started
+    /// here and its source has room.
+    ///
+    /// # Errors
+    ///
+    /// Why no route can take the job, naming each: Universal Exports then offers it elsewhere.
+    fn route_for(
+        &self,
+        state: &DaemonState,
+        agent: Agent,
+        earlier: Option<&RouteRef>,
+        failed: &[(RouteRef, String)],
+    ) -> Result<(Agent, Option<OnRoute>, bool), String> {
+        if !agent.is_routed() {
+            return Ok((agent, None, true));
+        }
+        let harness = self.harness.clone();
+        let refuses = move |route: &crate::directorates::m::roster::AgentRoute| {
+            let named = route.reference();
+            if let Some((_, reason)) = failed.iter().find(|(tried, _)| *tried == named) {
+                return Some(reason.clone());
+            }
+            (!harness.available(&route.handler))
+                .then(|| format!("this Station has no {:?} handler", route.handler))
+        };
+        let place = routes::Place {
+            refuses: &refuses,
+            clearance: None,
+            review: false,
+        };
+        let (on, same) = routes::for_conversation(state, &agent, earlier, &place)?;
+        let agent = agent.on_route(&on.route);
+        Ok((agent, Some(on), same))
     }
 
     /// What this Station's roster lets `job`'s person run and reach, the deployment capped by
@@ -1417,6 +1593,13 @@ impl Desk {
             "skills": skills,
             "skills_allow_tools": settings.skills_allow_tools(),
             "skills_unpinned": settings.skills_unpinned(),
+            "routes": state.roster.agent(None, &job.agent_id).ok().map(|agent| {
+                agent
+                    .route_list()
+                    .iter()
+                    .map(|route| route.reference().to_string())
+                    .collect::<Vec<_>>()
+            }),
         });
         workspace::sha256_hex(under.to_string().as_bytes())
     }
@@ -1509,6 +1692,7 @@ impl Desk {
         );
         let reporter = Arc::new(move |event: AssistantEvent| {
             outbox.send(AssistantReport {
+                route: None,
                 station_id: station.clone(),
                 conversation_id: conversation.clone(),
                 job_id: None,
@@ -1780,7 +1964,19 @@ impl Desk {
     }
 
     fn known_session(&self, conversation: &str) -> Option<String> {
-        self.known.lock().ok()?.get(conversation).cloned()
+        self.known
+            .lock()
+            .ok()?
+            .get(conversation)
+            .map(|(session, _)| session.clone())
+    }
+
+    fn known_route(&self, conversation: &str) -> Option<RouteRef> {
+        self.known
+            .lock()
+            .ok()?
+            .get(conversation)
+            .and_then(|(_, route)| route.clone())
     }
 
     /// The conversation's working directory, made empty-if-new; the same path on every start.
@@ -1813,6 +2009,13 @@ impl Drop for Starting<'_> {
 struct Pump {
     #[cfg(feature = "cables-mcp")]
     left_held: LeftHeld,
+    state: DaemonState,
+    /// What its account claim and leases go under.
+    session_name: String,
+    /// The route it runs on, when its Agent has routes.
+    route: Option<RouteRef>,
+    /// What the running harness has reported so far.
+    usage: UsageTracker,
     conversation_id: String,
     station_id: String,
     session: SharedSession,
@@ -1824,7 +2027,7 @@ struct Pump {
     remove_retry: Duration,
     outbox: Outbox,
     live: Arc<Mutex<BTreeMap<String, Live>>>,
-    known: Arc<Mutex<BTreeMap<String, String>>>,
+    known: Known,
     stopping: Arc<AtomicBool>,
     /// For a resumed harness, how to start afresh should it fail before confirming the
     /// provider Session.
@@ -1841,6 +2044,7 @@ struct Pump {
 struct Fallback {
     harness: Arc<dyn Harness>,
     handler: String,
+    settings: HandlerSettings,
     start: AgentStart,
     /// The provider Session the harness was asked to resume.
     resumed: String,
@@ -1895,6 +2099,7 @@ impl Pump {
             match read {
                 Ok(Some(event)) => {
                     heard = Instant::now();
+                    let limited = self.count(&event);
                     let mut shared = Vec::new();
                     if !event.tools.is_empty() {
                         shared = self.shared_bases(&event);
@@ -1908,6 +2113,7 @@ impl Pump {
                     let mut stopped = false;
                     let mut events: Vec<AssistantEvent> = std::mem::take(&mut self.notices)
                         .into_iter()
+                        .chain(limited)
                         .map(|notice| AssistantEvent::new(EVENT_NOTICE, Some(notice)))
                         .collect();
                     if event.kind == "completed" || cancelled {
@@ -1983,6 +2189,8 @@ impl Pump {
         if let Ok(session) = self.session.read() {
             let _ = session.close();
         }
+        // Before it leaves `live`: the next harness of this conversation claims under this name.
+        credentials::release(&self.state, &self.session_name);
         // What the closed harness left is saved before its directory goes, and later commits
         // go to clones of their own.
         let saved = self.end_turn(true);
@@ -1990,6 +2198,11 @@ impl Pump {
             self.send(session_id.as_ref(), saved);
         }
         remove_area(&self.area, self.remove_retry);
+        // Before it leaves `live`: a message waiting for this harness to go then finds this report.
+        self.send(
+            session_id.as_ref(),
+            vec![AssistantEvent::new(EVENT_CLOSED, reason)],
+        );
         if let Ok(mut live) = self.live.lock()
             && live
                 .get(&self.conversation_id)
@@ -2006,11 +2219,39 @@ impl Pump {
                 }
             }
         }
-        self.send(
-            session_id.as_ref(),
-            vec![AssistantEvent::new(EVENT_CLOSED, reason)],
-        );
         self.outbox.closed(&self.conversation_id);
+    }
+
+    /// Counts what `event` reports against the account the harness holds, and at a provider's
+    /// limit marks it, so her next message takes another route. What the person should know of
+    /// that, for a routed Agent.
+    fn count(&mut self, event: &AgentEvent) -> Option<String> {
+        accounts::observe_quota(&self.state, &self.session_name, &event.quota);
+        if let Some(reported) = &event.usage {
+            let delta = self.usage.observe(reported);
+            accounts::record_usage(&self.state, &self.session_name, delta.tokens());
+        }
+        if event.kind != LIMIT_EVENT {
+            return None;
+        }
+        let holder = Holder {
+            id: &self.session_name,
+            operation: None,
+        };
+        let fallback = self.outbox.desk().limit_fallback.0.as_secs();
+        let resets_at = event.limit.as_ref().and_then(|limit| limit.resets_at);
+        let (account, _, until) = accounts::mark_limited(&self.state, holder, resets_at, fallback)?;
+        eprintln!(
+            "ai6: assistant conversation {}: account {account} is limited until {until} (Unix \
+             seconds): {}",
+            conversation_digest(&self.conversation_id),
+            event.text.as_deref().unwrap_or_default()
+        );
+        let route = self.route.as_ref()?;
+        Some(format!(
+            "Moneypenny's route {route} is out of quota: your next message takes another route if \
+             one has room."
+        ))
     }
 
     /// Replaces a resumed harness that failed with `failure` by one started afresh (with the
@@ -2023,9 +2264,13 @@ impl Pump {
             .write()
             .map_err(|_| "assistant Session lock failed".to_owned())?;
         let _ = session.close();
-        match fallback.harness.start(&fallback.handler, fallback.start) {
+        match fallback
+            .harness
+            .start(&fallback.handler, &fallback.settings, fallback.start)
+        {
             Ok(started) => {
                 *session = started;
+                self.usage = UsageTracker::default();
                 Ok(())
             }
             Err(error) => Err(format!(
@@ -2129,12 +2374,16 @@ impl Pump {
                     return;
                 }
             }
-            known.insert(self.conversation_id.clone(), session_id.to_owned());
+            known.insert(
+                self.conversation_id.clone(),
+                (session_id.to_owned(), self.route.clone()),
+            );
         }
     }
 
     fn send(&self, session_id: Option<&SessionId>, events: Vec<AssistantEvent>) {
         self.outbox.send(AssistantReport {
+            route: session_id.and(self.route.clone()),
             station_id: self.station_id.clone(),
             conversation_id: self.conversation_id.clone(),
             job_id: None,
@@ -3057,6 +3306,7 @@ mod tests {
         fn start(
             &self,
             _handler: &str,
+            _settings: &HandlerSettings,
             request: AgentStart,
         ) -> Result<Object<dyn AgentSession>, String> {
             let message = request.prompt.clone();
@@ -3076,7 +3326,7 @@ mod tests {
         fn resume(
             &self,
             _handler: &str,
-            _agent: &str,
+            _settings: &HandlerSettings,
             request: AgentResume,
         ) -> Result<Object<dyn AgentSession>, String> {
             if !self.resumable {
@@ -3371,6 +3621,7 @@ mod tests {
 
     fn job(conversation: &str, message: &str) -> AssistantJob {
         AssistantJob {
+            route: None,
             job_id: format!("job-{message}"),
             conversation_id: conversation.to_owned(),
             agent_id: "moneypenny".to_owned(),
@@ -3425,6 +3676,673 @@ mod tests {
             assert!(Instant::now() < deadline, "timed out waiting");
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
+    }
+
+    /// Her routes in the owner's order: free first, then a gateway through Claude Code.
+    const HER_ROUTES: &str = r#"
+[agent.moneypenny]
+balance = "priority"
+context = "You serve the operator."
+
+[[agent.moneypenny.route]]
+handler = "mock-grok"
+model = "grok-4.7"
+priority = 2
+[agent.moneypenny.route.handler_settings]
+command = "grok"
+args = ["agent", "stdio"]
+
+[[agent.moneypenny.route]]
+handler = "mock-claude"
+model = "gemini-free"
+effort = "low"
+priority = 1
+secrets = ["litellm"]
+env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL = "gemini-free" }
+"#;
+    /// As Grok CLI 1.0.70 worded a real limit, through the acp handler: no reset time.
+    const GROK_LIMIT: &str = "Rate limited: API error (status 429 Too Many Requests): \
+                              subscription:free-usage-exhausted: You've used all the included free \
+                              usage for model grok-4.7 for now. Usage resets over a rolling 24-hour \
+                              window — tokens (actual/limit): 609418/600000. Upgrade to a Grok \
+                              subscription for higher limits: https://grok.com/super";
+
+    /// What a routed harness was asked to do.
+    #[derive(Clone)]
+    enum RoutedAsk {
+        Start(String, HandlerSettings, AgentStart),
+        Resume(String, HandlerSettings, AgentResume),
+    }
+
+    /// A harness with several handlers: its provider Session ID comes only once a turn runs, as a
+    /// real stream reports it, a handler in `limited` stops at a limit in Grok's words, and one in
+    /// `logged_out` does not start.
+    #[derive(Clone, Default)]
+    struct RoutedHarness {
+        handlers: Arc<Mutex<Vec<String>>>,
+        limited: Arc<Mutex<Vec<String>>>,
+        logged_out: Arc<Mutex<Vec<String>>>,
+        asked: Arc<Mutex<Vec<RoutedAsk>>>,
+        started: Arc<AtomicUsize>,
+    }
+
+    struct RoutedSession {
+        id: SessionId,
+        events: Mutex<VecDeque<AgentEvent>>,
+    }
+
+    impl AgentSession for RoutedSession {
+        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
+            Ok(Some(self.id.clone()))
+        }
+
+        fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
+            let next = self.events.lock().unwrap().pop_front();
+            if next.is_none() {
+                std::thread::sleep(Duration::from_millis(timeout_ms.min(20) as u64));
+            }
+            Ok(next)
+        }
+
+        fn interrupt(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn close(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    impl RoutedHarness {
+        fn session(&self, handler: &str, id: String) -> Object<dyn AgentSession> {
+            let mut events = VecDeque::new();
+            if self
+                .limited
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|name| name == handler)
+            {
+                let mut limit = event(LIMIT_EVENT, Some(GROK_LIMIT));
+                limit.limit = Some(crate::directorates::section_00::agent::UsageLimit {
+                    resets_at: None,
+                    window: None,
+                });
+                events.push_back(limit);
+            } else {
+                events.push_back(event(EVENT_TEXT, Some("an answer")));
+                events.push_back(event("completed", Some("an answer")));
+            }
+            RoutedSession {
+                id: SessionId::try_new(id).unwrap(),
+                events: Mutex::new(events),
+            }
+            .into_object()
+        }
+    }
+
+    impl Harness for RoutedHarness {
+        fn available(&self, handler: &str) -> bool {
+            self.handlers
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|name| name == handler)
+        }
+
+        fn start(
+            &self,
+            handler: &str,
+            settings: &HandlerSettings,
+            request: AgentStart,
+        ) -> Result<Object<dyn AgentSession>, String> {
+            if self
+                .logged_out
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|name| name == handler)
+            {
+                return Err("session/new: Authentication required".to_owned());
+            }
+            self.asked.lock().unwrap().push(RoutedAsk::Start(
+                handler.to_owned(),
+                settings.clone(),
+                request,
+            ));
+            let started = self.started.fetch_add(1, Ordering::SeqCst);
+            Ok(self.session(handler, format!("provider-{handler}-{started}")))
+        }
+
+        fn resume(
+            &self,
+            handler: &str,
+            settings: &HandlerSettings,
+            request: AgentResume,
+        ) -> Result<Object<dyn AgentSession>, String> {
+            let id = request.session_id.as_str().to_owned();
+            self.asked.lock().unwrap().push(RoutedAsk::Resume(
+                handler.to_owned(),
+                settings.clone(),
+                request,
+            ));
+            Ok(self.session(handler, id))
+        }
+    }
+
+    /// Hands out `fake-<name>-0451` for each secret.
+    struct FakeSecrets;
+
+    impl crate::directorates::q::SecretBackend for FakeSecrets {
+        fn acquire(
+            &self,
+            _request: &crate::directorates::q::SecretRequest,
+            names: &[String],
+        ) -> Result<
+            BTreeMap<String, crate::directorates::q::SecretValue>,
+            crate::directorates::q::SecretBackendFailure,
+        > {
+            Ok(names
+                .iter()
+                .map(|name| {
+                    (
+                        name.clone(),
+                        crate::directorates::q::SecretValue::new(format!("fake-{name}-0451")),
+                    )
+                })
+                .collect())
+        }
+
+        fn revoke(
+            &self,
+            _lease_id: &str,
+        ) -> Result<(), crate::directorates::q::SecretBackendFailure> {
+            Ok(())
+        }
+    }
+
+    struct RoutedFixture {
+        desk: Arc<Desk>,
+        harness: RoutedHarness,
+        state: DaemonState,
+        reports: Arc<Mutex<Vec<AssistantReport>>>,
+        _root: tempfile::TempDir,
+    }
+
+    impl Drop for RoutedFixture {
+        fn drop(&mut self) {
+            self.desk.close_all();
+            if let Some(root) = self.desk.areas.lock().unwrap().take() {
+                let path = root.path.clone();
+                drop(root);
+                let _ = std::fs::remove_dir_all(path);
+            }
+        }
+    }
+
+    fn routed_fixture(agents: &str, loadouts: &str, handlers: &[&str]) -> RoutedFixture {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", agents);
+        state.station = state
+            .station
+            .clone()
+            .with_loadouts(loadouts.parse().unwrap())
+            .with_secret_backend(FakeSecrets);
+        let harness = RoutedHarness::default();
+        *harness.handlers.lock().unwrap() = handlers.iter().map(|h| (*h).to_owned()).collect();
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let sink = reports.clone();
+        let desk = Desk::new(
+            state.clone(),
+            Arc::new(harness.clone()),
+            Arc::new(move |report, answered: Option<Answered>| {
+                sink.lock().unwrap().push(report);
+                if let Some(answered) = answered {
+                    let _ = answered.send(Delivery::Taken);
+                }
+            }),
+            "https://exports.example/v1/moneypenny/mcp".to_owned(),
+        )
+        .with_limits(IDLE, 4)
+        .with_beside_missions(false)
+        .with_elevation(Arc::new(|| Ok(false)), Arc::new(|_: &str| {}))
+        .with_exports(Arc::new(Recorded));
+        RoutedFixture {
+            desk: Arc::new(desk),
+            harness,
+            state,
+            reports,
+            _root: root,
+        }
+    }
+
+    impl RoutedFixture {
+        fn kinds(&self, conversation: &str) -> Vec<String> {
+            self.reports
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|report| report.conversation_id == conversation)
+                .flat_map(|report| report.events.iter().map(|event| event.kind.clone()))
+                .collect()
+        }
+
+        fn texts(&self, conversation: &str, kind: &str) -> Vec<String> {
+            self.reports
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|report| report.conversation_id == conversation)
+                .flat_map(|report| report.events.iter())
+                .filter(|event| event.kind == kind)
+                .filter_map(|event| event.text.clone())
+                .collect()
+        }
+
+        fn last_route(&self, conversation: &str) -> Option<RouteRef> {
+            self.reports
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|report| report.conversation_id == conversation)
+                .filter_map(|report| report.route.clone())
+                .next_back()
+        }
+
+        fn last_session(&self, conversation: &str) -> Option<String> {
+            self.reports
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|report| report.conversation_id == conversation)
+                .filter_map(|report| report.session_id.clone())
+                .next_back()
+        }
+
+        /// Waits until the conversation's harness has closed.
+        async fn closed(&self, conversation: &str) {
+            self.desk.close(conversation);
+            until(|| self.kinds(conversation).contains(&EVENT_CLOSED.to_owned())).await;
+        }
+    }
+
+    const LITELLM: &str = "[secret.litellm]\nenv = \"ANTHROPIC_AUTH_TOKEN\"\n";
+
+    #[tokio::test]
+    async fn she_takes_her_routes_in_order_and_a_limit_moves_her_next_message_to_the_next() {
+        let fixture = routed_fixture(HER_ROUTES, LITELLM, &["mock-grok", "mock-claude"]);
+        *fixture.harness.limited.lock().unwrap() = vec!["mock-grok".to_owned()];
+
+        fixture.desk.handle(job("c-limit", "first")).await;
+        until(|| fixture.kinds("c-limit").contains(&EVENT_LIMIT.to_owned())).await;
+        let RoutedAsk::Start(handler, settings, start) =
+            fixture.harness.asked.lock().unwrap()[0].clone()
+        else {
+            panic!("a start");
+        };
+        assert_eq!(handler, "mock-grok", "the first in order");
+        assert_eq!(settings["command"], "grok", "the route's own settings");
+        assert_eq!(start.model.as_deref(), Some("grok-4.7"));
+        assert!(!start.environment.contains_key("ANTHROPIC_BASE_URL"));
+        assert!(!start.environment.contains_key("ANTHROPIC_AUTH_TOKEN"));
+        let told = fixture.texts("c-limit", EVENT_NOTICE);
+        assert!(
+            told.iter().any(|text| text.contains("mock-grok grok-4.7")
+                && text.contains("next message takes another route")),
+            "{told:?}"
+        );
+        until(|| fixture.kinds("c-limit").contains(&EVENT_CLOSED.to_owned())).await;
+        let marked = fixture
+            .state
+            .intake
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|row| row.limited_until.is_some())
+            .expect("the route is marked for every Station");
+        assert!(routes::is_implicit(&marked.account.pool));
+        assert!(marked.active.is_empty(), "its claim is freed");
+        let held_session = fixture.last_session("c-limit");
+
+        // What Universal Exports sends next: the Session and the route it knows of.
+        let next = AssistantJob {
+            session_id: held_session.clone(),
+            route: fixture.last_route("c-limit"),
+            ..job("c-limit", "second")
+        };
+        fixture.desk.handle(next).await;
+        until(|| {
+            fixture
+                .kinds("c-limit")
+                .contains(&EVENT_COMPLETED.to_owned())
+        })
+        .await;
+        let asked = fixture.harness.asked.lock().unwrap().clone();
+        assert_eq!(asked.len(), 2);
+        let RoutedAsk::Start(handler, settings, start) = asked[1].clone() else {
+            panic!("a provider Session of another source is not resumed");
+        };
+        assert_eq!(handler, "mock-claude");
+        assert!(settings.is_empty());
+        assert_eq!(start.model.as_deref(), Some("gemini-free"));
+        assert_eq!(start.effort.as_deref(), Some("low"));
+        assert_eq!(
+            start.environment["ANTHROPIC_BASE_URL"], "https://llm.example",
+            "the route's env passes what her environment otherwise keeps out"
+        );
+        assert_eq!(
+            start.environment["ANTHROPIC_SMALL_FAST_MODEL"],
+            "gemini-free"
+        );
+        assert_eq!(
+            start.environment["ANTHROPIC_AUTH_TOKEN"], "fake-litellm-0451",
+            "the route's secret"
+        );
+        assert!(
+            start
+                .initial_context
+                .iter()
+                .any(|line| line == "Earlier in this conversation: hello."),
+            "afresh, with its recap: {:?}",
+            start.initial_context
+        );
+        assert!(
+            fixture
+                .texts("c-limit", EVENT_NOTICE)
+                .iter()
+                .any(|text| text.contains("moved from mock-grok grok-4.7 to mock-claude")),
+            "the person is told"
+        );
+        assert_eq!(
+            fixture.last_route("c-limit"),
+            Some(RouteRef::new(
+                "mock-claude",
+                Some("gemini-free".to_owned()),
+                None
+            )),
+            "Universal Exports learns the new route with the new Session"
+        );
+    }
+
+    /// The close of the harness a message replaces is not told after the message's `accepted`,
+    /// where it would read as her closing before she answered.
+    #[test]
+    fn a_replaced_harness_s_close_goes_before_the_messages_answer() {
+        let sent: Arc<Mutex<Vec<AssistantReport>>> = Arc::default();
+        let sink = sent.clone();
+        let outbox = Outbox::new(Arc::new(move |report, _answered: Option<Answered>| {
+            sink.lock().unwrap().push(report);
+        }));
+        let report = |kind: &str| AssistantReport {
+            route: None,
+            station_id: "hq".to_owned(),
+            conversation_id: "c".to_owned(),
+            job_id: None,
+            session_id: None,
+            events: vec![AssistantEvent::new(kind, None)],
+        };
+        outbox.hold("c");
+        outbox.send(report(EVENT_CLOSED));
+        outbox.send(report(EVENT_TEXT));
+        assert!(sent.lock().unwrap().is_empty(), "held for the message");
+        outbox.release_closed("c");
+        let kinds: Vec<String> = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|report| report.events.iter().map(|event| event.kind.clone()))
+            .collect();
+        assert_eq!(kinds, [EVENT_CLOSED], "the rest waits for its answer");
+        outbox.release_closed("nothing-held");
+    }
+
+    #[tokio::test]
+    async fn a_route_whose_harness_does_not_start_gives_way_to_the_next_and_with_none_left_she_is_refused()
+     {
+        let fixture = routed_fixture(HER_ROUTES, LITELLM, &["mock-grok", "mock-claude"]);
+        *fixture.harness.logged_out.lock().unwrap() = vec!["mock-grok".to_owned()];
+        fixture.desk.handle(job("c-out", "hello")).await;
+        until(|| fixture.kinds("c-out").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert_eq!(fixture.last_route("c-out").unwrap().handler, "mock-claude");
+        assert!(
+            fixture.kinds("c-out").contains(&EVENT_ACCEPTED.to_owned()),
+            "the person never sees the first route's trouble"
+        );
+
+        *fixture.harness.logged_out.lock().unwrap() =
+            vec!["mock-grok".to_owned(), "mock-claude".to_owned()];
+        fixture.desk.handle(job("c-out-both", "hello")).await;
+        until(|| {
+            fixture
+                .kinds("c-out-both")
+                .contains(&EVENT_REJECTED.to_owned())
+        })
+        .await;
+        let refused = fixture.texts("c-out-both", EVENT_REJECTED).remove(0);
+        for expected in [
+            "mock-grok grok-4.7",
+            "mock-claude gemini-free",
+            "Authentication required",
+        ] {
+            assert!(refused.contains(expected), "{refused}");
+        }
+        assert!(
+            fixture
+                .state
+                .intake
+                .accounts()
+                .unwrap()
+                .iter()
+                .all(|row| row
+                    .active
+                    .iter()
+                    .all(|claim| claim.mission != session_name("c-out-both"))),
+            "a harness that did not start holds nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn her_conversation_resumes_on_the_same_route_with_its_settings() {
+        let fixture = routed_fixture(HER_ROUTES, LITELLM, &["mock-grok", "mock-claude"]);
+        let resume = AssistantJob {
+            session_id: Some("provider-earlier".to_owned()),
+            route: Some(RouteRef::new(
+                "mock-claude",
+                Some("gemini-free".to_owned()),
+                None,
+            )),
+            ..job("c-same", "again")
+        };
+        fixture.desk.handle(resume).await;
+        until(|| {
+            fixture
+                .kinds("c-same")
+                .contains(&EVENT_COMPLETED.to_owned())
+        })
+        .await;
+        let asked = fixture.harness.asked.lock().unwrap().clone();
+        let RoutedAsk::Resume(handler, settings, resume) = &asked[0] else {
+            panic!("the Session it ran resumes, though another route comes first in order");
+        };
+        assert_eq!(handler, "mock-claude");
+        assert!(settings.is_empty(), "this route's, not the first's");
+        assert_eq!(resume.session_id.as_str(), "provider-earlier");
+        assert_eq!(
+            resume.environment["ANTHROPIC_AUTH_TOKEN"],
+            "fake-litellm-0451"
+        );
+        assert!(
+            !resume
+                .initial_context
+                .iter()
+                .any(|line| line == "Earlier in this conversation: hello."),
+            "a resumed harness has the conversation"
+        );
+        assert!(
+            fixture.texts("c-same", EVENT_NOTICE).is_empty(),
+            "nothing moved"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_station_with_no_handler_of_hers_refuses_so_another_station_can_take_her() {
+        let fixture = routed_fixture(HER_ROUTES, LITELLM, &[]);
+        fixture.desk.handle(job("c-none", "hello")).await;
+        until(|| fixture.kinds("c-none").contains(&EVENT_REJECTED.to_owned())).await;
+        let refused = fixture.texts("c-none", EVENT_REJECTED).remove(0);
+        for expected in [
+            "mock-grok grok-4.7",
+            "mock-claude gemini-free",
+            "no \"mock-grok\" handler",
+        ] {
+            assert!(refused.contains(expected), "{refused}");
+        }
+        assert!(fixture.harness.asked.lock().unwrap().is_empty());
+
+        // One handler here: she runs on it, though it comes second.
+        *fixture.harness.handlers.lock().unwrap() = vec!["mock-claude".to_owned()];
+        fixture.desk.handle(job("c-second", "hello")).await;
+        until(|| {
+            fixture
+                .kinds("c-second")
+                .contains(&EVENT_COMPLETED.to_owned())
+        })
+        .await;
+        assert_eq!(
+            fixture.last_route("c-second").unwrap().handler,
+            "mock-claude"
+        );
+    }
+
+    #[tokio::test]
+    async fn with_every_route_out_of_quota_she_is_refused_naming_each_and_a_claim_is_freed_at_close()
+     {
+        let agents = r#"
+[agent.moneypenny]
+balance = "priority"
+[[agent.moneypenny.route]]
+handler = "mock-grok"
+model = "grok-4.7"
+pool = "grok-free"
+[[agent.moneypenny.route]]
+handler = "mock-claude"
+model = "gemini-free"
+"#;
+        let loadouts = r#"
+[pool.grok-free]
+handler = "mock-grok"
+named_only = true
+[pool.grok-free.account.free]
+kind = "harness-login"
+max_concurrent = 1
+"#;
+        let fixture = routed_fixture(agents, loadouts, &["mock-grok", "mock-claude"]);
+        let first = crate::directorates::registry::accounts::AccountRef::new("grok-free", "free");
+
+        // Its one place taken, the next conversation goes to the next route.
+        fixture.desk.handle(job("c-one", "hello")).await;
+        until(|| fixture.kinds("c-one").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert_eq!(fixture.last_route("c-one").unwrap().handler, "mock-grok");
+        fixture.desk.handle(job("c-two", "hello")).await;
+        until(|| fixture.kinds("c-two").contains(&EVENT_COMPLETED.to_owned())).await;
+        assert_eq!(fixture.last_route("c-two").unwrap().handler, "mock-claude");
+
+        fixture.closed("c-one").await;
+        let row = |state: &DaemonState| {
+            state
+                .intake
+                .accounts()
+                .unwrap()
+                .into_iter()
+                .find(|row| row.account == first)
+                .unwrap()
+        };
+        assert!(row(&fixture.state).active.is_empty(), "freed at close");
+        fixture.desk.handle(job("c-three", "hello")).await;
+        until(|| {
+            fixture
+                .kinds("c-three")
+                .contains(&EVENT_COMPLETED.to_owned())
+        })
+        .await;
+        assert_eq!(fixture.last_route("c-three").unwrap().handler, "mock-grok");
+        fixture.closed("c-two").await;
+        fixture.closed("c-three").await;
+
+        fixture
+            .state
+            .intake
+            .limit_account(&first, unix_now() + 3_600.0)
+            .unwrap();
+        let second = routes::implicit_pool(
+            "moneypenny",
+            &fixture
+                .state
+                .roster
+                .agent(None, "moneypenny")
+                .unwrap()
+                .route_list()[1],
+        );
+        fixture
+            .state
+            .intake
+            .limit_account(
+                &crate::directorates::registry::accounts::AccountRef::new(second.id(), "login"),
+                unix_now() + 3_600.0,
+            )
+            .unwrap();
+        fixture.desk.handle(job("c-four", "hello")).await;
+        until(|| fixture.kinds("c-four").contains(&EVENT_REJECTED.to_owned())).await;
+        let refused = fixture.texts("c-four", EVENT_REJECTED).remove(0);
+        assert!(refused.contains("grok-4.7 (pool grok-free)"), "{refused}");
+        assert!(
+            refused.contains("gemini-free: its limit resets"),
+            "{refused}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_plain_form_draws_a_pool_account_as_a_mission_does() {
+        let agents = "[agent.moneypenny]\nhandler = \"mock-claude\"\n";
+        let loadouts = r#"
+[pool.gateway]
+handler = "mock-claude"
+[pool.gateway.account.key]
+kind = "anthropic-auth-token"
+secret = "gateway-key"
+"#;
+        let fixture = routed_fixture(agents, loadouts, &["mock-claude"]);
+        fixture.desk.handle(job("c-plain", "hello")).await;
+        until(|| {
+            fixture
+                .kinds("c-plain")
+                .contains(&EVENT_COMPLETED.to_owned())
+        })
+        .await;
+        let RoutedAsk::Start(_, _, start) = fixture.harness.asked.lock().unwrap()[0].clone() else {
+            panic!("a start");
+        };
+        assert_eq!(
+            start.environment["ANTHROPIC_AUTH_TOKEN"],
+            "fake-gateway-key-0451"
+        );
+        assert_eq!(
+            fixture.last_route("c-plain"),
+            None,
+            "one handler has no route to name"
+        );
+        let held = fixture.state.intake.accounts().unwrap();
+        assert_eq!(held[0].active.len(), 1, "her harness holds it");
+        fixture.closed("c-plain").await;
+        assert!(
+            fixture.state.intake.accounts().unwrap()[0]
+                .active
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -3676,10 +4594,15 @@ mod tests {
             "[agent.moneypenny]\nhandler = \"mock-denied\"\n\
              [agent.moneypenny.handler_settings]\ncommand = \"the-agent\"\n",
         );
+        let settings = state
+            .roster
+            .agent(None, "moneypenny")
+            .unwrap()
+            .handler_settings;
         let session = StationHarness(state)
             .resume(
                 "mock-denied",
-                "moneypenny",
+                &settings,
                 AgentResume {
                     mission_id: MissionId::try_new("assistant--a").unwrap(),
                     session_id: SessionId::try_new("provider-session").unwrap(),
@@ -3941,6 +4864,7 @@ event_bytes = 7
             };
             let (reports, queued) = std::sync::mpsc::sync_channel(4);
             let report = |job: Option<&str>, kind: &str| AssistantReport {
+                route: None,
                 station_id: "hq".to_owned(),
                 conversation_id: "c-late".to_owned(),
                 job_id: job.map(str::to_owned),
@@ -4090,6 +5014,7 @@ event_bytes = 7
 
     fn reported(conversation: &str, kinds: &[&str]) -> AssistantReport {
         AssistantReport {
+            route: None,
             station_id: "test".to_owned(),
             conversation_id: conversation.to_owned(),
             job_id: None,

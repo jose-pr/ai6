@@ -283,6 +283,7 @@ fn control_job(
         mcp_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
         token_expires_at: now() + 60.0,
         session_id: conversation.session_id.clone(),
+        route: conversation.route.clone(),
         close: *control == Control::Close,
         interrupt: *control == Control::Interrupt,
         person_id: Some(conversation.person_id.clone()),
@@ -694,6 +695,7 @@ impl Assistant {
                 mcp_token: String::new(),
                 token_expires_at: 0.0,
                 session_id: conversation.session_id.clone(),
+                route: conversation.route.clone(),
                 close: false,
                 interrupt: false,
                 person_id: Some(person_id.to_owned()),
@@ -1049,6 +1051,7 @@ impl Assistant {
                 .filter(|id| ai6::directorates::section_00::assistant::valid_identity(id))
             {
                 conversation.session_id = Some(session_id);
+                conversation.route = report.route.clone();
             }
             let mut set_aside = Vec::new();
             for event in report
