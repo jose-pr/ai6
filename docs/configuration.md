@@ -562,6 +562,117 @@ reason_chars = 512                    # the reason for lowering an Agent's clear
 cdn = "none"                          # web only: none, fonts or all (read by the page's bootstrap)
 ```
 
+The keys are declared on `OoSettings` in the `ai6` crate, and the app takes that schema with its
+build; the values above are their defaults, which a test holds them to.
+
+`[oo.appearance]`
+
+<!-- schema:oo.appearance:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `theme` | `night-ops` | **Theme.** The theme a person who has chosen none starts with, or `system`; what a person chooses wins. |
+<!-- schema:oo.appearance:end -->
+
+`[oo.chat]`
+
+<!-- schema:oo.chat:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `min_width` | 320 | **Narrowest docked chat.** How narrow the docked chat may be dragged. |
+| `max_width` | 720 | **Widest docked chat.** How wide the docked chat may be dragged. |
+| `width` | 400 | **Width of the docked chat.** The docked chat's width until the person drags it; what they drag to wins. |
+| `width_step` | 16 | **An arrow key moves it.** How far an arrow key moves the drag handle. |
+| `min_page_width` | 360 | **Page kept beside the chat.** The page keeps at least this much beside the docked chat. |
+| `text_width` | 960 | **Widest column of her text.** The widest column her text keeps to when expanded. |
+| `window_width` | 520 | **Width of her own window.** The width her own window opens at (desktop). |
+| `window_height` | 760 | **Height of her own window.** The height her own window opens at (desktop). |
+| `transition_ms` | 200 | **The chat moves in.** Milliseconds the chat takes to move; none when the system asks for no animations. |
+| `connect_timeout` | 10 | **Her socket says it is ready within.** Seconds her socket may take to say it is ready before the chat says it failed and offers to try again. |
+<!-- schema:oo.chat:end -->
+
+`[oo.routes]`
+
+<!-- schema:oo.routes:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `text_bytes` | 128 | **Longest text filter in a link.** Bytes of the `text` filter of a page link; a web URL or one of Moneypenny's links with a longer one is refused like any other bad link. Keep it equal to the `unex` record's `route_text_bytes`, or her links that one accepts and this one does not show as a refused view. |
+<!-- schema:oo.routes:end -->
+
+`[oo.art]`
+
+<!-- schema:oo.art:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_width` | 3,840 | **Widest hero picture.** Pixels of the widest hero picture ever fetched; a site on slow links sets 1920. |
+<!-- schema:oo.art:end -->
+
+`[oo.refresh]`: how often each page asks again; `0` turns that refresh off.
+
+<!-- schema:oo.refresh:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `sessions` | 3 | **The page shown.** What the page shown displays from the board of Sessions, Stations and Missions. |
+| `overview` | 10 | **The overview.** The overview's recent activity. |
+| `timeline` | 10 | **A timeline.** An Operation's timeline. |
+| `pools` | 15 | The account pools. |
+| `slow` | 15 | **The bell and the search.** What the bell and the search need and the page shown does not display: Sessions, Stations, held briefs, green ink requests and Mission proposals; `0` reads them with every refresh. |
+| `profile` | 60 | **Who the person is.** Who the person is and what they may do; `0` reads it only at sign-in and when the operator menu opens. |
+| `hidden` | 60 | **While nothing can be seen.** Everything, while the tab or window cannot be seen; `0` reads nothing until it can. |
+| `silent_intervals` | 3 | **Intervals before a Station is silent.** A Station that has not checked in for this many `sessions` intervals shows as silent. |
+| `renew_before` | 600 | **Renew a sign-in before it ends.** How long before the access token ends the app renews it, and before the sign-in itself ends the person is told; `0` does neither, and the sign-in ends with the token. A shorter lifetime than this is renewed halfway through. |
+| `renew_retry` | 30 | **Retry a failed renewal after.** How soon a failed renewal is tried again when `sessions` is off; else it is tried again at `sessions`. |
+<!-- schema:oo.refresh:end -->
+
+`[oo.controls]`: following a Mission control until the Station reports.
+
+<!-- schema:oo.controls:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `wait` | 10 | **Follow a control for.** How long to follow a control for the Station's outcome; `0` returns once it is queued. |
+| `poll` | 0.5 | **Ask for its status every.** How often to ask for its status meanwhile. |
+| `confirming` | 30 | **A proposal may stay applying.** How long a proposal of Moneypenny's may stay applying before its card says the outcome is unknown. |
+<!-- schema:oo.controls:end -->
+
+`[oo.pages]`: how much a page asks for.
+
+<!-- schema:oo.pages:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `timeline` | 50 | **Timeline items in a page.** Items in one page of an Operation's timeline. |
+| `audit` | 100 | **Audit records shown.** Records in the audit log. |
+| `summary` | 5 | **Items in a summary.** Items of recent activity, Operations and Stations a summary lists. |
+| `search` | 24 | **Search results listed.** Results the top bar's search lists at once. |
+<!-- schema:oo.pages:end -->
+
+`[oo.terminal]`: the live Session terminal.
+
+<!-- schema:oo.terminal:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `scrollback_lines` | 10,000 | **Lines kept.** Lines the terminal keeps. |
+| `connect_timeout` | 10 | **The socket opens within.** How long the socket may take to open. |
+| `retry_delay` | 1 | **First reconnect after.** The wait before the first reconnect; each next one doubles, up to `retry_max_delay`. |
+| `retry_max_delay` | 16 | **Longest wait between reconnects.** The longest wait between reconnects. |
+<!-- schema:oo.terminal:end -->
+
+`[oo.limits]`: how much a text field takes, in characters; `0` takes the bound away.
+
+<!-- schema:oo.limits:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `mission_title_chars` | 512 | A new Mission's title. |
+| `mission_prompt_chars` | 65,536 | A new Mission's instructions. |
+| `reason_chars` | 512 | **The reason for lowering a clearance.** The reason for lowering an Agent's clearance. |
+<!-- schema:oo.limits:end -->
+
+`[oo.assets]`: read by the web page's bootstrap, before the app runs.
+
+<!-- schema:oo.assets:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `cdn` | none | **Fetched from outside.** What the web page may fetch from outside its own origin; the desktop app reads nothing here. |
+<!-- schema:oo.assets:end -->
+
 Every value of `[oo.refresh]` is a number of seconds, whole or fractional, `0` or more; `[oo.controls]`
 `wait` likewise, and the other seconds are more than 0. The counts of `[oo.pages]`,
 `silent_intervals` and `scrollback_lines` are whole numbers of 1 or more, and `[oo.limits]` takes whole numbers of 0 or
@@ -583,6 +694,9 @@ equal to the `unex` record's `route_text_bytes`, or her links that one accepts a
 does not show as a refused view. The operator
 menu on desktop writes `[unex] url` back in the format the file declares, keeping its `#!`
 line, its comments and every other program's section. The address applies at the next start.
+Below it, the same schema draws `[oo]` as a form: on desktop saving writes back what differs from
+the defaults, replacing the `[oo]` tables with any comment inside them, and applies at the next
+start; on the web it shows the deployment's file and changes nothing.
 
 ## Agent handler settings
 

@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   or lists every section with its title. The settings tables in the docs are generated from the same
   declarations, and `cargo run -p ai6 --features cli --example settings_reference -- --check` fails
   when one differs.
+- `[oo]` has one declaration, `OoSettings` in the `ai6` crate: Outer Office takes its schema with the
+  build, reads every default and bound from it, and draws it as a form in the operator menu, which on
+  desktop writes `ai6.cfg` back and on the web shows the deployment's file. `ai6 config schema oo`
+  prints it.
 - What was written in the code is now a setting, at the same value: `[assistant.desk] held_cables`,
   `held_cable_ttl` and `page_upload_timeout`; `[registry.limits.cables] page`;
   `[registry.limits.sessions] exposure_sources`; the `station` record's `[approvals] checked_steps`,

@@ -185,6 +185,13 @@ to offer for it (`lib/roster/record_editor.dart`). `assets/record_forms.json` ho
 for the preview's summaries and the tests; a test in the `ai6` crate fails when it is stale, and
 `AI6_UPDATE_RECORD_FORMS=1 cargo test -p ai6 --all-features --lib records` writes it.
 
+`[oo]` is declared the same way, on `OoSettings` in the `ai6` crate.
+`lib/settings/oo_settings.g.dart` holds its schema and form and each default as a constant, since a
+`const` constructor needs one; `lib/settings/oo_schema.dart` reads a file by that schema, and the
+operator menu draws it as a form. `cargo run -p ai6 --features cli --example settings_reference`
+writes the file, and a test in the `ai6` crate fails when it is stale. A new key is added on the
+struct, not here; a test in `test/oo_settings_test.dart` fails until `OoConfig` holds it.
+
 The forms need the `guatiao_intake` surface: `web/ai6_guatiao.wasm` on the web, built below, and on
 desktop the library its build hook bundles.
 

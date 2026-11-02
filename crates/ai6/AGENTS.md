@@ -288,6 +288,7 @@ pub fn schema(section: &str) -> Option<serde_json::Value>;   // a dotted path: p
 pub fn sections() -> Vec<(String, String)>;                  // every table's path and title
 pub mod reference {
     pub const DOCS: [&str; 2];                               // the docs holding generated tables
+    pub const OO_DART: &str;                                 // Outer Office's copy of [oo]
     pub fn table(section: &str) -> Result<String, String>;   // one section's Markdown table
     pub fn rewritten(text: &str) -> Result<String, String>;  // a doc with each marked table written anew
     pub fn write(root: &Path) -> Result<(), String>;         // every generated file under a checkout
@@ -295,7 +296,9 @@ pub mod reference {
 }
 ```
 
-A setting is declared once, on its struct: a doc comment, `#[schema(title = "..")]`, a unit
+`[oo]` is declared by `bootstrap::oo::OoSettings` (`OoChat`, `OoRefresh`, ..), whose schema and form
+are `directorates::m::records::oo_settings_form()`; `Bootstrap::oo` stays the table as written, since
+no Rust program reads it. A setting is declared once, on its struct: a doc comment, `#[schema(title = "..")]`, a unit
 (`format = "bytes"`; `Seconds` and `TimeLimit` carry theirs), and a default (`#[map(default = ..)]`
 reading the type's `Default`, or for an `Option` a closing `Default: ..` in the doc comment). A test
 refuses a field with no title or no stated default. Everything else reads it: `ai6 config schema`,
