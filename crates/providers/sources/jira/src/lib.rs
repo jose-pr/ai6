@@ -19,7 +19,7 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
     IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Source, SourceBatch, SourceConfig,
     SourceItem, SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
-    TrackerUpdate, settings_from_table,
+    TrackerUpdate, settings_from_table, settled_cursor,
 };
 use url::Url;
 
@@ -99,6 +99,11 @@ struct Settings {
     #[schema(title = "Pages per poll")]
     #[map(default = 5)]
     max_pages: u64,
+    /// Seconds a poll searches behind the cursor, for an issue the search showed after a newer
+    /// one. 0 searches from the cursor's minute.
+    #[schema(title = "Search behind the cursor by", format = "seconds")]
+    #[map(default = 60)]
+    settling_secs: u64,
     /// Account IDs (Cloud) or user names (Server), besides the issue's reporter and
     /// assignee, whose comments may answer a question.
     #[schema(title = "People who may answer")]
@@ -591,9 +596,14 @@ impl TryFrom<SourceConfig> for Jira {
     }
 }
 
-impl Source for Jira {
-    fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError> {
-        let jql = self.jql(request.cursor.as_deref());
+impl Jira {
+    /// The issues changed since `since`, oldest change first, and whether more remain past the
+    /// pages one poll reads.
+    fn changed_issues(
+        &self,
+        since: Option<&str>,
+    ) -> Result<(Vec<SourceItem>, bool), ProviderError> {
+        let jql = self.jql(since);
         let url = match self.settings.deployment {
             Deployment::Cloud => self.api("/search/jql"),
             Deployment::Server => self.api("/search"),
@@ -607,6 +617,7 @@ impl Source for Jira {
         let mut items = Vec::new();
         let mut page_token: Option<String> = None;
         let mut start_at = 0_u64;
+        let mut remaining = false;
         for _ in 0..self.settings.max_pages {
             let mut page_query = query.clone();
             match self.settings.deployment {
@@ -646,19 +657,46 @@ impl Source for Jira {
                     !issues.is_empty() && total.is_some_and(|total| start_at < total)
                 }
             };
+            remaining = more;
             if !more {
                 break;
             }
         }
+        Ok((items, remaining))
+    }
+}
+
+impl Source for Jira {
+    fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError> {
+        let since = request.cursor.as_deref().map(|cursor| {
+            settled_cursor(cursor, self.settings.settling_secs).unwrap_or_else(|| cursor.to_owned())
+        });
+        let (mut items, more) = self.changed_issues(since.as_deref())?;
+        // Pages filled by what the margin repeats would keep every poll from what follows them.
+        if more
+            && since != request.cursor
+            && !items.iter().any(|item| {
+                request
+                    .cursor
+                    .as_deref()
+                    .is_some_and(|cursor| is_after(&item.updated, cursor))
+            })
+        {
+            items = self.changed_issues(request.cursor.as_deref())?.0;
+        }
         if items.is_empty() && self.settings.deployment == Deployment::Cloud {
             self.confirm_empty_search()?;
         }
-        let cursor = items
-            .iter()
-            .map(|item| item.updated.as_str())
-            .max()
-            .map(str::to_owned)
-            .or(request.cursor);
+        // What the margin repeats is older than the cursor, which never moves back for it.
+        let mut cursor = request.cursor;
+        for item in &items {
+            if cursor
+                .as_deref()
+                .is_none_or(|current| is_after(&item.updated, current))
+            {
+                cursor = Some(item.updated.clone());
+            }
+        }
         Ok(SourceBatch { items, cursor })
     }
 }

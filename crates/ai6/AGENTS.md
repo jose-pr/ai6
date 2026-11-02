@@ -2674,6 +2674,7 @@ pub const SOURCE_BRIEF_PREFIX: &str = "source:";
 pub enum Ingest { Queued, Updated, Unchanged, InFlight, Finished }
 pub struct FinishedSourceBrief { pub brief: Brief, pub outcome: serde_json::Value, pub ok: bool }
 pub fn source_brief(operation: &str, provider: &str, item: &SourceItem, limits: &SourceLimits) -> Brief;  // no provenance; text cut to item_text_bytes
+pub fn settled_cursor(cursor: &str, settling_secs: u64) -> Option<String>;  // the ISO 8601 cursor that much earlier on its own clock; None when it does not read as a time
 pub fn reportable(brief: &Brief, provider: &str) -> bool;  // a `source` provenance naming provider and item
 
 SourceStore::source_cursor(operation: &str, provider: &str) -> io::Result<Option<String>>

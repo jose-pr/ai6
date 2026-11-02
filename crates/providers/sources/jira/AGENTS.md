@@ -52,6 +52,7 @@ as TOML, in `SourceConfig::settings_toml`.
 | `request_timeout_secs` | 30 | seconds one request may take; 0 is refused |
 | `page_size` | 50 | issues asked for per page; 0 is refused |
 | `max_pages` | 5 | pages one poll reads at most; 0 is refused |
+| `settling_secs` | 60 | seconds a poll searches behind the cursor; 0 searches from the cursor's minute |
 
 | `reply_authors` | `[]` | account IDs (Cloud) or user names (Server) besides the reporter and assignee whose comments may answer |
 | `issue_type` | `Task` | the type of a created issue |
@@ -72,6 +73,11 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
   issue key; Cloud descriptions in Atlassian Document Format are flattened to plain text:
   one line per block, links and mentions as their visible text, emoji and status lozenges as
   their text, dates as a UTC `YYYY-MM-DD`; an attachment has no text and is dropped.
+  The `<cursor minute>` is the cursor, `settling_secs` earlier, on its own clock; the returned
+  cursor is the newest `updated`, and never earlier than the one given, so what changed in that
+  margin repeats and the Registry sees it as unchanged. When the pages one poll reads hold
+  nothing newer than the cursor and more remain, it searches again from the cursor's own
+  minute, so a margin fuller than a poll cannot stop it.
 - **Empty search (Cloud)**: Jira Cloud answers a search by a refused credential, or one
   naming a project the credential cannot see, with status 200 and no issues. So when a poll
   finds nothing, it makes one more request, `GET /project/KEY` (or `GET /myself` when only

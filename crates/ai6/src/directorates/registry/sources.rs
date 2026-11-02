@@ -260,6 +260,45 @@ pub(super) fn refresh_queued(brief: &mut Brief, existing: Brief) -> Ingest {
     Ingest::Updated
 }
 
+/// `cursor`, an ISO 8601 time as a provider spells it (`2026-11-01T15:56:02Z`,
+/// `2026-11-01T23:12:53.426+0700`), `settling_secs` earlier on its own clock, so its fraction
+/// and offset stay as they are. `None` for text that does not read as such a time.
+///
+/// A listing can show an item after a newer one, whose time the cursor has by then taken: a poll
+/// that searches this far behind the cursor still finds it, and the Registry takes what
+/// repeats as unchanged ([`Ingest::Unchanged`]).
+#[must_use]
+pub fn settled_cursor(cursor: &str, settling_secs: u64) -> Option<String> {
+    let (date, time) = cursor.split_once('T')?;
+    let mut date = date.splitn(3, '-');
+    let year: i64 = date.next()?.parse().ok()?;
+    let month: i64 = date.next()?.parse().ok()?;
+    let day: i64 = date.next()?.parse().ok()?;
+    let clock = time.get(..8)?;
+    let zone = &time[8..];
+    let mut clock = clock.splitn(3, ':');
+    let hour: i64 = clock.next()?.parse().ok()?;
+    let minute: i64 = clock.next()?.parse().ok()?;
+    let second: i64 = clock.next()?.parse().ok()?;
+    // `days_from_civil` of <https://howardhinnant.github.io/date_algorithms.html>.
+    let shifted_year = if month <= 2 { year - 1 } else { year };
+    let era = shifted_year.div_euclid(400);
+    let year_of_era = shifted_year.rem_euclid(400);
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let earlier = (days * 86_400 + hour * 3_600 + minute * 60 + second)
+        .checked_sub(i64::try_from(settling_secs).ok()?)?;
+    let (year, month, day) = super::sleepers::civil_from_days(earlier.div_euclid(86_400));
+    let seconds = earlier.rem_euclid(86_400);
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}{zone}",
+        seconds / 3_600,
+        seconds / 60 % 60,
+        seconds % 60
+    ))
+}
+
 /// Whether a finished brief's key marks it as coming from a [`Source`].
 pub(super) fn is_source_key(key: &str) -> bool {
     key.starts_with(&safe_component(SOURCE_BRIEF_PREFIX))
@@ -490,6 +529,32 @@ mod tests {
             author: Some("reporter".to_owned()),
             updated: updated.to_owned(),
         }
+    }
+
+    #[test]
+    fn a_settled_cursor_is_earlier_on_its_own_clock() {
+        for (cursor, secs, settled) in [
+            ("2026-11-01T15:56:02Z", 60, Some("2026-11-01T15:55:02Z")),
+            ("2026-11-01T15:56:02Z", 0, Some("2026-11-01T15:56:02Z")),
+            (
+                "2026-11-01T23:12:53.426+0700",
+                60,
+                Some("2026-11-01T23:11:53.426+0700"),
+            ),
+            (
+                "2026-03-01T00:00:30-05:00",
+                60,
+                Some("2026-02-28T23:59:30-05:00"),
+            ),
+            ("2028-03-01T00:00:00Z", 1, Some("2028-02-29T23:59:59Z")),
+            ("2027-01-01T00:00:00Z", 86_400, Some("2026-12-31T00:00:00Z")),
+            ("c", 60, None),
+            ("2026-11-01", 60, None),
+            ("2026-11-01T15:5", 60, None),
+        ] {
+            assert_eq!(settled_cursor(cursor, secs).as_deref(), settled, "{cursor}");
+        }
+        assert_eq!(settled_cursor("2026-11-01T15:56:02Z", u64::MAX), None);
     }
 
     // A changed required signature affects every built source provider.

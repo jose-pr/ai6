@@ -4528,6 +4528,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 pub fn ai6::directorates::registry::sources::reportable(&ai6::directorates::registry::store::Brief, &str) -> bool
+pub fn ai6::directorates::registry::sources::settled_cursor(&str, u64) -> core::option::Option<alloc::string::String>
 pub fn ai6::directorates::registry::sources::source_brief(&str, &str, &ai6::directorates::registry::sources::SourceItem, &ai6::directorates::registry::limits::SourceLimits) -> ai6::directorates::registry::store::Brief
 pub mod ai6::directorates::registry::sql
 pub struct ai6::directorates::registry::sql::SqlOptions
@@ -10579,6 +10580,7 @@ pub async fn ai6::serve_with_options<F>(ai6::station::server::ServeConfig, F) ->
 pub async fn ai6::serve_with_plugins<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::serve_with_plugins_and_capacity<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub fn ai6::settings_from_table<T: guatiao::value::convert::FromValue>(toml::table::Table) -> core::result::Result<T, alloc::string::String>
+pub fn ai6::settled_cursor(&str, u64) -> core::option::Option<alloc::string::String>
 pub fn ai6::source_brief(&str, &str, &ai6::directorates::registry::sources::SourceItem, &ai6::directorates::registry::limits::SourceLimits) -> ai6::directorates::registry::store::Brief
 pub fn ai6::tool_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::unsupported(&str) -> guatiao::library::kind::ProviderError

@@ -1145,6 +1145,48 @@ mod tests {
         assert!(registry.read_claimed(&running.key()).unwrap().is_some());
     }
 
+    /// A provider searching behind its cursor returns what it already returned.
+    #[test]
+    fn a_repeated_item_makes_no_second_brief_or_mission() {
+        struct Repeating;
+        impl Source for Repeating {
+            fn poll(&self, _request: SourcePoll) -> Result<SourceBatch, ProviderError> {
+                Ok(SourceBatch {
+                    items: vec![SourceItem {
+                        id: "o/r#1".to_owned(),
+                        title: "Item".to_owned(),
+                        body: "Please look.".to_owned(),
+                        url: None,
+                        labels: Vec::new(),
+                        author: None,
+                        updated: "2026-01-01T00:00:00Z".to_owned(),
+                    }],
+                    cursor: Some("2026-01-01T00:00:00Z".to_owned()),
+                })
+            }
+        }
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let poll = || poll_source(&registry, "station-a", "G", "repeating", &Repeating).unwrap();
+
+        assert_eq!(poll().queued, 1);
+        let again = poll();
+        assert_eq!((again.queued, again.updated, again.unchanged), (0, 0, 1));
+        assert_eq!(registry.list_new().unwrap().len(), 1);
+
+        let running = registry.claim_new(None).unwrap().unwrap();
+        let claimed = poll();
+        assert_eq!((claimed.queued, claimed.skipped), (0, 1));
+        assert!(registry.list_new().unwrap().is_empty());
+
+        registry
+            .finish(&running, &serde_json::json!({}), true, None, None)
+            .unwrap();
+        let finished = poll();
+        assert_eq!((finished.queued, finished.skipped), (0, 1));
+        assert!(registry.claim_new(None).unwrap().is_none());
+    }
+
     #[test]
     fn a_string_source_is_shorthand_for_a_target() {
         let (_dir, roster) = roster_with("covert", "{ fake = \"GUA\" }");

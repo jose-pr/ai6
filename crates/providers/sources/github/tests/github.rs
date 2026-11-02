@@ -111,7 +111,7 @@ fn polling_follows_pages_maps_items_and_advances_the_cursor() {
 fn a_cursor_becomes_since_and_an_empty_poll_keeps_it() {
     let fake = serve(|_| vec![canned(200, "[]")]);
     let cursor = "2026-10-04T11:15:00Z".to_owned();
-    let batch = provider(&fake.base, "assignee = \"bot\"")
+    let batch = provider(&fake.base, "assignee = \"bot\"\nsettling_secs = 0")
         .poll(SourcePoll {
             cursor: Some(cursor.clone()),
         })
@@ -124,6 +124,81 @@ fn a_cursor_becomes_since_and_an_empty_poll_keeps_it() {
         "{target}"
     );
     assert!(target.contains("assignee=bot"));
+}
+
+/// One issue of a listing, as the recorded first page has it, changed at `updated`.
+fn listed(updated: &str) -> String {
+    let mut issues: Vec<serde_json::Value> = serde_json::from_str(PAGE1).unwrap();
+    let mut issue = issues.remove(0);
+    issue["updated_at"] = serde_json::json!(updated);
+    serde_json::to_string(&[issue]).unwrap()
+}
+
+#[test]
+fn a_poll_searches_a_margin_behind_the_cursor_and_the_cursor_stays_ahead_of_it() {
+    let cursor = "2026-10-04T11:15:00Z".to_owned();
+    let late = listed("2026-10-04T11:14:30Z");
+    let fake = serve(|_| vec![canned(200, &late)]);
+    let batch = provider(&fake.base, "")
+        .poll(SourcePoll {
+            cursor: Some(cursor.clone()),
+        })
+        .unwrap();
+    assert_eq!(batch.items.len(), 1, "the issue the listing showed late");
+    assert_eq!(batch.cursor, Some(cursor), "the cursor does not move back");
+    let target = fake.requests.lock().unwrap()[0].target.clone();
+    assert!(
+        target.contains("since=2026-10-04T11%3A14%3A00Z"),
+        "60 seconds by default: {target}"
+    );
+
+    let newer = listed("2026-10-04T11:15:09Z");
+    let fake = serve(|_| vec![canned(200, &newer)]);
+    let batch = provider(&fake.base, "settling_secs = 3600")
+        .poll(SourcePoll {
+            cursor: Some("2026-10-04T11:15:00Z".to_owned()),
+        })
+        .unwrap();
+    assert_eq!(batch.cursor.as_deref(), Some("2026-10-04T11:15:09Z"));
+    let target = fake.requests.lock().unwrap()[0].target.clone();
+    assert!(
+        target.contains("since=2026-10-04T10%3A15%3A00Z"),
+        "{target}"
+    );
+}
+
+#[test]
+fn a_poll_filled_by_the_margin_goes_on_from_the_cursor() {
+    let inside = listed("2026-10-04T11:14:30Z");
+    let newer = listed("2026-10-04T11:15:09Z");
+    let fake = serve(|base| {
+        vec![
+            Canned {
+                status: 200,
+                headers: vec![("link", page1_link(base))],
+                body: inside.clone(),
+            },
+            canned(200, &newer),
+        ]
+    });
+    let batch = provider(&fake.base, "max_pages = 1")
+        .poll(SourcePoll {
+            cursor: Some("2026-10-04T11:15:00Z".to_owned()),
+        })
+        .unwrap();
+    assert_eq!(batch.cursor.as_deref(), Some("2026-10-04T11:15:09Z"));
+    let requests = fake.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[0]
+            .target
+            .contains("since=2026-10-04T11%3A14%3A00Z")
+    );
+    assert!(
+        requests[1]
+            .target
+            .contains("since=2026-10-04T11%3A15%3A00Z")
+    );
 }
 
 #[test]

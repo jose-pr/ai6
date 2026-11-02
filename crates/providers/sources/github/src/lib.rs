@@ -22,7 +22,7 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
     IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Source, SourceBatch, SourceConfig,
     SourceItem, SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
-    TrackerUpdate, settings_from_table,
+    TrackerUpdate, settings_from_table, settled_cursor,
 };
 use url::Url;
 
@@ -73,6 +73,11 @@ struct Settings {
     #[schema(title = "Pages per poll")]
     #[map(default = 5)]
     max_pages: u64,
+    /// Seconds a poll searches behind the cursor, for an issue the listing showed after a newer
+    /// one. 0 searches from the cursor.
+    #[schema(title = "Search behind the cursor by", format = "seconds")]
+    #[map(default = 60)]
+    settling_secs: u64,
     /// GitHub logins besides the issue's author and the associations below whose comments
     /// may answer a question.
     #[schema(title = "People who may answer")]
@@ -419,8 +424,13 @@ impl TryFrom<SourceConfig> for Github {
     }
 }
 
-impl Source for Github {
-    fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError> {
+impl Github {
+    /// The issues changed since `since`, oldest change first, and whether more remain past the
+    /// pages one poll reads.
+    fn changed_issues(
+        &self,
+        since: Option<&str>,
+    ) -> Result<(Vec<SourceItem>, bool), ProviderError> {
         let mut query = vec![
             ("state", "open".to_owned()),
             ("sort", "updated".to_owned()),
@@ -433,13 +443,14 @@ impl Source for Github {
         if let Some(assignee) = &self.settings.assignee {
             query.push(("assignee", assignee.clone()));
         }
-        if let Some(cursor) = &request.cursor {
-            query.push(("since", cursor.clone()));
+        if let Some(since) = since {
+            query.push(("since", since.to_owned()));
         }
 
         let mut items = Vec::new();
         let mut url = self.issues_url();
         let mut first = true;
+        let mut more = false;
         for _ in 0..self.settings.max_pages {
             let mut response = self.get(&url, if first { &query } else { &[] })?;
             first = false;
@@ -458,17 +469,37 @@ impl Source for Github {
                 page.iter()
                     .filter_map(|issue| item_of(&self.settings.repo, issue)),
             );
+            more = next.is_some();
             match next {
                 Some(next) if !exhausted => url = next,
                 _ => break,
             }
         }
+        Ok((items, more))
+    }
+}
+
+impl Source for Github {
+    fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError> {
+        let since = request.cursor.as_deref().map(|cursor| {
+            settled_cursor(cursor, self.settings.settling_secs).unwrap_or_else(|| cursor.to_owned())
+        });
+        let (mut items, more) = self.changed_issues(since.as_deref())?;
+        // Pages filled by what the margin repeats would keep every poll from what follows them.
+        if more
+            && since != request.cursor
+            && !items
+                .iter()
+                .any(|item| Some(item.updated.as_str()) > request.cursor.as_deref())
+        {
+            items = self.changed_issues(request.cursor.as_deref())?.0;
+        }
+        // What the margin repeats is older than the cursor, which never moves back for it.
         let cursor = items
             .iter()
-            .map(|item| item.updated.as_str())
-            .max()
-            .map(str::to_owned)
-            .or(request.cursor);
+            .map(|item| item.updated.clone())
+            .chain(request.cursor)
+            .max();
         Ok(SourceBatch { items, cursor })
     }
 }

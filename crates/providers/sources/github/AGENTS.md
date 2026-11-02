@@ -49,6 +49,7 @@ as TOML, in `SourceConfig::settings_toml`.
 | `request_timeout_secs` | 30 | seconds one request may take; 0 is refused |
 | `page_size` | 100 | issues asked for per page; 0 is refused |
 | `max_pages` | 5 | pages one poll reads at most; 0 is refused |
+| `settling_secs` | 60 | seconds a poll searches behind the cursor; 0 searches from the cursor |
 
 | `reply_authors` | `[]` | logins besides the issue's author and the associations below whose comments may answer a question |
 | `reply_associations` | `["OWNER", "MEMBER", "COLLABORATOR"]` | `author_association` values that may answer |
@@ -62,12 +63,16 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
 
 - **Poll** lists `GET /repos/{repo}/issues` (open, oldest change first, `page_size` (100) per page,
   at most `max_pages` (5) pages) and maps each issue or pull request to a `SourceItem` with ID
-  `owner/name#number`. The returned cursor is the newest `updated_at`; the next poll sends
-  it as `since`, which GitHub treats as inclusive, so the newest item repeats and the
-  Registry sees it as unchanged. A `Link: rel="next"` that leaves the API origin is not
-  followed, so the token is never sent elsewhere.
+  `owner/name#number`. The returned cursor is the newest `updated_at`, and never earlier than
+  the one it was given; the next poll sends it, `settling_secs` earlier, as `since`, which GitHub
+  treats as inclusive, so what changed in that margin repeats and the Registry sees it as
+  unchanged. When the pages one poll reads hold nothing newer than the cursor and more remain,
+  it searches again from the cursor itself, so a margin fuller than a poll cannot stop it. A
+  `Link: rel="next"` that leaves the API origin is not followed, so the token is never sent
+  elsewhere.
 - **Listing lag**: a new or changed issue can take several seconds to show in the listing,
-  so it can appear on a later poll.
+  so it can appear on a later poll. The margin is for one shown after a newer one, whose time
+  the cursor has by then taken.
 - **Items**: an item ID is `owner/name#number` naming this instance's repository; any other
   is refused (`GUATIAO_ERR_BAD_VALUE`, message `foreign item ...`) before a request.
 - **Capabilities**: comment, edit, labels (the repository's own), assign, close, create,

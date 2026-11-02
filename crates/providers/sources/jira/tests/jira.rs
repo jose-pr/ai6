@@ -119,7 +119,7 @@ fn a_cloud_poll_pages_by_token_and_flattens_rich_text() {
 #[test]
 fn a_cursor_narrows_the_search_to_the_minute_it_stopped_at() {
     let fake = serve(|_| vec![canned(200, EMPTY_SEARCH), canned(200, PROJECT)]);
-    let batch = cloud(&fake.base, "")
+    let batch = cloud(&fake.base, "settling_secs = 0")
         .poll(SourcePoll {
             cursor: Some("2026-11-01T23:12:53.426+0700".to_owned()),
         })
@@ -133,6 +133,75 @@ fn a_cursor_narrows_the_search_to_the_minute_it_stopped_at() {
     let jql = param(&requests[0].target, "jql").unwrap();
     assert!(jql.contains("updated >= \"2026-11-01 23:12\""), "{jql}");
     assert_eq!(requests[1].target, "/rest/api/3/project/AI6");
+}
+
+/// One recorded search answer whose first issue changed at `updated`, with a next page or not.
+fn found(updated: &str, more: bool) -> String {
+    let mut search: serde_json::Value = serde_json::from_str(PAGE1).unwrap();
+    let issues = search["issues"].as_array_mut().unwrap();
+    issues.truncate(1);
+    issues[0]["fields"]["updated"] = serde_json::json!(updated);
+    if more {
+        search["nextPageToken"] = serde_json::json!("next");
+    } else {
+        search.as_object_mut().unwrap().remove("nextPageToken");
+    }
+    search.to_string()
+}
+
+#[test]
+fn a_poll_searches_a_margin_behind_the_cursor_and_the_cursor_stays_ahead_of_it() {
+    let cursor = "2026-11-01T23:12:53.426+0700".to_owned();
+    let late = found("2026-11-01T23:12:10.000+0700", false);
+    let fake = serve(|_| vec![canned(200, &late)]);
+    let batch = cloud(&fake.base, "")
+        .poll(SourcePoll {
+            cursor: Some(cursor.clone()),
+        })
+        .unwrap();
+    assert_eq!(batch.items.len(), 1, "the issue the search showed late");
+    assert_eq!(batch.cursor, Some(cursor), "the cursor does not move back");
+    let jql = param(&fake.requests.lock().unwrap()[0].target, "jql").unwrap();
+    assert!(
+        jql.contains("updated >= \"2026-11-01 23:11\""),
+        "60 seconds by default: {jql}"
+    );
+
+    let newer = found("2026-11-01T23:13:09.000+0700", false);
+    let fake = serve(|_| vec![canned(200, &newer)]);
+    let batch = cloud(&fake.base, "settling_secs = 3600")
+        .poll(SourcePoll {
+            cursor: Some("2026-11-01T23:12:53.426+0700".to_owned()),
+        })
+        .unwrap();
+    assert_eq!(
+        batch.cursor.as_deref(),
+        Some("2026-11-01T23:13:09.000+0700")
+    );
+    let jql = param(&fake.requests.lock().unwrap()[0].target, "jql").unwrap();
+    assert!(jql.contains("updated >= \"2026-11-01 22:12\""), "{jql}");
+}
+
+#[test]
+fn a_poll_filled_by_the_margin_goes_on_from_the_cursor() {
+    let inside = found("2026-11-01T23:12:10.000+0700", true);
+    let newer = found("2026-11-01T23:13:09.000+0700", false);
+    let fake = serve(|_| vec![canned(200, &inside), canned(200, &newer)]);
+    let batch = cloud(&fake.base, "max_pages = 1")
+        .poll(SourcePoll {
+            cursor: Some("2026-11-01T23:12:53.426+0700".to_owned()),
+        })
+        .unwrap();
+    assert_eq!(
+        batch.cursor.as_deref(),
+        Some("2026-11-01T23:13:09.000+0700")
+    );
+    let requests = fake.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    let jql = param(&requests[0].target, "jql").unwrap();
+    assert!(jql.contains("updated >= \"2026-11-01 23:11\""), "{jql}");
+    let jql = param(&requests[1].target, "jql").unwrap();
+    assert!(jql.contains("updated >= \"2026-11-01 23:12\""), "{jql}");
 }
 
 /// Cloud answers such a search with status 200 and no issues.

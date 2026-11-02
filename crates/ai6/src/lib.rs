@@ -180,7 +180,7 @@ pub use directorates::registry::sleepers::{
 };
 pub use directorates::registry::sources::{
     FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, Source, SourceBatch, SourceConfig,
-    SourceItem, SourcePoll, source_brief,
+    SourceItem, SourcePoll, settled_cursor, source_brief,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::registry::sql::{SqlOptions, SqlRegistry};

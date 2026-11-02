@@ -537,7 +537,8 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
   poll` and `min_poll`). Provider calls block on the
   network, so they run off the daemon's async runtime. Each Operation and provider keeps a
   cursor in the Registry, so a Station that takes over the lease resumes where the last one
-  stopped.
+  stopped. A poll searches `settling_secs` (default 60; 0 for none) behind the cursor, since a
+  listing can show an item after a newer one; what repeats changes nothing.
 - **Brief identity.** An item becomes a brief keyed `source_<provider>--<item>`. If the
   item changes while its brief is still in `new/`, the brief is updated in place. Once a
   Station has claimed it, polling leaves it alone; a finished item is never queued again,

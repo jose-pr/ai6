@@ -690,7 +690,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `local` (transport) | `reader_grace_ms` |
 | `adb`, `container` (transport settings) | `reader_grace_ms` |
 | `ssh` (transport settings) | `connect_timeout_secs`, `exit_grace_ms`, `keepalive_secs`, `keepalive_max` |
-| `github`, `jira` (Source settings) | `request_timeout_secs`, `page_size`, `max_pages` |
+| `github`, `jira` (Source settings) | `request_timeout_secs`, `page_size`, `max_pages`, `settling_secs` |
 | `ephemeral-container` (Theater provider `config`) | `engine_timeout_ms`, `engine_output_bytes`, `reader_grace_ms` |
 
 `[scheduler]`
