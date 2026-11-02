@@ -5956,8 +5956,11 @@ pub ai6::station::limits::PublisherLimits::control_wait: ai6::bounds::Seconds
 pub ai6::station::limits::PublisherLimits::input_retry_delay: ai6::bounds::Seconds
 pub ai6::station::limits::PublisherLimits::input_wait: ai6::bounds::Seconds
 pub ai6::station::limits::PublisherLimits::pre_bind_terminal_bytes: ai6::bounds::Limit
+pub ai6::station::limits::PublisherLimits::publish_retry_delay: ai6::bounds::Seconds
 pub ai6::station::limits::PublisherLimits::queue: usize
+pub ai6::station::limits::PublisherLimits::refresh_every: ai6::bounds::Seconds
 pub ai6::station::limits::PublisherLimits::request_timeout: ai6::bounds::Seconds
+pub ai6::station::limits::PublisherLimits::retry_max_delay: ai6::bounds::Seconds
 pub ai6::station::limits::PublisherLimits::terminal_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::station::limits::PublisherLimits
 pub fn ai6::station::limits::PublisherLimits::default() -> Self

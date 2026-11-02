@@ -106,6 +106,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A Station keeps publishing through a gateway outage. One failed publication or one full queue used
+  to end its publish thread until the Station restarted; a single `desk` Codex start could do it, its
+  tool check's output filling the queue. Now it tries again with growing pauses (`[publisher]
+  publish_retry_delay`, `retry_max_delay`), registers each live Session again when the gateway
+  answers, and every `refresh_every` seconds for one that restarted during a quiet spell, with its
+  brief and latest state, and goes on with its sequence. Output past `[publisher] queue` is dropped,
+  oldest first; the Session's sequence skips a number there, a Session's latest state is never what
+  goes, and `/internal/publisher` gains `lost_terminal_bytes`. Consecutive reads of a Session travel
+  as one frame. Output past `pre_bind_terminal_bytes`, a Session changing its ID and a lock failure
+  no longer stop publishing either. Failed input and control polls now back off too.
 - **Security.** Codex's tool check no longer reaches a Session's viewers. `codex mcp list --json`
   prints each MCP server's environment values and `codex debug prompt-input` the thread's
   instructions, and both went through the terminal a Station publishes, so anyone with

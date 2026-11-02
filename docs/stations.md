@@ -308,6 +308,35 @@ address is written down again. A Station keeps its identity in `identity.pem` an
 under `peers/`, in its state directory. The mechanism is the shared
 [coqui-peer-tls](https://boriken-dev.github.io/coqui-peer-tls/) crate.
 
+## When Universal Exports goes away
+
+A Station publishes each Session's states and terminal output to Universal Exports. A gateway that
+stops answering costs the Session nothing: the harness runs on, and the Station tries again with
+growing pauses (`[publisher] publish_retry_delay`, `retry_max_delay`). Its `/internal/publisher`
+reports it unhealthy, with the reason, until an event gets through.
+
+Universal Exports holds its Sessions in memory, so one that comes back has forgotten them. When it
+answers, and every `refresh_every` seconds in case it restarted during a quiet spell, the Station
+registers each live Session again with its Mission's brief and sends its latest state, and its
+sequence goes on from where it was, so a viewer's cursor stays good. Operator controls and terminal
+input resume by themselves, since each is a poll the Station keeps making.
+
+What is lost while it is away:
+
+- **Terminal output past the queue.** `[publisher] queue` frames wait, of up to `terminal_bytes`
+  each, across the Station's Sessions; past that the oldest go. The Station counts them
+  (`lost_terminal_bytes` in `/internal/publisher`), and the Session's sequence skips a number there.
+- **States in between.** When the queue is full, a Session's newer state replaces its older one, so
+  the gateway's timeline can skip a state the Session passed through. Its latest state always
+  arrives.
+- **Whatever the gateway held, if it restarted**: every Session's scrollback, and any Session that
+  ended before the gateway came back and has no state still waiting. The Registry keeps the
+  Missions themselves.
+- **Input typed into a gateway that went away**, and controls it had queued and not handed over,
+  since it holds them in memory too.
+
+The Session itself loses nothing: its harness and its record of the work are on the Station.
+
 ## Provider libraries: pins and publishers
 
 A Station runs every provider library it loads with its own privileges, so it checks them

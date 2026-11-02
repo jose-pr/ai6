@@ -1065,6 +1065,7 @@ async fn publisher_health(State(state): State<DaemonState>) -> Json<publisher::H
             enabled: false,
             healthy: false,
             error: None,
+            lost_terminal_bytes: 0,
         },
         |publisher| publisher.health(),
     ))

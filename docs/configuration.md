@@ -721,10 +721,13 @@ provider applied before it was a key; the provider's API header lists them with 
 | Key | Default | What |
 | --- | --- | --- |
 | `request_timeout` | 2 | Seconds one request may take |
-| `queue` | 64 | Lifecycle and terminal events held for publication; when full, publication stops and is reported unhealthy |
+| `queue` | 64 | Events waiting for Universal Exports. Past it output gives way, oldest first; a Session's latest state is kept |
 | `terminal_bytes` | 1 MiB | Bytes of terminal output in one published frame |
-| `pre_bind_terminal_bytes` | 1 MiB | Bytes of terminal output held for a Session not yet bound to its Mission |
-| `input_retry_delay` | 0.1 | Seconds before a failed input or control poll is tried again |
+| `pre_bind_terminal_bytes` | 1 MiB | Bytes of terminal output held for a Session not yet bound to its Mission; past it the oldest goes |
+| `publish_retry_delay` | 0.5 | Seconds before a failed publication is tried again; each try doubles it, up to `retry_max_delay` |
+| `retry_max_delay` | 30 | The longest pause between tries, of a publication or of an input or control poll |
+| `refresh_every` | 15 | Seconds between registering every live Session again, which is how a gateway restarted during a quiet spell learns of them |
+| `input_retry_delay` | 0.1 | Seconds before a failed input or control poll is tried again; each try doubles it, up to `retry_max_delay` |
 | `control_wait` | 1 | Seconds Universal Exports holds a control poll open |
 | `input_wait` | 20 | Seconds Universal Exports holds an input poll open; a keystroke ends it at once |
 | `control_queue` | 16 | Mission controls queued for the scheduler |

@@ -164,14 +164,25 @@ impl Default for SchedulerLimits {
 pub struct PublisherLimits {
     /// Seconds one request to Universal Exports may take. Default 2.
     pub request_timeout: Seconds,
-    /// Lifecycle events queued for publication; past it new ones are dropped. Default 64.
+    /// Events waiting for Universal Exports; past it output gives way, oldest first, and a
+    /// Session's latest state is kept. Default 64.
     pub queue: usize,
     /// Bytes of terminal output in one published frame. Default 1 MiB.
     pub terminal_bytes: Limit,
-    /// Bytes of terminal output kept for a Session not yet bound to its Mission. Default
-    /// 1 MiB.
+    /// Bytes of terminal output kept for a Session not yet bound to its Mission; past it the
+    /// oldest goes. Default 1 MiB.
     pub pre_bind_terminal_bytes: Limit,
-    /// Seconds before a failed input or control poll is tried again. Default 0.1.
+    /// Seconds before a failed publication is tried again; each try doubles it, up to
+    /// `retry_max_delay`. Default 0.5.
+    pub publish_retry_delay: Seconds,
+    /// The longest pause between tries, of a publication or of an input or control poll.
+    /// Default 30.
+    pub retry_max_delay: Seconds,
+    /// Seconds between registering every live Session again, which is how a gateway restarted
+    /// during a quiet spell learns of them. Default 15.
+    pub refresh_every: Seconds,
+    /// Seconds before a failed input or control poll is tried again; each try doubles it, up
+    /// to `retry_max_delay`. Default 0.1.
     pub input_retry_delay: Seconds,
     /// Seconds Universal Exports holds a control poll open; kept under `request_timeout`.
     /// Default 1.
@@ -192,6 +203,9 @@ impl Default for PublisherLimits {
             queue: 64,
             terminal_bytes: Limit::at(MIB),
             pre_bind_terminal_bytes: Limit::at(MIB),
+            publish_retry_delay: Seconds(std::time::Duration::from_millis(500)),
+            retry_max_delay: Seconds::new(30),
+            refresh_every: Seconds::new(15),
             input_retry_delay: Seconds(std::time::Duration::from_millis(100)),
             control_wait: Seconds::new(1),
             input_wait: Seconds::new(20),
