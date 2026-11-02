@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Checks tools/sdk/sdk.lock against itself and against what the repository builds with.
 
-Usage: check_lock.py [--lock FILE] [--deps-ref REF] [--online]
+Usage: check_lock.py [--lock FILE] [--pubspec-lock FILE] [--deps-ref REF] [--online]
 
 Exits 0 when every check passes and 1 with one line per failure. --lock checks another copy of the
-lock. --deps-ref is where to read the build containers' defaults (default origin/deps); a ref
+lock, and --pubspec-lock another copy of the app's pubspec.lock against the deps commit. --deps-ref is where to read the build containers' defaults (default origin/deps); a ref
 without them is reported and skipped. --online also compares each download's hash with what its
 upstream publishes, the only way to notice a well-formed hash that was changed.
 """
@@ -27,6 +27,7 @@ PLATFORMS = {"windows-x64", "windows-arm64", "linux-x64", "linux-arm64", "macos-
 FLOATING = re.compile(r"^(stable|beta|nightly|latest|lts|main|master|head|dev)$", re.IGNORECASE)
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
+PUBSPEC_LOCK = ROOT / "clients/outer-office/pubspec.lock"
 MAX_BYTES = 20 * 1024
 
 
@@ -40,12 +41,42 @@ class Item(NamedTuple):
     url: str
 
 
+class Package(NamedTuple):
+    name: str
+    version: str
+    source: str
+    url: str
+
+
+def locked_packages(text: str) -> list[Package]:
+    """The packages of a pubspec.lock, read by indentation: the file pub writes has one shape."""
+    packages = []
+    current: dict[str, str] = {}
+    for line in text.splitlines():
+        entry = re.match(r"^  ([A-Za-z0-9_]+):\s*$", line)
+        field = re.match(r'^ {4,6}(source|version|url): "?([^"]*)"?\s*$', line)
+        if entry:
+            if current:
+                packages.append(Package(**current))
+            current = {"name": entry[1], "version": "", "source": "", "url": ""}
+        elif field and current:
+            current[field[1]] = field[2]
+        elif not line.startswith(" ") and current:
+            packages.append(Package(**current))
+            current = {}
+    if current:
+        packages.append(Package(**current))
+    return packages
+
+
 class Checker:
-    def __init__(self, lock: Path) -> None:
+    def __init__(self, lock: Path, pubspec_lock: Path = PUBSPEC_LOCK) -> None:
         self.lock = lock
+        self.pubspec_lock = pubspec_lock
         self.errors: list[str] = []
         self.items: list[Item] = []
         self.notes: list[str] = []
+        self.trees: dict[str, set[str]] = {}
 
     def error(self, message: str, line: int | None = None) -> None:
         where = f"{self.lock.name}:{line}: " if line else f"{self.lock.name}: "
@@ -171,6 +202,45 @@ class Checker:
             self.error(f"the README of deps at {deps.version} names no Flutter engine", deps.line)
         elif named[1] != item.version:
             self.error(f"deps at {deps.version} names Flutter {named[1]}, the lock {item.version}", item.line)
+        self.check_pub(deps)
+
+    def check_pub(self, deps: Item) -> None:
+        """Every package pubspec.lock names is in deps' pub cache, or the offline build stops there.
+
+        A package from the Flutter SDK comes with it, and a path package is the checkout's.
+        """
+        packages = locked_packages(self.pubspec_lock.read_text(encoding="utf-8"))
+        if not packages:
+            self.error(f"{self.pubspec_lock.name} names no package", deps.line)
+        for package in packages:
+            if package.source == "hosted":
+                host = package.url.removeprefix("https://").removeprefix("http://").rstrip("/")
+                where = f"pub/hosted/{host}/{package.name}-{package.version}"
+                found = self.tree_holds(deps.version, where)
+            elif package.source == "git":
+                where = f"pub/git/cache/{package.url.rstrip('/').rsplit('/', 1)[-1].removesuffix('.git')}-*"
+                found = self.tree_holds(deps.version, where)
+            else:
+                continue
+            if not found:
+                self.error(
+                    f"{self.pubspec_lock.name} names {package.name} {package.version}, "
+                    f"but deps at {deps.version} has no {where}; refresh the deps branch",
+                    deps.line,
+                )
+
+    def tree_holds(self, ref: str, path: str) -> bool:
+        """Whether a commit holds `path`; a `*` matches the last part's end."""
+        parent, _, name = path.rpartition("/")
+        if parent not in self.trees:
+            done = subprocess.run(
+                ["git", "-C", str(ROOT), "ls-tree", "--name-only", f"{ref}:{parent}"],
+                capture_output=True,
+            )
+            self.trees[parent] = set(done.stdout.decode("utf-8").split()) if done.returncode == 0 else set()
+        if name.endswith("*"):
+            return any(entry.startswith(name[:-1]) for entry in self.trees[parent])
+        return name in self.trees[parent]
 
     def check_docs(self) -> None:
         requirements = (ROOT / "tools/sdk/docs-requirements.txt").read_text(encoding="utf-8")
@@ -279,11 +349,12 @@ def llvm_digest(item: Item) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check tools/sdk/sdk.lock.")
     parser.add_argument("--lock", type=Path, default=ROOT / "tools/sdk/sdk.lock")
+    parser.add_argument("--pubspec-lock", type=Path, default=PUBSPEC_LOCK)
     parser.add_argument("--deps-ref", default="origin/deps")
     parser.add_argument("--online", action="store_true")
     args = parser.parse_args()
 
-    checker = Checker(args.lock)
+    checker = Checker(args.lock, args.pubspec_lock)
     checker.parse()
     checker.check_platforms()
     checker.check_rust()

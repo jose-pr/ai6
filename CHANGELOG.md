@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `send_cable` takes scope `operation`, as its description said it did.
 - An audit record's `resource` may also name `operation:`, `mission:` or `compartment:`.
 
+- `tools/sdk/check_lock.py` fails when `pubspec.lock` names a package the `deps` commit's `pub/` lacks,
+  which only an offline build found out before.
 - Moneypenny's chat comes back by itself after a socket fails, and says `Reconnecting…` meanwhile:
   after `[oo.chat] retry_delay` (default 1 second), doubling up to `retry_max_delay` (default 16). It
   stays down after a refused sign-in, a person's `Stop trying`, a socket lost while stopping an answer,

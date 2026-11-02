@@ -72,7 +72,9 @@ commits still have to match.
 ## Changing a pin
 
 Run `python3 tools/sdk/check_lock.py` afterwards (`--online` also compares each download's hash
-with what upstream publishes; `--deps-ref` says where to read the build containers' defaults).
+with what upstream publishes; `--deps-ref` says where to read the build containers' defaults). It
+also fails on a package `clients/outer-office/pubspec.lock` names that the `deps` commit's `pub/`
+lacks, so a new dependency cannot land ahead of a refreshed branch.
 
 - **Rust stable**: the newest tested on merge. The lock is for repeatable builds; CI keeps legs on
   floating stable, so a new compiler is still noticed.
