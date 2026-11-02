@@ -48,9 +48,10 @@ its format on its first line:
   and fails as TOML.
 - A name no format answers to is an error that lists `json`, `toml` and `yaml`.
 
-`OO.cfg` follows these rules today. `ai6.cfg`, `unex.cfg` and the provider's family files
-named `.cfg` are read as TOML until the shared reader of the first line is in place; give them
-a `.json` or `.yaml` extension for those formats.
+The provider's family files follow the same rules. Every format becomes one value before a
+type reads it, so a refusal is the same in each: it names the key or the position and never
+quotes the document. A repeated key is refused in every format. A YAML plain scalar has its
+type before the setting is asked, so `n`, `yes` or `123` in a text setting is refused; quote it.
 
 ### Secrets
 

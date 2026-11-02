@@ -66,7 +66,6 @@ fn the_example_configuration_reads_alike_in_every_format() {
 }
 
 #[test]
-#[ignore = "guatiao text::cfg"]
 fn a_cfg_family_file_reads_the_format_its_first_line_names() {
     let expected = FileProvider::new(examples()).load("").unwrap();
     let dir = tempfile::tempdir().unwrap();

@@ -7,7 +7,7 @@
 use guatiao::{FromValue, ToValue};
 use guatiao_intake::{Screen, check};
 use guatiao_serde::{Serializable, from_serde};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Serialize;
 
 use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::config::ConfigRecord;
@@ -15,15 +15,6 @@ use crate::directorates::m::cover::CoverDefinition;
 use crate::directorates::m::roster::{
     AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
 };
-
-/// One document as a value, for a format that reads through serde.
-pub(crate) struct Document(pub(crate) guatiao::Value);
-
-impl<'de> Deserialize<'de> for Document {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        from_serde(deserializer).map(Self)
-    }
-}
 
 /// `T` from a value.
 pub(crate) fn from_value<T: FromValue>(value: &guatiao::Value) -> Result<T, String> {
@@ -42,8 +33,8 @@ pub fn from_json<T: FromValue>(definition: &serde_json::Value) -> Result<T, Stri
 
 /// `T` from a TOML document.
 pub(crate) fn from_toml<T: FromValue>(text: &str) -> Result<T, String> {
-    let document: Document = toml::from_str(text).map_err(|error| error.to_string())?;
-    from_value(&document.0)
+    crate::bootstrap::format::read(std::path::Path::new("document.toml"), text)
+        .map_err(|error| error.to_string())
 }
 
 /// `value` as JSON, written as a record is.

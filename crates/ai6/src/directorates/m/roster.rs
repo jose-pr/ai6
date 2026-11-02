@@ -2279,11 +2279,8 @@ fn parse_file<T: FromValue>(path: &Path) -> Result<T, RosterError> {
         };
         error_of(kind, format!("{}: {e}", path.display()))
     })?;
-    let format =
-        crate::bootstrap::format::Format::for_path(path).map_err(|e| error(e.to_string()))?;
-    let document: records::Document = crate::bootstrap::format::from_str(format, &text)
-        .map_err(|e| error(format!("{}: {e}", path.display())))?;
-    records::from_value(&document.0).map_err(|e| error(format!("{}: {e}", path.display())))
+    crate::bootstrap::format::read(path, &text)
+        .map_err(|e| error(format!("{}: {e}", path.display())))
 }
 
 fn parse_operation_agents(path: &Path) -> Result<AgentsDocument, RosterError> {

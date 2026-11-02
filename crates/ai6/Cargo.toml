@@ -64,7 +64,8 @@ coqui-roles.workspace = true
 coqui-access-kit = { workspace = true, optional = true }
 guatiao = { workspace = true, features = ["provider"] }
 guatiao-intake.workspace = true
-guatiao-serde.workspace = true
+guatiao-serde = { workspace = true, features = ["json", "toml", "yaml"] }
+anycfg.workspace = true
 fs2 = "0.4"
 futures-util = { workspace = true, optional = true }
 serde = { workspace = true, features = ["alloc"] }

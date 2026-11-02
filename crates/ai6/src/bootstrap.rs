@@ -713,12 +713,13 @@ impl SearchPath {
 /// `NotFound` or another I/O kind when the file cannot be read, `InvalidData` when it is not
 /// valid in its format or has a key `T` does not know (the error names the key).
 pub fn read_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, BootstrapError> {
-    let format = Format::for_path(path)
+    Format::for_path(path)
         .map_err(|error| BootstrapError::new(io::ErrorKind::InvalidInput, error.to_string()))?;
     let text = std::fs::read_to_string(path).map_err(|error| {
         BootstrapError::new(error.kind(), format!("{}: {error}", path.display()))
     })?;
-    format::from_str(format, &text).map_err(|error| BootstrapError::invalid(path, error))
+    let value = format::parse(path, &text).map_err(|error| BootstrapError::invalid(path, error))?;
+    guatiao_serde::adapt::from_value(&value).map_err(|error| BootstrapError::invalid(path, error))
 }
 
 /// Reads a PEM file of certificate authorities (`[unex] ca_file`, `ai6ctl --ca-file`): the DER of

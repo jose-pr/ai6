@@ -45,7 +45,6 @@ fn each_extension_reads_its_own_format() {
 }
 
 #[test]
-#[ignore = "guatiao text::cfg"]
 fn a_first_line_names_the_format() {
     for text in [
         "#!json\n{\"station\": \"hq-1\"}\n",
@@ -62,7 +61,6 @@ fn a_first_line_names_the_format() {
 }
 
 #[test]
-#[ignore = "guatiao text::cfg"]
 fn an_unknown_format_name_lists_the_known_ones() {
     let refused = read("#!ini\nstation = hq-1\n").unwrap_err();
     for format in ["json", "toml", "yaml"] {

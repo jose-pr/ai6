@@ -868,8 +868,10 @@ process needs before it reaches its configuration provider. Found by `SearchPath
 (must exist), else the variable (`AI6_CONFIG` / `UNEX_CONFIG`, must exist), else the file in
 `platform_config_dir()`, else in `system_config_dir()`; the first found is the only one read,
 and none means every default. The working directory is never searched. The format follows
-the extension (`format::Format::for_path`: `cfg` and `toml` are TOML, `json`, `yaml`/`yml`);
-a `.cfg` is TOML until a first-line format rule lands. Unknown keys are refused, naming the
+the extension (`toml`, `json`, `yaml`/`yml`); a `.cfg` names it on its first line (`#!json`,
+`#!yaml`, `#!toml`, the line's last word; a document starting `%YAML` is YAML), else it is TOML.
+A document becomes one `guatiao::Value`, and a refusal names the key or position and never the
+value. Unknown keys are refused, naming the
 key. A relative path in a file is relative to the file's directory.
 
 ```rust
@@ -942,6 +944,7 @@ pub fn system_config_dir() -> Option<PathBuf>;                     // /etc/ai6, 
 pub fn platform_state_dir() -> Result<PathBuf, BootstrapError>;   // %LOCALAPPDATA%\AI6, XDG_STATE_HOME/AI6, ~/.local/state/AI6
 #[non_exhaustive] pub struct BootstrapError;  // kind(): NotFound, InvalidData, ...; Into<io::Error>
 // format: EXTENSIONS, Format { Json, Toml, Yaml } (name, for_path, for_extension),
+//   parse(path, text) -> guatiao::Value, read::<T: FromValue>(path, text),
 //         from_str<T>(Format, &str), to_string<T>(Format, &T), FormatError
 ```
 

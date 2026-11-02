@@ -11,7 +11,7 @@ use super::{
     ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
     ConfigSnapshot, Layer, assemble, check_placement, merged,
 };
-use crate::bootstrap::format::{self, EXTENSIONS, Format};
+use crate::bootstrap::format::{self, EXTENSIONS};
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
 
 /// The directory of a Station's own family files under the provider's root.
@@ -169,15 +169,14 @@ fn read_family(
     layer: &mut Layer,
 ) -> Result<(), RosterError> {
     let in_file = |reason: &dyn std::fmt::Display| error(format!("{}: {reason}", path.display()));
-    let format = Format::for_path(path).map_err(|reason| in_file(&reason))?;
     let text = fs::read_to_string(path).map_err(|failure| unavailable(path, &failure))?;
-    let document: serde_json::Value =
-        format::from_str(format, &text).map_err(|reason| in_file(&reason))?;
-    let document = match document {
-        serde_json::Value::Object(document) => document,
-        // An empty YAML document is null.
-        serde_json::Value::Null => serde_json::Map::new(),
-        _ => return Err(in_file(&"the document is not a table")),
+    let document = format::parse(path, &text).map_err(|reason| in_file(&reason))?;
+    let mut document = serde_json::to_value(guatiao_serde::Serializable::from(&document))
+        .map_err(|reason| in_file(&reason))?;
+    // A record says the same whichever format wrote it; TOML's writer alone moves sub-tables last.
+    document.sort_all_objects();
+    let serde_json::Value::Object(document) = document else {
+        return Err(in_file(&"the document is not a table"));
     };
     if let Some(record) = ConfigRecord::ALL
         .into_iter()

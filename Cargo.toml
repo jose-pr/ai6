@@ -28,6 +28,8 @@ publish = false
 guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "a67fd4be0aa319795614ac6fe12d35d856ec3d8b" }
 guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "a67fd4be0aa319795614ac6fe12d35d856ec3d8b", features = ["derive"] }
 guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "a67fd4be0aa319795614ac6fe12d35d856ec3d8b", default-features = false }
+# Chooses a configuration document's format and hands it to a codec over guatiao's value.
+anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
 # Shared access kinds, models, role authorizer and the five access providers, pinned to the
 # same guatiao revision as above so kinds and plugins agree.
 coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "e43061d82cf0e845a37058ecb83c896587af19c8" }

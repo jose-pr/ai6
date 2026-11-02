@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `PluginPolicy::with_keep_verified`, `ServeConfig::with_keep_verified`,
   `PluginScanSummary::verified_removed` and `verified_held`.
 
+- Configuration documents are read through `anycfg` over guatiao's value, in one reader for
+  bootstrap files and family files. A `.cfg` file now names its format on its first line (`#!json`,
+  `#!yaml`, `#!toml`, or a document starting `%YAML`), else it is TOML. A refusal names the key or
+  the position and never quotes the document, and a repeated key is refused in JSON as in TOML and
+  YAML. A YAML plain scalar has its type before a setting is asked, so `n`, `yes` or `123` in a
+  text setting needs quotes. New: `ai6::bootstrap::format::{parse, read}`.
 - A Mission ID names its Operation and a number or the tracker's code, not a random one: `ai6-42`,
   `ai6-gh-63`, `ai6-AI6-64`, `ai6-backend-63`, `ai6-nightly-43`. It is chosen once, where the brief
   enters, and stays through a retry, a return to the queue, a resume and a restart. Numbers
