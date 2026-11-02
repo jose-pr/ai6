@@ -580,7 +580,7 @@ mod tests {
             path.contains("/lifecycle/") && body["state"] == "blocked"
         })
         .expect("the start publishes the block");
-        // The handler no longer builds, as a resume finds out after it binds its telemetry.
+        // A handler that does not build, which a resume finds out after it binds its telemetry.
         state
             .sessions
             .lock()
