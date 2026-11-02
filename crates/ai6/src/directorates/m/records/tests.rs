@@ -528,7 +528,7 @@ fn stored_records_keep_their_values_nulls_and_lifted_bounds() {
         station.roles.as_deref(),
         Some(&["execution".to_owned()][..])
     );
-    assert_eq!(station.labels["site"], "asgard");
+    assert_eq!(station.labels["site"], "west");
     assert_eq!(
         station.providers["pty"],
         serde_json::json!({
