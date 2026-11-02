@@ -461,7 +461,7 @@ mod tests {
         assert_eq!(registry.entered_mission_id(&other).unwrap(), None);
         assert_eq!(registry.allot_mission_id(&other).unwrap(), "G-deps-2");
 
-        // A brief that entered and is deleted leaves its number spent.
+        // A brief that entered and finished leaves its number spent.
         let entered = registry
             .enter_brief(&brief("gone"), &MissionEntry::person(Some("G")))
             .unwrap();
@@ -777,6 +777,44 @@ mod tests {
             .map(|finished| finished.brief.key())
             .collect();
         assert_eq!(listed, ["G-github-o_r_1"], "{} owes nothing", asked.key());
+    }
+
+    #[test]
+    fn a_deleted_brief_does_not_free_its_number_on_a_file_registry() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
+        let entered = registry
+            .enter_brief(&brief("gone"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        assert_eq!(entered.key(), "G-1");
+        let claimed = registry.claim_new(Some("G-1")).unwrap().unwrap();
+        registry
+            .finish(&claimed, &serde_json::json!({}), true, None, None)
+            .unwrap();
+        std::fs::remove_dir_all(root.path().join("done")).unwrap();
+        assert_eq!(person(&registry, Some("G")), "G-2");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn a_deleted_brief_does_not_free_its_number_on_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("registry.db");
+        let registry = crate::directorates::registry::sql::SqlRegistry::open(&format!(
+            "sqlite:{}",
+            path.display()
+        ))
+        .unwrap();
+        let entered = registry
+            .enter_brief(&brief("gone"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        assert_eq!(entered.key(), "G-1");
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute("DELETE FROM ai6_briefs", [])
+            .unwrap();
+        assert!(registry.list_new().unwrap().is_empty());
+        assert_eq!(person(&registry, Some("G")), "G-2");
     }
 
     /// The listing is cut at a row limit, so a finished brief that owes nothing must not count
