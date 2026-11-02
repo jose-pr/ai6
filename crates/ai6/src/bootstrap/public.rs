@@ -3,7 +3,7 @@
 //! A page can fetch only what is served, and a host's file names files and addresses that are not
 //! the public's business. So this is an allow list, and a new key is private until it is named
 //! here: `[unex] url`, and of `[oo]` its tables' numbers and booleans and the text settings
-//! [`PUBLIC_TEXT`] names. Every other value a person writes under `[oo]` is left out, so a secret
+//! `PUBLIC_TEXT` names. Every other value a person writes under `[oo]` is left out, so a secret
 //! filed there by mistake goes no further.
 
 use std::fmt;
