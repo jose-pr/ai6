@@ -82,10 +82,20 @@ env = "ANTHROPIC_AUTH_TOKEN"
 from = { file = "/etc/ai6/litellm.key" }
 ```
 
-- **A limit moves the next message.** When a harness reports a limit the route's account is marked
-  for every Station, the person is told, and the harness closes. Her next message takes the next
-  route with room. The message that met the limit is not sent again by itself. With no reset time
-  (the Grok CLI gives none) the mark lasts `[assistant.desk] limit_fallback`, 30 minutes by default.
+- **A limit moves her to the next route, within the same turn, if the turn did nothing yet.** When a
+  harness reports a limit the route's account is marked for every Station. If the harness had
+  shown no text and started no tool call for that message, the Station closes it, starts the next
+  route with room and sends that same message there, with the conversation's recap as for any
+  route she moves to. The person sees a note that the route is out of quota and which route took
+  over. She goes on through her routes while each reports a limit, each once, and with none left the
+  turn ends with the notice that the route is out of quota and the next message takes another route
+  if one has room. A Stop, or closing the conversation, while she moves ends the walk. With no reset
+  time (the Grok CLI gives none) the mark lasts `[assistant.desk] limit_fallback`, 30 minutes by
+  default.
+- **A limit after text or a tool call is never sent again.** A tool may have acted, and the person
+  has seen part of an answer, so the message is not sent to another route: the turn ends with the
+  notice, and the next message takes the next route. The same holds for a message that joined a
+  turn already being answered.
 - **Her conversation stays on its route while it can.** Universal Exports keeps the route beside the
   provider Session and sends both with each message. A Session resumes only on its own route, even
   if another comes first in order. Otherwise she starts afresh with the conversation's recap, and
@@ -94,8 +104,8 @@ from = { file = "/etc/ai6/litellm.key" }
   Station refuses the message, naming each route and why, and Universal Exports offers it to the
   next healthy Station, as it does any refusal.
 - **A route's harness that does not start**, its login gone say, gives way to the next route with
-  room, within the same message, and the Station's log says why. A limit does not, since the harness
-  may have done something by then.
+  room, within the same message, and the Station's log says why. A limit does the same only while
+  the turn has done nothing.
 - **Her environment** keeps only what reaches the model; a route's `env` and `secrets` are that by
   definition, whatever their names. She is given no loadout secret. For the `acp` handler the
   Session's environment wins over `handler_settings.env`, so an Agent `env` setting `HOME` hides a

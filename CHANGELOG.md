@@ -22,8 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   board's attempts gain `route` and `account`, and `ai6ctl mission`, `ai6ctl agents`, the Agents page
   and the timeline (`route` / `chosen`, `moved`) show them.
 - Moneypenny's Sessions use routes and account pools. A harness's limit marks its route for every
-  Station and her next message takes another; her conversation resumes on the same route while it
-  has room and otherwise starts afresh with its recap, and the person is told. A Station with none of
+  Station and, if the turn had shown no text and started no tool call, the same message goes to her
+  next route within the turn, each route once, and the person is told which took over; after text or
+  a tool call, or with no route left, the turn ends with a notice and her next message takes another
+  route. Her conversation resumes on the same route while it has room and otherwise starts afresh
+  with its recap. A Station with none of
   her routes' handlers refuses the message, so another can take it. `AssistantJob` and
   `AssistantReport` gain `route`; `[assistant.desk] limit_fallback` says how long a limit with no
   reset time lasts, 30 minutes by default.
