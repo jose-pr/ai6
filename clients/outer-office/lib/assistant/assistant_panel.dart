@@ -12,14 +12,15 @@ import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_view.dart';
 import 'entry_kind.dart';
+import 'export.dart' as exporting;
 import 'pages.dart';
 import 'navigation_card.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
 /// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries
 /// [route], the app page the person is on, so "this Mission" means something to her. Its menu
-/// opens her memory of the person ([onMemory]) and, with [pageActions], her pages. Enter sends;
-/// Shift+Enter starts a new line.
+/// opens her memory of the person ([onMemory]), with [pageActions] her pages, and exports the
+/// conversation. Enter sends; Shift+Enter starts a new line.
 class AssistantPanel extends StatefulWidget {
   const AssistantPanel({
     required this.controller,
@@ -37,6 +38,7 @@ class AssistantPanel extends StatefulWidget {
     this.label,
     this.proposalWait = ControlSettings.defaultConfirming,
     this.pageActions,
+    this.saveText = exporting.saveText,
     super.key,
   });
 
@@ -81,6 +83,9 @@ class AssistantPanel extends StatefulWidget {
   /// shows her title only.
   final PageActions? pageActions;
 
+  /// Where an export goes: a download in a browser, the Downloads folder on a desktop.
+  final Future<String?> Function(String name, String text) saveText;
+
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
 }
@@ -103,6 +108,34 @@ class _AssistantPanelState extends State<AssistantPanel> {
     widget.controller.removeListener(_showReveal);
     _ownMessage?.dispose();
     super.dispose();
+  }
+
+  /// Saves the conversation the app holds as Markdown and says where it went.
+  Future<void> _export() async {
+    final controller = widget.controller;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final text = exporting.conversationMarkdown(
+      conversationId: controller.conversationId,
+      entries: controller.entries,
+      exportedAt: DateTime.now(),
+    );
+    try {
+      final where = await widget.saveText(
+        exporting.exportFileName(controller.conversationId),
+        text,
+      );
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            where == null ? 'Conversation exported.' : 'Saved to $where',
+          ),
+        ),
+      );
+    } on Object catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('The conversation was not exported: $error')),
+      );
+    }
   }
 
   /// Shows a password the person just confirmed resetting, once, outside the conversation.
@@ -244,48 +277,50 @@ class _AssistantPanelState extends State<AssistantPanel> {
                         : null,
                     icon: const Icon(Icons.add_comment_outlined),
                   ),
-                  if (widget.onMemory != null ||
-                      widget.onFollowAtOnce != null ||
-                      widget.pageActions != null)
-                    PopupMenuButton<void>(
-                      tooltip: 'Moneypenny menu',
-                      style: const ButtonStyle(
-                        visualDensity: VisualDensity.compact,
+                  PopupMenuButton<void>(
+                    tooltip: 'Moneypenny menu',
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    itemBuilder: (menuContext) => [
+                      PopupMenuItem(
+                        enabled: controller.entries.isNotEmpty,
+                        onTap: () => unawaited(_export()),
+                        child: const ListTile(
+                          leading: Icon(Icons.download_outlined),
+                          title: Text('Export conversation'),
+                        ),
                       ),
-                      itemBuilder: (menuContext) => [
-                        if (widget.onMemory case final onMemory?)
-                          PopupMenuItem(
-                            onTap: onMemory,
-                            child: const ListTile(
-                              leading: Icon(Icons.psychology_outlined),
-                              title: Text('Her memory of you'),
-                            ),
+                      if (widget.onMemory case final onMemory?)
+                        PopupMenuItem(
+                          onTap: onMemory,
+                          child: const ListTile(
+                            leading: Icon(Icons.psychology_outlined),
+                            title: Text('Her memory of you'),
                           ),
-                        if (widget.pageActions case final actions?)
-                          PopupMenuItem(
-                            onTap: () => unawaited(
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) =>
-                                      HerPagesPage(actions: actions),
-                                ),
+                        ),
+                      if (widget.pageActions case final actions?)
+                        PopupMenuItem(
+                          onTap: () => unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => HerPagesPage(actions: actions),
                               ),
                             ),
-                            child: const ListTile(
-                              leading: Icon(Icons.web_outlined),
-                              title: Text('Her pages'),
-                            ),
                           ),
-                        if (widget.onFollowAtOnce case final onFollow?)
-                          CheckedPopupMenuItem(
-                            checked: widget.followAtOnce,
-                            onTap: () => onFollow(!widget.followAtOnce),
-                            child: const Text(
-                              "Open Moneypenny's links at once",
-                            ),
+                          child: const ListTile(
+                            leading: Icon(Icons.web_outlined),
+                            title: Text('Her pages'),
                           ),
-                      ],
-                    ),
+                        ),
+                      if (widget.onFollowAtOnce case final onFollow?)
+                        CheckedPopupMenuItem(
+                          checked: widget.followAtOnce,
+                          onTap: () => onFollow(!widget.followAtOnce),
+                          child: const Text("Open Moneypenny's links at once"),
+                        ),
+                    ],
+                  ),
                   ...widget.actions,
                 ],
               ),
@@ -499,6 +534,15 @@ class _EntryView extends StatelessWidget {
               ),
               child: MarkdownText(entry.text, onOpen: onOpen),
             ),
+          ),
+          // Her words as she wrote them, Markdown included.
+          IconButton(
+            tooltip: 'Copy',
+            iconSize: 16,
+            visualDensity: VisualDensity.compact,
+            onPressed: () =>
+                unawaited(Clipboard.setData(ClipboardData(text: entry.text))),
+            icon: const Icon(Icons.copy_outlined),
           ),
         ],
       ),

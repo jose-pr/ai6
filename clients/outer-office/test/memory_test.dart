@@ -488,11 +488,14 @@ void main() {
         home: Scaffold(body: AssistantPanel(controller: controller)),
       ),
     );
+    await tester.tap(find.byTooltip('Moneypenny menu'));
+    await tester.pumpAndSettle();
     expect(
-      find.byTooltip('Moneypenny menu'),
+      find.text('Her memory of you'),
       findsNothing,
-      reason: 'no memory to open, no menu',
+      reason: 'no memory to open, no menu entry; Export stays',
     );
+    expect(find.text('Export conversation'), findsOneWidget);
   });
 
   testWidgets(

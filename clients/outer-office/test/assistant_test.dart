@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/assistant/assistant_view.dart';
+import 'package:outer_office/assistant/export.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/settings/oo_config.dart' show ChatSettings;
 import 'package:outer_office/shell/oo_shell.dart';
@@ -441,6 +443,71 @@ void main() {
     expect(find.text('Stopped.'), findsOneWidget);
   });
 
+  testWidgets('the menu exports the conversation as Markdown', (tester) async {
+    final channel = FakeChannel();
+    final controller = AssistantController(
+      token: 'user-token',
+      connect: () => channel,
+    );
+    addTearDown(controller.dispose);
+    final saved = <(String, String)>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AssistantPanel(
+            controller: controller,
+            saveText: (name, text) async {
+              saved.add((name, text));
+              return '/home/me/Downloads/$name';
+            },
+          ),
+        ),
+      ),
+    );
+    channel.answer({
+      'type': 'ready',
+      'conversation': 'c-1',
+      'busy': false,
+      'entries': [
+        {'role': 'person', 'text': 'Which Stations are busy?', 'at': 1.0},
+        {'role': 'moneypenny', 'text': '**worker** is busy.', 'at': 2.0},
+      ],
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Moneypenny menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Export conversation'));
+    await tester.pumpAndSettle();
+    expect(saved.single.$1, 'moneypenny-c-1.md');
+    expect(saved.single.$2, contains('conversation: "c-1"'));
+    expect(saved.single.$2, contains('## Moneypenny · '));
+    expect(saved.single.$2, contains('**worker** is busy.'));
+    expect(
+      find.text('Saved to /home/me/Downloads/moneypenny-c-1.md'),
+      findsOneWidget,
+    );
+  });
+
+  test('an export keeps entry data in a fence its backticks cannot close', () {
+    final text = conversationMarkdown(
+      conversationId: 'c/1',
+      entries: const [
+        AssistantEntry(
+          role: 'proposal',
+          text: 'Set limits',
+          at: 0,
+          data: {'note': 'has ``` inside'},
+        ),
+      ],
+      exportedAt: DateTime.utc(2026, 11, 3),
+    );
+    expect(text, startsWith('---\nconversation: "c/1"\n'));
+    expect(text, contains('exported_at: 2026-11-03T00:00:00.000Z'));
+    expect(text, contains('## Proposal · 1970-01-01T00:00:00.000Z'));
+    expect(text, contains('````json'));
+    expect(exportFileName('c/1'), 'moneypenny-c-1.md');
+  });
+
   testWidgets('no view carries a strip, whatever an entry says', (
     tester,
   ) async {
@@ -547,6 +614,25 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(find.text('board'), findsOneWidget);
     expect(find.textContaining('is busy: 4 of 4.'), findsOneWidget);
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await tester.tap(find.byTooltip('Copy'));
+    await tester.pump();
+    expect(copied, ['**worker** is busy: 4 of 4.'], reason: 'her Markdown');
     expect(inConversation, findsOneWidget);
     expect(
       find.descendant(
