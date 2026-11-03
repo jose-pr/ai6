@@ -127,6 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Those pages have **Add filter**, offering the Agents, Missions and pools their rows hold. The
   routes `agents`, `green_ink` and `pools` take `mission_id`, and `green_ink` takes `agent`, for the
   app and for Moneypenny's links alike.
+- The Roster page opens on **All records**, every kind's keys under its name; its picker narrows to one
+  kind, where records are added and edited.
 - Outer Office's map, skyline and paper hero pictures have 2560 and 3840 pixel files, so a 4K window no
   longer stretches them to more than three times their size.
 - The ACP client is the `coqui-acp` library, pinned by revision, with AI6's launch extension, the
