@@ -5028,10 +5028,7 @@ fn a_page_on_the_api_origin_may_be_framed_by_that_origin_with_no_path() {
         ("http://127.0.0.1:7082/pages", "http://127.0.0.1:7082"),
     ] {
         let csp = page_csp(base, ai6::PageNetwork::Open, true);
-        assert!(
-            csp.ends_with(&format!("frame-ancestors {origin}")),
-            "{csp}"
-        );
+        assert!(csp.ends_with(&format!("frame-ancestors {origin}")), "{csp}");
         assert!(frame_csp(base).contains(&format!("frame-src {base}/;")));
     }
 }
