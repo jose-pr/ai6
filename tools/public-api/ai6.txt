@@ -652,6 +652,7 @@ pub ai6::directorates::m::assistant::AssistantPageLimits::max_page_bytes: ai6::b
 pub ai6::directorates::m::assistant::AssistantPageLimits::max_page_files: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::max_pages: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::max_person_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantPageLimits::max_shares: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::max_total_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::network: ai6::PageNetwork
 pub ai6::directorates::m::assistant::AssistantPageLimits::open_ttl: ai6::bounds::Seconds
@@ -8629,6 +8630,7 @@ pub ai6::AssistantPageLimits::max_page_bytes: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::max_page_files: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::max_pages: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::max_person_bytes: ai6::bounds::Limit
+pub ai6::AssistantPageLimits::max_shares: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::max_total_bytes: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::network: ai6::PageNetwork
 pub ai6::AssistantPageLimits::open_ttl: ai6::bounds::Seconds
