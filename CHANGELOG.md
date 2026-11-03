@@ -121,6 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Outer Office's map, skyline and paper hero pictures have 2560 and 3840 pixel files, so a 4K window no
+  longer stretches them to more than three times their size.
 - The ACP client is the `coqui-acp` library, pinned by revision, with AI6's launch extension, the
   event stream of its own facade and runner, runner sequence numbers and acknowledgements, restricted
   Sessions and the words of `limit`, `blocked` and `failed` kept on top. What changes for a caller:
