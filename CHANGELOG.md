@@ -335,6 +335,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The `acp` handler's default `limit_phrases` name the Grok CLI's out-of-credits words (`spending-limit`,
+  `run out of credits`, `402 Payment Required`), so such a turn stops as limited and its route is passed
+  over once the ACP client passes Grok's reason on.
+
 - A page Moneypenny publishes loads on the API's own origin. Its `frame-ancestors` carried the `/pages`
   path, which never matches a parent's origin, so a browser refused to show it. The guide now lists
   `/pages/` among the paths a reverse proxy passes to the gateway.

@@ -158,7 +158,11 @@ env = { HOME = "/var/lib/ai6", GROK_DISABLE_AUTOUPDATER = "1", GROK_MEMORY = "0"
 
 Past its free quota Grok 1.0.70 answers `session/prompt` with JSON-RPC error `-32003`, `Rate limited`,
 with xAI's text beside it (`subscription:free-usage-exhausted: You've used all the included free usage
-...`) and no reset time. The handler's `limit_phrases` setting says what words mark a failed turn as a limit, found in
+...`) and no reset time. Out of credits, Grok answers `-32603`, `Internal error`, with its reason in an
+object (`data.message`: `API error (status 402 Payment Required): personal-team-blocked:spending-limit:
+You have run out of credits ...`); the ACP client AI6 uses passes on only a string `data`, so until it
+passes that message on, such a turn fails as `Internal error` instead of stopping as limited.
+The handler's `limit_phrases` setting says what words mark a failed turn as a limit, found in
 that error without regard to case; its default names Grok's and those other agents commonly use. Such
 a Session stops as limited rather than failed, so [its route](agents.md#routes) or account is passed
 over.
