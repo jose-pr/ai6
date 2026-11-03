@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, response::IntoResponse};
 use serde_json::{Value, json};
 
@@ -37,6 +37,8 @@ async fn start() -> (String, Seen) {
                      "expires_at": 1_800_000_000.0},
                     {"id": "page-b", "kind": "file", "title": "Log", "bytes": 10,
                      "expires_at": null},
+                    {"id": "page-c", "kind": "report", "title": "Theirs", "bytes": 1,
+                     "expires_at": null, "shared_by": "q-007"},
                 ]))
             }),
         )
@@ -66,6 +68,25 @@ async fn start() -> (String, Seen) {
                  Json(body): Json<Value>| async move {
                     record(&seen, "POST", format!("/v1/user/pages/{id}/remember"), &headers, body);
                     Json(json!({"id": id}))
+                },
+            ),
+        )
+        .route(
+            "/v1/user/pages/{id}/shares",
+            put(
+                |State(seen): State<Seen>,
+                 headers: HeaderMap,
+                 Path(id): Path<String>,
+                 Json(body): Json<Value>| async move {
+                    record(&seen, "PUT", format!("/v1/user/pages/{id}/shares"), &headers, body.clone());
+                    if body["subjects"] == json!(["operation:H"]) {
+                        return (
+                            StatusCode::FORBIDDEN,
+                            Json(json!({"error": "you do not hold mission.read in Operation H"})),
+                        )
+                            .into_response();
+                    }
+                    Json(json!({"id": id, "shares": body["subjects"]})).into_response()
                 },
             ),
         )
@@ -123,10 +144,62 @@ async fn pages_list_prints_one_line_each_with_the_expiry_or_remembered() {
     // A control character in a title is shown as one, never as a column break.
     assert_eq!(
         lines[0],
-        "page-a\tdashboard\t2048\t1800000000\tLoad\u{fffd}by station"
+        "page-a\tdashboard\t2048\t1800000000\tLoad\u{fffd}by station\t-"
     );
-    assert_eq!(lines[1], "page-b\tfile\t10\tremembered\tLog");
+    assert_eq!(lines[1], "page-b\tfile\t10\tremembered\tLog\t-");
+    // A page shared with you names whose it is.
+    assert_eq!(lines[2], "page-c\treport\t1\tremembered\tTheirs\tq-007");
     assert_eq!(seen.lock().unwrap()[0].2, "Bearer tok");
+}
+
+#[tokio::test]
+async fn pages_share_puts_the_subjects_and_prints_the_gateways_reason_for_a_refusal() {
+    let (server, seen) = start().await;
+    let shared = ai6ctl(
+        &server,
+        Some("tok"),
+        &["pages", "share", "page-a", "group:ops", "operation:G"],
+    )
+    .await;
+    assert!(shared.status.success(), "{}", err(&shared));
+    assert_eq!(out(&shared), "page-a: shared with group:ops operation:G\n");
+    let nobody = ai6ctl(&server, Some("tok"), &["pages", "share", "page-a"]).await;
+    assert_eq!(out(&nobody), "page-a: shared with nobody\n");
+    let refused = ai6ctl(
+        &server,
+        Some("tok"),
+        &["pages", "share", "page-a", "operation:H"],
+    )
+    .await;
+    assert!(!refused.status.success());
+    assert!(
+        err(&refused).contains("you do not hold mission.read in Operation H"),
+        "{}",
+        err(&refused)
+    );
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.iter()
+            .map(|(method, path, _, body)| (method.as_str(), path.as_str(), body.clone()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "PUT",
+                "/v1/user/pages/page-a/shares",
+                json!({"subjects": ["group:ops", "operation:G"]})
+            ),
+            (
+                "PUT",
+                "/v1/user/pages/page-a/shares",
+                json!({"subjects": []})
+            ),
+            (
+                "PUT",
+                "/v1/user/pages/page-a/shares",
+                json!({"subjects": ["operation:H"]})
+            ),
+        ]
+    );
 }
 
 #[tokio::test]

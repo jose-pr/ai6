@@ -97,8 +97,8 @@ enum Command {
         #[arg(long)]
         operation: String,
     },
-    /// The pages Moneypenny published for you: list them, print a link to open one, keep or
-    /// release one, delete one. Sharing a page waits for compartments.
+    /// The pages Moneypenny published for you and those shared with you: list them, print a
+    /// link to open one, keep or release one, share one, delete one.
     Pages {
         #[command(subcommand)]
         command: PagesCommand,
@@ -628,7 +628,8 @@ enum MissionCommand {
 /// What `ai6ctl pages` does.
 #[derive(Debug, Subcommand)]
 enum PagesCommand {
-    /// List your pages: id, kind, size and expiry.
+    /// List your pages, then those shared with you: id, kind, size, expiry, title and whose
+    /// a shared one is.
     List,
     /// Print a link to a page, valid for the time the gateway sets (an hour by default); open
     /// it in a browser. The link is bound to this access token.
@@ -648,6 +649,16 @@ enum PagesCommand {
     Forget {
         /// The page's id.
         id: String,
+    },
+    /// Share a page with the subjects given, in place of whom it was shared with; none
+    /// shares it with nobody. A subject is person:ID, group:NAME, account:NAME,
+    /// compartment:ID (one you are read into) or operation:ID (one where you hold
+    /// mission.read).
+    Share {
+        /// The page's id.
+        id: String,
+        /// Whom to share it with.
+        subjects: Vec<String>,
     },
     /// Delete a page.
     Rm {
@@ -1586,6 +1597,9 @@ async fn pages(
         PagesCommand::Forget { id } => client
             .post(pages_url(server, Some(id), Some("remember")))
             .json(&serde_json::json!({"remember": false})),
+        PagesCommand::Share { id, subjects } => client
+            .put(pages_url(server, Some(id), Some("shares")))
+            .json(&serde_json::json!({"subjects": subjects})),
         PagesCommand::Rm { id } => client.delete(pages_url(server, Some(id), None)),
     };
     let response = request
@@ -1595,7 +1609,12 @@ async fn pages(
         .map_err(|_| "could not contact Universal Exports".to_owned())?;
     let status = response.status();
     if !status.is_success() {
-        return Err(pages_refusal(status));
+        let reason = response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|body| body["error"].as_str().map(plain));
+        return Err(reason.unwrap_or_else(|| pages_refusal(status)));
     }
     let invalid = || "Universal Exports returned an invalid page answer".to_owned();
     match command {
@@ -1604,7 +1623,7 @@ async fn pages(
             for page in list {
                 let text = |key: &str| plain(page[key].as_str().unwrap_or("-"));
                 println!(
-                    "{}\t{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}",
                     text("id"),
                     text("kind"),
                     page["bytes"].as_u64().unwrap_or(0),
@@ -1612,6 +1631,7 @@ async fn pages(
                         .as_f64()
                         .map_or_else(|| "remembered".to_owned(), |at| format!("{at:.0}")),
                     text("title"),
+                    text("shared_by"),
                 );
             }
         }
@@ -1621,6 +1641,20 @@ async fn pages(
         }
         PagesCommand::Remember { id } => println!("{}: remembered", plain(&id)),
         PagesCommand::Forget { id } => println!("{}: will expire", plain(&id)),
+        PagesCommand::Share { id, .. } => {
+            let page: serde_json::Value = response.json().await.map_err(|_| invalid())?;
+            let shares: Vec<String> = page["shares"]
+                .as_array()
+                .ok_or_else(invalid)?
+                .iter()
+                .filter_map(|share| share.as_str().map(plain))
+                .collect();
+            if shares.is_empty() {
+                println!("{}: shared with nobody", plain(&id));
+            } else {
+                println!("{}: shared with {}", plain(&id), shares.join(" "));
+            }
+        }
         PagesCommand::Rm { id } => println!("{}: deleted", plain(&id)),
     }
     Ok(())

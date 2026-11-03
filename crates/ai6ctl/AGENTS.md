@@ -67,12 +67,15 @@ origin leaves the public roots alone.
   the Operation overrides the Station definition (`agent.read` on that Operation). The
   Operation ID is encoded as one URL path segment.
 - `ai6ctl pages list` prints `GET /v1/user/pages` as tab-separated `ID KIND BYTES EXPIRES_UNIX
-  TITLE` (`EXPIRES_UNIX` is `remembered` without an expiry);
+  TITLE SHARED_BY` (`EXPIRES_UNIX` is `remembered` without an expiry; `SHARED_BY` is `-` for
+  your own pages, else whose the shared page is);
   `pages open <ID> [--network none|own]` prints the link `POST /v1/user/pages/{id}/open` gives
   (open it in a browser; it is bound to the access token); `pages remember <ID>` and `pages
-  forget <ID>` post `.../remember`; `pages rm <ID>` deletes. The ID is encoded as one path
-  segment; 404 reads "no such page of yours" (another person's page too). Sharing a page waits
-  for compartments.
+  forget <ID>` post `.../remember`; `pages share <ID> [SUBJECT...]` puts `.../shares`
+  (`person:`, `group:`, `account:`, `compartment:` or `operation:` and an ID; none shares with
+  nobody) and prints `ID: shared with SUBJECT...` or `ID: shared with nobody`; `pages rm <ID>`
+  deletes. The ID is encoded as one path segment; 404 reads "no such page of yours" (another
+  person's page too); a refusal with a reason prints the gateway's reason.
 - `ai6ctl pools --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/pools`
   as tab-separated `POOL ACCOUNT KIND SESSIONS WINDOWS LIMITED_UNTIL_UNIX TOKENS_TODAY`:
   `SESSIONS` is `active/max_concurrent` (or the count without a limit), `WINDOWS`
