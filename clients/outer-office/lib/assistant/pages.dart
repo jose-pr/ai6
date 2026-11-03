@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -37,6 +38,14 @@ abstract interface class PageActions {
   /// Shares page [id] with [subjects] in place of whom it was shared with, and answers whom it
   /// is now shared with. A refusal throws with the gateway's reason.
   Future<List<String>> share(String id, List<String> subjects);
+
+  /// Gives page [id] a public link, or takes it away; answers the link, `null` when off. A
+  /// refusal throws with the gateway's reason.
+  Future<String?> setPublic(String id, {required bool on});
+
+  /// The app's own link to page [id], the one to give someone: it opens Her pages at that page
+  /// after they sign in, if they may open it.
+  Uri appLink(String id);
 }
 
 /// How a link is launched: a new browser tab on the web, the system browser on a desktop,
@@ -81,6 +90,9 @@ class _PageCardState extends State<PageCard> {
   Timer? _renew;
   bool? _remembered;
   List<String>? _shares;
+
+  /// The public link once changed here; `''` when turned off.
+  String? _public;
   bool _deleted = false;
 
   Map<String, Object?> get _data => widget.data ?? const {};
@@ -143,6 +155,20 @@ class _PageCardState extends State<PageCard> {
       ),
     );
     if (shares != null && mounted) setState(() => _shares = shares);
+  }
+
+  String? get _publicUrl {
+    final url = _public ?? _data['public_url'] as String?;
+    return url == null || url.isEmpty ? null : url;
+  }
+
+  Future<void> _makePublic() async {
+    final url = await showDialog<String>(
+      context: context,
+      builder: (context) =>
+          PublicDialog(id: _id, url: _publicUrl, actions: widget.actions),
+    );
+    if (url != null && mounted) setState(() => _public = url);
   }
 
   List<String> get _currentShares =>
@@ -208,6 +234,8 @@ class _PageCardState extends State<PageCard> {
                         await _open(network: 'none');
                       case 'share':
                         await _share();
+                      case 'public':
+                        await _makePublic();
                       case 'remember':
                         await widget.actions.remember(_id, remember: true);
                         if (mounted) setState(() => _remembered = true);
@@ -232,6 +260,10 @@ class _PageCardState extends State<PageCard> {
                       const PopupMenuItem(
                         value: 'share',
                         child: Text('Share…'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'public',
+                        child: Text('Public link…'),
                       ),
                       const PopupMenuItem(
                         value: 'delete',
@@ -266,6 +298,11 @@ class _PageCardState extends State<PageCard> {
             else if (shares.isNotEmpty)
               Text(
                 'Shared with ${shares.map(revealInvisible).join(', ')}',
+                style: theme.textTheme.bodySmall,
+              ),
+            if (sharedBy == null && _publicUrl != null)
+              Text(
+                'Public: anyone with its public link sees it',
                 style: theme.textTheme.bodySmall,
               ),
             if (_failed != null)
@@ -357,6 +394,29 @@ class _ShareDialogState extends State<ShareDialog> {
               'are read into) or operation:ID (one where you can read Missions). Leave it '
               'empty to share with nobody.',
             ),
+            Row(
+              spacing: 8,
+              children: [
+                Expanded(
+                  child: Text(
+                    'Send them the app\'s link, which opens it after they sign in: '
+                    '${widget.actions.appLink(widget.id)}',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Copy the link',
+                  icon: const Icon(Icons.copy),
+                  onPressed: () => unawaited(
+                    Clipboard.setData(
+                      ClipboardData(
+                        text: widget.actions.appLink(widget.id).toString(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
             TextField(
               key: const ValueKey('share-subjects'),
               controller: _text,
@@ -398,16 +458,22 @@ class _ShareDialogState extends State<ShareDialog> {
   }
 }
 
-/// Her pages: the person's own, then those shared with them, each as a [PageCard].
+/// Her pages: the person's own, then those shared with them, each as a [PageCard]. Opened from
+/// a page's app link, [focus] is that page, shown first; a page the person may not open reads
+/// as one that does not exist.
 class HerPagesPage extends StatefulWidget {
   const HerPagesPage({
     required this.actions,
     this.launcher = launchPage,
+    this.focus,
     super.key,
   });
 
   final PageActions actions;
   final PageLauncher launcher;
+
+  /// The id of the page a link named.
+  final String? focus;
 
   @override
   State<HerPagesPage> createState() => _HerPagesPageState();
@@ -440,7 +506,16 @@ class _HerPagesPageState extends State<HerPagesPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final pages = _pages ?? const <Map<String, Object?>>[];
+    final focus = widget.focus;
+    final all = _pages ?? const <Map<String, Object?>>[];
+    final focused = [
+      for (final page in all)
+        if (focus != null && page['id'] == focus) page,
+    ];
+    final pages = [
+      for (final page in all)
+        if (!focused.contains(page)) page,
+    ];
     final own = [
       for (final page in pages)
         if (page['shared_by'] == null) page,
@@ -478,6 +553,21 @@ class _HerPagesPageState extends State<HerPagesPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                if (focus != null) ...[
+                  Text(
+                    'The page you were sent',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  if (focused.isEmpty)
+                    Text(
+                      'There is no page ${revealInvisible(focus)} you can open: it is gone, '
+                      'or it is not yours and nobody shared it with you.',
+                    )
+                  else
+                    for (final page in focused) card(page),
+                  const SizedBox(height: 16),
+                ],
                 Text('Your pages', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 8),
                 if (own.isEmpty)
@@ -493,6 +583,110 @@ class _HerPagesPageState extends State<HerPagesPage> {
                   for (final page in shared) card(page),
               ],
             ),
+    );
+  }
+}
+
+/// A page's public link: before one exists it says what one gives away and makes it; while one
+/// exists it shows the link, copies it and takes it away. Pops the link, `''` once taken away,
+/// or nothing when nothing changed.
+class PublicDialog extends StatefulWidget {
+  const PublicDialog({
+    required this.id,
+    required this.url,
+    required this.actions,
+    super.key,
+  });
+
+  final String id;
+
+  /// The public link there is, if any.
+  final String? url;
+  final PageActions actions;
+
+  @override
+  State<PublicDialog> createState() => _PublicDialogState();
+}
+
+class _PublicDialogState extends State<PublicDialog> {
+  String? _refused;
+  bool _saving = false;
+
+  Future<void> _set({required bool on}) async {
+    setState(() {
+      _saving = true;
+      _refused = null;
+    });
+    try {
+      final url = await widget.actions.setPublic(widget.id, on: on);
+      if (mounted) Navigator.of(context).pop(url ?? '');
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _refused = '$error';
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final url = widget.url;
+    return AlertDialog(
+      title: Text(url == null ? 'Make this page public?' : 'Public link'),
+      content: SizedBox(
+        width: 480,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 8,
+          children: [
+            const Text(
+              'Anyone holding a public link sees this page, without signing in, until you '
+              'turn it off or the page goes. It shows no live data: feeds answer only to '
+              'people signed in.',
+            ),
+            if (url != null)
+              Row(
+                spacing: 8,
+                children: [
+                  Expanded(child: SelectableText(url)),
+                  IconButton(
+                    tooltip: 'Copy the public link',
+                    icon: const Icon(Icons.copy),
+                    onPressed: () =>
+                        unawaited(Clipboard.setData(ClipboardData(text: url))),
+                  ),
+                ],
+              ),
+            if (_refused case final refused?)
+              Text(
+                refused,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: Text(url == null ? 'Cancel' : 'Close'),
+        ),
+        if (url == null)
+          FilledButton(
+            onPressed: _saving ? null : () => unawaited(_set(on: true)),
+            child: const Text('Make public'),
+          )
+        else
+          FilledButton(
+            onPressed: _saving ? null : () => unawaited(_set(on: false)),
+            child: const Text('Turn off'),
+          ),
+      ],
     );
   }
 }

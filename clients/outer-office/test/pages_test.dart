@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/pages.dart';
+import 'package:outer_office/routes/oo_route.dart';
+import 'package:outer_office/routes/oo_router.dart';
+import 'package:outer_office/shell/oo_shell.dart' show OoPage;
 import 'package:outer_office/shell/oo_freshness.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:url_launcher_platform_interface/link.dart';
@@ -37,6 +40,18 @@ class FakeActions implements PageActions {
 
   @override
   Future<List<Map<String, Object?>>> list() async => pages;
+
+  final publics = <(String, bool)>[];
+
+  @override
+  Future<String?> setPublic(String id, {required bool on}) async {
+    publics.add((id, on));
+    return on ? 'https://pages.example/s/public-$id/' : null;
+  }
+
+  @override
+  Uri appLink(String id) =>
+      Uri.parse('https://ai6.example/#/pages?page_id=$id');
 
   @override
   Future<List<String>> share(String id, List<String> subjects) async {
@@ -96,6 +111,7 @@ Future<(FakeLauncher, FakeActions)> show(
 
 void main() {
   sharingTests();
+  privacyTests();
   testWidgets('a page card shows its kind, title, size, expiry and feeds', (
     tester,
   ) async {
@@ -284,5 +300,160 @@ void sharingTests() {
     await tester.tap(find.text('Open').last);
     await tester.pumpAndSettle();
     expect(launcher.launches.single.$1, contains('token-'));
+  });
+}
+
+void privacyTests() {
+  testWidgets(
+    'a public link is made only after the dialog says what it gives',
+    (tester) async {
+      final (_, actions) = await show(tester, fixture());
+      expect(find.textContaining('Public:'), findsNothing);
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Public link…'));
+      await tester.pumpAndSettle();
+      expect(find.text('Make this page public?'), findsOneWidget);
+      expect(find.textContaining('without signing in'), findsOneWidget);
+      expect(find.textContaining('It shows no live data'), findsOneWidget);
+      expect(
+        actions.publics,
+        isEmpty,
+        reason: 'nothing before the person says',
+      );
+      await tester.tap(find.text('Make public'));
+      await tester.pumpAndSettle();
+      expect(actions.publics.single, ('page-1', true));
+      expect(
+        find.text('Public: anyone with its public link sees it'),
+        findsOneWidget,
+      );
+      // Opened again, it shows the link and takes it away.
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Public link…'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('https://pages.example/s/public-page-1/'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Turn off'));
+      await tester.pumpAndSettle();
+      expect(actions.publics.last, ('page-1', false));
+      expect(find.textContaining('Public:'), findsNothing);
+    },
+  );
+
+  testWidgets('the share dialog gives the app link to send', (tester) async {
+    await show(tester, fixture());
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Share…'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('https://ai6.example/#/pages?page_id=page-1'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Copy the link'), findsOneWidget);
+  });
+
+  testWidgets(
+    'a link to one page shows it first, and a hidden one as missing',
+    (tester) async {
+      final launcher = FakeLauncher();
+      UrlLauncherPlatform.instance = launcher;
+      final actions = FakeActions()
+        ..pages = [
+          {...fixture(), 'id': 'page-0', 'title': 'Older'},
+          {...fixture(), 'title': 'Sent to me', 'shared_by': 'q-007'},
+        ];
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HerPagesPage(actions: actions, focus: 'page-1'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final sent = tester.getTopLeft(find.text('The page you were sent')).dy;
+      final card = tester.getTopLeft(find.text('Sent to me')).dy;
+      final yours = tester.getTopLeft(find.text('Your pages')).dy;
+      expect(sent < card && card < yours, isTrue);
+      expect(find.text('Nobody has shared a page with you.'), findsOneWidget);
+      await tester.tap(find.text('Open').first);
+      await tester.pumpAndSettle();
+      expect(launcher.launches, hasLength(1));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HerPagesPage(actions: actions, focus: 'page-x'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'There is no page page-x you can open: it is gone, or it is not yours and '
+          'nobody shared it with you.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  test('a page link is a route of its own, and the app writes it back', () {
+    final route = OoRoute.fromLocation(Uri.parse('/pages?page_id=page-1'));
+    expect(route.page, OoPage.pages);
+    expect(route['page_id'], 'page-1');
+    expect(route.location, '/pages?page_id=page-1');
+  });
+
+  testWidgets('the router opens Her pages at the page a link names', (
+    tester,
+  ) async {
+    final delegate = OoRouterDelegate(
+      shell: (context, router) => const Text('the shell'),
+      pages: (context, pageId) => Text('her pages at $pageId'),
+    );
+    addTearDown(delegate.dispose);
+    await tester.pumpWidget(
+      MaterialApp.router(
+        routerDelegate: delegate,
+        routeInformationParser: OoRouteParser(onUnknown: (_) {}),
+        routeInformationProvider: PlatformRouteInformationProvider(
+          initialRouteInformation: RouteInformation(
+            uri: Uri.parse('/pages?page_id=page-1'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('her pages at page-1'), findsOneWidget);
+    expect(delegate.page.page, OoPage.overview, reason: 'the page behind it');
+    // Before sign-in the builder gives nothing, and the page behind it shows.
+    final signedOut = OoRouterDelegate(
+      shell: (context, router) => const Text('sign in'),
+      pages: (context, pageId) => null,
+    );
+    addTearDown(signedOut.dispose);
+    await tester.pumpWidget(
+      MaterialApp.router(
+        routerDelegate: signedOut,
+        routeInformationParser: OoRouteParser(onUnknown: (_) {}),
+        routeInformationProvider: PlatformRouteInformationProvider(
+          initialRouteInformation: RouteInformation(
+            uri: Uri.parse('/pages?page_id=page-1'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('sign in'), findsOneWidget);
+    expect(
+      signedOut.route.page,
+      OoPage.pages,
+      reason: 'kept for after sign-in',
+    );
   });
 }

@@ -83,7 +83,11 @@ enum OoPage {
   ),
 
   /// Her memory of the person; opened from her chat, not the rail.
-  memory('memory', "Moneypenny's memory", OoIconName.moneypenny, '');
+  memory('memory', "Moneypenny's memory", OoIconName.moneypenny, ''),
+
+  /// The pages she published for the person and those shared with them; opened from her chat
+  /// or a page's link, not the rail.
+  pages('pages', 'Her pages', OoIconName.moneypenny, '');
 
   const OoPage(this.id, this.label, this.iconName, this.purpose);
 

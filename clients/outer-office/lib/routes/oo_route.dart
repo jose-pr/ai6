@@ -132,6 +132,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('scope', _Kind.oneOf, ['global']),
     _Field('operation_id', _Kind.identifier),
   ],
+  OoPage.pages: [_Field('page_id', _Kind.identifier)],
   OoPage.compartments: [_Field('compartment_id', _Kind.identifier)],
 };
 

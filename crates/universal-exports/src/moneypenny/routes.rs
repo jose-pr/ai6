@@ -94,10 +94,11 @@ pub(crate) enum Page {
     Access,
     Memory,
     Compartments,
+    Pages,
 }
 
 impl Page {
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 16] = [
         Self::Overview,
         Self::Operations,
         Self::Missions,
@@ -113,6 +114,7 @@ impl Page {
         Self::Access,
         Self::Compartments,
         Self::Memory,
+        Self::Pages,
     ];
 
     /// The page's name in both forms.
@@ -133,6 +135,7 @@ impl Page {
             Self::Access => "access",
             Self::Compartments => "compartments",
             Self::Memory => "memory",
+            Self::Pages => "pages",
         }
     }
 
@@ -201,6 +204,7 @@ impl Page {
             Self::Audit => &[("operation_id", Identifier), ("station_id", Identifier)],
             Self::Access => &[("tab", OneOf(ACCESS_TABS)), ("operation_id", Identifier)],
             Self::Compartments => &[("compartment_id", Identifier)],
+            Self::Pages => &[("page_id", Identifier)],
         }
     }
 

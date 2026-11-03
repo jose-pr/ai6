@@ -34,7 +34,12 @@ void main() {
     test('every page but her memory is in one group', () {
       final grouped = [for (final group in OoRailGroup.values) ...group.pages];
       expect(grouped.toSet(), hasLength(grouped.length));
-      expect(grouped.toSet(), OoPage.values.toSet()..remove(OoPage.memory));
+      expect(
+        grouped.toSet(),
+        OoPage.values.toSet()
+          ..remove(OoPage.memory)
+          ..remove(OoPage.pages),
+      );
     });
 
     test('a group with nothing the person may see is left out', () {

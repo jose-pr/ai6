@@ -28,7 +28,7 @@ enum BoardRead {
     BoardRead.greenInk,
   };
   final (live, extra) = switch (page) {
-    OoPage.overview || OoPage.memory => (
+    OoPage.overview || OoPage.memory || OoPage.pages => (
       const {BoardRead.board, BoardRead.stations},
       const {BoardRead.missions},
     ),

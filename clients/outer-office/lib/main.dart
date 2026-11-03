@@ -1223,6 +1223,38 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     ];
   }
 
+  /// Gives one of the person's pages a public link, or takes it away
+  /// (`PUT /v1/user/pages/{id}/public`); a refusal carries the gateway's reason.
+  @override
+  Future<String?> setPublic(String id, {required bool on}) async {
+    if (demo) throw StateError('Pages are unavailable in preview.');
+    final response = await _userRequest(
+      'PUT',
+      '/v1/user/pages/${Uri.encodeComponent(id)}/public',
+      body: {'on': on},
+    );
+    final body = response.body.isEmpty ? null : jsonDecode(response.body);
+    if (response.statusCode != 200) {
+      final reason = body is Map ? body['error'] : null;
+      throw GatewayRefused(
+        response.statusCode,
+        reason is String ? reason : 'The gateway refused the public link.',
+      );
+    }
+    return (body as Map)['public_url'] as String?;
+  }
+
+  /// The app's link to one of the pages (`#/pages?page_id=ID` on the app's own origin, where
+  /// the reverse proxy serves both the app and the API).
+  @override
+  Uri appLink(String id) => Uri(
+    scheme: apiOrigin.scheme,
+    host: apiOrigin.host,
+    port: apiOrigin.hasPort ? apiOrigin.port : null,
+    path: '/',
+    fragment: const OoRoute(OoPage.pages).withField('page_id', id).location,
+  );
+
   /// Deletes one of the person's pages.
   @override
   Future<void> delete(String id) async {
@@ -4093,6 +4125,10 @@ class _OuterOfficeAppState extends State<OuterOfficeApp>
         _ => MemoryShelf.person,
       },
     ),
+    pages: (context, pageId) =>
+        widget.board.accessToken == null || widget.board.demo
+        ? null
+        : HerPagesPage(actions: widget.board, focus: pageId),
   );
   final _location = PlatformRouteInformationProvider(
     initialRouteInformation: RouteInformation(
@@ -4397,7 +4433,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
 
   /// The board sources the page shows, whose staleness it says.
   static List<BoardSource> _sourcesOf(OoPage page) => switch (page) {
-    OoPage.overview || OoPage.memory => attentionSources,
+    OoPage.overview || OoPage.memory || OoPage.pages => attentionSources,
     OoPage.missions => const [BoardSource.board, BoardSource.missions],
     OoPage.operations || OoPage.sessions => const [BoardSource.board],
     OoPage.stations => const [BoardSource.stations],
@@ -4415,7 +4451,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           final board = widget.board;
           final onRoute = widget.onRoute;
           return switch (route.page) {
-            OoPage.overview || OoPage.memory => OverviewPage(
+            OoPage.overview || OoPage.memory || OoPage.pages => OverviewPage(
               board: board,
               pages: pages,
               onOpen: _open,
