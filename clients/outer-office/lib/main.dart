@@ -1182,6 +1182,47 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     }
   }
 
+  /// The person's own pages, then those shared with them (`GET /v1/user/pages`).
+  @override
+  Future<List<Map<String, Object?>>> list() async {
+    if (demo) throw StateError('Pages are unavailable in preview.');
+    final response = await _userRequest('GET', '/v1/user/pages');
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the list of pages.',
+      );
+    }
+    return [
+      for (final page in jsonDecode(response.body) as List<dynamic>)
+        (page as Map<String, dynamic>).cast<String, Object?>(),
+    ];
+  }
+
+  /// Shares one of the person's pages with [subjects] (`PUT /v1/user/pages/{id}/shares`); a
+  /// refusal carries the gateway's reason.
+  @override
+  Future<List<String>> share(String id, List<String> subjects) async {
+    if (demo) throw StateError('Pages are unavailable in preview.');
+    final response = await _userRequest(
+      'PUT',
+      '/v1/user/pages/${Uri.encodeComponent(id)}/shares',
+      body: {'subjects': subjects},
+    );
+    final body = response.body.isEmpty ? null : jsonDecode(response.body);
+    if (response.statusCode != 200) {
+      final reason = body is Map ? body['error'] : null;
+      throw GatewayRefused(
+        response.statusCode,
+        reason is String ? reason : 'The gateway refused to share the page.',
+      );
+    }
+    return [
+      for (final share in ((body as Map)['shares'] as List?) ?? const [])
+        '$share',
+    ];
+  }
+
   /// Deletes one of the person's pages.
   @override
   Future<void> delete(String id) async {

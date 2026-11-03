@@ -27,6 +27,23 @@ class FakeActions implements PageActions {
   final opened = <(String, String?)>[];
   final remembered = <(String, bool)>[];
   final deleted = <String>[];
+  final shared = <(String, List<String>)>[];
+
+  /// What [list] answers.
+  List<Map<String, Object?>> pages = const [];
+
+  /// A reason [share] refuses with, when set.
+  String? refuse;
+
+  @override
+  Future<List<Map<String, Object?>>> list() async => pages;
+
+  @override
+  Future<List<String>> share(String id, List<String> subjects) async {
+    shared.add((id, subjects));
+    if (refuse case final reason?) throw Refused(reason);
+    return subjects;
+  }
 
   @override
   Future<PageLink> open(String id, {String? network}) async {
@@ -78,6 +95,7 @@ Future<(FakeLauncher, FakeActions)> show(
 }
 
 void main() {
+  sharingTests();
   testWidgets('a page card shows its kind, title, size, expiry and feeds', (
     tester,
   ) async {
@@ -153,4 +171,118 @@ void main() {
       expect(find.text('Page deleted.'), findsOneWidget);
     },
   );
+}
+
+/// A refusal that reads as the gateway's own words.
+class Refused implements Exception {
+  const Refused(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+void sharingTests() {
+  testWidgets(
+    'Share sends one subject a line and the card says whom it reaches',
+    (tester) async {
+      final (_, actions) = await show(tester, fixture());
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Share…'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          "Each viewer's live data is read with their own permissions.",
+        ),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('share-subjects')),
+        'group:ops\n\n  operation:G  \n',
+      );
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(actions.shared, hasLength(1));
+      expect(actions.shared.single.$1, 'page-1');
+      expect(actions.shared.single.$2, ['group:ops', 'operation:G']);
+      expect(find.text('Shared with group:ops, operation:G'), findsOneWidget);
+    },
+  );
+
+  testWidgets('a refused share keeps the dialog open with the reason', (
+    tester,
+  ) async {
+    final (_, actions) = await show(tester, {...fixture(), 'kind': 'report'});
+    actions.refuse = 'you do not hold mission.read in Operation H';
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Share…'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('A report shows what you could read'),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('share-subjects')),
+      'operation:H',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('you do not hold mission.read in Operation H'),
+      findsOneWidget,
+    );
+    expect(find.text('Share this page'), findsOneWidget);
+    expect(find.textContaining('Shared with operation'), findsNothing);
+  });
+
+  testWidgets('a page shared with you says whose it is and only opens', (
+    tester,
+  ) async {
+    await show(tester, {...fixture(), 'shared_by': 'q-007'});
+    expect(find.text('Shared by q-007'), findsOneWidget);
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    expect(find.text('Open with network off'), findsOneWidget);
+    for (final absent in ['Remember', 'Forget', 'Share…', 'Delete']) {
+      expect(find.text(absent), findsNothing, reason: absent);
+    }
+  });
+
+  testWidgets('Her pages lists yours, then those shared with you', (
+    tester,
+  ) async {
+    final launcher = FakeLauncher();
+    UrlLauncherPlatform.instance = launcher;
+    final actions = FakeActions()
+      ..pages = [
+        {...fixture(), 'shares': <String>[]},
+        {
+          ...fixture(),
+          'id': 'page-2',
+          'title': 'Their log',
+          'shared_by': 'q-007',
+        },
+      ];
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(home: HerPagesPage(actions: actions)));
+    await tester.pumpAndSettle();
+    final yours = tester.getTopLeft(find.text('Your pages')).dy;
+    final mine = tester.getTopLeft(find.text('Station load')).dy;
+    final sharedHeading = tester.getTopLeft(find.text('Shared with you')).dy;
+    final theirs = tester.getTopLeft(find.text('Their log')).dy;
+    expect(
+      yours < mine && mine < sharedHeading && sharedHeading < theirs,
+      isTrue,
+    );
+    expect(find.text('Shared by q-007'), findsOneWidget);
+    await tester.tap(find.text('Open').last);
+    await tester.pumpAndSettle();
+    expect(launcher.launches.single.$1, contains('token-'));
+  });
 }

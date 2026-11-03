@@ -20,6 +20,11 @@ class PageLink {
 
 /// What the app asks of Universal Exports about the pages Moneypenny published.
 abstract interface class PageActions {
+  /// The person's own pages, newest first, then the pages shared with them (each naming whose
+  /// it is in `shared_by`): `{id, kind, title, bytes, expires_at, feeds}` and, for their own,
+  /// `shares`.
+  Future<List<Map<String, Object?>>> list();
+
   /// A link to page [id]; with [network] `none`, one whose page may reach nothing outside its
   /// own files.
   Future<PageLink> open(String id, {String? network});
@@ -28,6 +33,10 @@ abstract interface class PageActions {
   Future<void> remember(String id, {required bool remember});
 
   Future<void> delete(String id);
+
+  /// Shares page [id] with [subjects] in place of whom it was shared with, and answers whom it
+  /// is now shared with. A refusal throws with the gateway's reason.
+  Future<List<String>> share(String id, List<String> subjects);
 }
 
 /// How a link is launched: a new browser tab on the web, the system browser on a desktop,
@@ -41,9 +50,10 @@ Future<bool> launchPage(Uri url) => launchUrl(
   webOnlyWindowName: '_blank',
 );
 
-/// A page she published: its kind, title, size and expiry (or "Remembered"), and the feeds it
-/// reads. **Open** launches it outside the app; the menu opens it with the network off,
-/// remembers or forgets it, and deletes it.
+/// A page she published: its kind, title, size and expiry (or "Remembered"), the feeds it
+/// reads and whom it is shared with. **Open** launches it outside the app; the menu opens it
+/// with the network off, remembers or forgets it, shares it and deletes it. A page someone
+/// shared with the person says whose it is, and its menu only opens it.
 ///
 /// The link is minted when the card is shown and again before it ends, so a click launches at
 /// once, within the click's activation, where a browser lets a window open.
@@ -55,7 +65,8 @@ class PageCard extends StatefulWidget {
     super.key,
   });
 
-  /// The entry's `data`: `{id, kind, title, bytes, expires_at, feeds}`.
+  /// The entry's `data`: `{id, kind, title, bytes, expires_at, feeds}`, with `shares` on the
+  /// person's own page and `shared_by` on one shared with them.
   final Map<String, Object?>? data;
   final PageActions actions;
   final PageLauncher launcher;
@@ -69,6 +80,7 @@ class _PageCardState extends State<PageCard> {
   Object? _failed;
   Timer? _renew;
   bool? _remembered;
+  List<String>? _shares;
   bool _deleted = false;
 
   Map<String, Object?> get _data => widget.data ?? const {};
@@ -120,6 +132,23 @@ class _PageCardState extends State<PageCard> {
     await widget.launcher(link.url);
   }
 
+  Future<void> _share() async {
+    final shares = await showDialog<List<String>>(
+      context: context,
+      builder: (context) => ShareDialog(
+        id: _id,
+        kind: _data['kind'] as String? ?? 'file',
+        shares: _currentShares,
+        actions: widget.actions,
+      ),
+    );
+    if (shares != null && mounted) setState(() => _shares = shares);
+  }
+
+  List<String> get _currentShares =>
+      _shares ??
+      [for (final share in (_data['shares'] as List?) ?? const []) '$share'];
+
   String _size() {
     final bytes = (_data['bytes'] as num?)?.toInt() ?? 0;
     if (bytes < 1024) return '$bytes bytes';
@@ -146,6 +175,8 @@ class _PageCardState extends State<PageCard> {
     final feeds = [
       for (final feed in (_data['feeds'] as List?) ?? const []) '$feed',
     ];
+    final sharedBy = _data['shared_by'] as String?;
+    final shares = _currentShares;
     return Card(
       key: ValueKey('page-${_data['id']}'),
       margin: EdgeInsets.zero,
@@ -175,6 +206,8 @@ class _PageCardState extends State<PageCard> {
                     switch (choice) {
                       case 'none':
                         await _open(network: 'none');
+                      case 'share':
+                        await _share();
                       case 'remember':
                         await widget.actions.remember(_id, remember: true);
                         if (mounted) setState(() => _remembered = true);
@@ -191,11 +224,20 @@ class _PageCardState extends State<PageCard> {
                       value: 'none',
                       child: Text('Open with network off'),
                     ),
-                    PopupMenuItem(
-                      value: remembered ? 'forget' : 'remember',
-                      child: Text(remembered ? 'Forget' : 'Remember'),
-                    ),
-                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                    if (sharedBy == null) ...[
+                      PopupMenuItem(
+                        value: remembered ? 'forget' : 'remember',
+                        child: Text(remembered ? 'Forget' : 'Remember'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'share',
+                        child: Text('Share…'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Delete'),
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -216,6 +258,16 @@ class _PageCardState extends State<PageCard> {
                 'Reads live: ${feeds.join(', ')}',
                 style: theme.textTheme.bodySmall,
               ),
+            if (sharedBy != null)
+              Text(
+                'Shared by ${revealInvisible(sharedBy)}',
+                style: theme.textTheme.bodySmall,
+              )
+            else if (shares.isNotEmpty)
+              Text(
+                'Shared with ${shares.map(revealInvisible).join(', ')}',
+                style: theme.textTheme.bodySmall,
+              ),
             if (_failed != null)
               Text(
                 'The link could not be made; open it again later.',
@@ -228,6 +280,219 @@ class _PageCardState extends State<PageCard> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Whom a page is shared with, one subject a line: `person:`, `group:` or `account:` and an
+/// ID, `compartment:` and one the person is read into, or `operation:` and one where they may
+/// read Missions. Save sends the whole list; an empty one shares the page with nobody.
+class ShareDialog extends StatefulWidget {
+  const ShareDialog({
+    required this.id,
+    required this.kind,
+    required this.shares,
+    required this.actions,
+    super.key,
+  });
+
+  final String id;
+
+  /// The page's kind: a report says it shows what its author could read.
+  final String kind;
+  final List<String> shares;
+  final PageActions actions;
+
+  @override
+  State<ShareDialog> createState() => _ShareDialogState();
+}
+
+class _ShareDialogState extends State<ShareDialog> {
+  late final _text = TextEditingController(text: widget.shares.join('\n'));
+  String? _refused;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final subjects = [
+      for (final line in _text.text.split('\n'))
+        if (line.trim().isNotEmpty) line.trim(),
+    ];
+    setState(() {
+      _saving = true;
+      _refused = null;
+    });
+    try {
+      final shares = await widget.actions.share(widget.id, subjects);
+      if (mounted) Navigator.of(context).pop(shares);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _refused = '$error';
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('Share this page'),
+      content: SizedBox(
+        width: 480,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 8,
+          children: [
+            const Text(
+              'One a line: person:ID, group:NAME, account:NAME, compartment:ID (one you '
+              'are read into) or operation:ID (one where you can read Missions). Leave it '
+              'empty to share with nobody.',
+            ),
+            TextField(
+              key: const ValueKey('share-subjects'),
+              controller: _text,
+              minLines: 3,
+              maxLines: 8,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'Shared with',
+              ),
+            ),
+            Text(
+              widget.kind == 'report'
+                  ? 'A report shows what you could read when it was made, to everyone '
+                        'you share it with.'
+                  : "Each viewer's live data is read with their own permissions.",
+              style: theme.textTheme.bodySmall,
+            ),
+            if (_refused case final refused?)
+              Text(
+                refused,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : () => unawaited(_save()),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Her pages: the person's own, then those shared with them, each as a [PageCard].
+class HerPagesPage extends StatefulWidget {
+  const HerPagesPage({
+    required this.actions,
+    this.launcher = launchPage,
+    super.key,
+  });
+
+  final PageActions actions;
+  final PageLauncher launcher;
+
+  @override
+  State<HerPagesPage> createState() => _HerPagesPageState();
+}
+
+class _HerPagesPageState extends State<HerPagesPage> {
+  List<Map<String, Object?>>? _pages;
+  Object? _failed;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    try {
+      final pages = await widget.actions.list();
+      if (mounted) {
+        setState(() {
+          _pages = pages;
+          _failed = null;
+        });
+      }
+    } on Object catch (error) {
+      if (mounted) setState(() => _failed = error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pages = _pages ?? const <Map<String, Object?>>[];
+    final own = [
+      for (final page in pages)
+        if (page['shared_by'] == null) page,
+    ];
+    final shared = [
+      for (final page in pages)
+        if (page['shared_by'] != null) page,
+    ];
+    Widget card(Map<String, Object?> page) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: PageCard(
+        key: ValueKey('her-page-${page['id']}'),
+        data: page,
+        actions: widget.actions,
+        launcher: widget.launcher,
+      ),
+    );
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Her pages'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () => unawaited(_load()),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: _pages == null
+          ? Center(
+              child: _failed == null
+                  ? const CircularProgressIndicator()
+                  : const Text('Her pages could not be read; try again.'),
+            )
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Text('Your pages', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+                if (own.isEmpty)
+                  const Text('She has published no page for you.')
+                else
+                  for (final page in own) card(page),
+                const SizedBox(height: 16),
+                Text('Shared with you', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+                if (shared.isEmpty)
+                  const Text('Nobody has shared a page with you.')
+                else
+                  for (final page in shared) card(page),
+              ],
+            ),
     );
   }
 }

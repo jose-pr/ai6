@@ -150,10 +150,12 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   [assistant guide](https://jose-pr.github.io/ai6/assistant/) and
   [memories](https://jose-pr.github.io/ai6/memories/).
 - Pages she publishes (a dashboard of live data, a report or a file) appear in her chat as a
-  card: kind, size, expiry or **Remembered**, what she read when it was made after outside
-  text, and the feeds it reads. **Open** launches it in a new browser tab (the system browser
-  on a desktop), never inside the app; the menu opens it with the network off, remembers or
-  forgets it and deletes it. Only you can open your pages.
+  card: kind, size, expiry or **Remembered**, the feeds it reads and whom it is shared with.
+  **Open** launches it in a new browser tab (the system browser on a desktop), never inside
+  the app; the menu opens it with the network off, remembers or forgets it, shares it (one
+  `person:`, `group:`, `account:`, `compartment:` or `operation:` subject a line) and deletes
+  it. Her menu's **Her pages** lists your pages, then those shared with you, which say whose
+  they are and only open. Only you, and whoever you share a page with, can open it.
 - Audit log for operators with `audit.read`, each action in words with its name on hover;
   operator menu with identity, effective
   permissions per Operation, appearance and sign-out.

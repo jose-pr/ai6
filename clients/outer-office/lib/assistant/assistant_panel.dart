@@ -18,7 +18,8 @@ import 'navigation_card.dart';
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
 /// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries
 /// [route], the app page the person is on, so "this Mission" means something to her. Its menu
-/// opens her memory of the person ([onMemory]). Enter sends; Shift+Enter starts a new line.
+/// opens her memory of the person ([onMemory]) and, with [pageActions], her pages. Enter sends;
+/// Shift+Enter starts a new line.
 class AssistantPanel extends StatefulWidget {
   const AssistantPanel({
     required this.controller,
@@ -243,19 +244,36 @@ class _AssistantPanelState extends State<AssistantPanel> {
                         : null,
                     icon: const Icon(Icons.add_comment_outlined),
                   ),
-                  if (widget.onMemory != null || widget.onFollowAtOnce != null)
+                  if (widget.onMemory != null ||
+                      widget.onFollowAtOnce != null ||
+                      widget.pageActions != null)
                     PopupMenuButton<void>(
                       tooltip: 'Moneypenny menu',
                       style: const ButtonStyle(
                         visualDensity: VisualDensity.compact,
                       ),
-                      itemBuilder: (context) => [
+                      itemBuilder: (menuContext) => [
                         if (widget.onMemory case final onMemory?)
                           PopupMenuItem(
                             onTap: onMemory,
                             child: const ListTile(
                               leading: Icon(Icons.psychology_outlined),
                               title: Text('Her memory of you'),
+                            ),
+                          ),
+                        if (widget.pageActions case final actions?)
+                          PopupMenuItem(
+                            onTap: () => unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      HerPagesPage(actions: actions),
+                                ),
+                              ),
+                            ),
+                            child: const ListTile(
+                              leading: Icon(Icons.web_outlined),
+                              title: Text('Her pages'),
                             ),
                           ),
                         if (widget.onFollowAtOnce case final onFollow?)
