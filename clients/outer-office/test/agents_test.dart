@@ -58,6 +58,23 @@ const _agents = [
     'agent': '008',
     'posted': true,
     'operation': {'done': 0},
+    'holds': [
+      {
+        'operation': 'G',
+        'agent': '008',
+        'reason': 'failing',
+        'by': 'm',
+        'at': 1.0,
+      },
+      {
+        'operation': 'G',
+        'agent': '008',
+        'route': {'handler': 'claude', 'model': 'opus', 'pool': 'team'},
+        'reason': 'slow',
+        'by': 'alice',
+        'at': 1.0,
+      },
+    ],
     'model_history': [],
     'clearance': 'desk',
     'configured_clearance': 'desk',
@@ -303,6 +320,38 @@ void main() {
       expect(find.text('m-3'), findsOneWidget);
     },
   );
+
+  testWidgets('a hold is shown to a reader and lifted by a configurer', (
+    tester,
+  ) async {
+    final read = <http.Request>[];
+    await openAgents(tester, signedIn(read, ['agent.read']));
+    expect(find.text('Held by m: failing'), findsOneWidget);
+    expect(
+      find.text('Route claude · opus · pool team held by alice: slow'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Lift hold'),
+      findsNothing,
+      reason: 'agent.configure is needed',
+    );
+
+    final requests = <http.Request>[];
+    await openAgents(
+      tester,
+      signedIn(requests, ['agent.read', 'agent.configure']),
+    );
+    await tester.tap(find.text('Lift hold').last);
+    await tester.pumpAndSettle();
+    final lifted = requests.lastWhere((request) => request.method == 'DELETE');
+    expect(lifted.url.path, '/v1/user/operations/G/agents/008/hold');
+    expect(lifted.url.queryParameters, {
+      'handler': 'claude',
+      'model': 'opus',
+      'pool': 'team',
+    });
+  });
 
   testWidgets(
     'a configurer lowers a clearance and restores the configured one',

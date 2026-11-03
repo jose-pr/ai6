@@ -146,6 +146,48 @@ class ClearanceGrantSummary {
       : 'Held at $clearance by $signer${reason == null ? '' : ': $reason'}';
 }
 
+/// A hold that keeps an Agent, or one of its routes, out of use until a person lifts it.
+@immutable
+class HoldSummary {
+  const HoldSummary({
+    required this.by,
+    required this.reason,
+    this.handler,
+    this.model,
+    this.pool,
+  });
+
+  /// A person, or `m` when M held it by itself.
+  final String by;
+  final String reason;
+
+  /// The route held; null holds the whole Agent.
+  final String? handler;
+  final String? model;
+  final String? pool;
+
+  factory HoldSummary.fromJson(Map<String, dynamic> json) {
+    final route = json['route'] as Map<String, dynamic>?;
+    return HoldSummary(
+      by: json['by'] as String,
+      reason: json['reason'] as String,
+      handler: route?['handler'] as String?,
+      model: route?['model'] as String?,
+      pool: route?['pool'] as String?,
+    );
+  }
+
+  bool get wholeAgent => handler == null;
+
+  /// `Held by m: reason`, naming the route when it is one.
+  String get label => [
+    wholeAgent
+        ? 'Held by $by'
+        : 'Route ${[handler, model ?? 'default model', if (pool case final pool?) 'pool $pool'].join(' · ')} held by $by',
+    reason,
+  ].join(': ');
+}
+
 const _defaultModel = "The handler's default model";
 
 /// One way an Agent's roster record says it reaches its model.
@@ -207,6 +249,7 @@ class AgentSummary {
     this.retirement,
     this.grant,
     this.promotion,
+    this.holds = const [],
     this.grantUnreadable = false,
   });
 
@@ -238,6 +281,10 @@ class AgentSummary {
 
   /// The clearance a waiting promotion request asks for.
   final String? promotion;
+
+  /// What keeps it, or a route of it, out of use; a route hold is left out for a person
+  /// without `roster.read`.
+  final List<HoldSummary> holds;
 
   /// Its grant could not be read; Stations work it at `desk`.
   final bool grantUnreadable;
@@ -279,6 +326,10 @@ class AgentSummary {
         ),
         _ => null,
       },
+      holds: [
+        for (final hold in json['holds'] as List<dynamic>? ?? const [])
+          HoldSummary.fromJson(hold as Map<String, dynamic>),
+      ],
       grantUnreadable: json['grant_unreadable'] as bool? ?? false,
       // The target names `AGENT:CLEARANCE@OPERATION`.
       promotion: target == null
@@ -484,6 +535,17 @@ class _AgentsPageState extends State<AgentsPage>
     );
   }
 
+  Future<void> _liftHold(AgentSummary agent, HoldSummary hold) async {
+    final operation = _operation;
+    if (operation == null) return;
+    await _change(
+      () => widget.board.liftHold(operation, agent.agent, hold),
+      hold.wholeAgent
+          ? '${agent.agent} takes new work again.'
+          : 'The route of ${agent.agent} takes new work again.',
+    );
+  }
+
   Future<void> _change(Future<void> Function() change, String done) async {
     setState(() => _changing = true);
     try {
@@ -623,6 +685,9 @@ class _AgentsPageState extends State<AgentsPage>
                             canConfigure && !_changing && agent.grant != null
                             ? () => unawaited(_restore(agent))
                             : null,
+                        onLift: canConfigure && !_changing
+                            ? (hold) => unawaited(_liftHold(agent, hold))
+                            : null,
                       ),
                   ],
                 ),
@@ -637,6 +702,7 @@ class _AgentTile extends StatelessWidget {
     required this.agent,
     this.onLower,
     this.onRestore,
+    this.onLift,
     this.onEdit,
     this.onRemove,
   });
@@ -648,6 +714,9 @@ class _AgentTile extends StatelessWidget {
   final VoidCallback? onRemove;
   final VoidCallback? onLower;
   final VoidCallback? onRestore;
+
+  /// Lifts one hold; null without `agent.configure`.
+  final ValueChanged<HoldSummary>? onLift;
 
   @override
   Widget build(BuildContext context) {
@@ -752,6 +821,25 @@ class _AgentTile extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text('Promotion to $promotion awaits green ink'),
+              ),
+            for (final hold in agent.holds)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.pause_circle_outline,
+                      color: theme.colorScheme.error,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(hold.label)),
+                    if (onLift != null)
+                      TextButton(
+                        onPressed: () => onLift!(hold),
+                        child: const Text('Lift hold'),
+                      ),
+                  ],
+                ),
               ),
             if (onLower != null || onRestore != null)
               OverflowBar(

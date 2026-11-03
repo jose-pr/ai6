@@ -1757,6 +1757,25 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     }
   }
 
+  /// Lifts a hold on an Agent, or on the route it names (`agent.configure`).
+  Future<void> liftHold(
+    String operationId,
+    String agent,
+    HoldSummary hold,
+  ) async {
+    if (demo) throw StateError('Holds are unavailable in preview.');
+    final query = hold.wholeAgent
+        ? ''
+        : '?${Uri(queryParameters: {'handler': hold.handler!, 'model': ?hold.model, 'pool': ?hold.pool}).query}';
+    final response = await _userRequest(
+      'DELETE',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/agents/${Uri.encodeComponent(agent)}/hold$query',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused to lift the hold.');
+    }
+  }
+
   /// Removes an Agent's clearance grant in an Operation (`agent.configure`).
   Future<void> revokeClearanceGrant(String operationId, String agent) async {
     if (demo) throw StateError('Clearance changes are unavailable in preview.');
