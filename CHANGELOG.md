@@ -324,6 +324,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A page Moneypenny publishes loads on the API's own origin. Its `frame-ancestors` carried the `/pages`
+  path, which never matches a parent's origin, so a browser refused to show it. The guide now lists
+  `/pages/` among the paths a reverse proxy passes to the gateway.
 - A gateway's 429 through Claude Code (`API Error: Request rejected (429)`, `api_error_status`) is a
   limit, not a failed turn.
 - A program the `pipe` terminal starts outlives the thread that asked for it. The Grok CLI asks to

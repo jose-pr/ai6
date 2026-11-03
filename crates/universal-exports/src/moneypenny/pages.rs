@@ -858,8 +858,17 @@ fn verify(
 // Headers
 // ---------------------------------------------------------------------------------------
 
-/// The CSP of every page response for `network` and `scripts`; `base` is the pages' base, the
-/// only origin that may frame a page. The sandbox never has `allow-same-origin` or
+/// The origin of the pages' base: `frame-ancestors` is compared with a parent's origin, whose path
+/// is `/`, so a source with any other path never matches and the browser blocks the frame.
+fn origin_of(base: &str) -> &str {
+    let after_scheme = base.find("://").map_or(0, |at| at + 3);
+    base[after_scheme..]
+        .find('/')
+        .map_or(base, |at| &base[..after_scheme + at])
+}
+
+/// The CSP of every page response for `network` and `scripts`; `base` is the pages' base, whose
+/// origin alone may frame a page. The sandbox never has `allow-same-origin` or
 /// `allow-top-navigation*`, so a page is an opaque origin and cannot reach its host.
 pub(crate) fn page_csp(base: &str, network: PageNetwork, scripts: bool) -> String {
     let mut csp = String::from(
@@ -868,7 +877,7 @@ pub(crate) fn page_csp(base: &str, network: PageNetwork, scripts: bool) -> Strin
     if scripts {
         csp.push_str(" allow-scripts");
     }
-    let _ = write!(csp, "; frame-ancestors {base}");
+    let _ = write!(csp, "; frame-ancestors {}", origin_of(base));
     match network {
         PageNetwork::Open => {}
         _ => csp.push_str(
@@ -879,8 +888,7 @@ pub(crate) fn page_csp(base: &str, network: PageNetwork, scripts: bool) -> Strin
 }
 
 /// The CSP of the gateway's frame document: no script, only what is under the pages' base
-/// framed (`frame-src` takes a path as a prefix only with a trailing slash; the page's own
-/// `frame-ancestors` ignores paths).
+/// framed (`frame-src` takes a path as a prefix only with a trailing slash).
 pub(crate) fn frame_csp(base: &str) -> String {
     format!(
         "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-src {base}/; \

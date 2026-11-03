@@ -4863,7 +4863,7 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
         .unwrap();
     assert_page_headers(
         &file,
-        "sandbox allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-scripts; frame-ancestors https://localhost/pages",
+        "sandbox allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-scripts; frame-ancestors https://localhost",
     );
     assert_eq!(file.headers()["access-control-allow-origin"], "*");
     assert!(
@@ -5017,6 +5017,23 @@ fn pages_csp_per_profile_is_exact() {
     }
     assert!(frame_csp(base).starts_with("default-src 'none'"));
     assert!(frame_csp(base).ends_with("frame-ancestors 'none'"));
+}
+
+/// Under `/pages` on the API's origin, a path in `frame-ancestors` would block every page.
+#[test]
+fn a_page_on_the_api_origin_may_be_framed_by_that_origin_with_no_path() {
+    use crate::moneypenny::pages::{frame_csp, page_csp};
+    for (base, origin) in [
+        ("https://ai6.example.net/pages", "https://ai6.example.net"),
+        ("http://127.0.0.1:7082/pages", "http://127.0.0.1:7082"),
+    ] {
+        let csp = page_csp(base, ai6::PageNetwork::Open, true);
+        assert!(
+            csp.ends_with(&format!("frame-ancestors {origin}")),
+            "{csp}"
+        );
+        assert!(frame_csp(base).contains(&format!("frame-src {base}/;")));
+    }
 }
 
 #[tokio::test]
