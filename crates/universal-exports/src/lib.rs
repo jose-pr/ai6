@@ -8363,11 +8363,25 @@ mod tests {
                 .unwrap()
                 .contains("private-host")
         );
+        // A substring test would also match the digits of a live timestamp.
+        fn holds_number(value: &serde_json::Value, wanted: u64) -> bool {
+            match value {
+                serde_json::Value::Number(number) => number.as_u64() == Some(wanted),
+                serde_json::Value::Array(items) => {
+                    items.iter().any(|item| holds_number(item, wanted))
+                }
+                serde_json::Value::Object(fields) => {
+                    fields.values().any(|item| holds_number(item, wanted))
+                }
+                _ => false,
+            }
+        }
         assert!(
             !serde_json::to_string(&station_board)
                 .unwrap()
-                .contains("7132")
+                .contains("process_id")
         );
+        assert!(!holds_number(&station_board, 7132));
 
         FileRegistry::open(directory.path())
             .record_usage(
