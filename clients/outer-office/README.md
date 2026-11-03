@@ -304,6 +304,13 @@ box's physical size (`OoArt`; `[oo.art] max_width` in `ai6.cfg` caps it): `map-9
 reference images (pale ivory paper, thin taupe coast-like contours and drafting arcs at the
 left and right edges, a blank centre, no text, labels, routes or markers), mirrored so its
 contours sit on the right, clear of the hero's text panel, and saved at JPEG quality 92.
+The `-2560` and `-3840` files are enlarged from those pictures with Real-ESRGAN (BSD-3-Clause),
+`realesrgan-ncnn-vulkan` from release v0.2.5.0, SHA-256 of the Windows zip
+`abc02804e17982a3be33675e4d471e91ea374e65b70167abc09e31acb412802d`: the map and skyline from the
+banners' lossless crops with the `realesrgan-x4plus-anime` model, the paper from `paper-1536.jpg`
+with `realesrgan-x4plus`. Each is blended 70% with a bicubic enlargement to keep the art's tone,
+then resized and saved at JPEG quality 92. The model invents the added detail, so it is decoration
+and shows no real geography or building.
 The wallpaper in `assets/backdrops/` is one drawing, `wallpaper.svg`, painted at the window's size
 in each theme's colours: its graph and circles were measured from the AI6 brand pack's pictures,
 which it replaces, and its label, `wallpaper-label.svg`, is outlined from Roboto, so no font is

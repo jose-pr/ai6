@@ -102,16 +102,16 @@ void main() {
 
   test('each theme has the art the direction sheet gives it', () {
     String? asset(OoThemeId id) => id.tokens.hero?.files.last.asset;
-    expect(asset(OoThemeId.nightOps), 'assets/heroes/map-940.jpg');
+    expect(asset(OoThemeId.nightOps), 'assets/heroes/map-3840.jpg');
     expect(OoThemeId.nightOps.tokens.heroTint, OoArtTint.none);
-    expect(asset(OoThemeId.dusk), 'assets/heroes/skyline-774.jpg');
+    expect(asset(OoThemeId.dusk), 'assets/heroes/skyline-3840.jpg');
     expect(OoThemeId.dusk.tokens.heroTint, OoArtTint.none);
-    expect(asset(OoThemeId.blackOps), 'assets/heroes/map-940.jpg');
+    expect(asset(OoThemeId.blackOps), 'assets/heroes/map-3840.jpg');
     expect(OoThemeId.blackOps.tokens.heroTint, OoArtTint.quiet);
     // One light master: Light as drawn, Classic tinted from its tokens.
-    expect(asset(OoThemeId.light), 'assets/heroes/paper-1536.jpg');
+    expect(asset(OoThemeId.light), 'assets/heroes/paper-3840.jpg');
     expect(OoThemeId.light.tokens.heroMatrix, isNull);
-    expect(asset(OoThemeId.classic), 'assets/heroes/paper-1536.jpg');
+    expect(asset(OoThemeId.classic), 'assets/heroes/paper-3840.jpg');
     expect(OoThemeId.classic.tokens.heroTint, OoArtTint.paper);
     expect(OoThemeId.redFile.tokens.backdrop, isNull);
     expect(OoThemeId.redFile.tokens.heroTint, OoArtTint.night);
@@ -208,6 +208,15 @@ void main() {
   });
 
   group('the hero picker', () {
+    test('every shipped hero gives a 4K window its 3840 file', () {
+      for (final theme in OoThemeId.values) {
+        final art = theme.tokens.hero;
+        if (art == null) continue;
+        OoArt.forget();
+        expect(art.pick(const Size(3226, 270)).width, 3840, reason: theme.name);
+      }
+    });
+
     // Widths the art will ship at, at the map's aspect.
     const art = OoArt([
       OoArtFile('a-940.jpg', 940, 278),

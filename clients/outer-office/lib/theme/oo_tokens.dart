@@ -345,13 +345,21 @@ class OoTokens extends ThemeExtension<OoTokens> {
   }
 }
 
-const _mapHero = OoArt([OoArtFile('assets/heroes/map-940.jpg', 940, 278)]);
+const _mapHero = OoArt([
+  OoArtFile('assets/heroes/map-940.jpg', 940, 278),
+  OoArtFile('assets/heroes/map-2560.jpg', 2560, 757),
+  OoArtFile('assets/heroes/map-3840.jpg', 3840, 1136),
+]);
 const _skylineHero = OoArt([
   OoArtFile('assets/heroes/skyline-774.jpg', 774, 278),
+  OoArtFile('assets/heroes/skyline-2560.jpg', 2560, 919),
+  OoArtFile('assets/heroes/skyline-3840.jpg', 3840, 1379),
 ]);
 const _paperHero = OoArt([
   OoArtFile('assets/heroes/paper-940.jpg', 940, 278),
   OoArtFile('assets/heroes/paper-1536.jpg', 1536, 454),
+  OoArtFile('assets/heroes/paper-2560.jpg', 2560, 757),
+  OoArtFile('assets/heroes/paper-3840.jpg', 3840, 1135),
 ]);
 
 // The design kit's tokens. Where a kit colour fell below WCAG AA where text is drawn with
