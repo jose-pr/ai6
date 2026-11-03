@@ -65,6 +65,21 @@ Unknown keys are refused when the handler loads; every number is a setting.
 | `exit_wait_ms` | `1000` | How long the report of a lost agent waits for its exit status. |
 | `poll_ms` | `200` | How often a silent agent's output is checked for a stop request. |
 | `unconfined_desk` | `false` | Starts a `desk` Session with whatever tools the agent has, in place of refusing it. A weakening. |
+| `limit_phrases` | Grok's words and those other agents commonly use | What marks a failed turn as a limit; see [Grok](#grok). |
+| `text_flush_bytes` | `65536` | UTF-8 bytes of agent text gathered before they are delivered mid-message. |
+| `max_tool_kinds` | `4096` | Tool calls whose kind is kept, by which a later request that does not say its kind is judged. Past it the oldest is forgotten, said once as a `notice`, and such a request is of unknown kind. |
+| `describe_options`, `describe_values`, `describe_modes` | `64`, `1024`, `64` | What the model listing keeps of the agent's answer before any Session: options, values per option, modes. |
+| `describe_sessions`, `describe_pages` | `500`, `10` | Sessions kept of the agent's session list, and pages of it asked for. |
+| `describe_text_bytes` | `4096` | UTF-8 bytes past which an identifier in that answer is dropped and other text cut. |
+
+### Models
+
+The handler lists an account's models without a Session: it starts the agent with that
+environment, asks what a Session can start with (the `_coqui_acp/session_options` request, sent only
+to an agent that advertises `dev.boriken.coqui.acp/session_options`, such as an agent served by
+`coqui-acp-provider`'s facade), and ends it. The values of its option of category `model` are the
+listing. An agent that does not advertise it, or offers no model option, is listed as unknown,
+with the reason.
 
 ### Environment and accounts
 
@@ -160,12 +175,12 @@ Past its free quota Grok 1.0.70 answers `session/prompt` with JSON-RPC error `-3
 with xAI's text beside it (`subscription:free-usage-exhausted: You've used all the included free usage
 ...`) and no reset time. Out of credits, Grok answers `-32603`, `Internal error`, with its reason in an
 object (`data.message`: `API error (status 402 Payment Required): personal-team-blocked:spending-limit:
-You have run out of credits ...`); the ACP client AI6 uses passes on only a string `data`, so until it
-passes that message on, such a turn fails as `Internal error` instead of stopping as limited.
+You have run out of credits ...`). The handler reads the error as `Internal error: API error (status 402
+Payment Required): ...`, the message with that reason after it, so such a turn stops as limited.
 The handler's `limit_phrases` setting says what words mark a failed turn as a limit, found in
 that error without regard to case; its default names Grok's and those other agents commonly use. Such
 a Session stops as limited rather than failed, so [its route](agents.md#routes) or account is passed
-over.
+over. An agent that dies is never limited, whatever it last wrote: its Session fails.
 
 `--no-auto-update` and `--disable-web-search` go before `agent`. AI6 cannot tell whether a profile
 is set, so nothing warns of an Agent without one. xAI's server-side search for this model is not in
@@ -179,7 +194,9 @@ converted to millionths of a dollar when it is in USD), AI6 cannot park a Sessio
 or read an account's quota windows from it, and the Agent's context goes in front of the first
 prompt as text. The agent also decides how it ends a turn: `end_turn`, `max_tokens` and
 `max_turn_requests` complete the Mission's turn, `refusal` and an error fail it, and `cancelled`
-completes a turn AI6 asked to interrupt and otherwise blocks it.
+completes a turn AI6 asked to interrupt and is otherwise a `cancelled` event, which blocks the
+Mission. When a bridge that kept the agent through a lost connection says it dropped some of the
+agent's output meanwhile, the turn fails, naming how many lines and bytes were lost.
 
 ## Field runners
 

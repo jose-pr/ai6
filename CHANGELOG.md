@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The `acp` handler lists an agent's models before any Session, from what the agent offers through
+  `coqui-acp`'s `describe`, bounded by the new `describe_*` settings (64 options, 1024 values, 64
+  modes, 500 sessions, 10 pages, 4096 bytes of text; any value). `text_flush_bytes` (64 KiB) and
+  `max_tool_kinds` (4096) are settings too. An agent that does not say is listed as unknown, with the
+  reason.
 - The `antigravity` handler (`ai6-agent-antigravity`) runs the Antigravity CLI, `agy`, through its
   stream-json mode, measured on agy 1.4.12 on x86-64 Linux. A Session's ID is read from its stream,
   and a resume sends nothing until the stream names the conversation asked for. A tool refused by the
@@ -124,6 +129,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Breaking for handler plugins**: the Session a handler returns is the shared agent session kind of
+  `coqui-acp-provider` (object kind `agent_session`, pinned with `coqui-acp` at `3c2b30e`), in place
+  of AI6's own `ai6_agent_session`. `AgentSession`, `AgentMessage`, `AgentEvent`, `UsageLimit`,
+  `TokenUsage`, `QuotaReport`, `LIMIT_EVENT` and `DENIED_EVENT` move there and stay re-exported at
+  `ai6::`; their JSON is unchanged. `AgentSession::session_id` answers a string, which the Station
+  and the field runner check as a `SessionId` where they record it: one that is not fails the
+  Session. Every handler plugin is rebuilt against the new kind.
+- A turn an ACP agent gives up by itself is a `cancelled` event, the shared contract's own kind, in
+  place of `blocked` with `TURN_CANCELLED`. The Station, the field runner and Moneypenny count it as
+  ending the turn: a Mission is blocked by it as before, and AI6's ACP facade and the runner answer the
+  prompt `cancelled`.
+- `ai6::directorates::section_00::acp` re-exports `coqui_acp`'s `Exchange` builder in place of the
+  `exchange` function, and `AcpOptions::disconnect_detail` is asked at most once (`FnOnce`).
 - Outer Office's Agents, Account pools, Green ink and class authorisation pages open on **All
   Operations** instead of the first one; the picker narrows to one, and an Operation that could not
   be read is named with its reason beside the others' rows.
@@ -336,8 +354,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - The `acp` handler's default `limit_phrases` name the Grok CLI's out-of-credits words (`spending-limit`,
-  `run out of credits`, `402 Payment Required`), so such a turn stops as limited and its route is passed
-  over once the ACP client passes Grok's reason on.
+  `run out of credits`, `402 Payment Required`), and the ACP client now keeps the reason Grok puts in an
+  object `data`, so such a turn stops as limited and its route is passed over.
+- An ACP agent whose connection is lost is never taken for one at a usage limit, whatever it last
+  wrote: its Session fails with how it ended.
+- Output a bridge dropped while no Station was connected fails the turn, naming the lines and bytes
+  lost, rather than leaving a silent gap.
+- A Session whose agent said it started and left at once is no longer refused as never started: what
+  it said is read before the lost connection is.
 
 - A page Moneypenny publishes loads on the API's own origin. Its `frame-ancestors` carried the `/pages`
   path, which never matches a parent's origin, so a browser refused to show it. The guide now lists

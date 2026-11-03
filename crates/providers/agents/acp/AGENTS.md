@@ -3,9 +3,9 @@
 Header-file-style reference for the `ai6-agent-acp` crate. It ships inside the package and is
 self-contained. Development documentation lives at <https://github.com/jose-pr/ai6>.
 
-No features. MSRV: Rust 1.89. Depends on `ai6` (features `acp`, `gate`), the Agent Client
-Protocol SDK (`agent-client-protocol`), `futures`, `serde`, `serde_json` and `toml`. Contains no
-`unsafe` code. Also builds the test binary `ai6-acp-fake-agent`.
+No features. MSRV: Rust 1.89. Depends on `ai6` (features `acp`, `gate`), `coqui-acp`, the Agent
+Client Protocol SDK (`agent-client-protocol`), `futures`, `serde`, `serde_json` and `toml`.
+Contains no `unsafe` code. Also builds the test binary `ai6-acp-fake-agent`.
 
 ```rust
 pub struct AcpConfig { pub settings_toml: String }   // Guatiao config; "" until an Agent sets handler_settings
@@ -23,6 +23,14 @@ pub struct AcpSettings {
     pub poll_ms: i64,                           // 200
     pub unconfined_desk: bool,                  // false
     pub limit_phrases: Vec<String>,             // "rate limited", "rate limit exceeded", "usage-exhausted", "usage limit", "quota exceeded", "spending-limit", "run out of credits", "402 payment required"
+    pub text_flush_bytes: usize,                // 65536: agent text delivered mid-message
+    pub max_tool_kinds: usize,                  // 4096: tool calls whose kind is kept
+    pub describe_options: usize,                // 64: options `models` keeps of the agent's answer
+    pub describe_values: usize,                 // 1024: values per option
+    pub describe_modes: usize,                  // 64: modes
+    pub describe_sessions: usize,               // 500: sessions, across pages
+    pub describe_text_bytes: usize,             // 4096: identifier and text bytes
+    pub describe_pages: usize,                  // 10: session list pages (coqui_acp DescribeLimits; any value)
 }
 pub struct AcpHandler;                           // AgentHandler provider id "acp"; stdio() = Json (pipe)
 ```
@@ -46,9 +54,17 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
 - `clearance_refusal` answers why a clearance `clearance_runs_commands` denies is refused, unless
   `unconfined_desk` is set, so a route of this handler is passed over before a Session starts.
 - A prompt whose error contains one of `limit_phrases`, without regard to case, ends as a limit
-  event (`resets_at` and `window` unset), not `failed`.
+  event (`resets_at` and `window` unset), not `failed`. The error's text is its message and the
+  agent's reason, from a string `data` or an object `data`'s `message` (Grok out of credits:
+  `Internal error: API error (status 402 Payment Required): ...`). A lost connection is never a
+  limit, whatever the agent last wrote.
+- `models(environment)` starts `command args` itself, with exactly the settings' `env` under
+  `environment`, asks what the agent offers before any Session (`coqui_acp`'s `describe`, bounded by
+  the `describe_*` settings, under `initialize_timeout_ms` and `request_timeout_ms`), and ends it.
+  The values of the option of category `model` are the listing; an agent that advertises no such
+  answer, or offers no model option, is unknown with the reason.
 - `assistant_scripts` and `assistant_skills` keep the trait defaults (none).
 - A failed open appends the agent's last non-protocol output lines to the error; a connection
   lost later is `failed` with the agent's exit status and those lines.
 - An interrupted turn the agent answers `cancelled` is `completed`; one it cancels by itself is
-  `blocked` with the text `ai6`'s `TURN_CANCELLED`.
+  `cancelled` with the text `TURN_CANCELLED` (`coqui_acp_provider`'s).

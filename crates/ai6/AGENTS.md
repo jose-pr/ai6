@@ -3626,8 +3626,10 @@ impl ResumeMeta { pub fn from_resume(&AgentResume) -> Self; pub fn into_resume(s
 
 // Re-exported from `coqui_acp`, the ACP client the Session is built on (pinned by revision):
 // `Decider` as PermissionDecider, `Decision` as PermissionDecision, PermissionRequest,
-// PermissionOption, RefuseAll (the default decider), Authenticate, RpcFailure and
-// `exchange(transport, authenticate, initialize: Option<Duration>, request: Option<Duration>, calls)`.
+// PermissionOption, RefuseAll (the default decider), Authenticate, RpcFailure and `Exchange`, the
+// calls that are no session: `Exchange::new().client_info(name, version).authenticate(a)
+// .initialize_timeout(Option<Duration>).request_timeout(Option<Duration>).describe_limits(l)`, then
+// `.run(transport, calls)` or `.describe(transport)` (what an agent offers before any session).
 pub trait PermissionDecider: Send + Sync { fn decide(&self, &PermissionRequest) -> PermissionDecision; }
 pub enum PermissionDecision { Allow, Deny(String) }   // Allow -> the first allow_once option, Deny -> reject_once
 pub const UNBOUNDED_MS: u64 = u64::MAX;               // a timeout that never fires
@@ -3640,8 +3642,12 @@ pub struct AcpOptions {          // Default: timeouts 20000 / 30000 / 2000 ms, n
     pub prompt: Option<String>, pub resume: Option<String>, pub restricted: bool,
     pub authenticate: Option<Authenticate>, pub initialize_timeout_ms: u64,
     pub request_timeout_ms: u64, pub close_grace_ms: u64, pub decider: Arc<dyn PermissionDecider>,
-    pub disconnect_detail: Option<DisconnectDetail> }  // what became of a lost agent
-pub type DisconnectDetail = Box<dyn Fn() -> Option<String> + Send + Sync>;
+    pub fail_on_disconnect: bool,                     // true: a connection lost mid-turn is `failed`
+    pub limit_phrases: Vec<String>,                   // empty: no failure is a limit
+    pub disconnect_detail: Option<DisconnectDetail>,  // what became of a lost agent
+    pub text_flush_bytes: usize,                      // DEFAULT_TEXT_FLUSH_BYTES (65536); any value
+    pub max_tool_kinds: usize }                       // DEFAULT_MAX_TOOL_KINDS (4096); any value
+pub type DisconnectDetail = Box<dyn FnOnce() -> Option<String> + Send>;  // asked at most once
 pub struct AcpSession;           // implements AgentSession
 impl AcpSession {
     /// initialize -> (authenticate) -> session/new | session/resume | session/load -> config
@@ -3676,11 +3682,17 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
   is read from `session/update` and the stop reason: message chunks coalesce into one `text`
   event per turn segment, `tool_call` is a `tool` event, `usage_update.cost` (USD) is `usage` with
   `cost_micro_usd` (token counts are not guessed); `end_turn|max_tokens|max_turn_requests` ->
-  `completed`, `refusal` -> `failed`, `cancelled` -> `completed` after `interrupt`, else `blocked`
-  with the text `TURN_CANCELLED`, a JSON-RPC error -> `failed`. A connection that ends unclosed
+  `completed`, `refusal` -> `failed`, `cancelled` -> `completed` after `interrupt`, else
+  `cancelled` (`coqui_acp_provider::CANCELLED_EVENT`) with the text `TURN_CANCELLED`, a JSON-RPC
+  error -> `failed` in its message and the agent's reason (`data`, or an object `data`'s
+  `message`), or `limit` when that text holds one of `limit_phrases`. A connection that ends unclosed
   while the turn is not over is `failed`: `the agent closed its connection`, then
-  `disconnect_detail`'s answer; a turn the façade already ended is not failed by the agent leaving.
-  An agent answering `initialize` with a protocol version other than 1 is refused.
+  `disconnect_detail`'s answer, and never a limit, whatever the agent last wrote; a turn the façade
+  already ended (a terminal event on `_ai6/event`) is not failed by the agent leaving. A bridge's
+  report of output lost while nobody was connected is a `failed` event naming the lines and bytes
+  lost; a tool kind forgotten past `max_tool_kinds` is a `notice`, and its request reaches the
+  decider with no kind. An agent answering `initialize` with a protocol version other than 1 is
+  refused.
 - **Restricted.** With `AcpOptions::restricted`, only a request of kind `read`, `search` or `think`
   or for a tool of a server in `mcp_servers` (the Grok CLI's `UseTool` input, else a title
   `mcp__<server>__`) reaches the decider; every other is refused. A tool of a `RESTRICTED_KINDS`
@@ -3696,7 +3708,8 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
   client's `connect` fails with it. `session/resume|load` with `ResumeMeta` calls
   `handler.resume` (a `message` there is submitted by the handler); `session/cancel` ->
   `interrupt` and answers waiting prompts `cancelled`; `session/close` -> `close`. A `completed`
-  event answers waiting prompts `end_turn`, `limit` `refusal`, `failed` a JSON-RPC error. It
+  event answers waiting prompts `end_turn`, `limit` `refusal`, `cancelled` (or `blocked` with
+  `TURN_CANCELLED`) `cancelled`, `failed` a JSON-RPC error. It
   advertises `loadSession`, `sessionCapabilities.resume|close` and no MCP (the environment
   carries the native handlers' MCP servers).
 
@@ -4108,9 +4121,16 @@ is SHA-256 hashed before it is stored. The file backend bounds scans to 10,000 C
 and records to 2 MiB; `SqlRegistry` keeps Cables in `ai6_cables` and the buckets, keyed the
 same way, in `ai6_cable_quotas`, with the same bounds.
 
-`ai6::directorates::section_00::agent` defines `AgentStart`, `AgentResume`, `AgentMessage`, `AgentEvent`, the
-`AgentHandler` Guatiao kind `ai6_agent_handler`, and the `AgentSession` object kind
-`ai6_agent_session`. Handlers own harness launch, initial-context delivery, resume,
+`ai6::directorates::section_00::agent` defines `AgentStart`, `AgentResume` and the `AgentHandler`
+Guatiao kind `ai6_agent_handler`. The Session a handler returns is the shared agent session kind of
+[`coqui-acp-provider`](https://github.com/Boriken-Dev/coqui-acp) (object kind `agent_session`,
+pinned by revision with `coqui-acp`, on the same Guatiao revision): `AgentSession`, `AgentMessage`,
+`AgentEvent`, `UsageLimit`, `TokenUsage`, `QuotaReport`, `LIMIT_EVENT` and `DENIED_EVENT` are
+re-exported at the crate root as `ai6::AgentSession` and so on; the event kinds `cancelled`
+(`CANCELLED_EVENT`) and `TURN_CANCELLED` are that crate's alone. `AgentSession::session_id`
+answers `Result<Option<String>, ProviderError>`: the Station checks the ID as a `SessionId` where
+it records it, and an ID that is not one fails the Session (`the provider reported a Session ID AI6
+cannot record: ...`). Handlers own harness launch, initial-context delivery, resume,
 message submission and event decoding. AI6 supplies an `AgentTerminal` object bridge
 over its selected `Terminal` provider. `AgentHandler::stdio(&self) -> Result<HarnessStdio,
 ProviderError>` is an appended slot (default `Ok(HarnessStdio::Terminal)`): a handler whose
@@ -4152,9 +4172,14 @@ build; a field runner logs them at each launch.
 (field names as declared): a runner's API carries them as JSON.
 
 ```rust
+// coqui_acp_provider's event contract; consumers match `kind` as text.
 pub const LIMIT_EVENT: &str = "limit";
-pub const TURN_CANCELLED: &str = "the agent cancelled the turn";  // text of a `blocked` event; no `completed` follows
 pub const DENIED_EVENT: &str = "denied";
+// coqui_acp_provider::CANCELLED_EVENT = "cancelled": the turn stopped because of `interrupt`, or
+// the agent gave it up. The Station counts it as ending the turn; a Mission's Session that ends
+// one by itself leaves the Mission `Blocked`, and Moneypenny's answer ends with a notice.
+// coqui_acp_provider::TURN_CANCELLED = "the agent cancelled the turn": the text of a `blocked`
+// event that means `cancelled`, read the same way.
 pub struct UsageLimit { pub resets_at: Option<i64> /* Unix seconds */, pub window: Option<String> }
 pub struct TokenUsage { pub input: u64, pub output: u64, pub cache_read: u64, pub cache_write: u64,
                         pub cost_micro_usd: u64, pub cumulative: bool }
@@ -4920,8 +4945,9 @@ connections may be open. `initialize` advertises `authMethods: [{id: "ai6-runner
   seq}` stores the cursor. `session/cancel` interrupts, `session/close` ends the Session and
   its harness, `_ai6/session_status {key}` answers handler, terminal, `session_id`, `ended`,
   `last`, `cursor` (`-32002` when unknown) and `_ai6/cable {key, upstream}` points the Cable
-  relay at the Station's endpoint. A `completed` event answers the waiting prompt `end_turn`,
-  a `failed` or `limit` one an error.
+  relay at the Station's endpoint. A `completed` event answers the waiting prompt `end_turn`, a
+  `cancelled` one (or `blocked` with `TURN_CANCELLED`) `cancelled`, a `failed` or `limit` one an
+  error.
 
 Every event is appended to `sessions/<key>/events.jsonl` with its sequence number (from 1)
 before any Station can read it, and the cursor is kept in `cursor`, so a Station that comes
