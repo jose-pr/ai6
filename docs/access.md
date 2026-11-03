@@ -166,7 +166,10 @@ is 443:
 | --- | --- |
 | `/v1/` | The gateway: every method, every path under it |
 | `/health` | The gateway (for checks; the app does not call it) |
+| `/pages/` | The gateway, unless `[unex.pages] origin` gives [her pages](assistant.md#pages-she-publishes) their own origin |
 | Anything else | The files of `build/web`, with no fallback to `index.html`: the app's routes are in the fragment of its URL, so `/` is the only page |
+
+The proxy must not add a `Content-Security-Policy` of its own to `/pages/`: a browser enforces every policy it receives, so the app's would block a page's scripts, and each page has its own sandbox policy from the gateway. In nginx, an `add_header` in the `location` stops the server's being inherited.
 
 Two paths under `/v1/` are WebSockets, so the proxy must pass the upgrade: `/v1/socket/{session_id}`
 (a Session's terminal, subprotocol `ai6.guatiao`) and `/v1/user/moneypenny` (her chat). Neither
