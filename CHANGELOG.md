@@ -126,6 +126,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Outer Office: any text can be selected and copied, across a whole page or dialog. Moneypenny's
   answers have a **Copy** that copies her Markdown, and her menu's **Export conversation** saves the
   conversation as Markdown with frontmatter.
+- Outer Office renders a document as Markdown (`OoMarkdown`): its frontmatter as a panel of fields,
+  then headings, paragraphs, nested and numbered lists, task boxes, quotes, code, tables and rules.
+  Nothing is fetched and no HTML is rendered. An app link and a reference Universal Exports resolved
+  open in the app; a Mission reference also offers its linked issues and its Sources' boards. A web
+  link opens at once on a known tracker and after showing its full address anywhere else. Moneypenny's
+  text uses the same renderer with web links off.
 
 ### Changed
 
