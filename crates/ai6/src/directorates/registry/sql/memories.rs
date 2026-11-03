@@ -10,8 +10,8 @@ use super::SqlRegistry;
 use super::db::{Dialect, Row, Tx, Value};
 use crate::directorates::registry::limits::MemoryLimits;
 use crate::directorates::registry::memories::{
-    MemoryEntry, MemoryError, MemoryHeader, MemoryScope, MemorySource, MemoryStore, index_words,
-    is_memory_id, newest, replacing, room_for,
+    MemoryEntry, MemoryError, MemoryHeader, MemoryProposal, MemoryScope, MemorySource, MemoryStore,
+    PROPOSALS_FULL, index_words, is_memory_id, newest, oldest, replacing, room_for,
 };
 use crate::directorates::registry::store::invalid_data;
 
@@ -329,6 +329,84 @@ impl MemoryStore for SqlRegistry {
                 )?;
             }
             Ok(entry)
+        })
+    }
+
+    fn propose_memory(&self, proposal: &MemoryProposal) -> Result<(), MemoryError> {
+        let limits = self.limits.memories.clone();
+        proposal.validate(&limits).map_err(MemoryError::Invalid)?;
+        let record = to_json(proposal)?;
+        self.write(|tx, revision| {
+            let waiting = tx
+                .query_opt(
+                    "SELECT count(*) FROM ai6_memory_proposals WHERE scope = $1",
+                    &[proposal.scope.to_string().into()],
+                )?
+                .ok_or_else(|| invalid_data("a scope's proposals could not be counted"))?
+                .int(0)?;
+            if !limits
+                .proposals
+                .allows(u64::try_from(waiting).unwrap_or(u64::MAX).saturating_add(1))
+            {
+                return Err(MemoryError::Full(PROPOSALS_FULL.to_owned()));
+            }
+            tx.execute(
+                "INSERT INTO ai6_memory_proposals (id, scope, record, revision) \
+                 VALUES ($1, $2, $3, $4)",
+                &[
+                    proposal.id.as_str().into(),
+                    proposal.scope.to_string().into(),
+                    record.as_str().into(),
+                    revision.into(),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn memory_proposals(&self, scope: &MemoryScope) -> io::Result<Vec<MemoryProposal>> {
+        let rows = self.read(|tx| {
+            tx.query(
+                "SELECT record FROM ai6_memory_proposals WHERE scope = $1",
+                &[scope.to_string().into()],
+            )
+        })?;
+        let mut found: Vec<MemoryProposal> = rows
+            .iter()
+            .filter_map(|row| serde_json::from_str(&row.text(0).ok()?).ok())
+            .collect();
+        oldest(&mut found);
+        Ok(found)
+    }
+
+    fn memory_proposal(&self, id: &str) -> io::Result<Option<MemoryProposal>> {
+        if !is_memory_id(id) {
+            return Ok(None);
+        }
+        self.read(|tx| {
+            tx.query_opt(
+                "SELECT record FROM ai6_memory_proposals WHERE id = $1",
+                &[id.into()],
+            )
+        })?
+        .map(|row| {
+            serde_json::from_str(&row.text(0)?)
+                .map_err(|error| invalid_data(format!("invalid proposal: {error}")))
+        })
+        .transpose()
+    }
+
+    fn drop_memory_proposal(&self, id: &str) -> io::Result<bool> {
+        if !is_memory_id(id) {
+            return Ok(false);
+        }
+        self.write(|tx, _| {
+            Ok::<_, io::Error>(
+                tx.execute(
+                    "DELETE FROM ai6_memory_proposals WHERE id = $1",
+                    &[id.into()],
+                )? > 0,
+            )
         })
     }
 }

@@ -11,9 +11,12 @@
 //! narrows that set. [`matching`] then ranks what is left once the caller has filtered it, so a
 //! search answers the same on every backend and no score rests on an entry the reader may not see.
 //!
-//! The file Registry keeps `memories/<scope digest>/<id>.json`, and prior versions in
-//! `memories/<scope digest>/versions/<id>/<revision>.json`. A scope's directory is a digest so
-//! that two scopes differing only by case stay apart on a filesystem that folds case.
+//! What an Agent may not write at once waits as a [`MemoryProposal`] for a person.
+//!
+//! The file Registry keeps `memories/<scope digest>/<id>.json`, prior versions in
+//! `memories/<scope digest>/versions/<id>/<revision>.json` and proposals in
+//! `memories/<scope digest>/proposals/<id>.json`. A scope's directory is a digest so that two
+//! scopes differing only by case stay apart on a filesystem that folds case.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -294,6 +297,93 @@ impl MemoryEntry {
     }
 }
 
+/// A change an Agent asked for, waiting for a person. It carries who asked and how exposed they
+/// were, so an entry made from it stays marked.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryProposal {
+    /// A generated UUID.
+    pub id: String,
+    /// The scope it changes.
+    pub scope: MemoryScope,
+    /// The entry it changes, and the revision it was made from; `None` for a new entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<(String, u64)>,
+    /// It forgets the entry, rather than writing it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forget: bool,
+    /// The entry's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The entry's one-line summary.
+    pub summary: String,
+    /// The entry's whole new text.
+    pub content: String,
+    /// The compartments it would set; `None` leaves them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compartments: Option<Vec<String>>,
+    /// Who asked.
+    pub source: MemorySource,
+    /// When, as Unix seconds.
+    pub at: f64,
+}
+
+impl MemoryProposal {
+    /// A proposal with a fresh ID, of a new entry, or with `target` of a change to that entry at
+    /// that revision.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        scope: MemoryScope,
+        target: Option<(String, u64)>,
+        name: Option<String>,
+        summary: impl Into<String>,
+        content: impl Into<String>,
+        compartments: Option<Vec<String>>,
+        source: MemorySource,
+        at: f64,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            scope,
+            target,
+            forget: false,
+            name,
+            summary: summary.into(),
+            content: content.into(),
+            compartments,
+            source,
+            at,
+        }
+    }
+
+    /// Checks its bounds, as the entry it would make.
+    ///
+    /// # Errors
+    ///
+    /// A message for the writer, naming what is wrong.
+    pub fn validate(&self, limits: &MemoryLimits) -> Result<(), String> {
+        if !is_memory_id(&self.id)
+            || self
+                .target
+                .as_ref()
+                .is_some_and(|(id, _)| !is_memory_id(id))
+        {
+            return Err("a proposal and the entry it changes are named by UUIDs".to_owned());
+        }
+        MemoryEntry::with_id(
+            self.id.clone(),
+            self.scope.clone(),
+            self.name.clone(),
+            self.summary.clone(),
+            self.content.clone(),
+            self.source.clone(),
+            self.at,
+        )
+        .behind(self.compartments.clone().unwrap_or_default())
+        .validate(limits)
+    }
+}
+
 /// Whether `id` is a UUID in the one form this makes them: lower case, with hyphens. Anything
 /// else names no entry, so it cannot climb out of a directory or match by case.
 pub fn is_memory_id(id: &str) -> bool {
@@ -402,6 +492,35 @@ pub trait MemoryStore {
     ///
     /// [`MemoryError::Missing`], [`MemoryError::Changed`], or the store failing.
     fn forget_memory(&self, id: &str, base: Option<u64>) -> Result<MemoryEntry, MemoryError>;
+
+    /// Keeps a proposal until a person decides it.
+    ///
+    /// # Errors
+    ///
+    /// [`MemoryError::Invalid`] out of bounds, [`MemoryError::Full`] past
+    /// `[registry.limits.memories] proposals` waiting in its scope, or the store failing.
+    fn propose_memory(&self, proposal: &MemoryProposal) -> Result<(), MemoryError>;
+
+    /// What waits in `scope`, oldest first. Unreadable proposals are skipped.
+    ///
+    /// # Errors
+    ///
+    /// I/O errors.
+    fn memory_proposals(&self, scope: &MemoryScope) -> io::Result<Vec<MemoryProposal>>;
+
+    /// The proposal `id`, whoever's it is. The caller decides who may see it.
+    ///
+    /// # Errors
+    ///
+    /// I/O errors. An ID that is not one answers `None`.
+    fn memory_proposal(&self, id: &str) -> io::Result<Option<MemoryProposal>>;
+
+    /// Removes the proposal `id`, once it is decided; `false` when it was not there.
+    ///
+    /// # Errors
+    ///
+    /// I/O errors.
+    fn drop_memory_proposal(&self, id: &str) -> io::Result<bool>;
 }
 
 /// The words of `text`, lower case: every run of letters and digits.
@@ -479,6 +598,19 @@ pub(super) fn newest(headers: &mut [MemoryHeader]) {
         right
             .updated_at
             .total_cmp(&left.updated_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
+/// What a full queue of proposals says, telling nothing of what they ask.
+pub(super) const PROPOSALS_FULL: &str =
+    "too many proposals wait for a person here, so this one was not kept";
+
+/// Oldest first, then by ID.
+pub(super) fn oldest(proposals: &mut [MemoryProposal]) {
+    proposals.sort_by(|left, right| {
+        left.at
+            .total_cmp(&right.at)
             .then_with(|| left.id.cmp(&right.id))
     });
 }
@@ -561,6 +693,29 @@ impl FileRegistry {
     /// The directory of an entry's prior versions.
     fn versions_dir(&self, scope: &MemoryScope, id: &str) -> PathBuf {
         self.memory_scope_dir(scope).join("versions").join(id)
+    }
+
+    fn proposals_dir(&self, scope: &MemoryScope) -> PathBuf {
+        self.memory_scope_dir(scope).join("proposals")
+    }
+
+    /// The file of the proposal `id`, in whichever scope holds it.
+    fn proposal_file(&self, id: &str) -> io::Result<Option<PathBuf>> {
+        if !is_memory_id(id) {
+            return Ok(None);
+        }
+        let scopes = match fs::read_dir(self.memories_root()) {
+            Ok(scopes) => scopes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        for scope in scopes {
+            let path = scope?.path().join("proposals").join(format!("{id}.json"));
+            if path.exists() {
+                return Ok(Some(path));
+            }
+        }
+        Ok(None)
     }
 
     /// Keeps `previous` as a prior version and drops the oldest past `[..] versions`.
@@ -730,6 +885,52 @@ impl MemoryStore for FileRegistry {
         fs::remove_file(dir.join(format!("{id}.json")))?;
         Ok(entry)
     }
+
+    fn propose_memory(&self, proposal: &MemoryProposal) -> Result<(), MemoryError> {
+        let limits = &self.limits.memories;
+        proposal.validate(limits).map_err(MemoryError::Invalid)?;
+        let bytes = serde_json::to_vec(proposal).map_err(io::Error::other)?;
+        let _lock = self.lock()?;
+        let dir = self.proposals_dir(&proposal.scope);
+        if !limits.proposals.allows(entry_files(&dir)?.len() + 1) {
+            return Err(MemoryError::Full(PROPOSALS_FULL.to_owned()));
+        }
+        self.write_atomic(&dir.join(format!("{}.json", proposal.id)), &bytes)?;
+        Ok(())
+    }
+
+    fn memory_proposals(&self, scope: &MemoryScope) -> io::Result<Vec<MemoryProposal>> {
+        let mut found = Vec::new();
+        for path in entry_files(&self.proposals_dir(scope))? {
+            if let Ok(bytes) = fs::read(&path)
+                && let Ok(proposal) = serde_json::from_slice::<MemoryProposal>(&bytes)
+                && proposal.scope == *scope
+            {
+                found.push(proposal);
+            }
+        }
+        oldest(&mut found);
+        Ok(found)
+    }
+
+    fn memory_proposal(&self, id: &str) -> io::Result<Option<MemoryProposal>> {
+        let Some(path) = self.proposal_file(id)? else {
+            return Ok(None);
+        };
+        let bytes = fs::read(path)?;
+        let proposal: MemoryProposal = serde_json::from_slice(&bytes)
+            .map_err(|error| invalid_data(format!("invalid proposal: {error}")))?;
+        Ok((proposal.id == id).then_some(proposal))
+    }
+
+    fn drop_memory_proposal(&self, id: &str) -> io::Result<bool> {
+        let _lock = self.lock()?;
+        let Some(path) = self.proposal_file(id)? else {
+            return Ok(false);
+        };
+        fs::remove_file(path)?;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -749,6 +950,7 @@ mod tests {
         a_search_finds_every_word_at_any_length_of_query,
         prior_versions_are_kept_to_the_limit_and_go_with_a_forget,
         an_id_that_is_not_one_names_nothing,
+        proposals_wait_per_scope_within_their_limit,
     );
 
     fn person(id: &str) -> MemoryScope {
@@ -1113,6 +1315,83 @@ mod tests {
             );
         }
         assert!(registry.memory(&written.header.id).unwrap().is_some());
+    }
+
+    fn proposal(scope: MemoryScope, summary: &str) -> MemoryProposal {
+        MemoryProposal {
+            id: Uuid::new_v4().to_string(),
+            scope,
+            target: None,
+            forget: false,
+            name: None,
+            summary: summary.to_owned(),
+            content: "text".to_owned(),
+            compartments: None,
+            source: MemorySource::new("agent:007", Some("G-1".to_owned()))
+                .exposed_by(["tool:WebFetch".to_owned()]),
+            at: 10.0,
+        }
+    }
+
+    fn proposals_wait_per_scope_within_their_limit(store: &dyn Store) {
+        let registry = store.handle();
+        let operation = MemoryScope::Operation("G".to_owned());
+        assert!(registry.memory_proposals(&operation).unwrap().is_empty());
+        let first = proposal(operation.clone(), "first");
+        registry.propose_memory(&first).unwrap();
+        let mut later = proposal(operation.clone(), "later");
+        later.at = 20.0;
+        registry.propose_memory(&later).unwrap();
+        registry
+            .propose_memory(&proposal(MemoryScope::Global, "elsewhere"))
+            .unwrap();
+        let waiting = registry.memory_proposals(&operation).unwrap();
+        assert_eq!(
+            waiting
+                .iter()
+                .map(|one| one.summary.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "later"]
+        );
+        assert_eq!(
+            waiting[0].source.exposures,
+            ["tool:WebFetch"],
+            "its mark stays"
+        );
+        assert_eq!(registry.memory_proposal(&first.id).unwrap().unwrap(), first);
+        assert!(registry.memory_proposal("not-an-id").unwrap().is_none());
+        assert!(registry.drop_memory_proposal(&first.id).unwrap());
+        assert!(!registry.drop_memory_proposal(&first.id).unwrap());
+        assert!(registry.memory_proposal(&first.id).unwrap().is_none());
+        assert_eq!(registry.memory_proposals(&operation).unwrap().len(), 1);
+
+        let mut bad = proposal(operation.clone(), "two\nlines");
+        assert!(matches!(
+            registry.propose_memory(&bad),
+            Err(MemoryError::Invalid(_))
+        ));
+        bad.summary = "s".to_owned();
+        bad.target = Some(("../x".to_owned(), 1));
+        assert!(matches!(
+            registry.propose_memory(&bad),
+            Err(MemoryError::Invalid(_))
+        ));
+        // Past the limit the next is refused, in that scope alone.
+        let room = registry.limits().memories.proposals.or_max();
+        for index in 1..room {
+            registry
+                .propose_memory(&proposal(operation.clone(), &format!("{index}")))
+                .unwrap();
+        }
+        assert!(matches!(
+            registry.propose_memory(&proposal(operation.clone(), "one too many")),
+            Err(MemoryError::Full(_))
+        ));
+        assert!(
+            registry
+                .propose_memory(&proposal(MemoryScope::Global, "another scope"))
+                .is_ok()
+        );
     }
 
     #[test]

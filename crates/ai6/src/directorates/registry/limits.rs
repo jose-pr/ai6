@@ -515,6 +515,10 @@ pub struct MemoryLimits {
     #[schema(title = "Longest search", format = "bytes")]
     #[map(default = MemoryLimits::default().query_bytes)]
     pub query_bytes: Limit,
+    /// Agents' proposals waiting for a person in one scope.
+    #[schema(title = "Proposals waiting in a scope")]
+    #[map(default = MemoryLimits::default().proposals)]
+    pub proposals: Limit,
 }
 
 impl Default for MemoryLimits {
@@ -530,6 +534,7 @@ impl Default for MemoryLimits {
             index_bytes: Limit::at(512 * KIB),
             search_results: Limit::at(50),
             query_bytes: Limit::at(4 * KIB),
+            proposals: Limit::at(64),
         }
     }
 }

@@ -221,7 +221,8 @@ no policy authority. The `compartment` family is global and applies live.
 
 ```rust
 #[non_exhaustive] pub enum CompartmentAction { MissionStatus, MissionRead /* implies status */,
-    ProductRead, CableSend, CableRead /* people */, MissionPropose /* Agents */ }
+    ProductRead, CableSend, CableRead /* people */, MissionPropose /* Agents */,
+    MemoryRead /* an Operation's memory, audited as a crossing */ }
     // written mission.status ...; ALL, as_str(), parse(name) -> Option; anything else is Invalid
 #[non_exhaustive] pub enum CoverTarget { Operation(String), Mission(String) } // Display, parse(text)
 #[non_exhaustive] pub struct CompartmentCover { pub target: CoverTarget, pub propagate: bool } // new, with_propagate
@@ -247,6 +248,9 @@ impl CompiledCompartments {
     pub fn field_allows_in(&self, id, &FieldPrincipal, CompartmentAction, &CompartmentResource) -> bool;
     pub fn person_allows(&self, &Person, CompartmentAction, &CompartmentResource) -> Option<&str>;
     pub fn person_compartments(&self, &Person, operation) -> Vec<&str>;
+    pub fn person_read_in(&self, id, &Person) -> bool;     // named in read_in, whatever it covers or grants
+    pub fn field_read_in(&self, id, &FieldPrincipal) -> bool; // agent:, mission:, operation: (propagating up
+                                                              // the tree), at its clearance floor
     pub fn reachable(&self, &FieldPrincipal, CompartmentAction) -> Vec<CompartmentResource>;
     pub fn person_reachable(&self, &Person, CompartmentAction) -> Vec<CompartmentResource>;
     pub fn held(&self, &FieldPrincipal) -> Vec<HeldCompartment>;
@@ -425,6 +429,7 @@ pub struct ExposureGate;     // clone-shared per Session: new(policy, inherited,
                              // at most `exposures` kept), exposures(), is_exposed(), restricts(r),
                              // take_changes()
 pub fn cable_source(sender: &str, limit: Limit) -> String;   // "cable:SENDER" cut to limit bytes
+pub fn memory_source(id: &str, limit: Limit) -> String; // "memory:<id>": read what an exposed Session wrote
 pub fn tool_source(tool: &str, limit: Limit) -> String;      // "tool:NAME" cut to limit bytes
 
 // quarantine — when an Agent is stopped everywhere
@@ -2469,8 +2474,10 @@ pub struct HoldLimits { pub record_bytes, pub holds, pub text_bytes }   // [regi
 ### Memories
 
 Rows of text with a scope, the same three ways on every Registry. `ai6::directorates::m::memories`
-decides who may see and change one; every read goes through it. `Moneypenny`'s tools and routes are
-in `universal-exports`.
+decides who may see and change one; every read goes through it. Moneypenny's tools and the routes
+are in `universal-exports`; a Session's tools (`memory_search`, `memory_read`, `memory_write`,
+`memory_forget`) are on its Cable endpoint, served by `station::server::memories`. Who holds what:
+`docs/memories.md`.
 
 ```rust
 // ai6::directorates::registry::memories; re-exported at the crate root.
@@ -2504,26 +2511,45 @@ pub trait MemoryStore {  // part of RegistryBackend; `memories/<scope digest>/<i
     fn memory_versions(&self, id: &str) -> io::Result<Vec<MemoryEntry>>; // newest first
     fn forget_memory(&self, id: &str, base: Option<u64>) -> Result<MemoryEntry, MemoryError>;
         // and its prior versions
+    fn memory_limits(&self) -> &MemoryLimits;
+    fn propose_memory(&self, &MemoryProposal) -> Result<(), MemoryError>; // Full past `proposals` a scope
+    fn memory_proposals(&self, scope: &MemoryScope) -> io::Result<Vec<MemoryProposal>>; // oldest first
+    fn memory_proposal(&self, id: &str) -> io::Result<Option<MemoryProposal>>;
+    fn drop_memory_proposal(&self, id: &str) -> io::Result<bool>;
 }
+pub struct MemoryProposal { pub id: String, pub scope: MemoryScope,
+    pub target: Option<(String, u64)> /* the entry and the revision it was made from */,
+    pub forget: bool, pub name: Option<String>, pub summary: String, pub content: String,
+    pub compartments: Option<Vec<String>> /* None leaves them */, pub source: MemorySource /* who
+    asked, with their mark */, pub at: f64 }
+impl MemoryProposal { pub fn new(scope, target, name, summary, content, compartments, source, at)
+    -> Self; pub fn validate(&self, &MemoryLimits) -> Result<(), String>; }
 pub fn search_terms(query: &str) -> Vec<String>;   // distinct runs of letters and digits, lower case
 pub fn matching(entries: Vec<MemoryEntry>, terms: &[String]) -> Vec<MemoryEntry>;
     // holds at least one term, ranked: how many it holds, how many in its name or summary, newest
     // change, ID. No terms: all of them, newest first.
 pub fn is_memory_id(id: &str) -> bool;
 pub struct MemoryLimits { pub content_bytes, entries, scope_bytes, versions, summary_bytes, name_bytes,
-    compartments, index_bytes, search_results, query_bytes: Limit } // [registry.limits.memories]
+    compartments, index_bytes, search_results, query_bytes, proposals: Limit } // [registry.limits.memories]
 
 // ai6::directorates::m::memories
-pub const AUDIT_WRITE, AUDIT_FORGET, AUDIT_READ, PERSON_RESOURCE, GLOBAL_RESOURCE: &str;
-pub enum MemoryWriteRight { Write, Refused }
+pub const AUDIT_WRITE, AUDIT_FORGET, AUDIT_READ, AUDIT_COMPARTMENTS, AUDIT_MARK_CLEARED,
+    AUDIT_PROPOSED, AUDIT_APPROVED, AUDIT_REJECTED, PERSON_RESOURCE, GLOBAL_RESOURCE: &str;
+pub enum MemoryWriteRight { Write, Propose, Refused }
 pub trait MemoryCaller {          // who is asking, read afresh for the call; what cannot be read is not held
     fn by(&self) -> String; fn session(&self) -> Option<String>;
     fn reads_scope(&self, &MemoryScope) -> bool;
     fn writes_scope(&self, &MemoryScope) -> MemoryWriteRight;
-    fn read_in(&self, compartment: &str) -> bool; fn sees_all_compartments(&self) -> bool;
+    fn read_in(&self, compartment: &str) -> bool; // unknown or unreadable: false
+    fn sees_all_compartments(&self) -> bool;       // a chief
+    fn acts_in_person(&self) -> bool;              // clears a mark, decides a proposal
+    fn exposures(&self) -> Vec<String>;            // a write carries them
+    fn saw_marked(&self, source: &str);            // shown what an exposed Session wrote: memory:<id>
+    fn mark_bytes(&self) -> Limit;
     fn now(&self) -> f64;
     fn audit(&self, action: &str, scope: &MemoryScope, target: &str) -> Result<(), String>;
 }
+// visible(): the scope's read, and no compartments, a chief, or read into one of them.
 pub enum MemoryRefusal { Missing /* one answer for not there and not visible */, Forbidden(String),
     Invalid(String), Full(String), Changed { revision: u64 }, Failed(String) } // Display: for the caller
 pub fn read_entry(store, caller, id) -> Result<MemoryEntry, MemoryRefusal>;
@@ -2533,11 +2559,24 @@ pub fn search_entries(store, caller, scopes, query, limits) -> Result<MemorySear
     // filters, ranks, counts, then cuts to search_results; query past query_bytes is Invalid
 pub struct MemorySearch { pub hits: Vec<MemoryHeader>, pub total: usize }
 pub enum MemoryTarget { New(MemoryScope), Existing { id: String, revision: u64 } }
-pub struct MemoryChange { pub target, pub name, pub summary, pub content } // ::new(target, name, summary, content)
+pub struct MemoryChange { pub target, pub name, pub summary, pub content,
+    pub compartments: Option<Vec<String>> } // ::new(target, name, summary, content).with_compartments(..)
 pub struct MemoryWritten { pub entry: MemoryEntry, pub before: Option<String> }
-pub fn write_entry(store, caller, change) -> Result<MemoryWritten, MemoryRefusal>; // audited first
-pub fn forget_entry(store, caller, id, revision) -> Result<MemoryEntry, MemoryRefusal>; // audited first
+pub enum MemoryOutcome { Kept(MemoryWritten), Proposed(MemoryProposal) }
+pub enum MemoryForgotten { Forgotten(MemoryEntry), Proposed(MemoryProposal) }
+pub fn write_entry(store, caller, change) -> Result<MemoryOutcome, MemoryRefusal>;
+    // validated, then audited, then kept or proposed. Adding or removing a compartment needs a read-in
+    // (or a chief), and none may leave the entry hidden from its writer. A person's own edit clears
+    // a mark (memory.mark_cleared); anyone else's keeps it and adds their exposures.
+pub fn forget_entry(store, caller, id, revision) -> Result<MemoryForgotten, MemoryRefusal>;
+pub fn list_proposals(store, caller, scope) -> Result<Vec<MemoryProposal>, MemoryRefusal>;
+    // only for a person who writes the scope, only what they may see
+pub fn decide_proposal(store, caller, id, approve: bool) -> Result<Option<MemoryEntry>, MemoryRefusal>;
+    // approved: written with the proposer's source and mark; rejected: dropped; both audited
 pub fn header_json(&MemoryHeader) -> Value; pub fn entry_json(&MemoryEntry) -> Value;
+pub fn proposal_json(&MemoryProposal) -> Value;
+pub fn fenced(tool: &str, &Value) -> String;       // <ai6-data tool="..">, `<` escaped inside
+pub fn bounded(text: &str, Limit) -> String;       // one line within the bound, for an audit record
 pub fn summaries_for_a_model(headers, bytes: Limit, fence: impl Fn(&Value) -> String) -> Option<String>;
 ```
 

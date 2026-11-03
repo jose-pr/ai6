@@ -68,17 +68,22 @@ pub enum CompartmentAction {
     #[map(rename = "mission.propose")]
     #[schema(label = "Propose Missions (Agents)")]
     MissionPropose,
+    /// Read the Operation's memory.
+    #[map(rename = "memory.read")]
+    #[schema(label = "Read its memory")]
+    MemoryRead,
 }
 
 impl CompartmentAction {
     /// Every action.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::MissionStatus,
         Self::MissionRead,
         Self::ProductRead,
         Self::CableSend,
         Self::CableRead,
         Self::MissionPropose,
+        Self::MemoryRead,
     ];
 
     /// The name written in a record.
@@ -90,6 +95,7 @@ impl CompartmentAction {
             Self::CableSend => "cable.send",
             Self::CableRead => "cable.read",
             Self::MissionPropose => "mission.propose",
+            Self::MemoryRead => "memory.read",
         }
     }
 
@@ -1165,6 +1171,51 @@ impl CompiledCompartments {
     ) -> bool {
         self.compiled.get(id).is_some_and(|one| {
             CompiledOne::asks(&one.people, person, action, resource, &self.lineage)
+        })
+    }
+
+    /// Whether `person` is named among those read into compartment `id`, whatever it covers or
+    /// grants. An entry of the memory protected by a compartment asks this. A compartment that is
+    /// unknown, or could not be read or compiled, reads nobody in.
+    pub fn person_read_in(&self, id: &str, person: &Person) -> bool {
+        self.compiled.get(id).is_some_and(|one| {
+            one.compartment
+                .read_in
+                .iter()
+                .any(|read_in| match &read_in.subject {
+                    ReadInSubject::Person(subject) => *subject == person.id,
+                    ReadInSubject::Group(subject) => person.groups.contains(subject),
+                    ReadInSubject::Account(subject) => *subject == person.name,
+                    _ => false,
+                })
+        })
+    }
+
+    /// Whether this Session is named among those read into compartment `id` and meets its
+    /// clearance floor, whatever it covers or grants: as [`person_read_in`](Self::person_read_in).
+    pub fn field_read_in(&self, id: &str, principal: &FieldPrincipal) -> bool {
+        self.compiled.get(id).is_some_and(|one| {
+            one.clears(&principal.clearance)
+                && one
+                    .compartment
+                    .read_in
+                    .iter()
+                    .any(|read_in| match &read_in.subject {
+                        ReadInSubject::Agent(agent) => *agent == principal.agent,
+                        ReadInSubject::Mission(mission) => {
+                            principal.mission.as_deref() == Some(mission.as_str())
+                        }
+                        ReadInSubject::Operation(operation) => {
+                            *operation == principal.operation
+                                || (read_in.propagate
+                                    && self
+                                        .lineage
+                                        .ancestors(&principal.operation)
+                                        .iter()
+                                        .any(|ancestor| ancestor == operation))
+                        }
+                        _ => false,
+                    })
         })
     }
 

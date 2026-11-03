@@ -501,3 +501,12 @@ CREATE TABLE IF NOT EXISTS ai6_memory_versions (
     revision BIGINT NOT NULL,
     PRIMARY KEY (id, entry_revision)
 );
+
+-- What Agents asked to change in the memory, each until a person decides it.
+CREATE TABLE IF NOT EXISTS ai6_memory_proposals (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai6_memory_proposals_scope ON ai6_memory_proposals (scope);

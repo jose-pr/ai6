@@ -605,6 +605,9 @@ pub struct Operation {
     pub green_ink: GreenInkPolicy,
     /// What AI6 writes on a Mission's linked issues and how; strict unless configured.
     pub issues: IssuePolicy,
+    /// The clearance from which an Agent changes this Operation's memory at once; below it, or with
+    /// none, its change is a proposal a person decides.
+    pub memory_write: Option<String>,
     /// How briefs are vetted before they are placed; every check on unless configured.
     pub vetting: VettingPolicy,
     /// Work sources (trackers, CI) this Operation takes briefs from.
@@ -1819,6 +1822,14 @@ pub(crate) struct OperationDefinition {
     #[map(default)]
     #[form(form)]
     issues: IssuePolicy,
+    /// The clearance from which an Agent changes this Operation's memory at once, `field` or `00`.
+    /// Below it, or with none, its change is a proposal a person decides. Default: none.
+    #[schema(
+        title = "Agents who write its memory at once",
+        section = "safety",
+        advanced
+    )]
+    memory_write: Option<ClearanceLevel>,
     /// How briefs are checked before they are placed.
     #[schema(title = "Vetting", section = "safety", advanced)]
     vetting: Option<VettingSetting>,
@@ -1883,6 +1894,7 @@ impl Default for OperationDefinition {
             quarantine: QuarantineDefinition::default(),
             green_ink: GreenInkDefinition::default(),
             issues: IssuePolicy::default(),
+            memory_write: None,
             vetting: None,
             harness: HarnessPolicy::default(),
             promotion: PromotionDefinition::default(),
@@ -1973,6 +1985,12 @@ impl OperationDefinition {
         self.harness
             .validate()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        if self.memory_write == Some(ClearanceLevel::Desk) {
+            return Err(error(format!(
+                "Operation {id:?}: memory_write is field or 00: a desk Agent only proposes"
+            )));
+        }
+        let memory_write = self.memory_write.map(|level| level.as_str().to_owned());
         let green_ink = self
             .green_ink
             .resolve()
@@ -2027,6 +2045,7 @@ impl OperationDefinition {
             quarantine,
             green_ink,
             issues,
+            memory_write,
             vetting,
             sources: self.sources,
             sleepers: self.sleepers,

@@ -49,6 +49,12 @@ pub fn issue_source(tracker: &str, limit: Limit) -> String {
     bounded(format!("issue:{tracker}"), limit)
 }
 
+/// The source for a Session that read a memory entry an exposed Session wrote, cut to `limit`
+/// bytes.
+pub fn memory_source(id: &str, limit: Limit) -> String {
+    bounded(format!("memory:{id}"), limit)
+}
+
 /// The source for a Session that read a brief or a product of `operation`, cut to `limit` bytes.
 pub fn product_source(operation: &str, limit: Limit) -> String {
     bounded(format!("{PRODUCT_PREFIX}{operation}"), limit)
@@ -73,8 +79,8 @@ fn bounded(mut source: String, limit: Limit) -> String {
 /// One way a Session was exposed, and when.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Exposure {
-    /// `brief:source`, `brief:compartment`, `cable:SENDER`, `issue:TRACKER`, `product:OPERATION`,
-    /// `tool:NAME` or `review`.
+    /// `brief:source`, `brief:compartment`, `cable:SENDER`, `issue:TRACKER`, `memory:ID`,
+    /// `product:OPERATION`, `tool:NAME` or `review`.
     pub source: String,
     /// When it happened, as Unix seconds.
     pub at: f64,

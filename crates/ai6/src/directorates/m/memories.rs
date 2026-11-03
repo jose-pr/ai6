@@ -5,26 +5,48 @@
 //! everywhere. An entry the caller may not see answers as an ID that does not exist. A search
 //! filters before it ranks or counts: nothing it answers rests on an entry it hid.
 //!
+//! An entry can be protected by compartments: to see it at all a caller needs the scope's read and
+//! to be read into one of them, or to be a chief. A compartment that is unknown, or cannot be read,
+//! reads nobody in. Only someone read into a compartment adds it to an entry or removes it, and
+//! nobody hides an entry from themselves.
+//!
+//! An entry written by an exposed Session stays marked, and whoever reads it is told: a Session is
+//! exposed by it, as by a Cable. A person's own edit clears the mark, audited. What an Agent may not
+//! write at once becomes a [`MemoryProposal`] a person decides; it keeps who asked and their mark.
+//!
 //! Universal Exports asks as a person, and as Moneypenny for one; a Station asks as a Session. Each
 //! says what it holds by implementing [`MemoryCaller`], read afresh for the call.
 
+use std::collections::BTreeSet;
 use std::io;
 
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use crate::bounds::Limit;
+use crate::directorates::medical::exposure::memory_source;
 use crate::directorates::registry::limits::MemoryLimits;
 use crate::directorates::registry::memories::{
-    MemoryEntry, MemoryError, MemoryHeader, MemoryScope, MemorySource, MemoryStore, matching,
-    search_terms,
+    MemoryEntry, MemoryError, MemoryHeader, MemoryProposal, MemoryScope, MemorySource, MemoryStore,
+    matching, search_terms,
 };
 
-/// The audit action of a change to an entry, or the read of another person's.
+/// The audit action of a change to an entry.
 pub const AUDIT_WRITE: &str = "memory.write";
 /// The audit action of forgetting an entry.
 pub const AUDIT_FORGET: &str = "memory.forget";
 /// The audit action of a read of another person's memory.
 pub const AUDIT_READ: &str = "memory.read";
+/// The audit action of a change to an entry's compartments.
+pub const AUDIT_COMPARTMENTS: &str = "memory.compartments";
+/// The audit action of a person's edit that cleared an entry's mark.
+pub const AUDIT_MARK_CLEARED: &str = "memory.mark_cleared";
+/// The audit action of a proposal kept for a person to decide.
+pub const AUDIT_PROPOSED: &str = "memory.proposed";
+/// The audit action of a person approving a proposal.
+pub const AUDIT_APPROVED: &str = "memory.proposal.approved";
+/// The audit action of a person rejecting a proposal.
+pub const AUDIT_REJECTED: &str = "memory.proposal.rejected";
 /// The audit resource of a person's memory.
 pub const PERSON_RESOURCE: &str = "config:assistant";
 /// The audit resource of the global memory, where `memory.write` is granted.
@@ -36,6 +58,8 @@ pub const GLOBAL_RESOURCE: &str = "config:memory";
 pub enum MemoryWriteRight {
     /// Change them at once.
     Write,
+    /// Ask a person to.
+    Propose,
     /// Nothing.
     Refused,
 }
@@ -62,6 +86,19 @@ pub trait MemoryCaller {
     /// Whether the caller sees an entry whatever its compartments: a chief.
     fn sees_all_compartments(&self) -> bool;
 
+    /// Whether a person is acting for themselves, so an edit clears a mark and a proposal can be
+    /// decided: never a Session, nor Moneypenny for a person.
+    fn acts_in_person(&self) -> bool;
+
+    /// How what is asking has been exposed, which a write it makes carries.
+    fn exposures(&self) -> Vec<String>;
+
+    /// Tells the caller it was shown what an exposed Session wrote; `source` says which.
+    fn saw_marked(&self, source: &str);
+
+    /// Bytes of one exposure source (`[registry.limits.sessions] exposure_source_bytes`).
+    fn mark_bytes(&self) -> Limit;
+
     /// The time now, as Unix seconds.
     fn now(&self) -> f64;
 
@@ -73,15 +110,25 @@ pub trait MemoryCaller {
     fn audit(&self, action: &str, scope: &MemoryScope, target: &str) -> Result<(), String>;
 }
 
+/// Whether `compartments` let `caller` see what they protect.
+fn admits(caller: &dyn MemoryCaller, compartments: &[String]) -> bool {
+    compartments.is_empty()
+        || caller.sees_all_compartments()
+        || compartments
+            .iter()
+            .any(|compartment| caller.read_in(compartment))
+}
+
 /// The one question every read asks: whether `caller` may know of this entry at all.
 fn visible(caller: &dyn MemoryCaller, header: &MemoryHeader) -> bool {
-    caller.reads_scope(&header.scope)
-        && (header.compartments.is_empty()
-            || caller.sees_all_compartments()
-            || header
-                .compartments
-                .iter()
-                .any(|compartment| caller.read_in(compartment)))
+    caller.reads_scope(&header.scope) && admits(caller, &header.compartments)
+}
+
+/// Tells `caller` of each of `headers` an exposed Session wrote.
+fn note_marks<'a>(caller: &dyn MemoryCaller, headers: impl Iterator<Item = &'a MemoryHeader>) {
+    for header in headers.filter(|header| header.source.exposed()) {
+        caller.saw_marked(&memory_source(&header.id, caller.mark_bytes()));
+    }
 }
 
 /// Why a call did nothing, in the words the caller sees. [`Missing`](Self::Missing) is one answer
@@ -153,6 +200,17 @@ pub fn read_entry(
     caller: &dyn MemoryCaller,
     id: &str,
 ) -> Result<MemoryEntry, MemoryRefusal> {
+    let entry = find(store, caller, id)?;
+    note_marks(caller, std::iter::once(&entry.header));
+    Ok(entry)
+}
+
+/// The entry `id`, when the caller may see it, without telling them of a mark.
+fn find(
+    store: &dyn MemoryStore,
+    caller: &dyn MemoryCaller,
+    id: &str,
+) -> Result<MemoryEntry, MemoryRefusal> {
     let entry = store.memory(id)?.ok_or(MemoryRefusal::Missing)?;
     if !visible(caller, &entry.header) {
         return Err(MemoryRefusal::Missing);
@@ -170,8 +228,12 @@ pub fn prior_versions(
     caller: &dyn MemoryCaller,
     id: &str,
 ) -> Result<Vec<MemoryEntry>, MemoryRefusal> {
-    read_entry(store, caller, id)?;
-    Ok(store.memory_versions(id)?)
+    let versions = {
+        read_entry(store, caller, id)?;
+        store.memory_versions(id)?
+    };
+    note_marks(caller, versions.iter().map(|version| &version.header));
+    Ok(versions)
 }
 
 /// What the caller may see of `scope`, newest change first.
@@ -187,11 +249,13 @@ pub fn list_entries(
     if !caller.reads_scope(scope) {
         return Ok(Vec::new());
     }
-    Ok(store
+    let listed: Vec<MemoryHeader> = store
         .memory_headers(scope)?
         .into_iter()
         .filter(|header| visible(caller, header))
-        .collect())
+        .collect();
+    note_marks(caller, listed.iter());
+    Ok(listed)
 }
 
 /// What a search found.
@@ -241,6 +305,7 @@ pub fn search_entries(
         .take(limits.search_results.or_max())
         .map(|entry| entry.header)
         .collect();
+    note_marks(caller, hits.iter());
     Ok(MemorySearch { hits, total })
 }
 
@@ -271,6 +336,10 @@ pub struct MemoryChange {
     pub summary: String,
     /// The entry's whole new text.
     pub content: String,
+    /// The compartments protecting it; `None` leaves them as they are, and a new entry without.
+    pub compartments: Option<Vec<String>>,
+    /// Who wrote it, when that is not the caller: the Agent whose proposal a person approved.
+    source: Option<MemorySource>,
 }
 
 impl MemoryChange {
@@ -286,7 +355,16 @@ impl MemoryChange {
             name,
             summary: summary.into(),
             content: content.into(),
+            compartments: None,
+            source: None,
         }
+    }
+
+    /// This change setting `compartments`, when given.
+    #[must_use]
+    pub fn with_compartments(mut self, compartments: Option<Vec<String>>) -> Self {
+        self.compartments = compartments;
+        self
     }
 }
 
@@ -300,64 +378,196 @@ pub struct MemoryWritten {
     pub before: Option<String>,
 }
 
-/// Makes `change` as the caller, audited first.
+/// What a write came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemoryOutcome {
+    /// It is kept.
+    Kept(MemoryWritten),
+    /// It waits for a person.
+    Proposed(MemoryProposal),
+}
+
+/// What a forget came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemoryForgotten {
+    /// It is gone, with its prior versions.
+    Forgotten(MemoryEntry),
+    /// It waits for a person.
+    Proposed(MemoryProposal),
+}
+
+/// Refuses a change of an entry's compartments from `before` to `after` the caller may not make:
+/// adding or removing one it is not read into, or hiding the entry from itself. A chief makes any.
+fn check_compartments(
+    caller: &dyn MemoryCaller,
+    before: &[String],
+    after: &[String],
+) -> Result<(), MemoryRefusal> {
+    if caller.sees_all_compartments() {
+        return Ok(());
+    }
+    let (before_set, after_set): (BTreeSet<&String>, BTreeSet<&String>) =
+        (before.iter().collect(), after.iter().collect());
+    if before_set
+        .symmetric_difference(&after_set)
+        .any(|compartment| !caller.read_in(compartment))
+    {
+        return Err(MemoryRefusal::Forbidden(
+            "You add or remove only a compartment you are read into.".to_owned(),
+        ));
+    }
+    if before_set != after_set && !admits(caller, after) {
+        return Err(MemoryRefusal::Forbidden(
+            "That would hide the entry from you.".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Makes `change` as the caller, audited first: kept at once, or kept as a proposal for a person
+/// when that is all the caller may do. A person's own edit clears a mark, audited; anyone else's
+/// keeps it, and adds how they were exposed.
 ///
 /// # Errors
 ///
 /// [`MemoryRefusal`]: an entry the caller may not see is [`MemoryRefusal::Missing`], a scope they
-/// may not write is [`MemoryRefusal::Forbidden`].
+/// may not write or a compartment they may not set is [`MemoryRefusal::Forbidden`].
 pub fn write_entry(
     store: &dyn MemoryStore,
     caller: &dyn MemoryCaller,
     change: MemoryChange,
-) -> Result<MemoryWritten, MemoryRefusal> {
-    let source = MemorySource::new(caller.by(), caller.session());
+) -> Result<MemoryOutcome, MemoryRefusal> {
     let at = caller.now();
-    let (next, base, before) = match change.target {
-        MemoryTarget::New(scope) => (
-            MemoryEntry::new(
-                scope,
-                change.name,
-                change.summary,
-                change.content,
-                source,
-                at,
-            ),
-            None,
-            None,
-        ),
+    let (scope, current, revision) = match &change.target {
+        MemoryTarget::New(scope) => (scope.clone(), None, None),
         MemoryTarget::Existing { id, revision } => {
-            let current = read_entry(store, caller, &id)?;
-            let next = MemoryEntry::with_id(
-                id,
-                current.header.scope.clone(),
-                change.name,
-                change.summary,
-                change.content,
-                source,
-                at,
-            )
-            .behind(current.header.compartments.clone());
-            (next, Some(revision), Some(current.content))
+            let current = find(store, caller, id)?;
+            (current.header.scope.clone(), Some(current), Some(*revision))
         }
     };
-    let scope = next.header.scope.clone();
-    if caller.writes_scope(&scope) != MemoryWriteRight::Write {
+    let right = caller.writes_scope(&scope);
+    if right == MemoryWriteRight::Refused {
         return Err(MemoryRefusal::Forbidden(format!(
             "You may not change the memory of {scope}."
         )));
     }
+    let before: Vec<String> = current
+        .as_ref()
+        .map(|entry| entry.header.compartments.clone())
+        .unwrap_or_default();
+    let after = change
+        .compartments
+        .clone()
+        .unwrap_or_else(|| before.clone());
+    check_compartments(caller, &before, &after)?;
+
+    let marks = current
+        .as_ref()
+        .filter(|_| !caller.acts_in_person())
+        .map(|entry| entry.header.source.exposures.clone())
+        .unwrap_or_default();
+    let mut exposures = caller.exposures();
+    exposures.extend(marks);
+    exposures.sort_unstable();
+    exposures.dedup();
+    let source = match change.source {
+        Some(source) => source,
+        None => MemorySource::new(caller.by(), caller.session()).exposed_by(exposures),
+    };
+
+    if right == MemoryWriteRight::Propose {
+        let proposal = MemoryProposal {
+            id: Uuid::new_v4().to_string(),
+            scope: scope.clone(),
+            target: current
+                .as_ref()
+                .map(|entry| entry.header.id.clone())
+                .zip(revision),
+            forget: false,
+            name: change.name,
+            summary: change.summary,
+            content: change.content,
+            compartments: change.compartments,
+            source,
+            at,
+        };
+        return propose(store, caller, proposal);
+    }
+
+    let next = match &current {
+        Some(entry) => MemoryEntry::with_id(
+            entry.header.id.clone(),
+            scope.clone(),
+            change.name,
+            change.summary,
+            change.content,
+            source,
+            at,
+        ),
+        None => MemoryEntry::new(
+            scope.clone(),
+            change.name,
+            change.summary,
+            change.content,
+            source,
+            at,
+        ),
+    }
+    .behind(after.clone());
+    // Who wrote what it holds may be the Agent whose proposal this carries out; who changed it last
+    // is always the caller.
+    let mut next = next;
+    next.header.updated_by = caller.by();
     next.validate(store.memory_limits())
         .map_err(MemoryRefusal::Invalid)?;
+    let id = next.header.id.clone();
     caller
-        .audit(AUDIT_WRITE, &scope, &audit_target(&next.header.id, caller))
+        .audit(AUDIT_WRITE, &scope, &audit_target(&id, caller))
         .map_err(MemoryRefusal::Failed)?;
-    let entry = store.write_memory(next, base)?;
-    Ok(MemoryWritten { entry, before })
+    if before != next.header.compartments {
+        caller
+            .audit(
+                AUDIT_COMPARTMENTS,
+                &scope,
+                &format!("{id} [{}] to [{}]", before.join(","), after.join(",")),
+            )
+            .map_err(MemoryRefusal::Failed)?;
+    }
+    if current
+        .as_ref()
+        .is_some_and(|entry| entry.header.source.exposed())
+        && !next.header.source.exposed()
+    {
+        caller
+            .audit(AUDIT_MARK_CLEARED, &scope, &id)
+            .map_err(MemoryRefusal::Failed)?;
+    }
+    let entry = store.write_memory(next, revision)?;
+    Ok(MemoryOutcome::Kept(MemoryWritten {
+        entry,
+        before: current.map(|entry| entry.content),
+    }))
+}
+
+/// Keeps `proposal`, audited first.
+fn propose(
+    store: &dyn MemoryStore,
+    caller: &dyn MemoryCaller,
+    proposal: MemoryProposal,
+) -> Result<MemoryOutcome, MemoryRefusal> {
+    caller
+        .audit(
+            AUDIT_PROPOSED,
+            &proposal.scope,
+            &audit_target(&proposal.id, caller),
+        )
+        .map_err(MemoryRefusal::Failed)?;
+    store.propose_memory(&proposal)?;
+    Ok(MemoryOutcome::Proposed(proposal))
 }
 
 /// Forgets the entry `id` as the caller, audited first; `revision`, when given, is the one it was
-/// read at. Its prior versions go with it.
+/// read at. Its prior versions go with it. Where the caller may only propose, it is a proposal.
 ///
 /// # Errors
 ///
@@ -367,18 +577,148 @@ pub fn forget_entry(
     caller: &dyn MemoryCaller,
     id: &str,
     revision: Option<u64>,
-) -> Result<MemoryEntry, MemoryRefusal> {
-    let current = read_entry(store, caller, id)?;
-    let scope = current.header.scope;
-    if caller.writes_scope(&scope) != MemoryWriteRight::Write {
-        return Err(MemoryRefusal::Forbidden(format!(
+) -> Result<MemoryForgotten, MemoryRefusal> {
+    let current = find(store, caller, id)?;
+    let scope = current.header.scope.clone();
+    match caller.writes_scope(&scope) {
+        MemoryWriteRight::Refused => Err(MemoryRefusal::Forbidden(format!(
             "You may not change the memory of {scope}."
+        ))),
+        MemoryWriteRight::Propose => {
+            let proposal = MemoryProposal {
+                id: Uuid::new_v4().to_string(),
+                scope,
+                target: Some((
+                    current.header.id.clone(),
+                    revision.unwrap_or(current.header.revision),
+                )),
+                forget: true,
+                name: current.header.name.clone(),
+                summary: current.header.summary.clone(),
+                content: String::new(),
+                compartments: None,
+                source: MemorySource::new(caller.by(), caller.session())
+                    .exposed_by(caller.exposures()),
+                at: caller.now(),
+            };
+            match propose(store, caller, proposal)? {
+                MemoryOutcome::Proposed(proposal) => Ok(MemoryForgotten::Proposed(proposal)),
+                MemoryOutcome::Kept(_) => Err(MemoryRefusal::Failed(
+                    "It was neither forgotten nor proposed.".to_owned(),
+                )),
+            }
+        }
+        MemoryWriteRight::Write => {
+            caller
+                .audit(AUDIT_FORGET, &scope, &audit_target(id, caller))
+                .map_err(MemoryRefusal::Failed)?;
+            Ok(MemoryForgotten::Forgotten(
+                store.forget_memory(id, revision)?,
+            ))
+        }
+    }
+}
+
+/// Whether `caller` may know of `proposal`: the scope's read and the compartments it would set, or
+/// those of the entry it changes.
+fn proposal_visible(
+    store: &dyn MemoryStore,
+    caller: &dyn MemoryCaller,
+    proposal: &MemoryProposal,
+) -> bool {
+    if !caller.reads_scope(&proposal.scope) {
+        return false;
+    }
+    let held = proposal
+        .target
+        .as_ref()
+        .and_then(|(id, _)| store.memory(id).ok().flatten())
+        .map(|entry| entry.header.compartments)
+        .unwrap_or_default();
+    admits(caller, &held) && admits(caller, proposal.compartments.as_deref().unwrap_or_default())
+}
+
+/// What waits in `scope` for a person like `caller` to decide, oldest first: nothing for anyone
+/// but a person who may change the scope, and only what they may see.
+///
+/// # Errors
+///
+/// When the store cannot be read.
+pub fn list_proposals(
+    store: &dyn MemoryStore,
+    caller: &dyn MemoryCaller,
+    scope: &MemoryScope,
+) -> Result<Vec<MemoryProposal>, MemoryRefusal> {
+    if !caller.acts_in_person() || caller.writes_scope(scope) != MemoryWriteRight::Write {
+        return Ok(Vec::new());
+    }
+    Ok(store
+        .memory_proposals(scope)?
+        .into_iter()
+        .filter(|proposal| proposal_visible(store, caller, proposal))
+        .collect())
+}
+
+/// Decides the proposal `id` as a person who may change its scope, audited first: approved, it is
+/// carried out with who asked as its source and their mark on it, and the entry it wrote answers;
+/// rejected, it is dropped. A proposal the caller may not see answers as one that does not exist,
+/// and an approval is held to what the person may do: a compartment they are not read into is
+/// refused. One whose entry has moved on is refused and left for them to reject.
+///
+/// # Errors
+///
+/// [`MemoryRefusal`].
+pub fn decide_proposal(
+    store: &dyn MemoryStore,
+    caller: &dyn MemoryCaller,
+    id: &str,
+    approve: bool,
+) -> Result<Option<MemoryEntry>, MemoryRefusal> {
+    let proposal = store.memory_proposal(id)?.ok_or(MemoryRefusal::Missing)?;
+    if !caller.acts_in_person() || !proposal_visible(store, caller, &proposal) {
+        return Err(MemoryRefusal::Missing);
+    }
+    if caller.writes_scope(&proposal.scope) != MemoryWriteRight::Write {
+        return Err(MemoryRefusal::Forbidden(format!(
+            "You may not change the memory of {}.",
+            proposal.scope
         )));
     }
+    let scope = proposal.scope.clone();
+    if !approve {
+        caller
+            .audit(AUDIT_REJECTED, &scope, id)
+            .map_err(MemoryRefusal::Failed)?;
+        store.drop_memory_proposal(id)?;
+        return Ok(None);
+    }
     caller
-        .audit(AUDIT_FORGET, &scope, &audit_target(id, caller))
+        .audit(AUDIT_APPROVED, &scope, id)
         .map_err(MemoryRefusal::Failed)?;
-    Ok(store.forget_memory(id, revision)?)
+    let written = if proposal.forget {
+        let (entry, revision) = proposal.target.as_ref().ok_or(MemoryRefusal::Missing)?;
+        forget_entry(store, caller, entry, Some(*revision))?;
+        None
+    } else {
+        let target = match proposal.target {
+            Some((id, revision)) => MemoryTarget::Existing { id, revision },
+            None => MemoryTarget::New(scope),
+        };
+        let change = MemoryChange {
+            target,
+            name: proposal.name,
+            summary: proposal.summary,
+            content: proposal.content,
+            compartments: proposal.compartments,
+            source: Some(proposal.source),
+        };
+        match write_entry(store, caller, change)? {
+            MemoryOutcome::Kept(written) => Some(written.entry),
+            MemoryOutcome::Proposed(_) => None,
+        }
+    };
+    store.drop_memory_proposal(id)?;
+    Ok(written)
 }
 
 /// What an audit record names: the entry, and the Session or conversation it came from.
@@ -387,6 +727,57 @@ fn audit_target(id: &str, caller: &dyn MemoryCaller) -> String {
         Some(session) => format!("{id} from {session}"),
         None => id.to_owned(),
     }
+}
+
+/// `text` on one line within `limit` bytes, for an audit record.
+pub fn bounded(text: &str, limit: Limit) -> String {
+    let line: String = text
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect();
+    let mut end = line.len().min(limit.or_max());
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    line[..end].to_owned()
+}
+
+/// `value` fenced as data for a model: `<` is escaped inside the JSON, so nothing in an entry can
+/// close the element.
+pub fn fenced(tool: &str, value: &Value) -> String {
+    let body = serde_json::to_string_pretty(value)
+        .unwrap_or_default()
+        .replace('<', "\\u003c");
+    format!("<ai6-data tool=\"{tool}\">\n{body}\n</ai6-data>")
+}
+
+/// A proposal as routes show it.
+pub fn proposal_json(proposal: &MemoryProposal) -> Value {
+    json!({
+        "id": proposal.id,
+        "status": "proposed",
+        "scope": proposal.scope.to_string(),
+        "entry": proposal.target.as_ref().map(|(id, _)| id),
+        "revision": proposal.target.as_ref().map(|(_, revision)| revision),
+        "forget": proposal.forget,
+        "name": proposal.name,
+        "summary": proposal.summary,
+        "content": proposal.content,
+        "compartments": proposal.compartments,
+        "source": {
+            "by": proposal.source.by,
+            "session": proposal.source.session,
+            "exposed": proposal.source.exposed(),
+            "exposures": proposal.source.exposures,
+        },
+        "at": proposal.at,
+    })
 }
 
 /// An entry's header as tools, routes and a starting context show it: never its content.
@@ -461,13 +852,17 @@ mod tests {
     use super::*;
     use crate::directorates::registry::store::FileRegistry;
 
-    /// A caller holding exactly what a test gives it, recording what it audits.
+    /// A caller holding exactly what a test gives it, recording what it audits and is shown.
     #[derive(Default)]
     struct Holds {
         reads: BTreeSet<String>,
         writes: BTreeSet<String>,
+        proposes: BTreeSet<String>,
         read_in: BTreeSet<String>,
         chief: bool,
+        agent: bool,
+        exposed: Vec<String>,
+        seen: RefCell<Vec<String>>,
         audited: RefCell<Vec<(String, String)>>,
         audit_fails: bool,
     }
@@ -498,9 +893,29 @@ mod tests {
         fn writes_scope(&self, scope: &MemoryScope) -> MemoryWriteRight {
             if self.writes.contains(&scope.to_string()) {
                 MemoryWriteRight::Write
+            } else if self.proposes.contains(&scope.to_string()) {
+                MemoryWriteRight::Propose
             } else {
                 MemoryWriteRight::Refused
             }
+        }
+
+        fn acts_in_person(&self) -> bool {
+            !self.agent
+        }
+
+        fn exposures(&self) -> Vec<String> {
+            let mut all = self.exposed.clone();
+            all.extend(self.seen.borrow().iter().cloned());
+            all
+        }
+
+        fn saw_marked(&self, source: &str) {
+            self.seen.borrow_mut().push(source.to_owned());
+        }
+
+        fn mark_bytes(&self) -> Limit {
+            Limit::at(128)
         }
 
         fn read_in(&self, compartment: &str) -> bool {
@@ -540,6 +955,31 @@ mod tests {
         (dir, registry)
     }
 
+    fn written(outcome: MemoryOutcome) -> MemoryWritten {
+        match outcome {
+            MemoryOutcome::Kept(written) => written,
+            MemoryOutcome::Proposed(proposal) => panic!("proposed: {proposal:?}"),
+        }
+    }
+
+    fn kept(outcome: MemoryOutcome) -> MemoryEntry {
+        written(outcome).entry
+    }
+
+    fn global() -> MemoryScope {
+        MemoryScope::Global
+    }
+
+    /// One reading the global memory and writing it, read into `compartments`.
+    fn global_reader(compartments: &[&str]) -> Holds {
+        Holds {
+            reads: [global().to_string()].into(),
+            writes: [global().to_string()].into(),
+            read_in: compartments.iter().map(|name| (*name).to_owned()).collect(),
+            ..Holds::default()
+        }
+    }
+
     fn new_in(scope: &MemoryScope, summary: &str, content: &str) -> MemoryChange {
         MemoryChange::new(MemoryTarget::New(scope.clone()), None, summary, content)
     }
@@ -547,13 +987,14 @@ mod tests {
     #[test]
     fn one_person_finds_nothing_of_anothers_by_any_read() {
         let (_dir, registry) = store();
-        let theirs = write_entry(
-            &registry,
-            &Holds::of(&bob()),
-            new_in(&bob(), "bob's", "secret"),
+        let theirs = kept(
+            write_entry(
+                &registry,
+                &Holds::of(&bob()),
+                new_in(&bob(), "bob's", "secret"),
+            )
+            .unwrap(),
         )
-        .unwrap()
-        .entry
         .header
         .id;
         let caller = Holds::of(&ana());
@@ -606,9 +1047,9 @@ mod tests {
     fn a_write_is_on_the_record_before_it_happens_and_not_without_it() {
         let (_dir, registry) = store();
         let caller = Holds::of(&ana());
-        let written = write_entry(&registry, &caller, new_in(&ana(), "s", "one")).unwrap();
-        let id = written.entry.header.id.clone();
-        assert_eq!(written.before, None);
+        let first = written(write_entry(&registry, &caller, new_in(&ana(), "s", "one")).unwrap());
+        let id = first.entry.header.id.clone();
+        assert_eq!(first.before, None);
         assert_eq!(
             caller.audited.borrow().as_slice(),
             [(AUDIT_WRITE.to_owned(), format!("person:ana {id}"))]
@@ -635,10 +1076,13 @@ mod tests {
             Err(MemoryRefusal::Failed(_))
         ));
         assert_eq!(registry.memory(&id).unwrap().unwrap().content, "one");
-        let written = write_entry(&registry, &caller, change).unwrap();
-        assert_eq!(written.before.as_deref(), Some("one"));
-        assert_eq!(written.entry.header.revision, 2);
-        forget_entry(&registry, &caller, &id, Some(2)).unwrap();
+        let again = written(write_entry(&registry, &caller, change).unwrap());
+        assert_eq!(again.before.as_deref(), Some("one"));
+        assert_eq!(again.entry.header.revision, 2);
+        assert!(matches!(
+            forget_entry(&registry, &caller, &id, Some(2)).unwrap(),
+            MemoryForgotten::Forgotten(_)
+        ));
         assert_eq!(
             caller.audited.borrow().last().unwrap(),
             &(AUDIT_FORGET.to_owned(), format!("person:ana {id}"))
@@ -696,5 +1140,346 @@ mod tests {
         assert!(!some.contains("\"not_shown\":0"), "{some}");
         assert_eq!(summaries_for_a_model(&headers, Limit::at(10), fence), None);
         assert_eq!(summaries_for_a_model(&[], Limit::UNBOUNDED, fence), None);
+    }
+
+    #[test]
+    fn a_protected_entry_answers_as_a_missing_id_to_who_is_not_read_in() {
+        let (_dir, registry) = store();
+        let holder = global_reader(&["KESTREL"]);
+        let protected = kept(
+            write_entry(
+                &registry,
+                &holder,
+                new_in(&global(), "secret needle", "the secret")
+                    .with_compartments(Some(vec!["KESTREL".to_owned()])),
+            )
+            .unwrap(),
+        );
+        assert_eq!(protected.header.compartments, ["KESTREL"]);
+        kept(write_entry(&registry, &holder, new_in(&global(), "open needle", "x")).unwrap());
+        let limits = MemoryLimits::default();
+
+        for outsider in [global_reader(&[]), global_reader(&["OTHER"])] {
+            let id = protected.header.id.as_str();
+            let missing = "6f1e4a6a-9c55-4a0c-9d5c-2f8a0b6c1e11";
+            for asked in [id, missing] {
+                assert!(matches!(
+                    read_entry(&registry, &outsider, asked),
+                    Err(MemoryRefusal::Missing)
+                ));
+                assert!(matches!(
+                    prior_versions(&registry, &outsider, asked),
+                    Err(MemoryRefusal::Missing)
+                ));
+                assert!(matches!(
+                    forget_entry(&registry, &outsider, asked, None),
+                    Err(MemoryRefusal::Missing)
+                ));
+                let change = MemoryChange::new(
+                    MemoryTarget::Existing {
+                        id: asked.to_owned(),
+                        revision: 1,
+                    },
+                    None,
+                    "taken",
+                    "taken",
+                );
+                assert!(matches!(
+                    write_entry(&registry, &outsider, change),
+                    Err(MemoryRefusal::Missing)
+                ));
+            }
+            let listed = list_entries(&registry, &outsider, &global()).unwrap();
+            assert_eq!(listed.len(), 1);
+            let found =
+                search_entries(&registry, &outsider, &[global()], "needle", &limits).unwrap();
+            assert_eq!((found.hits.len(), found.total), (1, 1), "nothing counts it");
+            let found =
+                search_entries(&registry, &outsider, &[global()], "secret", &limits).unwrap();
+            assert_eq!(found.total, 0);
+            assert!(outsider.audited.borrow().is_empty());
+        }
+        // A chief sees it, whatever it is read into.
+        let chief = Holds {
+            chief: true,
+            ..global_reader(&[])
+        };
+        assert!(read_entry(&registry, &chief, &protected.header.id).is_ok());
+        assert_eq!(
+            search_entries(&registry, &chief, &[global()], "needle", &limits)
+                .unwrap()
+                .total,
+            2
+        );
+    }
+
+    #[test]
+    fn only_one_read_in_sets_a_compartment_and_nobody_hides_an_entry_from_themselves() {
+        let (_dir, registry) = store();
+        let holder = global_reader(&["MINE"]);
+        for names in [&["THEIRS"][..], &["NO-SUCH"][..], &["MINE", "THEIRS"][..]] {
+            let change = new_in(&global(), "s", "c")
+                .with_compartments(Some(names.iter().map(|name| (*name).to_owned()).collect()));
+            assert!(
+                matches!(
+                    write_entry(&registry, &holder, change),
+                    Err(MemoryRefusal::Forbidden(_))
+                ),
+                "{names:?}"
+            );
+        }
+        assert!(holder.audited.borrow().is_empty());
+        let entry = kept(
+            write_entry(
+                &registry,
+                &holder,
+                new_in(&global(), "s", "c").with_compartments(Some(vec!["MINE".to_owned()])),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            holder
+                .audited
+                .borrow()
+                .iter()
+                .filter(|(action, _)| action == AUDIT_COMPARTMENTS)
+                .count(),
+            1
+        );
+        // Another's compartment on it stays, and is neither added nor removed by this one.
+        let both = entry
+            .clone()
+            .behind(["MINE".to_owned(), "THEIRS".to_owned()]);
+        registry.write_memory(both, Some(1)).unwrap();
+        let change = |names: &[&str], revision: u64| {
+            MemoryChange::new(
+                MemoryTarget::Existing {
+                    id: entry.header.id.clone(),
+                    revision,
+                },
+                None,
+                "s",
+                "edited",
+            )
+            .with_compartments(Some(names.iter().map(|name| (*name).to_owned()).collect()))
+        };
+        for names in [&["MINE"][..], &["THEIRS"][..], &[][..]] {
+            assert!(
+                matches!(
+                    write_entry(&registry, &holder, change(names, 2)),
+                    Err(MemoryRefusal::Forbidden(_))
+                ),
+                "{names:?}"
+            );
+        }
+        let kept_both = kept(
+            write_entry(
+                &registry,
+                &holder,
+                MemoryChange::new(
+                    MemoryTarget::Existing {
+                        id: entry.header.id.clone(),
+                        revision: 2,
+                    },
+                    None,
+                    "s",
+                    "edited",
+                ),
+            )
+            .unwrap(),
+        );
+        assert_eq!(kept_both.header.compartments, ["MINE", "THEIRS"]);
+        // A chief sets any, a compartment it holds or not.
+        let chief = Holds {
+            chief: true,
+            ..global_reader(&[])
+        };
+        assert!(write_entry(&registry, &chief, change(&["NO-SUCH"], 3)).is_ok());
+    }
+
+    #[test]
+    fn a_mark_stays_through_an_agents_edit_and_goes_with_a_persons_audited() {
+        let (_dir, registry) = store();
+        let operation = MemoryScope::Operation("G".to_owned());
+        let agent = Holds {
+            agent: true,
+            exposed: vec!["tool:WebFetch".to_owned()],
+            ..Holds::of(&operation)
+        };
+        let poisoned =
+            kept(write_entry(&registry, &agent, new_in(&operation, "s", "bad")).unwrap());
+        assert_eq!(poisoned.header.source.exposures, ["tool:WebFetch"]);
+        assert_eq!(poisoned.header.source.by, "person:ana");
+
+        // A clean Agent reading it is told, and its own edit keeps the mark and adds what it saw.
+        let reader = Holds {
+            agent: true,
+            ..Holds::of(&operation)
+        };
+        read_entry(&registry, &reader, &poisoned.header.id).unwrap();
+        let mark = format!("memory:{}", poisoned.header.id);
+        assert_eq!(reader.seen.borrow().as_slice(), [mark.clone()]);
+        let edit = MemoryChange::new(
+            MemoryTarget::Existing {
+                id: poisoned.header.id.clone(),
+                revision: 1,
+            },
+            None,
+            "s",
+            "still bad",
+        );
+        let edited = kept(write_entry(&registry, &reader, edit).unwrap());
+        assert_eq!(
+            edited.header.source.exposures,
+            [mark.clone(), "tool:WebFetch".to_owned()]
+        );
+        // A listing and a search tell a reader too, of what they show.
+        let lister = Holds {
+            agent: true,
+            ..Holds::of(&operation)
+        };
+        list_entries(&registry, &lister, &operation).unwrap();
+        assert_eq!(lister.seen.borrow().as_slice(), [mark.clone()]);
+        let searcher = Holds {
+            agent: true,
+            ..Holds::of(&operation)
+        };
+        search_entries(
+            &registry,
+            &searcher,
+            &[operation.clone()],
+            "zebra",
+            &MemoryLimits::default(),
+        )
+        .unwrap();
+        assert!(
+            searcher.seen.borrow().is_empty(),
+            "nothing shown, nothing told"
+        );
+
+        // A person's edit clears it, on the record.
+        let person = Holds::of(&operation);
+        let edit = MemoryChange::new(
+            MemoryTarget::Existing {
+                id: poisoned.header.id.clone(),
+                revision: 2,
+            },
+            None,
+            "s",
+            "checked",
+        );
+        let cleared = kept(write_entry(&registry, &person, edit).unwrap());
+        assert!(!cleared.header.source.exposed());
+        assert!(
+            person
+                .audited
+                .borrow()
+                .iter()
+                .any(|(action, target)| action == AUDIT_MARK_CLEARED
+                    && target.contains(&poisoned.header.id))
+        );
+    }
+
+    #[test]
+    fn a_proposal_keeps_its_source_and_only_a_person_who_may_write_decides_it() {
+        let (_dir, registry) = store();
+        let operation = MemoryScope::Operation("G".to_owned());
+        let agent = Holds {
+            agent: true,
+            exposed: vec!["issue:github".to_owned()],
+            reads: [operation.to_string()].into(),
+            proposes: [operation.to_string()].into(),
+            ..Holds::default()
+        };
+        let MemoryOutcome::Proposed(proposal) =
+            write_entry(&registry, &agent, new_in(&operation, "worth it", "text")).unwrap()
+        else {
+            panic!("an Agent proposes");
+        };
+        assert!(registry.memory_headers(&operation).unwrap().is_empty());
+        assert_eq!(proposal.source.exposures, ["issue:github"]);
+        assert_eq!(
+            agent.audited.borrow().as_slice(),
+            [(
+                AUDIT_PROPOSED.to_owned(),
+                format!("operation:G {}", proposal.id)
+            )]
+        );
+
+        // Not the Agent, nor a reader who may not write, nor one who may not see it.
+        let reader = Holds {
+            reads: [operation.to_string()].into(),
+            ..Holds::default()
+        };
+        for who in [&agent, &reader] {
+            assert!(
+                list_proposals(&registry, who, &operation)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(decide_proposal(&registry, who, &proposal.id, true).is_err());
+        }
+        let hidden = MemoryProposal::new(
+            operation.clone(),
+            None,
+            None,
+            "behind KESTREL",
+            "text",
+            Some(vec!["KESTREL".to_owned()]),
+            MemorySource::new("agent:007", None),
+            2.0,
+        );
+        registry.propose_memory(&hidden).unwrap();
+        let person = Holds::of(&operation);
+        let waiting = list_proposals(&registry, &person, &operation).unwrap();
+        assert_eq!(
+            waiting
+                .iter()
+                .map(|one| one.id.as_str())
+                .collect::<Vec<_>>(),
+            [proposal.id.as_str()]
+        );
+        assert!(matches!(
+            decide_proposal(&registry, &person, &hidden.id, true),
+            Err(MemoryRefusal::Missing)
+        ));
+
+        // Approved, it is kept with who asked as its source, still marked.
+        let entry = decide_proposal(&registry, &person, &proposal.id, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.header.source.by, "person:ana");
+        assert_eq!(entry.header.source.exposures, ["issue:github"]);
+        assert_eq!(entry.header.updated_by, "person:ana");
+        assert!(registry.memory_proposal(&proposal.id).unwrap().is_none());
+        assert!(
+            person
+                .audited
+                .borrow()
+                .iter()
+                .any(|(action, _)| action == AUDIT_APPROVED)
+        );
+        // Rejected, it goes and nothing is kept.
+        let MemoryOutcome::Proposed(again) =
+            write_entry(&registry, &agent, new_in(&operation, "no", "text")).unwrap()
+        else {
+            panic!("an Agent proposes");
+        };
+        assert_eq!(
+            decide_proposal(&registry, &person, &again.id, false).unwrap(),
+            None
+        );
+        assert!(registry.memory_proposal(&again.id).unwrap().is_none());
+        assert_eq!(registry.memory_headers(&operation).unwrap().len(), 1);
+        // A forget proposed by an Agent waits too.
+        let MemoryForgotten::Proposed(forgetting) =
+            forget_entry(&registry, &agent, &entry.header.id, None).unwrap()
+        else {
+            panic!("an Agent proposes a forget");
+        };
+        assert!(forgetting.forget);
+        assert!(registry.memory(&entry.header.id).unwrap().is_some());
+        decide_proposal(&registry, &person, &forgetting.id, true).unwrap();
+        assert!(registry.memory(&entry.header.id).unwrap().is_none());
     }
 }

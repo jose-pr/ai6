@@ -189,7 +189,7 @@ pub use directorates::registry::logbook::{
     is_head_of_station_role,
 };
 pub use directorates::registry::memories::{
-    MemoryEntry, MemoryError, MemoryHeader, MemoryScope, MemorySource, MemoryStore,
+    MemoryEntry, MemoryError, MemoryHeader, MemoryProposal, MemoryScope, MemorySource, MemoryStore,
 };
 pub use directorates::registry::mission_ids::{MissionEntry, run_id};
 pub use directorates::registry::quarantine::Quarantine;

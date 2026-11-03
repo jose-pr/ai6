@@ -61,7 +61,8 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// `access.manage` read and change a policy, at `config:access` (the global one) or
 /// `operation:<id>` (that Operation's); `account.manage` manages accounts at
 /// `config:accounts`. `compartment.read` and `compartment.manage` act on `compartment:<id>`;
-/// `compartment.cover` on `operation:<id>` is the Operation's consent to be covered.
+/// `compartment.cover` on `operation:<id>` is the Operation's consent to be covered. `memory.write`
+/// changes the memory of `operation:<id>`, or of everyone at `config:memory`.
 pub const ACTIONS: &[&str] = &[
     "access.manage",
     "access.read",
@@ -81,6 +82,7 @@ pub const ACTIONS: &[&str] = &[
     "issue.create",
     "issue.link",
     "issue.update",
+    "memory.write",
     "mission.control",
     "mission.create",
     "mission.read",
@@ -113,6 +115,7 @@ pub const OPERATION_ACTIONS: &[&str] = &[
     "issue.create",
     "issue.link",
     "issue.update",
+    "memory.write",
     "mission.control",
     "mission.create",
     "mission.read",
