@@ -45,6 +45,9 @@ use crate::Gateway;
 /// The scope every page audit record is made under.
 pub(crate) const RESOURCE: &str = "config:assistant";
 
+/// Where a page's top-level files read its feeds, `data/NAME`: no file of a page is under it.
+pub(crate) const FEEDS_DIR: &str = "data/";
+
 /// What she made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -571,6 +574,12 @@ impl PageStore {
                     limits.max_file_bytes
                 ));
             }
+        }
+        if let Some(path) = files.keys().find(|path| path.starts_with(FEEDS_DIR)) {
+            return Err(format!(
+                "{path} is under a top-level {FEEDS_DIR} directory, where a dashboard reads its \
+                 feeds as {FEEDS_DIR}NAME; put it in another directory"
+            ));
         }
         if !limits.max_page_bytes.allows(total as usize) {
             return Err(format!(
@@ -1160,13 +1169,15 @@ fn base_path(base: &str) -> &str {
 
 /// The routes of pages. `/v/{token}/` is a viewer's frame, bound to the browser that first
 /// asked for it; `/v/{view}/f/{path}` and `/v/{view}/data/{name}` are the page's files and feeds
-/// under the view token the frame names. `/s/{token}/` and `/s/{token}/f/{path}` are a public
-/// link's frame and files, with no feed. Nothing of `/v1`.
+/// under the view token the frame names, each feed also at `/v/{view}/f/data/{name}`, where
+/// `data/NAME` from a file at the top of the page leads. `/s/{token}/` and `/s/{token}/f/{path}`
+/// are a public link's frame and files, with no feed. Nothing of `/v1`.
 pub(crate) fn pages_router() -> Router<Gateway> {
     Router::new()
         .route("/v/{token}/", get(frame))
         .route("/v/{token}/f/{*path}", get(file))
         .route("/v/{token}/data/{name}", get(feed))
+        .route("/v/{token}/f/data/{name}", get(feed))
         .route("/s/{token}/", get(public_frame))
         .route("/s/{token}/f/{*path}", get(public_file))
 }

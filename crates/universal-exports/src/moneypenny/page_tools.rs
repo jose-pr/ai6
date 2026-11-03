@@ -29,7 +29,9 @@ pub(crate) const LIST: &str = "pages";
 
 pub(crate) const PUBLISH_DESCRIPTION: &str = "Publish a page the person opens in a browser tab \
     outside the app. kind is dashboard (reads live data through feeds, each a read tool with \
-    fixed input, run with the viewer's own permissions), report (a snapshot of data you put in \
+    fixed input, run with the viewer's own permissions; a script in a file at the top of the \
+    bundle fetches each as data/NAME, so no file may be under a top-level data/ directory), \
+    report (a snapshot of data you put in \
     the files; make one only when the person asks for a report) or file (one file shown by its \
     format: a log, CSV, Markdown, an image). Give path (a file or a directory under personal/ \
     or scratch/; a bundle's entry is index.html unless entry names another) or content (one \

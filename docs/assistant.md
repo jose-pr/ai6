@@ -974,8 +974,10 @@ may need a chart library or an API. What they cannot do is act as the app. Every
 carries `Content-Security-Policy: sandbox ...` without `allow-same-origin`, so the page is an
 opaque origin with no cookie, storage or sign-in of its host, `/v1` answers it no CORS header,
 and it cannot navigate the top window. Dashboards read **live** data: each feed is a read tool
-with input fixed at publish, run when the page asks for `data/NAME` as the link's viewer, so a
-viewer sees only what their own permissions allow and a revoked grant applies at once.
+with input fixed at publish, run when the page asks for `data/NAME` (from a file at the top
+of the page, such as its `index.html`) as the link's viewer, so a viewer sees only what their own
+permissions allow and a revoked grant applies at once. A bundle with a top-level `data/`
+directory is refused, so no file can stand in for a feed.
 Feeds read; they never propose or send. Options, set by an administrator for everyone:
 `scripts = false`, `network = "own"` (its own files and feeds) or `"none"` (its own files), `feeds
 = false`, and a separate origin for pages (`ai6.cfg`'s `[unex.pages] origin`). You may also open one

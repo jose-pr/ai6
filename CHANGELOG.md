@@ -561,6 +561,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   menu, `ai6ctl pages public`), which needs no sign-in, serves no feeds, lasts until turned off
   and is audited as `moneypenny.page.public`; `[assistant.pages] public = false` stops them, and
   a gateway serving pages on the API's own origin reports allowed public links as a weakening.
+  A script in a file at the top of a dashboard reads a feed as `data/NAME`, and a bundle with a
+  top-level `data/` directory is refused.
   `frame = false` drops only the bar: the page stays in the gateway's frame
   ([Moneypenny](https://jose-pr.github.io/ai6/assistant/)).
 - Moneypenny's proposals show what they rest on and what they touch. A proposal records the
