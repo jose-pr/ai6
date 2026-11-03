@@ -20,6 +20,8 @@ mod head_of_station;
 #[cfg(feature = "cables-mcp")]
 mod issues;
 mod medical;
+#[cfg(feature = "cables-mcp")]
+mod memories;
 mod models;
 mod promotion;
 mod recovery;
@@ -4317,6 +4319,7 @@ async fn start_mission(
             endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
             endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
             endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
+            endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
             if let Some(role) = mission.role_id.as_deref() {
                 endpoint.set_mission_role(role);
             }
@@ -5209,6 +5212,7 @@ async fn resume_mission(
         endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
         endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
+        endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
         }
