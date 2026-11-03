@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_route.dart';
+import '../shell/oo_markdown.dart';
 import '../shell/oo_shell.dart' show OoPage;
 import 'charts.dart';
 import 'entry_kind.dart';
@@ -1087,7 +1088,12 @@ class AssistantViewCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: switch (block) {
-                  TextBlock() => MarkdownText(block.markdown, onOpen: onOpen),
+                  TextBlock() => OoMarkdown(
+                    block.markdown,
+                    onOpen: onOpen,
+                    webLinks: false,
+                    selectable: false,
+                  ),
                   TableBlock() => AssistantTable(block.columns, block.rows),
                   KeyValuesBlock() => _PairsView(block.items),
                   ChartBlock() => ChartView(block),
@@ -1124,115 +1130,6 @@ class RefusedView extends StatelessWidget {
         title: const Text('View refused'),
         subtitle: Text(revealInvisible(reason)),
       ),
-    );
-  }
-}
-
-/// The Markdown subset of a text block: `#` headings, `-` lists, paragraphs, `**bold**`,
-/// `*italic*`, `` `code` `` and links into the app. Anything else is shown as written.
-class MarkdownText extends StatelessWidget {
-  const MarkdownText(this.markdown, {this.onOpen, super.key});
-
-  final String markdown;
-  final void Function(String link)? onOpen;
-
-  static final _inline = RegExp(
-    r'\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\((app:/[^)\s]*)\)',
-  );
-
-  List<InlineSpan> _spans(BuildContext context, String line) {
-    final theme = Theme.of(context);
-    final spans = <InlineSpan>[];
-    var at = 0;
-    for (final match in _inline.allMatches(line)) {
-      if (match.start > at) {
-        spans.add(TextSpan(text: line.substring(at, match.start)));
-      }
-      if (match.group(1) != null) {
-        spans.add(
-          TextSpan(
-            text: match.group(1),
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-        );
-      } else if (match.group(2) != null) {
-        spans.add(
-          TextSpan(
-            text: match.group(2),
-            style: const TextStyle(fontStyle: FontStyle.italic),
-          ),
-        );
-      } else if (match.group(3) != null) {
-        spans.add(
-          TextSpan(
-            text: match.group(3),
-            style: TextStyle(
-              fontFamily: 'monospace',
-              backgroundColor: theme.colorScheme.surfaceContainerHighest,
-            ),
-          ),
-        );
-      } else {
-        final link = match.group(5)!;
-        spans.add(
-          WidgetSpan(
-            alignment: PlaceholderAlignment.baseline,
-            baseline: TextBaseline.alphabetic,
-            child: InkWell(
-              onTap: onOpen == null ? null : () => onOpen!(link),
-              child: Text(
-                match.group(4)!,
-                style: TextStyle(
-                  color: theme.colorScheme.primary,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
-          ),
-        );
-      }
-      at = match.end;
-    }
-    if (at < line.length) spans.add(TextSpan(text: line.substring(at)));
-    return spans;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final children = <Widget>[];
-    for (final raw in revealInvisible(markdown).split('\n')) {
-      final line = raw.trimRight();
-      if (line.isEmpty) continue;
-      final heading = RegExp(r'^(#{1,3}) (.*)$').firstMatch(line);
-      if (heading != null) {
-        children.add(
-          Text.rich(
-            TextSpan(children: _spans(context, heading.group(2)!)),
-            style: heading.group(1)!.length == 1
-                ? theme.textTheme.titleLarge
-                : theme.textTheme.titleMedium,
-          ),
-        );
-      } else if (line.startsWith('- ') || line.startsWith('* ')) {
-        children.add(
-          Text.rich(
-            TextSpan(
-              children: [
-                const TextSpan(text: '•  '),
-                ..._spans(context, line.substring(2)),
-              ],
-            ),
-          ),
-        );
-      } else {
-        children.add(Text.rich(TextSpan(children: _spans(context, line))));
-      }
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      spacing: 4,
-      children: children,
     );
   }
 }

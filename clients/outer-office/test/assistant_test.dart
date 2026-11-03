@@ -122,8 +122,8 @@ void main() {
     await showView(tester, valid['text'], onOpen: opened.add);
     expect(find.text('Why mission-7 stalled'), findsOneWidget);
     expect(find.text('Stalled'), findsOneWidget);
-    expect(find.text('the Mission'), findsOneWidget);
-    await tester.tap(find.text('the Mission'));
+    expect(find.textRange.ofSubstring('the Mission'), findsOneWidget);
+    await tester.tapOnText(find.textRange.ofSubstring('the Mission'));
     expect(opened, ['app:/missions?operation_id=G&mission_id=mission-7']);
 
     await showView(tester, valid['table']);

@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart' show ControlSettings;
+import '../shell/oo_markdown.dart';
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
@@ -532,7 +533,12 @@ class _EntryView extends StatelessWidget {
                   bottomRight: Radius.circular(14),
                 ),
               ),
-              child: MarkdownText(entry.text, onOpen: onOpen),
+              child: OoMarkdown(
+                entry.text,
+                onOpen: onOpen,
+                webLinks: false,
+                selectable: false,
+              ),
             ),
           ),
           // Her words as she wrote them, Markdown included.
