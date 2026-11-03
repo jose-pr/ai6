@@ -54,6 +54,7 @@ const _tables = {
   'agents': 'agent',
   'roles': 'role',
   'covers': 'cover',
+  'reviews': 'review',
 };
 
 /// The kinds of record a form may name, and a person's word for one of each.
@@ -62,6 +63,7 @@ const _recordNames = {
   'agents': 'Agent',
   'roles': 'Role',
   'covers': 'Cover policy',
+  'reviews': 'Review policy',
   'assistant': "Moneypenny's settings",
 };
 

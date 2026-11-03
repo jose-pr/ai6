@@ -107,6 +107,7 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
             "compartment.cover",
             "compartment.manage",
             "memory.write",
+            "mission.review",
             "pool.manage",
             "roster.manage",
             "station.configure",

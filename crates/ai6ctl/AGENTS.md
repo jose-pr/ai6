@@ -125,6 +125,7 @@ Mission lists include only Missions with a provider Session registered at the ga
 
 ### Compartments
 
+- `ai6ctl reviews show --operation OP MISSION` prints each gate's review: `GATE POLICY STATUS iteration round sent back turns tokens`, then `why`, each seat (`seat N AGENT weight W [veto] MODEL`), each vote (`ITERATION.ROUND AGENT VOTE weight W MODEL REASONS`) and an overrule. `ai6ctl reviews overrule --operation OP MISSION [--gate output|plan] --decision pass|redo|refuse --reason TEXT` needs `mission.review`.
 - `ai6ctl compartments` lists what the person may read: `COMPARTMENT ACTIONS COVERS READ_IN`.
 - `ai6ctl compartments show <ID>`.
 - `ai6ctl compartments set <ID> [--description TEXT] [--actions a,b] [--min-clearance LEVEL]

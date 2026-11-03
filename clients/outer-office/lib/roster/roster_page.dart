@@ -144,6 +144,7 @@ const _kinds = {
   'agents': 'Agents',
   'roles': 'Agent roles',
   'covers': 'Cover policies',
+  'reviews': 'Review policies',
   _assistantKind: "Moneypenny's settings",
 };
 
@@ -156,6 +157,7 @@ const _routeKinds = {
   'agent': 'agents',
   'role': 'roles',
   'cover': 'covers',
+  'review': 'reviews',
   'assistant': _assistantKind,
 };
 

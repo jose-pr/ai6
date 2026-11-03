@@ -103,6 +103,7 @@ fn kind_of(kind: &str) -> Result<ConfigRecord, ApiError> {
         "agents" => "agent",
         "roles" => "role",
         "covers" => "cover",
+        "reviews" => "review",
         "assistant" => "assistant",
         "roster" => "roster",
         _ => return Err(ApiError::not_found()),
@@ -777,6 +778,7 @@ mod tests {
             "agents",
             "roles",
             "covers",
+            "reviews",
             "assistant",
             "roster",
         ] {

@@ -5,6 +5,7 @@
 //! compared with the revision it read. What decides stays in
 //! [`review`](crate::directorates::m::review); this is what a restart carries on from.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -133,6 +134,23 @@ pub struct Overrule {
     pub reason: String,
     /// When, as Unix seconds.
     pub at: f64,
+}
+
+impl Overrule {
+    /// `by`'s decision `decision` (`pass`, `redo` or `refuse`) for `reason`, at `at`.
+    pub fn new(
+        by: impl Into<String>,
+        decision: impl Into<String>,
+        reason: impl Into<String>,
+        at: f64,
+    ) -> Self {
+        Self {
+            by: by.into(),
+            decision: decision.into(),
+            reason: reason.into(),
+            at,
+        }
+    }
 }
 
 /// One gate's review of one Mission.
@@ -301,6 +319,64 @@ impl MissionReview {
     }
 }
 
+/// What reviews say of one Agent, for its scorecard: as an author, how often its work was put up
+/// and sent back; as a reviewer, how often it voted and how often against what its panel decided.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ReviewTally {
+    /// Times its work was put up for review.
+    pub put_up: u64,
+    /// Times its work was sent back.
+    pub sent_back: u64,
+    /// Votes it cast that judged (`pass` or `redo`).
+    pub votes: u64,
+    /// Of those, votes against what the panel decided in that round.
+    pub disagreed: u64,
+    /// Turns it was asked for and gave no answer that could be read.
+    pub absent: u64,
+}
+
+/// The tally of every Agent in `reviews`, by codename. A round's decision is what came of it: a
+/// redo when the work was sent back after it, a pass when the review passed in it; a round that
+/// ended otherwise counts no vote as disagreeing.
+pub fn tally(reviews: &[MissionReview]) -> BTreeMap<String, ReviewTally> {
+    let mut tallies = BTreeMap::<String, ReviewTally>::new();
+    for review in reviews {
+        let author = tallies.entry(review.author.clone()).or_default();
+        author.put_up += u64::from(review.iteration);
+        author.sent_back += u64::from(review.sent_back);
+        for vote in &review.votes {
+            let decided = if vote.iteration < review.iteration {
+                // Put up again after this round: the panel's last word on it was a redo, unless an
+                // earlier round of the same iteration went on to another.
+                let last_round = review
+                    .votes
+                    .iter()
+                    .filter(|other| other.iteration == vote.iteration)
+                    .map(|other| other.round)
+                    .max();
+                (last_round == Some(vote.round)).then_some(Vote::Redo)
+            } else if vote.round == review.round && review.status == ReviewStatus::Passed {
+                Some(Vote::Pass)
+            } else {
+                None
+            };
+            let reviewer = tallies.entry(vote.agent.clone()).or_default();
+            match vote.vote {
+                Vote::Pass | Vote::Redo => {
+                    reviewer.votes += 1;
+                    if decided.is_some_and(|decided| decided != vote.vote) {
+                        reviewer.disagreed += 1;
+                    }
+                }
+                Vote::Absent => reviewer.absent += 1,
+                Vote::Abstain => {}
+            }
+        }
+    }
+    tallies
+}
+
 /// Reads and writes Mission reviews.
 pub trait MissionReviewStore {
     /// The review of `mission_id` at `gate`, as last written.
@@ -422,6 +498,42 @@ mod tests {
     use super::*;
     use crate::directorates::m::review::PanelSeat;
     use crate::directorates::registry::suite::{Store, backend_tests};
+
+    #[test]
+    fn a_tally_counts_work_sent_back_and_votes_against_their_panel() {
+        let vote = |iteration, round, agent: &str, vote| RecordedVote {
+            iteration,
+            round,
+            seat: 0,
+            agent: agent.to_owned(),
+            model: "m".to_owned(),
+            weight: 1,
+            vote,
+            reasons: Vec::new(),
+            at: 1.0,
+        };
+        let mut review = review("m", ReviewGate::Output);
+        review.iteration = 2;
+        review.sent_back = 1;
+        review.status = ReviewStatus::Passed;
+        review.votes = vec![
+            vote(1, 1, "r1", Vote::Redo),
+            vote(1, 1, "r2", Vote::Pass),
+            vote(2, 1, "r1", Vote::Pass),
+            vote(2, 1, "r2", Vote::Absent),
+        ];
+        let tallies = tally(&[review]);
+        let author = &tallies["007"];
+        assert_eq!((author.put_up, author.sent_back), (2, 1));
+        let r1 = &tallies["r1"];
+        assert_eq!((r1.votes, r1.disagreed, r1.absent), (2, 0, 0));
+        let r2 = &tallies["r2"];
+        assert_eq!(
+            (r2.votes, r2.disagreed, r2.absent),
+            (1, 1, 1),
+            "it passed what was sent back, then gave no answer"
+        );
+    }
 
     backend_tests!(
         a_review_is_kept_per_gate_and_a_write_over_an_old_revision_loses,

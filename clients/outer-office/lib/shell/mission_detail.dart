@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../controls/mission_actions.dart';
 import '../issues/linked_issues.dart';
+import '../reviews/mission_reviews.dart';
 import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
@@ -202,6 +203,14 @@ class MissionDetail extends StatelessWidget {
                   label: const Text('Timeline'),
                 ),
             ],
+          ),
+          const SizedBox(height: 16),
+          MissionReviewsSection(
+            // Keyed so that opening another Mission reads its own reviews.
+            key: ValueKey(('reviews', operationId, mission.missionId)),
+            board: board,
+            operationId: operationId,
+            missionId: mission.missionId,
           ),
           const SizedBox(height: 16),
           LinkedIssuesSection(

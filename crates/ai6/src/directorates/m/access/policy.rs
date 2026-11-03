@@ -227,6 +227,7 @@ pub fn seeded_policy() -> AccessPolicy {
     ];
     const ADMINISTER: [&str; 10] = [
         "memory.write",
+        "mission.review",
         "compartment.manage",
         "compartment.cover",
         "roster.manage",

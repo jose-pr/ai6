@@ -16,6 +16,7 @@ mod memories;
 mod models;
 mod moneypenny;
 mod pools;
+mod reviews;
 mod roster;
 mod timeline;
 mod tree;
@@ -1479,6 +1480,14 @@ impl Gateway {
                 post(held::refuse),
             )
             .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/reviews",
+                get(reviews::list),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/reviews/{gate}/overrule",
+                post(reviews::overrule),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/agent-roles",
                 get(list_user_agent_roles),
             )
@@ -2122,6 +2131,24 @@ async fn create_user_mission(
     if !decision.allowed {
         return Err(ApiError::forbidden());
     }
+    // A person's naming may weaken a review, so it takes the action that decides over reviews.
+    if let Some(review) = &request.review {
+        if review
+            .named()
+            .chain(
+                review
+                    .plan
+                    .iter()
+                    .chain(review.output.iter())
+                    .map(String::as_str),
+            )
+            .any(|name| name.trim().is_empty() || name.len() > 128)
+        {
+            return Err(ApiError::bad_request());
+        }
+        authorize_operation_action(&gateway, person.clone(), &operation_id, "mission.review")
+            .await?;
+    }
 
     let created = utc_timestamp()?;
     let received_at = unix_timestamp()? as i64;
@@ -2148,7 +2175,16 @@ async fn create_user_mission(
         stations: request.stations,
         priority: 0,
         url: None,
-        data: BTreeMap::new(),
+        data: request
+            .review
+            .as_ref()
+            .map(|review| {
+                BTreeMap::from([(
+                    ai6::directorates::m::review::BRIEF_REVIEW_KEY.to_owned(),
+                    serde_json::to_value(review).unwrap_or_default(),
+                )])
+            })
+            .unwrap_or_default(),
         created,
         version: 1,
         provenance: None,
@@ -4199,6 +4235,9 @@ struct CreateUserMissionRequest {
     tags: Vec<String>,
     #[serde(default)]
     stations: Vec<String>,
+    /// The review policy per gate, `none` included; naming one needs `mission.review`.
+    #[serde(default)]
+    review: Option<ai6::ReviewChoice>,
 }
 
 #[derive(Serialize)]

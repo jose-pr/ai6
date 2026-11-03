@@ -32,6 +32,7 @@ import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
 import 'issues/linked_issues.dart';
 import 'pools/pools_page.dart';
+import 'reviews/mission_reviews.dart';
 import 'roster/record_editor.dart';
 import 'roster/roster_page.dart';
 import 'routes/oo_filters.dart';
@@ -959,6 +960,56 @@ class MissionBoard extends ChangeNotifier implements PageActions {
       ),
     ],
   );
+
+  /// Each gate's review of a Mission; none in preview.
+  Future<List<MissionReviewSummary>> loadMissionReviews(
+    String operationId,
+    String missionId,
+  ) async {
+    if (demo) return const [];
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/missions/${Uri.encodeComponent(missionId)}/reviews',
+    );
+    if (response.statusCode == 404) return const [];
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the reviews.',
+      );
+    }
+    return (jsonDecode(response.body) as List<dynamic>)
+        .map(
+          (review) =>
+              MissionReviewSummary.fromJson(review as Map<String, dynamic>),
+        )
+        .toList();
+  }
+
+  /// Decides over a Mission's review panel: `pass`, `redo` or `refuse`, with a reason.
+  Future<void> overruleReview(
+    String operationId,
+    String missionId,
+    String gate,
+    String decision,
+    String reason,
+  ) async {
+    if (demo) throw StateError('Deciding a review is unavailable in preview.');
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/missions/${Uri.encodeComponent(missionId)}/reviews/'
+          '${Uri.encodeComponent(gate)}/overrule',
+      body: {'decision': decision, 'reason': reason},
+    );
+    if (response.statusCode >= 300) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the decision.',
+      );
+    }
+  }
 
   String _missionIssuesPath(String operationId, String missionId) =>
       '/v1/user/operations/${Uri.encodeComponent(operationId)}'

@@ -69,7 +69,7 @@ pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.man
                               // agent.configure, agent.read, approval.class,
                               // approval.decide, assistant.memory.admin, audit.read,
                               // cable.read, cable.send, compartment.cover, compartment.manage,
-                              // compartment.read, mission.control, mission.create, mission.read,
+                              // compartment.read, mission.control, mission.create, mission.read, mission.review,
                               // mission.status, pool.manage, pool.read, product.read, roster.manage,
                               // roster.read, session.input, session.read,
                               // station.configure, station.read; cable.* on operation:<id>
@@ -270,7 +270,8 @@ ReviewMaterial, tokens, overrule }` (`open`, `vote_of`, `asked_of`, `record_vote
 `ballots`, `turns`, `others_reasons`, `redo_reasons`); `ReviewStatus { Reviewing, Waiting, Person,
 SendingBack, Redoing, Passed, Refused }`; `MissionReviewStore` on `RegistryBackend`: `mission_review`,
 `mission_reviews`, `put_mission_review` (written only over the revision read; `None` when another
-wrote first); `update_mission_review(store, (mission, gate), tries, change)`. SQL table
+wrote first); `tally(&[MissionReview]) -> BTreeMap<String, ReviewTally { put_up, sent_back, votes,
+disagreed, absent }>` for an Agent's scorecard; `update_mission_review(store, (mission, gate), tries, change)`. SQL table
 `ai6_mission_reviews`, made at the next open. `Mission.review_naming: Option<BriefNaming>`,
 `StationLimits.review: ReviewLimits` (`[review]`), and a safe house's change: `SafeHouseDiff { text,
 cut }`, the kind method `SafeHouseSession::diff(bytes)` (unsupported by default; `git` gives the working

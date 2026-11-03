@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod access;
 mod compartments;
 mod memories;
+mod reviews;
 
 use clap::{Args, Parser, Subcommand};
 use reqwest::{Client, Method, StatusCode, Url};
@@ -117,6 +118,11 @@ enum Command {
         compartment: Option<String>,
         #[command(subcommand)]
         command: Option<MissionsCommand>,
+    },
+    /// Show a Mission's reviews, or decide over a panel with a reason.
+    Reviews {
+        #[command(subcommand)]
+        command: reviews::ReviewsCommand,
     },
     /// List the compartments you may read, or show, change, cover or read into one.
     Compartments {
@@ -1152,6 +1158,10 @@ async fn run() -> Result<(), String> {
                 None => missions(&client, &server, &token, filter).await?,
             };
             print_missions(listed);
+        }
+        Command::Reviews { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            reviews::run(&client, &server, &token, command).await?;
         }
         Command::Compartments { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
