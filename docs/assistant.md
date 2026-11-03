@@ -917,8 +917,22 @@ styles and images of a bundle load as they are; anything else (a PDF included) d
 
 A page is kept for a day unless you **Remember** it, counts toward quotas
 (`[assistant.pages]`, [Moneypenny's limits](configuration.md#moneypennys-limits)) and is audited
-(`moneypenny.page.published`, `.opened`, `.remembered`, `.forgotten`, `.deleted`, `.expired`).
-Only you can open it: another person, an administrator included, gets 404. The link is a
+(`moneypenny.page.published`, `.opened`, `.remembered`, `.forgotten`, `.shared`, `.deleted`,
+`.expired`). Only you, and whoever you share it with, can ask for a link to it: another person,
+an administrator included, gets 404 from `POST /v1/user/pages/{id}/open`.
+
+**Share** (the card's menu, `PUT /v1/user/pages/{id}/shares {subjects}`, `ai6ctl pages share ID
+SUBJECT...`) names whom it reaches, in place of whom it reached: `person:ID`, `group:NAME` or
+`account:NAME`, `compartment:ID` (the people read into it; only one you are read into) or
+`operation:ID` (the people who hold `mission.read` there, compartments and parent Operations
+included; only one where you do). An empty list shares it with nobody. A viewer's feeds run with
+that viewer's own permissions, so they see only what they may read; a report shows what you
+could read when she made it, to everyone it reaches. A viewer no share names any longer loses
+their link at once, as does one read out of the compartment or losing `mission.read`. Only you
+change its shares, remember, forget or delete it; the bar tells a viewer it was shared by you.
+**Her pages**, in her chat's menu, lists your pages and then those shared with you. An
+administrator turns sharing off with `[assistant.pages] sharing = false`, and existing shares then
+grant nothing; `max_shares` (32) bounds the subjects of one page. The link is a
 capability, `{pages base}/v/{token}/`, valid for an hour, bound to your sign-in (signing out
 ends it) and to a network profile; the app mints it when you click. Opening shows the gateway's
 **classification bar** over the page: "Made by Moneypenny for you, not part of Outer Office",

@@ -545,8 +545,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   it, and the Station names the web tool and host instead of `tool:outside-text`. Outer
   Office shows each page as a card (kind, size, expiry or Remembered, what she read, its
   feeds) whose Open launches it outside the app, with a menu to open it with the network
-  off, remember or forget it and delete it; `ai6ctl pages list | open | remember | forget |
-  rm` does the same. Sharing a page waits for compartments
+  off, remember, forget, share or delete it, and **Her pages** in her chat's menu lists the
+  person's pages and those shared with them; `ai6ctl pages list | open | remember | forget |
+  share | rm` does the same. A person shares their page (`PUT /v1/user/pages/{id}/shares`)
+  with `person:`, `group:` and `account:` subjects, a compartment they are read into or an
+  Operation where they hold `mission.read`, audited as `moneypenny.page.shared`; each viewer's
+  feeds run with that viewer's permissions, a viewer no share names any longer loses the link
+  at once, and `[assistant.pages] sharing = false` turns sharing off and shares grant nothing
   ([Moneypenny](https://jose-pr.github.io/ai6/assistant/)).
 - Moneypenny's proposals show what they rest on and what they touch. A proposal records the
   read tools she called since the person's last message (each with its identifier arguments
