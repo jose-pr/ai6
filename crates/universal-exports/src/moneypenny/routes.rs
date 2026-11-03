@@ -187,11 +187,14 @@ impl Page {
                 ("operation_id", Identifier),
                 ("agent", Identifier),
                 ("role", Identifier),
+                ("mission_id", Identifier),
             ],
             Self::GreenInk => &[
                 ("tab", OneOf(GREEN_INK_TABS)),
                 ("operation_id", Identifier),
                 ("request_id", Identifier),
+                ("agent", Identifier),
+                ("mission_id", Identifier),
             ],
             Self::Briefings => &[
                 ("tab", OneOf(BRIEFING_TABS)),
@@ -199,7 +202,11 @@ impl Page {
                 ("item_id", Identifier),
             ],
             Self::Roster => &[("kind", OneOf(ROSTER_KINDS)), ("key", Identifier)],
-            Self::Pools => &[("operation_id", Identifier), ("pool", Identifier)],
+            Self::Pools => &[
+                ("operation_id", Identifier),
+                ("pool", Identifier),
+                ("mission_id", Identifier),
+            ],
             Self::Timeline => &[("operation_id", Identifier), ("mission_id", Identifier)],
             Self::Audit => &[("operation_id", Identifier), ("station_id", Identifier)],
             Self::Access => &[("tab", OneOf(ACCESS_TABS)), ("operation_id", Identifier)],

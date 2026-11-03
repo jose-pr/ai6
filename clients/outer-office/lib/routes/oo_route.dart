@@ -91,11 +91,14 @@ const _fields = <OoPage, List<_Field>>{
     _Field('operation_id', _Kind.identifier),
     _Field('agent', _Kind.identifier),
     _Field('role', _Kind.identifier),
+    _Field('mission_id', _Kind.identifier),
   ],
   OoPage.greenInk: [
     _Field('tab', _Kind.oneOf, ['inbox', 'classes']),
     _Field('operation_id', _Kind.identifier),
     _Field('request_id', _Kind.identifier),
+    _Field('agent', _Kind.identifier),
+    _Field('mission_id', _Kind.identifier),
   ],
   OoPage.briefings: [
     _Field('tab', _Kind.oneOf, ['proposals', 'held']),
@@ -115,6 +118,7 @@ const _fields = <OoPage, List<_Field>>{
   OoPage.pools: [
     _Field('operation_id', _Kind.identifier),
     _Field('pool', _Kind.identifier),
+    _Field('mission_id', _Kind.identifier),
   ],
   OoPage.timeline: [
     _Field('operation_id', _Kind.identifier),

@@ -41,11 +41,17 @@
       "uri": "app:/green_ink?tab=inbox&operation_id=G&request_id=ink-1"
     },
     {
+      "json": {"page": "green_ink", "agent": "007", "mission_id": "G-42"},
+      "uri": "app:/green_ink?agent=007&mission_id=G-42"
+    },
+    {"json": {"page": "agents", "mission_id": "G-42"}, "uri": "app:/agents?mission_id=G-42"},
+    {
       "json": {"page": "briefings", "tab": "held", "operation_id": "G", "item_id": "G/issue 4"},
       "uri": "app:/briefings?tab=held&operation_id=G&item_id=G%2Fissue%204"
     },
     {"json": {"page": "roster", "kind": "agent", "key": "008"}, "uri": "app:/roster?kind=agent&key=008"},
     {"json": {"page": "pools", "operation_id": "G", "pool": "claude-max"}, "uri": "app:/pools?operation_id=G&pool=claude-max"},
+    {"json": {"page": "pools", "mission_id": "G-42"}, "uri": "app:/pools?mission_id=G-42"},
     {
       "json": {"page": "timeline", "operation_id": "G", "mission_id": "mission-7"},
       "uri": "app:/timeline?operation_id=G&mission_id=mission-7"
