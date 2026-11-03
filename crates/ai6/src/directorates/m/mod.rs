@@ -12,6 +12,7 @@ pub mod identity;
 pub mod inherit;
 pub mod issues;
 pub mod limits;
+pub mod memories;
 pub mod mission;
 pub mod placement;
 pub mod promotion;

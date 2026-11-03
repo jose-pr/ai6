@@ -239,8 +239,9 @@ pub(super) struct Statement {
 ///
 /// # Errors
 ///
-/// `InvalidData` for anything but `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS` and
-/// the clock's `INSERT`, which could not be run again at every open.
+/// `InvalidData` for anything but `CREATE TABLE IF NOT EXISTS`, `CREATE VIRTUAL TABLE IF NOT
+/// EXISTS`, `CREATE INDEX IF NOT EXISTS` and the clock's `INSERT`, which could not be run again at
+/// every open.
 pub(super) fn statements(schema: &str) -> io::Result<Vec<Statement>> {
     let code: String = schema
         .lines()
@@ -251,11 +252,15 @@ pub(super) fn statements(schema: &str) -> io::Result<Vec<Statement>> {
         .map(str::trim)
         .filter(|statement| !statement.is_empty())
         .map(|text| {
-            let creates = ["CREATE TABLE IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS "]
-                .into_iter()
-                .find_map(|head| text.strip_prefix(head))
-                .and_then(|rest| rest.split_whitespace().next())
-                .map(str::to_owned);
+            let creates = [
+                "CREATE TABLE IF NOT EXISTS ",
+                "CREATE VIRTUAL TABLE IF NOT EXISTS ",
+                "CREATE INDEX IF NOT EXISTS ",
+            ]
+            .into_iter()
+            .find_map(|head| text.strip_prefix(head))
+            .and_then(|rest| rest.split_whitespace().next())
+            .map(str::to_owned);
             if creates.is_none() && !text.starts_with("INSERT INTO ai6_clock ") {
                 return Err(invalid(format!("not a repeatable statement: {text}")));
             }

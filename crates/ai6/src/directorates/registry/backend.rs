@@ -27,6 +27,7 @@ pub use super::approvals::ApprovalStore;
 pub use super::clearance::ClearanceStore;
 pub use super::holds::HoldStore;
 pub use super::logbook::LogbookStore;
+pub use super::memories::MemoryStore;
 pub use super::mission_issues::MissionIssueStore;
 pub use super::quarantine::QuarantineStore;
 pub use super::sessions::SessionStore;
@@ -66,6 +67,7 @@ pub trait RegistryBackend:
     + ClearanceStore
     + HoldStore
     + LogbookStore
+    + MemoryStore
     + MissionIssueStore
     + QuarantineStore
     + SessionStore
@@ -145,6 +147,7 @@ impl<T> RegistryBackend for T where
         + ClearanceStore
         + HoldStore
         + LogbookStore
+        + MemoryStore
         + MissionIssueStore
         + QuarantineStore
         + SessionStore

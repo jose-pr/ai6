@@ -180,13 +180,16 @@ pub use directorates::registry::clearance::ClearanceGrant;
 pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, RosterHold};
 pub use directorates::registry::limits::{
     AccountLimits, AgentLimits, AgentRoleLimits, ApprovalLimits, AuditLimits, BriefLimits,
-    CableLimits, ClearanceLimits, FileLimits, HeldLimits, HoldLimits, LogbookLimits,
+    CableLimits, ClearanceLimits, FileLimits, HeldLimits, HoldLimits, LogbookLimits, MemoryLimits,
     ProposalLimits, QuarantineLimits, RegistryLimits, SessionLimits, SleeperLimits, SourceLimits,
     StationLimits, TimelineLimits, TokenLimits, UsageLimits,
 };
 pub use directorates::registry::logbook::{
     HEAD_OF_STATION_ROLE, Severity, StationFinding, StationFindingKind, StationReport,
     is_head_of_station_role,
+};
+pub use directorates::registry::memories::{
+    MemoryEntry, MemoryError, MemoryHeader, MemoryScope, MemorySource, MemoryStore,
 };
 pub use directorates::registry::mission_ids::{MissionEntry, run_id};
 pub use directorates::registry::quarantine::Quarantine;

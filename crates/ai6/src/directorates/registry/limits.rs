@@ -71,6 +71,10 @@ pub struct RegistryLimits {
     #[schema(title = "Station logbooks")]
     #[map(default)]
     pub logbook: LogbookLimits,
+    /// `[registry.limits.memories]`: memory entries, per scope.
+    #[schema(title = "Memory entries")]
+    #[map(default)]
+    pub memories: MemoryLimits,
     /// `[registry.limits.proposals]`: Mission proposals.
     #[schema(title = "Mission proposals")]
     #[map(default)]
@@ -459,6 +463,73 @@ impl Default for HoldLimits {
             record_bytes: Limit::at(16 * KIB),
             holds: Limit::at(10_000),
             text_bytes: Limit::at(2_048),
+        }
+    }
+}
+
+/// `[registry.limits.memories]`: what one memory scope (a person, an Operation, the global one)
+/// may hold.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct MemoryLimits {
+    /// Bytes of one entry's content.
+    #[schema(title = "Longest entry", format = "bytes")]
+    #[map(default = MemoryLimits::default().content_bytes)]
+    pub content_bytes: Limit,
+    /// Entries in one scope.
+    #[schema(title = "Entries in a scope")]
+    #[map(default = MemoryLimits::default().entries)]
+    pub entries: Limit,
+    /// Bytes of every entry's name, summary and content in one scope.
+    #[schema(title = "All the entries of a scope", format = "bytes")]
+    #[map(default = MemoryLimits::default().scope_bytes)]
+    pub scope_bytes: Limit,
+    /// Prior versions kept of one entry; forgetting the entry removes them. `0` keeps none.
+    #[schema(title = "Prior versions of an entry")]
+    #[map(default = MemoryLimits::default().versions)]
+    pub versions: Limit,
+    /// Bytes of an entry's one-line summary.
+    #[schema(title = "Longest summary", format = "bytes")]
+    #[map(default = MemoryLimits::default().summary_bytes)]
+    pub summary_bytes: Limit,
+    /// Bytes of an entry's name, or of who wrote it.
+    #[schema(title = "Longest name or author", format = "bytes")]
+    #[map(default = MemoryLimits::default().name_bytes)]
+    pub name_bytes: Limit,
+    /// Compartments on one entry, each at most `name_bytes`.
+    #[schema(title = "Compartments on an entry")]
+    #[map(default = MemoryLimits::default().compartments)]
+    pub compartments: Limit,
+    /// Bytes of an entry's distinct words a database's text index holds. A word past it is found
+    /// only by a search that matched another word of the entry, and PostgreSQL refuses an index
+    /// of 1 MiB or more for one entry.
+    #[schema(title = "Words of an entry in the text index", format = "bytes")]
+    #[map(default = MemoryLimits::default().index_bytes)]
+    pub index_bytes: Limit,
+    /// Entries one search answers.
+    #[schema(title = "Entries a search answers")]
+    #[map(default = MemoryLimits::default().search_results)]
+    pub search_results: Limit,
+    /// Bytes of what one search asks for.
+    #[schema(title = "Longest search", format = "bytes")]
+    #[map(default = MemoryLimits::default().query_bytes)]
+    pub query_bytes: Limit,
+}
+
+impl Default for MemoryLimits {
+    fn default() -> Self {
+        Self {
+            content_bytes: Limit::at(256 * KIB),
+            entries: Limit::at(1_024),
+            scope_bytes: Limit::at(8 * MIB),
+            versions: Limit::at(8),
+            summary_bytes: Limit::at(KIB),
+            name_bytes: Limit::at(256),
+            compartments: Limit::at(16),
+            index_bytes: Limit::at(512 * KIB),
+            search_results: Limit::at(50),
+            query_bytes: Limit::at(4 * KIB),
         }
     }
 }
