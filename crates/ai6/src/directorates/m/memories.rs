@@ -1318,7 +1318,7 @@ mod tests {
         };
         read_entry(&registry, &reader, &poisoned.header.id).unwrap();
         let mark = format!("memory:{}", poisoned.header.id);
-        assert_eq!(reader.seen.borrow().as_slice(), [mark.clone()]);
+        assert_eq!(reader.seen.borrow().as_slice(), std::slice::from_ref(&mark));
         let edit = MemoryChange::new(
             MemoryTarget::Existing {
                 id: poisoned.header.id.clone(),
@@ -1339,7 +1339,7 @@ mod tests {
             ..Holds::of(&operation)
         };
         list_entries(&registry, &lister, &operation).unwrap();
-        assert_eq!(lister.seen.borrow().as_slice(), [mark.clone()]);
+        assert_eq!(lister.seen.borrow().as_slice(), std::slice::from_ref(&mark));
         let searcher = Holds {
             agent: true,
             ..Holds::of(&operation)
@@ -1347,7 +1347,7 @@ mod tests {
         search_entries(
             &registry,
             &searcher,
-            &[operation.clone()],
+            std::slice::from_ref(&operation),
             "zebra",
             &MemoryLimits::default(),
         )

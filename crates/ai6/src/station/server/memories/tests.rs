@@ -309,7 +309,10 @@ fn a_poisoned_entry_marks_the_next_reader_stays_fenced_and_carries_its_mark_on()
         .memory(answer["id"].as_str().unwrap())
         .unwrap()
         .unwrap();
-    assert_eq!(derived.header.source.exposures, [source.clone()]);
+    assert_eq!(
+        derived.header.source.exposures,
+        std::slice::from_ref(&source)
+    );
     // An edit by an Agent keeps the mark, whatever it says.
     let clean = reader("licensed");
     let change = MemoryChange::new(

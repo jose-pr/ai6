@@ -1070,11 +1070,11 @@ mod tests {
         );
         assert_eq!(
             found(registry.as_ref(), &[person("ana")], "ana"),
-            [hers.header.id.clone()]
+            std::slice::from_ref(&hers.header.id)
         );
         assert_eq!(
             found(registry.as_ref(), &[person("ANA")], "another"),
-            [other.header.id.clone()]
+            std::slice::from_ref(&other.header.id)
         );
         assert!(found(registry.as_ref(), &[person("ana")], "another").is_empty());
         // An entry cannot be moved to another scope by naming its ID there.
@@ -1215,14 +1215,14 @@ mod tests {
         for query in ["gateway", "EXAMPLE", "api-gateway", "8443", "com"] {
             assert_eq!(
                 found(registry.as_ref(), &scopes, query),
-                [hyphen.clone()],
+                std::slice::from_ref(&hyphen),
                 "{query}"
             );
         }
         assert!(found(registry.as_ref(), &scopes, "gate").is_empty());
         assert_eq!(
             found(registry.as_ref(), &scopes, "mañana"),
-            [accent.clone()]
+            std::slice::from_ref(&accent)
         );
         assert_eq!(found(registry.as_ref(), &scopes, "CAFÉ"), [accent]);
         // Syntax of an index's own query language is only words.

@@ -418,7 +418,7 @@ async fn a_protected_entry_is_invisible_to_who_is_not_read_in_and_answers_as_a_m
     assert_eq!(hidden_answers, missing_answers);
     assert_eq!(hidden_answers[0].0, StatusCode::NOT_FOUND);
     let (found, total, body) = fixture.search(&viewer, "needle").await;
-    assert_eq!(found, [open.clone()]);
+    assert_eq!(found, std::slice::from_ref(&open));
     assert_eq!(total, 1, "a total tells nothing of it");
     assert!(!body.to_string().contains("secret"), "{body}");
     let (_, listed) = fixture
