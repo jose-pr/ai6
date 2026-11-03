@@ -2431,6 +2431,52 @@ impl Scorecard { pub fn build(operation: &str, records: &[SessionRecord],
 The Station writes `SessionLaunch.agent` and a `SessionResult` at every sync of the Mission's state
 to its Session record; Universal Exports serves the scorecard (`GET .../agents/scorecard`).
 
+### Stewardship and holds (`ai6::directorates::m::stewardship`, `ai6::directorates::registry::holds`)
+
+What M files from the scorecard. `propose(card, agents, held, policy)` is pure: it returns the
+`Proposal`s a round files, each with the numbers and Missions in its `reason`. Every rule is off
+until `StewardshipPolicy` sets its threshold; a row with `small_sample` is never judged; an Agent
+with no roles, a held Agent or route, and a model in `never_prefer` are never proposed.
+
+```rust
+pub const HOLD_KIND: &str = "hold"; pub const PREFER_KIND: &str = "prefer";   // green ink kinds
+#[non_exhaustive] pub struct StewardshipPolicy { pub propose: bool /* true */,
+    pub hold_above: Option<f64>, pub reorder_gap: Option<f64>, pub auto_hold: bool /* false */,
+    pub never_prefer: Vec<String> }       // Operation.stewardship; [operation.ID.scorecard] keys
+#[non_exhaustive] pub enum Step { Hold { agent: String, route: Option<RouteRef> },
+                                  Prefer { agent: String, over: String } }   // exported as ProposedStep
+#[non_exhaustive] pub struct Proposal { pub step: Step, pub target: String /* AGENT@OP,
+    AGENT:HANDLER/MODEL/POOL@OP, AGENT>OVER@OP */, pub reason: String, pub judged: u64 }
+pub fn propose(card: &Scorecard, agents: &[AgentFacts], held: &[RosterHold],
+               policy: &StewardshipPolicy) -> Vec<Proposal>;
+/// The roles a hold would leave with no Agent able to take them; empty allows the hold.
+pub fn roles_left_empty(agents: &[AgentFacts], holding: &str, route: Option<&RouteRef>,
+    unavailable: &[String], held_routes: &[RosterHold]) -> Vec<String>;
+
+#[non_exhaustive] pub struct RosterHold { pub operation: String, pub agent: String,
+    pub route: Option<RouteRef> /* None: the whole Agent */, pub reason: String,
+    pub by: String /* a person, or AUTOMATIC_HOLD ("m") */, pub at: f64,
+    pub approval: Option<String> /* the green ink request that signed it */ }
+impl RosterHold { pub fn new(operation, agent, route, reason, by, at) -> Self;
+    pub fn signed_through(self, approval) -> Self; pub fn holds_agent(&self) -> bool;
+    pub fn covers(&self, route: &RouteRef) -> bool; pub fn validate(&self, &HoldLimits) -> io::Result<()> }
+pub trait HoldStore {   // part of RegistryBackend; `holds/OPERATION/AGENT--ROUTE.json`, table ai6_roster_holds
+    fn put_hold(&self, hold: &RosterHold) -> io::Result<()>;          // replaces the same Agent/route
+    fn holds(&self, operation: &str) -> io::Result<Vec<RosterHold>>;
+    fn lift_hold(&self, operation: &str, agent: &str, route: Option<&RouteRef>)
+        -> io::Result<Option<RosterHold>>;
+}
+pub struct HoldLimits { pub record_bytes, pub holds, pub text_bytes }   // [registry.limits.holds]
+```
+
+The Station's round (`station::server::stewardship`, Headquarters, with promotion) files each
+proposal as a green ink request under Session `m` and Mission `hold-AGENT`/`prefer-AGENT`,
+idempotency key `TARGET#(judged / small_sample)`. A `hold` a person signed (not an expiry, not a
+class authorisation) is spent and becomes a hold in the signer's name; a `prefer` only closes. With
+`auto_hold` it holds by itself and audits `agent.hold.applied`. Selection (`agents::select`,
+`reassign_if_unavailable`) passes held Agents over; `routes::standing_of` refuses a held route. Nothing
+touches a running Session.
+
 ## Promotion and clearance grants (`ai6::directorates::m::promotion`, `ai6::directorates::registry::clearance`)
 
 Autonomy is earned per Operation and signed by a person. M (the Headquarters Station, each

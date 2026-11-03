@@ -14,6 +14,7 @@ pub mod backend;
 pub mod bona_fides;
 pub mod cables;
 pub mod clearance;
+pub mod holds;
 pub mod limits;
 pub mod logbook;
 pub mod mission_ids;

@@ -32,7 +32,7 @@ origin leaves the public roots alone.
 - `ai6ctl station <STATION_ID>` prints one visible Station row (no header); exit `1` if absent.
 - `ai6ctl agents --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/agents`
   as tab-separated `AGENT POSTED DONE FAILED BLOWN ABANDONED STALLED LOST QUARANTINED BUDGET_STOPS
-  GREEN_INK_REJECTED LAST_MISSION_UNIX MODEL RETIREMENT CLEARANCE PROMOTION` (one header line):
+  GREEN_INK_REJECTED LAST_MISSION_UNIX MODEL RETIREMENT CLEARANCE PROMOTION HOLDS` (one header line):
   counts in that Operation (`LOST`: Sessions lost with their Station or runner, never
   failures), `QUARANTINED` adding quarantines of every Operation, `LAST_MISSION_UNIX` `-`
   before any, `MODEL` the current occupant (`default` for the handler's own, `-` before any
@@ -40,6 +40,12 @@ origin leaves the public roots alone.
   `CLEARANCE` the clearance it works at there (`field(configured:desk)` when a grant moved it,
   `-` unknown) and `PROMOTION` `REQUEST_ID:AGENT:CLEARANCE@OPERATION` while M's promotion
   request waits for green ink, else `-`. A refusal names `agent.read`.
+- `HOLDS` of `ai6ctl agents` lists the holds that keep the Agent (`agent`) or a route
+  (`HANDLER/MODEL/POOL`, `-` unset) out of use, each `WHAT:BY`, comma-separated; `-` for none. A
+  route hold needs `roster.read` to be shown. `ai6ctl agents lift <AGENT> [--handler H [--model M]
+  [--pool P]] --operation <ID>` deletes `.../agents/{agent}/hold` (the whole Agent's hold, or that
+  route's) and prints `AGENT: hold by WHO lifted in ID: REASON` (`404`, no such hold, exits 1);
+  needs `agent.configure`, audited as `agent.hold.lifted`.
 - `ai6ctl agents scorecard --operation <ID> [--window-days N] [--show JUDGMENT]` prints
   `GET .../agents/scorecard` as a `#` line (the window and small-sample line) and tab-separated
   `AGENT ROUTE JUDGED FAILURE_RATE SAMPLE` then one column per judgment (`DONE FAILED BLOWN STALLED

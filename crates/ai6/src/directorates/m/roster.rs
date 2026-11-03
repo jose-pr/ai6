@@ -27,6 +27,7 @@ use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
 use crate::directorates::m::records;
 use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
 use crate::directorates::m::scorecard::{ScorecardDefinition, ScorecardPolicy};
+use crate::directorates::m::stewardship::StewardshipPolicy;
 use crate::directorates::m::vetting::{VettingPolicy, VettingSetting, policy_of};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
@@ -620,6 +621,8 @@ pub struct Operation {
     pub promotion: PromotionPolicy,
     /// What its scorecard covers.
     pub scorecard: ScorecardPolicy,
+    /// What M may do from the scorecard.
+    pub stewardship: StewardshipPolicy,
     /// Each key its definition was resolved with, dotted, and the Operation that wrote it.
     origins: BTreeMap<String, String>,
     /// The definition it was resolved from, its ancestors' keys layered in.
@@ -1984,6 +1987,10 @@ impl OperationDefinition {
             .promotion
             .resolve()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let stewardship = self
+            .scorecard
+            .rules()
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         Ok(Operation {
             id,
             parent: self.parent,
@@ -2027,6 +2034,7 @@ impl OperationDefinition {
             harness: self.harness,
             promotion,
             scorecard: self.scorecard.resolve(),
+            stewardship,
             origins: BTreeMap::new(),
             definition: serde_json::Map::new(),
         })

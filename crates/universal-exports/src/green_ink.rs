@@ -206,7 +206,12 @@ pub(crate) async fn approve(
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(registry_error)?;
-    if status.is_some_and(|status| status.request().scope.kind == CLEARANCE_KIND) {
+    if status.is_some_and(|status| {
+        matches!(
+            status.request().scope.kind.as_str(),
+            CLEARANCE_KIND | ai6::HOLD_KIND
+        )
+    }) {
         authorize_operation_action(&gateway, person.clone(), &operation, "agent.configure").await?;
     }
     let mut ruling = Ruling::approve(person.id.clone(), now, now + lasts);
@@ -322,8 +327,50 @@ pub(crate) async fn revoke(
     .map_err(registry_error)?;
     if approval.request.scope.kind == CLEARANCE_KIND {
         take_back_raise(registry, person.id, &operation, &approval, now).await?;
+    } else if approval.request.scope.kind == ai6::HOLD_KIND {
+        lift_signed_hold(registry, person.id, &operation, &approval, now).await?;
     }
     Ok(Json(approval))
+}
+
+/// Lifts the hold a revoked proposal approval put on, if it is still that hold; audited as
+/// `agent.hold.lifted`.
+async fn lift_signed_hold(
+    registry: Arc<dyn RegistryBackend>,
+    actor: String,
+    operation: &OperationId,
+    approval: &Approval,
+    at: f64,
+) -> Result<(), ApiError> {
+    let (store, operation_key) = (registry.clone(), operation.to_string());
+    let holds = tokio::task::spawn_blocking(move || store.holds(&operation_key))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(registry_error)?;
+    for hold in holds
+        .into_iter()
+        .filter(|hold| hold.approval.as_deref() == Some(approval.request.id.as_str()))
+    {
+        audit(
+            registry.clone(),
+            actor.clone(),
+            "agent.hold.lifted",
+            operation,
+            ai6::hold_target(&hold.agent, hold.route.as_ref(), operation.as_str()),
+            at,
+        )
+        .await?;
+        let store = registry.clone();
+        tokio::task::spawn_blocking(move || {
+            store
+                .lift_hold(&hold.operation, &hold.agent, hold.route.as_ref())
+                .map(|_| ())
+        })
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(registry_error)?;
+    }
+    Ok(())
 }
 
 /// Removes the clearance grant a revoked promotion approval raised, if it is still the

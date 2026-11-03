@@ -17,8 +17,12 @@ use guatiao_intake::Form;
 use serde::Serialize;
 
 use crate::directorates::m::roster::RouteRef;
+use crate::directorates::m::stewardship::StewardshipPolicy;
 use crate::directorates::medical::usage::UsageTotals;
-use crate::directorates::registry::sessions::{SessionRecord, SessionResult, SessionStatus};
+use crate::directorates::registry::sessions::{
+    SessionRecord, SessionResult, SessionStatus, SessionStore,
+};
+use crate::directorates::registry::usage::UsageStore;
 
 /// Days of attempts a scorecard covers, unless the Operation sets another.
 pub const DEFAULT_WINDOW_DAYS: u64 = 30;
@@ -152,6 +156,27 @@ pub struct ScorecardDefinition {
     #[schema(title = "Small sample below")]
     #[map(default = DEFAULT_SMALL_SAMPLE)]
     small_sample: u64,
+    /// Whether M files proposals from the scorecard. Each rule below is off until its
+    /// threshold is set.
+    #[schema(title = "M proposes")]
+    #[map(default = true)]
+    propose: bool,
+    /// A failure rate, from 0 to 1, above which M proposes holding an Agent or one of its
+    /// routes. Leave it empty to never propose a hold.
+    #[schema(title = "Propose a hold above")]
+    hold_above: Option<f64>,
+    /// A gap in failure rate, from 0 to 1, by which M proposes putting an Agent ahead of
+    /// another that shares a role. Leave it empty to never propose it.
+    #[schema(title = "Propose ahead by a gap of")]
+    reorder_gap: Option<f64>,
+    /// Whether M puts the holds it would propose on by itself, audited and lifted by a
+    /// person. A hold that would leave a role with no Agent is proposed instead.
+    #[schema(title = "M holds by itself")]
+    #[map(default)]
+    auto_hold: bool,
+    /// Models M never proposes putting an Agent on or ahead.
+    #[schema(title = "Never put ahead")]
+    never_prefer: Option<Vec<String>>,
 }
 
 impl Default for ScorecardDefinition {
@@ -159,6 +184,11 @@ impl Default for ScorecardDefinition {
         Self {
             window_days: DEFAULT_WINDOW_DAYS,
             small_sample: DEFAULT_SMALL_SAMPLE,
+            propose: true,
+            hold_above: None,
+            reorder_gap: None,
+            auto_hold: false,
+            never_prefer: None,
         }
     }
 }
@@ -170,6 +200,29 @@ impl ScorecardDefinition {
             window_days: self.window_days,
             small_sample: self.small_sample,
         }
+    }
+
+    /// What M may do from the scorecard.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the key for a threshold outside 0 to 1.
+    pub fn rules(&self) -> Result<StewardshipPolicy, String> {
+        for (name, value) in [
+            ("hold_above", self.hold_above),
+            ("reorder_gap", self.reorder_gap),
+        ] {
+            if value.is_some_and(|value| !(0.0..=1.0).contains(&value)) {
+                return Err(format!("scorecard {name} must be between 0 and 1"));
+            }
+        }
+        Ok(StewardshipPolicy {
+            propose: self.propose,
+            hold_above: self.hold_above,
+            reorder_gap: self.reorder_gap,
+            auto_hold: self.auto_hold,
+            never_prefer: self.never_prefer.clone().unwrap_or_default(),
+        })
     }
 }
 
@@ -327,6 +380,36 @@ pub struct Scorecard {
 }
 
 type RouteKey = (String, Option<String>, Option<String>);
+
+/// The scorecard of `operation` at `now`, read from `registry`'s Session records and usage
+/// ledger.
+///
+/// # Errors
+///
+/// Any error reading the Session records or the ledger.
+pub fn from_registry<R>(
+    registry: &R,
+    operation: &str,
+    policy: &ScorecardPolicy,
+    now: f64,
+) -> std::io::Result<Scorecard>
+where
+    R: SessionStore + UsageStore + ?Sized,
+{
+    let sessions = registry.sessions()?;
+    let missions: std::collections::BTreeSet<&str> = sessions
+        .iter()
+        .filter(|session| session.operation.as_deref() == Some(operation))
+        .map(|session| session.mission_id.as_str())
+        .collect();
+    let mut usage = BTreeMap::new();
+    for mission in missions {
+        if let Some(ledger) = registry.mission_usage(Some(operation), mission)? {
+            usage.extend(ledger.sessions);
+        }
+    }
+    Ok(Scorecard::build(operation, &sessions, &usage, policy, now))
+}
 
 impl Scorecard {
     /// The scorecard of `operation` at `now` from its Sessions (other Operations' are

@@ -595,6 +595,41 @@ window_days = 30                   # attempts of the last 30 days; 0 covers ever
 small_sample = 5                   # judged attempts below which a row ranks nothing
 ```
 
+#### What M does with it
+
+M reads the scorecard each round at Headquarters and **proposes**; a person decides. Proposing is on,
+but every rule is off until its threshold is set, and no rule looks at a row whose sample is small:
+
+```toml
+[operation.G.scorecard]
+propose = true                     # false stops M filing anything from the scorecard
+hold_above = 0.5                   # propose holding an Agent, or one of its routes, above this failure rate
+reorder_gap = 0.3                  # propose putting an Agent ahead of one sharing a role, across this gap
+auto_hold = false                  # true: M puts the holds above on itself instead of asking
+never_prefer = ["claude-fable-5-1"] # models M never proposes putting an Agent on or ahead
+```
+
+- **A proposal** is a [green ink](missions.md#green-ink) request of kind `hold` or `prefer`, filed by
+  M (Session `m`, Mission `hold-AGENT` or `prefer-AGENT`), with the numbers in its reason: the failed
+  share, the window, the cost and the Missions behind it. Signing one needs `approval.decide` and, for
+  a hold, `agent.configure`. It is asked again only once the sample has grown by `small_sample` more.
+  A **hold** you sign becomes a hold in your name. A **prefer** is advice (`008` ahead of `007` for
+  `case-officer`: set the priorities in the roster); signing it closes the request and changes
+  nothing, because M never edits the roster.
+- **A hold** keeps an Agent, or one route of it, out of use in that Operation until a person lifts it
+  (`ai6ctl agents lift`, or the Agents page): selection passes the Agent over, a queued Mission is
+  given to the next qualified Agent or waits, and the route is not chosen, saying why in the
+  Mission's `waiting` reason. It stops new work only: a Session already running finishes. Revoking
+  the green ink that signed a hold lifts it.
+- **`auto_hold`** lets M hold by itself, on the same threshold, audited (`agent.hold.applied`, actor
+  `m`) with the reason on the hold and the Agents page. A hold that would leave a role with no Agent
+  able to take it is refused and proposed instead, saying which role. Only holding is automatic:
+  the reversible direction. M never grants a role, a clearance or an account on this path.
+- **Who is never proposed**: an Agent with `roles = []` (used only when named, as the owner wants for
+  a model such as `claude-fable-5-1`), a model in `never_prefer`, and anyone the Operation's roster
+  does not post, so what the roster keeps out of an Operation, such as a free-tier or Antigravity
+  model for a private one, stays out.
+
 ## Credentials
 
 Q issues each Session the credentials its Agent's loadout names, as leases, and nothing

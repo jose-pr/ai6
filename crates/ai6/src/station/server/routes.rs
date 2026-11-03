@@ -125,6 +125,10 @@ fn standing_of(
     if let Some(reason) = (place.refuses)(route) {
         return Err(reason);
     }
+    if let Some(hold) = super::stewardship::hold_on(state, operation, &agent.id, &route.reference())
+    {
+        return Err(format!("held by {}: {}", hold.by, hold.reason));
+    }
     if let Some(clearance) = place.clearance {
         let handler = state
             .plugins

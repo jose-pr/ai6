@@ -42,6 +42,7 @@ pub universal_exports::AgentView::configured_clearance: core::option::Option<all
 pub universal_exports::AgentView::every_operation: ai6::directorates::registry::agent_records::AgentTally
 pub universal_exports::AgentView::grant: core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>
 pub universal_exports::AgentView::grant_unreadable: bool
+pub universal_exports::AgentView::holds: alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>
 pub universal_exports::AgentView::last_mission_at: core::option::Option<f64>
 pub universal_exports::AgentView::model_history: alloc::vec::Vec<ai6::directorates::registry::agent_records::ModelTenure>
 pub universal_exports::AgentView::operation: ai6::directorates::registry::agent_records::AgentTally

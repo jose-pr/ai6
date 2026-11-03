@@ -59,6 +59,10 @@ pub struct RegistryLimits {
     #[schema(title = "Briefs held by vetting")]
     #[map(default)]
     pub held: HeldLimits,
+    /// `[registry.limits.holds]`: Agents and routes held out of use.
+    #[schema(title = "Holds")]
+    #[map(default)]
+    pub holds: HoldLimits,
     /// `[registry.limits.issues]`: linked issues and the outbox.
     #[schema(title = "Linked issues and the outbox")]
     #[map(default)]
@@ -426,6 +430,35 @@ impl Default for ClearanceLimits {
             record_bytes: Limit::at(16 * KIB),
             grants: Limit::at(10_000),
             text_bytes: Limit::at(512),
+        }
+    }
+}
+
+/// `[registry.limits.holds]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct HoldLimits {
+    /// Bytes of one hold.
+    #[schema(title = "Largest hold", format = "bytes")]
+    #[map(default = HoldLimits::default().record_bytes)]
+    pub record_bytes: Limit,
+    /// Holds.
+    #[schema(title = "Holds")]
+    #[map(default = HoldLimits::default().holds)]
+    pub holds: Limit,
+    /// Bytes of a hold's reason, holder and route names.
+    #[schema(title = "Longest reason, holder or route name", format = "bytes")]
+    #[map(default = HoldLimits::default().text_bytes)]
+    pub text_bytes: Limit,
+}
+
+impl Default for HoldLimits {
+    fn default() -> Self {
+        Self {
+            record_bytes: Limit::at(16 * KIB),
+            holds: Limit::at(10_000),
+            text_bytes: Limit::at(2_048),
         }
     }
 }

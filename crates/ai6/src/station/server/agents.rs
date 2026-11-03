@@ -26,6 +26,7 @@ pub(super) fn select(
     excluded: &[String],
 ) -> Result<Agent, RosterError> {
     let mut passed_over = medical::quarantined_agents(state, operation);
+    passed_over.extend(super::stewardship::held_agents(state, operation));
     passed_over.extend_from_slice(excluded);
     state.roster.select_agent(
         &AgentQuery::new()
@@ -204,7 +205,7 @@ pub(super) fn retired(state: &DaemonState, agent: &Agent) -> Option<String> {
     })
 }
 
-/// Gives a queued Mission whose Agent is quarantined or retired to the next qualified Agent.
+/// Gives a queued Mission whose Agent is quarantined, retired or held to the next qualified Agent.
 ///
 /// Returns `false` when it must wait: its Agent may not work and no other can take it.
 pub(super) fn reassign_if_unavailable(state: &DaemonState, mission: &Mission) -> bool {
@@ -217,10 +218,17 @@ pub(super) fn reassign_if_unavailable(state: &DaemonState, mission: &Mission) ->
         .agent(operation, agent)
         .ok()
         .and_then(|agent| retired(state, &agent));
-    let unavailable = retired.or_else(|| {
-        medical::is_quarantined(state, agent, operation)
-            .then(|| format!("Agent {agent:?} is quarantined"))
-    });
+    let unavailable = retired
+        .or_else(|| {
+            medical::is_quarantined(state, agent, operation)
+                .then(|| format!("Agent {agent:?} is quarantined"))
+        })
+        .or_else(|| {
+            super::stewardship::held_agents(state, operation)
+                .iter()
+                .any(|held| held == agent)
+                .then(|| format!("Agent {agent:?} is held"))
+        });
     let Some(unavailable) = unavailable else {
         // A routed Agent's wait is its start's to settle: it may still have no route with room.
         let routed = state

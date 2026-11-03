@@ -1638,6 +1638,45 @@ priority = 2
     }
 
     #[tokio::test]
+    async fn a_held_route_takes_no_new_work_until_a_person_lifts_the_hold() {
+        use crate::directorates::m::roster::RouteRef;
+        use crate::directorates::registry::holds::RosterHold;
+
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = routed_state(root.path(), "", &two_routes("priority"), ROUTE_POOLS);
+        let two = RouteRef::new(
+            "mock-pooled",
+            Some("name-two".to_owned()),
+            Some("two".to_owned()),
+        );
+        state
+            .intake
+            .put_hold(&RosterHold::new(
+                "G",
+                "007",
+                Some(two.clone()),
+                "failing",
+                "alice",
+                1.0,
+            ))
+            .unwrap();
+        run(&state, "route-held-1").await;
+        assert_eq!(
+            token("route-held-1"),
+            "fake-one-a-0451",
+            "priority prefers two, which is held"
+        );
+        assert_eq!(
+            launch_of(&state, "route-held-1").model.as_deref(),
+            Some("name-one")
+        );
+
+        state.intake.lift_hold("G", "007", Some(&two)).unwrap();
+        run(&state, "route-held-2").await;
+        assert_eq!(token("route-held-2"), "fake-two-b-0451", "back once lifted");
+    }
+
+    #[tokio::test]
     async fn a_handler_missing_on_this_station_skips_its_routes_and_with_none_left_the_mission_waits()
      {
         let root = tempfile::tempdir().unwrap();

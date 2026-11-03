@@ -24,6 +24,7 @@ mod promotion;
 mod recovery;
 mod reload;
 mod routes;
+mod stewardship;
 #[cfg(test)]
 mod stream_tests;
 #[cfg(feature = "cables-mcp")]
@@ -1657,6 +1658,8 @@ async fn scheduler_loop(base: DaemonState) {
         if is_headquarters && check_in {
             let promoting = state.clone();
             let _ = tokio::task::spawn_blocking(move || promotion::round(&promoting)).await;
+            let stewarding = state.clone();
+            let _ = tokio::task::spawn_blocking(move || stewardship::round(&stewarding)).await;
         }
         if is_headquarters && SourceDesk::has_work(&state.roster) && desk.begin() {
             let (desk, plugins, roster, registry) = (

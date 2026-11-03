@@ -231,6 +231,21 @@ enum AgentCommand {
         /// The Agent codename.
         agent: String,
     },
+    /// Lift the hold on an Agent, or on one of its routes, so work goes to it again (needs
+    /// agent.configure; audited).
+    Lift {
+        /// The Agent codename.
+        agent: String,
+        /// With this, lifts the hold on that one route; without, the hold on the whole Agent.
+        #[arg(long)]
+        handler: Option<String>,
+        /// The route's model, as the roster names it.
+        #[arg(long, requires = "handler")]
+        model: Option<String>,
+        /// The route's pool.
+        #[arg(long, requires = "handler")]
+        pool: Option<String>,
+    },
     /// How each Agent, route and model has run the Operation's Missions over a window (needs
     /// agent.read on the Operation and roster.read): attempts done, failed, blown and stalled
     /// are the Agent's own; the rest are shown but not held against it.
@@ -985,6 +1000,36 @@ async fn run() -> Result<(), String> {
                     )?;
                     let agents: Vec<AgentView> = send(request, "agent.read", "Agent list").await?;
                     print_agents(&agents);
+                }
+                Some(AgentCommand::Lift {
+                    agent,
+                    handler,
+                    model,
+                    pool,
+                }) => {
+                    let mut request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::DELETE,
+                        &[&operation, "agents", &agent, "hold"],
+                    )?;
+                    if let Some(handler) = handler {
+                        request = request.query(
+                            &[("handler", Some(handler)), ("model", model), ("pool", pool)]
+                                .into_iter()
+                                .filter_map(|(key, value)| Some((key, value?)))
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+                    let hold: HoldView = send(request, "agent.configure", "hold").await?;
+                    println!(
+                        "{}: hold by {} lifted in {}: {}",
+                        plain(&agent),
+                        plain(&hold.by),
+                        plain(&operation),
+                        plain(&hold.reason)
+                    );
                 }
                 Some(AgentCommand::Scorecard { window_days, show }) => {
                     let mut request = operation_request(
@@ -2171,6 +2216,16 @@ struct AgentView {
     clearance: Option<String>,
     configured_clearance: Option<String>,
     promotion: Option<WaitingStep>,
+    #[serde(default)]
+    holds: Vec<HoldView>,
+}
+
+/// An Agent, or one of its routes, held out of use.
+#[derive(Debug, Deserialize)]
+struct HoldView {
+    route: Option<RouteView>,
+    by: String,
+    reason: String,
 }
 
 /// An Agent's clearance grant in an Operation.
@@ -2391,7 +2446,7 @@ fn print_scorecard(card: &ScorecardView, show: Option<&str>) {
 
 fn print_agents(agents: &[AgentView]) {
     println!(
-        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tLOST\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION"
+        "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tLOST\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION\tHOLDS"
     );
     for view in agents {
         let tally = &view.operation;
@@ -2403,7 +2458,7 @@ fn print_agents(agents: &[AgentView]) {
             (None, _) => "-".to_owned(),
         };
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             plain(&view.agent),
             view.posted,
             tally.done,
@@ -2425,6 +2480,25 @@ fn print_agents(agents: &[AgentView]) {
             view.promotion.as_ref().map_or("-".to_owned(), |request| {
                 format!("{}:{}", plain(&request.id), plain(&request.scope.target))
             }),
+            if view.holds.is_empty() {
+                "-".to_owned()
+            } else {
+                view.holds
+                    .iter()
+                    .map(|hold| {
+                        let held = hold.route.as_ref().map_or("agent".to_owned(), |route| {
+                            format!(
+                                "{}/{}/{}",
+                                plain(&route.handler),
+                                route.model.as_deref().map_or("-".to_owned(), plain),
+                                route.pool.as_deref().map_or("-".to_owned(), plain)
+                            )
+                        });
+                        format!("{held}:{}", plain(&hold.by))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            },
         );
     }
 }

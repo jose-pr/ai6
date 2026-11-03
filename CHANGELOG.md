@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   number lists its attempts, and a row under `small_sample` judged attempts says so. The Session
   record gains `opened_at`, `closed_at`, `result` and `launch.agent`, and `[operation.ID.scorecard]`
   sets `window_days` (30) and `small_sample` (5).
+- M proposes from the scorecard and may hold. Each round at Headquarters it files green ink requests
+  of kind `hold` (an Agent, or one route of it, whose failure rate is above `hold_above`) and
+  `prefer` (an Agent across `reorder_gap` of another that shares a role), with the numbers and the
+  Missions in the reason; every rule is off until its threshold is set, no row with a small sample
+  counts, and an Agent with no roles or a model in `never_prefer` is never put ahead. A hold a
+  person signs keeps the Agent or route out of selection until it is lifted (`ai6ctl agents lift`,
+  the Agents page, `DELETE .../agents/{agent}/hold`); a Session already running finishes. With
+  `auto_hold = true` M holds by itself, audited, unless that leaves a role with no Agent, which it
+  proposes instead. Holds are a new Registry family (`[registry.limits.holds]`, table
+  `ai6_roster_holds`).
 
 - An Agent can list routes in place of one handler, `[[agent.<id>.route]]`: a handler, what that
   source calls the model, and an account source, with `effort`, `handler_settings`, `pool`, `env`,

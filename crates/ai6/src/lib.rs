@@ -78,7 +78,12 @@ pub use directorates::m::roster::{
 };
 pub use directorates::m::scorecard::{
     AgentCard, AttemptRef, DEFAULT_SMALL_SAMPLE, DEFAULT_WINDOW_DAYS, Judgment, ModelCard,
-    RouteCard, Scorecard, ScorecardDefinition, ScorecardPolicy, Standing, judge,
+    RouteCard, Scorecard, ScorecardDefinition, ScorecardPolicy, Standing,
+    from_registry as scorecard_from, judge,
+};
+pub use directorates::m::stewardship::{
+    HOLD_KIND, PREFER_KIND, Proposal, Step as ProposedStep, StewardshipPolicy, hold_target,
+    propose as propose_from_scorecard, roles_left_empty, route_name,
 };
 pub use directorates::m::theaters::{
     AgentMode, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind, EphemeralAccess,
@@ -172,11 +177,12 @@ pub use directorates::registry::cables::{
     CableSendRequest, CableState, CableTarget, MAX_CABLE_FANOUT,
 };
 pub use directorates::registry::clearance::ClearanceGrant;
+pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, RosterHold};
 pub use directorates::registry::limits::{
     AccountLimits, AgentLimits, AgentRoleLimits, ApprovalLimits, AuditLimits, BriefLimits,
-    CableLimits, ClearanceLimits, FileLimits, HeldLimits, LogbookLimits, ProposalLimits,
-    QuarantineLimits, RegistryLimits, SessionLimits, SleeperLimits, SourceLimits, StationLimits,
-    TimelineLimits, TokenLimits, UsageLimits,
+    CableLimits, ClearanceLimits, FileLimits, HeldLimits, HoldLimits, LogbookLimits,
+    ProposalLimits, QuarantineLimits, RegistryLimits, SessionLimits, SleeperLimits, SourceLimits,
+    StationLimits, TimelineLimits, TokenLimits, UsageLimits,
 };
 pub use directorates::registry::logbook::{
     HEAD_OF_STATION_ROLE, Severity, StationFinding, StationFindingKind, StationReport,

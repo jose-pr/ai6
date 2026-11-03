@@ -19,6 +19,7 @@ pub mod records;
 pub mod recovery;
 pub mod roster;
 pub mod scorecard;
+pub mod stewardship;
 pub mod theaters;
 pub mod unex_limits;
 pub mod vetting;

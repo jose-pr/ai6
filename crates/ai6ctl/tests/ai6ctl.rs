@@ -691,8 +691,8 @@ async fn agents_lists_each_agents_record_in_the_operation() {
     assert_eq!(
         printed,
         [
-            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tLOST\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION",
-            "007\tfalse\t2\t0\t0\t0\t1\t1\t0\t0\t0\t1000\topus\t-\tfield\t-",
+            "AGENT\tPOSTED\tDONE\tFAILED\tBLOWN\tABANDONED\tSTALLED\tLOST\tQUARANTINED\tBUDGET_STOPS\tGREEN_INK_REJECTED\tLAST_MISSION_UNIX\tMODEL\tRETIREMENT\tCLEARANCE\tPROMOTION\tHOLDS",
+            "007\tfalse\t2\t0\t0\t0\t1\t1\t0\t0\t0\t1000\topus\t-\tfield\t-\t-",
         ]
     );
     let lowered = lines(
@@ -740,6 +740,93 @@ async fn agents_lists_each_agents_record_in_the_operation() {
     )
     .await;
     assert!(!missing.status.success());
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn agents_lift_ends_a_hold_on_the_agent_or_on_one_route() {
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    let now = 1_800_000_000.0;
+    let route = ai6::RouteRef::new("claude", Some("opus".to_owned()), None);
+    registry
+        .put_hold(&ai6::RosterHold::new(
+            "operation-01",
+            "007",
+            None,
+            "failing",
+            "m",
+            now,
+        ))
+        .unwrap();
+    registry
+        .put_hold(&ai6::RosterHold::new(
+            "operation-01",
+            "007",
+            Some(route),
+            "slow",
+            "alice",
+            now,
+        ))
+        .unwrap();
+    registry
+        .record_agent_outcome(&ai6::AgentOutcomeReport::new(
+            "007",
+            Some("operation-01".to_owned()),
+            ai6::AgentOutcome::Done,
+            "m-1#1#done",
+            1_000.0,
+        ))
+        .unwrap();
+    let listed = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &["agents", "--operation", "operation-01"],
+        )
+        .await,
+    );
+    assert!(
+        listed[1].ends_with("\tagent:m,claude/opus/-:alice"),
+        "{}",
+        listed[1]
+    );
+    let whole = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &["agents", "lift", "007", "--operation", "operation-01"],
+        )
+        .await,
+    );
+    assert_eq!(whole, ["007: hold by m lifted in operation-01: failing"]);
+    let one = lines(
+        &ai6ctl(
+            server.clone(),
+            Some(token.clone()),
+            &[
+                "agents",
+                "lift",
+                "007",
+                "--handler",
+                "claude",
+                "--model",
+                "opus",
+                "--operation",
+                "operation-01",
+            ],
+        )
+        .await,
+    );
+    assert_eq!(one, ["007: hold by alice lifted in operation-01: slow"]);
+    assert!(registry.holds("operation-01").unwrap().is_empty());
+    let again = ai6ctl(
+        server.clone(),
+        Some(token.clone()),
+        &["agents", "lift", "007", "--operation", "operation-01"],
+    )
+    .await;
+    assert!(!again.status.success(), "no hold left");
     let _ = shutdown.send(());
 }
 

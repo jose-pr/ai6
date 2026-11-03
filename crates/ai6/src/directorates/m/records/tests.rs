@@ -134,6 +134,15 @@ fn full_example(record: ConfigRecord) -> Value {
                 }
             });
             operation["issues"] = issue_policy_example();
+            operation["scorecard"] = json!({
+                "window_days": 7,
+                "small_sample": 3,
+                "propose": true,
+                "hold_above": 0.6,
+                "reorder_gap": 0.25,
+                "auto_hold": false,
+                "never_prefer": ["claude-fable-5-1"]
+            });
             operation
         }
         ConfigRecord::Agent => json!({

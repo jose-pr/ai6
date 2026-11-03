@@ -17,7 +17,7 @@ use std::time::Duration;
 use ai6::directorates::registry::backend::*;
 use ai6::{
     AgentRecord, AgentTally, ApprovalRequest, AuditRecord, CLEARANCE_KIND, ClearanceGrant,
-    ModelTenure, NO_OPERATION, Scorecard, ScorecardPolicy,
+    ModelTenure, NO_OPERATION, RosterHold, Scorecard, ScorecardPolicy,
 };
 use ai6_diptel::OperationId;
 use axum::Json;
@@ -65,6 +65,9 @@ pub struct AgentView {
     pub grant: Option<ClearanceGrant>,
     /// M's promotion request for it waiting for green ink, if any.
     pub promotion: Option<ApprovalRequest>,
+    /// Holds that keep it, or a route of it, out of use here until a person lifts them. A hold
+    /// on one route is left out for a person without `roster.read`.
+    pub holds: Vec<RosterHold>,
     /// Its grant could not be read: Stations work it at `desk`, and so does this view.
     pub grant_unreadable: bool,
 }
@@ -114,6 +117,7 @@ impl AgentView {
             configured_clearance: None,
             grant: None,
             promotion: None,
+            holds: Vec::new(),
             grant_unreadable: false,
         }
     }
@@ -305,7 +309,15 @@ pub(crate) async fn list(
             .into_iter()
             .filter(is_promotion)
             .collect::<Vec<_>>();
+        let holds = registry
+            .holds(&operation)
+            .map_err(|_| ApiError::internal())?;
         for view in views.values_mut() {
+            view.holds = holds
+                .iter()
+                .filter(|hold| hold.agent == view.agent && (reads_roster || hold.holds_agent()))
+                .cloned()
+                .collect();
             view.retirement = headquarters.retirement(&view.agent);
             if reads_roster {
                 view.routes = headquarters.routes(&operation, &view.agent);
@@ -334,6 +346,72 @@ pub(crate) async fn list(
     .await
     .map_err(|_| ApiError::internal())??;
     Ok(Json(views))
+}
+
+/// The query of `DELETE .../agents/{agent}/hold`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HoldQuery {
+    /// With `handler`, lifts the hold on that one route; without, the hold on the whole Agent.
+    handler: Option<String>,
+    model: Option<String>,
+    pool: Option<String>,
+}
+
+/// `DELETE /v1/user/operations/{operation_id}/agents/{agent}/hold`: lifts the hold on the Agent,
+/// or on the route the query names, so selection takes it again. Needs `agent.configure`; audited
+/// first as `agent.hold.lifted`. `404` when there is no such hold.
+pub(crate) async fn lift_hold(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, agent)): Path<(String, String)>,
+    axum::extract::Query(query): axum::extract::Query<HoldQuery>,
+) -> Result<Json<RosterHold>, ApiError> {
+    valid_agent(&agent)?;
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    authorize_operation_action(&gateway, person.clone(), &operation_id, "agent.configure").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    ensure_operation_registered(&registry, &operation_id).await?;
+    let route = match (query.handler, query.model, query.pool) {
+        (Some(handler), model, pool) => Some(ai6::RouteRef::new(handler, model, pool)),
+        (None, None, None) => None,
+        _ => return Err(ApiError::bad_request()),
+    };
+    let agent = resolve(&registry, &operation_id, &agent)
+        .await?
+        .unwrap_or(agent);
+    let now = unix_timestamp()?;
+    let (store, operation, name, held) = (
+        registry.clone(),
+        operation_id.to_string(),
+        agent.clone(),
+        route.clone(),
+    );
+    let current = tokio::task::spawn_blocking(move || store.holds(&operation))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?
+        .into_iter()
+        .find(|hold| hold.agent == name && hold.route == held)
+        .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
+    audit(
+        registry.clone(),
+        person.id.clone(),
+        "agent.hold.lifted",
+        operation_id.to_string(),
+        ai6::hold_target(&agent, route.as_ref(), operation_id.as_str()),
+        now,
+    )
+    .await?;
+    let (operation, name) = (operation_id.to_string(), agent);
+    let lifted =
+        tokio::task::spawn_blocking(move || registry.lift_hold(&operation, &name, route.as_ref()))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(|_| ApiError::internal())?
+            .unwrap_or(current);
+    Ok(Json(lifted))
 }
 
 /// The query of `GET .../agents/scorecard`.
@@ -1262,5 +1340,149 @@ mod tests {
             .unwrap();
         assert_eq!(all["window_days"], 0, "the request's window wins");
         assert!(all["from"].is_null());
+    }
+
+    #[tokio::test]
+    async fn a_hold_is_shown_signed_for_with_agent_configure_and_lifted_with_it() {
+        let served = served_with(CONFIGURERS).await;
+        served
+            .registry
+            .check_in(
+                "hq",
+                BTreeMap::from([(
+                    "operation_policies".to_owned(),
+                    serde_json::json!({"G": {"operation": "G", "agents": [{"id": "007"}]}}),
+                )]),
+            )
+            .unwrap();
+        let now = crate::unix_timestamp().ok().unwrap();
+        let request = ai6::ApprovalRequest::try_new(
+            "G",
+            ai6::MissionId::try_new("hold-007").unwrap(),
+            ai6::SessionId::try_new("m").unwrap(),
+            "007",
+            ai6::ActionScope::try_new(ai6::HOLD_KIND, "007@G").unwrap(),
+            "5 of 6 judged attempts failed",
+            "007@G#1",
+            &Default::default(),
+        )
+        .unwrap()
+        .expiring(now, std::time::Duration::from_secs(3600));
+        served.registry.request_approval(&request).unwrap();
+
+        let approve = format!(
+            "{}/v1/user/operations/G/green-ink/{}/approve",
+            served.base, request.id
+        );
+        assert_eq!(
+            call(
+                reqwest::Method::POST,
+                approve.clone(),
+                &served.viewer,
+                Some(serde_json::json!({}))
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN,
+            "approval.decide alone cannot sign a hold: it stops an Agent's work"
+        );
+        assert_eq!(
+            call(
+                reqwest::Method::POST,
+                approve,
+                &served.operator,
+                Some(serde_json::json!({}))
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+
+        // M turns the signature into a hold, in the signer's name.
+        let route = ai6::RouteRef::new("claude", Some("opus".to_owned()), None);
+        served
+            .registry
+            .put_hold(
+                &ai6::RosterHold::new("G", "007", None, "5 of 6 failed", "operator-007", now)
+                    .signed_through(request.id.clone()),
+            )
+            .unwrap();
+        served
+            .registry
+            .put_hold(&ai6::RosterHold::new(
+                "G",
+                "007",
+                Some(route.clone()),
+                "slow",
+                "m",
+                now,
+            ))
+            .unwrap();
+        let views: serde_json::Value = agents(&served.base, &served.operator)
+            .await
+            .json()
+            .await
+            .unwrap();
+        let held = views[0]["holds"].as_array().unwrap();
+        assert_eq!(
+            held.len(),
+            1,
+            "a route hold shows handler and model, which roster.read decides"
+        );
+        assert_eq!(held[0]["by"], "operator-007");
+        assert_eq!(held[0]["reason"], "5 of 6 failed");
+
+        let url = format!("{}/v1/user/operations/G/agents/007/hold", served.base);
+        assert_eq!(
+            call(reqwest::Method::DELETE, url.clone(), &served.viewer, None)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(
+                reqwest::Method::DELETE,
+                format!("{url}?model=opus"),
+                &served.operator,
+                None
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST,
+            "a route is named by its handler"
+        );
+        let lifted = call(reqwest::Method::DELETE, url.clone(), &served.operator, None).await;
+        assert_eq!(lifted.status(), StatusCode::OK);
+        let holds = served.registry.holds("G").unwrap();
+        assert_eq!(holds.len(), 1, "the route's hold stays");
+        assert_eq!(
+            call(reqwest::Method::DELETE, url.clone(), &served.operator, None)
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        let route_url = format!("{url}?handler=claude&model=opus");
+        assert_eq!(
+            call(reqwest::Method::DELETE, route_url, &served.operator, None)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert!(served.registry.holds("G").unwrap().is_empty());
+        let actions: Vec<_> = served
+            .registry
+            .list_audit(20)
+            .unwrap()
+            .into_iter()
+            .map(|record| record.action)
+            .collect();
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| *action == "agent.hold.lifted")
+                .count(),
+            2,
+            "each lifting is audited first: {actions:?}"
+        );
     }
 }

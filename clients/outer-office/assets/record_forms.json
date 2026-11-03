@@ -1353,6 +1353,45 @@
               "title": "Small sample below",
               "description": "Judged attempts below which a row says its sample is too small to rank on.",
               "default": 5
+            },
+            "propose": {
+              "type": "boolean",
+              "title": "M proposes",
+              "description": "Whether M files proposals from the scorecard. Each rule below is off until its threshold is set.",
+              "default": true
+            },
+            "hold_above": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Propose a hold above",
+              "description": "A failure rate, from 0 to 1, above which M proposes holding an Agent or one of its routes. Leave it empty to never propose a hold."
+            },
+            "reorder_gap": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "title": "Propose ahead by a gap of",
+              "description": "A gap in failure rate, from 0 to 1, by which M proposes putting an Agent ahead of another that shares a role. Leave it empty to never propose it."
+            },
+            "auto_hold": {
+              "type": "boolean",
+              "title": "M holds by itself",
+              "description": "Whether M puts the holds it would propose on by itself, audited and lifted by a person. A hold that would leave a role with no Agent is proposed instead.",
+              "default": false
+            },
+            "never_prefer": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "title": "Never put ahead",
+              "description": "Models M never proposes putting an Agent on or ahead."
             }
           },
           "additionalProperties": false,
@@ -1362,7 +1401,9 @@
           "x-advanced": true,
           "default": {
             "window_days": 30,
-            "small_sample": 5
+            "small_sample": 5,
+            "propose": true,
+            "auto_hold": false
           }
         },
         "sources": {

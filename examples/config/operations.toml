@@ -50,3 +50,8 @@ quiet_days = 60
 [operation.G.scorecard]
 window_days = 30
 small_sample = 5
+# M proposes from it, a person decides; every rule is off until set.
+# hold_above = 0.5      # propose holding an Agent or route whose failure rate is above this
+# reorder_gap = 0.3     # propose putting an Agent ahead of one sharing a role across this gap
+# auto_hold = false     # true: M holds by itself (audited; a person lifts it)
+# never_prefer = ["claude-fable-5-1"]

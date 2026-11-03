@@ -189,6 +189,15 @@ CREATE TABLE IF NOT EXISTS ai6_clearance_grants (
     PRIMARY KEY (operation, agent)
 );
 
+CREATE TABLE IF NOT EXISTS ai6_roster_holds (
+    operation TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    route TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (operation, agent, route)
+);
+
 CREATE TABLE IF NOT EXISTS ai6_sessions (
     session_id TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL,
