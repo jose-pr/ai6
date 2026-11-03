@@ -148,6 +148,9 @@ const _kinds = {
   _assistantKind: "Moneypenny's settings",
 };
 
+/// The kind picker's value for every kind: a route without `kind`.
+const _allKinds = '\u0000all';
+
 /// The kind of Moneypenny's `[assistant]` settings: at most one record, keyed `settings`.
 const _assistantKind = 'assistant';
 
@@ -165,8 +168,8 @@ const _routeKinds = {
 /// settings, edited through Universal Exports. Each Station takes up an accepted edit at its
 /// next poll; what an edit of her settings weakens stays shown until the next edit.
 ///
-/// The [route] (page `roster`) names the `kind` shown (Agents when absent) and may narrow
-/// the list to the record whose key is `key`.
+/// The [route] (page `roster`) names the `kind` shown and may narrow the list to the record
+/// whose key is `key`. With neither it shows every kind's records, each a link to its kind.
 class RosterPage extends StatefulWidget {
   const RosterPage({
     required this.board,
@@ -192,8 +195,19 @@ class _RosterPageState extends State<RosterPage> {
   /// What the last accepted edit weakens, as the gateway words it.
   List<String> _weakened = const [];
 
-  /// The API kind the route names.
+  /// Every kind's records, for All: a kind's [RosterRecords], or why it could not be read.
+  Map<String, Object> _everything = const {};
+
+  /// Whether every kind is shown: the route names no kind and no record.
+  bool get _showAll =>
+      widget.route['kind'] == null && widget.route['key'] == null;
+
+  /// The API kind the route names; a key without a kind is an Agent's.
   String get _kind => _routeKinds[widget.route['kind'] ?? 'agent']!;
+
+  /// The route's name for an API [kind].
+  static String _singular(String kind) =>
+      _routeKinds.entries.firstWhere((entry) => entry.value == kind).key;
 
   @override
   void initState() {
@@ -204,9 +218,11 @@ class _RosterPageState extends State<RosterPage> {
   @override
   void didUpdateWidget(RosterPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.route['kind'] != widget.route['kind']) {
+    if (oldWidget.route['kind'] != widget.route['kind'] ||
+        (oldWidget.route['key'] == null) != (widget.route['key'] == null)) {
       setState(() {
         _records = null;
+        _everything = const {};
         _spec = null;
         _weakened = const [];
       });
@@ -215,6 +231,7 @@ class _RosterPageState extends State<RosterPage> {
   }
 
   Future<void> _load() async {
+    if (_showAll) return _loadAll();
     final kind = _kind;
     setState(() => _loading = true);
     try {
@@ -231,6 +248,136 @@ class _RosterPageState extends State<RosterPage> {
       if (mounted) setState(() => _loading = false);
     }
   }
+
+  Future<void> _loadAll() async {
+    setState(() => _loading = true);
+    final kinds = _kinds.keys.toList();
+    final read = await Future.wait([
+      for (final kind in kinds)
+        widget.board
+            .loadRoster(kind)
+            .then<Object>(
+              (records) => records,
+              onError: (Object error) =>
+                  error is StateError ? error.message : '$error',
+            ),
+    ]);
+    if (!mounted || !_showAll) return;
+    setState(() {
+      _everything = {
+        for (final (index, kind) in kinds.indexed) kind: read[index],
+      };
+      _loading = false;
+    });
+  }
+
+  /// The kind picker: All records first, the default, then each kind.
+  Widget _picker() => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 260),
+    child: DropdownButton<String>(
+      isExpanded: true,
+      value: _showAll ? _allKinds : _kind,
+      items: [
+        const DropdownMenuItem(value: _allKinds, child: Text('All records')),
+        for (final MapEntry(:key, :value) in _kinds.entries)
+          DropdownMenuItem(value: key, child: Text(value)),
+      ],
+      onChanged: (kind) {
+        if (kind == null || kind == (_showAll ? _allKinds : _kind)) return;
+        final route = widget.route.without('key');
+        widget.onRoute(
+          kind == _allKinds
+              ? route.without('kind')
+              : route.withField('kind', _singular(kind)),
+        );
+      },
+    ),
+  );
+
+  /// Every kind under its heading, each record a link to it in its kind's view.
+  Widget _buildAll(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+        child: Wrap(
+          spacing: 16,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _picker(),
+            IconButton(
+              tooltip: 'Refresh the roster',
+              onPressed: () => unawaited(_load()),
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+      ),
+      Expanded(
+        child: _everything.isEmpty
+            ? Center(
+                child: _loading
+                    ? const CircularProgressIndicator()
+                    : const Text('The roster is unavailable.'),
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                children: [
+                  for (final MapEntry(key: kind, value: read)
+                      in _everything.entries) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 16, 8, 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(switch (read) {
+                              RosterRecords(:final records) =>
+                                '${_kinds[kind]} (${records.length})',
+                              _ => _kinds[kind]!,
+                            }, style: Theme.of(context).textTheme.titleSmall),
+                          ),
+                          TextButton(
+                            onPressed: () => widget.onRoute(
+                              widget.route.withField('kind', _singular(kind)),
+                            ),
+                            child: Text('Open ${_kinds[kind]}'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    switch (read) {
+                      RosterRecords(records: []) => const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('No records of this kind.'),
+                      ),
+                      RosterRecords(:final records) => Card(
+                        child: Column(
+                          children: [
+                            for (final record in records)
+                              ListTile(
+                                dense: true,
+                                title: Text(record.key),
+                                onTap: () => widget.onRoute(
+                                  widget.route
+                                      .withField('kind', _singular(kind))
+                                      .withField('key', record.key),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      final why => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('$why'),
+                      ),
+                    },
+                  ],
+                ],
+              ),
+      ),
+    ],
+  );
 
   /// The form of this kind, which rows are summarized by; without it they say how much they
   /// hold.
@@ -365,6 +512,7 @@ class _RosterPageState extends State<RosterPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_showAll) return _buildAll(context);
     final records = _records;
     final key = widget.route['key'];
     final shown = [
@@ -387,26 +535,7 @@ class _RosterPageState extends State<RosterPage> {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 260),
-                child: DropdownButton<String>(
-                  isExpanded: true,
-                  value: _kind,
-                  items: [
-                    for (final MapEntry(:key, :value) in _kinds.entries)
-                      DropdownMenuItem(value: key, child: Text(value)),
-                  ],
-                  onChanged: (kind) {
-                    if (kind == null || kind == _kind) return;
-                    final singular = _routeKinds.entries
-                        .firstWhere((entry) => entry.value == kind)
-                        .key;
-                    widget.onRoute(
-                      widget.route.without('key').withField('kind', singular),
-                    );
-                  },
-                ),
-              ),
+              _picker(),
               IconButton(
                 tooltip: 'Refresh the roster',
                 onPressed: () => unawaited(_load()),

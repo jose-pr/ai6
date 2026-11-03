@@ -172,6 +172,8 @@ Future<void> _open(
   await tester.pumpWidget(OuterOfficeApp(board: board, desktopWindows: false));
   await openPage(tester, page);
   await tester.pumpAndSettle();
+  // The roster opens on All records; these cases edit its Agents.
+  if (page == 'Roster') await _rosterKind(tester, 'Agents');
 }
 
 Future<void> _rosterKind(WidgetTester tester, String label) async {

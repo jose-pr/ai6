@@ -102,6 +102,14 @@ Future<void> openRoster(WidgetTester tester, MissionBoard board) async {
   await tester.pumpAndSettle();
 }
 
+/// Narrows the roster to the kind called [label].
+Future<void> pickKind(WidgetTester tester, String label) async {
+  await tester.tap(find.byType(DropdownButton<String>));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label).last);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('a roster reader sees the records and which Stations run them', (
     tester,
@@ -109,8 +117,12 @@ void main() {
     final requests = <http.Request>[];
     final board = signedIn(requests, ['roster.read'], agents);
     await openRoster(tester, board);
+    await pickKind(tester, 'Agents');
 
-    expect(requests.first.url.path, '/v1/user/roster/agents');
+    expect(
+      requests.map((request) => request.url.path),
+      contains('/v1/user/roster/agents'),
+    );
     expect(find.text('007'), findsOneWidget);
     expect(
       find.text('Roster revision 12 · running on 1 of 2 Stations'),
@@ -135,9 +147,30 @@ void main() {
       'roster.manage',
     ], (request) => agents(request, writable: false));
     await openRoster(tester, board);
+    await pickKind(tester, 'Agents');
     expect(find.textContaining('read-only'), findsOneWidget);
     expect(find.text('Add'), findsNothing);
     expect(find.byTooltip('Edit 007'), findsNothing);
+  });
+
+  testWidgets('All records is the default, each kind a section of links', (
+    tester,
+  ) async {
+    final requests = <http.Request>[];
+    final board = signedIn(requests, ['roster.read'], agents);
+    await openRoster(tester, board);
+
+    expect(find.text('All records'), findsOneWidget);
+    expect(
+      requests.map((request) => request.url.pathSegments.last).toSet(),
+      containsAll(['operations', 'agents', 'roles', 'covers', 'assistant']),
+    );
+    expect(find.text('Agents (1)'), findsOneWidget);
+    await tester.tap(find.text('007').first);
+    await tester.pumpAndSettle();
+    final page = tester.widget<RosterPage>(find.byType(RosterPage));
+    expect(page.route['kind'], 'operation');
+    expect(page.route['key'], '007');
   });
 
   group('a row opens what it names', () {
@@ -173,12 +206,7 @@ void main() {
         operations: [UserOperationAccess(operationId: 'G', actions: actions)],
       );
       await openRoster(tester, board);
-      if (label != 'Agents') {
-        await tester.tap(find.byType(DropdownButton<String>));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text(label).last);
-        await tester.pumpAndSettle();
-      }
+      await pickKind(tester, label);
     }
 
     testWidgets('an Agent opens the Agents page filtered to it', (
