@@ -499,6 +499,11 @@ Sessions, quota used, limit and tokens today (`pool.read`).
   to the queue with the next qualified Agent. `quarantined` is a Session state in the board,
   `ai6ctl` and Outer Office.
 
+## Review
+
+An Operation, a role or a brief can ask that a Mission's output is judged before it is `done`, by a
+panel of Agents on different models, with weights and rounds: [Review](review.md).
+
 ## Vetting and held briefs
 
 Before M places a brief, the Station holding the Headquarters lease vets it under the

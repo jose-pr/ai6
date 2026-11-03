@@ -1058,6 +1058,22 @@ provider applied before it was a key; the provider's API header lists them with 
 | `answer_tail_bytes` | 16 KiB | **Review answer searched.** Bytes at the end of a review's answer searched for its verdict; the answer ends the message. |
 <!-- schema:record.station.vetting:end -->
 
+`[review]`: reviews of Missions' plans and output ([Review](review.md)).
+
+<!-- schema:record.station.review:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `goals_bytes` | 32 KiB | **Goals a reviewer reads.** Bytes of a Mission's brief a reviewer is given. |
+| `submitted_bytes` | 32 KiB | **Report a reviewer reads.** Bytes of an Agent's plan or final message a reviewer is given. |
+| `diff_bytes` | 64 KiB | **Change a reviewer reads.** Bytes of a Mission's change a reviewer is given; a change cut here says so. |
+| `commits` | 100 | **Commits a reviewer is shown.** Commits listed for a reviewer. |
+| `reasons` | 16 | **Reasons kept per vote.** Reasons kept from one vote, and told to an author sent back. |
+| `reason_bytes` | 1 KiB | **Longest reason.** Bytes of one reason, and of a line a review records. |
+| `answer_tail_bytes` | 16 KiB | **Reviewer's answer searched.** Bytes at the end of a reviewer's answer searched for its vote; the vote ends the message. |
+| `write_tries` | 16 | **Tries of a contested write.** Times a Station tries a write to a review another Station keeps writing first, before it logs that and leaves it for the next round. |
+| `station_window` | 300 | **Handlers reported within.** How recent a Station's check-in must be for the handlers it reports to count when a panel is filled. |
+<!-- schema:record.station.review:end -->
+
 `[accounts]`: pool accounts.
 
 <!-- schema:record.station.accounts:begin -->

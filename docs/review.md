@@ -77,18 +77,36 @@ Agents that are quarantined, retired, held or have no handler are passed over. A
 be filled, or cannot reach `distinct_models`, makes the Mission wait with the reason shown: it is
 never reviewed by fewer.
 
-## Settings
+## The output gate
 
-<!-- schema:record.review:begin -->
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `panel` | none | **Panel.** Who reviews: Agents or roles, each with a weight and an optional veto. |
-| `pass_at` | 1 | **Share that must pass.** The share of the weight, above 0 and at most 1, that must vote to pass. Abstentions are left out of the share. Leave it at 1 for all of it. |
-| `distinct_models` | 1 | **Different models.** How many different models must be behind the votes, none of them the author's. |
-| `rounds` | 1 | **Rounds to agree.** How many rounds the panel has to agree before `on_no_agreement`. |
-| `redo_limit` | 1 | **Times sent back.** How many times the author is sent back before a person decides. |
-| `on_no_agreement` | `person` | **When the panel does not agree.** What happens when the panel does not agree, or the budget runs out. |
-| `max_turns` | none | **Turns one review may spend.** Reviewer turns one review may spend. Leave it empty for no limit of its own. |
-| `max_tokens` | none | **Tokens one review may spend.** Tokens one review may spend. Leave it empty for no limit of its own. |
-| `reviewer_timeout_secs` | 3,600 | **A reviewer answers within.** How long one reviewer has to answer before it counts as absent; 0 is no limit. |
-<!-- schema:record.review:end -->
+Where a Mission would be `done`, it waits as `blocked`, reason `review-output`. Its Session is
+closed and its safe house kept. Nothing that says it is done moves: not a CX report, a status
+comment, a linked issue's state or a Source's report. Only a pass does.
+
+Each reviewer's turn is an answer-only Session of its own, on the Station's own host, with no tool
+that changes anything, in an empty directory, started as a [Chief of Staff review](missions.md#vetting-and-held-briefs)
+is. It gets the goals, the Agent's own report (which is where any test results are: AI6 runs no
+tests of its own), the branch, its commits and the change, each cut to the Station's
+[`[review]` limits](configuration.md), a cut one saying so.
+
+Everything the author wrote, and any other reviewer's reasons in a later round, is quoted between
+markers no line of it contains. Whatever it says, it reaches a decision only through a reviewer's
+vote, and a vote is read only from that reviewer's own final message: one JSON object at its end.
+An answer that is not plainly a pass never passes.
+
+| Outcome | What happens |
+| --- | --- |
+| Pass | The cover is audited on what is there now, the safe house finished, the Mission `done`, its reports sent |
+| Redo | The author's Session is resumed with the reasons, also quoted, up to `redo_limit`; past it `blocked`, reason `review-redo`, for a person |
+| No agreement, or the budget runs out | `on_no_agreement`: `blocked` for a person, or the Mission fails |
+| No panel can be filled, or no policy read | `blocked`, the reason on the review, until it can |
+
+Votes and where the review stands are in the Registry, one record per Mission and gate. A Station
+that restarts mid-review carries on from it: a seat has one vote a round, so a reviewer started
+again is not counted twice. A reviewer's lost harness is resumed when it named a Session and started
+again when it did not. Every vote, weight, reason, model and round is on the Operation's timeline
+(kind `review`) and in Audit, and so is a weakening or a naming that was ignored.
+
+`transition` to `done` is refused while a Mission waits for its review. An operator's `resume` starts
+the author again, and what it then says is done is reviewed again.
+
