@@ -540,8 +540,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   quotas and options in the roster's `[assistant.pages]`), expires them after a day unless
   the person remembers one, and serves each through a capability link under a CSP `sandbox`
   (an opaque origin: no cookie, storage or `/v1` of its host), optionally on an origin of its
-  own, in a frame under a classification bar naming what she read. Only the person opens a
-  page; feeds run with the viewer's own permissions. Her conversation now lists what exposed
+  own, in a frame under a classification bar naming what she read. Only the person, and whom
+  they share it with, opens a page; feeds run with the viewer's own permissions. Her conversation now lists what exposed
   it, and the Station names the web tool and host instead of `tool:outside-text`. Outer
   Office shows each page as a card (kind, size, expiry or Remembered, what she read, its
   feeds) whose Open launches it outside the app, with a menu to open it with the network
@@ -551,7 +551,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   with `person:`, `group:` and `account:` subjects, a compartment they are read into or an
   Operation where they hold `mission.read`, audited as `moneypenny.page.shared`; each viewer's
   feeds run with that viewer's permissions, a viewer no share names any longer loses the link
-  at once, and `[assistant.pages] sharing = false` turns sharing off and shares grant nothing
+  at once, and `[assistant.pages] sharing = false` turns sharing off and shares grant nothing.
+  A page is private: the link the app opens is the viewer's own and works only in the browser
+  whose first request set its cookie (`ai6_page`, `HttpOnly`, `Secure`, `SameSite=Strict`, its
+  path that one link), so a copied address answers 404 exactly as an unknown link does, and the
+  page's files and feeds answer only to a second token the gateway's frame names. The link to
+  send someone is the app's, `#/pages?page_id=ID`, which opens Her pages at that page after
+  sign-in. A person may give a page a public link (`PUT /v1/user/pages/{id}/public`, the card's
+  menu, `ai6ctl pages public`), which needs no sign-in, serves no feeds, lasts until turned off
+  and is audited as `moneypenny.page.public`; `[assistant.pages] public = false` stops them, and
+  a gateway serving pages on the API's own origin reports allowed public links as a weakening.
+  `frame = false` drops only the bar: the page stays in the gateway's frame
   ([Moneypenny](https://jose-pr.github.io/ai6/assistant/)).
 - Moneypenny's proposals show what they rest on and what they touch. A proposal records the
   read tools she called since the person's last message (each with its identifier arguments

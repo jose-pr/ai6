@@ -917,9 +917,10 @@ styles and images of a bundle load as they are; anything else (a PDF included) d
 
 A page is kept for a day unless you **Remember** it, counts toward quotas
 (`[assistant.pages]`, [Moneypenny's limits](configuration.md#moneypennys-limits)) and is audited
-(`moneypenny.page.published`, `.opened`, `.remembered`, `.forgotten`, `.shared`, `.deleted`,
-`.expired`). Only you, and whoever you share it with, can ask for a link to it: another person,
-an administrator included, gets 404 from `POST /v1/user/pages/{id}/open`.
+(`moneypenny.page.published`, `.opened`, `.remembered`, `.forgotten`, `.shared`, `.public`,
+`.deleted`, `.expired`). A page is private: only you, and whoever you share it with, can ask for
+a link to it. Another person, an administrator included, gets 404 from `POST
+/v1/user/pages/{id}/open`, exactly as for a page that does not exist.
 
 **Share** (the card's menu, `PUT /v1/user/pages/{id}/shares {subjects}`, `ai6ctl pages share ID
 SUBJECT...`) names whom it reaches, in place of whom it reached: `person:ID`, `group:NAME` or
@@ -932,20 +933,49 @@ their link at once, as does one read out of the compartment or losing `mission.r
 change its shares, remember, forget or delete it; the bar tells a viewer it was shared by you.
 **Her pages**, in her chat's menu, lists your pages and then those shared with you. An
 administrator turns sharing off with `[assistant.pages] sharing = false`, and existing shares then
-grant nothing; `max_shares` (32) bounds the subjects of one page. The link is a
-capability, `{pages base}/v/{token}/`, valid for an hour, bound to your sign-in (signing out
-ends it) and to a network profile; the app mints it when you click. Opening shows the gateway's
-**classification bar** over the page: "Made by Moneypenny for you, not part of Outer Office",
-the title, kind and expiry. The close control hides the bar for that view; a reload shows it
-again.
+grant nothing; `max_shares` (32) bounds the subjects of one page.
+
+**The link to give someone is the app's**: `https://APP/#/pages?page_id=ID` (the Share dialog
+copies it) opens Her pages on that page once they sign in, and they open it from there; anyone
+the page is hidden from is told there is no such page. The link the app opens in a browser tab,
+`{pages base}/v/{token}/`, is the viewer's own: minted when they click, valid for an hour, bound
+to their sign-in (signing out ends it), to a network profile and to the browser that first asks
+for it. That first request sets a cookie, `ai6_page`, `HttpOnly`, `Secure` and
+`SameSite=Strict`, whose path is that link alone, and every later request needs it: a reload in
+that browser works, and the same address anywhere else answers 404, exactly as a link that never
+existed. The page runs in the gateway's frame under a second token the frame names, never in an
+address bar, which ends with the link; its files and feeds answer only to that token, which only
+the page's own scripts can learn, and they could already read what it reads. Until the first
+request, the link opens for whoever holds it; the app opens it as it mints it, so that is one
+launch. `ai6ctl pages open` prints one to open at once in your browser. Where pages have an
+origin of their own on another registrable domain than the app's, the app's tab is another
+site: Chrome and Edge 156 then keep the `SameSite=Strict` cookie from a reload of that tab,
+which answers 404, and the page is opened again from the app. On the app's own origin or a
+sibling subdomain, a reload works.
+
+Opening shows the gateway's **classification bar** over the page: "Made by Moneypenny for you,
+not part of Outer Office", the title, kind and expiry. The close control hides the bar for that
+view; a reload shows it again. `[assistant.pages] frame = false` drops the bar; the page still
+runs in the gateway's frame, which is what keeps its link in one browser, and a page's file
+asked for on its own is sent to the frame.
+
+A **public link** is your choice (the card's menu, `PUT /v1/user/pages/{id}/public {on}`,
+`ai6ctl pages public ID on|off`): `{pages base}/s/{token}/` opens the page for anyone holding
+it, with no sign-in, until you turn it off or the page goes. Turning it on again keeps the same
+link, and a page she replaces keeps it, audited again. It serves **no feeds**, since a public
+viewer has no permissions to read with, and its bar says it is public and does not name you.
+The app asks before it turns one on. `[assistant.pages] public = false` lets nobody make one and
+stops every one there is. On the API's own origin (no `[unex.pages] origin`) a gateway with
+public links allowed reports it as a weakening at start: an outsider then sees a page she made
+under the app's address.
 
 Pages are open by default: scripts run and they may fetch from anywhere, because a dashboard
 may need a chart library or an API. What they cannot do is act as the app. Every response
 carries `Content-Security-Policy: sandbox ...` without `allow-same-origin`, so the page is an
 opaque origin with no cookie, storage or sign-in of its host, `/v1` answers it no CORS header,
 and it cannot navigate the top window. Dashboards read **live** data: each feed is a read tool
-with input fixed at publish, run when the page asks for `data/NAME` as whoever holds the link,
-so a viewer sees only what their own permissions allow and a revoked grant applies at once.
+with input fixed at publish, run when the page asks for `data/NAME` as the link's viewer, so a
+viewer sees only what their own permissions allow and a revoked grant applies at once.
 Feeds read; they never propose or send. Options, set by an administrator for everyone:
 `scripts = false`, `network = "own"` (its own files and feeds) or `"none"` (its own files), `feeds
 = false`, and a separate origin for pages (`ai6.cfg`'s `[unex.pages] origin`). You may also open one
