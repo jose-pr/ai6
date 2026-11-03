@@ -539,6 +539,7 @@ pub fn search_terms(query: &str) -> Vec<String> {
 }
 
 /// The distinct words of `entry` a database's text index holds, within `limit` bytes.
+#[cfg_attr(not(any(feature = "sqlite", feature = "postgres")), allow(dead_code))]
 pub(super) fn index_words(entry: &MemoryEntry, limit: crate::bounds::Limit) -> String {
     let distinct: BTreeSet<String> = words(entry.header.name.as_deref().unwrap_or_default())
         .chain(words(&entry.header.summary))
