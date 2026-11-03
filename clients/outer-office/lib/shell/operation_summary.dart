@@ -158,6 +158,19 @@ class _OperationSummaryState extends State<OperationSummary> {
             ],
           ),
         ],
+        const SizedBox(height: 20),
+        Text('KNOWLEDGE', style: ooSectionLabel(context)),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const ValueKey('operation-memory'),
+            onPressed: () => widget.onRoute(
+              OoRoute(OoPage.memory).withField('operation_id', _id),
+            ),
+            icon: const Icon(Icons.menu_book_outlined),
+            label: Text("$_id's memory"),
+          ),
+        ),
         if (canWatchBriefs) ...[
           const SizedBox(height: 20),
           Text('WAITING', style: ooSectionLabel(context)),

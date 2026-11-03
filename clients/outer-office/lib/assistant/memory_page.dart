@@ -5,6 +5,33 @@ import 'package:material_ui/material_ui.dart';
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../main.dart';
 
+/// Whose memory a page shows: the signed-in person's, everyone's, or an Operation's.
+@immutable
+class MemoryShelf {
+  const MemoryShelf._(this.scope, this.label);
+
+  /// What she keeps of the signed-in person.
+  static const person = MemoryShelf._(null, 'Of you');
+
+  /// What everyone shares.
+  static const global = MemoryShelf._('global', 'Everyone');
+
+  /// An Operation's knowledge base.
+  factory MemoryShelf.operation(String id) =>
+      MemoryShelf._('operation:$id', 'Operation $id');
+
+  /// The scope as the gateway names it; `null` for the person's own, read through their routes.
+  final String? scope;
+  final String label;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MemoryShelf && other.scope == scope;
+
+  @override
+  int get hashCode => scope.hashCode;
+}
+
 /// One entry of a memory, without its text.
 @immutable
 class MemorySummary {
@@ -16,6 +43,7 @@ class MemorySummary {
     required this.updatedBy,
     required this.updatedAt,
     required this.writtenBy,
+    this.scope = '',
     this.name,
     this.exposures = const [],
     this.compartments = const [],
@@ -23,6 +51,7 @@ class MemorySummary {
 
   /// A generated UUID; names and summaries may repeat.
   final String id;
+  final String scope;
   final String? name;
 
   /// One line saying what it is for.
@@ -51,6 +80,7 @@ class MemorySummary {
     final source = json['source'] as Map<String, dynamic>? ?? const {};
     return MemorySummary(
       id: json['id'] as String,
+      scope: json['scope'] as String? ?? '',
       name: json['name'] as String?,
       summary: json['summary'] as String? ?? '',
       revision: (json['revision'] as num?)?.toInt() ?? 1,
@@ -135,6 +165,47 @@ class MemoryListing {
   );
 }
 
+/// A change an Agent asked for, waiting for a person.
+@immutable
+class MemoryProposalSummary {
+  const MemoryProposalSummary({
+    required this.id,
+    required this.summary,
+    required this.content,
+    required this.writtenBy,
+    this.entry,
+    this.forget = false,
+    this.exposures = const [],
+  });
+
+  final String id;
+  final String summary;
+  final String content;
+  final String writtenBy;
+
+  /// The entry it changes; `null` for a new one.
+  final String? entry;
+  final bool forget;
+  final List<String> exposures;
+
+  factory MemoryProposalSummary.fromJson(Map<String, dynamic> json) {
+    final source = json['source'] as Map<String, dynamic>? ?? const {};
+    return MemoryProposalSummary(
+      id: json['id'] as String,
+      summary: json['summary'] as String? ?? '',
+      content: json['content'] as String? ?? '',
+      writtenBy: source['by'] as String? ?? '',
+      entry: json['entry'] as String?,
+      forget: json['forget'] as bool? ?? false,
+      exposures: [
+        for (final exposure
+            in source['exposures'] as List<dynamic>? ?? const [])
+          exposure as String,
+      ],
+    );
+  }
+}
+
 /// Universal Exports refused a memory request; [message] is its own words.
 class MemoryRefused implements Exception {
   const MemoryRefused(this.message);
@@ -145,20 +216,29 @@ class MemoryRefused implements Exception {
   String toString() => message;
 }
 
-/// One line saying who wrote [entry] and what it was marked with.
-String memorySource(MemorySummary entry) {
-  final written = 'Written by ${entry.writtenBy}';
-  return entry.exposed
-      ? '$written, after reading outside text (${entry.exposures.join(', ')})'
-      : written;
+/// One line saying who wrote [writtenBy] and what it was marked with.
+String memorySource(String writtenBy, List<String> exposures) {
+  final written = 'Written by $writtenBy';
+  return exposures.isEmpty
+      ? written
+      : '$written, after reading outside text (${exposures.join(', ')})';
 }
 
-/// What Moneypenny remembers about the signed-in person: rows she and the person keep, searched,
-/// opened, edited and forgotten through Universal Exports. No repository or Station is involved.
+/// The memories the signed-in person may read: what Moneypenny keeps of them, what everyone
+/// shares and each Operation's, searched, opened, edited by a form and forgotten through
+/// Universal Exports. Where they may change a memory, what Agents proposed for it waits here for
+/// their decision.
 class MemoryPage extends StatefulWidget {
-  const MemoryPage({required this.board, super.key});
+  const MemoryPage({
+    required this.board,
+    this.shelf = MemoryShelf.person,
+    super.key,
+  });
 
   final MissionBoard board;
+
+  /// The memory it opens on.
+  final MemoryShelf shelf;
 
   @override
   State<MemoryPage> createState() => _MemoryPageState();
@@ -166,7 +246,9 @@ class MemoryPage extends StatefulWidget {
 
 class _MemoryPageState extends State<MemoryPage> {
   final _search = TextEditingController();
+  late MemoryShelf _shelf = widget.shelf;
   MemoryListing? _listing;
+  List<MemoryProposalSummary> _proposals = const [];
   String? _error;
   bool _loading = false;
 
@@ -182,16 +264,36 @@ class _MemoryPageState extends State<MemoryPage> {
     super.dispose();
   }
 
+  /// Every memory the person may read, by what their profile says.
+  List<MemoryShelf> get _shelves => [
+    MemoryShelf.person,
+    MemoryShelf.global,
+    for (final operation in widget.board.memoryOperations)
+      MemoryShelf.operation(operation),
+    if (!{
+      MemoryShelf.person,
+      MemoryShelf.global,
+      for (final operation in widget.board.memoryOperations)
+        MemoryShelf.operation(operation),
+    }.contains(widget.shelf))
+      widget.shelf,
+  ];
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
       final query = _search.text.trim();
       final listing = await widget.board.loadMemory(
+        scope: _shelf.scope,
         query: query.isEmpty ? null : query,
       );
+      final proposals = _shelf.scope == null
+          ? const <MemoryProposalSummary>[]
+          : await widget.board.loadMemoryProposals(_shelf.scope!);
       if (!mounted) return;
       setState(() {
         _listing = listing;
+        _proposals = proposals;
         _error = null;
       });
     } on Object catch (error) {
@@ -208,7 +310,8 @@ class _MemoryPageState extends State<MemoryPage> {
   Future<void> _open(MemorySummary? entry) async {
     final changed = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) => MemoryEditorPage(board: widget.board, entry: entry),
+        builder: (_) =>
+            MemoryEditorPage(board: widget.board, shelf: _shelf, entry: entry),
       ),
     );
     if (changed == null || !mounted) return;
@@ -219,9 +322,24 @@ class _MemoryPageState extends State<MemoryPage> {
   Future<void> _forget(MemorySummary entry) async {
     if (!await confirmForget(context, entry.summary) || !mounted) return;
     try {
-      await widget.board.forgetMemory(entry.id);
+      await widget.board.forgetMemory(entry.id, scope: _shelf.scope);
       if (!mounted) return;
       _say('Forgotten: ${entry.summary}.');
+      await _load();
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    }
+  }
+
+  Future<void> _decide(MemoryProposalSummary proposal, bool approve) async {
+    try {
+      await widget.board.decideMemoryProposal(proposal.id, approve: approve);
+      if (!mounted) return;
+      _say(
+        approve
+            ? 'Approved: ${proposal.summary}.'
+            : 'Rejected: ${proposal.summary}.',
+      );
       await _load();
     } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
@@ -233,9 +351,11 @@ class _MemoryPageState extends State<MemoryPage> {
     final listing = _listing;
     final small = Theme.of(context).textTheme.bodySmall;
     final searching = _search.text.trim().isNotEmpty;
+    final error = Theme.of(context).colorScheme.error;
+    final person = _shelf == MemoryShelf.person;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Moneypenny's memory"),
+        title: Text(person ? "Moneypenny's memory" : 'Memory: ${_shelf.label}'),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -254,10 +374,31 @@ class _MemoryPageState extends State<MemoryPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
         children: [
-          const Text(
-            'What Moneypenny remembers about you. She starts each conversation with these '
-            'summaries, reads an entry when she needs it, and shows you each change she makes. '
-            'You can correct or forget anything here.',
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final shelf in _shelves)
+                ChoiceChip(
+                  key: Key('memory-shelf-${shelf.scope ?? 'person'}'),
+                  label: Text(shelf.label),
+                  selected: shelf == _shelf,
+                  onSelected: (_) {
+                    setState(() => _shelf = shelf);
+                    unawaited(_load());
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            person
+                ? 'What Moneypenny remembers about you. She starts each conversation with '
+                      'these summaries, reads an entry when she needs it, and shows you each '
+                      'change she makes. You can correct or forget anything here.'
+                : 'What Agents and people keep for ${_shelf == MemoryShelf.global ? 'everyone' : _shelf.label}. '
+                      'An Agent asks before it keeps anything, unless the Operation lets it '
+                      'write; an entry an exposed Session wrote is marked until a person edits it.',
           ),
           const SizedBox(height: 12),
           TextField(
@@ -269,26 +410,74 @@ class _MemoryPageState extends State<MemoryPage> {
             ),
             onSubmitted: (_) => unawaited(_load()),
           ),
-          if (_error case final error?)
+          if (_error case final problem?)
             Padding(
               padding: const EdgeInsets.only(top: 12),
               child: Text(
-                revealInvisible(error),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                revealInvisible(problem),
+                style: TextStyle(color: error),
               ),
             ),
+          if (_proposals.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Waiting for you',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            for (final proposal in _proposals)
+              Card(
+                key: Key('memory-proposal-${proposal.id}'),
+                child: ListTile(
+                  leading: Icon(
+                    proposal.exposures.isNotEmpty
+                        ? Icons.warning_amber_outlined
+                        : Icons.inbox_outlined,
+                  ),
+                  title: Text(
+                    '${proposal.forget ? 'Forget' : 'Keep'}: '
+                    '${revealInvisible(proposal.summary)}',
+                  ),
+                  subtitle: Text(
+                    [
+                      memorySource(proposal.writtenBy, proposal.exposures),
+                      if (!proposal.forget) revealInvisible(proposal.content),
+                    ].join('\n'),
+                    style: proposal.exposures.isNotEmpty
+                        ? TextStyle(color: error)
+                        : null,
+                  ),
+                  isThreeLine: true,
+                  trailing: Wrap(
+                    children: [
+                      IconButton(
+                        tooltip: 'Approve ${proposal.summary}',
+                        onPressed: () => unawaited(_decide(proposal, true)),
+                        icon: const Icon(Icons.check),
+                      ),
+                      IconButton(
+                        tooltip: 'Reject ${proposal.summary}',
+                        onPressed: () => unawaited(_decide(proposal, false)),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
           const SizedBox(height: 12),
           if (listing == null)
             Center(
               child: _loading
                   ? const CircularProgressIndicator()
-                  : const Text('Her memory is unavailable.'),
+                  : const Text('This memory is unavailable.'),
             )
           else if (listing.entries.isEmpty)
             Text(
               searching
-                  ? 'Nothing she keeps matches that.'
-                  : 'She remembers nothing about you yet.',
+                  ? 'Nothing kept here matches that.'
+                  : person
+                  ? 'She remembers nothing about you yet.'
+                  : 'Nothing is kept here yet.',
             )
           else ...[
             for (final entry in listing.entries)
@@ -297,13 +486,17 @@ class _MemoryPageState extends State<MemoryPage> {
                   leading: Icon(
                     entry.exposed
                         ? Icons.warning_amber_outlined
+                        : entry.compartments.isNotEmpty
+                        ? Icons.lock_outline
                         : Icons.description_outlined,
                   ),
                   title: Text(revealInvisible(entry.summary)),
                   subtitle: Text(
                     [
                       if (entry.name case final name?) revealInvisible(name),
-                      memorySource(entry),
+                      memorySource(entry.writtenBy, entry.exposures),
+                      if (entry.compartments.isNotEmpty)
+                        'Only for ${entry.compartments.join(', ')}',
                       '${entry.bytes} bytes',
                     ].join(' · '),
                   ),
@@ -336,8 +529,8 @@ Future<bool> confirmForget(BuildContext context, String what) async =>
       builder: (context) => AlertDialog(
         title: Text('Forget "$what"?'),
         content: const Text(
-          'It goes for good, with its earlier versions. A conversation she is in now keeps '
-          'what it already read.',
+          'It goes for good, with its earlier versions. A conversation or a Mission now running '
+          'keeps what it already read.',
         ),
         actions: [
           TextButton(
@@ -357,9 +550,17 @@ Future<bool> confirmForget(BuildContext context, String what) async =>
 /// that was opened, so an entry changed meanwhile is refused rather than replaced. Pops with what
 /// was done.
 class MemoryEditorPage extends StatefulWidget {
-  const MemoryEditorPage({required this.board, this.entry, super.key});
+  const MemoryEditorPage({
+    required this.board,
+    this.shelf = MemoryShelf.person,
+    this.entry,
+    super.key,
+  });
 
   final MissionBoard board;
+
+  /// The memory it belongs to.
+  final MemoryShelf shelf;
 
   /// The entry opened; `null` for a new one.
   final MemorySummary? entry;
@@ -372,6 +573,7 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
   final _name = TextEditingController();
   final _summary = TextEditingController();
   final _content = TextEditingController();
+  final _compartments = TextEditingController();
   MemorySummary? _opened;
   String? _problem;
   late bool _loading = widget.entry != null;
@@ -388,18 +590,23 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
     _name.dispose();
     _summary.dispose();
     _content.dispose();
+    _compartments.dispose();
     super.dispose();
   }
 
   Future<void> _read() async {
     try {
-      final record = await widget.board.readMemory(widget.entry!.id);
+      final record = await widget.board.readMemory(
+        widget.entry!.id,
+        scope: widget.shelf.scope,
+      );
       if (!mounted) return;
       setState(() {
         _opened = record.summary;
         _name.text = record.summary.name ?? '';
         _summary.text = record.summary.summary;
         _content.text = record.content;
+        _compartments.text = record.summary.compartments.join(', ');
       });
     } on Object catch (error) {
       if (mounted) setState(() => _problem = '$error');
@@ -408,6 +615,11 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
     }
   }
 
+  List<String> get _named => [
+    for (final name in _compartments.text.split(','))
+      if (name.trim().isNotEmpty) name.trim(),
+  ];
+
   Future<void> _save() async {
     setState(() {
       _saving = true;
@@ -415,12 +627,21 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
     });
     try {
       final name = _name.text.trim();
+      final compartments = _named;
+      final unchanged =
+          _opened != null &&
+          compartments.toSet().containsAll(_opened!.compartments) &&
+          _opened!.compartments.toSet().containsAll(compartments);
       await widget.board.saveMemory(
+        scope: widget.shelf.scope,
         id: widget.entry?.id,
         revision: _opened?.revision,
         name: name.isEmpty ? null : name,
         summary: _summary.text.trim(),
         content: _content.text,
+        compartments: widget.shelf.scope == null || unchanged
+            ? null
+            : compartments,
       );
       if (mounted) Navigator.of(context).pop('Saved ${_summary.text.trim()}.');
     } on Object catch (error) {
@@ -438,7 +659,10 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
       _problem = null;
     });
     try {
-      await widget.board.forgetMemory(widget.entry!.id);
+      await widget.board.forgetMemory(
+        widget.entry!.id,
+        scope: widget.shelf.scope,
+      );
       if (mounted) Navigator.of(context).pop('Forgotten: $what.');
     } on Object catch (error) {
       if (mounted) setState(() => _problem = '$error');
@@ -476,8 +700,9 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
               Text(revealInvisible(problem), style: TextStyle(color: error)),
             if (opened != null)
               Text(
-                '${memorySource(opened)}. Last changed by ${opened.updatedBy}, revision '
-                '${opened.revision}.',
+                '${memorySource(opened.writtenBy, opened.exposures)}. Last changed by '
+                '${opened.updatedBy}, revision ${opened.revision}.'
+                '${opened.exposed ? ' Saving your edit clears the mark.' : ''}',
                 key: const Key('memory-source'),
                 style: opened.exposed
                     ? TextStyle(color: error)
@@ -489,8 +714,7 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
               enabled: !busy && !readOnly,
               decoration: const InputDecoration(
                 labelText: 'Summary',
-                helperText:
-                    'One line saying what it is for; she sees it first.',
+                helperText: 'One line saying what it is for; it is what a search shows.',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -503,6 +727,19 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
                 border: OutlineInputBorder(),
               ),
             ),
+            if (widget.shelf.scope != null)
+              TextField(
+                key: const Key('memory-compartments'),
+                controller: _compartments,
+                enabled: !busy && !readOnly,
+                decoration: const InputDecoration(
+                  labelText: 'Compartments (optional)',
+                  helperText:
+                      'Only those read into one of these see it. You add or remove only '
+                      'compartments you are read into.',
+                  border: OutlineInputBorder(),
+                ),
+              ),
             Expanded(
               child: TextField(
                 key: const Key('memory-text'),
@@ -515,7 +752,7 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
                   labelText: 'Content',
                   alignLabelWithHint: true,
                   border: OutlineInputBorder(),
-                  hintText: 'What Moneypenny should remember',
+                  hintText: 'What should be remembered',
                 ),
               ),
             ),

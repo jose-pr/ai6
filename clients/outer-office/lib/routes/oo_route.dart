@@ -128,7 +128,10 @@ const _fields = <OoPage, List<_Field>>{
     _Field('tab', _Kind.oneOf, ['roles', 'rules', 'accounts', 'check']),
     _Field('operation_id', _Kind.identifier),
   ],
-  OoPage.memory: [],
+  OoPage.memory: [
+    _Field('scope', _Kind.oneOf, ['global']),
+    _Field('operation_id', _Kind.identifier),
+  ],
   OoPage.compartments: [_Field('compartment_id', _Kind.identifier)],
 };
 

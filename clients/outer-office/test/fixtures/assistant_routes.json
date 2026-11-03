@@ -55,6 +55,8 @@
     {"json": {"page": "access", "tab": "accounts"}, "uri": "app:/access?tab=accounts"},
     {"json": {"page": "access", "tab": "rules", "operation_id": "G"}, "uri": "app:/access?tab=rules&operation_id=G"},
     {"json": {"page": "memory"}, "uri": "app:/memory"},
+    {"json": {"page": "memory", "scope": "global"}, "uri": "app:/memory?scope=global"},
+    {"json": {"page": "memory", "operation_id": "G"}, "uri": "app:/memory?operation_id=G"},
     {"json": {"page": "missions", "compartment": "KESTREL"}, "uri": "app:/missions?compartment=KESTREL"},
     {"json": {"page": "compartments"}, "uri": "app:/compartments"},
     {"json": {"page": "compartments", "compartment_id": "KESTREL"}, "uri": "app:/compartments?compartment_id=KESTREL"}
@@ -63,6 +65,7 @@
     {"json": ["missions"], "reason": "a route is an object naming its page"},
     {"json": {"operation_id": "G"}, "reason": "a route is an object naming its page"},
     {"json": {"page": "settings"}, "reason": "unknown page settings"},
+    {"json": {"page": "memory", "scope": "person:ana"}, "reason": "scope is one of global"},
     {"json": {"page": "missions", "token": "secret"}, "reason": "missions has no token"},
     {"json": {"page": "overview", "operation_id": "G"}, "reason": "overview has no operation_id"},
     {"json": {"page": "missions", "operation_id": 7}, "reason": "operation_id is a string"},

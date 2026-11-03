@@ -1524,13 +1524,17 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     }
   }
 
-  /// Moneypenny's memory of the signed-in person, or what matches [query], best first. Throws
-  /// [MemoryRefused] with the gateway's own words.
-  Future<MemoryListing> loadMemory({String? query}) async {
+  /// A memory: Moneypenny's of the signed-in person with no [scope], else `global` or
+  /// `operation:<id>`; or what of it matches [query], best first. Throws [MemoryRefused] with the
+  /// gateway's own words.
+  Future<MemoryListing> loadMemory({String? scope, String? query}) async {
     if (demo) return MemoryListing.demo();
     final response = await _userRequest(
       'GET',
-      Uri(path: _memoryPath, queryParameters: {'q': ?query}).toString(),
+      Uri(
+        path: scope == null ? _memoryPath : _memoriesPath,
+        queryParameters: {'scope': ?scope, 'q': ?query},
+      ).toString(),
     );
     if (response.statusCode != 200) throw _memoryRefused(response);
     return MemoryListing.fromJson(
@@ -1538,8 +1542,8 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     );
   }
 
-  /// One entry of that memory, by its ID.
-  Future<MemoryRecord> readMemory(String id) async {
+  /// One entry, by its ID, of the memory [scope] names as [loadMemory] does.
+  Future<MemoryRecord> readMemory(String id, {String? scope}) async {
     if (demo) {
       return MemoryRecord(
         summary: MemoryListing.demo().entries.firstWhere(
@@ -1548,45 +1552,96 @@ class MissionBoard extends ChangeNotifier implements PageActions {
         content: 'Prefers tables to prose, and the short version first.\n',
       );
     }
-    final response = await _userRequest('GET', '$_memoryPath/$id');
+    final response = await _userRequest(
+      'GET',
+      '${scope == null ? _memoryPath : _memoriesPath}/$id',
+    );
     if (response.statusCode != 200) throw _memoryRefused(response);
     return MemoryRecord.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
   }
 
-  /// Adds an entry to that memory, or with [id] changes that one from [revision], which is refused
-  /// when the entry has moved on.
+  /// Adds an entry to the memory [scope] names, or with [id] changes that one from [revision],
+  /// which is refused when the entry has moved on. [compartments], when given, protect it.
   Future<void> saveMemory({
     required String summary,
     required String content,
+    String? scope,
     String? id,
     int? revision,
     String? name,
+    List<String>? compartments,
   }) async {
     if (demo) throw StateError('Memory changes are unavailable in preview.');
+    final base = scope == null ? _memoryPath : _memoriesPath;
     final body = {
+      if (id == null && scope != null) 'scope': scope,
       'name': ?name,
       'summary': summary,
       'content': content,
       'revision': ?revision,
+      'compartments': ?compartments,
     };
     final response = id == null
-        ? await _userRequest('POST', _memoryPath, body: body)
-        : await _userRequest('PUT', '$_memoryPath/$id', body: body);
-    if (response.statusCode != 200 && response.statusCode != 201) {
+        ? await _userRequest('POST', base, body: body)
+        : await _userRequest('PUT', '$base/$id', body: body);
+    if (![200, 201, 202].contains(response.statusCode)) {
       throw _memoryRefused(response);
     }
   }
 
-  /// Forgets one entry of that memory, with its earlier versions.
-  Future<void> forgetMemory(String id) async {
+  /// Forgets one entry of the memory [scope] names, with its earlier versions.
+  Future<void> forgetMemory(String id, {String? scope}) async {
     if (demo) throw StateError('Memory changes are unavailable in preview.');
-    final response = await _userRequest('DELETE', '$_memoryPath/$id');
+    final response = await _userRequest(
+      'DELETE',
+      '${scope == null ? _memoryPath : _memoriesPath}/$id',
+    );
     if (response.statusCode != 200) throw _memoryRefused(response);
   }
 
+  /// What Agents proposed for the memory [scope] names that the person may decide, oldest first.
+  Future<List<MemoryProposalSummary>> loadMemoryProposals(String scope) async {
+    if (demo) return const [];
+    final response = await _userRequest(
+      'GET',
+      Uri(
+        path: '$_memoriesPath/proposals',
+        queryParameters: {'scope': scope},
+      ).toString(),
+    );
+    if (response.statusCode != 200) throw _memoryRefused(response);
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    return [
+      for (final proposal in json['proposals'] as List<dynamic>? ?? const [])
+        MemoryProposalSummary.fromJson(proposal as Map<String, dynamic>),
+    ];
+  }
+
+  /// Approves a proposal, or rejects it.
+  Future<void> decideMemoryProposal(String id, {required bool approve}) async {
+    if (demo) throw StateError('Memory changes are unavailable in preview.');
+    final response = await _userRequest(
+      'POST',
+      '$_memoriesPath/proposals/$id',
+      body: {'approve': approve},
+    );
+    if (response.statusCode != 200) throw _memoryRefused(response);
+  }
+
+  /// The Operations whose memory the person may read: those they read, and those a compartment
+  /// gives them something on.
+  List<String> get memoryOperations => [
+    for (final operation
+        in userSession?.operations ?? const <UserOperationAccess>[])
+      if (operation.actions.contains('mission.read') ||
+          operation.compartments.isNotEmpty)
+        operation.operationId,
+  ];
+
   static const _memoryPath = '/v1/user/assistant/memory';
+  static const _memoriesPath = '/v1/user/memories';
 
   /// Universal Exports' own words for a refused memory request, when it gave any.
   MemoryRefused _memoryRefused(http.Response response) {
@@ -3936,8 +3991,16 @@ class _OuterOfficeAppState extends State<OuterOfficeApp>
       chatSettings: widget.chatSettings,
       router: router,
     ),
-    memory: (context) =>
-        widget.board.moneypennyServed ? MemoryPage(board: widget.board) : null,
+    memory: (context, route) => MemoryPage(
+      key: ValueKey(route),
+      board: widget.board,
+      shelf: switch ((route['scope'], route['operation_id'])) {
+        (_, final String operation) => MemoryShelf.operation(operation),
+        ('global', _) => MemoryShelf.global,
+        _ when !widget.board.moneypennyServed => MemoryShelf.global,
+        _ => MemoryShelf.person,
+      },
+    ),
   );
   final _location = PlatformRouteInformationProvider(
     initialRouteInformation: RouteInformation(

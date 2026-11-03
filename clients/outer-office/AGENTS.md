@@ -31,9 +31,12 @@ native windows build their app with `boardThemedApp`.
   link; a view the parser refuses is shown as refused with its reason. Proposals run only on
   the operator's Confirm. `test/fixtures/assistant_views.json` is shared with the gateway's
   tests: change both sides together.
-- The Memory page (`lib/assistant/memory_page.dart`) reads and changes only the signed-in
-  person's own memory, through `/v1/user/assistant/memory`; it saves with the digest of the
-  text it opened as `base`, and shows a refusal in Universal Exports' own words.
+- The Memory page (`lib/assistant/memory_page.dart`, route `memory` with `scope=global` or
+  `operation_id`) shows one memory at a time: the signed-in person's through
+  `/v1/user/assistant/memory`, the global one and an Operation's through `/v1/user/memories`.
+  Rows by ID; a save names the revision it opened, and a refusal shows in Universal Exports' own
+  words. Each entry shows who wrote it, its compartments and any mark; proposals waiting for the
+  person sit above the entries. `test/fixtures/assistant_routes.json` holds the route's cases.
 
 - `lib/forms/` renders any schema and form and names no kind of record, which
   `test/record_forms_test.dart` checks; what is about the roster is in `lib/roster/`. No field,

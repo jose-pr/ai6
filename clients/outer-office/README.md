@@ -143,10 +143,12 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   she had read, the page it affects as a chip that only opens it, and how it stands:
   Waiting for you, Applying, Applied, Refused with the reason, Cancelled, Expired, or an
   outcome unknown when it has been applying for thirty seconds); **Stop**
-  ends an answer she is still giving. Her menu opens **Her memory of you**, the files of
-  `memory/` in the operator's personal repository: open, edit and save, add, or forget one
-  (after a confirmation), each a commit by the operator. See the
-  [assistant guide](https://jose-pr.github.io/ai6/assistant/).
+  ends an answer she is still giving. Her menu opens **Her memory of you**: the entries she keeps
+  of the operator, searched, opened in a form, saved, added or forgotten (after a confirmation).
+  The same page shows the global memory and each Operation's the operator may read, with who wrote
+  each entry and what Agents proposed for it. See the
+  [assistant guide](https://jose-pr.github.io/ai6/assistant/) and
+  [memories](https://jose-pr.github.io/ai6/memories/).
 - Pages she publishes (a dashboard of live data, a report or a file) appear in her chat as a
   card: kind, size, expiry or **Remembered**, what she read when it was made after outside
   text, and the feeds it reads. **Open** launches it in a new browser tab (the system browser

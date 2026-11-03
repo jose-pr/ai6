@@ -41,8 +41,8 @@ class OoRouterDelegate extends RouterDelegate<OoRoute>
   /// The app for a route that is not `memory`.
   final Widget Function(BuildContext context, OoRouterDelegate router) shell;
 
-  /// Her memory page; `null` (or no builder) shows only the page behind it.
-  final Widget? Function(BuildContext context)? memory;
+  /// The memory page for the route; `null` (or no builder) shows only the page behind it.
+  final Widget? Function(BuildContext context, OoRoute route)? memory;
 
   @override
   final navigatorKey = GlobalKey<NavigatorState>();
@@ -121,7 +121,7 @@ class OoRouterDelegate extends RouterDelegate<OoRoute>
   @override
   Widget build(BuildContext context) {
     final memoryPage = _route.page == OoPage.memory
-        ? memory?.call(context)
+        ? memory?.call(context, _route)
         : null;
     return Navigator(
       key: navigatorKey,

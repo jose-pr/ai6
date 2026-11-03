@@ -78,6 +78,16 @@ entry keeps its source:
   marks what she writes from it.
 - An Agent's edit keeps the mark. A person's own edit clears it, audited `memory.mark_cleared`.
 
+## In the app
+
+Outer Office's **Memory** page (`app:/memory`, `?scope=global`, `?operation_id=G`) shows one memory
+at a time, chosen at its top: what Moneypenny keeps of you, everyone's, or an Operation's you may
+read; an Operation's own page links to its memory. It lists the entries, newest change first, with
+who wrote each, any compartment protecting it, and a warning on one an exposed Session wrote;
+searches them; and opens one in a form (summary, name, compartments, content) saved from the
+revision that was opened, or forgotten once you confirm. Where you may change that memory, what
+Agents proposed for it waits at the top, with who asked and their mark, to approve or reject.
+
 ## Routes
 
 `/v1/user/memories` serves every scope; `/v1/user/assistant/memory` is a person's own

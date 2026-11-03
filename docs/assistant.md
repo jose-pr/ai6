@@ -405,7 +405,8 @@ is lost: she reads it again and makes the change from what it holds now.
 
 What she remembers about you is yours to read and correct. In the app, **Ask Moneypenny**'s
 menu opens **Her memory of you**: your entries with who wrote each, a search, and a form to add,
-edit and forget one (after you confirm).
+edit and forget one (after you confirm). The same page shows the global memory and each
+Operation's you may read ([Memories](memories.md#in-the-app)).
 
 | Route | Does |
 | --- | --- |

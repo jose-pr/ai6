@@ -126,7 +126,78 @@ class MemoryGateway {
       requests.where((request) => request.method == method).toList();
 }
 
-MissionBoard signedIn(MemoryGateway gateway) {
+/// `/v1/user/memories` over the entries of each scope, with what Agents proposed, recording every
+/// request.
+class ScopedGateway {
+  ScopedGateway(this.scopes, {this.proposals = const {}});
+
+  /// Each scope's entries, by scope then ID.
+  final Map<String, Map<String, Map<String, dynamic>>> scopes;
+
+  /// What waits, by scope.
+  final Map<String, List<Map<String, dynamic>>> proposals;
+  final requests = <http.Request>[];
+
+  static const _prefix = '/v1/user/memories';
+
+  http.Response answer(http.Request request) {
+    requests.add(request);
+    final path = request.url.path;
+    if (path == '$_prefix/proposals') {
+      final scope = request.url.queryParameters['scope']!;
+      return http.Response(
+        jsonEncode({'proposals': proposals[scope] ?? const []}),
+        200,
+        headers: _json,
+      );
+    }
+    if (path.startsWith('$_prefix/proposals/')) {
+      return http.Response(
+        jsonEncode({'approved': jsonDecode(request.body)['approve']}),
+        200,
+        headers: _json,
+      );
+    }
+    if (path == _prefix && request.method == 'GET') {
+      final scope = request.url.queryParameters['scope']!;
+      final found = (scopes[scope] ?? const {}).values.toList();
+      return http.Response(
+        jsonEncode({
+          'entries': [
+            for (final entry in found) {...entry}..remove('content'),
+          ],
+          'total': found.length,
+        }),
+        200,
+        headers: _json,
+      );
+    }
+    if (path == _prefix && request.method == 'POST') {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      return http.Response(
+        jsonEncode(entry('made', body['summary'] as String, '')),
+        201,
+        headers: _json,
+      );
+    }
+    final id = path.substring(_prefix.length + 1);
+    for (final held in scopes.values) {
+      if (held[id] case final found?) {
+        return http.Response(jsonEncode(found), 200, headers: _json);
+      }
+    }
+    return http.Response(
+      jsonEncode({'error': 'There is no such entry.'}),
+      404,
+      headers: _json,
+    );
+  }
+
+  List<http.Request> sent(String method) =>
+      requests.where((request) => request.method == method).toList();
+}
+
+MissionBoard signedIn(MemoryGateway gateway, {ScopedGateway? scoped}) {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
@@ -134,15 +205,38 @@ MissionBoard signedIn(MemoryGateway gateway) {
       if (request.url.path.startsWith('/v1/user/assistant/memory')) {
         return gateway.answer(request);
       }
+      if (scoped != null && request.url.path.startsWith('/v1/user/memories')) {
+        return scoped.answer(request);
+      }
       return http.Response('[]', 200, headers: _json);
     }),
   );
   board.accessToken = 'operator-token';
   board.loading = false;
+  board.userSession = UserSessionSummary.fromJson({
+    'person_id': 'operator-007',
+    'name': 'operator-007',
+    'groups': <String>[],
+    'expires_at': 1.0e10,
+    'operations': [
+      {
+        'operation_id': 'G',
+        'actions': ['mission.read', 'memory.write'],
+      },
+      {
+        'operation_id': 'L',
+        'actions': ['mission.status'],
+      },
+    ],
+  });
   return board;
 }
 
-Future<void> openMemory(WidgetTester tester, MissionBoard board) async {
+Future<void> openMemory(
+  WidgetTester tester,
+  MissionBoard board, {
+  MemoryShelf shelf = MemoryShelf.person,
+}) async {
   tester.view.physicalSize = const Size(800, 1600);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -150,7 +244,7 @@ Future<void> openMemory(WidgetTester tester, MissionBoard board) async {
   addTearDown(board.dispose);
   await tester.pumpWidget(
     MaterialApp(
-      home: MemoryPage(key: ObjectKey(board), board: board),
+      home: MemoryPage(key: ObjectKey(board), board: board, shelf: shelf),
     ),
   );
   await tester.pumpAndSettle();
@@ -255,7 +349,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('memory-search')), 'zebra');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(find.text('Nothing she keeps matches that.'), findsOneWidget);
+    expect(find.text('Nothing kept here matches that.'), findsOneWidget);
   });
 
   testWidgets('its source and its mark are shown', (tester) async {
@@ -361,7 +455,7 @@ void main() {
           http.Response(jsonEncode({'error': none}), 503, headers: _json);
     await openMemory(tester, signedIn(empty));
     expect(find.text(none), findsOneWidget);
-    expect(find.text('Her memory is unavailable.'), findsOneWidget);
+    expect(find.text('This memory is unavailable.'), findsOneWidget);
   });
 
   testWidgets('the Ask Moneypenny panel\'s menu opens her memory', (
@@ -399,5 +493,92 @@ void main() {
       findsNothing,
       reason: 'no memory to open, no menu',
     );
+  });
+
+  testWidgets(
+    'an Operation\'s memory and the global one list, search, edit and forget by a form',
+    (tester) async {
+      final scoped = ScopedGateway({
+        'operation:G': {
+          _idPrefs: entry(_idPrefs, 'How G deploys', 'Through the gate.\n'),
+        },
+        'global': {
+          _idCall: {
+            ...entry(_idCall, 'Who to call', 'Ana.\n'),
+            'compartments': ['KESTREL'],
+          },
+        },
+      });
+      final board = signedIn(MemoryGateway([]), scoped: scoped);
+      await openMemory(tester, board, shelf: MemoryShelf.operation('G'));
+
+      // The Operations to choose from are the ones the person reads.
+      expect(find.byKey(const Key('memory-shelf-operation:G')), findsOneWidget);
+      expect(find.byKey(const Key('memory-shelf-operation:L')), findsNothing);
+      expect(find.text('Memory: Operation G'), findsOneWidget);
+      expect(scoped.requests.first.url.queryParameters['scope'], 'operation:G');
+      expect(find.text('How G deploys'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('memory-shelf-global')));
+      await tester.pumpAndSettle();
+      expect(find.text('Who to call'), findsOneWidget);
+      expect(find.textContaining('Only for KESTREL'), findsOneWidget);
+
+      // An entry opens by its ID, and a save goes to the general route with its revision.
+      await tester.tap(find.text('Who to call'));
+      await tester.pumpAndSettle();
+      expect(scoped.requests.last.url.path, '/v1/user/memories/$_idCall');
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('memory-compartments')))
+            .controller!
+            .text,
+        'KESTREL',
+      );
+      await tester.enterText(find.byKey(const Key('memory-text')), 'Bo.\n');
+      scoped.requests.clear();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      final put = scoped.sent('PUT').single;
+      expect(put.url.path, '/v1/user/memories/$_idCall');
+      expect(jsonDecode(put.body), {
+        'summary': 'Who to call',
+        'content': 'Bo.\n',
+        'revision': 1,
+      });
+    },
+  );
+
+  testWidgets('what Agents proposed waits for a decision, its mark shown', (
+    tester,
+  ) async {
+    final scoped = ScopedGateway(
+      {'operation:G': {}},
+      proposals: {
+        'operation:G': [
+          {
+            'id': 'proposal-1',
+            'summary': 'How G deploys',
+            'content': 'Push to main.',
+            'forget': false,
+            'source': {
+              'by': 'agent:007',
+              'exposures': ['tool:WebFetch'],
+            },
+          },
+        ],
+      },
+    );
+    final board = signedIn(MemoryGateway([]), scoped: scoped);
+    await openMemory(tester, board, shelf: MemoryShelf.operation('G'));
+    expect(find.text('Waiting for you'), findsOneWidget);
+    expect(find.textContaining('agent:007'), findsOneWidget);
+    expect(find.textContaining('tool:WebFetch'), findsOneWidget);
+    await tester.tap(find.byTooltip('Approve How G deploys'));
+    await tester.pumpAndSettle();
+    final decided = scoped.sent('POST').single;
+    expect(decided.url.path, '/v1/user/memories/proposals/proposal-1');
+    expect(jsonDecode(decided.body), {'approve': true});
+    expect(find.text('Approved: How G deploys.'), findsOneWidget);
   });
 }

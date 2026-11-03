@@ -61,6 +61,7 @@ const GREEN_INK_TABS: &[&str] = &["inbox", "classes"];
 const BRIEFING_TABS: &[&str] = &["proposals", "held"];
 const ACCESS_TABS: &[&str] = &["roles", "rules", "accounts", "check"];
 const ROSTER_KINDS: &[&str] = &["operation", "agent", "role", "cover", "assistant"];
+const MEMORY_SCOPES: &[&str] = &["global"];
 
 /// What a field holds.
 #[derive(Debug, Clone, Copy)]
@@ -146,7 +147,11 @@ impl Page {
     fn fields(self) -> &'static [(&'static str, Kind)] {
         use Kind::{Identifier, OneOf, States, Text};
         match self {
-            Self::Overview | Self::Memory => &[],
+            Self::Overview => &[],
+            Self::Memory => &[
+                ("scope", OneOf(MEMORY_SCOPES)),
+                ("operation_id", Identifier),
+            ],
             Self::Operations => &[("operation_id", Identifier)],
             Self::Missions => &[
                 ("operation_id", Identifier),
