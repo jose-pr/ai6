@@ -45,6 +45,7 @@ nav:
       - Agents and clearance: agents.md
       - Compartments: compartments.md
       - Memories: memories.md
+      - Review: review.md
       - The Agent Client Protocol: acp.md
       - Moneypenny, the assistant: assistant.md
       - Terminals: terminals.md
