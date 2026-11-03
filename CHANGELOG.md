@@ -124,6 +124,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Outer Office's Agents, Account pools, Green ink and class authorisation pages open on **All
   Operations** instead of the first one; the picker narrows to one, and an Operation that could not
   be read is named with its reason beside the others' rows.
+- Those pages have **Add filter**, offering the Agents, Missions and pools their rows hold. The
+  routes `agents`, `green_ink` and `pools` take `mission_id`, and `green_ink` takes `agent`, for the
+  app and for Moneypenny's links alike.
 - Outer Office's map, skyline and paper hero pictures have 2560 and 3840 pixel files, so a 4K window no
   longer stretches them to more than three times their size.
 - The ACP client is the `coqui-acp` library, pinned by revision, with AI6's launch extension, the

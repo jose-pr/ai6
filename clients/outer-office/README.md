@@ -133,7 +133,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Agents, Account pools and Green ink open on **All Operations**: every Operation the person
   may read there, each one's rows under its name, an Operation that could not be read named with
   why. The picker narrows to one (`operation_id` in the route), and an action on a row goes to
-  that row's Operation.
+  that row's Operation. **Add filter** narrows by a field the shown rows hold (Agent, Mission,
+  pool), each a chip that removes it.
 - Moneypenny, the assistant: **Ask Moneypenny** on every page opens a chat with her (see
   Layout for where it goes and its shortcuts), where the profile says the gateway serves her;
   elsewhere the app offers no card, button or chat for her and Settings says she is off and who
