@@ -1389,6 +1389,7 @@ never a weakening, and nothing is evicted when one is lowered. Pages are open by
 | `feeds` | `true` | **Dashboards read live feeds.** Whether dashboards may read live feeds. |
 | `frame` | `true` | **Show pages in the gateway's frame.** Whether a page is shown in the gateway's frame with the classification bar. |
 | `sharing` | `true` | **People may share pages.** Whether a person may share a page. |
+| `max_shares` | 32 | **Subjects a page is shared with.** Subjects one page is shared with. |
 <!-- schema:record.assistant.pages:end -->
 
 A Station reads `[assistant.limits]` `page_file_bytes` (8 MiB), `page_files` (200) and

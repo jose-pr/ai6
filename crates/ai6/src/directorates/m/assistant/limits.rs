@@ -547,6 +547,10 @@ pub struct AssistantPageLimits {
     #[schema(title = "People may share pages")]
     #[map(default = AssistantPageLimits::default().sharing)]
     pub sharing: bool,
+    /// Subjects one page is shared with.
+    #[schema(title = "Subjects a page is shared with")]
+    #[map(default = AssistantPageLimits::default().max_shares)]
+    pub max_shares: Limit,
 }
 
 impl Default for AssistantPageLimits {
@@ -573,6 +577,7 @@ impl Default for AssistantPageLimits {
             feeds: true,
             frame: true,
             sharing: true,
+            max_shares: Limit::at(32),
         }
     }
 }

@@ -1397,6 +1397,10 @@ impl Gateway {
             .route(
                 "/v1/user/pages/{id}/remember",
                 post(moneypenny::page_tools::remember),
+            )
+            .route(
+                "/v1/user/pages/{id}/shares",
+                axum::routing::put(moneypenny::page_tools::share),
             );
         let router = Router::new()
             .route("/health", get(health))

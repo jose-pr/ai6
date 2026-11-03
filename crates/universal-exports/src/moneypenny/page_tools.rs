@@ -11,6 +11,7 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -440,16 +441,22 @@ async fn page_limits(gateway: &Gateway) -> Result<AssistantPageLimits, ApiError>
 // The person
 // ---------------------------------------------------------------------------------------
 
-/// `GET /v1/user/pages`: the person's own pages, newest first.
+/// `GET /v1/user/pages`: the person's own pages, newest first, then the pages shared with them,
+/// each naming whose it is.
 pub(crate) async fn list(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
-    Ok(Json(Value::Array(
-        store.of(&person.id).iter().map(Page::summary).collect(),
-    )))
+    let limits = page_limits(&gateway).await?;
+    let mut listed: Vec<Value> = store.of(&person.id).iter().map(Page::summary).collect();
+    for page in store.shared_by_others(&person.id) {
+        if pages::may_view(&gateway, &page, &person, &limits).await {
+            listed.push(page.summary_for(&person.id));
+        }
+    }
+    Ok(Json(Value::Array(listed)))
 }
 
 #[derive(Deserialize, Default)]
@@ -459,8 +466,8 @@ pub(crate) struct OpenRequest {
 }
 
 /// `POST /v1/user/pages/{id}/open {network?}`: a link to the page for this sign-in, valid
-/// `open_ttl` or until the page goes: `{url, expires_at}`. Only the person whose page it is
-/// may ask; any other gets 404, an administrator included.
+/// `open_ttl` or until the page goes: `{url, expires_at}`. Only the person whose page it is, or
+/// someone a share names, may ask; any other gets 404, an administrator included.
 pub(crate) async fn open(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -471,7 +478,8 @@ pub(crate) async fn open(
     let person = resolve_user(&gateway, token).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     let page = store.get(&id).ok_or_else(ApiError::not_found)?;
-    if !pages::may_view(&gateway, &page, &person.id).await {
+    let limits = page_limits(&gateway).await?;
+    if !pages::may_view(&gateway, &page, &person, &limits).await {
         return Err(ApiError::not_found());
     }
     let asked = match request.and_then(|Json(request)| request.network).as_deref() {
@@ -481,7 +489,6 @@ pub(crate) async fn open(
         Some("open") => Some(PageNetwork::Open),
         Some(_) => return Err(ApiError::bad_request()),
     };
-    let limits = page_limits(&gateway).await?;
     let network = pages::profile(&limits, asked);
     let (link, expires) = store.mint(
         &page,
@@ -537,6 +544,118 @@ pub(crate) async fn remember(
         .remember(&id, request.remember, limits.default_ttl.0)
         .ok_or_else(ApiError::not_found)?;
     Ok(Json(page.summary()))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SharesRequest {
+    subjects: Vec<String>,
+}
+
+/// A refusal with its reason, `{"error": reason}`.
+fn refusal(status: StatusCode, reason: impl Into<String>) -> Response {
+    (status, Json(json!({"error": reason.into()}))).into_response()
+}
+
+/// `PUT /v1/user/pages/{id}/shares {subjects}`: whom the page is shared with, in place of whom
+/// it was; an empty list shares it with nobody. Only the page's person, and only while
+/// `[assistant.pages] sharing` is on; a compartment only if they are read into it, an Operation
+/// only where they hold `mission.read`. A viewer no share names any longer loses their links at
+/// once. Answers the page as its person lists it.
+pub(crate) async fn share(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+    Json(request): Json<SharesRequest>,
+) -> Result<Response, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
+    match store.get(&id) {
+        Some(page) if page.person_id == person.id => {}
+        _ => return Err(ApiError::not_found()),
+    }
+    let limits = page_limits(&gateway).await?;
+    if !limits.sharing {
+        return Ok(refusal(
+            StatusCode::FORBIDDEN,
+            "this deployment turns sharing pages off",
+        ));
+    }
+    let mut subjects: Vec<String> = Vec::new();
+    for subject in request.subjects {
+        let subject = subject.trim().to_owned();
+        if !subjects.contains(&subject) {
+            subjects.push(subject);
+        }
+    }
+    if !limits.max_shares.allows(subjects.len()) {
+        return Ok(refusal(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "a page is shared with at most {} subjects",
+                limits.max_shares
+            ),
+        ));
+    }
+    for subject in &subjects {
+        match pages::share_subject(subject) {
+            None => {
+                return Ok(refusal(
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "{subject:?} is not person:, group:, account:, compartment: or \
+                         operation: and an ID"
+                    ),
+                ));
+            }
+            Some(("compartment", compartment))
+                if !pages::read_into(&gateway, &person, compartment).await =>
+            {
+                return Ok(refusal(
+                    StatusCode::FORBIDDEN,
+                    format!("you are not read into compartment {compartment}"),
+                ));
+            }
+            Some(("operation", operation))
+                if !pages::reads_operation(&gateway, &person, operation).await =>
+            {
+                return Ok(refusal(
+                    StatusCode::FORBIDDEN,
+                    format!("you do not hold mission.read in Operation {operation}"),
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    let target = if subjects.is_empty() {
+        format!("{id} nobody")
+    } else {
+        format!("{id} {}", subjects.join(" "))
+    };
+    audit(
+        &gateway,
+        &person,
+        "moneypenny.page.shared",
+        String::new(),
+        Some(RESOURCE.to_owned()),
+        &target,
+    )
+    .await
+    .map_err(|_| ApiError::internal())?;
+    let page = store
+        .share(&id, subjects)
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(ApiError::not_found)?;
+    let mut kept = Vec::new();
+    for (viewer, token) in store.viewers(&id) {
+        if let Ok(holder) = resolve_user(&gateway, &token).await
+            && pages::may_view(&gateway, &page, &holder, &limits).await
+        {
+            kept.push(viewer);
+        }
+    }
+    store.revoke_viewers(&id, &|viewer| kept.iter().any(|kept| kept == viewer));
+    Ok(Json(page.summary()).into_response())
 }
 
 /// `DELETE /v1/user/pages/{id}`: deletes the page. Only the page's person.

@@ -90,13 +90,14 @@ impl Authenticator for People {
 }
 
 impl Directory for People {
-    /// Operator 007 is in directory group `ops`; viewer 007 in none.
+    /// Operator 007 and member 007 are in directory group `ops`; viewer 007 and admin 007 in
+    /// none.
     fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
-        Ok(["operator-007", "viewer-007"]
+        Ok(["operator-007", "viewer-007", "admin-007", "member-007"]
             .contains(&lookup.value.as_str())
             .then(|| Person {
                 id: lookup.value.clone(),
-                groups: if lookup.value == "operator-007" {
+                groups: if ["operator-007", "member-007"].contains(&lookup.value.as_str()) {
                     vec!["ops".to_owned()]
                 } else {
                     Vec::new()
@@ -108,8 +109,20 @@ impl Directory for People {
 }
 
 /// Operator 007 reads and audits Operation G, manages the roster and may read anyone's memory
-/// (`assistant.memory.admin`); viewer 007 only reads G.
+/// (`assistant.memory.admin`); viewer 007 only reads G; admin 007 administers everything;
+/// member 007 holds no rule.
 const ROLES: &str = r#"
+    [role.admin]
+    actions = [
+        "mission.read", "mission.control", "audit.read", "roster.read", "roster.manage",
+        "assistant.memory.admin",
+    ]
+
+    [[rule]]
+    subject = "person:admin-007"
+    scope = "*"
+    role = "admin"
+
     [role.viewer]
     actions = ["mission.read"]
 
@@ -151,6 +164,10 @@ struct Served {
     registry: FileRegistry,
     operator: String,
     viewer: String,
+    /// Holds every administrative action everywhere.
+    admin: String,
+    /// In group `ops` with operator 007, and holds no rule.
+    member: String,
     server: tokio::task::JoinHandle<()>,
     /// The pages' own listener, when the gateway was given an origin for them.
     pages_server: Option<(String, tokio::task::JoinHandle<()>)>,
@@ -324,6 +341,8 @@ async fn served_full(
     };
     let operator = token("operator-007").await;
     let viewer = token("viewer-007").await;
+    let admin = token("admin-007").await;
+    let member = token("member-007").await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let pages_server = gateway.pages_router().map(|router| {
@@ -348,6 +367,8 @@ async fn served_full(
         registry,
         operator,
         viewer,
+        admin,
+        member,
         server,
         pages_server,
         pages_dir,
@@ -4796,8 +4817,8 @@ async fn pages_only_the_person_opens_a_page_and_deleting_it_ends_its_links() {
         )
         .await,
     );
-    // A stranger gets 404, as does an unknown page.
-    for bearer in [&served.viewer] {
+    // A stranger and an administrator get 404, as does an unknown page.
+    for bearer in [&served.viewer, &served.admin] {
         assert_eq!(
             open_page(&served, bearer, &id, None).await.status(),
             StatusCode::NOT_FOUND
@@ -5862,3 +5883,5 @@ async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation()
     );
     finish(&served, &mut app, &job).await;
 }
+
+mod sharing;

@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use ai6::{AssistantPageFile, AssistantPageLimits, PageNetwork};
+use ai6::{AssistantPageFile, AssistantPageLimits, PageNetwork, Person};
 use axum::extract::{Path as UrlPath, Query, Request, State};
 use axum::http::header::{
     CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, LOCATION,
@@ -113,8 +113,25 @@ pub(crate) struct Page {
 }
 
 impl Page {
-    /// How the app and her `pages` tool list it.
+    /// How the app and her `pages` tool list it to its person, with whom it is shared.
     pub(crate) fn summary(&self) -> Value {
+        let mut summary = self.common();
+        summary["shares"] = json!(self.shares);
+        summary
+    }
+
+    /// How it is listed to `viewer`: its person sees [`summary`](Self::summary); anyone it is
+    /// shared with sees whose it is, and not whom else it is shared with.
+    pub(crate) fn summary_for(&self, viewer: &str) -> Value {
+        if viewer == self.person_id {
+            return self.summary();
+        }
+        let mut summary = self.common();
+        summary["shared_by"] = json!(self.person_id);
+        summary
+    }
+
+    fn common(&self) -> Value {
         json!({
             "id": self.id,
             "kind": self.kind.as_str(),
@@ -124,6 +141,19 @@ impl Page {
             "feeds": self.feeds.iter().map(|feed| feed.name.as_str()).collect::<Vec<_>>(),
         })
     }
+}
+
+/// A share's kind and ID: `person:`, `group:` or `account:` (as the access policy names people),
+/// `compartment:{id}` (the people read into it) or `operation:{id}` (the people who hold
+/// `mission.read` there). The ID is 1 to 256 bytes without control characters.
+pub(crate) fn share_subject(text: &str) -> Option<(&str, &str)> {
+    let (kind, id) = text.split_once(':')?;
+    let known = matches!(
+        kind,
+        "person" | "group" | "account" | "compartment" | "operation"
+    );
+    (known && !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
+        .then_some((kind, id))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -416,6 +446,51 @@ impl PageStore {
 
     pub(crate) fn get(&self, id: &str) -> Option<Page> {
         self.state().pages.get(id).cloned()
+    }
+
+    /// Pages of other people than `person` that are shared with someone, newest first: the
+    /// ones that might be shared with `person`.
+    pub(crate) fn shared_by_others(&self, person: &str) -> Vec<Page> {
+        let mut pages: Vec<Page> = self
+            .state()
+            .pages
+            .values()
+            .filter(|page| page.person_id != person && !page.shares.is_empty())
+            .cloned()
+            .collect();
+        pages.sort_by(|a, b| b.created_at.total_cmp(&a.created_at));
+        pages
+    }
+
+    /// Sets whom a page is shared with.
+    ///
+    /// # Errors
+    ///
+    /// The record could not be written; nothing changed.
+    pub(crate) fn share(&self, id: &str, shares: Vec<String>) -> io::Result<Option<Page>> {
+        let mut state = self.state();
+        let Some(page) = state.pages.get(id) else {
+            return Ok(None);
+        };
+        let mut changed = page.clone();
+        changed.shares = shares;
+        self.save(&changed)?;
+        state.pages.insert(changed.id.clone(), changed.clone());
+        Ok(Some(changed))
+    }
+
+    /// Each viewer holding a link to `page`, with the access token the link was made with.
+    pub(crate) fn viewers(&self, page: &str) -> Vec<(String, String)> {
+        let mut viewers: Vec<(String, String)> = self
+            .state()
+            .links
+            .values()
+            .filter(|link| link.page == page)
+            .map(|link| (link.viewer.clone(), link.bearer.clone()))
+            .collect();
+        viewers.sort();
+        viewers.dedup();
+        viewers
     }
 
     /// `person`'s pages, newest first.
@@ -988,10 +1063,65 @@ fn gone() -> Response {
     StatusCode::NOT_FOUND.into_response()
 }
 
-/// Whether `viewer` may read `page`: its person, and nobody else; an administrator included.
-pub(crate) async fn may_view(gateway: &Gateway, page: &Page, viewer: &str) -> bool {
-    let _ = gateway;
-    page.person_id == viewer
+/// What the compartments grant now, read for one decision; `None` without a configuration
+/// provider or when it cannot be read, which grants nothing.
+async fn compartments_now(gateway: &Gateway) -> Option<ai6::CompiledCompartments> {
+    let roster = gateway.roster.clone()?;
+    tokio::task::spawn_blocking(move || {
+        ai6::directorates::m::compartments::current(roster.as_ref()).ok()
+    })
+    .await
+    .ok()?
+}
+
+/// Whether `person` holds `mission.read` on Operation `operation`, compartments and the tree of
+/// Operations included.
+pub(crate) async fn reads_operation(gateway: &Gateway, person: &Person, operation: &str) -> bool {
+    crate::resource_action_allowed(
+        gateway,
+        person.clone(),
+        crate::tree::operation_resource(operation),
+        "mission.read",
+    )
+    .await
+    .unwrap_or(false)
+}
+
+/// Whether `person` is read into compartment `id` now.
+pub(crate) async fn read_into(gateway: &Gateway, person: &Person, id: &str) -> bool {
+    compartments_now(gateway)
+        .await
+        .is_some_and(|compiled| compiled.person_holds(id, person))
+}
+
+/// Whether `viewer` may read `page`: its person, or someone one of its shares names while
+/// `limits` lets pages be shared. An administrator is no exception.
+pub(crate) async fn may_view(
+    gateway: &Gateway,
+    page: &Page,
+    viewer: &Person,
+    limits: &AssistantPageLimits,
+) -> bool {
+    if page.person_id == viewer.id {
+        return true;
+    }
+    if !limits.sharing {
+        return false;
+    }
+    for share in &page.shares {
+        let named = match share_subject(share) {
+            Some(("compartment", id)) => read_into(gateway, viewer, id).await,
+            Some(("operation", id)) => reads_operation(gateway, viewer, id).await,
+            Some(_) => share
+                .parse::<ai6::Subject>()
+                .is_ok_and(|subject| subject.matches(viewer)),
+            None => false,
+        };
+        if named {
+            return true;
+        }
+    }
+    false
 }
 
 /// A link that stands: not expired, its page there, and its viewer still signed in and still
@@ -999,20 +1129,14 @@ pub(crate) async fn may_view(gateway: &Gateway, page: &Page, viewer: &str) -> bo
 async fn standing(gateway: &Gateway, token: &str) -> Option<(Link, Page, AssistantPageLimits)> {
     let store = gateway.pages.clone()?;
     let (link, page) = store.link(token)?;
-    let registry = gateway.registry.clone()?;
-    let access = link.access.clone();
-    let signed_in = tokio::task::spawn_blocking(move || registry.find_access_token(&access))
-        .await
-        .ok()?
-        .ok()??;
-    let _ = signed_in;
+    let viewer = crate::resolve_user(gateway, &link.bearer).await.ok()?;
     let limits = super::assistant_settings(gateway)
         .await
         .ok()?
         .pages()
         .clone();
-    if !may_view(gateway, &page, &link.viewer).await {
-        store.revoke_viewers(&page.id, &|viewer| viewer != link.viewer);
+    if viewer.id != link.viewer || !may_view(gateway, &page, &viewer, &limits).await {
+        store.revoke_viewers(&page.id, &|held| held != link.viewer);
         return None;
     }
     Some((link, page, limits))

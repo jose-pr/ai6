@@ -4496,6 +4496,26 @@
               "title": "People may share pages",
               "description": "Whether a person may share a page.",
               "default": true
+            },
+            "max_shares": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Subjects a page is shared with",
+              "description": "Subjects one page is shared with.",
+              "default": 32
             }
           },
           "additionalProperties": false,
@@ -4524,7 +4544,8 @@
             "network": "open",
             "feeds": true,
             "frame": true,
-            "sharing": true
+            "sharing": true,
+            "max_shares": 32
           }
         }
       },
