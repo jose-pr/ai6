@@ -276,6 +276,13 @@ wrote first); `update_mission_review(store, (mission, gate), tries, change)`. SQ
 cut }`, the kind method `SafeHouseSession::diff(bytes)` (unsupported by default; `git` gives the working
 tree against the base and untracked names) and `SafeHouse::diff(Limit)`.
 
+The plan gate: `ai6::READ_CLEARANCE` (`"read"`, set only by AI6) and `clearance_reads_only(&str)`; the
+`AgentHandler` kind method `read_only_refusal() -> Result<Option<String>, ProviderError>` (default:
+refuses; `claude` and `codex` hold a Session to reading and take up the Mission's tools on a resume of
+the same Session). A Mission under a `plan` policy starts and is sent back at `read`, its only Cable
+tool `submit_plan`, kept in `Mission.plan` until it is put up; it does not start on a handler that
+refuses, nor in remote-hands mode, and waits with the reason in `Mission.waiting`.
+
 The crate root re-exports these, `decide` as `decide_review`, `applicable` as `applicable_review`,
 `next_step` as `review_next_step`, `out_of_budget` as `review_out_of_budget`, `Decision` as
 `ReviewDecision` and `Step` as `ReviewStep`. `RosterBuilder::review(name, policy)` adds a policy and

@@ -34,7 +34,7 @@ use ai6::directorates::q::terminal::{
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
     LIMIT_EVENT, ModelInfo, ModelListing, QuotaReport, TokenUsage, UsageLimit,
-    clearance_runs_commands,
+    clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::directorates::section_00::listing;
@@ -186,6 +186,10 @@ impl AgentHandler for CodexHandler {
         Ok(ai6::HarnessStdio::Json)
     }
 
+    fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
     /// The app server's `model/list`: the models Codex offers the account behind `environment`
     /// (its `CODEX_HOME` login or API key), before any model turn. With no login it answers from
     /// the catalog it ships with, so the list is what Codex offers, not a check of the account.
@@ -287,6 +291,7 @@ impl AgentHandler for CodexHandler {
                 request.answer_only,
                 request.assistant.as_ref(),
                 desk.then_some(&request.environment),
+                clearance_reads_only(&request.clearance),
             ))
             .reporting_commands(scripts != Scripts::None);
         session.request(
@@ -418,6 +423,7 @@ impl CodexHandler {
                 request.answer_only,
                 request.assistant.as_ref(),
                 desk.then_some(&request.environment),
+                clearance_reads_only(&request.clearance),
             ))
             .reporting_commands(scripts != Scripts::None);
         session.request(
@@ -520,19 +526,21 @@ fn station_servers(environment: &std::collections::BTreeMap<String, String>) -> 
 }
 
 /// What a restricted thread may use, `None` for a thread that is not restricted. `desk` is the
-/// environment of a thread held to `desk`.
+/// environment of a thread held to `desk`; `reads_only` holds it further, to reading until its plan
+/// passes: no file change at all, so a patch ends the thread.
 fn restriction(
     answer_only: bool,
     assistant: Option<&AssistantMode>,
     desk: Option<&std::collections::BTreeMap<String, String>>,
+    reads_only: bool,
 ) -> Option<Restriction> {
     if let Some(environment) = desk {
-        let on_station = !is_remote_hands(environment);
+        let changes = !is_remote_hands(environment) && !reads_only;
         return Some(Restriction {
             servers: station_servers(environment),
             commands: false,
-            file_changes: on_station,
-            asks_file_changes: on_station,
+            file_changes: changes,
+            asks_file_changes: changes,
         });
     }
     match assistant {
@@ -1691,7 +1699,7 @@ fn spawn(
             // `apply_patch` is nested in `exec` in remote-hands mode too, where a read-only sandbox
             // that never asks refuses it.
             files: mode.desk
-                || restriction(mode.answer_only, mode.assistant, None)
+                || restriction(mode.answer_only, mode.assistant, None, false)
                     .is_some_and(|allowed| allowed.file_changes),
         }
         .check()?;
@@ -2894,7 +2902,7 @@ mod tests {
             None,
         )
         .working_in(&directory.to_string_lossy())
-        .restricted_to(restriction(false, None, Some(&BTreeMap::new())));
+        .restricted_to(restriction(false, None, Some(&BTreeMap::new()), false));
         while let Ok(Some(_)) = session.next_event(20) {}
         let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
         written
@@ -2902,6 +2910,64 @@ mod tests {
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .find_map(|message| message.pointer("/result/decision").cloned())
             .expect("the file change was answered, not left waiting")
+    }
+
+    #[test]
+    fn a_thread_held_to_its_plan_changes_no_file_and_one_at_desk_or_field_may() {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let inside = file_change(&work.join("p.md").to_string_lossy(), Value::Null);
+        let answered = |reads_only: bool| {
+            let writes = Arc::new(Mutex::new(Vec::new()));
+            let session = CodexSession::new(
+                ResumeTerminalSession {
+                    input: Mutex::new(inside.as_bytes().to_vec()),
+                    writes: writes.clone(),
+                    killed: Arc::new(AtomicBool::new(false)),
+                }
+                .into_object(),
+                None,
+            )
+            .working_in(&work.to_string_lossy())
+            .restricted_to(restriction(
+                false,
+                None,
+                Some(&BTreeMap::new()),
+                reads_only,
+            ));
+            let mut events = Vec::new();
+            while let Ok(Some(event)) = session.next_event(20) {
+                events.push(event);
+            }
+            let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+            let decision = written
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .find_map(|message| message.pointer("/result/decision").cloned());
+            (decision, events)
+        };
+        let (decision, events) = answered(true);
+        assert_ne!(decision, Some(json!("accept")), "{events:?}");
+        assert!(
+            events.iter().any(|event| event.kind == "failed"),
+            "a patch ends a thread held to its plan: {events:?}"
+        );
+        assert_eq!(
+            answered(false).0,
+            Some(json!("accept")),
+            "after the pass it may"
+        );
+        assert!(
+            held_to_desk(ai6::READ_CLEARANCE, false, None),
+            "and it never runs a command"
+        );
+    }
+
+    #[test]
+    fn this_handler_can_hold_a_thread_to_its_plan() {
+        let handler = CodexHandler::try_from(CodexConfig::default()).unwrap();
+        assert_eq!(handler.read_only_refusal().unwrap(), None);
     }
 
     #[test]
@@ -4828,7 +4894,7 @@ mod tests {
         let item = |kind: &str| json!({"method":"item/started","params":{"item":{"type":kind}}});
         let mut mode = AssistantMode::moneypenny();
         mode.interpreters.push("python3".to_owned());
-        let scripts = restriction(false, Some(&mode), None).unwrap();
+        let scripts = restriction(false, Some(&mode), None, false).unwrap();
         assert_eq!(forbidden_use(&item("commandExecution"), &scripts), None);
         assert!(
             forbidden_use(&item("fileChange"), &scripts).is_some(),
@@ -4836,7 +4902,7 @@ mod tests {
         );
         assert!(forbidden_use(&item("webSearch"), &scripts).is_some());
         mode.files.push("personal".to_owned());
-        let files = restriction(false, Some(&mode), None).unwrap();
+        let files = restriction(false, Some(&mode), None, false).unwrap();
         assert_eq!(forbidden_use(&item("fileChange"), &files), None);
         let approval = json!({"id": 3, "method": COMMAND_APPROVAL, "params": {}});
         assert!(
@@ -4910,7 +4976,7 @@ mod tests {
             "no sandbox profile without scripts: {argv:?}"
         );
         assert_eq!(
-            restriction(false, Some(&mode), None),
+            restriction(false, Some(&mode), None, false),
             Some(Restriction {
                 servers: vec!["moneypenny".to_owned()],
                 commands: false,

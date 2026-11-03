@@ -134,7 +134,6 @@ pub(super) fn holds_output(
             return true;
         }
     };
-    note_choice(state, &mission, gate, &applied);
     let Some(name) = applied.name else {
         return false;
     };
@@ -1403,8 +1402,195 @@ async fn refuse(state: &DaemonState, mission_id: &str, reason: &str) {
     );
 }
 
-/// Goes on after a plan passed. The Agent's tools are the Mission's from this resume on.
-async fn go_on_after_plan(_state: &DaemonState, _mission_id: &str) {}
+/// Told to an Agent whose plan is reviewed before it works, with the tools it has meanwhile.
+pub(super) const PLAN_CONTEXT: &str = "This Mission's plan is reviewed before any work starts. \
+    For now you can read and search, and change nothing. Work out how you would do the task, then \
+    call the AI6 tool submit_plan with the whole plan, the steps and how you will test them, and \
+    end your turn. If the tool is not there, make the plan your final message. A review may send \
+    it back with reasons; once it passes you are resumed with the tools to carry it out.";
+
+/// Told to an Agent when its plan passed.
+const PLAN_PASSED: &str = "Your plan passed its review. You now have this Mission's tools: carry \
+    the plan out.";
+
+/// Whether `mission` is held to reading until its plan passes: a plan review applies and has not
+/// passed. When the Registry or the policy cannot say, it is held.
+pub(super) fn in_plan_stage(state: &DaemonState, mission: &Mission) -> bool {
+    if vetting::is_review_mission(mission) || mission.operation_id.is_none() {
+        return false;
+    }
+    match applied_policy(state, mission, ReviewGate::Plan) {
+        Ok(applied) if applied.name.is_none() => false,
+        _ => !matches!(
+            state
+                .intake
+                .mission_review(mission.mission_id.as_str(), ReviewGate::Plan),
+            Ok(Some(review)) if review.status == ReviewStatus::Passed
+        ),
+    }
+}
+
+/// Stops the author at the plan gate, as [`holds_output`] does at the output gate: its plan is what
+/// it submitted with `submit_plan`, else its final message.
+pub(super) fn holds_plan(
+    state: &DaemonState,
+    mission_id: &str,
+    session: &std::sync::Arc<std::sync::Mutex<crate::guatiao::library::Object<dyn AgentSession>>>,
+    final_message: Option<&str>,
+) -> bool {
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+    else {
+        return false;
+    };
+    if !in_plan_stage(state, &mission) {
+        return false;
+    }
+    let gate = ReviewGate::Plan;
+    let name = match applied_policy(state, &mission, gate) {
+        Ok(applied) => applied.name,
+        Err(refusal) => {
+            stop_author(state, mission_id, session, gate, &refusal.to_string());
+            note_refusal(state, &mission, gate, &refusal.to_string());
+            return true;
+        }
+    };
+    let Some(name) = name else {
+        return false;
+    };
+    let limits = &state.station.limits().review;
+    let plan = mission
+        .plan
+        .clone()
+        .or_else(|| final_message.map(str::to_owned))
+        .unwrap_or_default();
+    let material = ReviewMaterial {
+        goals: cut(&mission.prompt, limits.goals_bytes.or_max()),
+        submitted: cut(&plan, limits.submitted_bytes.or_max()),
+        ..ReviewMaterial::default()
+    };
+    open_review(state, &mission, gate, &name, material);
+    if let Ok(mut missions) = state.missions.lock() {
+        let _ = missions.set_plan(mission_id, None);
+    }
+    stop_author(
+        state,
+        mission_id,
+        session,
+        gate,
+        &format!("its plan waits for review policy {name:?}"),
+    );
+    true
+}
+
+/// Why a Mission held to reading cannot start on `handler`, when it cannot.
+pub(super) fn plan_stage_refusal(
+    handler: &dyn crate::directorates::section_00::agent::AgentHandler,
+    remote_hands: bool,
+) -> Option<String> {
+    let refused = match handler.read_only_refusal() {
+        Ok(refused) => refused,
+        Err(error) => Some(format!("its handler could not say whether it can: {error}")),
+    };
+    refused
+        .or_else(|| {
+            remote_hands.then(|| {
+                "in remote-hands mode the Theater's tools can change it, whatever the handler offers"
+                    .to_owned()
+            })
+        })
+        .map(|why| format!("its plan is reviewed before it may change anything, and {why}"))
+}
+
+/// The `submit_plan` tool of a Mission held to reading: it keeps the plan for its review.
+#[derive(Clone)]
+#[cfg_attr(not(feature = "cables-mcp"), allow(dead_code))]
+pub(super) struct PlanDesk {
+    state: DaemonState,
+    mission_id: String,
+}
+
+#[cfg_attr(not(feature = "cables-mcp"), allow(dead_code))]
+impl PlanDesk {
+    pub(super) fn new(state: DaemonState, mission_id: String) -> Self {
+        Self { state, mission_id }
+    }
+
+    /// Keeps `plan`, cut to `[review] submitted_bytes`, and says what happens next.
+    pub(super) fn submit(&self, plan: &str) -> String {
+        let bytes = self.state.station.limits().review.submitted_bytes.or_max();
+        let kept = self.state.missions.lock().ok().is_some_and(|mut missions| {
+            missions
+                .set_plan(&self.mission_id, Some(cut(plan, bytes)))
+                .is_ok()
+        });
+        if kept {
+            "Your plan is kept for its review. End your turn now: you are resumed with the outcome."
+                .to_owned()
+        } else {
+            "Your plan could not be kept; give it as your final message instead.".to_owned()
+        }
+    }
+}
+
+/// Goes on after a plan passed: the author is resumed at its Mission's clearance with the
+/// Mission's tools. Tried again next round when it cannot start.
+async fn go_on_after_plan(state: &DaemonState, mission_id: &str) {
+    let waiting = state
+        .retry_after
+        .lock()
+        .ok()
+        .and_then(|retries| retries.get(mission_id).copied())
+        .is_some_and(|retry_at| retry_at > tokio::time::Instant::now());
+    if waiting {
+        return;
+    }
+    let resumed = resume_mission(
+        State(state.clone()),
+        Path(mission_id.to_owned()),
+        Json(ResumeMission {
+            message: Some(PLAN_PASSED.to_owned()),
+            environment: BTreeMap::new(),
+        }),
+    )
+    .await;
+    if let Err(ApiErrorResponse(_, Json(error))) = resumed {
+        eprintln!(
+            "ai6: Mission {mission_id:?} did not go on after its plan passed: {}",
+            error.error
+        );
+        if let Ok(mut retries) = state.retry_after.lock() {
+            retries.insert(
+                mission_id.to_owned(),
+                tokio::time::Instant::now() + state.station.limits().scheduler.retry_delay.0,
+            );
+        }
+    }
+}
+
+/// Records, once when a Mission is created, a brief's naming that did not take or that weakened a
+/// review, for each gate.
+pub(super) fn note_naming(state: &DaemonState, mission_id: &str) {
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+    else {
+        return;
+    };
+    if mission.review_naming.is_none() {
+        return;
+    }
+    for gate in [ReviewGate::Plan, ReviewGate::Output] {
+        if let Ok(applied) = applied_policy(state, &mission, gate) {
+            note_choice(state, &mission, gate, &applied);
+        }
+    }
+}
 
 /// Writes one timeline event of a review.
 fn record(state: &DaemonState, review: &MissionReview, action: &str, details: &[(&str, String)]) {
@@ -1470,3 +1656,6 @@ pub(super) mod testing;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod plan_tests;

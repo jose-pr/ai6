@@ -186,6 +186,16 @@ pub fn clearance_runs_commands(clearance: &str) -> bool {
     crate::directorates::m::approvals::clearance_at_least(clearance, "field")
 }
 
+/// The clearance of a Mission's Session held to reading and searching until its plan passes a
+/// review: no tool that changes anything but AI6's own `submit_plan`. Only AI6 sets it; an Agent
+/// cannot be configured at it.
+pub const READ_CLEARANCE: &str = "read";
+
+/// Whether a Session at `clearance` is held to reading ([`READ_CLEARANCE`]).
+pub fn clearance_reads_only(clearance: &str) -> bool {
+    clearance == READ_CLEARANCE
+}
+
 /// How AI6 resumes a provider-issued Session.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
@@ -438,6 +448,17 @@ pub trait AgentHandler: Send + Sync {
     fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
         let _ = clearance;
         Ok(None)
+    }
+
+    /// Why this handler cannot hold a Mission's Session to reading at [`READ_CLEARANCE`] and then
+    /// give it the Mission's tools on a resume of the same Session, in a sentence; `None` when it
+    /// can. The default: it cannot say it can, so a Mission whose plan is reviewed does not start
+    /// on it.
+    fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "its handler cannot hold a Session to reading and then give it the Mission's tools"
+                .to_owned(),
+        ))
     }
 
     /// The models the account behind `environment` (the variables a Session would start with)

@@ -85,6 +85,7 @@ use crate::directorates::registry::sessions::{
 };
 use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
+use crate::directorates::section_00::agent::READ_CLEARANCE;
 use crate::directorates::section_00::agent::{
     AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, DENIED_EVENT, LIMIT_EVENT,
 };
@@ -3287,12 +3288,18 @@ fn create_intake_mission(
             &medical::brief_exposure(brief, &state.intake.limits().sessions),
         )
         .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))?;
+    let named = naming.is_some();
     if let Some(naming) = naming {
         missions
             .record_review_naming(mission_id.as_str(), naming)
             .map_err(|error| format!("could not record the brief's review policy: {error:?}"))?;
     }
-    bona_fides::record_origin(state, &mut missions, mission_id.as_str(), brief)
+    let created = bona_fides::record_origin(state, &mut missions, mission_id.as_str(), brief);
+    drop(missions);
+    if named && created.is_ok() {
+        review::note_naming(state, mission_id.as_str());
+    }
+    created
 }
 
 fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), String> {
@@ -4130,6 +4137,19 @@ async fn start_mission(
     let handler_settings = agent.handler_settings.clone();
     let model = agent.model.clone();
     let effort = agent.effort.clone();
+    let plan_stage = !review && review::in_plan_stage(&state, &mission);
+    if plan_stage {
+        let asked = state
+            .plugins
+            .handler_with(&handler_provider, &handler_settings)
+            .map_err(provider_error)?;
+        if let Some(reason) =
+            review::plan_stage_refusal(asked.as_ref(), plan.mode == ExecutionMode::RemoteHands)
+        {
+            agents::note_waiting(&state, &mission, Some(reason.clone()));
+            return Err(conflict(&reason));
+        }
+    }
     // The Station loads the harness's providers only when it supervises the harness itself.
     let handler = match &runner {
         Some(_) => None,
@@ -4236,6 +4256,9 @@ async fn start_mission(
     if let Some(round) = &round {
         initial_context.push(round.context.clone());
     }
+    if plan_stage {
+        initial_context.push(review::PLAN_CONTEXT.to_owned());
+    }
     if session_hold(&state, &mission_id).is_some() {
         initial_context.push(
             "This Mission continues an earlier attempt that stopped before finishing. \
@@ -4327,6 +4350,9 @@ async fn start_mission(
             .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
             endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
             endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
+            if plan_stage {
+                endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
+            }
             endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
             endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
             if let Some(role) = mission.role_id.as_deref() {
@@ -4410,6 +4436,8 @@ async fn start_mission(
         .map(|_| uuid::Uuid::new_v4().simple().to_string());
     let launch_clearance = if review {
         "desk".to_owned()
+    } else if plan_stage {
+        READ_CLEARANCE.to_owned()
     } else {
         agent.clearance.clone()
     };
@@ -4462,7 +4490,7 @@ async fn start_mission(
         });
     }
     // A review's directory is new and empty: there are no project settings to decide on.
-    let (project_settings, project_mcp) = if review {
+    let (project_settings, project_mcp) = if review || plan_stage {
         (false, false)
     } else {
         let project = harness::project_settings(
@@ -4481,11 +4509,7 @@ async fn start_mission(
         prompt: mission.prompt,
         initial_context,
         working_directory: working_directory.clone(),
-        clearance: if review {
-            "desk".to_owned()
-        } else {
-            agent.clearance
-        },
+        clearance: launch_clearance.clone(),
         environment: environment.clone(),
         model: model.clone(),
         effort: effort.clone(),
@@ -5042,6 +5066,18 @@ async fn resume_mission(
             "a Chief of Staff review runs only on this Station's own host",
         ));
     }
+    let plan_stage = !review && review::in_plan_stage(&state, &mission);
+    if plan_stage {
+        let asked = state
+            .plugins
+            .handler_with(&handler_provider, &resume_agent.handler_settings)
+            .map_err(provider_error)?;
+        if let Some(reason) =
+            review::plan_stage_refusal(asked.as_ref(), resume_mode == ExecutionMode::RemoteHands)
+        {
+            return Err(conflict(&reason));
+        }
+    }
     let runner = match resume_mode {
         ExecutionMode::Field => {
             runner_link(&state, &resume_theater).map_err(configuration_error)?
@@ -5082,6 +5118,8 @@ async fn resume_mission(
             .unwrap_or_else(|| "00".to_owned())
     } else if review {
         "desk".to_owned()
+    } else if plan_stage {
+        READ_CLEARANCE.to_owned()
     } else {
         resume_agent.clearance.clone()
     };
@@ -5168,6 +5206,9 @@ async fn resume_mission(
         .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
         endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
         endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
+        if plan_stage {
+            endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
+        }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
         endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
@@ -5266,7 +5307,7 @@ async fn resume_mission(
     let message = request
         .message
         .or_else(|| reattach.is_none().then(|| RESUMED_MESSAGE.to_owned()));
-    let (project_settings, project_mcp) = if review {
+    let (project_settings, project_mcp) = if review || plan_stage {
         (false, false)
     } else {
         let project = harness::project_settings(
@@ -5288,6 +5329,8 @@ async fn resume_mission(
         // here, since each handler builds its tools from this request.
         clearance: if review {
             "desk".to_owned()
+        } else if plan_stage {
+            READ_CLEARANCE.to_owned()
         } else {
             resume_agent.clearance.clone()
         },
@@ -5300,16 +5343,22 @@ async fn resume_mission(
         answer_only: review,
         assistant: None,
         // A role removed since the start leaves only the Agent's context.
-        initial_context: standing_context(
-            &resume_agent.context,
-            mission
-                .role_id
-                .as_deref()
-                .and_then(|key| {
-                    configured_agent_role(&state, mission.operation_id.as_deref(), key).ok()
-                })
-                .as_ref(),
-        ),
+        initial_context: {
+            let mut context = standing_context(
+                &resume_agent.context,
+                mission
+                    .role_id
+                    .as_deref()
+                    .and_then(|key| {
+                        configured_agent_role(&state, mission.operation_id.as_deref(), key).ok()
+                    })
+                    .as_ref(),
+            );
+            if plan_stage {
+                context.push(review::PLAN_CONTEXT.to_owned());
+            }
+            context
+        },
     };
     let attachment = runner.as_ref().map(|_| RunnerAttachment {
         key: reattach.as_ref().map_or_else(
@@ -6026,12 +6075,14 @@ fn spawn_event_pump_with_monitor(
                     if event.kind == "completed" {
                         vetting::review_completed(&state, &mission_id, event.text.as_deref());
                         review::reviewer_answered(&state, &mission_id, event.text.as_deref());
-                        if review::holds_output(
-                            &state,
-                            &mission_id,
-                            &session,
-                            event.text.as_deref(),
-                        ) {
+                        if review::holds_plan(&state, &mission_id, &session, event.text.as_deref())
+                            || review::holds_output(
+                                &state,
+                                &mission_id,
+                                &session,
+                                event.text.as_deref(),
+                            )
+                        {
                             break;
                         }
                     }

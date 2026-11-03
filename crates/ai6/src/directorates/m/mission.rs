@@ -116,6 +116,9 @@ pub struct Mission {
     /// The review policy its brief names, and who the naming speaks for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_naming: Option<BriefNaming>,
+    /// The plan its Agent submitted, until it is put up for review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -249,6 +252,7 @@ impl MissionStore {
             parked_until: None,
             blocked_reason: None,
             review_naming: None,
+            plan: None,
             denied_tools: Vec::new(),
             exposure: Vec::new(),
             provenance: None,
@@ -412,6 +416,15 @@ impl MissionStore {
         if mission.exposure.len() == before {
             return Ok(());
         }
+        mission.revision += 1;
+        self.commit(next)
+    }
+
+    /// Keeps the plan the Mission's Agent submitted, or forgets it.
+    pub fn set_plan(&mut self, mission_id: &str, plan: Option<String>) -> Result<(), MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        mission.plan = plan;
         mission.revision += 1;
         self.commit(next)
     }

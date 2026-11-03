@@ -459,6 +459,20 @@ mod route_tests {
     }
 
     #[test]
+    fn it_cannot_hold_a_session_to_a_plan_however_it_is_set() {
+        for settings in [
+            "command = \"grok\"
+",
+            "command = \"grok\"
+unconfined_desk = true
+",
+        ] {
+            let refused = handler(settings).read_only_refusal().unwrap();
+            assert!(refused.is_some(), "{settings}");
+        }
+    }
+
+    #[test]
     fn it_refuses_desk_unless_unconfined_and_keeps_its_limit_words() {
         let confined = handler("command = \"grok\"\n");
         assert!(

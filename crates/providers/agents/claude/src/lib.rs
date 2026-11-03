@@ -18,7 +18,7 @@ use ai6::directorates::q::terminal::{
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
     DENIED_EVENT, LIMIT_EVENT, ModelInfo, ModelListing, QuotaReport, TokenUsage, UsageLimit,
-    clearance_runs_commands,
+    clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
 use ai6::directorates::section_00::denied::DenyList;
@@ -193,6 +193,10 @@ impl AgentHandler for ClaudeHandler {
         Ok(ai6::HarnessStdio::Json)
     }
 
+    fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
     /// Claude Code's sandbox runs on macOS (Seatbelt, built in) and on Linux and WSL2 with
     /// `bwrap` and `socat` on the harness's `PATH`; on native Windows it runs commands
     /// unsandboxed (code.claude.com/docs/en/sandboxing). WSL1 passes this check and is caught
@@ -306,6 +310,7 @@ impl AgentHandler for ClaudeHandler {
             project_mcp: request.project_mcp,
             answer_only: request.answer_only,
             commands: clearance_runs_commands(&request.clearance),
+            reads_only: clearance_reads_only(&request.clearance),
         };
         add_settings(
             &mut argv,
@@ -367,6 +372,7 @@ impl AgentHandler for ClaudeHandler {
             project_mcp: request.project_mcp,
             answer_only: request.answer_only,
             commands: clearance_runs_commands(&request.clearance),
+            reads_only: clearance_reads_only(&request.clearance),
         };
         add_settings(
             &mut argv,
@@ -585,6 +591,8 @@ struct Mode {
     answer_only: bool,
     /// Whether the clearance allows a command tool ([`clearance_runs_commands`]).
     commands: bool,
+    /// Whether the Session is held to reading until its plan passes ([`clearance_reads_only`]).
+    reads_only: bool,
 }
 
 /// Every built-in tool an assistant Session is denied by name, besides `--tools=` turning the
@@ -626,6 +634,11 @@ fn add_settings(
         add_assistant(argv, environment, working_directory, assistant)?;
     } else if mode.answer_only {
         add_answer_only(argv);
+    } else if mode.reads_only {
+        add_project_settings(argv, false, false);
+        add_read_only_tools(argv, environment);
+        add_mcp(argv, environment);
+        add_gate(argv, environment);
     } else {
         add_project_settings(argv, mode.project_settings, mode.project_mcp);
         add_field_tools(argv, environment, settings, mode.commands);
@@ -1237,6 +1250,49 @@ fn add_field_tools(
         allowed.join(","),
     ]);
 }
+
+/// The tools of a Session held to reading until its plan passes: reading and searching, and AI6's
+/// Cable server, whose only tool it then has is `submit_plan`. What could change anything is denied
+/// by name, and no setting adds to the list: `allowed_tools` is a field Session's. A resume at the
+/// Mission's clearance builds the field list again, since each launch passes its own flags
+/// (`--resume` keeps the conversation, not the tools).
+fn add_read_only_tools(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
+    let mut allowed = vec!["Read", "Glob", "Grep"];
+    if has_endpoint(environment, "AI6_CABLE_MCP") {
+        allowed.insert(0, "mcp__ai6-cables");
+    }
+    let denied = FIELD_DENIED
+        .iter()
+        .chain(READ_ONLY_DENIED.iter())
+        .copied()
+        .collect::<Vec<_>>();
+    argv.extend([
+        "--tools".to_owned(),
+        "Read,Glob,Grep".to_owned(),
+        "--permission-mode".to_owned(),
+        "dontAsk".to_owned(),
+        "--disallowedTools".to_owned(),
+        denied.join(","),
+        "--allowedTools".to_owned(),
+        allowed.join(","),
+    ]);
+}
+
+/// What a Session held to reading is denied besides [`FIELD_DENIED`]: everything that writes or runs.
+const READ_ONLY_DENIED: [&str; 12] = [
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Bash",
+    "PowerShell",
+    "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "mcp__ai6-theater__theater_run",
+    "mcp__ai6-theater__theater_write",
+];
 
 /// Adds the Station's MCP servers: Cable tools, and, when the Station serves a Theater's tools
 /// (remote-hands mode), those. [`add_field_tools`] allows them by server.
@@ -3473,6 +3529,7 @@ mod tests {
                 project_mcp: false,
                 answer_only: false,
                 commands: true,
+                reads_only: false,
             },
             &ClaudeSettings::default(),
             None,
@@ -3724,6 +3781,50 @@ mod tests {
     }
 
     #[test]
+    fn a_session_held_to_its_plan_reads_and_calls_ai6_and_a_resume_at_field_has_its_tools() {
+        let flags = flags_at(
+            ai6::READ_CLEARANCE,
+            "allowed_tools = [\"Bash\", \"Edit(/**)\"]
+",
+        );
+        assert_eq!(flags[0].0, "Read,Glob,Grep", "nothing offered but reading");
+        assert_eq!(
+            flags[0].2, "mcp__ai6-cables,Read,Glob,Grep",
+            "no setting adds to it"
+        );
+        for denied in [
+            "Edit",
+            "Write",
+            "NotebookEdit",
+            "Bash",
+            "PowerShell",
+            "TodoWrite",
+        ] {
+            assert!(
+                flags[0].1.split(',').any(|tool| tool == denied),
+                "{denied} denied by name: {}",
+                flags[0].1
+            );
+        }
+        assert_eq!(
+            flags[1], flags[0],
+            "a resume held to the plan is held the same"
+        );
+        let field = flags_at("field", "");
+        assert_eq!(
+            field[1].0, DEFAULT_OFFERED,
+            "a resume at field gets the Mission's tools"
+        );
+        assert!(field[1].2.contains("Edit(/**)") && field[1].2.contains("Bash"));
+    }
+
+    #[test]
+    fn this_handler_can_hold_a_session_to_its_plan() {
+        let handler = ClaudeHandler::try_from(ClaudeConfig::default()).unwrap();
+        assert_eq!(handler.read_only_refusal().unwrap(), None);
+    }
+
+    #[test]
     fn a_desk_session_without_a_station_has_no_server_and_no_command_tool() {
         let mut argv = Vec::new();
         add_settings(
@@ -3735,6 +3836,7 @@ mod tests {
                 project_mcp: false,
                 answer_only: false,
                 commands: false,
+                reads_only: false,
             },
             &ClaudeSettings::default(),
             None,
@@ -3759,6 +3861,7 @@ mod tests {
                     project_mcp: false,
                     answer_only,
                     commands,
+                    reads_only: false,
                 },
                 &ClaudeSettings::default(),
                 assistant,
@@ -3814,6 +3917,7 @@ mod tests {
                         project_mcp: false,
                         answer_only,
                         commands: true,
+                        reads_only: false,
                     },
                     settings,
                     assistant,

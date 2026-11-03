@@ -116,6 +116,10 @@ fn scripted_output(prompt: &str) -> String {
 pub(in crate::station::server) struct MockAuthorHandler;
 
 impl AgentHandler for MockAuthorHandler {
+    fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
     fn start(
         &self,
         request: AgentStart,

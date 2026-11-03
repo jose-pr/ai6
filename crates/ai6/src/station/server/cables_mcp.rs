@@ -34,6 +34,7 @@ use super::green_ink::{Asked, Checked, Desk};
 use super::head_of_station;
 use super::issues::IssueDesk;
 use super::memories::MemoryDesk;
+use super::review;
 use super::unix_now;
 use crate::bounds::{Limit, TimeLimit};
 use crate::directorates::m::assistant::AssistantDeskLimits;
@@ -71,6 +72,7 @@ pub(super) struct Endpoint {
     memory_desk: Arc<OnceLock<MemoryDesk>>,
     mission_role: Arc<OnceLock<String>>,
     station: Arc<OnceLock<head_of_station::Desk>>,
+    plan: Arc<OnceLock<review::PlanDesk>>,
 }
 
 impl Endpoint {
@@ -105,6 +107,7 @@ impl Endpoint {
         let memory_desk = Arc::new(OnceLock::new());
         let mission_role = Arc::new(OnceLock::new());
         let station = Arc::new(OnceLock::new());
+        let plan = Arc::new(OnceLock::new());
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
@@ -120,6 +123,7 @@ impl Endpoint {
                 let memory_desk = memory_desk.clone();
                 let mission_role = mission_role.clone();
                 let station = station.clone();
+                let plan = plan.clone();
                 let identity = identity.clone();
                 move || {
                     Ok(CableTools::new(
@@ -135,6 +139,7 @@ impl Endpoint {
                         memory_desk.clone(),
                         mission_role.clone(),
                         station.clone(),
+                        plan.clone(),
                     ))
                 }
             },
@@ -162,6 +167,7 @@ impl Endpoint {
             memory_desk,
             mission_role,
             station,
+            plan,
         })
     }
 
@@ -181,6 +187,12 @@ impl Endpoint {
     /// afterwards lists and may call them; without this they do not exist for the Session.
     pub(super) fn open_station_tools(&self, desk: head_of_station::Desk) {
         let _ = self.station.set(desk);
+    }
+
+    /// Holds the Session to its plan: `submit_plan` is then its only tool, whatever else was
+    /// opened. Open it before the harness connects.
+    pub(super) fn open_plan_tools(&self, desk: review::PlanDesk) {
+        let _ = self.plan.set(desk);
     }
 
     /// Lets the Session ask its Station for green ink; without it `request_approval` says
@@ -1676,6 +1688,7 @@ struct CableTools {
     memory_desk: Arc<OnceLock<MemoryDesk>>,
     mission_role: Arc<OnceLock<String>>,
     station: Arc<OnceLock<head_of_station::Desk>>,
+    plan: Arc<OnceLock<review::PlanDesk>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -1694,9 +1707,28 @@ impl CableTools {
         memory_desk: Arc<OnceLock<MemoryDesk>>,
         mission_role: Arc<OnceLock<String>>,
         station: Arc<OnceLock<head_of_station::Desk>>,
+        plan: Arc<OnceLock<review::PlanDesk>>,
     ) -> Self {
         // The Station's own tools exist only for a Head of Station round, and the issue tools
         // only where the Station opened them.
+        // A Session held to its plan changes nothing: not a Cable, an issue or a proposal.
+        if plan.get().is_some() {
+            return Self {
+                relay,
+                identity,
+                principal,
+                intake,
+                allow_mission_proposals,
+                exposure,
+                green_ink,
+                issue_desk,
+                compartment_desk,
+                mission_role,
+                station,
+                plan,
+                tool_router: Self::plan_router(),
+            };
+        }
         let mut tool_router = Self::tool_router();
         if station.get().is_some() {
             tool_router += Self::station_router();
@@ -1723,6 +1755,7 @@ impl CableTools {
             memory_desk,
             mission_role,
             station,
+            plan,
             tool_router,
         }
     }
@@ -3171,5 +3204,29 @@ impl AssistantCableTools {
         })
         .await;
         replied.unwrap_or_else(|_| "Cable is unavailable or not authorized".to_owned())
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SubmitPlanArgs {
+    /// The whole plan: the steps, and how each will be tested.
+    plan: String,
+}
+
+#[tool_router(router = plan_router)]
+impl CableTools {
+    /// Keep the Agent's plan for its review.
+    #[tool(
+        description = "Submit your plan for this Mission's review: the steps and how you will test them. Then end your turn; you are resumed with the outcome."
+    )]
+    async fn submit_plan(&self, Parameters(args): Parameters<SubmitPlanArgs>) -> String {
+        let Some(desk) = self.plan.get().cloned() else {
+            return "This Session has no plan to submit.".to_owned();
+        };
+        tokio::task::spawn_blocking(move || desk.submit(&args.plan))
+            .await
+            .unwrap_or_else(|_| {
+                "Your plan could not be kept; give it as your final message instead.".to_owned()
+            })
     }
 }

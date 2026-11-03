@@ -1267,3 +1267,12 @@ fn mcp_calls_are_named_by_server_and_tool_each_once() {
 fn it_speaks_on_pipes() {
     assert_eq!(handler("").stdio().unwrap(), ai6::HarnessStdio::Json);
 }
+
+/// A resumed conversation keeps the tools of its first launch, so a Session started holding only
+/// what reads could never be given the Mission's: the handler says so, and the Station never
+/// starts it under a plan review.
+#[test]
+fn it_cannot_hold_a_session_to_its_plan() {
+    let refused = handler("").read_only_refusal().unwrap();
+    assert!(refused.is_some());
+}
