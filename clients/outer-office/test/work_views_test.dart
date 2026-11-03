@@ -343,7 +343,9 @@ void main() {
     );
 
     int lines(WidgetTester tester, String text) {
-      final paragraph = tester.renderObject<RenderParagraph>(find.text(text));
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find.descendant(of: find.text(text), matching: find.byType(RichText)),
+      );
       final boxes = paragraph.getBoxesForSelection(
         TextSelection(baseOffset: 0, extentOffset: text.length),
       );

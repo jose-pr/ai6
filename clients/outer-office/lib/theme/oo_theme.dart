@@ -289,6 +289,7 @@ class OoMaterialApp extends StatelessWidget {
         themeMode: themeMode,
         themeAnimationDuration: animation,
         routerConfig: routerConfig,
+        builder: _selectable,
       );
     }
     return MaterialApp(
@@ -299,6 +300,15 @@ class OoMaterialApp extends StatelessWidget {
       themeMode: themeMode,
       themeAnimationDuration: animation,
       home: home,
+      builder: _selectable,
     );
   }
+
+  /// One selection area per window, around every page and dialog, so any text can be copied
+  /// and a drag can cross widgets. Text fields and the terminal keep their own selection. It
+  /// sits above the Navigator, so it brings its own overlay for its handles and menu.
+  static Widget _selectable(BuildContext context, Widget? child) =>
+      Overlay.wrap(
+        child: SelectionArea(child: child ?? const SizedBox.shrink()),
+      );
 }

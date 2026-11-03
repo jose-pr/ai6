@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -593,6 +594,9 @@ class _ResizeHandleState extends State<_ResizeHandle> {
           onExit: (_) => setState(() => _hovered = false),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            // The window's text selection competes for the drag; from the touch-down point
+            // the edge still follows the pointer the whole way.
+            dragStartBehavior: DragStartBehavior.down,
             onHorizontalDragUpdate: (details) =>
                 _resize(_width - details.delta.dx, save: false),
             onHorizontalDragEnd: (_) => _resize(_width),
