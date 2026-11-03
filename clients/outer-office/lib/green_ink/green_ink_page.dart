@@ -311,10 +311,29 @@ class _GreenInkPageState extends State<GreenInkPage> {
                 }
                 final read = snapshot.data!;
                 final several = scope.shown.length > 1;
+                final agent = widget.route['agent'];
+                final mission = widget.route['mission_id'];
                 final requests = [
                   for (final (_, request) in read.rows)
-                    if (requestId == null || request.id == requestId) request,
+                    if ((requestId == null || request.id == requestId) &&
+                        (agent == null || request.agent == agent) &&
+                        (mission == null || request.missionId == mission))
+                      request,
                 ];
+                final narrow = OoAddFilter(
+                  route: widget.route,
+                  onRoute: widget.onRoute,
+                  choices: [
+                    (
+                      field: 'agent',
+                      values: [for (final (_, r) in read.rows) r.agent],
+                    ),
+                    (
+                      field: 'mission_id',
+                      values: [for (final (_, r) in read.rows) r.missionId],
+                    ),
+                  ],
+                );
                 if (requests.isEmpty && read.failed.isNotEmpty && !several) {
                   return Center(child: Text(read.failed.values.single));
                 }
@@ -322,7 +341,7 @@ class _GreenInkPageState extends State<GreenInkPage> {
                     ? null
                     : OoReadFailures(failed: read.failed, several: several);
                 if (requests.isEmpty) {
-                  return OoEmptyState(
+                  final empty = OoEmptyState(
                     icon: OoIconName.greenInk,
                     title: switch ((requestId, operationId)) {
                       (null, _) => 'No steps are waiting for green ink.',
@@ -336,6 +355,14 @@ class _GreenInkPageState extends State<GreenInkPage> {
                     body:
                         'An Agent asks here before an irreversible step, such as a push, '
                         'and waits for your signature.',
+                  );
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      narrow,
+                      ?failures,
+                      Expanded(child: empty),
+                    ],
                   );
                 }
                 final list = ListView.separated(
@@ -413,11 +440,11 @@ class _GreenInkPageState extends State<GreenInkPage> {
                     );
                   },
                 );
-                if (failures == null) return list;
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    failures,
+                    narrow,
+                    ?failures,
                     Expanded(child: list),
                   ],
                 );

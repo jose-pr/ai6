@@ -211,3 +211,53 @@ class _OoTabsState extends State<OoTabs> with TickerProviderStateMixin {
     );
   }
 }
+
+/// One field a page can narrow by, with the values its rows hold.
+typedef OoFilterChoice = ({String field, List<String> values});
+
+/// "Add filter": each field the page can narrow by and is not narrowed by yet, with the values
+/// the shown rows hold; choosing one writes it to the route, where [OoFilterBar] shows it as a
+/// chip. Nothing when there is nothing to offer.
+class OoAddFilter extends StatelessWidget {
+  const OoAddFilter({
+    required this.route,
+    required this.onRoute,
+    required this.choices,
+    super.key,
+  });
+
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
+  final List<OoFilterChoice> choices;
+
+  @override
+  Widget build(BuildContext context) {
+    final offered = [
+      for (final choice in choices)
+        if (route[choice.field] == null && choice.values.isNotEmpty) choice,
+    ];
+    if (offered.isEmpty) return const SizedBox.shrink();
+    return MenuAnchor(
+      builder: (context, controller, _) => TextButton.icon(
+        onPressed: () =>
+            controller.isOpen ? controller.close() : controller.open(),
+        icon: const Icon(Icons.filter_list),
+        label: const Text('Add filter'),
+      ),
+      menuChildren: [
+        for (final choice in offered)
+          SubmenuButton(
+            menuChildren: [
+              for (final value in ({...choice.values}.toList()..sort()))
+                MenuItemButton(
+                  onPressed: () =>
+                      onRoute(route.withField(choice.field, value)),
+                  child: Text(value),
+                ),
+            ],
+            child: Text(_labels[choice.field] ?? choice.field),
+          ),
+      ],
+    );
+  }
+}

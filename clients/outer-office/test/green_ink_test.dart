@@ -237,6 +237,31 @@ void main() {
     );
   });
 
+  testWidgets('the inbox narrows by Mission from its menu, and widens again', (
+    tester,
+  ) async {
+    final gateway = FakeGreenInk();
+    final board = await signedIn(gateway);
+    addTearDown(board.dispose);
+    await openAdministration(tester, board);
+    await tester.tap(find.widgetWithText(Tab, 'Inbox'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add filter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mission'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('mission-007'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mission: mission-007'), findsOneWidget);
+    expect(find.text('push · origin:refs/heads/main'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Remove this filter'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mission: mission-007'), findsNothing);
+    expect(find.text('push · origin:refs/heads/main'), findsOneWidget);
+  });
+
   testWidgets('an operator rejects a step with a reason', (tester) async {
     final gateway = FakeGreenInk();
     final board = await signedIn(

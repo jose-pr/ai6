@@ -569,10 +569,22 @@ class _AgentsPageState extends State<AgentsPage>
     final operation = _operation;
     final shown = _shown;
     final named = widget.route['agent'];
+    final mission = widget.route['mission_id'];
+    // The Agents whose Sessions ran the Mission, by Operation.
+    final ran = {
+      for (final session in widget.board.sessions)
+        if (session.missionId == mission && session.agent != null)
+          (session.operationId, session.agent!),
+    };
     final agents = [
       for (final row in _agents)
-        if (named == null || row.$2.agent == named) row,
+        if ((named == null || row.$2.agent == named) &&
+            (mission == null || ran.contains((row.$1, row.$2.agent))))
+          row,
     ];
+    final shownAgents = {
+      for (final (from, agent) in _agents) (from, agent.agent),
+    };
     bool canConfigure(String operation) =>
         !widget.board.demo && widget.board.canConfigureAgentRoles(operation);
     return Column(
@@ -593,6 +605,28 @@ class _AgentsPageState extends State<AgentsPage>
                 tooltip: 'Refresh Agents',
                 onPressed: () => unawaited(_load()),
                 icon: const Icon(Icons.refresh),
+              ),
+              OoAddFilter(
+                route: widget.route,
+                onRoute: widget.onRoute,
+                choices: [
+                  (
+                    field: 'agent',
+                    values: [for (final (_, agent) in _agents) agent.agent],
+                  ),
+                  (
+                    field: 'mission_id',
+                    values: [
+                      for (final session in widget.board.sessions)
+                        if (session.agent case final agent?
+                            when shownAgents.contains((
+                              session.operationId,
+                              agent,
+                            )))
+                          session.missionId,
+                    ],
+                  ),
+                ],
               ),
               if (canChangeRecords)
                 FilledButton.icon(

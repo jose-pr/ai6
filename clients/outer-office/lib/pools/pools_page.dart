@@ -218,9 +218,12 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
     final operation = scope.operation;
     final shown = scope.shown;
     final pool = widget.route['pool'];
+    final mission = widget.route['mission_id'];
     final accounts = [
       for (final row in _accounts)
-        if (pool == null || row.$2.pool == pool) row,
+        if ((pool == null || row.$2.pool == pool) &&
+            (mission == null || row.$2.active.contains(mission)))
+          row,
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -240,6 +243,24 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
                 tooltip: 'Refresh account pools',
                 onPressed: () => unawaited(_load()),
                 icon: const Icon(Icons.refresh),
+              ),
+              OoAddFilter(
+                route: widget.route,
+                onRoute: widget.onRoute,
+                choices: [
+                  (
+                    field: 'pool',
+                    values: [
+                      for (final (_, account) in _accounts) account.pool,
+                    ],
+                  ),
+                  (
+                    field: 'mission_id',
+                    values: [
+                      for (final (_, account) in _accounts) ...account.active,
+                    ],
+                  ),
+                ],
               ),
             ],
           ),
