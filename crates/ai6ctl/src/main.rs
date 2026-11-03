@@ -86,6 +86,9 @@ enum Command {
         #[command(subcommand)]
         command: Option<AgentCommand>,
     },
+    /// The models each account and route may use, as the Stations last found them through their
+    /// handlers (needs roster.read). A handler that cannot list says unknown, with why.
+    Models,
     /// List Agent roles available to one Operation.
     AgentRoles {
         /// AI6 Operation ID.
@@ -1091,6 +1094,16 @@ async fn run() -> Result<(), String> {
                     );
                 }
             }
+        }
+        Command::Models => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let mut url = server.clone();
+            url.path_segments_mut()
+                .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+                .extend(["v1", "user", "models"]);
+            let request = client.get(url).bearer_auth(&token);
+            let found: Vec<ModelsFound> = send(request, "roster.read", "model list").await?;
+            print_models(&found);
         }
         Command::AgentRoles { operation } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -2441,6 +2454,56 @@ fn print_scorecard(card: &ScorecardView, show: Option<&str>) {
                 );
             }
         }
+    }
+}
+
+/// What one Station found of one account or route.
+#[derive(Debug, Deserialize)]
+struct ModelsFound {
+    station: String,
+    source: String,
+    handler: String,
+    listing: ModelsListing,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelsListing {
+    known: bool,
+    unknown_because: Option<String>,
+    models: Vec<ModelsInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelsInfo {
+    id: String,
+}
+
+fn print_models(found: &[ModelsFound]) {
+    println!("STATION\tSOURCE\tHANDLER\tKNOWN\tMODELS\tUNKNOWN_BECAUSE");
+    for entry in found {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            plain(&entry.station),
+            plain(&entry.source),
+            plain(&entry.handler),
+            entry.listing.known,
+            if entry.listing.models.is_empty() {
+                "-".to_owned()
+            } else {
+                entry
+                    .listing
+                    .models
+                    .iter()
+                    .map(|model| plain(&model.id))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            },
+            entry
+                .listing
+                .unknown_because
+                .as_deref()
+                .map_or("-".to_owned(), plain),
+        );
     }
 }
 

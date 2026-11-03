@@ -3929,6 +3929,20 @@ over its selected `Terminal` provider. `AgentHandler::stdio(&self) -> Result<Har
 ProviderError>` is an appended slot (default `Ok(HarnessStdio::Terminal)`): a handler whose
 harness speaks JSON over standard input and output answers `Json` (the `claude` and `codex`
 handlers do), and the Station gives it a provider without a terminal.
+`AgentHandler::models(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, ProviderError>`
+lists the models the account behind `environment` may use with no model turn; the default answers
+`ModelListing::unknown("this handler has no way to list models")`, and a handler that cannot never
+guesses. `ModelListing { known: bool, unknown_because: Option<String>, models: Vec<ModelInfo { id,
+name: Option<String>, description: Option<String> }> }` (`ModelListing::unknown(reason)`,
+`::of(models)`). `section_00::listing::ask(program, args, environment, wait, |harness| ...)` runs a
+harness that speaks JSON lines with exactly `environment`, kills it afterwards and returns what the
+closure reads (`Harness::send`, `Harness::next_where`); no credential of `environment` is ever part
+of a listing. The Station asks it for each pool account (the account's credential leased as for a
+Session, no claim made, the lease revoked after) and for each route no pool serves (its env and
+secrets), every `[accounts] models_every` seconds (3600; 0 never on its own), keeps the answers
+(`station::server::models::ModelBoard`) and reports them at check-in under `models` (`Found
+{ source, pool, account, agent, route, handler, listing, at }`). Universal Exports serves them at
+`GET /v1/user/models` (`roster.read`), `ai6ctl models` prints them, and the Pools page shows them.
 `AgentHandler::clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError>`
 says why the handler, with its settings, would refuse a Mission's Session at that clearance; a route
 that would be refused is passed over (default: `None`).

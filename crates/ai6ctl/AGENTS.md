@@ -46,6 +46,9 @@ origin leaves the public roots alone.
   [--pool P]] --operation <ID>` deletes `.../agents/{agent}/hold` (the whole Agent's hold, or that
   route's) and prints `AGENT: hold by WHO lifted in ID: REASON` (`404`, no such hold, exits 1);
   needs `agent.configure`, audited as `agent.hold.lifted`.
+- `ai6ctl models` prints `GET /v1/user/models` as tab-separated `STATION SOURCE HANDLER KNOWN MODELS
+  UNKNOWN_BECAUSE`: `MODELS` the ids comma-separated (`-` for none), `UNKNOWN_BECAUSE` why a handler
+  could not list (`-` when it did). Needs `roster.read`.
 - `ai6ctl agents scorecard --operation <ID> [--window-days N] [--show JUDGMENT]` prints
   `GET .../agents/scorecard` as a `#` line (the window and small-sample line) and tab-separated
   `AGENT ROUTE JUDGED FAILURE_RATE SAMPLE` then one column per judgment (`DONE FAILED BLOWN STALLED

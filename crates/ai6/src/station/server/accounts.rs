@@ -495,7 +495,7 @@ fn claim<'a>(
 }
 
 /// Puts `account`'s credential where the harness reads it.
-fn hand_over(
+pub(super) fn hand_over(
     state: &DaemonState,
     broker: &SecretBroker,
     pool: &AccountPool,
@@ -1224,7 +1224,36 @@ pub(super) mod testing {
         ProviderError::new(Status::GUATIAO_ERR_INTERNAL, message)
     }
 
+    /// The environment of each look at the models, in order.
+    pub(in crate::station::server) static LISTED: Mutex<Vec<BTreeMap<String, String>>> =
+        Mutex::new(Vec::new());
+
     impl AgentHandler for MockPooledHandler {
+        /// Lists one model, and keeps the environment it was asked with.
+        fn models(
+            &self,
+            environment: BTreeMap<String, String>,
+        ) -> Result<crate::directorates::section_00::agent::ModelListing, ProviderError> {
+            let had_credential = environment.contains_key("CLAUDE_CODE_OAUTH_TOKEN")
+                || environment.contains_key("ANTHROPIC_API_KEY")
+                || environment.contains_key("ANTHROPIC_AUTH_TOKEN");
+            LISTED.lock().unwrap().push(environment);
+            Ok(crate::directorates::section_00::agent::ModelListing::of(
+                vec![crate::directorates::section_00::agent::ModelInfo {
+                    id: "mock-model".to_owned(),
+                    name: None,
+                    description: Some(
+                        if had_credential {
+                            "listed with a credential"
+                        } else {
+                            "listed with none"
+                        }
+                        .to_owned(),
+                    ),
+                }],
+            ))
+        }
+
         /// Stands for a handler that cannot hold a `desk` Session, as `acp` cannot.
         fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
             Ok((clearance == "desk").then(|| "it cannot keep commands from one".to_owned()))
@@ -1273,7 +1302,7 @@ mod tests {
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use super::testing::{POOLED_CALLS, POOLED_RESET, PooledCall};
+    use super::testing::{LISTED, POOLED_CALLS, POOLED_RESET, PooledCall};
     use super::*;
     use crate::directorates::m::identity::MissionId;
     use crate::directorates::m::mission::MissionState;
@@ -1559,6 +1588,149 @@ priority = 2
                 &[QuotaWindow::new("five_hour", START as f64).used_permille(used)],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn the_models_each_account_may_use_are_listed_with_its_credential_and_it_is_never_in_the_answer()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now, _logins) = pooled_state(root.path(), "", "", ENV_POOLS);
+        LISTED.lock().unwrap().clear();
+        super::super::models::look(&state);
+
+        let found = state.models.found();
+        let sources: Vec<_> = found.iter().map(|found| found.source.as_str()).collect();
+        assert_eq!(sources, ["elsewhere/gamma", "team/alpha", "team/beta"]);
+        for entry in &found {
+            assert!(entry.listing.known, "{entry:?}");
+            assert_eq!(entry.listing.models[0].id, "mock-model");
+            assert_eq!(
+                entry.listing.models[0].description.as_deref(),
+                Some("listed with a credential"),
+                "the handler was given the account's credential: {entry:?}"
+            );
+        }
+        let given = LISTED.lock().unwrap().clone();
+        let credentials: Vec<String> = given
+            .iter()
+            .filter_map(|environment| {
+                environment
+                    .get("CLAUDE_CODE_OAUTH_TOKEN")
+                    .or_else(|| environment.get("ANTHROPIC_API_KEY"))
+                    .or_else(|| environment.get("ANTHROPIC_AUTH_TOKEN"))
+                    .cloned()
+            })
+            .collect();
+        // Other tests share the handler's record; these three accounts' credentials are among it.
+        for expected in [
+            "fake-env-alpha-0451",
+            "fake-env-beta-0451",
+            "fake-env-gamma-0451",
+        ] {
+            assert!(
+                credentials.iter().any(|given| given == expected),
+                "the handler was given {expected}"
+            );
+        }
+        let reported = serde_json::to_string(&found).unwrap();
+        let checked_in = serde_json::to_string(&serde_json::json!(state.models.found())).unwrap();
+        for credential in &credentials {
+            assert!(
+                credential.starts_with("fake-"),
+                "a planted credential: {credential}"
+            );
+            assert!(!reported.contains(credential.as_str()), "{reported}");
+            assert!(!checked_in.contains(credential.as_str()));
+        }
+        assert!(
+            given
+                .iter()
+                .all(|environment| !environment.contains_key("ANTHROPIC_BASE_URL")),
+            "nothing but the account's own and the Station's base"
+        );
+    }
+
+    #[test]
+    fn a_route_no_pool_serves_is_listed_with_its_own_env_and_secret_and_none_leaks() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = r#"[agent.007]
+env = { SHARED = "agent" }
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "anthropic/name"
+secrets = ["gateway"]
+env = { GATEWAY_URL = "https://llm.example", SHARED = "route" }
+"#;
+        let loadouts = format!("{ROUTE_POOLS}[secret.gateway]\nenv = \"ANTHROPIC_AUTH_TOKEN\"\n");
+        let (state, _now) = routed_state(root.path(), "", agents, &loadouts);
+        LISTED.lock().unwrap().clear();
+        super::super::models::look(&state);
+
+        let found = state.models.found();
+        let route = found
+            .iter()
+            .find(|found| found.agent.as_deref() == Some("007"))
+            .expect("its route is looked at");
+        assert!(route.listing.known, "{route:?}");
+        assert_eq!(
+            route.route.as_ref().unwrap().model.as_deref(),
+            Some("anthropic/name")
+        );
+        let given = LISTED.lock().unwrap().clone();
+        let asked = given
+            .iter()
+            .find(|environment| environment.contains_key("GATEWAY_URL"))
+            .expect("the route's env reached the handler");
+        assert_eq!(asked["SHARED"], "route", "the route's over the Agent's");
+        assert_eq!(asked["ANTHROPIC_AUTH_TOKEN"], "fake-gateway-0451");
+        assert!(
+            !serde_json::to_string(&found)
+                .unwrap()
+                .contains("fake-gateway")
+        );
+        assert!(
+            found.iter().any(|found| found.source == "one/a"),
+            "the pool accounts are listed too"
+        );
+        assert!(
+            state
+                .station
+                .credentials
+                .issued_for("models-007-mock-pooled")
+                .is_empty(),
+            "the lease taken for a look is revoked"
+        );
+    }
+
+    #[test]
+    fn a_handler_that_cannot_list_or_is_not_here_says_unknown() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now, _logins) = pooled_state(
+            root.path(),
+            "",
+            "",
+            r#"
+[pool.absent]
+handler = "not-on-this-station"
+[pool.absent.account.a]
+kind = "claude-oauth-token"
+secret = "env-alpha"
+"#,
+        );
+        super::super::models::look(&state);
+        let found = state.models.found();
+        let absent = found
+            .iter()
+            .find(|found| found.source == "absent/a")
+            .expect("the account is looked at");
+        assert!(!absent.listing.known && absent.listing.models.is_empty());
+        assert!(
+            absent
+                .listing
+                .unknown_because
+                .as_deref()
+                .is_some_and(|reason| reason.contains("not on this Station"))
+        );
     }
 
     #[tokio::test]

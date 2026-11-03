@@ -487,6 +487,11 @@ pub struct AccountLimits {
     #[schema(title = "Longest account login")]
     #[map(default = AccountLimits::default().login_timeout)]
     pub login_timeout: Seconds,
+    /// Seconds between this Station's looks at the models each account and route may use; 0 never
+    /// looks on its own.
+    #[schema(title = "Look at the models every")]
+    #[map(default = AccountLimits::default().models_every)]
+    pub models_every: Seconds,
 }
 
 impl Default for AccountLimits {
@@ -497,6 +502,7 @@ impl Default for AccountLimits {
             claim_ttl: Seconds(crate::directorates::registry::store::DEFAULT_LEASE),
             limit_horizon: Seconds::new(8 * DAY),
             login_timeout: Seconds::new(60),
+            models_every: Seconds::new(3_600),
         }
     }
 }

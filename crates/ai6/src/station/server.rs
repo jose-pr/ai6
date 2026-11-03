@@ -20,6 +20,7 @@ mod head_of_station;
 #[cfg(feature = "cables-mcp")]
 mod issues;
 mod medical;
+mod models;
 mod promotion;
 mod recovery;
 mod reload;
@@ -946,6 +947,7 @@ where
         event_pumps: Arc::new(Mutex::new(Vec::new())),
         clock: Clock::system(),
         vetting: Default::default(),
+        models: Default::default(),
         #[cfg(feature = "publisher")]
         publisher,
     };
@@ -1495,6 +1497,8 @@ struct DaemonState {
     clock: Clock,
     /// What Headquarters remembers between intake rounds about the briefs it vets.
     vetting: Arc<vetting::VettingDesk>,
+    /// The models each account and route may use, as their handlers last said.
+    models: Arc<models::ModelBoard>,
 }
 
 impl DaemonState {
@@ -1636,6 +1640,7 @@ async fn scheduler_loop(base: DaemonState) {
                 recovery::checkpoint_due(&tick);
                 ephemeral::sweep(&tick);
                 agents::enforce_clearances(&tick);
+                models::refresh_if_due(&tick);
             }
             medical::enforce_quarantines(&tick);
         })
@@ -2236,6 +2241,7 @@ fn publish_station_check_in(state: &DaemonState) {
         serde_json::json!(agents::retirements(&state.roster, state.clock.now())),
     );
     info.insert("agent_clearances".to_owned(), agents::clearances(state));
+    info.insert("models".to_owned(), serde_json::json!(state.models.found()));
     info.insert(
         "config".to_owned(),
         serde_json::json!(state.config.status()),
@@ -7536,6 +7542,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
 
         let Json(briefs) = list_intake_briefs(State(state)).await.unwrap();
@@ -7701,6 +7708,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
 
         let response = send_cable(
@@ -8625,6 +8633,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         }
     }
 
@@ -9113,6 +9122,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
 
         schedule_queued_once(&state).await;
@@ -9239,6 +9249,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -9456,6 +9467,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -9599,6 +9611,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -9655,6 +9668,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         }
     }
 
@@ -9793,6 +9807,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
         let result = create_mission(
             State(state.clone()),
@@ -9904,6 +9919,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
         let mission_id = MissionId::try_new("mission-lifecycle").unwrap();
         let result = create_mission(
@@ -10129,6 +10145,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
         state.sessions.lock().unwrap().insert(
             mission_id.to_string(),
@@ -10233,6 +10250,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
         let monitor = Watchdog::with_limits(
             std::time::Duration::from_secs(5),
@@ -10431,6 +10449,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
         state.sessions.lock().unwrap().insert(
             mission_id.to_string(),
@@ -10809,6 +10828,7 @@ queue = 1
             event_pumps: Arc::new(Mutex::new(Vec::new())),
             clock: Clock::system(),
             vetting: Default::default(),
+            models: Default::default(),
         };
         let spec = SafeHouseSpec {
             operation_id: "G".to_owned(),

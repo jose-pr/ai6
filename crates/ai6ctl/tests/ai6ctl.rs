@@ -744,6 +744,36 @@ async fn agents_lists_each_agents_record_in_the_operation() {
 }
 
 #[tokio::test]
+async fn models_prints_what_each_station_found_and_why_a_handler_could_not_say() {
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    registry
+        .check_in(
+            "station-02",
+            BTreeMap::from([(
+                "models".to_owned(),
+                serde_json::json!([
+                    {"source": "team/alpha", "pool": "team", "account": "alpha", "handler": "claude", "at": 20.0,
+                     "listing": {"known": true, "models": [{"id": "opus"}, {"id": "haiku", "name": "Haiku"}]}},
+                    {"source": "007/acp/-", "agent": "007", "handler": "acp", "at": 10.0,
+                     "listing": {"known": false, "unknown_because": "this handler has no way to list models", "models": []}},
+                ]),
+            )]),
+        )
+        .unwrap();
+    let printed = lines(&ai6ctl(server.clone(), Some(token.clone()), &["models"]).await);
+    assert_eq!(
+        printed,
+        [
+            "STATION\tSOURCE\tHANDLER\tKNOWN\tMODELS\tUNKNOWN_BECAUSE",
+            "station-02\tteam/alpha\tclaude\ttrue\topus,haiku\t-",
+            "station-02\t007/acp/-\tacp\tfalse\t-\tthis handler has no way to list models",
+        ]
+    );
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn agents_lift_ends_a_hold_on_the_agent_or_on_one_route() {
     let (server, shutdown, token, directory) = start_gateway().await;
     let registry = FileRegistry::open(directory.path());

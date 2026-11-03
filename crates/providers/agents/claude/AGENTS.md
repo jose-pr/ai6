@@ -401,6 +401,21 @@ only managed settings besides AI6's. Inferred, not checked against a live Claude
 authenticates under `--restricted`. A Claude Code that does not know a flag refuses to start,
 which ends the review without an answer.
 
+## Listing models
+
+`ClaudeHandler::models(environment)` starts `claude -p --input-format stream-json --output-format
+stream-json --verbose` with exactly that environment, writes an `initialize` control request and reads
+the `control_response`: `response.response.models[]` holds `value` (the id a roster names, such as
+`opus` or `default`), `displayName`, `description` and `resolvedModel`. No model turn and no network
+are involved. Measured with Claude Code 2.1.316 on Windows with an empty `CLAUDE_CONFIG_DIR`, a dummy
+`ANTHROPIC_API_KEY` and a closed loopback `ANTHROPIC_BASE_URL`: it listed `default`, `opus`, `fable`
+and the others the build knows. So the list follows the kind of login the environment gives (an
+API key, a subscription, a gateway) and is not a check of the account's standing, and a gateway's own
+model names (`gemini-free`) are not in it. The answer's `account` is never read. `models_wait_ms`
+(30000) bounds the wait; a Claude Code that does not answer, or answers without `models`, is
+`unknown` with the reason. `cargo test -p ai6-agent-claude -- --ignored live_` with
+`AI6_TEST_LIVE_HARNESSES=1` runs it against the installed program.
+
 ## Gotchas
 
 The Claude executable must be available to the terminal environment. The gate is best

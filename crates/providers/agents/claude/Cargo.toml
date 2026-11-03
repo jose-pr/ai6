@@ -21,3 +21,4 @@ toml.workspace = true
 
 [dev-dependencies]
 ai6 = { path = "../../../ai6", features = ["daemon"] }
+tempfile.workspace = true

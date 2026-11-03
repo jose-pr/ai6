@@ -339,6 +339,50 @@ fn issue_for(
     keep(state, mission_id, leases)
 }
 
+/// The catalog and a broker over it, for a look at the models accounts and routes may use.
+pub(super) fn listing_broker(state: &DaemonState) -> Option<(&LoadoutCatalog, SecretBroker)> {
+    let desk = &state.station.credentials;
+    let catalog = desk.catalog()?;
+    Some((
+        catalog,
+        desk.broker(catalog, state.station.limits().secrets.max_lease_ttl),
+    ))
+}
+
+/// Leases the secrets `route` names into `environment` for a look at its models, kept under `id`
+/// until [`release`]. The route claims no account: it only reads.
+pub(super) fn issue_for_listing(
+    state: &DaemonState,
+    id: &str,
+    agent: &Agent,
+    route: &crate::directorates::m::roster::AgentRoute,
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    let Some((catalog, broker)) = listing_broker(state) else {
+        return Ok(());
+    };
+    let holder = Holder {
+        id,
+        operation: None,
+    };
+    let on = OnRoute {
+        route: route.clone(),
+        implicit: None,
+    };
+    let mut leases = Leases::default();
+    issue_route_secrets(
+        state,
+        (catalog, &broker),
+        holder,
+        &agent.id,
+        &on,
+        None,
+        environment,
+        &mut leases,
+    )?;
+    keep(state, id, leases)
+}
+
 /// Leases the secrets `on`'s route names into `environment`. One whose variable is in `reserved`
 /// (the route draws an account from a pool, which supplies that variable) is not issued.
 #[allow(clippy::too_many_arguments)]

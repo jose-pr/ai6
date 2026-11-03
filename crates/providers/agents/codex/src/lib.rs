@@ -33,12 +33,35 @@ use ai6::directorates::q::terminal::{
 };
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit, clearance_runs_commands,
+    LIMIT_EVENT, ModelInfo, ModelListing, QuotaReport, TokenUsage, UsageLimit,
+    clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
+use ai6::directorates::section_00::listing;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use serde_json::{Value, json};
+
+/// The models in the app server's answer to `model/list`; unknown when it has none. A model the
+/// catalog hides (`hidden`) is left out: Codex does not offer it.
+fn models_of(answer: &Value) -> ModelListing {
+    let Some(models) = answer["result"]["data"].as_array() else {
+        return ModelListing::unknown("this Codex does not list its models");
+    };
+    ModelListing::of(
+        models
+            .iter()
+            .filter(|model| model["hidden"] != true)
+            .filter_map(|model| {
+                Some(ModelInfo {
+                    id: model["model"].as_str().or(model["id"].as_str())?.to_owned(),
+                    name: model["displayName"].as_str().map(str::to_owned),
+                    description: model["description"].as_str().map(str::to_owned),
+                })
+            })
+            .collect(),
+    )
+}
 
 /// Codex app-server AgentHandler configuration.
 #[derive(Debug, Clone, ToValue, FromValue, Schema)]
@@ -161,6 +184,41 @@ impl AgentHandler for CodexHandler {
     /// `codex app-server` speaks JSON-RPC, one message per line, over standard input and output.
     fn stdio(&self) -> Result<ai6::HarnessStdio, ProviderError> {
         Ok(ai6::HarnessStdio::Json)
+    }
+
+    /// The app server's `model/list`: the models Codex offers the account behind `environment`
+    /// (its `CODEX_HOME` login or API key), before any model turn. With no login it answers from
+    /// the catalog it ships with, so the list is what Codex offers, not a check of the account.
+    fn models(
+        &self,
+        environment: std::collections::BTreeMap<String, String>,
+    ) -> Result<ModelListing, ProviderError> {
+        let start = self.config.millis(self.config.start_timeout_ms);
+        let request = self.config.millis(self.config.request_timeout_ms);
+        let asked = listing::ask(
+            &self.config.executable,
+            &["app-server"],
+            &environment,
+            start + request,
+            |harness| {
+                harness.send(&json!({
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
+                        "capabilities": {}
+                    }
+                }))?;
+                harness.next_where(|line| line["id"] == 1)?;
+                harness.send(&json!({ "method": "initialized", "params": {} }))?;
+                harness.send(&json!({ "id": 2, "method": "model/list", "params": {} }))?;
+                harness.next_where(|line| line["id"] == 2)
+            },
+        );
+        Ok(match asked {
+            Ok(answer) => models_of(&answer),
+            Err(reason) => ModelListing::unknown(reason),
+        })
     }
 
     /// Asks Codex to run a command in the sandbox an assistant's scripts would get (`codex
@@ -1883,6 +1941,67 @@ fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn the_models_codex_lists_are_read_from_model_list_and_hidden_ones_are_left_out() {
+        let answer = json!({"id": 2, "result": {"data": [
+            {"id": "gpt-6.1-sol", "model": "gpt-6.1-sol", "displayName": "GPT-6.1-Sol",
+             "description": "Latest workhorse model", "hidden": false, "isDefault": true},
+            {"id": "internal", "model": "internal", "hidden": true},
+            {"id": "gpt-6-astra", "displayName": "Astra"}
+        ]}});
+        let listing = models_of(&answer);
+        assert!(listing.known);
+        let ids: Vec<_> = listing
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(ids, ["gpt-6.1-sol", "gpt-6-astra"]);
+        assert_eq!(listing.models[0].name.as_deref(), Some("GPT-6.1-Sol"));
+    }
+
+    #[test]
+    fn an_answer_without_data_is_unknown_never_empty() {
+        let listing =
+            models_of(&json!({"id": 2, "error": {"code": -32601, "message": "no such method"}}));
+        assert!(!listing.known && listing.models.is_empty());
+        assert!(listing.unknown_because.is_some());
+    }
+
+    /// Against the real Codex on this machine, with an empty `CODEX_HOME`, no login and no
+    /// network: the app server answers `model/list` from its own catalog. Run with
+    /// `AI6_TEST_LIVE_HARNESSES=1`.
+    #[test]
+    #[ignore = "needs Codex installed; set AI6_TEST_LIVE_HARNESSES=1 and run with --ignored"]
+    fn live_codex_lists_models_with_no_login_and_no_turn() {
+        assert!(
+            std::env::var_os("AI6_TEST_LIVE_HARNESSES").is_some(),
+            "set AI6_TEST_LIVE_HARNESSES=1"
+        );
+        let home = tempfile::tempdir().unwrap();
+        let environment = BTreeMap::from([
+            ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
+            (
+                "SYSTEMROOT".to_owned(),
+                std::env::var("SYSTEMROOT").unwrap_or_default(),
+            ),
+            ("HOME".to_owned(), home.path().display().to_string()),
+            ("USERPROFILE".to_owned(), home.path().display().to_string()),
+            ("APPDATA".to_owned(), home.path().display().to_string()),
+            ("LOCALAPPDATA".to_owned(), home.path().display().to_string()),
+            (
+                "CODEX_HOME".to_owned(),
+                home.path().join(".codex").display().to_string(),
+            ),
+            ("HTTPS_PROXY".to_owned(), "http://127.0.0.1:9".to_owned()),
+        ]);
+        std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+        let handler = CodexHandler::try_from(CodexConfig::default()).unwrap();
+        let listing = handler.models(environment).unwrap();
+        assert!(listing.known, "{listing:?}");
+        assert!(!listing.models.is_empty(), "{listing:?}");
+    }
     use std::io::{BufRead, BufReader, Read, Write};
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::sync::Arc;

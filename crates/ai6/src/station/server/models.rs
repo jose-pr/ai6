@@ -1,0 +1,247 @@
+//! What the Station learns of the models each account and route may use.
+//!
+//! Each look asks a handler, with the credentials a Session on that account or route would get,
+//! to list its models ([`AgentHandler::models`]): no model turn is spent and no pool account is
+//! claimed. A handler that cannot list says so, and the answer stays "unknown"; nothing is
+//! guessed. The credentials come from the same leases a Session's do and are revoked as soon as
+//! the question is over; none is ever part of an answer. The board is rebuilt every
+//! `[accounts] models_every` seconds and reported at check-in under `models`; it only informs a
+//! person, and makes no route or pool.
+
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use super::{DaemonState, accounts, credentials};
+use crate::directorates::m::roster::{Agent, RouteRef};
+use crate::directorates::q::{Account, AccountPool};
+use crate::directorates::section_00::agent::{AgentHandler, ModelListing};
+
+/// What one account or route may use, as its handler said.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Found {
+    /// `pool/account`, or `agent/handler/model` for a route that draws from no pool.
+    pub source: String,
+    /// The pool, for an account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
+    /// The account, for an account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// The Agent, for a route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// The route, for a route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<RouteRef>,
+    /// The handler asked.
+    pub handler: String,
+    /// What it said.
+    pub listing: ModelListing,
+    /// When, as Unix seconds.
+    pub at: f64,
+}
+
+/// The last look, kept for the next check-in.
+#[derive(Default)]
+pub(super) struct ModelBoard {
+    found: Mutex<Vec<Found>>,
+    looked_at: Mutex<Option<f64>>,
+}
+
+impl ModelBoard {
+    /// What the last look found.
+    pub(super) fn found(&self) -> Vec<Found> {
+        self.found
+            .lock()
+            .map(|found| found.clone())
+            .unwrap_or_default()
+    }
+
+    fn put(&self, found: Vec<Found>, at: f64) {
+        if let Ok(mut held) = self.found.lock() {
+            *held = found;
+        }
+        if let Ok(mut looked) = self.looked_at.lock() {
+            *looked = Some(at);
+        }
+    }
+
+    /// Whether a look is due at `now`: the first, or one `every` after the last. `every` of 0
+    /// never looks on its own.
+    fn due(&self, now: f64, every: Duration) -> bool {
+        if every.is_zero() {
+            return false;
+        }
+        match self.looked_at.lock().ok().and_then(|looked| *looked) {
+            None => true,
+            Some(at) => now - at >= every.as_secs_f64(),
+        }
+    }
+}
+
+/// Looks again when one is due. Runs on the check-in tick.
+pub(super) fn refresh_if_due(state: &DaemonState) {
+    let now = state.clock.now() as f64;
+    let every = state.station.limits().accounts.models_every.0;
+    if state.models.due(now, every) {
+        look(state);
+    }
+}
+
+/// The variables every harness is started with for a look: where it finds its program and a
+/// private home, so the Station user's own login is never read.
+fn base(state: &DaemonState) -> BTreeMap<String, String> {
+    let home = std::env::temp_dir().join(format!("ai6-models-{}", state.station_id));
+    let _ = std::fs::create_dir_all(&home);
+    let home = home.display().to_string();
+    let mut environment = BTreeMap::new();
+    for name in ["PATH", "SYSTEMROOT", "windir", "PATHEXT", "COMSPEC"] {
+        if let Ok(value) = std::env::var(name) {
+            environment.insert(name.to_owned(), value);
+        }
+    }
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+    ] {
+        environment.insert(name.to_owned(), home.clone());
+    }
+    environment.insert("CLAUDE_CONFIG_DIR".to_owned(), format!("{home}/.claude"));
+    environment.insert("CODEX_HOME".to_owned(), format!("{home}/.codex"));
+    environment
+}
+
+fn ask(
+    state: &DaemonState,
+    handler: &str,
+    settings: &serde_json::Map<String, serde_json::Value>,
+    environment: BTreeMap<String, String>,
+) -> ModelListing {
+    let built = state.plugins.handler_with(handler, settings);
+    let handler: Box<dyn AgentHandler> = match built {
+        Ok(handler) => handler,
+        Err(_) => return ModelListing::unknown("this handler is not on this Station"),
+    };
+    handler
+        .models(environment)
+        .unwrap_or_else(|error| ModelListing::unknown(format!("the handler failed: {error}")))
+}
+
+/// Looks at every pool account and every route no pool serves, and keeps what it found.
+pub(super) fn look(state: &DaemonState) {
+    let now = state.clock.now() as f64;
+    let mut found = Vec::new();
+    if let Some((catalog, broker)) = credentials::listing_broker(state) {
+        for pool in catalog.pools() {
+            for account in pool.accounts() {
+                found.push(of_account(state, &broker, pool, account, now));
+            }
+        }
+    }
+    for id in state.roster.agent_ids() {
+        let Ok(agent) = state.roster.agent(None, id) else {
+            continue;
+        };
+        for route in agent.route_list() {
+            // A route a pool serves is listed by its pool's accounts.
+            let routed = agent.on_route(&route);
+            if matches!(
+                accounts::source_of(state, None, &routed),
+                accounts::Source::Unpooled
+            ) {
+                found.push(of_route(state, &agent, &route, now));
+            }
+        }
+    }
+    state.models.put(found, now);
+}
+
+fn of_account(
+    state: &DaemonState,
+    broker: &crate::directorates::q::SecretBroker,
+    pool: &AccountPool,
+    account: &Account,
+    now: f64,
+) -> Found {
+    let holder = format!("models-{}-{}", pool.id(), account.name());
+    let mut environment = base(state);
+    let site = accounts::Site {
+        resuming: false,
+        on_station: true,
+    };
+    let listing = match accounts::hand_over(
+        state,
+        broker,
+        pool,
+        account,
+        &holder,
+        site,
+        &mut environment,
+    ) {
+        Ok(lease) => {
+            let listing = ask(state, pool.handler(), &serde_json::Map::new(), environment);
+            if let Some(lease) = lease
+                && let Err(error) = lease.revoke()
+            {
+                eprintln!("ai6: a credential lease for listing models was not revoked: {error}");
+            }
+            listing
+        }
+        Err(reason) => ModelListing::unknown(reason),
+    };
+    Found {
+        source: format!("{}/{}", pool.id(), account.name()),
+        pool: Some(pool.id().to_owned()),
+        account: Some(account.name().to_owned()),
+        agent: None,
+        route: None,
+        handler: pool.handler().to_owned(),
+        listing,
+        at: now,
+    }
+}
+
+fn of_route(
+    state: &DaemonState,
+    agent: &Agent,
+    route: &crate::directorates::m::roster::AgentRoute,
+    now: f64,
+) -> Found {
+    let reference = route.reference();
+    let holder = format!("models-{}-{}", agent.id, route.handler);
+    let routed = agent.on_route(route);
+    let mut environment = base(state);
+    environment.extend(routed.env.clone());
+    let listing =
+        match credentials::issue_for_listing(state, &holder, &routed, route, &mut environment) {
+            Ok(()) => {
+                let listing = ask(state, &route.handler, &route.handler_settings, environment);
+                credentials::release(state, &holder);
+                listing
+            }
+            Err(reason) => ModelListing::unknown(reason),
+        };
+    Found {
+        source: format!(
+            "{}/{}/{}",
+            agent.id,
+            route.handler,
+            route.model.as_deref().unwrap_or("-")
+        ),
+        pool: None,
+        account: None,
+        agent: Some(agent.id.clone()),
+        route: Some(reference),
+        handler: route.handler.clone(),
+        listing,
+        at: now,
+    }
+}

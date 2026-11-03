@@ -310,6 +310,52 @@ pub struct QuotaReport {
     pub status: Option<String>,
 }
 
+/// One model a harness says an account may use.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[map(crate = ::guatiao)]
+pub struct ModelInfo {
+    /// What a roster names it (`model = "..."`): the harness's own identifier or alias.
+    pub id: String,
+    /// What the harness shows a person, when it has a name apart from the identifier.
+    pub name: Option<String>,
+    /// The harness's one-line description, when it gives one.
+    pub description: Option<String>,
+}
+
+/// What a handler can say about the models an account may use, with no model turn.
+///
+/// A handler that cannot list says so ([`ModelListing::unknown`]); it never guesses.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[map(crate = ::guatiao)]
+pub struct ModelListing {
+    /// Whether the harness listed them. `false`: unknown, and `models` is empty.
+    pub known: bool,
+    /// Why it could not, when `known` is `false`.
+    pub unknown_because: Option<String>,
+    /// The models, in the order the harness gave them.
+    pub models: Vec<ModelInfo>,
+}
+
+impl ModelListing {
+    /// A listing the harness could not give, with the reason.
+    pub fn unknown(reason: impl Into<String>) -> Self {
+        Self {
+            known: false,
+            unknown_because: Some(reason.into()),
+            models: Vec::new(),
+        }
+    }
+
+    /// The models a harness listed.
+    pub fn of(models: Vec<ModelInfo>) -> Self {
+        Self {
+            known: true,
+            unknown_because: None,
+            models,
+        }
+    }
+}
+
 /// One provider event returned to the daemon.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[map(crate = ::guatiao)]
@@ -392,6 +438,16 @@ pub trait AgentHandler: Send + Sync {
     fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
         let _ = clearance;
         Ok(None)
+    }
+
+    /// The models the account behind `environment` (the variables a Session would start with)
+    /// may use, if the harness can say without a model turn. The default: it cannot, and says
+    /// so. A handler never puts a credential from `environment` in its answer.
+    fn models(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, ProviderError> {
+        let _ = environment;
+        Ok(ModelListing::unknown(
+            "this handler has no way to list models",
+        ))
     }
 }
 

@@ -6050,6 +6050,17 @@ pub ai6::directorates::section_00::agent::HandlerConfig::settings_toml: alloc::s
 pub struct ai6::directorates::section_00::agent::McpServerRef
 pub ai6::directorates::section_00::agent::McpServerRef::env_prefix: alloc::string::String
 pub ai6::directorates::section_00::agent::McpServerRef::name: alloc::string::String
+pub struct ai6::directorates::section_00::agent::ModelInfo
+pub ai6::directorates::section_00::agent::ModelInfo::description: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::ModelInfo::id: alloc::string::String
+pub ai6::directorates::section_00::agent::ModelInfo::name: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::section_00::agent::ModelListing
+pub ai6::directorates::section_00::agent::ModelListing::known: bool
+pub ai6::directorates::section_00::agent::ModelListing::models: alloc::vec::Vec<ai6::directorates::section_00::agent::ModelInfo>
+pub ai6::directorates::section_00::agent::ModelListing::unknown_because: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::agent::ModelListing
+pub fn ai6::directorates::section_00::agent::ModelListing::of(alloc::vec::Vec<ai6::directorates::section_00::agent::ModelInfo>) -> Self
+pub fn ai6::directorates::section_00::agent::ModelListing::unknown(impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::directorates::section_00::agent::QuotaReport
 pub ai6::directorates::section_00::agent::QuotaReport::resets_at: core::option::Option<i64>
 pub ai6::directorates::section_00::agent::QuotaReport::status: core::option::Option<alloc::string::String>
@@ -6072,6 +6083,7 @@ pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -6080,6 +6092,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::ki
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -6088,6 +6101,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::ki
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -6343,6 +6357,14 @@ pub fn ai6::directorates::section_00::gate::web_fetch_gate_with(&str, &[alloc::s
 pub type ai6::directorates::section_00::gate::Answers = alloc::vec::Vec<(alloc::string::String, core::option::Option<alloc::string::String>)>
 pub type ai6::directorates::section_00::gate::GitOutput = (bool, alloc::string::String)
 pub type ai6::directorates::section_00::gate::Resolver<'a> = (dyn core::ops::function::Fn(&str) -> core::io::error::Result<alloc::vec::Vec<core::net::ip_addr::IpAddr>> + 'a)
+pub mod ai6::directorates::section_00::listing
+pub struct ai6::directorates::section_00::listing::Harness
+impl ai6::directorates::section_00::listing::Harness
+pub fn ai6::directorates::section_00::listing::Harness::next_where(&mut self, impl core::ops::function::Fn(&serde_json::value::Value) -> bool) -> core::result::Result<serde_json::value::Value, alloc::string::String>
+pub fn ai6::directorates::section_00::listing::Harness::send(&mut self, &serde_json::value::Value) -> core::result::Result<(), alloc::string::String>
+impl core::ops::drop::Drop for ai6::directorates::section_00::listing::Harness
+pub fn ai6::directorates::section_00::listing::Harness::drop(&mut self)
+pub fn ai6::directorates::section_00::listing::ask<T>(&str, &[&str], &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, core::time::Duration, impl core::ops::function::FnOnce(&mut ai6::directorates::section_00::listing::Harness) -> core::result::Result<T, alloc::string::String>) -> core::result::Result<T, alloc::string::String>
 pub mod ai6::directorates::section_00::programs
 pub const ai6::directorates::section_00::programs::STATION_CONFIG_ROOTS: [&str; 3]
 pub fn ai6::directorates::section_00::programs::canonical(&std::path::Path) -> std::path::PathBuf
@@ -6405,6 +6427,7 @@ pub mod ai6::station::limits
 pub ai6::station::limits::AccountLimits::claim_ttl: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::limit_horizon: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::login_timeout: ai6::bounds::Seconds
+pub ai6::station::limits::AccountLimits::models_every: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::reset_grace: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::unknown_use_permille: u16
 impl core::default::Default for ai6::station::limits::AccountLimits
@@ -9106,6 +9129,17 @@ pub ai6::MissionUsage::total: ai6::directorates::medical::usage::UsageTotals
 #[non_exhaustive] pub struct ai6::ModelCard
 pub ai6::ModelCard::model: core::option::Option<alloc::string::String>
 pub ai6::ModelCard::standing: ai6::directorates::m::scorecard::Standing
+pub struct ai6::ModelInfo
+pub ai6::ModelInfo::description: core::option::Option<alloc::string::String>
+pub ai6::ModelInfo::id: alloc::string::String
+pub ai6::ModelInfo::name: core::option::Option<alloc::string::String>
+pub struct ai6::ModelListing
+pub ai6::ModelListing::known: bool
+pub ai6::ModelListing::models: alloc::vec::Vec<ai6::directorates::section_00::agent::ModelInfo>
+pub ai6::ModelListing::unknown_because: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::agent::ModelListing
+pub fn ai6::directorates::section_00::agent::ModelListing::of(alloc::vec::Vec<ai6::directorates::section_00::agent::ModelInfo>) -> Self
+pub fn ai6::directorates::section_00::agent::ModelListing::unknown(impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::ModelTenure
 pub ai6::ModelTenure::from: f64
 pub ai6::ModelTenure::model: core::option::Option<alloc::string::String>
@@ -10913,6 +10947,7 @@ pub trait ai6::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -10921,6 +10956,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::ki
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
@@ -10929,6 +10965,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::ki
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::section_00::agent::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>

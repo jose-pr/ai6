@@ -905,6 +905,26 @@ a model at all; an Agent that needs another model's behaviour is another Agent.
 
 [Moneypenny](assistant.md#routes-and-quota) takes routes too.
 
+### Models an account may use
+
+A route names a model by what its source calls it, so a person needs to know what a source offers.
+Each Station asks its handlers, through the optional call `AgentHandler::models`, which models the
+account behind an environment may use, with **no model turn**: for each pool account (its credential
+leased as a Session's is, no account claimed, the lease revoked as soon as the answer is in) and for
+each route no pool serves (its `env` and `secrets`). It looks again every `[accounts] models_every`
+seconds (3600; 0 never on its own) and reports the answers at check-in. `ai6ctl models` and the
+Pools page in Outer Office (`roster.read`) show them by pool and account.
+
+- **Claude Code** answers an `initialize` control request with the models its login can pick. The
+  list follows the kind of login in the environment (an API key, a subscription, a gateway), not a
+  check of the account's standing, and a gateway's own model names are not in it.
+- **Codex** answers `model/list` from the app server: its shipped catalog with no login, and what the
+  account is offered with one (not measured here).
+- **A handler that cannot list**, the `acp` handler for now, says **unknown** and why. Nothing is
+  guessed, and an unknown is never shown as an empty list.
+- A discovered model is an offer: it makes no route, and no Agent uses it until a person or an
+  approved proposal writes the route. No credential is ever part of an answer.
+
 ## Commands
 
 Run `ai6 serve --help` to configure a Station and `ai6ctl --help` for the operator

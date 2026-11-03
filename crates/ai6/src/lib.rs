@@ -215,8 +215,8 @@ pub use directorates::registry::tracker::{
 pub use directorates::registry::vetting::{Clearance, HeldBrief};
 pub use directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    AssistantNetwork, DENIED_EVENT, LIMIT_EVENT, McpServerRef, QuotaReport, TokenUsage, UsageLimit,
-    clearance_runs_commands,
+    AssistantNetwork, DENIED_EVENT, LIMIT_EVENT, McpServerRef, ModelInfo, ModelListing,
+    QuotaReport, TokenUsage, UsageLimit, clearance_runs_commands,
 };
 pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_ENV_PREFIX, ASSISTANT_CABLE_MCP_SERVER, ASSISTANT_CABLE_MCP_TOKEN_ENV,

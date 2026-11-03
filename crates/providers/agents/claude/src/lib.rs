@@ -17,11 +17,13 @@ use ai6::directorates::q::terminal::{
 };
 use ai6::directorates::section_00::agent::{
     AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    DENIED_EVENT, LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit, clearance_runs_commands,
+    DENIED_EVENT, LIMIT_EVENT, ModelInfo, ModelListing, QuotaReport, TokenUsage, UsageLimit,
+    clearance_runs_commands,
 };
 use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
 use ai6::directorates::section_00::denied::DenyList;
 use ai6::directorates::section_00::gate::{GATE_PROGRAM_ENV, WEB_GATE_ARGS};
+use ai6::directorates::section_00::listing;
 use ai6::directorates::section_00::programs;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
@@ -55,6 +57,10 @@ pub struct ClaudeConfig {
     /// Milliseconds the end of the output waits for Claude Code's exit status. Default 1000.
     #[map(default = 1_000)]
     pub exit_wait_ms: u64,
+    /// Milliseconds a listing of the models an account may use waits for Claude Code to answer.
+    /// Default 30000.
+    #[map(default = 30_000)]
+    pub models_wait_ms: u64,
     /// The Agent's `handler_settings` table as TOML (`allowed_tools`, `denied_tools`), which the
     /// Station fills in. Empty keeps the default list of tools.
     #[map(default = String::new())]
@@ -71,6 +77,7 @@ impl Default for ClaudeConfig {
             tail_line_bytes: 512,
             close_wait_ms: 2_000,
             exit_wait_ms: 1_000,
+            models_wait_ms: 30_000,
             settings_toml: String::new(),
         }
     }
@@ -104,6 +111,45 @@ impl ClaudeSettings {
         }
         Ok(settings)
     }
+}
+
+/// The `request_id` of the `initialize` request that lists models.
+const MODELS_REQUEST: &str = "ai6-models";
+
+/// The models in Claude Code's answer to `initialize`; unknown when the answer has none. The
+/// answer's `account` is never read.
+fn models_of(answer: &Value) -> ModelListing {
+    let response = &answer["response"];
+    if response["subtype"] != "success" {
+        return ModelListing::unknown("Claude Code refused the request to list its models");
+    }
+    let Some(models) = response["response"]["models"].as_array() else {
+        return ModelListing::unknown("this Claude Code does not list its models");
+    };
+    ModelListing::of(
+        models
+            .iter()
+            .filter_map(|model| {
+                let id = model["value"].as_str()?;
+                let resolved = model["resolvedModel"]
+                    .as_str()
+                    .filter(|resolved| *resolved != id);
+                let description = match (model["description"].as_str(), resolved) {
+                    (Some(text), Some(resolved)) => {
+                        Some(format!("{text} (resolves to {resolved})"))
+                    }
+                    (Some(text), None) => Some(text.to_owned()),
+                    (None, Some(resolved)) => Some(format!("resolves to {resolved}")),
+                    (None, None) => None,
+                };
+                Some(ModelInfo {
+                    id: id.to_owned(),
+                    name: model["displayName"].as_str().map(str::to_owned),
+                    description,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Starts and resumes Claude Code streams for AI6 Agent Sessions.
@@ -195,6 +241,42 @@ impl AgentHandler for ClaudeHandler {
                 }
             })
             .collect())
+    }
+
+    /// Claude Code answers an `initialize` control request with the models its account may
+    /// pick (`models[].value`, `displayName`, `resolvedModel`), before any model turn and with
+    /// no network. The list follows the kind of login the environment gives it (an API key, a
+    /// subscription, a gateway), not a check of the account's standing.
+    fn models(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, ProviderError> {
+        let wait = std::time::Duration::from_millis(self.config.models_wait_ms);
+        let asked = listing::ask(
+            &self.config.executable,
+            &[
+                "-p",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+            ],
+            &environment,
+            wait,
+            |harness| {
+                harness.send(&json!({
+                    "type": "control_request",
+                    "request_id": MODELS_REQUEST,
+                    "request": {"subtype": "initialize"}
+                }))?;
+                harness.next_where(|line| {
+                    line["type"] == "control_response"
+                        && line["response"]["request_id"] == MODELS_REQUEST
+                })
+            },
+        );
+        Ok(match asked {
+            Ok(answer) => models_of(&answer),
+            Err(reason) => ModelListing::unknown(reason),
+        })
     }
 
     fn start(
@@ -1902,6 +1984,109 @@ fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    /// Claude Code 2.1.316's answer to `initialize`, cut to what the listing reads, with the
+    /// `account` it also carries: that is never read.
+    fn initialize_answer() -> Value {
+        json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": "ai6-models",
+                "response": {
+                    "account": {"email": "someone@example.invalid"},
+                    "models": [
+                        {"value": "default", "resolvedModel": "claude-opus-5-5",
+                         "displayName": "Default (recommended)",
+                         "description": "Use the default model", "supportsEffort": true},
+                        {"value": "claude-haiku-5-5", "resolvedModel": "claude-haiku-5-5",
+                         "displayName": "Haiku"},
+                        {"displayName": "no value: not a model"}
+                    ]
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn the_models_claude_code_lists_are_read_from_its_initialize_answer() {
+        let listing = models_of(&initialize_answer());
+        assert!(listing.known);
+        let ids: Vec<_> = listing
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(ids, ["default", "claude-haiku-5-5"]);
+        assert_eq!(
+            listing.models[0].name.as_deref(),
+            Some("Default (recommended)")
+        );
+        assert_eq!(
+            listing.models[0].description.as_deref(),
+            Some("Use the default model (resolves to claude-opus-5-5)")
+        );
+        assert_eq!(
+            listing.models[1].description, None,
+            "an id that resolves to itself"
+        );
+        assert!(
+            !format!("{listing:?}").contains("someone@example"),
+            "the account is never read"
+        );
+    }
+
+    #[test]
+    fn an_answer_without_models_or_a_refusal_is_unknown_never_empty() {
+        for answer in [
+            json!({"type": "control_response", "response": {"subtype": "error", "request_id": "ai6-models"}}),
+            json!({"type": "control_response", "response": {"subtype": "success", "response": {"commands": []}}}),
+        ] {
+            let listing = models_of(&answer);
+            assert!(!listing.known && listing.models.is_empty(), "{listing:?}");
+            assert!(listing.unknown_because.is_some());
+        }
+    }
+
+    /// Against the real Claude Code on this machine, with no login and no network: the harness
+    /// answers `initialize` before any turn. Run with `AI6_TEST_LIVE_HARNESSES=1`.
+    #[test]
+    #[ignore = "needs Claude Code installed; set AI6_TEST_LIVE_HARNESSES=1 and run with --ignored"]
+    fn live_claude_code_lists_models_with_no_login_and_no_turn() {
+        assert!(
+            std::env::var_os("AI6_TEST_LIVE_HARNESSES").is_some(),
+            "set AI6_TEST_LIVE_HARNESSES=1"
+        );
+        let home = tempfile::tempdir().unwrap();
+        let path = std::env::var("PATH").unwrap_or_default();
+        let environment = BTreeMap::from([
+            ("PATH".to_owned(), path),
+            (
+                "SYSTEMROOT".to_owned(),
+                std::env::var("SYSTEMROOT").unwrap_or_default(),
+            ),
+            ("HOME".to_owned(), home.path().display().to_string()),
+            ("USERPROFILE".to_owned(), home.path().display().to_string()),
+            ("APPDATA".to_owned(), home.path().display().to_string()),
+            ("LOCALAPPDATA".to_owned(), home.path().display().to_string()),
+            (
+                "CLAUDE_CONFIG_DIR".to_owned(),
+                home.path().join(".claude").display().to_string(),
+            ),
+            ("ANTHROPIC_API_KEY".to_owned(), "dummy-not-a-key".to_owned()),
+            (
+                "ANTHROPIC_BASE_URL".to_owned(),
+                "http://127.0.0.1:9".to_owned(),
+            ),
+        ]);
+        let handler = ClaudeHandler::try_from(ClaudeConfig::default()).unwrap();
+        let listing = handler.models(environment).unwrap();
+        assert!(listing.known, "{listing:?}");
+        assert!(
+            listing.models.iter().any(|model| model.id == "opus"),
+            "{listing:?}"
+        );
+    }
     use std::io::{BufRead, BufReader, Read, Write};
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::sync::Arc;

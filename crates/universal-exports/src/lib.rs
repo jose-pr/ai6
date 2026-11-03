@@ -12,6 +12,7 @@ mod green_ink;
 mod held;
 mod issues;
 mod login_limit;
+mod models;
 mod moneypenny;
 mod pools;
 mod roster;
@@ -1585,6 +1586,7 @@ impl Gateway {
                     .delete(compartments::remove_read_in),
             )
             .route("/v1/user/accounts", get(accounts::list))
+            .route("/v1/user/models", get(models::list))
             .route(
                 "/v1/user/accounts/{name}",
                 axum::routing::put(accounts::put_account),

@@ -6,4 +6,5 @@ pub mod agent;
 pub mod assistant;
 pub mod denied;
 pub mod gate;
+pub mod listing;
 pub mod programs;

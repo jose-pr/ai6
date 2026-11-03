@@ -1049,6 +1049,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `claim_ttl` | 60 | **A claim on an account lasts.** Seconds a claim on an account lasts unless the Station renews it at check-in. |
 | `limit_horizon` | 691,200 (8 days) | **Longest a limited account stays out.** The longest a limited account is kept out, in seconds, whatever reset time its provider reports. |
 | `login_timeout` | 60 | **Longest account login.** Seconds a pool account's login command may take. |
+| `models_every` | 3,600 | **Look at the models every.** Seconds between this Station's looks at the models each account and route may use; 0 never looks on its own. |
 <!-- schema:record.station.accounts:end -->
 
 `[approvals]`: green ink steps.

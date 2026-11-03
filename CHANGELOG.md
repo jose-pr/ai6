@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   number lists its attempts, and a row under `small_sample` judged attempts says so. The Session
   record gains `opened_at`, `closed_at`, `result` and `launch.agent`, and `[operation.ID.scorecard]`
   sets `window_days` (30) and `small_sample` (5).
+- Models are discovered per account and route. `AgentHandler::models(environment)` is a new optional
+  handler call that lists what the account behind an environment may use with no model turn; the
+  default, and any handler that cannot, answers `unknown` with why. Claude Code lists through its
+  `initialize` control request and Codex through the app server's `model/list`; the `acp` handler
+  does not list yet. Each Station asks for every pool account (with its credential leased as a
+  Session's is, no account claimed) and every route no pool serves, every `[accounts] models_every`
+  seconds (3600; 0 never), and reports the answers at check-in; `GET /v1/user/models`,
+  `ai6ctl models` and the Pools page show them. No credential is in an answer.
 - M proposes from the scorecard and may hold. Each round at Headquarters it files green ink requests
   of kind `hold` (an Agent, or one route of it, whose failure rate is above `hold_above`) and
   `prefer` (an Agent across `reorder_gap` of another that shares a role), with the numbers and the

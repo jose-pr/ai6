@@ -329,6 +329,18 @@ The terminal is opened at `STREAM_COLS` (32767) columns and read with
 written and lines it breaks are read as the stream Codex wrote. A line that is not JSON is
 skipped while waiting for a reply, and is an event of kind `output` otherwise.
 
+## Listing models
+
+`CodexHandler::models(environment)` starts `codex app-server` with exactly that environment, answers
+`initialize`, sends `initialized` and asks `model/list`: `result.data[]` holds `id`, `model`,
+`displayName`, `description` and `hidden`; a hidden model is left out, as Codex does not offer it. No
+model turn is involved. Measured with Codex 0.164.0 on Windows with an empty `CODEX_HOME`, no login
+and an unreachable proxy: it answered from the catalog it ships with (`gpt-6.1-sol` default,
+`gpt-6-astra`, and others). With a login it may refresh from the account; that was not measured. The
+wait is `start_timeout_ms` plus `request_timeout_ms`; no answer, or one without `data`, is `unknown`
+with the reason. `cargo test -p ai6-agent-codex -- --ignored live_` with `AI6_TEST_LIVE_HARNESSES=1`
+runs it against the installed program.
+
 ## Gotchas
 
 The Codex executable must be available to the terminal environment. Tests use protocol
