@@ -389,6 +389,90 @@ void main() {
     },
   );
 
+  testWidgets(
+    'All Operations is the default, says which failed, and narrows to one',
+    (tester) async {
+      final requests = <http.Request>[];
+      final board = MissionBoard(
+        apiOrigin: Uri.parse('https://oo.example'),
+        pollInterval: null,
+        client: MockClient((request) async {
+          requests.add(request);
+          final path = request.url.path;
+          if (path == '/v1/user/operations/G/agents') {
+            return http.Response(
+              jsonEncode(_agents),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (path == '/v1/user/operations/L/agents') {
+            return http.Response('{"error":"down"}', 503);
+          }
+          if (path.endsWith('/clearance')) {
+            return http.Response(
+              jsonEncode({
+                'agent': '007',
+                'operation': 'G',
+                'clearance': 'desk',
+                'signer': 'operator-007',
+                'at': 1.0,
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response('[]', 200);
+        }),
+      );
+      board.accessToken = 'operator-token';
+      board.loading = false;
+      board.userSession = UserSessionSummary(
+        personId: 'operator-007',
+        name: 'operator-007',
+        displayName: null,
+        groups: const [],
+        expiresAt: 1e12,
+        operations: [
+          UserOperationAccess(
+            operationId: 'G',
+            actions: const ['agent.read', 'agent.configure'],
+          ),
+          UserOperationAccess(operationId: 'L', actions: const ['agent.read']),
+        ],
+        roster: const [],
+      );
+      await openAgents(tester, board);
+
+      final paths = requests.map((request) => request.url.path);
+      expect(paths, contains('/v1/user/operations/G/agents'));
+      expect(paths, contains('/v1/user/operations/L/agents'));
+      expect(find.text('All Operations'), findsOneWidget);
+      expect(find.text('Operation G'), findsOneWidget);
+      expect(find.textContaining('Operation L: '), findsOneWidget);
+      expect(find.text('field (configured desk)'), findsOneWidget);
+
+      // An action from All goes to the row's Operation.
+      await tester.tap(find.text('Lower clearance'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'under review');
+      await tester.tap(find.text('Lower'));
+      await tester.pumpAndSettle();
+      expect(
+        requests.lastWhere((request) => request.method == 'PUT').url.path,
+        '/v1/user/operations/G/agents/007/clearance',
+      );
+
+      await tester.tap(find.text('All Operations'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('G').last);
+      await tester.pumpAndSettle();
+      expect(find.text('All Operations'), findsNothing);
+      expect(find.textContaining('Operation L: '), findsNothing);
+      expect(find.text('field (configured desk)'), findsOneWidget);
+    },
+  );
+
   group('the model an Agent card shows', () {
     AgentSummary summary(Map<String, dynamic> fields) => AgentSummary.fromJson({
       'agent': '007',

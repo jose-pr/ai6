@@ -48,8 +48,14 @@ class FakeGreenInk {
   bool decided = false;
   bool revoked = false;
 
+  /// Operations whose routes answer 503.
+  final failing = <String>{};
+
   http.Response answer(http.Request request) {
     final path = request.url.path;
+    if (failing.contains(request.url.pathSegments[3])) {
+      return http.Response('{"error":"down"}', 503);
+    }
     if (path.endsWith('/green-ink')) {
       return http.Response(jsonEncode(decided ? [] : [pendingRequest()]), 200);
     }
@@ -82,6 +88,7 @@ Future<MissionBoard> signedIn(
     'approval.decide',
     'approval.class',
   ],
+  List<String> operations = const ['G'],
 }) async {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
@@ -120,7 +127,8 @@ Future<MissionBoard> signedIn(
           'groups': [],
           'expires_at': 1_900_000_000,
           'operations': [
-            {'operation_id': 'G', 'actions': actions},
+            for (final operation in operations)
+              {'operation_id': operation, 'actions': actions},
           ],
           'stations': [],
         }),
@@ -200,6 +208,32 @@ void main() {
     expect(
       find.textContaining('No steps are waiting for green ink.'),
       findsOneWidget,
+    );
+  });
+
+  testWidgets('All Operations is the inbox, each request signed in its own', (
+    tester,
+  ) async {
+    final gateway = FakeGreenInk()..failing.add('L');
+    final board = await signedIn(gateway, operations: const ['G', 'L']);
+    addTearDown(board.dispose);
+    await openAdministration(tester, board);
+    await tester.tap(find.widgetWithText(Tab, 'Inbox'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('All Operations'), findsOneWidget);
+    expect(find.text('Operation G'), findsOneWidget);
+    expect(find.textContaining('Operation L: '), findsOneWidget);
+    await tester.tap(find.text('Approve…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Approve'));
+    await tester.pumpAndSettle();
+    expect(
+      gateway.requests
+          .singleWhere((request) => request.url.path.endsWith('/approve'))
+          .url
+          .path,
+      '/v1/user/operations/G/green-ink/$requestId/approve',
     );
   });
 

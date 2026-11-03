@@ -152,7 +152,17 @@ void main() {
     await openPage(tester, 'Account Pools');
     await tester.pumpAndSettle();
 
-    expect(asked.single.path, '/v1/user/operations/G/pools');
+    expect(asked.map((url) => url.path).toSet(), {
+      '/v1/user/operations/G/pools',
+      '/v1/user/operations/L/pools',
+    }, reason: 'All Operations is the default');
+    expect(find.text('All Operations'), findsOneWidget);
+    expect(
+      find.text('Operation G'),
+      findsOneWidget,
+      reason: 'G has accounts; L has none and no heading',
+    );
+    expect(find.text('Operation L'), findsNothing);
     expect(find.text('team/alpha'), findsOneWidget);
     expect(
       find.text('2/2 Sessions · five hour 42.5% · 1200 tokens today'),

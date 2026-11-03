@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../routes/oo_scope.dart';
 import '../shell/oo_freshness.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_link.dart';
@@ -129,42 +130,8 @@ const approvalLifetimes = <(String, int)>[
 
 double _now() => DateTime.now().millisecondsSinceEpoch / 1000;
 
-/// The Operations a page may show, and the one shown.
-class _OperationPicker extends StatelessWidget {
-  const _OperationPicker({
-    required this.operations,
-    required this.selected,
-    required this.onChanged,
-  });
-
-  final List<String> operations;
-  final String? selected;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) => ConstrainedBox(
-    constraints: const BoxConstraints(maxWidth: 420),
-    child: DropdownButtonFormField<String>(
-      // The field keeps its first value; a new selection is a new field.
-      key: ValueKey(selected),
-      initialValue: selected,
-      decoration: const InputDecoration(labelText: 'Operation'),
-      items: [
-        for (final id in operations)
-          DropdownMenuItem(value: id, child: Text(id)),
-      ],
-      onChanged: onChanged,
-    ),
-  );
-}
-
-/// The Operation a green ink page shows: [route]'s `operation_id` when it is one of
-/// [operations], `null` when it is not, else the first of them.
-String? _routeOperation(OoRoute route, List<String> operations) {
-  final named = route['operation_id'];
-  if (named != null) return operations.contains(named) ? named : null;
-  return operations.isEmpty ? null : operations.first;
-}
+/// What one read of a page's Operations gave: rows with their Operation, and what failed.
+typedef _Read<T> = ({List<(String, T)> rows, Map<String, String> failed});
 
 /// The Green ink inbox: steps Agents wait to take, each approved for a chosen time or
 /// rejected with a reason. Needs `approval.decide`.
@@ -188,11 +155,10 @@ class GreenInkPage extends StatefulWidget {
 }
 
 class _GreenInkPageState extends State<GreenInkPage> {
-  Future<List<GreenInkRequestSummary>>? _requests;
+  Future<_Read<GreenInkRequestSummary>>? _requests;
   bool _deciding = false;
 
-  String? get _operationId =>
-      _routeOperation(widget.route, widget.board.greenInkOperations);
+  OoScope get _scope => OoScope(widget.route, widget.board.greenInkOperations);
 
   @override
   void initState() {
@@ -209,19 +175,12 @@ class _GreenInkPageState extends State<GreenInkPage> {
   }
 
   void _reload() {
-    final operationId = _operationId;
+    final shown = _scope.shown;
     setState(() {
-      _requests = operationId == null
+      _requests = shown.isEmpty
           ? null
-          : widget.board.loadGreenInk(operationId);
+          : readEach(shown, widget.board.loadGreenInk, const []);
     });
-  }
-
-  void _select(String? operationId) {
-    if (operationId == null || operationId == _operationId) return;
-    widget.onRoute(
-      widget.route.without('request_id').withField('operation_id', operationId),
-    );
   }
 
   Future<void> _ask(
@@ -276,23 +235,24 @@ class _GreenInkPageState extends State<GreenInkPage> {
   @override
   Widget build(BuildContext context) {
     final operations = widget.board.greenInkOperations;
-    final operationId = _operationId;
+    final scope = _scope;
+    final operationId = scope.operation;
     if (operations.isEmpty) {
       return const Center(
         child: Text('No Operations grant approval.decide to this account.'),
       );
     }
-    final picker = _OperationPicker(
-      operations: operations,
-      selected: operationId,
-      onChanged: _select,
+    final picker = OoOperationPicker(
+      scope: scope,
+      onRoute: widget.onRoute,
+      narrower: const ['request_id'],
     );
     final filters = OoFilterBar(
       route: widget.route,
       onRoute: widget.onRoute,
       padding: const EdgeInsets.only(top: 8),
     );
-    if (operationId == null) {
+    if (scope.unreadable) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -340,7 +300,7 @@ class _GreenInkPageState extends State<GreenInkPage> {
             const Chip(label: Text('Demo data: decisions are off')),
           const SizedBox(height: 8),
           Expanded(
-            child: FutureBuilder<List<GreenInkRequestSummary>>(
+            child: FutureBuilder<_Read<GreenInkRequestSummary>>(
               future: _requests,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -349,23 +309,36 @@ class _GreenInkPageState extends State<GreenInkPage> {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
+                final read = snapshot.data!;
+                final several = scope.shown.length > 1;
                 final requests = [
-                  for (final request in snapshot.data!)
+                  for (final (_, request) in read.rows)
                     if (requestId == null || request.id == requestId) request,
                 ];
+                if (requests.isEmpty && read.failed.isNotEmpty && !several) {
+                  return Center(child: Text(read.failed.values.single));
+                }
+                final failures = read.failed.isEmpty
+                    ? null
+                    : OoReadFailures(failed: read.failed, several: several);
                 if (requests.isEmpty) {
                   return OoEmptyState(
                     icon: OoIconName.greenInk,
-                    title: requestId == null
-                        ? 'No steps are waiting for green ink.'
-                        : 'Request $requestId is not waiting in Operation '
-                              '$operationId.',
+                    title: switch ((requestId, operationId)) {
+                      (null, _) => 'No steps are waiting for green ink.',
+                      (_, null) =>
+                        'Request $requestId is not waiting in an Operation '
+                            'you may sign for.',
+                      (_, _) =>
+                        'Request $requestId is not waiting in Operation '
+                            '$operationId.',
+                    },
                     body:
                         'An Agent asks here before an irreversible step, such as a push, '
                         'and waits for your signature.',
                   );
                 }
-                return ListView.separated(
+                final list = ListView.separated(
                   itemCount: requests.length,
                   separatorBuilder: (context, index) =>
                       const SizedBox(height: 8),
@@ -386,6 +359,11 @@ class _GreenInkPageState extends State<GreenInkPage> {
                               crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 OoLinkLine([
+                                  if (operationId == null)
+                                    (
+                                      'Operation ${request.operationId}',
+                                      OoLinkTo.operation(request.operationId),
+                                    ),
                                   (
                                     'Agent ${request.agent}',
                                     OoLinkTo.agent(
@@ -434,6 +412,14 @@ class _GreenInkPageState extends State<GreenInkPage> {
                       ),
                     );
                   },
+                );
+                if (failures == null) return list;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    failures,
+                    Expanded(child: list),
+                  ],
                 );
               },
             ),
@@ -547,11 +533,11 @@ class ClassAuthorizationsPage extends StatefulWidget {
 }
 
 class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
-  Future<List<ClassAuthorizationSummary>>? _records;
+  Future<_Read<ClassAuthorizationSummary>>? _records;
   bool _revoking = false;
 
-  String? get _operationId =>
-      _routeOperation(widget.route, widget.board.classAuthorizationOperations);
+  OoScope get _scope =>
+      OoScope(widget.route, widget.board.classAuthorizationOperations);
 
   @override
   void initState() {
@@ -568,19 +554,12 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
   }
 
   void _reload() {
-    final operationId = _operationId;
+    final shown = _scope.shown;
     setState(() {
-      _records = operationId == null
+      _records = shown.isEmpty
           ? null
-          : widget.board.loadClassAuthorizations(operationId);
+          : readEach(shown, widget.board.loadClassAuthorizations, const []);
     });
-  }
-
-  void _select(String? operationId) {
-    if (operationId == null || operationId == _operationId) return;
-    widget.onRoute(
-      widget.route.without('request_id').withField('operation_id', operationId),
-    );
   }
 
   Future<void> _revoke(
@@ -628,23 +607,20 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
   @override
   Widget build(BuildContext context) {
     final operations = widget.board.classAuthorizationOperations;
-    final operationId = _operationId;
+    final scope = _scope;
+    final operationId = scope.operation;
     if (operations.isEmpty) {
       return const Center(
         child: Text('No Operations grant approval.class to this account.'),
       );
     }
-    final picker = _OperationPicker(
-      operations: operations,
-      selected: operationId,
-      onChanged: _select,
-    );
+    final picker = OoOperationPicker(scope: scope, onRoute: widget.onRoute);
     final filters = OoFilterBar(
       route: widget.route,
       onRoute: widget.onRoute,
       padding: const EdgeInsets.only(top: 8),
     );
-    if (operationId == null) {
+    if (scope.unreadable) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -678,7 +654,7 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: FutureBuilder<List<ClassAuthorizationSummary>>(
+            child: FutureBuilder<_Read<ClassAuthorizationSummary>>(
               future: _records,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -687,12 +663,20 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final records = snapshot.data!;
-                if (records.isEmpty) {
-                  return const Center(
+                final read = snapshot.data!;
+                final several = scope.shown.length > 1;
+                if (read.rows.isEmpty && read.failed.isNotEmpty && !several) {
+                  return Center(child: Text(read.failed.values.single));
+                }
+                if (read.rows.isEmpty && read.failed.isEmpty) {
+                  return Center(
                     child: Text(
-                      'No class authorisations in this Operation. A class '
-                      'authorisation signs a kind of step in advance.',
+                      operationId == null
+                          ? 'No class authorisations in an Operation you may '
+                                'manage them in. A class authorisation signs a kind '
+                                'of step in advance.'
+                          : 'No class authorisations in this Operation. A class '
+                                'authorisation signs a kind of step in advance.',
                       textAlign: TextAlign.center,
                     ),
                   );
@@ -700,13 +684,16 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
                 final now = _now();
                 return ListView(
                   children: [
-                    for (final record in records)
+                    if (read.failed.isNotEmpty)
+                      OoReadFailures(failed: read.failed, several: several),
+                    for (final (from, record) in read.rows)
                       ListTile(
                         title: Text(
                           '${record.kinds.join(', ')} · ${record.targetPattern}',
                         ),
                         subtitle: Text(
                           [
+                            if (operationId == null) 'Operation $from',
                             if (record.agents.isNotEmpty)
                               'Agents ${record.agents.join(', ')}',
                             if (record.roles.isNotEmpty)
@@ -723,7 +710,7 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
                             ? TextButton(
                                 onPressed: _revoking || widget.board.demo
                                     ? null
-                                    : () => _revoke(operationId, record),
+                                    : () => _revoke(from, record),
                                 child: const Text('Revoke'),
                               )
                             : Chip(

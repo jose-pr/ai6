@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../routes/oo_scope.dart';
 import '../settings/oo_config.dart';
 import '../theme/oo_icon.dart';
 import 'models_section.dart';
@@ -149,18 +150,19 @@ class AccountPoolsPage extends StatefulWidget {
 }
 
 class _AccountPoolsPageState extends State<AccountPoolsPage> {
-  List<PoolAccountSummary> _accounts = const [];
+  /// The accounts shown, each with the Operation it was read in.
+  List<(String, PoolAccountSummary)> _accounts = const [];
+
+  /// The Operations whose accounts could not be read, with why.
+  Map<String, String> _failed = const {};
   bool _loading = false;
-  String? _error;
   Timer? _timer;
 
-  /// The route's Operation when the person may read it, `null` when not, else the first.
-  String? get _operation {
-    final operations = widget.board.poolOperations;
-    final named = widget.route['operation_id'];
-    if (named != null) return operations.contains(named) ? named : null;
-    return operations.isEmpty ? null : operations.first;
-  }
+  OoScope get _scope => OoScope(widget.route, widget.board.poolOperations);
+
+  /// The read error to show in place of the list: the one Operation's, when only one is read.
+  String? get _error =>
+      _scope.shown.length == 1 ? _failed[_scope.shown.single] : null;
 
   @override
   void initState() {
@@ -179,7 +181,7 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
     if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
       setState(() {
         _accounts = const [];
-        _error = null;
+        _failed = const {};
       });
       unawaited(_load());
     }
@@ -192,21 +194,16 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
   }
 
   Future<void> _load() async {
-    final operation = _operation;
-    if (operation == null) return;
+    final shown = _scope.shown;
+    if (shown.isEmpty) return;
     setState(() => _loading = true);
-    try {
-      final accounts = await widget.board.loadPools(operation);
-      if (!mounted || operation != _operation) return;
-      setState(() {
-        _accounts = accounts;
-        _error = null;
-      });
-    } on StateError catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    final read = await readEach(shown, widget.board.loadPools, _accounts);
+    if (!mounted || shown.join('\n') != _scope.shown.join('\n')) return;
+    setState(() {
+      _accounts = read.rows;
+      _failed = read.failed;
+      _loading = false;
+    });
   }
 
   @override
@@ -217,11 +214,13 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
         child: Text('No account pool is visible to this account.'),
       );
     }
-    final operation = _operation;
+    final scope = _scope;
+    final operation = scope.operation;
+    final shown = scope.shown;
     final pool = widget.route['pool'];
     final accounts = [
-      for (final account in _accounts)
-        if (pool == null || account.pool == pool) account,
+      for (final row in _accounts)
+        if (pool == null || row.$2.pool == pool) row,
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -232,21 +231,10 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
             spacing: 16,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              DropdownButton<String>(
-                value: operation,
-                hint: const Text('Operation'),
-                items: [
-                  for (final operation in operations)
-                    DropdownMenuItem(value: operation, child: Text(operation)),
-                ],
-                onChanged: (chosen) {
-                  if (chosen == null || chosen == operation) return;
-                  widget.onRoute(
-                    widget.route
-                        .without('pool')
-                        .withField('operation_id', chosen),
-                  );
-                },
+              OoOperationPicker(
+                scope: scope,
+                onRoute: widget.onRoute,
+                narrower: const ['pool'],
               ),
               IconButton(
                 tooltip: 'Refresh account pools',
@@ -257,13 +245,10 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
           ),
         ),
         OoFilterBar(route: widget.route, onRoute: widget.onRoute),
-        if (_error case final error? when accounts.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Text(error),
-          ),
+        if (_failed.isNotEmpty && (shown.length > 1 || accounts.isNotEmpty))
+          OoReadFailures(failed: _failed, several: shown.length > 1),
         Expanded(
-          child: operation == null
+          child: scope.unreadable
               ? Center(
                   child: Text(
                     'Operation ${widget.route['operation_id']}\'s account pools '
@@ -282,9 +267,14 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
               : accounts.isEmpty
               ? OoEmptyState(
                   icon: OoIconName.pools,
-                  title: pool == null
-                      ? 'No pool account serves this Operation.'
-                      : 'No account pool named $pool in Operation $operation.',
+                  title: switch ((pool, operation)) {
+                    (null, null) => 'No pool account serves an Operation this account may read.',
+                    (null, _) => 'No pool account serves this Operation.',
+                    (_, null) =>
+                      'No account pool named $pool in an Operation this account may read.',
+                    (_, _) =>
+                      'No account pool named $pool in Operation $operation.',
+                  },
                   body:
                       'A pool shares logins among Sessions. Without one, a Session uses '
                       'the login its Agent is given.',
@@ -294,8 +284,14 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
                   children: [
                     if (widget.board.canReadRoster)
                       ModelsSection(board: widget.board),
-                    for (final account in accounts)
-                      _AccountTile(account: account, operation: operation),
+                    for (final group in shown) ...[
+                      if (operation == null &&
+                          accounts.any((row) => row.$1 == group))
+                        OoOperationHeading(group),
+                      for (final (from, account) in accounts)
+                        if (from == group)
+                          _AccountTile(account: account, operation: from),
+                    ],
                   ],
                 ),
         ),

@@ -6,6 +6,7 @@ import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../roster/record_editor.dart';
 import '../routes/oo_route.dart';
+import '../routes/oo_scope.dart';
 import '../settings/oo_config.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_link.dart';
@@ -430,20 +431,21 @@ class _AgentsPageState extends State<AgentsPage>
   @override
   Future<void> recordsChanged() => _load();
 
-  List<AgentSummary> _agents = const [];
+  /// The Agents shown, each with the Operation it was read in.
+  List<(String, AgentSummary)> _agents = const [];
+
+  /// The Operations whose Agents could not be read, with why.
+  Map<String, String> _failed = const {};
   bool _loading = false;
   bool _changing = false;
-  String? _error;
 
-  List<String> get _operations => widget.board.agentOperations;
+  OoScope get _scope => OoScope(widget.route, widget.board.agentOperations);
+  String? get _operation => _scope.operation;
+  bool get _unreadable => _scope.unreadable;
+  List<String> get _shown => _scope.shown;
 
-  /// The Operation shown: the route's when the person may read it, else none.
-  String? get _operation {
-    final operations = _operations;
-    final named = widget.route['operation_id'];
-    if (named != null) return operations.contains(named) ? named : null;
-    return operations.isEmpty ? null : operations.first;
-  }
+  /// The read error to show in place of the list: the one Operation's, when only one is read.
+  String? get _error => _shown.length == 1 ? _failed[_shown.single] : null;
 
   @override
   void initState() {
@@ -458,33 +460,26 @@ class _AgentsPageState extends State<AgentsPage>
     if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
       setState(() {
         _agents = const [];
-        _error = null;
+        _failed = const {};
       });
       unawaited(_load());
     }
   }
 
   Future<void> _load() async {
-    final operation = _operation;
-    if (operation == null) return;
+    final shown = _shown;
+    if (shown.isEmpty) return;
     setState(() => _loading = true);
-    try {
-      final agents = await widget.board.loadAgents(operation);
-      if (!mounted || operation != _operation) return;
-      setState(() {
-        _agents = agents;
-        _error = null;
-      });
-    } on StateError catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    final read = await readEach(shown, widget.board.loadAgents, _agents);
+    if (!mounted || shown.join('\n') != _shown.join('\n')) return;
+    setState(() {
+      _agents = read.rows;
+      _failed = read.failed;
+      _loading = false;
+    });
   }
 
-  Future<void> _lower(AgentSummary agent) async {
-    final operation = _operation;
-    if (operation == null) return;
+  Future<void> _lower(String operation, AgentSummary agent) async {
     final lowered = await showDialog<(String, String)>(
       context: context,
       builder: (_) => _LowerClearanceDialog(
@@ -504,9 +499,7 @@ class _AgentsPageState extends State<AgentsPage>
     );
   }
 
-  Future<void> _restore(AgentSummary agent) async {
-    final operation = _operation;
-    if (operation == null) return;
+  Future<void> _restore(String operation, AgentSummary agent) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -535,9 +528,11 @@ class _AgentsPageState extends State<AgentsPage>
     );
   }
 
-  Future<void> _liftHold(AgentSummary agent, HoldSummary hold) async {
-    final operation = _operation;
-    if (operation == null) return;
+  Future<void> _liftHold(
+    String operation,
+    AgentSummary agent,
+    HoldSummary hold,
+  ) async {
     await _change(
       () => widget.board.liftHold(operation, agent.agent, hold),
       hold.wholeAgent
@@ -565,22 +560,21 @@ class _AgentsPageState extends State<AgentsPage>
 
   @override
   Widget build(BuildContext context) {
-    final operations = _operations;
+    final operations = widget.board.agentOperations;
     if (operations.isEmpty) {
       return const Center(
         child: Text('No Operation\'s Agents are visible to this account.'),
       );
     }
     final operation = _operation;
+    final shown = _shown;
     final named = widget.route['agent'];
     final agents = [
-      for (final agent in _agents)
-        if (named == null || agent.agent == named) agent,
+      for (final row in _agents)
+        if (named == null || row.$2.agent == named) row,
     ];
-    final canConfigure =
-        operation != null &&
-        !widget.board.demo &&
-        widget.board.canConfigureAgentRoles(operation);
+    bool canConfigure(String operation) =>
+        !widget.board.demo && widget.board.canConfigureAgentRoles(operation);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -590,21 +584,10 @@ class _AgentsPageState extends State<AgentsPage>
             spacing: 16,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              DropdownButton<String>(
-                value: operation,
-                hint: const Text('Operation'),
-                items: [
-                  for (final operation in operations)
-                    DropdownMenuItem(value: operation, child: Text(operation)),
-                ],
-                onChanged: (chosen) {
-                  if (chosen == null || chosen == operation) return;
-                  widget.onRoute(
-                    widget.route
-                        .without('agent')
-                        .withField('operation_id', chosen),
-                  );
-                },
+              OoOperationPicker(
+                scope: _scope,
+                onRoute: widget.onRoute,
+                narrower: const ['agent'],
               ),
               IconButton(
                 tooltip: 'Refresh Agents',
@@ -626,13 +609,10 @@ class _AgentsPageState extends State<AgentsPage>
             child: note,
           ),
         OoFilterBar(route: widget.route, onRoute: widget.onRoute),
-        if (_error case final error? when agents.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Text(error),
-          ),
+        if (_failed.isNotEmpty && (shown.length > 1 || agents.isNotEmpty))
+          OoReadFailures(failed: _failed, several: shown.length > 1),
         Expanded(
-          child: operation == null
+          child: _unreadable
               ? Center(
                   child: Text(
                     'Operation ${widget.route['operation_id']}\'s Agents are '
@@ -650,45 +630,57 @@ class _AgentsPageState extends State<AgentsPage>
               ? Center(
                   child: _loading
                       ? const CircularProgressIndicator()
-                      : Text(
-                          named == null
-                              ? 'No Agent is posted to this Operation. An Agent is a '
-                                    'codename with a handler and model; the roster names them.'
-                              : 'Agent $named is not in Operation $operation.',
-                        ),
+                      : Text(switch ((named, operation)) {
+                          (null, null) =>
+                            'No Agent is posted to an Operation this account may '
+                                'read. An Agent is a codename with a handler and model; '
+                                'the roster names them.',
+                          (null, _) =>
+                            'No Agent is posted to this Operation. An Agent is a '
+                                'codename with a handler and model; the roster names them.',
+                          (_, null) =>
+                            'Agent $named is not in an Operation this account may read.',
+                          (_, _) =>
+                            'Agent $named is not in Operation $operation.',
+                        }),
                 )
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   children: [
-                    if (widget.board.canReadScorecard(operation) &&
-                        named == null)
-                      ScorecardSection(
-                        board: widget.board,
-                        operation: operation,
-                      ),
-                    for (final agent in agents)
-                      _AgentTile(
-                        agent: agent,
-                        onEdit: canChangeRecords
-                            ? () => unawaited(editRecord(agent.agent))
-                            : null,
-                        onRemove: canChangeRecords
-                            ? () => unawaited(removeRecord(agent.agent))
-                            : null,
-                        onLower:
-                            canConfigure &&
-                                !_changing &&
-                                agent.lowerClearances.isNotEmpty
-                            ? () => unawaited(_lower(agent))
-                            : null,
-                        onRestore:
-                            canConfigure && !_changing && agent.grant != null
-                            ? () => unawaited(_restore(agent))
-                            : null,
-                        onLift: canConfigure && !_changing
-                            ? (hold) => unawaited(_liftHold(agent, hold))
-                            : null,
-                      ),
+                    for (final group in shown) ...[
+                      if (operation == null &&
+                          agents.any((row) => row.$1 == group))
+                        OoOperationHeading(group),
+                      if (widget.board.canReadScorecard(group) && named == null)
+                        ScorecardSection(board: widget.board, operation: group),
+                      for (final (from, agent) in agents)
+                        if (from == group)
+                          _AgentTile(
+                            agent: agent,
+                            onEdit: canChangeRecords
+                                ? () => unawaited(editRecord(agent.agent))
+                                : null,
+                            onRemove: canChangeRecords
+                                ? () => unawaited(removeRecord(agent.agent))
+                                : null,
+                            onLower:
+                                canConfigure(from) &&
+                                    !_changing &&
+                                    agent.lowerClearances.isNotEmpty
+                                ? () => unawaited(_lower(from, agent))
+                                : null,
+                            onRestore:
+                                canConfigure(from) &&
+                                    !_changing &&
+                                    agent.grant != null
+                                ? () => unawaited(_restore(from, agent))
+                                : null,
+                            onLift: canConfigure(from) && !_changing
+                                ? (hold) =>
+                                      unawaited(_liftHold(from, agent, hold))
+                                : null,
+                          ),
+                    ],
                   ],
                 ),
         ),
