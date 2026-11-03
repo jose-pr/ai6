@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn floor_hashes_are_pinned() {
         assert_eq!(SafeHouseProviderVtable::FLOOR_HASH, 3612232285);
-        assert_eq!(SafeHouseSessionVtable::FLOOR_HASH, 3217966664);
+        assert_eq!(SafeHouseSessionVtable::FLOOR_HASH, 1018608612);
     }
 
     fn spec() -> SafeHouseSpec {

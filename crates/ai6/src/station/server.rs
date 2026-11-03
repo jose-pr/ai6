@@ -9410,17 +9410,17 @@ queue = 1
             stations[0].info()["handlers"],
             serde_json::json!([
                 "mock-agent",
+                "mock-author",
                 "mock-denied",
                 "mock-drip",
                 "mock-limit",
                 "mock-lines",
                 "mock-pooled",
                 "mock-recorder",
+                "mock-reviewer",
                 "mock-spend",
                 "mock-stream",
                 "mock-verdict",
-                "mock-author",
-                "mock-reviewer"
             ])
         );
 
