@@ -28,6 +28,7 @@ $packages = @(
     'ai6-safehouse-git',
     'ai6-safehouse-copy',
     'ai6-source-github',
+    'ai6-source-gitlab',
     'ai6-source-jira'
 )
 
