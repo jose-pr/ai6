@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::placement::ExecutionMode;
+use crate::directorates::m::review::BriefNaming;
 use crate::directorates::q::safehouse::SafeHouseReport;
 use crate::directorates::registry::bona_fides::Provenance;
 use crate::{MissionId, SessionId};
@@ -112,6 +113,9 @@ pub struct Mission {
     /// the Mission works again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied_tools: Vec<String>,
+    /// The review policy its brief names, and who the naming speaks for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_naming: Option<BriefNaming>,
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -244,6 +248,7 @@ impl MissionStore {
             revision: 1,
             parked_until: None,
             blocked_reason: None,
+            review_naming: None,
             denied_tools: Vec::new(),
             exposure: Vec::new(),
             provenance: None,
@@ -407,6 +412,19 @@ impl MissionStore {
         if mission.exposure.len() == before {
             return Ok(());
         }
+        mission.revision += 1;
+        self.commit(next)
+    }
+
+    /// Records the review policy the Mission's brief names, and who the naming speaks for.
+    pub fn record_review_naming(
+        &mut self,
+        mission_id: &str,
+        naming: BriefNaming,
+    ) -> Result<(), MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        mission.review_naming = Some(naming);
         mission.revision += 1;
         self.commit(next)
     }

@@ -128,6 +128,14 @@ impl SafeHouseSession for GitSafeHouse {
         value(&saved)
     }
 
+    fn diff(&self, bytes: u64) -> Result<Value, ProviderError> {
+        let diff = self
+            .0
+            .diff(usize::try_from(bytes).unwrap_or(usize::MAX))
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
+        value(&diff)
+    }
+
     fn exports(&self) -> Result<Value, ProviderError> {
         let exports = self
             .0

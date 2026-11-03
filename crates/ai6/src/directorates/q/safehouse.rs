@@ -181,6 +181,16 @@ pub struct ChangeLog {
     pub changes: Vec<Change>,
 }
 
+/// The change a safe house holds since its base.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Default)]
+#[map(crate = ::guatiao)]
+pub struct SafeHouseDiff {
+    /// The change as a unified diff, then the names of new files nothing tracks yet.
+    pub text: String,
+    /// Whether it was cut to the bytes asked for.
+    pub cut: bool,
+}
+
 /// What a safe house held when the Mission ended, attached to the Mission record.
 #[derive(
     ToValue, FromValue, Schema, serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq,
@@ -250,6 +260,15 @@ pub trait SafeHouseSession: Send + Sync {
         Err(ProviderError::new(
             guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
             "this safe-house provider does not save checkpoints",
+        ))
+    }
+    /// Answers a [`SafeHouseDiff`] as a value: the change since the base, at most `bytes` of it.
+    /// Unsupported unless the provider has history.
+    fn diff(&self, bytes: u64) -> Result<Value, ProviderError> {
+        let _ = bytes;
+        Err(ProviderError::new(
+            guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+            "this safe-house provider cannot show its change",
         ))
     }
     /// Answers a [`SafeHouseExports`] as a value: what of the work exists only here.

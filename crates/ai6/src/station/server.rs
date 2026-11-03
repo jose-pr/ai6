@@ -26,6 +26,7 @@ mod models;
 mod promotion;
 mod recovery;
 mod reload;
+mod review;
 mod routes;
 mod stewardship;
 #[cfg(test)]
@@ -1655,6 +1656,7 @@ async fn scheduler_loop(base: DaemonState) {
         }
         let lapsing = state.clone();
         let _ = tokio::task::spawn_blocking(move || credentials::revoke_lapsed(&lapsing)).await;
+        review::advance(&state).await;
         schedule_recovered_once(&state).await;
         schedule_parked_once(&state).await;
         schedule_queued_once(&state).await;
@@ -3243,6 +3245,7 @@ fn create_intake_mission(
                 && existing.prompt == brief.prompt()
         });
     let retry = ended_here && recovery::retries_lost_attempt(state, mission_id.as_str());
+    let naming = review::naming_of(state, brief);
     let mut missions = state
         .missions
         .lock()
@@ -3284,6 +3287,11 @@ fn create_intake_mission(
             &medical::brief_exposure(brief, &state.intake.limits().sessions),
         )
         .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))?;
+    if let Some(naming) = naming {
+        missions
+            .record_review_naming(mission_id.as_str(), naming)
+            .map_err(|error| format!("could not record the brief's review policy: {error:?}"))?;
+    }
     bona_fides::record_origin(state, &mut missions, mission_id.as_str(), brief)
 }
 
@@ -3368,6 +3376,7 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
         return None;
     }
     vetting::review_ended(state, lease, &mission);
+    review::reviewer_ended(state, lease, &mission);
     let outcome = serde_json::json!({
         "state": format!("{:?}", mission.state).to_lowercase(),
         "mission_id": mission.mission_id.as_str(),
@@ -4966,59 +4975,7 @@ async fn resume_mission(
                 .ok_or_else(|| {
                     conflict("No durable AgentHandler settings are available to resume")
                 })?;
-            let safe_house = match &mission.operation_id {
-                Some(operation_id) => {
-                    let configured = state.roster.operation(operation_id);
-                    let reopen = match (&mission.safe_house, &configured) {
-                        (Some(report), _) if report.kept => Some((report.clone(), true)),
-                        // Work in place has no report; the cover audit remembers where it began.
-                        (_, Ok(configured)) if !configured.workspace.isolate => {
-                            operation.cover.as_ref().map(|audit| {
-                                (
-                                    SafeHouseReport {
-                                        path: operation.working_directory.clone(),
-                                        branch: None,
-                                        base: Some(audit.base.clone())
-                                            .filter(|base| !base.is_empty()),
-                                        kept: true,
-                                        changes: Vec::new(),
-                                    },
-                                    false,
-                                )
-                            })
-                        }
-                        _ => None,
-                    };
-                    match reopen {
-                        Some((report, isolate)) => {
-                            let configured = configured.map_err(configuration_error)?.clone();
-                            let plugins = state.plugins.clone();
-                            let mission_id = mission.mission_id.clone();
-                            let title = mission.prompt.clone();
-                            let state_dir = state.station.state_dir().map_err(runtime_error)?;
-                            tokio::task::spawn_blocking(move || {
-                                open_safe_house(
-                                    &plugins,
-                                    &configured,
-                                    &mission_id,
-                                    &title,
-                                    Some(&state_dir),
-                                    isolate,
-                                    Some(report),
-                                    None,
-                                )
-                            })
-                            .await
-                            .map_err(|error| {
-                                runtime_error(format!("safe-house recovery worker failed: {error}"))
-                            })?
-                            .map_err(configuration_error)?
-                        }
-                        None => None,
-                    }
-                }
-                None => None,
-            };
+            let safe_house = reopen_left_safe_house(&state, &mission, Some(&operation)).await?;
             (
                 operation.handler_provider.clone(),
                 operation.terminal_provider.clone(),
@@ -6068,6 +6025,15 @@ fn spawn_event_pump_with_monitor(
                     }
                     if event.kind == "completed" {
                         vetting::review_completed(&state, &mission_id, event.text.as_deref());
+                        review::reviewer_answered(&state, &mission_id, event.text.as_deref());
+                        if review::holds_output(
+                            &state,
+                            &mission_id,
+                            &session,
+                            event.text.as_deref(),
+                        ) {
+                            break;
+                        }
                     }
                     if matches!(event.kind.as_str(), "completed" | "failed") {
                         let finished = finish_operation(&state, &mission_id, &session);
@@ -6616,6 +6582,9 @@ fn held_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
         crate::station::issues::ISSUE_REASON,
         medical::BUDGET_REASON,
         CLEARANCE_REASON,
+        crate::directorates::m::review::PLAN_REASON,
+        crate::directorates::m::review::OUTPUT_REASON,
+        crate::directorates::m::review::REDO_REASON,
     ]
     .into_iter()
     .find(|reason| mission.blocked_reason.as_deref() == Some(*reason))
@@ -6900,45 +6869,15 @@ fn finish_operation(
     let mut fail_on_blow = false;
     if let Some(audit) = &operation.cover {
         fail_on_blow = audit.fail_on_blow;
-        let result = (|| {
-            let cover = state
-                .roster
-                .cover(&audit.policy)
-                .map_err(|error| error.to_string())?;
-            let safe_house = operation
-                .safe_house
-                .as_ref()
-                .ok_or_else(|| "no safe house to read the Mission's changes from".to_owned())?;
-            // Without history there is nothing to inspect: report that, never a pass.
-            let checkable = safe_house.supports_history();
-            let commits = if checkable {
-                safe_house.changes().map_err(|error| error.to_string())?
-            } else {
-                Vec::new()
-            };
-            let violations = cover.check_commits(
-                &commits,
-                audit.identity.as_ref(),
-                operation.model.as_deref().unwrap_or_default(),
-            );
-            let report = CoverReport {
-                policy: audit.policy.clone(),
-                commits: commits.len(),
-                checkable,
-                blown: !violations.is_empty(),
-                violations,
-            };
-            cover_blown = report.blown;
-            state
-                .missions
-                .lock()
-                .map_err(|_| "Mission book lock was poisoned".to_owned())?
-                .set_cover_report(mission_id, report)
-                .map_err(|error| format!("cover report could not be persisted: {error:?}"))?;
-            Ok::<_, String>(())
-        })();
-        if let Err(error) = result {
-            failure = Some(format!("cover audit failed: {error}"));
+        match audit_cover(
+            state,
+            mission_id,
+            audit,
+            operation.safe_house.as_ref(),
+            operation.model.as_deref(),
+        ) {
+            Ok(blown) => cover_blown = blown,
+            Err(error) => failure = Some(format!("cover audit failed: {error}")),
         }
     }
 
@@ -6968,6 +6907,47 @@ fn finish_operation(
         #[cfg(feature = "publisher")]
         telemetry: operation.telemetry,
     })
+}
+
+/// Checks the commits in `safe_house` against the Operation's cover policy and keeps the report on
+/// the Mission; whether the cover was blown.
+fn audit_cover(
+    state: &DaemonState,
+    mission_id: &str,
+    audit: &CoverAudit,
+    safe_house: Option<&SafeHouse>,
+    model: Option<&str>,
+) -> Result<bool, String> {
+    let cover = state
+        .roster
+        .cover(&audit.policy)
+        .map_err(|error| error.to_string())?;
+    let safe_house =
+        safe_house.ok_or_else(|| "no safe house to read the Mission's changes from".to_owned())?;
+    // Without history there is nothing to inspect: report that, never a pass.
+    let checkable = safe_house.supports_history();
+    let commits = if checkable {
+        safe_house.changes().map_err(|error| error.to_string())?
+    } else {
+        Vec::new()
+    };
+    let violations =
+        cover.check_commits(&commits, audit.identity.as_ref(), model.unwrap_or_default());
+    let report = CoverReport {
+        policy: audit.policy.clone(),
+        commits: commits.len(),
+        checkable,
+        blown: !violations.is_empty(),
+        violations,
+    };
+    let blown = report.blown;
+    state
+        .missions
+        .lock()
+        .map_err(|_| "Mission book lock was poisoned".to_owned())?
+        .set_cover_report(mission_id, report)
+        .map_err(|error| format!("cover report could not be persisted: {error:?}"))?;
+    Ok(blown)
 }
 
 fn publish_finished_event(
@@ -7118,6 +7098,61 @@ async fn finalize_mission_resources(
         .set_safe_house(mission_id, report)
         .map_err(mission_error)?;
     Ok(())
+}
+
+/// Opens again the safe house of a Mission with no live Session, when it left one: the one its
+/// report says it kept, or for work in place what its launch's cover audit remembers.
+async fn reopen_left_safe_house(
+    state: &DaemonState,
+    mission: &Mission,
+    manifest: Option<&LaunchManifest>,
+) -> Result<Option<SafeHouse>, ApiErrorResponse> {
+    let Some(operation_id) = &mission.operation_id else {
+        return Ok(None);
+    };
+    let configured = state.roster.operation(operation_id);
+    let reopen = match (&mission.safe_house, &configured) {
+        (Some(report), _) if report.kept => Some((report.clone(), true)),
+        // Work in place has no report; the cover audit remembers where it began.
+        (_, Ok(configured)) if !configured.workspace.isolate => manifest.and_then(|manifest| {
+            manifest.cover.as_ref().map(|audit| {
+                (
+                    SafeHouseReport {
+                        path: manifest.working_directory.clone(),
+                        branch: None,
+                        base: Some(audit.base.clone()).filter(|base| !base.is_empty()),
+                        kept: true,
+                        changes: Vec::new(),
+                    },
+                    false,
+                )
+            })
+        }),
+        _ => None,
+    };
+    let Some((report, isolate)) = reopen else {
+        return Ok(None);
+    };
+    let configured = configured.map_err(configuration_error)?.clone();
+    let plugins = state.plugins.clone();
+    let mission_id = mission.mission_id.clone();
+    let title = mission.prompt.clone();
+    let state_dir = state.station.state_dir().map_err(runtime_error)?;
+    tokio::task::spawn_blocking(move || {
+        open_safe_house(
+            &plugins,
+            &configured,
+            &mission_id,
+            &title,
+            Some(&state_dir),
+            isolate,
+            Some(report),
+            None,
+        )
+    })
+    .await
+    .map_err(|error| runtime_error(format!("safe-house recovery worker failed: {error}")))?
+    .map_err(configuration_error)
 }
 
 /// Finishes the safe house a Mission with no live Session left waiting (one that stalled, or
@@ -8400,7 +8435,9 @@ queue = 1
             super::stream_tests::MockStreamHandler,
             super::ephemeral::testing::MockMaker,
             super::ephemeral::testing::MockDir,
-            super::vetting::testing::MockVerdictHandler
+            super::vetting::testing::MockVerdictHandler,
+            super::review::testing::MockAuthorHandler,
+            super::review::testing::MockReviewerHandler
         ]
     );
 
@@ -9330,7 +9367,9 @@ queue = 1
                 "mock-recorder",
                 "mock-spend",
                 "mock-stream",
-                "mock-verdict"
+                "mock-verdict",
+                "mock-author",
+                "mock-reviewer"
             ])
         );
 

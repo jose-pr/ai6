@@ -142,6 +142,13 @@ pub fn source_brief(
             .unwrap_or_default(),
     ));
     let mut data = BTreeMap::new();
+    // Text from outside: what it names is judged where it is applied, and can only strengthen.
+    if let Some(choice) = crate::directorates::m::review::choice_in_labels(&item.labels) {
+        data.insert(
+            crate::directorates::m::review::BRIEF_REVIEW_KEY.to_owned(),
+            serde_json::to_value(choice).unwrap_or_default(),
+        );
+    }
     data.insert(
         "source".to_owned(),
         serde_json::json!({

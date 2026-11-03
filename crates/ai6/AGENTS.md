@@ -257,6 +257,25 @@ pub fn out_of_budget(policy, turns: u64, tokens: u64) -> bool;
 pub fn read_vote(text: &str, tail: Limit, reasons: Limit, reason_bytes: Limit) -> VoteAnswer;
 ```
 
+A reviewer's turn is a brief AI6 writes (`PANEL_SOURCE` `"ai6-review"`, data key `PANEL_DATA_KEY`
+`"mission_review"`, a `review` provenance whose reference starts `mission-review:`):
+`PanelTarget { mission, gate, iteration, round, seat }` (`new`, `review_id`, `entry`),
+`is_panel_review(&Brief)`, `panel_target(&Brief)`, `panel_brief(&MissionReview, &Reviewer, &PanelTarget,
+&ReviewLimits, (received_by, received_at)) -> Brief` (everything quoted between markers longer than
+any `=` run inside), `redo_message(gate, reasons, sent_back, limit) -> String`, `one_line`.
+
+`ai6::directorates::registry::reviews`: `MissionReview { mission_id, operation, gate, revision, policy_name,
+policy, author, status: ReviewStatus, why, iteration, sent_back, round, panel, asked, votes, material:
+ReviewMaterial, tokens, overrule }` (`open`, `vote_of`, `asked_of`, `record_vote` (one a seat a round),
+`ballots`, `turns`, `others_reasons`, `redo_reasons`); `ReviewStatus { Reviewing, Waiting, Person,
+SendingBack, Redoing, Passed, Refused }`; `MissionReviewStore` on `RegistryBackend`: `mission_review`,
+`mission_reviews`, `put_mission_review` (written only over the revision read; `None` when another
+wrote first); `update_mission_review(store, (mission, gate), tries, change)`. SQL table
+`ai6_mission_reviews`, made at the next open. `Mission.review_naming: Option<BriefNaming>`,
+`StationLimits.review: ReviewLimits` (`[review]`), and a safe house's change: `SafeHouseDiff { text,
+cut }`, the kind method `SafeHouseSession::diff(bytes)` (unsupported by default; `git` gives the working
+tree against the base and untracked names) and `SafeHouse::diff(Limit)`.
+
 The crate root re-exports these, `decide` as `decide_review`, `applicable` as `applicable_review`,
 `next_step` as `review_next_step`, `out_of_budget` as `review_out_of_budget`, `Decision` as
 `ReviewDecision` and `Step` as `ReviewStep`. `RosterBuilder::review(name, policy)` adds a policy and

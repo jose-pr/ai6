@@ -30,6 +30,7 @@ pub use super::logbook::LogbookStore;
 pub use super::memories::MemoryStore;
 pub use super::mission_issues::MissionIssueStore;
 pub use super::quarantine::QuarantineStore;
+pub use super::reviews::MissionReviewStore;
 pub use super::sessions::SessionStore;
 pub use super::sleepers::SleeperStore;
 pub use super::sources::SourceStore;
@@ -69,6 +70,7 @@ pub trait RegistryBackend:
     + LogbookStore
     + MemoryStore
     + MissionIssueStore
+    + MissionReviewStore
     + QuarantineStore
     + SessionStore
     + SleeperStore
@@ -149,6 +151,7 @@ impl<T> RegistryBackend for T where
         + LogbookStore
         + MemoryStore
         + MissionIssueStore
+        + MissionReviewStore
         + QuarantineStore
         + SessionStore
         + SleeperStore

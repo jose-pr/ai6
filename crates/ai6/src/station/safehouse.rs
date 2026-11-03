@@ -11,8 +11,8 @@ use guatiao::library::Object;
 use guatiao::{FromValue, ToValue};
 
 use crate::directorates::q::safehouse::{
-    Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseExports, SafeHouseInfo,
-    SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
+    Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseDiff, SafeHouseExports,
+    SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
 };
 
 /// A rejected safe-house operation.
@@ -89,6 +89,12 @@ impl SafeHouse {
     pub fn changes(&self) -> Result<Vec<Change>, SafeHouseError> {
         let log = self.session.changes().map_err(fail)?;
         Ok(ChangeLog::from_value(&log).map_err(fail)?.changes)
+    }
+
+    /// The change since the base, cut to `bytes`.
+    pub fn diff(&self, bytes: crate::bounds::Limit) -> Result<SafeHouseDiff, SafeHouseError> {
+        let diff = self.session.diff(bytes.or_max() as u64).map_err(fail)?;
+        SafeHouseDiff::from_value(&diff).map_err(fail)
     }
 
     /// Removes an untouched isolated safe house and keeps one that holds work.

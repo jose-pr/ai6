@@ -13,7 +13,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ai6::directorates::q::safehouse::{
-    Change, CheckpointSpec, SafeHouseCheckpoint, SafeHouseExports, SafeHouseReport, SafeHouseSpec,
+    Change, CheckpointSpec, SafeHouseCheckpoint, SafeHouseDiff, SafeHouseExports, SafeHouseReport,
+    SafeHouseSpec,
 };
 
 /// How the Git commands of one safe house run.
@@ -451,6 +452,32 @@ impl Worktree {
         }
         let output = self.here(&["log", "--format=%h %s", &self.since_base()])?;
         Ok(output.lines().map(str::to_owned).collect())
+    }
+
+    /// The working tree against the base, what is uncommitted included, then the names of new
+    /// files nothing tracks; cut to `bytes` on a character boundary.
+    pub(crate) fn diff(&self, bytes: usize) -> Result<SafeHouseDiff, Failure> {
+        let base = if self.base.is_empty() {
+            "HEAD"
+        } else {
+            self.base.as_str()
+        };
+        let mut text =
+            self.here(&["diff", "--no-color", "--no-ext-diff", "--no-textconv", base])?;
+        let untracked = self.here(&["ls-files", "--others", "--exclude-standard"])?;
+        if !untracked.trim().is_empty() {
+            text.push_str("\nNew files, not committed:\n");
+            text.push_str(&untracked);
+        }
+        let cut = text.len() > bytes;
+        if cut {
+            let mut end = bytes;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+        }
+        Ok(SafeHouseDiff { text, cut })
     }
 
     /// Full commit identity and messages since the base, newest first.

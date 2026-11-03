@@ -573,6 +573,10 @@ pub struct StationRuntime {
     #[schema(title = "Vetting")]
     #[map(default)]
     pub vetting: limits::VettingLimits,
+    /// `[review]`: reviews of Missions' plans and output.
+    #[schema(title = "Reviews")]
+    #[map(default)]
+    pub review: limits::ReviewLimits,
     /// `[accounts]`: pool accounts.
     #[schema(title = "Pool accounts")]
     #[map(default)]
@@ -695,6 +699,7 @@ impl StationRuntime {
             transports: self.transports.clone(),
             recovery: self.recovery.clone(),
             vetting: self.vetting.clone(),
+            review: self.review.clone(),
             accounts: self.accounts.clone(),
             approvals: self.approvals.clone(),
             harness: self.harness.clone(),

@@ -33,6 +33,7 @@ mod mission_issues;
 #[cfg(feature = "postgres")]
 mod postgres;
 mod records;
+mod reviews;
 mod sessions;
 mod stations;
 

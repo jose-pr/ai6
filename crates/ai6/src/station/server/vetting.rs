@@ -156,7 +156,10 @@ impl<'a> Round<'a> {
         };
         // A review is AI6's own brief (its provenance says so); vetting it would screen the
         // very text it quotes.
-        if !operation.vetting.enabled || is_review(brief) {
+        if !operation.vetting.enabled
+            || is_review(brief)
+            || crate::directorates::m::review::is_panel_review(brief)
+        {
             return Admission::Place;
         }
         let key = brief.key();
@@ -920,14 +923,16 @@ fn reviewer_available(state: &DaemonState, operation: &Operation) -> bool {
     .is_ok()
 }
 
-/// Whether a Mission is a Chief of Staff review: it was given the `chief-of-staff` role and its
-/// brief entered as a review, by the provenance AI6 recorded and the Mission keeps.
+/// Whether a Mission is a review: a Chief of Staff's, given that role, or a reviewer's turn on a
+/// Mission's panel; either way its brief entered as a review, by the provenance AI6 recorded and
+/// the Mission keeps.
 pub(super) fn is_review_mission(mission: &Mission) -> bool {
-    mission.role_id.as_deref() == Some(CHIEF_OF_STAFF_ROLE)
-        && mission
-            .provenance
-            .as_ref()
-            .is_some_and(|provenance| provenance.origin == Origin::Review)
+    super::review::is_panel_mission(mission)
+        || (mission.role_id.as_deref() == Some(CHIEF_OF_STAFF_ROLE)
+            && mission
+                .provenance
+                .as_ref()
+                .is_some_and(|provenance| provenance.origin == Origin::Review))
 }
 
 /// Where a review works: a new directory of its own under the temporary directory, named at

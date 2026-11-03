@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Command;
 
 use ai6::directorates::q::safehouse::{
-    ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseInfo,
+    ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseDiff, SafeHouseInfo,
     SafeHouseProvider, SafeHouseReport, SafeHouseSpec,
 };
 use ai6::guatiao::{FromValue, ToValue};
@@ -183,4 +183,46 @@ fn the_configured_timeout_stops_a_git_command() {
     };
     assert!(error.to_string().contains("timed out"), "{error}");
     assert!(Git::default().open(&spec.to_value().unwrap()).is_ok());
+}
+
+#[test]
+fn a_mission_change_is_read_through_the_kind_uncommitted_and_new_files_included_and_cut() {
+    let source = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    git(source.path(), &["init", "-b", "main"]);
+    git(source.path(), &["config", "user.name", "Test"]);
+    git(
+        source.path(),
+        &["config", "user.email", "test@example.invalid"],
+    );
+    fs::write(source.path().join("a.txt"), "one\n").unwrap();
+    git(source.path(), &["add", "."]);
+    git(source.path(), &["commit", "-m", "base"]);
+
+    let provider = Git::new(GitConfig::default());
+    let session = provider
+        .open(&spec(source.path(), state.path()).to_value().unwrap())
+        .unwrap();
+    let info = SafeHouseInfo::from_value(&session.info().unwrap()).unwrap();
+    let house = Path::new(&info.path);
+    git(house, &["config", "user.name", "Test"]);
+    git(house, &["config", "user.email", "test@example.invalid"]);
+
+    let read = |bytes: u64| SafeHouseDiff::from_value(&session.diff(bytes).unwrap()).unwrap();
+    assert_eq!(read(4096).text, "", "nothing changed yet");
+
+    fs::write(house.join("a.txt"), "one\ncommitted\n").unwrap();
+    git(house, &["commit", "-am", "work"]);
+    fs::write(house.join("a.txt"), "one\ncommitted\nuncommitted\n").unwrap();
+    fs::write(house.join("new.txt"), "fresh\n").unwrap();
+
+    let whole = read(4096);
+    assert!(!whole.cut);
+    assert!(whole.text.contains("+committed"), "{}", whole.text);
+    assert!(whole.text.contains("+uncommitted"), "{}", whole.text);
+    assert!(whole.text.contains("new.txt"), "{}", whole.text);
+
+    let cut = read(10);
+    assert!(cut.cut);
+    assert_eq!(cut.text.len(), 10);
 }

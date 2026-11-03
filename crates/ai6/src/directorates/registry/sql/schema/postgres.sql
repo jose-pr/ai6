@@ -429,6 +429,15 @@ CREATE TABLE IF NOT EXISTS ai6_config_review (
     PRIMARY KEY (scope, key)
 );
 
+-- A Mission's reviews, one JSON record per gate, written over the revision it read.
+CREATE TABLE IF NOT EXISTS ai6_mission_reviews (
+    mission_id TEXT NOT NULL,
+    gate TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (mission_id, gate)
+);
+
 -- The issues a Mission is linked to, as one JSON list per Mission.
 CREATE TABLE IF NOT EXISTS ai6_mission_issues (
     mission_id TEXT PRIMARY KEY,

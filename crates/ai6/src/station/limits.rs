@@ -36,6 +36,8 @@ pub struct StationLimits {
     pub recovery: RecoveryLimits,
     /// `[vetting]`: vetting briefs and Mission proposals.
     pub vetting: VettingLimits,
+    /// `[review]`: reviews of Missions' plans and output.
+    pub review: ReviewLimits,
     /// `[accounts]`: pool accounts.
     pub accounts: AccountLimits,
     /// `[approvals]`: green ink steps.
@@ -457,6 +459,67 @@ impl Default for VettingLimits {
             proposal_settle: Seconds::new(30),
             expiry_sweep: Seconds::new(60),
             answer_tail_bytes: Limit::at(16 * KIB),
+        }
+    }
+}
+
+/// `[review]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct ReviewLimits {
+    /// Bytes of a Mission's brief a reviewer is given.
+    #[schema(title = "Goals a reviewer reads", format = "bytes")]
+    #[map(default = ReviewLimits::default().goals_bytes)]
+    pub goals_bytes: Limit,
+    /// Bytes of an Agent's plan or final message a reviewer is given.
+    #[schema(title = "Report a reviewer reads", format = "bytes")]
+    #[map(default = ReviewLimits::default().submitted_bytes)]
+    pub submitted_bytes: Limit,
+    /// Bytes of a Mission's change a reviewer is given; a change cut here says so.
+    #[schema(title = "Change a reviewer reads", format = "bytes")]
+    #[map(default = ReviewLimits::default().diff_bytes)]
+    pub diff_bytes: Limit,
+    /// Commits listed for a reviewer.
+    #[schema(title = "Commits a reviewer is shown")]
+    #[map(default = ReviewLimits::default().commits)]
+    pub commits: Limit,
+    /// Reasons kept from one vote, and told to an author sent back.
+    #[schema(title = "Reasons kept per vote")]
+    #[map(default = ReviewLimits::default().reasons)]
+    pub reasons: Limit,
+    /// Bytes of one reason, and of a line a review records.
+    #[schema(title = "Longest reason", format = "bytes")]
+    #[map(default = ReviewLimits::default().reason_bytes)]
+    pub reason_bytes: Limit,
+    /// Bytes at the end of a reviewer's answer searched for its vote; the vote ends the message.
+    #[schema(title = "Reviewer's answer searched", format = "bytes")]
+    #[map(default = ReviewLimits::default().answer_tail_bytes)]
+    pub answer_tail_bytes: Limit,
+    /// Times a Station tries a write to a review another Station keeps writing first, before it
+    /// logs that and leaves it for the next round.
+    #[schema(title = "Tries of a contested write")]
+    #[map(default = ReviewLimits::default().write_tries)]
+    pub write_tries: Limit,
+    /// How recent a Station's check-in must be for the handlers it reports to count when a panel
+    /// is filled.
+    #[schema(title = "Handlers reported within")]
+    #[map(default = ReviewLimits::default().station_window)]
+    pub station_window: Seconds,
+}
+
+impl Default for ReviewLimits {
+    fn default() -> Self {
+        Self {
+            goals_bytes: Limit::at(32 * KIB),
+            submitted_bytes: Limit::at(32 * KIB),
+            diff_bytes: Limit::at(64 * KIB),
+            commits: Limit::at(100),
+            reasons: Limit::at(16),
+            reason_bytes: Limit::at(KIB),
+            answer_tail_bytes: Limit::at(16 * KIB),
+            write_tries: Limit::at(16),
+            station_window: Seconds::new(300),
         }
     }
 }
