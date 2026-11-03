@@ -5650,6 +5650,10 @@ const out = {{}};
     out.own = 'status ' + r.status + ' ' + (await r.text());
   }} catch (e) {{ out.own = 'blocked ' + e.name; }}
   try {{
+    const r = await fetch('data/board');
+    out.feed = 'status ' + r.status + (r.ok ? ' ' + Object.keys(await r.json()).sort() : '');
+  }} catch (e) {{ out.feed = 'blocked ' + e.name; }}
+  try {{
     const r = await fetch('{outside}/');
     out.outside = 'status ' + r.status + ' ' + (await r.text());
   }} catch (e) {{ out.outside = 'blocked ' + e.name; }}
@@ -5906,8 +5910,9 @@ impl Browser {
 
 /// The probe's record says the page ran as an opaque origin, reached its own files, and
 /// reached outside only under `open`.
-fn assert_probe(record: &Value, open: bool, what: &str) {
+fn assert_probe(record: &Value, open: bool, feed: &str, what: &str) {
     eprintln!("{what}: {record}");
+    assert_eq!(record["feed"], feed, "{what}");
     assert_eq!(record["localStorage"], "threw SecurityError", "{what}");
     let cookie = record["cookie"].as_str().unwrap();
     assert!(
@@ -5986,7 +5991,8 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_its_link_stays_
         &publish(
             &served,
             &job.mcp_token,
-            json!({"kind": "dashboard", "title": "probe", "path": "scratch/probe"}),
+            json!({"kind": "dashboard", "title": "probe", "path": "scratch/probe",
+                   "feeds": [{"name": "board", "tool": "board", "input": {}}]}),
         )
         .await,
     );
@@ -6001,7 +6007,7 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_its_link_stays_
         (top["iframe"].clone(), top["bar"].clone()),
         (json!(true), json!(true))
     );
-    assert_probe(&mine.probe(&tab).await, true, "open");
+    assert_probe(&mine.probe(&tab).await, true, "status 200 at,data", "open");
     // A reload in the same browser works.
     mine.evaluate(&tab, "window.before = 1").await;
     mine.call(Some(&tab), "Page.reload", json!({}))
@@ -6013,7 +6019,12 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_its_link_stays_
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_probe(&mine.probe(&tab).await, true, "open, reloaded");
+    assert_probe(
+        &mine.probe(&tab).await,
+        true,
+        "status 200 at,data",
+        "open, reloaded",
+    );
     // Another browser profile, given the copied address, gets nothing.
     let copied = other.open(&link).await;
     let top = other.top(&copied).await;
@@ -6026,7 +6037,7 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_its_link_stays_
     // With the network off the page reaches nothing outside.
     let none = frame_url(&served, &served.operator, &id, Some("none")).await;
     let tab = mine.open(&none).await;
-    assert_probe(&mine.probe(&tab).await, false, "none");
+    assert_probe(&mine.probe(&tab).await, false, "status 403", "none");
 
     // A link another site sends its viewer to opens there. Its reload is a navigation that site
     // started, so the `SameSite=Strict` cookie stays home and the reload opens nothing: on
@@ -6037,7 +6048,12 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_its_link_stays_
         sent.replace(':', "%3A").replace('/', "%2F")
     );
     let tab = mine.open(&opener).await;
-    assert_probe(&mine.probe(&tab).await, true, "sent from another site");
+    assert_probe(
+        &mine.probe(&tab).await,
+        true,
+        "status 200 at,data",
+        "sent from another site",
+    );
     mine.evaluate(&tab, "window.before = 1").await;
     mine.call(Some(&tab), "Page.reload", json!({}))
         .await
@@ -6072,7 +6088,13 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_its_link_stays_
     let tab = other.open(&public).await;
     let top = other.top(&tab).await;
     assert_eq!(top["bar"], true, "{top}");
-    assert_probe(&other.probe(&tab).await, true, "public");
+    // A public link has no feed: its 404 carries no CORS header, so the page's fetch fails.
+    assert_probe(
+        &other.probe(&tab).await,
+        true,
+        "blocked TypeError",
+        "public",
+    );
 }
 
 /// Links `gh:o/r#1` to Mission `mission-g`, which the served Registry holds a Session of.

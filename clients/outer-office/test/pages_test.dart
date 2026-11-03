@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:outer_office/assistant/assistant_controller.dart';
+import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/assistant/pages.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/routes/oo_router.dart';
@@ -112,6 +116,7 @@ Future<(FakeLauncher, FakeActions)> show(
 void main() {
   sharingTests();
   privacyTests();
+  menuTests();
   testWidgets('a page card shows its kind, title, size, expiry and feeds', (
     tester,
   ) async {
@@ -455,5 +460,50 @@ void privacyTests() {
       OoPage.pages,
       reason: 'kept for after sign-in',
     );
+  });
+}
+
+/// A chat socket that stays open and says nothing.
+class QuietChannel implements AssistantChannel {
+  final _incoming = StreamController<String>();
+
+  @override
+  Stream<String> get incoming => _incoming.stream;
+
+  @override
+  void send(String frame) {}
+
+  @override
+  Future<void> close() => _incoming.close();
+}
+
+void menuTests() {
+  testWidgets("her chat's menu opens Her pages", (tester) async {
+    final launcher = FakeLauncher();
+    UrlLauncherPlatform.instance = launcher;
+    final actions = FakeActions()..pages = [fixture()];
+    final controller = AssistantController(
+      token: 'user-token',
+      connect: QuietChannel.new,
+    );
+    addTearDown(controller.dispose);
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AssistantPanel(controller: controller, pageActions: actions),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Moneypenny menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Her pages'));
+    await tester.pumpAndSettle();
+    expect(find.text('Your pages'), findsOneWidget);
+    expect(find.text('Station load'), findsOneWidget);
   });
 }

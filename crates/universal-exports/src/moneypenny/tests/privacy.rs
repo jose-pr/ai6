@@ -108,7 +108,7 @@ async fn pages_a_copied_link_answers_as_an_unknown_one_and_the_first_browser_kee
         .await
         .unwrap();
     assert_eq!(answer(wrong).await, get(&unknown).await);
-    for suffix in ["f/index.html", "data/board"] {
+    for suffix in ["f/index.html", "data/board", "f/data/board"] {
         assert_eq!(
             get(&format!("{frame}{suffix}")).await,
             get(&format!("{unknown}{suffix}")).await,
@@ -309,4 +309,74 @@ async fn pages_a_public_link_needs_no_sign_in_serves_no_feed_and_stops_when_turn
             .any(|record| record.target == format!("{id} off"))
     );
     assert!(records.iter().all(|record| record.actor == "operator-007"));
+}
+
+#[tokio::test]
+async fn pages_a_feed_answers_at_data_name_beside_the_entry_on_either_layout() {
+    for own_origin in [false, true] {
+        let served = served_full(AssistantConfig::default(), None, own_origin).await;
+        let id = board_dashboard(&served).await;
+        let opened = open_frame(&frame_url(&served, &served.operator, &id, None).await).await;
+        // What the entry's script asks for as `data/board`, resolved as a browser resolves it.
+        let entry = reqwest::Url::parse(&format!("{}f/index.html", opened.view)).unwrap();
+        let asked = entry.join("data/board").unwrap();
+        assert!(asked.path().ends_with("/f/data/board"), "{asked}");
+        let response = plain()
+            .get(asked.clone())
+            .header("sec-fetch-dest", "empty")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{asked}");
+        assert_eq!(response.headers()["access-control-allow-origin"], "*");
+        let body = response.json::<Value>().await.unwrap();
+        assert!(body["at"].is_number() && !body["data"].is_null(), "{body}");
+        // The feed's own address still answers, and an unknown feed is no file either.
+        assert_eq!(
+            get(&format!("{}data/board", opened.view)).await.0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            get(&format!("{}f/data/other", opened.view)).await.0,
+            StatusCode::NOT_FOUND
+        );
+    }
+}
+
+#[tokio::test]
+async fn pages_a_bundle_with_a_top_level_data_directory_is_refused() {
+    let served = served(AssistantConfig::default()).await;
+    let (_app, job) = accepted(&served, &served.operator, "Shadow a feed.").await;
+    station_bundle(
+        &served,
+        &job.conversation_id,
+        "personal/dash",
+        &[("index.html", b"<p>x</p>"), ("data/x.json", b"{}")],
+    )
+    .await;
+    let refused = publish(
+        &served,
+        &job.mcp_token,
+        json!({"kind": "dashboard", "title": "d", "path": "personal/dash"}),
+    )
+    .await;
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(said(&refused).contains("data/"), "{}", said(&refused));
+    assert!(page_dirs(&served).is_empty());
+    // A file named data, or a data directory further down, is no feed's address.
+    station_bundle(
+        &served,
+        &job.conversation_id,
+        "personal/fine",
+        &[("index.html", b"<p>x</p>"), ("lib/data/x.json", b"{}")],
+    )
+    .await;
+    published_id(
+        &publish(
+            &served,
+            &job.mcp_token,
+            json!({"kind": "dashboard", "title": "d", "path": "personal/fine"}),
+        )
+        .await,
+    );
 }
