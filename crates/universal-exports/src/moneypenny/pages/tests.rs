@@ -326,7 +326,6 @@ fn links_stand_for_their_page_and_time_and_are_counted() {
         &made,
         "p",
         "bearer",
-        "digest",
         PageNetwork::Own,
         Duration::from_secs(3600),
     );
@@ -343,7 +342,7 @@ fn links_stand_for_their_page_and_time_and_are_counted() {
         assert!(store.note_read(&token, 3));
     }
     assert!(!store.note_read(&token, 3), "the fourth read in a minute");
-    let (short, _) = store.mint(&made, "p", "b", "d", PageNetwork::Open, Duration::ZERO);
+    let (short, _) = store.mint(&made, "p", "b", PageNetwork::Open, Duration::ZERO);
     assert!(
         store.link(&short).is_none(),
         "a link of no time stands for none"

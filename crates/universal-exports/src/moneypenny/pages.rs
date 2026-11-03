@@ -333,10 +333,9 @@ fn now() -> f64 {
 pub(crate) struct Link {
     pub(crate) page: String,
     pub(crate) viewer: String,
-    /// The viewer's access token, with which feeds run; held in memory only.
+    /// The viewer's access token, with which the sign-in is checked and feeds run; held in
+    /// memory only.
     pub(crate) bearer: String,
-    /// The access token's digest, to see that the sign-in still stands.
-    pub(crate) access: String,
     pub(crate) network: PageNetwork,
     pub(crate) expires: f64,
     /// Whether the first request was audited.
@@ -700,7 +699,6 @@ impl PageStore {
         page: &Page,
         viewer: &str,
         bearer: &str,
-        access: &str,
         network: PageNetwork,
         ttl: Duration,
     ) -> (String, f64) {
@@ -715,7 +713,6 @@ impl PageStore {
                 page: page.id.clone(),
                 viewer: viewer.to_owned(),
                 bearer: bearer.to_owned(),
-                access: access.to_owned(),
                 network,
                 expires,
                 opened: false,

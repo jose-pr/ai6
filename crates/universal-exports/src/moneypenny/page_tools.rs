@@ -490,14 +490,7 @@ pub(crate) async fn open(
         Some(_) => return Err(ApiError::bad_request()),
     };
     let network = pages::profile(&limits, asked);
-    let (link, expires) = store.mint(
-        &page,
-        &person.id,
-        token,
-        &crate::access_token_digest(token),
-        network,
-        limits.open_ttl.0,
-    );
+    let (link, expires) = store.mint(&page, &person.id, token, network, limits.open_ttl.0);
     Ok(Json(json!({
         "url": format!("{}/v/{link}/", pages::pages_base(&gateway)),
         "expires_at": expires,
