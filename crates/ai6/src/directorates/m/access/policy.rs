@@ -225,7 +225,7 @@ pub fn seeded_policy() -> AccessPolicy {
         "issue.update",
         "issue.create",
     ];
-    const ADMINISTER: [&str; 10] = [
+    const ADMINISTER: [&str; 11] = [
         "memory.write",
         "mission.review",
         "compartment.manage",

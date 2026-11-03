@@ -1723,6 +1723,7 @@ impl CableTools {
                 green_ink,
                 issue_desk,
                 compartment_desk,
+                memory_desk,
                 mission_role,
                 station,
                 plan,
