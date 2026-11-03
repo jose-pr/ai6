@@ -191,6 +191,11 @@ void main() {
     expect(ooInitials('Ana Maria Ortiz'), 'AO');
     expect(ooInitials('Ana Ortiz'), 'AO');
     expect(ooInitials('Ana'), 'A');
+    // A middle initial says where the surname starts, however many words it has.
+    expect(ooInitials('Ana M. Ortiz Vega'), 'AO');
+    expect(ooInitials('Ana M Ortiz Vega'), 'AO');
+    expect(ooInitials('A. M. Ortiz'), 'AO');
+    expect(ooInitials('Ana M.'), 'AM');
   });
 
   testWidgets('on a phone Moneypenny opens full screen, and the Overview card '

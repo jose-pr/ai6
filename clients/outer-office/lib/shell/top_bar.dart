@@ -603,15 +603,23 @@ String? _name(UserSessionSummary? session) {
   return name == null || name.isEmpty ? null : name;
 }
 
-/// Up to two initials of [name]: the first letters of its first and last words that start
-/// with a letter ("Ana Maria Ortiz" is "AO", "Operator 007" is "O").
+/// Up to two initials of [name]: the first letters of its first word and its surname, among the
+/// words that start with a letter. A directory gives one string, so the surname is the word after
+/// the last middle initial when there is one (`Ana M. Ortiz Vega`), else the last word.
 String? ooInitials(String? name) {
   if (name == null) return null;
-  final letters = [
+  final words = [
     for (final word in name.split(RegExp(r'\s+')))
-      if (word.isNotEmpty && RegExp(r'^\p{L}', unicode: true).hasMatch(word))
-        String.fromCharCode(word.runes.first).toUpperCase(),
+      if (RegExp(r'^\p{L}', unicode: true).hasMatch(word)) word,
   ];
-  if (letters.isEmpty) return null;
-  return letters.length == 1 ? letters.first : letters.first + letters.last;
+  if (words.isEmpty) return null;
+  String letter(String word) =>
+      String.fromCharCode(word.runes.first).toUpperCase();
+  if (words.length == 1) return letter(words.first);
+  final initial = RegExp(r'^\p{L}\.?$', unicode: true);
+  final lastInitial = words.lastIndexWhere(initial.hasMatch);
+  final surname = lastInitial >= 0 && lastInitial + 1 < words.length
+      ? words[lastInitial + 1]
+      : words.last;
+  return letter(words.first) + letter(surname);
 }
