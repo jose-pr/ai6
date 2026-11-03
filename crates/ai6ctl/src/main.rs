@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod access;
 mod compartments;
+mod memories;
 
 use clap::{Args, Parser, Subcommand};
 use reqwest::{Client, Method, StatusCode, Url};
@@ -121,6 +122,12 @@ enum Command {
     Compartments {
         #[command(subcommand)]
         command: Option<compartments::CompartmentsCommand>,
+    },
+    /// Search, read and change the memory of a person, an Operation or everyone, and decide what
+    /// Agents proposed for it.
+    Memories {
+        #[command(subcommand)]
+        command: memories::MemoriesCommand,
     },
     /// List the Operations you may act on as a tree, each under its nearest Operation you
     /// may read, with your actions; or show one.
@@ -1149,6 +1156,10 @@ async fn run() -> Result<(), String> {
         Command::Compartments { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             compartments::run(&client, &server, &token, command).await?;
+        }
+        Command::Memories { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            memories::run(&client, &server, &token, command).await?;
         }
         Command::Access { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;

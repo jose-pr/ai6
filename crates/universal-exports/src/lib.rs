@@ -12,6 +12,7 @@ mod green_ink;
 mod held;
 mod issues;
 mod login_limit;
+mod memories;
 mod models;
 mod moneypenny;
 mod pools;
@@ -1637,6 +1638,19 @@ impl Gateway {
             .route("/v1/user/attach-grants", post(issue_user_attach_token))
             .route("/v1/user/moneypenny", get(moneypenny::socket))
             .route("/v1/moneypenny/mcp", post(moneypenny::mcp::endpoint))
+            .route("/v1/user/memories", get(memories::list).post(memories::add))
+            .route("/v1/user/memories/proposals", get(memories::proposals))
+            .route(
+                "/v1/user/memories/proposals/{id}",
+                post(memories::decide),
+            )
+            .route(
+                "/v1/user/memories/{id}",
+                get(memories::read)
+                    .put(memories::change)
+                    .delete(memories::forget),
+            )
+            .route("/v1/user/memories/{id}/versions", get(memories::versions))
             .route(
                 "/v1/user/assistant/memory",
                 get(moneypenny::memory::list).post(moneypenny::memory::add),
@@ -2607,7 +2621,8 @@ struct UserProfile {
     /// The actions the person holds on the roster (`config:roster`).
     roster: Vec<String>,
     /// The actions the person holds on the global access policy (`access.read`, `access.manage`),
-    /// the accounts (`account.manage`) and other people's memory (`assistant.memory.admin`).
+    /// the accounts (`account.manage`), other people's memory (`assistant.memory.admin`) and the
+    /// global memory (`memory.write`).
     global_actions: Vec<String>,
     /// Whether this gateway serves Moneypenny, whom Outer Office offers only when it does.
     moneypenny: bool,
@@ -3266,6 +3281,7 @@ async fn user_profile(
                 "mission.read",
                 "mission.status",
                 "product.read",
+                "memory.write",
                 "compartment.cover",
                 "mission.create",
                 "mission.control",
@@ -3347,6 +3363,7 @@ async fn user_profile(
             ("account.manage", ai6::CONFIG_ACCOUNTS),
             ("assistant.memory.admin", "config:assistant"),
             ("compartment.manage", "compartment:*"),
+            ("memory.write", "config:memory"),
         ] {
             let allowed = authorizer
                 .authorize(AuthorizationRequest {
@@ -3406,6 +3423,42 @@ async fn operation_tree(gateway: &Gateway) -> Result<OperationTree, ApiError> {
         .map_err(|_| ApiError::internal())?;
     observe_tree(gateway, &tree);
     Ok(tree)
+}
+
+/// Every Operation the gateway knows of: from the Stations' check-ins and its roster.
+async fn known_operations(gateway: &Gateway) -> Vec<String> {
+    let mut known: BTreeSet<String> = BTreeSet::new();
+    if let Ok(tree) = operation_tree(gateway).await {
+        known.extend(tree.operations().map(str::to_owned));
+    }
+    if let Some(registry) = gateway.registry.clone()
+        && let Ok(Ok(stations)) =
+            tokio::task::spawn_blocking(move || registry.stations(Duration::MAX)).await
+    {
+        for station in &stations {
+            if let Some(operations) = station
+                .info()
+                .get("operations")
+                .and_then(serde_json::Value::as_array)
+            {
+                known.extend(
+                    operations
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                );
+            }
+        }
+    }
+    if let Some(source) = gateway.roster.clone()
+        && let Ok(Ok(definitions)) = tokio::task::spawn_blocking(move || {
+            source.definitions(ai6::ConfigRecord::Operation, &ai6::ConfigScope::Global)
+        })
+        .await
+    {
+        known.extend(definitions.records.into_iter().map(|(id, _)| id));
+    }
+    known.into_iter().collect()
 }
 
 /// Tells the access policy the tree the Stations last published, so Operation policies are

@@ -135,6 +135,20 @@ Mission lists include only Missions with a provider Session registered at the ga
 
 A refusal prints the gateway's reason and exits 1.
 
+### Memories
+
+- `ai6ctl memories search [QUERY] [--scope person:ID|operation:ID|global]`: `ID SCOPE REVISION
+  SOURCE SUMMARY`, best first, then `(N of TOTAL)` when cut; with no query, the newest of the scope.
+  SOURCE is who wrote it, with `(exposed: …)` when an exposed Session did.
+- `ai6ctl memories show <ID>`: the fields, then the content.
+- `ai6ctl memories add <SCOPE> --summary TEXT --content TEXT [--name N] [--compartments a,b]`,
+  `edit <ID> --revision N --summary TEXT --content TEXT [--name N] [--compartments a,b]`: prints
+  `ID REVISION`, or the proposal when the caller may only propose.
+- `ai6ctl memories forget <ID> [--revision N]`.
+- `ai6ctl memories proposals [--scope SCOPE]`, `decide <ID> [--reject]`.
+
+What the person may not see answers as not there (`404`).
+
 ### Controls
 
 Each control needs `mission.control` on the Mission's Operation. It posts

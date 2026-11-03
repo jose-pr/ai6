@@ -104,6 +104,9 @@ pub(crate) struct Conversation {
     /// The read tools called since the person's last message, oldest first, at most
     /// `[assistant.gateway] proposal_reads`: what a proposal made now is based on.
     pub(crate) turn_reads: Vec<ReadCall>,
+    /// How the memory entries she was shown here were marked: each `memory:<id>` of one an exposed
+    /// Session wrote. What she writes from this conversation carries them.
+    pub(crate) memory_marks: Vec<String>,
     /// What the Station running the harness reported each shared change call was made from,
     /// oldest first, until the call takes it; at most `[assistant.limits] shared_bases`.
     pub(crate) shared_bases: VecDeque<AssistantSharedBase>,
@@ -149,6 +152,15 @@ impl fmt::Debug for Conversation {
 }
 
 impl Conversation {
+    /// Keeps `marks` with those already on it, at most `kept` in all.
+    pub(crate) fn note_memory_marks(&mut self, marks: Vec<String>, kept: ai6::Limit) {
+        for mark in marks {
+            if !self.memory_marks.contains(&mark) && kept.allows(self.memory_marks.len() + 1) {
+                self.memory_marks.push(mark);
+            }
+        }
+    }
+
     /// A new conversation whose open sockets may fall `buffer` events behind.
     pub(crate) fn new(
         id: String,
@@ -178,6 +190,7 @@ impl Conversation {
             token: None,
             bytes: 0,
             turn_reads: Vec::new(),
+            memory_marks: Vec::new(),
             shared_bases: VecDeque::new(),
             cut_off: None,
         }

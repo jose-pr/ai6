@@ -368,6 +368,7 @@ global one.
 | `index_bytes` | 512 KiB | **Words of an entry in the text index.** Bytes of an entry's distinct words a database's text index holds. A word past it is found only by a search that matched another word of the entry, and PostgreSQL refuses an index of 1 MiB or more for one entry. |
 | `search_results` | 50 | **Entries a search answers.** Entries one search answers. |
 | `query_bytes` | 4 KiB | **Longest search.** Bytes of what one search asks for. |
+| `proposals` | 64 | **Proposals waiting in a scope.** Agents' proposals waiting for a person in one scope. |
 <!-- schema:registry.limits.memories:end -->
 
 `[registry.limits.proposals]`

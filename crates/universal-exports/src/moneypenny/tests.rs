@@ -3523,6 +3523,131 @@ async fn a_new_harness_starts_with_her_summaries_fenced_and_within_its_bound() {
     finish(&squeezed, &mut app, &job).await;
 }
 
+/// An entry of `scope` written by `by`, marked with `exposures`, straight into the Registry.
+fn stored(
+    served: &Served,
+    scope: ai6::MemoryScope,
+    summary: &str,
+    compartments: &[&str],
+    exposures: &[&str],
+) -> String {
+    served
+        .registry
+        .write_memory(
+            ai6::MemoryEntry::new(
+                scope,
+                None,
+                summary,
+                format!("the content of {summary}"),
+                ai6::MemorySource::new("agent:007", Some("G-1".to_owned()))
+                    .exposed_by(exposures.iter().map(|source| (*source).to_owned())),
+                1.0,
+            )
+            .behind(compartments.iter().map(|name| (*name).to_owned())),
+            None,
+        )
+        .unwrap()
+        .header
+        .id
+}
+
+#[tokio::test]
+async fn a_protected_global_entry_is_nothing_to_her_and_hers_carry_a_mark_she_read() {
+    let served = served(AssistantConfig::default()).await;
+    let hidden = stored(
+        &served,
+        ai6::MemoryScope::Global,
+        "protected needle",
+        &["KESTREL"],
+        &[],
+    );
+    let open = stored(&served, ai6::MemoryScope::Global, "open needle", &[], &[]);
+    let poisoned = stored(
+        &served,
+        ai6::MemoryScope::Global,
+        "deploy needle",
+        &[],
+        &["tool:WebFetch"],
+    );
+    let (mut app, job) = accepted(&served, &served.operator, "What do we know?").await;
+
+    // The starting context names what everyone may read, never the protected one.
+    let context = job
+        .context
+        .iter()
+        .find(|text| text.contains("<ai6-data tool="))
+        .expect("summaries");
+    assert!(context.contains(&open), "{context}");
+    assert!(
+        !context.contains(&hidden) && !context.contains("protected"),
+        "{context}"
+    );
+
+    // Her tools find it nowhere, and reading it answers as an ID that does not exist.
+    let found = call_tool(
+        &served,
+        &job.mcp_token,
+        "memory_search",
+        json!({"query": "needle"}),
+    )
+    .await;
+    let found = found["content"][0]["text"].as_str().unwrap().to_owned();
+    assert!(found.contains(&open) && !found.contains(&hidden), "{found}");
+    assert!(!found.contains("protected"), "{found}");
+    let of_hidden = call_tool(
+        &served,
+        &job.mcp_token,
+        "memory_read",
+        json!({"id": hidden}),
+    )
+    .await;
+    let of_nobody = call_tool(
+        &served,
+        &job.mcp_token,
+        "memory_read",
+        json!({"id": "6f1e4a6a-9c55-4a0c-9d5c-2f8a0b6c1e11"}),
+    )
+    .await;
+    assert_eq!(of_hidden, of_nobody);
+
+    // She saw a marked entry in that search: what she keeps from here carries its mark.
+    let kept = call_tool(
+        &served,
+        &job.mcp_token,
+        "memory_write",
+        json!({"summary": "Deploys", "content": "As the notes say."}),
+    )
+    .await;
+    assert_eq!(kept["isError"], false, "{kept}");
+    let (_, listed) = remember(&served, reqwest::Method::GET, "", &served.operator, None).await;
+    let mine = &listed["entries"][0];
+    assert_eq!(mine["source"]["exposed"], true, "{mine}");
+    assert_eq!(
+        mine["source"]["exposures"],
+        json!([format!("memory:{poisoned}")])
+    );
+
+    // Something for everyone is a proposal for a person to decide, never kept by her.
+    let proposed = call_tool(
+        &served,
+        &job.mcp_token,
+        "memory_write",
+        json!({"scope": "global", "summary": "For all", "content": "x"}),
+    )
+    .await;
+    let text = proposed["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Proposed") || proposed["isError"] == true,
+        "{proposed}"
+    );
+    let entries = served
+        .registry
+        .memory_headers(&ai6::MemoryScope::Global)
+        .unwrap();
+    assert_eq!(entries.len(), 3, "nothing kept for everyone by her");
+    finish(&served, &mut app, &job).await;
+}
+
 /// A roster whose `[assistant]` runs `python3` and `node`, reaches two hosts, narrows the
 /// `ops` group to `python3` and one host, and denies the viewer any network.
 fn narrowing_roster() -> Arc<dyn ai6::ConfigProvider> {

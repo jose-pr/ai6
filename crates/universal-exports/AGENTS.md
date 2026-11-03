@@ -608,21 +608,29 @@ answer is taken only from the Station it was given to (`403` otherwise, and it w
 `cable_sent` event is audited `moneypenny.cable.sent` (actor the person, the Cable's Operation,
 target `CONVERSATION CABLE`).
 
-Memory. `/v1/user/assistant/memory` (route table) reads and changes the signed-in person's rows
-of the Registry through `ai6::directorates::m::memories`, with no Station, clone or job.
-`?person=<id>` reads another person's memory only with `assistant.memory.admin` on
-`config:assistant` (`403` otherwise), audited `memory.read` (actor the reader, resource
-`config:assistant`, target `PERSON memory` or `PERSON ID`) before it is read; `PUT` and `DELETE` with
-another person are `403` whatever the reader holds. Without `?person`, another person's ID answers
-the same `404` as an ID that does not exist. A person's own reads are not audited; their changes and
-hers are, as `memory.write` and `memory.forget` (resource `config:assistant`, target `PERSON ID`,
-` from CONVERSATION` when she made it), before they are made, and one that cannot be audited is not
-made (`503`). Her tools `memory_search`, `memory_read`, `memory_write` and `memory_forget` run on the
-same calls as the person; her write shows as a `notice` entry with `data.diff`, her source is
-`moneypenny:PERSON` with the conversation as its session, and an input with a hidden character is
-refused. A message's job holds the newest summaries in `context`, fenced in `<ai6-data
-tool="memory_search">`, within `[assistant.gateway] memory_context_bytes` and what `context_bytes`
-leaves after the rest of the job's context and recap.
+Memory. `/v1/user/memories` (route table) serves every scope through
+`ai6::directorates::m::memories`; `/v1/user/assistant/memory` is a person's own, and refuses an ID
+of another scope as not there. What a person holds (`memories::PersonCaller`): their own memory; an
+Operation's with `mission.read` there by the policy alone, or a compartment granting `memory.read`
+(`CompartmentAccess::through`, audited `compartment.read`); the global one always; `memory.write`
+on `operation:<id>` or `config:memory` to change and to decide proposals; a chief
+(`LiveAccess::effective().is_chief`) sees every entry whatever its compartments. Anything that
+does not answer is not held. `?person=<id>` on the person routes reads another person's memory only
+with `assistant.memory.admin` on `config:assistant` (`403` otherwise), audited `memory.read` before
+it is read; `PUT` and `DELETE` with another person are `403`. Every change is audited before it is
+made: `memory.write`, `memory.forget`, `memory.compartments`, `memory.mark_cleared`,
+`memory.proposed`, `memory.proposal.approved`, `memory.proposal.rejected` (an Operation's under its
+`operation`, the global under `config:memory`, a person's under `config:assistant` with target
+`PERSON ID`), and one that cannot be audited is not made (`503`). Her tools `memory_search`,
+`memory_read`, `memory_write` and `memory_forget` run as the person (`moneypenny:PERSON`, the
+conversation as session): her memory of the person at once, shown as a `notice` with `data.diff`;
+an Operation's or the global one as a proposal, told as a `notice`. An entry an exposed Session
+wrote that she is shown adds `memory:<id>` to the conversation (`Conversation::memory_marks`, at
+most `[registry.limits.sessions] exposures`), which every later write of hers carries. A message's
+job holds the newest summaries of her memory of the person and of the global memory in `context`,
+fenced in `<ai6-data tool="memory_search">`, within `[assistant.gateway] memory_context_bytes` and
+what `context_bytes` leaves after the rest of the job's context and recap. An input with a hidden
+character is refused.
 
 The `show` tool takes `{"view": VIEW}` in the strict view schema version 1 (serde, unknown
 fields refused): `{"version": 1, "title"?, "blocks": [1..=24]}`, each block tagged by `kind`:
@@ -922,6 +930,12 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `PUT /v1/user/assistant/memory/{id}` | User bearer, own memory only. Body `{"name"?, "summary", "content", "revision"}`; the header. `409` with `revision` when it has moved on. |
 | `DELETE /v1/user/assistant/memory/{id}[?revision=N]` | User bearer, own memory only. Forgets it and its prior versions; `{"id"}`. |
 | `GET /v1/user/assistant/memory/{id}/versions[?person=ID]` | User bearer. `{"versions"}`, what it held before, newest first. |
+| `GET /v1/user/memories[?scope=SCOPE][&q=TEXT]` | User bearer. One scope newest first, or a search best first across one scope or every one the person may read: `{"entries","total"}`, no content; what they may not see is neither listed nor counted. |
+| `POST /v1/user/memories` | User bearer. `{"scope","name"?,"summary","content","compartments"?}`; `201` with the header, `202` with the proposal when the caller may only propose, `403` without the scope's write or a read-in of a compartment it adds. |
+| `GET`, `PUT`, `DELETE /v1/user/memories/{id}` | User bearer. As the person routes, on any scope; `PUT` takes `compartments`, left out to keep them. `404` for what the person may not see, the same as a missing ID. |
+| `GET /v1/user/memories/{id}/versions` | User bearer. `{"versions"}`, newest first. |
+| `GET /v1/user/memories/proposals[?scope=SCOPE]` | User bearer. `{"proposals"}` the person may decide, oldest first. |
+| `POST /v1/user/memories/proposals/{id}` | User bearer. `{"approve"}`; `{"approved","entry"?}`. `404` for one they may not see, `409` when its entry moved on. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most `[assistant.gateway] max_wait`), held the same with Moneypenny off. |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries; `cable_proposal` and `cable_sent` as under Cables in Moneypenny, the assistant. |
 | `GET /v1/station/assistant/cables?station=ID&conversation=ID&operation=ID` | Station bearer. `{"send", "read"}` for a conversation the Station runs: whether its person holds `cable.send` and `cable.read` there now (both false once the person's sign-in ended); `404` unknown conversation, `403` a Station that does not run it. |

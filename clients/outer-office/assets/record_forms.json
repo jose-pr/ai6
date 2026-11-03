@@ -996,6 +996,30 @@
             "creation_approval_secs": 3600
           }
         },
+        "memory_write": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "desk",
+                "field",
+                "00"
+              ],
+              "x-enum-labels": {
+                "desk": "Desk: reads and reports",
+                "field": "Field: does the work",
+                "00": "00: acts unattended where the Operation allows"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Agents who write its memory at once",
+          "description": "The clearance from which an Agent changes this Operation's memory at once, `field` or `00`. Below it, or with none, its change is a proposal a person decides. Default: none.",
+          "x-section": "safety",
+          "x-advanced": true
+        },
         "vetting": {
           "anyOf": [
             {
@@ -4586,7 +4610,8 @@
               "product.read",
               "cable.send",
               "cable.read",
-              "mission.propose"
+              "mission.propose",
+              "memory.read"
             ],
             "x-enum-labels": {
               "mission.status": "See status: IDs, states, roles, times; no text",
@@ -4594,7 +4619,8 @@
               "product.read": "Read products: outcome, report, refs",
               "cable.send": "Send Cables",
               "cable.read": "Read Cables, through Moneypenny (people)",
-              "mission.propose": "Propose Missions (Agents)"
+              "mission.propose": "Propose Missions (Agents)",
+              "memory.read": "Read its memory"
             }
           },
           "title": "What it grants",

@@ -10,12 +10,13 @@
 //! When the roster's `[assistant]` gives people personal repositories, each message names the
 //! person's workspace (their repository, their groups' shared ones, their name for commits). A
 //! change to a shared repository is a proposal unless the group's repository is `write = true`.
-//! Her memory of the person needs none of it: rows in the Registry, read and written here
-//! ([`memory`]), with the newest summaries in the context of each new harness.
+//! Her memory of the person needs none of it: rows in the Registry ([`memory`]), with the newest
+//! summaries in the context of each new harness.
 //!
-//! A conversation is never marked for what she read: her gate is the person's confirmation, and
+//! A conversation carries no exposure for what she reads: her gate is the person's confirmation, and
 //! exposure is for a Mission's Session. Tool results stay framed in `<ai6-data>`, which tells her
-//! what is data.
+//! what is data. Only a memory entry an exposed Session wrote leaves a mark on the conversation,
+//! which what she writes after it carries, so the mark is not washed out by passing through her.
 //!
 //! `show` and `navigate` only add an entry for the app: a view, or an app page offered as a
 //! card the person opens ([`routes`]). Neither reads nor changes anything, so neither is
@@ -199,7 +200,7 @@ impl AssistantConfig {
 }
 
 /// `[assistant.gateway]` of `gateway`'s assistant, the defaults without one.
-fn gateway_limits(gateway: &Gateway) -> AssistantGatewayLimits {
+pub(crate) fn gateway_limits(gateway: &Gateway) -> AssistantGatewayLimits {
     gateway
         .assistant
         .as_ref()
@@ -608,7 +609,7 @@ impl Assistant {
         let skills = settings.skills_for(&person.id, &person.groups);
         // Read again for every message, so a permission removed reaches her next turn.
         let cables = cables::grants(gateway, &person, self.config.limits.cable_grants).await;
-        let remembered = memory::starting_headers(gateway, &person).await;
+        let (remembered, marks) = memory::starting_headers(gateway, &person).await;
         {
             let mut desk = self.desk();
             let conversation = desk
@@ -652,6 +653,13 @@ impl Assistant {
                 .store
                 .owned(conversation_id, person_id)
                 .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
+            let marks_kept = gateway
+                .registry
+                .as_ref()
+                .map_or(Limit::UNBOUNDED, |registry| {
+                    registry.limits().sessions.exposures
+                });
+            conversation.note_memory_marks(marks, marks_kept);
             let mut context = guide::context();
             let recap = recap(conversation, &self.config);
             // What is left of the job's bound takes her memory's summaries; she searches for more.

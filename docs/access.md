@@ -39,13 +39,14 @@ A longer lifetime is reported at start.
 
 `access.toml` binds people to roles at a scope. A scope is `*` or `station:<id>`,
 `operation:<id>`, `theater:<id>`, `config:roster` (the roster every Station reads),
-`config:assistant` (Moneypenny's repositories), `config:access` (the global policy) or
+`config:assistant` (Moneypenny's repositories), `config:memory` (the global
+[memory](memories.md)), `config:access` (the global policy) or
 `config:accounts` (the accounts); the
 first rule that matches decides, and no match denies. The actions Universal Exports checks
 are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.read`, `approval.class`, `approval.decide`,
 `assistant.memory.admin`, `audit.read`,
 `cable.read`, `cable.send`, `issue.comment`, `issue.create`, `issue.link`, `issue.update`,
-`mission.control`, `mission.create`, `mission.read`,
+`memory.write`, `mission.control`, `mission.create`, `mission.read`,
 `pool.manage`, `pool.read`,
 `roster.manage`, `roster.read`, `session.input`, `session.read`, `station.configure` and
 `station.read`. `roster.read` and `roster.manage` at `config:roster` list and edit the
@@ -62,7 +63,9 @@ the person: send and reply, and read what is sent to her. The Station's `cables.
 has to let her Agent do it. A person reads and changes [Moneypenny's memory of
 them](assistant.md#your-memory-in-the-app) with no action at all, and nobody else's;
 `assistant.memory.admin` on `config:assistant` lets an administrator read anyone's, each read
-audited `memory.read`, and change none.
+audited `memory.read`, and change none. `memory.write` on `operation:<id>` changes that
+Operation's [memory](memories.md) and decides its Agents' proposals, and on `config:memory` the
+global one; reading an Operation's memory takes `mission.read` there.
 
 A rule on an Operation reaches the Operations under it: Universal Exports names a request's
 ancestors (the Operation's parent, then its parent's, nearest first, from the Stations'

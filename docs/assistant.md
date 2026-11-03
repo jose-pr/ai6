@@ -377,24 +377,27 @@ Moneypenny remembers each person in rows of the Registry, with nothing to set up
 no Station and no clone stand behind it, so she has it on every Station and it survives each of
 them. An entry has an ID (a generated UUID, what every tool and route names it by), a one-line
 summary saying what it is for, an optional name, its content, and who wrote it and when. Names
-and summaries may repeat. Each new harness starts with the newest summaries, fenced as data
+and summaries may repeat. Each new harness starts with the newest summaries of hers and then of the
+global memory (what the person may see of it), fenced as data
 (`[assistant.gateway] memory_context_bytes`, 8 KiB, and whatever the job's own bound leaves), and
 she reads what she needs:
 
 | Tool | What it does |
 | --- | --- |
-| `memory_search` | Finds entries by the words in their name, summary or content, best first, and answers their IDs, names and summaries |
+| `memory_search` | Finds entries by the words in their name, summary or content, best first, in her memory of the person, the global memory and the Operations the person may read, and answers their IDs, names and summaries |
 | `memory_read` | One entry's content and revision, fenced as data |
-| `memory_write` | Keeps something at once: a new entry, or a change to one that names the revision she read |
-| `memory_forget` | Forgets one entry, with its prior versions |
+| `memory_write` | Keeps something: a new entry, or a change to one that names the revision she read. In her memory of the person at once; in an Operation's or the global [memory](memories.md) a proposal a person who may change it decides |
+| `memory_forget` | Forgets one entry, with its prior versions, at once or as a proposal as a write |
 
 A search counts words, not parts of words, and needs only one of them: entries holding more of
 them rank first, then those holding them in the name or summary, then the newest. It answers the
 same on every Registry, since the database's own index (FTS5 on SQLite, `tsvector` on PostgreSQL,
 a scan on the file Registry) only finds the candidates.
 
-What she keeps needs nobody's confirmation, and you see it happen: the conversation shows the
-summary and the diff as it is written. A change is refused when the entry has moved on from the
+What she keeps of you needs nobody's confirmation, and you see it happen: the conversation shows
+the summary and the diff as it is written. Her conversation is never exposed, but once she has
+read an entry an [exposed Session wrote](memories.md#a-memory-can-carry-an-attack), whatever she
+writes in that conversation carries its mark. A change is refused when the entry has moved on from the
 revision she read (another conversation's change, or your own edit), so nothing written meanwhile
 is lost: she reads it again and makes the change from what it holds now.
 

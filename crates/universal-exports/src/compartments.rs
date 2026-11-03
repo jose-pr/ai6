@@ -55,6 +55,7 @@ fn is_a_read(action: CompartmentAction) -> bool {
         CompartmentAction::MissionStatus
             | CompartmentAction::MissionRead
             | CompartmentAction::ProductRead
+            | CompartmentAction::MemoryRead
     )
 }
 
@@ -97,6 +98,14 @@ impl CompartmentAccess {
                 None => Some(CompiledCompartments::default()),
             })
             .as_ref()
+    }
+
+    /// What the access policy alone answers, without what compartments add.
+    pub(crate) fn policy_allows(
+        &self,
+        request: AuthorizationRequest,
+    ) -> Result<AuthorizationDecision, ProviderError> {
+        self.inner.authorize(request)
     }
 
     /// The compartment that gives `person` `action` on `resource`, the read written to the log.
