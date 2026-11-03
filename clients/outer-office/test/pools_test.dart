@@ -47,6 +47,7 @@ Map<String, Object?> account(
 Future<MissionBoard> signedIn(
   List<Uri> asked, {
   List<String> actions = const ['mission.read', 'pool.read'],
+  List<String> roster = const [],
 }) async {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
@@ -80,6 +81,37 @@ Future<MissionBoard> signedIn(
           200,
         );
       }
+      if (path == '/v1/user/models') {
+        return http.Response(
+          jsonEncode([
+            {
+              'station': 'station-alpha',
+              'source': 'team/alpha',
+              'handler': 'claude',
+              'at': 2.0,
+              'listing': {
+                'known': true,
+                'models': [
+                  {'id': 'opus', 'name': 'Opus'},
+                  {'id': 'haiku'},
+                ],
+              },
+            },
+            {
+              'station': 'station-alpha',
+              'source': '007/acp/-',
+              'handler': 'acp',
+              'at': 1.0,
+              'listing': {
+                'known': false,
+                'unknown_because': 'this handler has no way to list models',
+                'models': [],
+              },
+            },
+          ]),
+          200,
+        );
+      }
       return http.Response(switch (path) {
         '/v1/board' || '/v1/missions' || '/v1/user/audit' => '[]',
         '/v1/stations' => jsonEncode({
@@ -96,6 +128,7 @@ Future<MissionBoard> signedIn(
             {'operation_id': 'G', 'actions': actions},
             {'operation_id': 'L', 'actions': actions},
           ],
+          'roster': roster,
           'stations': [],
         }),
         _ => throw StateError('unexpected request to $path'),
@@ -145,6 +178,38 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'the models each account may use show only to who reads the roster',
+    (tester) async {
+      final board = await signedIn(<Uri>[]);
+      addTearDown(board.dispose);
+      await tester.pumpWidget(
+        OuterOfficeApp(board: board, desktopWindows: false),
+      );
+      await openPage(tester, 'Account Pools');
+      await tester.pumpAndSettle();
+      expect(find.text('Models by account'), findsNothing);
+
+      final reader = await signedIn(<Uri>[], roster: const ['roster.read']);
+      addTearDown(reader.dispose);
+      await tester.pumpWidget(
+        OuterOfficeApp(board: reader, desktopWindows: false),
+      );
+      await openPage(tester, 'Account Pools');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Models by account'));
+      await tester.pumpAndSettle();
+      expect(find.text('team/alpha · claude · station-alpha'), findsOneWidget);
+      expect(find.text('opus, haiku'), findsOneWidget);
+      expect(find.text('007/acp/- · acp · station-alpha'), findsOneWidget);
+      expect(
+        find.text('Unknown: this handler has no way to list models'),
+        findsOneWidget,
+        reason: 'a handler that cannot list says unknown, never a guess',
+      );
+    },
+  );
 
   testWidgets('account pools need pool.read', (tester) async {
     final asked = <Uri>[];

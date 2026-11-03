@@ -18,6 +18,7 @@ import 'compartments/compartments_page.dart';
 import 'access/access_words.dart';
 import 'agents/agents_page.dart';
 import 'agents/scorecard.dart';
+import 'pools/models_section.dart';
 import 'assistant/assistant_controller.dart';
 import 'assistant/chat_layout.dart';
 import 'assistant/chat_region.dart';
@@ -1692,6 +1693,32 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     return [
       for (final agent in jsonDecode(response.body) as List<dynamic>)
         AgentSummary.fromJson(agent as Map<String, dynamic>),
+    ];
+  }
+
+  /// The models each account and route may use, as the Stations found them (`roster.read`).
+  Future<List<DiscoveredModels>> loadModels() async {
+    if (demo) {
+      return const [
+        DiscoveredModels(
+          station: 'preview',
+          source: 'team/alpha',
+          handler: 'claude',
+          known: true,
+          models: [
+            DiscoveredModel(id: 'opus'),
+            DiscoveredModel(id: 'haiku'),
+          ],
+        ),
+      ];
+    }
+    final response = await _userRequest('GET', '/v1/user/models');
+    if (response.statusCode != 200) {
+      throw _readRefused(response.statusCode, 'the models');
+    }
+    return [
+      for (final found in jsonDecode(response.body) as List<dynamic>)
+        DiscoveredModels.fromJson(found as Map<String, dynamic>),
     ];
   }
 

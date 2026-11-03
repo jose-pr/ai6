@@ -7,6 +7,7 @@ import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
 import '../theme/oo_icon.dart';
+import 'models_section.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_freshness.dart';
 import '../shell/oo_link.dart';
@@ -291,6 +292,8 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   children: [
+                    if (widget.board.canReadRoster)
+                      ModelsSection(board: widget.board),
                     for (final account in accounts)
                       _AccountTile(account: account, operation: operation),
                   ],
