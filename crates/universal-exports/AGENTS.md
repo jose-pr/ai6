@@ -428,7 +428,7 @@ impl AssistantConfig {
     /// gateway table's. Err(InvalidConfiguration) for what AssistantLimits::validate refuses
     pub fn with_limits(self, limits: ai6::AssistantLimits) -> Result<Self, GatewayError>;
     /// [assistant.gateway]: conversations kept, live ones, tokens, answers, proposals,
-    /// memory requests (429 past either), tools, the socket. Err(InvalidConfiguration) for
+    /// tools, the socket. Err(InvalidConfiguration) for
     /// what AssistantGatewayLimits::validate refuses
     pub fn with_gateway_limits(self, limits: ai6::AssistantGatewayLimits)
         -> Result<Self, GatewayError>;
@@ -560,11 +560,7 @@ gateway's narrowing. A conversation carries no mark of what she read; tool resul
 the person's last message, at most 16, each `{tool, ids}` with only the identifier arguments
 `operation_id`, `mission_id`, `station_id`, `agent`, `kind` and `key`, and `opens`, the link
 of the page it changes (`app:/missions?operation_id=G&mission_id=m-1`, none for a shared
-change, Cable or memory file). A Station's
-`memory_changes` event (with `change`) becomes a `notice`
-entry (`data.diff`) and a `memory` commit job (message `moneypenny: remember PATHS`, trailer
-`Via: Moneypenny (conversation ID)`) for that Station, at once, whatever she read; the commit
-keeps `AssistantChange::base`, so it is refused when a file changed on `main` since she read it.
+change or Cable).
 A confirmed shared change is audited
 `moneypenny.confirmed` (resource `config:assistant`) and sent as a commit job to the
 conversation's Station (else the first healthy one), staying `confirming` until the Station
@@ -612,23 +608,21 @@ answer is taken only from the Station it was given to (`403` otherwise, and it w
 `cable_sent` event is audited `moneypenny.cable.sent` (actor the person, the Cable's Operation,
 target `CONVERSATION CABLE`).
 
-Memory. `/v1/user/assistant/memory` (route table) reads and changes the signed-in person's
-`memory/` without a conversation: the gateway checks the request, then queues a control job
-with `memory` (`ai6::MemoryOp` on `personal_repo_for(person)`, conversation
-`memory-<hex>`, `person_id` the memory's person) for the Headquarters Station, else the first
-healthy one, and answers with that Station's `accepted` event (`200`) or its `rejected` one in
-its own words: `404` with `missing`, `409` with `changed`, else `502`. Its answer is taken only
-from the Station given the job (`403` to another). No answer in 30 seconds is `504`, and a job
-no Station took is withdrawn. `?person=<id>` reads another person's memory only with
-`assistant.memory.admin` on `config:assistant` (`403` otherwise, before any Station hears),
-audited `assistant.memory.read` (actor the reader, resource `config:assistant`, target
-`PERSON memory/<path>` or `PERSON memory/`) before the job is queued; `PUT` and `DELETE` with
-another person are `403` whatever the reader holds. A person's own reads are not audited; their
-`PUT` and `DELETE` are, as `assistant.memory.write` and `assistant.memory.forget` (target
-`PERSON memory/<path>`), before the job is queued, and a change that cannot be audited is not
-made (`503`). The commit is authored by the person (`author_of`), message the person's
-`message` (1-1024 bytes, no control characters but newlines) or `Edit memory/<path>` /
-`Forget memory/<path>`, then a blank line and `Via: Universal Exports`.
+Memory. `/v1/user/assistant/memory` (route table) reads and changes the signed-in person's rows
+of the Registry through `ai6::directorates::m::memories`, with no Station, clone or job.
+`?person=<id>` reads another person's memory only with `assistant.memory.admin` on
+`config:assistant` (`403` otherwise), audited `memory.read` (actor the reader, resource
+`config:assistant`, target `PERSON memory` or `PERSON ID`) before it is read; `PUT` and `DELETE` with
+another person are `403` whatever the reader holds. Without `?person`, another person's ID answers
+the same `404` as an ID that does not exist. A person's own reads are not audited; their changes and
+hers are, as `memory.write` and `memory.forget` (resource `config:assistant`, target `PERSON ID`,
+` from CONVERSATION` when she made it), before they are made, and one that cannot be audited is not
+made (`503`). Her tools `memory_search`, `memory_read`, `memory_write` and `memory_forget` run on the
+same calls as the person; her write shows as a `notice` entry with `data.diff`, her source is
+`moneypenny:PERSON` with the conversation as its session, and an input with a hidden character is
+refused. A message's job holds the newest summaries in `context`, fenced in `<ai6-data
+tool="memory_search">`, within `[assistant.gateway] memory_context_bytes` and what `context_bytes`
+leaves after the rest of the job's context and recap.
 
 The `show` tool takes `{"view": VIEW}` in the strict view schema version 1 (serde, unknown
 fields refused): `{"version": 1, "title"?, "blocks": [1..=24]}`, each block tagged by `kind`:
@@ -922,10 +916,12 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/station/controls/{control_id}/result` | Bearer-authenticated outcome `{"station","outcome":"applied"\|"rejected","state"?,"reason"?}`; `state` is a Mission state name, `reason` is cut to 512 characters without control characters. `204`; `404` unknown, `403` another Station's control, `409` already finished. |
 | `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized","message"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"earlier","busy","view_limits":{…}}` (the newest 100 entries within 512 KiB; `earlier` counts those left out); a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"route"?:ROUTE}` (an app route in its JSON form, `{"page":"missions","operation_id":"G",…}`) (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}`, `{"type":"submit","view":ID,"values":{…}}` and `{"type":"interrupt"}` (answered `{"type":"interrupt","stopping":bool}`; see Moneypenny, the assistant); the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal"\|"view"\|"navigation"\|"notice","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
-| `GET /v1/user/assistant/memory[?person=ID]` | User bearer. The files of `memory/` in the person's personal repository: `{"person","commit"?,"files":[{"path","bytes"}],"more"}`, each path relative to `memory/`, in path order. `404` when the roster gives nobody a personal repository, `400` an identifier `{person}` refuses, `503` without `with_assistant` or no Station checking in. Errors are `{"error": TEXT}` (see Moneypenny, the assistant, Memory). |
-| `GET /v1/user/assistant/memory/{path}[?person=ID]` | User bearer. `{"path","text","digest","commit"}`; `{path}` relative to `memory/`, up to seven names of ASCII letters, digits, `.`, `-` and `_`, none starting with `.` (`400` otherwise); `404` a missing file; `502` a file over 64 KiB or not UTF-8. |
-| `PUT /v1/user/assistant/memory/{path}` | User bearer, own memory only. Body `{"content": ≤ 64 KiB, "message"?: 1-1024 bytes, "base"?: 64 hex}`; commits the file to `main` as the person; `{"path","digest","commit"}`. `409` when `base` is given and the file no longer holds it. |
-| `DELETE /v1/user/assistant/memory/{path}` | User bearer, own memory only. "Forget": a commit by the person removing the file; `{"path","commit"}`, `404` a missing file. |
+| `GET /v1/user/assistant/memory[?person=ID][&q=TEXT]` | User bearer. `{"person","entries","total"}`, with no content: newest change first, or with `q` best first and at most `search_results`. Another person's needs `assistant.memory.admin` (`403`), audited `memory.read`. |
+| `POST /v1/user/assistant/memory` | User bearer. Body `{"name"?, "summary", "content"}`; `201` with the entry's header. `400` out of bounds, `409` when the memory is full. |
+| `GET /v1/user/assistant/memory/{id}[?person=ID]` | User bearer. The entry with `content`; `404` for an ID that is not this person's, the same whoever's it is. |
+| `PUT /v1/user/assistant/memory/{id}` | User bearer, own memory only. Body `{"name"?, "summary", "content", "revision"}`; the header. `409` with `revision` when it has moved on. |
+| `DELETE /v1/user/assistant/memory/{id}[?revision=N]` | User bearer, own memory only. Forgets it and its prior versions; `{"id"}`. |
+| `GET /v1/user/assistant/memory/{id}/versions[?person=ID]` | User bearer. `{"versions"}`, what it held before, newest first. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most `[assistant.gateway] max_wait`), held the same with Moneypenny off. |
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries; `cable_proposal` and `cable_sent` as under Cables in Moneypenny, the assistant. |
 | `GET /v1/station/assistant/cables?station=ID&conversation=ID&operation=ID` | Station bearer. `{"send", "read"}` for a conversation the Station runs: whether its person holds `cable.send` and `cable.read` there now (both false once the person's sign-in ended); `404` unknown conversation, `403` a Station that does not run it. |

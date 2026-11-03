@@ -6,10 +6,8 @@
 //! her), `scratch/`, and the desk's `CLAUDE.md` and `AGENTS.md`. The same standing text goes
 //! into a context file beside the directory, which the harness gets with its system prompt.
 //!
-//! At the start of each turn the desk keeps a copy of `personal/memory/`. When the turn ends,
-//! whatever she changed there is set aside (the copy is put back) and reported to Universal
-//! Exports, which sends it back as a commit, so the person sees the diff first; everything else
-//! in `personal/` is committed to `main`, authored by the person. A `main` that refuses the work twice gets it on `moneypenny/<conversation digest>`.
+//! When a turn ends, everything she changed in `personal/` is committed to `main`, authored by the
+//! person. A `main` that refuses the work twice gets it on `moneypenny/<conversation digest>`.
 //!
 //! Each `propose_shared_change` call is reported with what the file it changes held in her
 //! `shared/` checkout ([`AssistantSharedBase`]), so its commit is refused when that
@@ -32,7 +30,7 @@ use crate::directorates::q::safehouse::{
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_SERVER, ASSISTANT_PUBLISH_PAGE_TOOL, ASSISTANT_SHARED_CHANGE_TOOL,
     AssistantChange, AssistantCommit, AssistantPageFile, AssistantSharedBase, AssistantWorkspace,
-    COMMIT_MEMORY, repository_path,
+    repository_path,
 };
 use crate::station::safehouse::SafeHouse;
 
@@ -42,57 +40,37 @@ pub(super) const PERSONAL: &str = "personal";
 pub(super) const SHARED: &str = "shared";
 /// Her scratch directory, gone with the conversation's directory.
 pub(super) const SCRATCH: &str = "scratch";
-/// Her memory, inside the personal repository.
-pub(super) const MEMORY: &str = "memory";
 /// The branch every repository is read from and saved to.
 pub(super) const MAIN: &str = "main";
 /// The safe-house provider the workspace's repositories are opened with.
 pub(super) const PROVIDER: &str = "git";
-/// `MEMORY.md` as a first use writes it.
-const MEMORY_INDEX: &str = "# Memory\n\nWhat Moneypenny remembers about the person she works \
-                            for. Keep this index short: one line per file in `memory/`, saying \
-                            what it holds.\n";
 
 /// Opens safe houses: the Station's provider, or a test's.
 pub(super) type Houses = Arc<dyn Fn() -> Result<Box<dyn SafeHouseProvider>, String> + Send + Sync>;
 
-/// One conversation's checkout of the personal repository and its turn-start copies.
+/// One conversation's checkout of the personal repository and its note of the turn's start.
 pub(super) struct Workspace {
     conversation_id: String,
     digest: String,
-    repo: String,
     personal: SafeHouse,
     path: PathBuf,
     author_name: String,
     author_email: String,
-    /// `memory/` at the start of the turn, by path relative to `personal/`.
-    memory: BTreeMap<String, Vec<u8>>,
-    /// The other files of `personal/` at the start of the turn: size and modification time.
+    /// The files of `personal/` at the start of the turn: size and modification time.
     files: BTreeMap<String, (u64, Option<SystemTime>)>,
-    /// The harness closed and its directory is going: a commit goes to a clone of its own.
-    closed: bool,
     /// The shared repositories checked out under `shared/`, by name.
     shared: BTreeSet<String>,
     /// The most a save of her work commits, in bytes.
     save_bytes: Limit,
-    /// What her memory, her memory change and her shared bases are held to.
+    /// What her shared bases and the walk of her folder are held to.
     limits: AssistantLimits,
-}
-
-/// What the end of a turn found besides the work it saved.
-#[derive(Debug, Default)]
-pub(super) struct TurnEnd {
-    /// The memory change set aside and its unified diff.
-    pub(super) memory: Option<(AssistantChange, String)>,
-    /// What the person and Moneypenny should know.
-    pub(super) notices: Vec<String>,
 }
 
 impl Workspace {
     /// Makes the workspace in `area`, the conversation's empty directory, with the
     /// repositories' git directories in `repos` and the standing text in `context`, both
-    /// outside `area`, each repository cloned and each save made within `limits`, her memory
-    /// read within `bounds`; answers it with notices for the conversation.
+    /// outside `area`, each repository cloned and each save made within `limits`, her folder
+    /// walked within `bounds`; answers it with notices for the conversation.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn prepare(
         houses: &Houses,
@@ -122,43 +100,16 @@ impl Workspace {
         let mut workspace = Self {
             conversation_id: conversation_id.to_owned(),
             digest: digest.to_owned(),
-            repo: job.personal.clone(),
             personal,
             path,
             author_name: job.author_name.clone(),
             author_email: job.author_email.clone(),
-            memory: BTreeMap::new(),
             files: BTreeMap::new(),
-            closed: false,
             shared: BTreeSet::new(),
             save_bytes: limits.save_bytes,
             limits: bounds.clone(),
         };
         let mut notices = Vec::new();
-        let index = workspace.path.join(MEMORY).join("MEMORY.md");
-        if fs::symlink_metadata(&index).is_err() {
-            write_file(area, &index, MEMORY_INDEX)?;
-            let first = AssistantChange::new(BTreeMap::from([(
-                format!("{MEMORY}/MEMORY.md"),
-                Some(MEMORY_INDEX.to_owned()),
-            )]));
-            let message = format!(
-                "moneypenny: start her memory\n\nVia: Moneypenny (conversation {conversation_id})"
-            );
-            let spec = workspace.spec(
-                message,
-                &workspace.author_name,
-                &workspace.author_email,
-                Some(exactly(&first)),
-            );
-            let saved = workspace
-                .personal
-                .checkpoint(&spec)
-                .map_err(|error| error.to_string())?;
-            if saved.branch != MAIN {
-                notices.push(moved_on(&saved.branch));
-            }
-        }
         let mut shared = Vec::new();
         for (name, repo) in &job.shared {
             let target = area.join(SHARED).join(name);
@@ -184,20 +135,11 @@ impl Workspace {
             }
         }
         fs::create_dir_all(area.join(SCRATCH)).map_err(|error| error.to_string())?;
-        let memory = read_text(area, &index, bounds.memory_file_bytes.or_max()).unwrap_or_default();
         let standing = instructions(&shared, skills);
         workspace.shared = shared.into_iter().collect();
-        write_file(
-            area,
-            &area.join("CLAUDE.md"),
-            &format!("{standing}\n## Memory\n\n@{PERSONAL}/{MEMORY}/MEMORY.md\n"),
-        )?;
-        let inlined = format!(
-            "{standing}\n## Memory\n\n{}\n",
-            cut(&memory, bounds.inlined_memory_bytes.or_max())
-        );
-        write_file(area, &area.join("AGENTS.md"), &inlined)?;
-        write_file(context.parent().unwrap_or(context), context, &inlined)?;
+        write_file(area, &area.join("CLAUDE.md"), &standing)?;
+        write_file(area, &area.join("AGENTS.md"), &standing)?;
+        write_file(context.parent().unwrap_or(context), context, &standing)?;
         workspace.begin_turn();
         Ok((workspace, notices))
     }
@@ -250,138 +192,30 @@ impl Workspace {
         self.path.parent().unwrap_or(&self.path)
     }
 
-    /// Whether a commit of `repo` can be made here: the checkout is of it and still open.
-    pub(super) fn takes(&self, repo: &str) -> bool {
-        !self.closed && self.repo == repo
-    }
-
-    /// Ends the last turn as the harness closes; afterwards commits go elsewhere.
-    pub(super) fn close(&mut self) -> TurnEnd {
-        let end = self.end_turn();
-        self.closed = true;
-        end
+    /// Ends the last turn as the harness closes.
+    pub(super) fn close(&mut self) -> Vec<String> {
+        self.end_turn()
     }
 
     /// Notes what `personal/` holds as a turn starts.
     pub(super) fn begin_turn(&mut self) {
-        self.memory = read_tree(&self.path.join(MEMORY), MEMORY, &self.limits);
-        self.files = stat_tree(&self.path, self.limits.memory_walk);
+        self.files = stat_tree(&self.path, self.limits.personal_walk);
     }
 
-    /// Ends a turn: sets her memory change aside and saves the rest of `personal/`.
-    pub(super) fn end_turn(&mut self) -> TurnEnd {
-        let mut end = TurnEnd::default();
-        let now = read_tree(&self.path.join(MEMORY), MEMORY, &self.limits);
-        let mut files = BTreeMap::new();
-        for (path, bytes) in &now {
-            if self.memory.get(path) != Some(bytes) {
-                match String::from_utf8(bytes.clone()) {
-                    Ok(text) => {
-                        files.insert(path.clone(), Some(text));
-                    }
-                    Err(_) => end.notices.push(format!(
-                        "{path} is not text, so it was not kept in Moneypenny's memory."
-                    )),
-                }
-            }
-        }
-        for path in self.memory.keys() {
-            if !now.contains_key(path) {
-                files.insert(path.clone(), None);
-            }
-        }
-        // The memory goes back to what it was; a commit brings the change, once it is reported.
-        let mut restored = true;
-        for path in now.keys() {
-            if !self.memory.contains_key(path)
-                && let Err(error) = remove(self.area(), &in_tree(&self.path, path))
-            {
-                restored = false;
-                end.notices
-                    .push(format!("{path} could not be removed: {error}"));
-            }
-        }
-        for (path, bytes) in &self.memory {
-            if now.get(path) != Some(bytes)
-                && let Err(error) = write_bytes(self.area(), &in_tree(&self.path, path), bytes)
-            {
-                restored = false;
-                end.notices
-                    .push(format!("{path} could not be put back: {error}"));
-            }
-        }
-        let changed = changed_files(&self.files, &stat_tree(&self.path, self.limits.memory_walk));
-        if !restored {
-            end.notices.push(
-                "Moneypenny's work in personal/ was not saved, since her memory could not be put \
-                 back as it was."
-                    .to_owned(),
-            );
-        } else {
-            match self.save(&summary(&changed)) {
-                Ok(notice) => end.notices.extend(notice),
-                Err(reason) => end.notices.push(format!(
-                    "Moneypenny's work in personal/ could not be saved: {reason}"
-                )),
-            }
-        }
-        if !files.is_empty() {
-            // Made from the memory the turn started with: a commit of it is refused once any
-            // of its files changed since.
-            let base = files
-                .keys()
-                .map(|path| {
-                    (
-                        path.clone(),
-                        self.memory.get(path).map(|bytes| sha256_hex(bytes)),
-                    )
-                })
-                .collect();
-            let change = AssistantChange::based(files, base);
-            let diff = unified_diff(&self.memory, &change);
-            match change.validate(true, &self.limits) {
-                Ok(()) if self.limits.event_bytes.allows(diff.len()) => {
-                    end.memory = Some((change, diff));
-                }
-                Ok(()) => end.notices.push(
-                    "Moneypenny's memory change was too large to show, so it was not kept."
-                        .to_owned(),
-                ),
-                Err(reason) => end.notices.push(format!(
-                    "Moneypenny's memory change was not kept: {reason}."
-                )),
-            }
-        }
+    /// Ends a turn: saves what she changed in `personal/`, and answers what should be known.
+    pub(super) fn end_turn(&mut self) -> Vec<String> {
+        let changed = changed_files(
+            &self.files,
+            &stat_tree(&self.path, self.limits.personal_walk),
+        );
+        let notices = match self.save(&summary(&changed)) {
+            Ok(notice) => notice.into_iter().collect(),
+            Err(reason) => vec![format!(
+                "Moneypenny's work in personal/ could not be saved: {reason}"
+            )],
+        };
         self.begin_turn();
-        end
-    }
-
-    /// Commits exactly the files of a memory commit, never what a turn
-    /// in progress has written beside them, then writes them into this checkout as the turn's
-    /// starting point too; answers where it landed. Nothing is written when the commit is
-    /// refused.
-    pub(super) fn apply(&mut self, commit: &AssistantCommit) -> Result<String, String> {
-        let saved = self
-            .personal
-            .checkpoint(&self.spec(
-                commit.message.clone(),
-                &commit.author_name,
-                &commit.author_email,
-                Some(exactly(&commit.change)),
-            ))
-            .map_err(|error| error.to_string())?;
-        write_change(&self.path, &commit.change)?;
-        for (path, text) in &commit.change.files {
-            match text {
-                Some(text) => {
-                    self.memory.insert(path.clone(), text.as_bytes().to_vec());
-                }
-                None => {
-                    self.memory.remove(path);
-                }
-            }
-        }
-        Ok(landed(&saved, &self.repo))
+        notices
     }
 
     /// Commits everything in `personal/` and pushes it; a notice when it landed elsewhere
@@ -392,8 +226,6 @@ impl Workspace {
             self.conversation_id
         );
         let mut spec = self.spec(message, &self.author_name, &self.author_email, None);
-        // Her memory reaches the repository only as a commit Universal Exports sends back.
-        spec.exclude = Some(vec![MEMORY.to_owned()]);
         spec.max_bytes = self.save_bytes.get();
         let saved = self
             .personal
@@ -436,14 +268,13 @@ pub(super) fn commit_once(
         .prefix("ai6-assistant-commit-")
         .tempdir()
         .map_err(|error| error.to_string())?;
-    let create = commit.kind == COMMIT_MEMORY && RepoKind::of(&commit.repo)? == RepoKind::Local;
     let target = scratch.path().join("repository");
     let house = open_clone(
         provider.as_ref(),
         &commit.repo,
         &target,
         None,
-        create,
+        false,
         digest,
         limits,
     )?;
@@ -576,7 +407,7 @@ pub(super) fn open_clone(
     SafeHouse::open(provider, &spec).map_err(|error| error.to_string())
 }
 
-/// What the desk tells her about her workspace, before her memory.
+/// What the desk tells her about her workspace.
 fn instructions(shared: &[String], skills: &[String]) -> String {
     let skills = if skills.is_empty() {
         String::new()
@@ -606,50 +437,12 @@ fn instructions(shared: &[String], skills: &[String]) -> String {
          - `{PERSONAL}/` is the person's personal repository: keep what you make for them \
          there. After each answer everything you changed in it is committed to its `main`, \
          authored by the person.\n\
-         - `{PERSONAL}/{MEMORY}/` is your memory of the person: who they are, their \
-         preferences, standing instructions, ongoing work, summaries of past conversations. \
-         `{MEMORY}/MEMORY.md` is its index; keep it short and name the other files from it. \
-         A change to your memory is saved after your answer and shown to the person.\n\
          - {shared}\n\
          - `{SCRATCH}/` is for anything temporary; it goes when this conversation's session \
          closes.\n\
          {skills}\
          - Nothing else here is yours to change.\n"
     )
-}
-
-/// Every file under `root`, by `prefix/<path>`, with its bytes; links are not followed. Each
-/// file is read to at most `limits.memory_file_bytes`, and the walk stops at
-/// `limits.memory_files` files or `limits.memory_bytes` in all, so a script that enlarges a
-/// memory file cannot make the desk read it unbounded and abort the Station.
-fn read_tree(root: &Path, prefix: &str, limits: &AssistantLimits) -> BTreeMap<String, Vec<u8>> {
-    let mut found = BTreeMap::new();
-    let mut total = 0usize;
-    walk(root, prefix, &mut |path, file| {
-        if !limits.memory_files.allows(found.len() + 1) || !limits.memory_bytes.allows(total + 1) {
-            return;
-        }
-        if let Some(bytes) = read_capped(file, limits.memory_file_bytes.or_max()) {
-            total += bytes.len();
-            found.insert(path, bytes);
-        }
-    });
-    found
-}
-
-/// The first `limit` bytes of the plain file `path`: its own length when shorter, so a file
-/// `truncate`d to a huge length is read only to `limit`. The final component is opened without
-/// following a link (`O_NOFOLLOW`; `FILE_FLAG_OPEN_REPARSE_POINT` on Windows) and the open
-/// handle is checked, so a symbolic link or reparse point swapped in after [`no_links`] looked
-/// is not read through. `None` when it cannot be opened, is not a plain file, or is a link.
-fn read_capped(path: &Path, limit: usize) -> Option<Vec<u8>> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    open_plain(path)?
-        .take(limit as u64)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    Some(bytes)
 }
 
 /// The plain file `path`, opened for reading as [`read_capped`] opens it; `None` when it
@@ -679,7 +472,7 @@ fn open_plain(path: &Path) -> Option<fs::File> {
     Some(file)
 }
 
-/// The files of `personal/` outside `.git` and `memory/`, with size and modification time; at
+/// The files of `personal/` outside `.git`, with size and modification time; at
 /// most `files` of them.
 fn stat_tree(root: &Path, files: Limit) -> BTreeMap<String, (u64, Option<SystemTime>)> {
     let mut found = BTreeMap::new();
@@ -688,7 +481,7 @@ fn stat_tree(root: &Path, files: Limit) -> BTreeMap<String, (u64, Option<SystemT
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name == MEMORY {
+        if name.starts_with('.') {
             continue;
         }
         walk(&entry.path(), &name, &mut |path, file| {
@@ -756,42 +549,6 @@ fn summary(changed: &[String]) -> String {
     }
 }
 
-/// The unified diff of `change` against `before`, one file after another.
-fn unified_diff(before: &BTreeMap<String, Vec<u8>>, change: &AssistantChange) -> String {
-    let mut diff = String::new();
-    for (path, text) in &change.files {
-        let old = before
-            .get(path)
-            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-            .unwrap_or_default();
-        let new = text.clone().unwrap_or_default();
-        let (from, to) = match (before.contains_key(path), text.is_some()) {
-            (false, _) => ("/dev/null".to_owned(), format!("b/{path}")),
-            (true, false) => (format!("a/{path}"), "/dev/null".to_owned()),
-            (true, true) => (format!("a/{path}"), format!("b/{path}")),
-        };
-        diff.push_str(
-            &similar::TextDiff::from_lines(&old, &new)
-                .unified_diff()
-                .header(&from, &to)
-                .to_string(),
-        );
-    }
-    diff
-}
-
-/// Writes each file of `change` under `root`, or removes it.
-fn write_change(root: &Path, change: &AssistantChange) -> Result<(), String> {
-    for (path, text) in &change.files {
-        let file = in_tree(root, path);
-        match text {
-            Some(text) => write_file(root, &file, text)?,
-            None => remove(root, &file).map_err(|error| format!("{path}: {error}"))?,
-        }
-    }
-    Ok(())
-}
-
 fn write_file(root: &Path, path: &Path, text: &str) -> Result<(), String> {
     write_bytes(root, path, text.as_bytes()).map_err(|error| format!("{}: {error}", path.display()))
 }
@@ -803,25 +560,6 @@ fn write_bytes(root: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, bytes)
-}
-
-/// Removes the file `path`, under `root`, if it is there; never through a link.
-fn remove(root: &Path, path: &Path) -> std::io::Result<()> {
-    no_links(root, path)?;
-    match fs::remove_file(path) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
-    }
-}
-
-/// The text of the plain file `path`, under `root`, reached through no link, read to at most
-/// `limit` bytes; `None` when it is not a plain file or is not valid UTF-8.
-fn read_text(root: &Path, path: &Path, limit: usize) -> Option<String> {
-    no_links(root, path).ok()?;
-    if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
-        return None;
-    }
-    String::from_utf8(read_capped(path, limit)?).ok()
 }
 
 /// Refuses `path` when `root`, or anything from `root` down to it, is a link: a symbolic link,
@@ -1058,20 +796,9 @@ pub(super) fn in_tree(root: &Path, file: &str) -> PathBuf {
         .fold(root.to_path_buf(), |at, name| at.join(name))
 }
 
-fn cut(text: &str, limit: usize) -> &str {
-    let mut end = text.len().min(limit);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The default bound of one memory file read.
-    const FILE: usize = 256 * 1024;
 
     fn limits() -> AssistantLimits {
         AssistantLimits::default()
@@ -1095,45 +822,36 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_read_written_or_removed_through_a_link() {
+    fn nothing_is_written_through_a_link() {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         fs::write(outside.path().join("secret.md"), "secret").unwrap();
         let area = root.path().join("area");
         let personal = area.join(PERSONAL);
         fs::create_dir_all(&personal).unwrap();
-        let memory = personal.join(MEMORY);
-        link_directory(outside.path(), &memory);
+        let linked = personal.join("linked");
+        link_directory(outside.path(), &linked);
         // The link works: anything following it reaches outside the area.
         assert_eq!(
-            fs::read_to_string(memory.join("secret.md")).unwrap(),
+            fs::read_to_string(linked.join("secret.md")).unwrap(),
             "secret"
         );
 
-        assert!(write_file(&area, &memory.join("x.md"), "x").is_err());
+        assert!(write_file(&area, &linked.join("x.md"), "x").is_err());
         assert!(!outside.path().join("x.md").exists());
-        assert!(write_file(&area, &memory.join("new").join("x.md"), "x").is_err());
+        assert!(write_file(&area, &linked.join("new").join("x.md"), "x").is_err());
         assert!(!outside.path().join("new").exists());
-        assert_eq!(read_text(&area, &memory.join("secret.md"), FILE), None);
-        assert!(remove(&area, &memory.join("secret.md")).is_err());
-        assert!(outside.path().join("secret.md").exists());
-        assert!(read_tree(&memory, MEMORY, &limits()).is_empty());
-        assert!(stat_tree(&personal, limits().memory_walk).is_empty());
-        let change = AssistantChange::new(BTreeMap::from([(
-            "memory/secret.md".to_owned(),
-            Some("overwritten".to_owned()),
-        )]));
-        assert!(write_change(&personal, &change).is_err());
+        assert!(stat_tree(&personal, limits().personal_walk).is_empty());
         assert_eq!(
             fs::read_to_string(outside.path().join("secret.md")).unwrap(),
             "secret"
         );
 
-        // A plain path beside it is read and written as before.
+        // A plain path beside it is written as before.
         write_file(&area, &personal.join("notes").join("a.md"), "a").unwrap();
         assert_eq!(
-            read_text(&area, &personal.join("notes").join("a.md"), FILE).as_deref(),
-            Some("a")
+            fs::read_to_string(personal.join("notes").join("a.md")).unwrap(),
+            "a"
         );
     }
 
@@ -1258,75 +976,18 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_file_link_is_never_read_or_written() {
+    fn a_file_link_is_never_written() {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let secret = outside.path().join("secret.md");
         fs::write(&secret, "secret").unwrap();
         let area = root.path().join("area");
         fs::create_dir_all(&area).unwrap();
-        let index = area.join("MEMORY.md");
+        let index = area.join("notes.md");
         std::os::unix::fs::symlink(&secret, &index).unwrap();
         assert_eq!(fs::read_to_string(&index).unwrap(), "secret");
-        assert_eq!(read_text(&area, &index, FILE), None);
         assert!(write_file(&area, &index, "x").is_err());
         assert_eq!(fs::read_to_string(&secret).unwrap(), "secret");
-    }
-
-    #[test]
-    fn a_huge_memory_file_is_read_only_to_its_cap() {
-        let root = tempfile::tempdir().unwrap();
-        let memory = root.path().join("memory");
-        fs::create_dir_all(&memory).unwrap();
-        let big = memory.join("big.md");
-        // A script makes a file this long without writing it; the desk reads only its cap.
-        fs::File::create(&big)
-            .unwrap()
-            .set_len(64 * 1024 * 1024)
-            .unwrap();
-        assert_eq!(read_capped(&big, FILE).unwrap().len(), FILE);
-        let tree = read_tree(&memory, MEMORY, &limits());
-        assert_eq!(tree["memory/big.md"].len(), FILE);
-        assert_eq!(
-            read_text(root.path(), &big, FILE).map(|text| text.len()),
-            Some(FILE)
-        );
-        let mut tight = limits();
-        tight.memory_file_bytes = Limit::at(1_000);
-        let tree = read_tree(&memory, MEMORY, &tight);
-        assert_eq!(tree["memory/big.md"].len(), 1_000);
-    }
-
-    #[test]
-    fn a_tree_of_many_memory_files_is_read_only_to_its_count() {
-        let root = tempfile::tempdir().unwrap();
-        let memory = root.path().join("memory");
-        fs::create_dir_all(&memory).unwrap();
-        for index in 0..15 {
-            fs::write(memory.join(format!("{index:05}.md")), "x").unwrap();
-        }
-        let mut tight = limits();
-        tight.memory_files = Limit::at(10);
-        assert_eq!(read_tree(&memory, MEMORY, &tight).len(), 10);
-        assert_eq!(read_tree(&memory, MEMORY, &limits()).len(), 15);
-        tight.memory_files = Limit::UNBOUNDED;
-        tight.memory_bytes = Limit::at(3);
-        assert_eq!(read_tree(&memory, MEMORY, &tight).len(), 3);
-    }
-
-    /// The read itself refuses a link at the final component, so one swapped in after
-    /// `no_links` looked is not followed.
-    #[cfg(unix)]
-    #[test]
-    fn the_read_refuses_a_link_swapped_in_after_the_check() {
-        let root = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let secret = outside.path().join("secret.md");
-        fs::write(&secret, "secret").unwrap();
-        let link = root.path().join("MEMORY.md");
-        std::os::unix::fs::symlink(&secret, &link).unwrap();
-        assert_eq!(fs::read_to_string(&link).unwrap(), "secret");
-        assert_eq!(read_capped(&link, FILE), None);
     }
 
     /// `item/started` of a `propose_shared_change` call as Codex 0.164.0's app server sends it
@@ -1383,58 +1044,16 @@ mod tests {
     }
 
     #[test]
-    fn a_diff_shows_added_changed_and_removed_files() {
-        let before = BTreeMap::from([
-            ("memory/MEMORY.md".to_owned(), b"# Memory\n".to_vec()),
-            ("memory/old.md".to_owned(), b"old\n".to_vec()),
-        ]);
-        let change = AssistantChange::new(BTreeMap::from([
-            (
-                "memory/MEMORY.md".to_owned(),
-                Some("# Memory\n\n- prefers tables\n".to_owned()),
-            ),
-            ("memory/old.md".to_owned(), None),
-            ("memory/prefs.md".to_owned(), Some("tables\n".to_owned())),
-        ]));
-        let diff = unified_diff(&before, &change);
-        assert!(
-            diff.contains("--- a/memory/MEMORY.md\n+++ b/memory/MEMORY.md"),
-            "{diff}"
-        );
-        assert!(diff.contains("+- prefers tables"), "{diff}");
-        assert!(
-            diff.contains("--- a/memory/old.md\n+++ /dev/null"),
-            "{diff}"
-        );
-        assert!(
-            diff.contains("--- /dev/null\n+++ b/memory/prefs.md"),
-            "{diff}"
-        );
-        assert_eq!(change.validate(true, &limits()), Ok(()));
-    }
-
-    #[test]
-    fn a_change_is_written_only_under_its_root() {
-        let root = tempfile::tempdir().unwrap();
-        let change = AssistantChange::new(BTreeMap::from([(
-            "memory/notes/a.md".to_owned(),
-            Some("a".to_owned()),
-        )]));
-        write_change(root.path(), &change).unwrap();
-        assert_eq!(
-            fs::read_to_string(root.path().join("memory").join("notes").join("a.md")).unwrap(),
-            "a"
-        );
+    fn a_change_names_only_files_of_its_repository() {
         let escape = AssistantChange::new(BTreeMap::from([(
             "../x.md".to_owned(),
             Some("x".to_owned()),
         )]));
-        assert!(escape.validate(true, &limits()).is_err());
-        let outside = AssistantChange::new(BTreeMap::from([(
+        assert!(escape.validate(&limits()).is_err());
+        let inside = AssistantChange::new(BTreeMap::from([(
             "notes/x.md".to_owned(),
             Some("x".to_owned()),
         )]));
-        assert!(outside.validate(true, &limits()).is_err(), "memory only");
-        assert_eq!(outside.validate(false, &limits()), Ok(()));
+        assert_eq!(inside.validate(&limits()), Ok(()));
     }
 }

@@ -462,7 +462,7 @@ rather than half-loading.
   ["007"]}')`. The rows get the files' checks, `extends` included; an Operation's own
   `.ai6/agents.toml` still applies. Moneypenny's `[assistant]` settings are the one row of
   `ai6_config_assistant`, keyed `settings` ([her
-  workspace](assistant.md#her-workspace-and-memory)); without it the roster has the defaults.
+  workspace](assistant.md#her-workspace)); without it the roster has the defaults.
   `put` and `remove` change one record and refuse a change that would leave any Station's
   configuration invalid. Each change moves the configuration to its next revision (the
   `config` row of `ai6_clock`); a tool that edits the tables directly advances that row in

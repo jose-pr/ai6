@@ -352,6 +352,24 @@ it.
 | `finding_bytes` | 1 KiB | **Longest finding.** Bytes of one finding. |
 <!-- schema:registry.limits.logbook:end -->
 
+`[registry.limits.memories]`: what one scope of memory may hold: a person's, an Operation's or the
+global one.
+
+<!-- schema:registry.limits.memories:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `content_bytes` | 256 KiB | **Longest entry.** Bytes of one entry's content. |
+| `entries` | 1,024 | **Entries in a scope.** Entries in one scope. |
+| `scope_bytes` | 8 MiB | **All the entries of a scope.** Bytes of every entry's name, summary and content in one scope. |
+| `versions` | 8 | **Prior versions of an entry.** Prior versions kept of one entry; forgetting the entry removes them. `0` keeps none. |
+| `summary_bytes` | 1 KiB | **Longest summary.** Bytes of an entry's one-line summary. |
+| `name_bytes` | 256 | **Longest name or author.** Bytes of an entry's name, or of who wrote it. |
+| `compartments` | 16 | **Compartments on an entry.** Compartments on one entry, each at most `name_bytes`. |
+| `index_bytes` | 512 KiB | **Words of an entry in the text index.** Bytes of an entry's distinct words a database's text index holds. A word past it is found only by a search that matched another word of the entry, and PostgreSQL refuses an index of 1 MiB or more for one entry. |
+| `search_results` | 50 | **Entries a search answers.** Entries one search answers. |
+| `query_bytes` | 4 KiB | **Longest search.** Bytes of what one search asks for. |
+<!-- schema:registry.limits.memories:end -->
+
 `[registry.limits.proposals]`
 
 <!-- schema:registry.limits.proposals:begin -->
@@ -1210,7 +1228,7 @@ asks the grants alone, a weakening logged at start and reported at check-in.
 Three tables of the `assistant` record bound and pace Moneypenny. They follow the
 [Limits](#limits) rules: a count or size is a whole number or `"none"` (no bound); seconds may
 be fractional; a key left out keeps its default. Each bound looser than its default (larger,
-or no bound; for `memory_import_depth`, smaller) is a weakening, logged by every Station and
+or no bound) is a weakening, logged by every Station and
 listed at its check-in with the record's other weakenings:
 `assistant.desk.live none is looser than the default 4`. The keys that only pace work
 (`token_margin`, the waits, retries and margins, `report_attempts`, `unlocked_stale`,
@@ -1233,8 +1251,8 @@ conversations_per_person = 50
 token_ttl = 1800
 ```
 
-`[assistant.limits]`: what passes between Universal Exports and a Station, which both check,
-and what a Station reads of her memory. A Station reads it for each job and harness start;
+`[assistant.limits]`: what passes between Universal Exports and a Station, which both check.
+A Station reads it for each job and harness start;
 Universal Exports when it starts.
 
 <!-- schema:record.assistant.limits:begin -->
@@ -1243,27 +1261,21 @@ Universal Exports when it starts.
 | `cable_grants` | 64 | **Operations with Cables in one job.** Operations one job grants Cable actions in. |
 | `message_bytes` | 32 KiB | **Longest message.** Bytes of one job's message; Universal Exports refuses a person's longer message. |
 | `context_bytes` | 24 KiB | **Standing context and recap.** Bytes of a job's standing context and recap together; a recap stays under half. |
-| `event_bytes` | 64 KiB | **Longest reported event.** Bytes of one reported event's text; longer text is cut, and a memory change whose diff is longer is not kept. |
+| `event_bytes` | 64 KiB | **Longest reported event.** Bytes of one reported event's text; longer text is cut. |
 | `events` | 64 | Events in one report. |
-| `change_bytes` | 64 KiB | **File content in one memory change.** Bytes of file content in one memory change, commit, memory write or memory read. |
-| `change_files` | 32 | **Files in one memory change.** Files in one memory change or commit. |
+| `change_bytes` | 64 KiB | **File content in one commit.** Bytes of file content in one commit. |
+| `change_files` | 32 | Files in one commit. |
 | `commit_message_bytes` | 4 KiB | **Longest commit message.** Bytes of one commit's message. |
 | `shared_bases` | 32 | **Shared change bases.** Shared-change bases one event carries, and Universal Exports keeps for one conversation until their calls arrive. |
-| `memory_list_files` | 1,000 | **Files in a memory listing.** Files one memory listing names. |
-| `memory_list_bytes` | 128 KiB | **Paths in a memory listing.** Bytes of paths one memory listing names. |
 | `skills` | 64 | **Skills in one job.** Skills one job gives her. |
-| `inlined_memory_bytes` | 32 KiB | **MEMORY.md in her context.** Bytes of MEMORY.md inlined into her standing context. |
-| `memory_file_bytes` | 256 KiB | **Longest memory file read.** Bytes of one memory file the desk reads; a longer file is read to this length. |
-| `memory_files` | 1,024 | **Memory files read per turn.** Memory files the desk reads at a turn's edge. |
-| `memory_bytes` | 8 MiB | **All memory read per turn.** Bytes over all the memory files the desk reads at a turn's edge. |
-| `memory_walk` | 10,000 | **Files looked at per turn.** Files of her personal folder looked at to name what a turn changed. |
+| `personal_walk` | 10,000 | **Files looked at per turn.** Files of her personal folder looked at to name what a turn changed. |
 | `page_file_bytes` | 8 MiB | **Largest file read for a page.** Bytes of one file the Station reads to publish a page. |
 | `page_files` | 200 | **Files read for a page.** Files the Station reads to publish one page. |
 | `page_bytes` | 16 MiB | **All the files read for a page.** Bytes over all the files of one page the Station reads. |
 <!-- schema:record.assistant.limits:end -->
 
-`[assistant.desk]`: how each Station's desk runs her harnesses. Read for each job, harness
-start and memory request; `known`, `parked` and `report_queue` at each use; `job_wait`,
+`[assistant.desk]`: how each Station's desk runs her harnesses. Read for each job and harness
+start; `known` and `report_queue` at each use; `job_wait`,
 `job_bytes`, `job_retry`, `call_margin`, `report_attempts` and `report_retry` at each poll or
 report; `unlocked_stale` when the desk starts.
 
@@ -1280,16 +1292,14 @@ report; `unlocked_stale` when the desk starts.
 | `report_queue` | 256 | **Reports waiting to be sent.** Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are dropped. |
 | `report_attempts` | 3 | **Tries to send a report.** Times a report is sent before it counts as lost. |
 | `report_retry` | 0.2 | **Retry a report after.** Seconds between tries of a report that did not reach Universal Exports. |
-| `parked` | 64 | **Memory changes kept undelivered.** Memory changes kept on the Station because they could not be delivered; past it the oldest is dropped. |
 | `known` | 1,024 | **Conversations remembered for a resume.** Conversations whose provider Session the desk remembers for a resume. |
 | `close_wait` | 10 | **Wait for a closing harness.** Seconds a message waits for the conversation's closing harness. |
 | `limit_fallback` | 1,800 | **Out for this long at a limit with no reset time.** Seconds a route or account stays out when a harness reports a limit with no reset time. |
 | `remove_retry` | 2 | **Retry removing a directory for.** Seconds removing a closed harness's directory is tried again. |
 | `unlocked_stale` | 3,600 | **Sweep abandoned directories after.** Seconds before a directory of working directories left without its lock, or a lock without its directory, is swept. |
-| `clone_timeout` | 120 | **Longest clone.** Seconds a clone of one of her repositories may take; a memory request's clone also stops at its deadline. |
+| `clone_timeout` | 120 | **Longest clone.** Seconds a clone of one of her repositories may take. |
 | `clone_bytes` | 512 MiB | **Largest clone.** Bytes a clone of one of her repositories may hold on disk, then it is given up and removed. |
 | `save_bytes` | 16 MiB | **Largest save of her work.** Bytes one save of her work in her personal folder may commit; past it nothing is saved and she is told. |
-| `memory_requests` | 4 | **Memory requests at once.** The app's memory requests a Station makes at once; past it the next is refused. |
 | `held_cables` | 32 | **Cables held per conversation.** Cables one conversation holds for the person's confirmation; past it a send is refused, and nothing the person has not seen to is dropped to make room. |
 | `held_cable_ttl` | 3,600 | **A held Cable waits.** Seconds a Cable held for the person's confirmation waits before it is dropped. |
 | `page_upload_timeout` | 60 | **Longest page file upload.** Seconds sending one file of a page to Universal Exports may take. |
@@ -1308,17 +1318,14 @@ report; `unlocked_stale` when the desk starts.
 | `person_bytes` | 4 MiB | **Entries kept per person, in size.** Bytes of entries kept per person; a person's views go first. |
 | `live_per_person` | 2 | **Live conversations per person.** One person's conversations with a harness running or an answer pending; the least recently used idle harness is closed to make room. |
 | `tool_calls_per_minute` | 120 | **Tool calls a minute.** Tool calls one conversation makes in a minute. |
-| `memory_requests_per_person` | 2 | **Memory requests waiting per person.** The app's memory requests waiting for a Station for one person; `429` past it. |
-| `memory_requests` | 16 | **Memory requests waiting in all.** The app's memory requests waiting for a Station in all. |
 | `token_ttl` | 3,600 | **A tool token lasts.** Seconds a tool token given to a harness is accepted; past it, while that harness's answer runs and its Station was heard from within `answer_deadline`, until the person stops it. |
 | `token_reuse_margin` | 600 | **Keep a token if it still has.** Seconds a token must still have to be given to the next message; kept above `[assistant.desk] token_margin`. |
 | `answer_timeout` | 60 | **A Station takes up a message within.** Seconds a Station has to take up a message before another is asked. |
 | `answer_deadline` | 600 | **Give up on a silent answer after.** Seconds an accepted message may go without word from its Station before it is given up. |
-| `memory_timeout` | 30 | **A Station answers a memory request within.** Seconds a Station has to answer a memory request. |
 | `proposal_ttl` | 3,600 | **A proposal waits.** Seconds a proposal waits for the person's confirmation. |
 | `proposals` | 32 | **Proposals waiting per conversation.** Proposals waiting for the person in one conversation. |
 | `message_bytes` | 16 KiB | **Longest message a person writes.** Bytes of one message the person writes. |
-| `memory_message_bytes` | 1 KiB | **Longest memory commit message.** Bytes of a commit message the person writes for a memory change. |
+| `memory_context_bytes` | 8 KiB | **Memory summaries in her context.** Bytes of her memory's summaries in a new harness's context; the job's context bound applies as well, and she can search for what does not fit. |
 | `change_message_chars` | 200 | **Longest shared change message.** Characters of the one-line message of a shared change she proposes. |
 | `recap_bytes` | 8 KiB | **Longest recap.** Bytes of the recap a conversation's new harness starts with. |
 | `ready_entries` | 100 | **Entries sent when a conversation opens.** Entries the app is sent when it opens a conversation. |

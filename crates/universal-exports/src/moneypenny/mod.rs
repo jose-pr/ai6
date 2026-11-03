@@ -8,9 +8,10 @@
 //! who is chatting, through the same routes and authorization as the app.
 //!
 //! When the roster's `[assistant]` gives people personal repositories, each message names the
-//! person's workspace (their repository, their groups' shared ones, their name for commits).
-//! A memory change the Station sets aside is committed at once, its diff shown in the chat; a
+//! person's workspace (their repository, their groups' shared ones, their name for commits). A
 //! change to a shared repository is a proposal unless the group's repository is `write = true`.
+//! Her memory of the person needs none of it: rows in the Registry, read and written here
+//! ([`memory`]), with the newest summaries in the context of each new harness.
 //!
 //! A conversation is never marked for what she read: her gate is the person's confirmation, and
 //! exposure is for a Mission's Session. Tool results stay framed in `<ai6-data>`, which tells her
@@ -51,9 +52,9 @@ use std::time::{Duration, Instant};
 use ai6::{
     AssistantChange, AssistantCommit, AssistantEvent, AssistantGatewayLimits, AssistantJob,
     AssistantLimits, AssistantReach, AssistantReport, AssistantSettings, AssistantWorkspace,
-    COMMIT_MEMORY, COMMIT_SHARED, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT,
-    EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
-    EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, Limit, Seconds,
+    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
+    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT,
+    EVENT_TOOL, Limit, Seconds,
 };
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
@@ -138,7 +139,7 @@ impl AssistantConfig {
         }
     }
 
-    /// Holds jobs, reports and memory requests to `limits` (`[assistant.limits]`), as the
+    /// Holds jobs and reports to `limits` (`[assistant.limits]`), as the
     /// Stations do.
     ///
     /// # Errors
@@ -154,8 +155,7 @@ impl AssistantConfig {
     }
 
     /// Keeps her conversations within `limits` (`[assistant.gateway]`): how many are kept and
-    /// for how long, how much each holds, how many run at once, her tokens, proposals,
-    /// memory requests and tools.
+    /// for how long, how much each holds, how many run at once, her tokens, proposals and tools.
     ///
     /// # Errors
     ///
@@ -180,16 +180,6 @@ impl AssistantConfig {
         self.cable_body_bytes = body_bytes;
         self.cable_default_ttl = default_ttl;
         self
-    }
-
-    /// `[assistant.limits]` as the gateway holds jobs and reports to them.
-    pub(crate) fn limits(&self) -> &AssistantLimits {
-        &self.limits
-    }
-
-    /// `[assistant.gateway]`.
-    pub(crate) fn gateway(&self) -> &AssistantGatewayLimits {
-        &self.gateway
     }
 
     fn bounds(&self) -> Bounds {
@@ -240,11 +230,6 @@ struct Desk {
     /// Confirmed Cables waiting for their Station, by control job ID: the conversation, the
     /// proposal and when they are given up, Unix seconds.
     cable_deadlines: HashMap<String, (String, String, f64)>,
-    /// Memory requests waiting for their Station's answer, by job ID: the Station given the
-    /// job, and where its answer goes.
-    memory: HashMap<String, (String, tokio::sync::oneshot::Sender<AssistantReport>)>,
-    /// Memory requests waiting for a Station, by the signed-in person who made them.
-    memory_waiting: HashMap<String, usize>,
 }
 
 /// What a control job asks of a Station.
@@ -252,8 +237,8 @@ struct Desk {
 enum Control {
     Close,
     Interrupt,
-    /// A commit: a memory change or a shared change, the proposal it carries out when the
-    /// person confirmed one, and what it is, for the note that tells her how it went.
+    /// A commit of a shared change, the proposal it carries out when the person confirmed one, and
+    /// what it is, for the note that tells her how it went.
     Commit {
         proposal: Option<String>,
         what: String,
@@ -292,7 +277,6 @@ fn control_job(
         cables: Vec::new(),
         cable_confirm: None,
         cable_discard: None,
-        memory: None,
         reach: AssistantReach::default(),
         skills: Vec::new(),
         // A control starts no harness, so it carries no reach, skills or groups.
@@ -444,16 +428,6 @@ const ASSISTANT_AUDIT_RESOURCE: &str = "config:assistant";
 /// The commit trailer naming Moneypenny and the conversation.
 fn trailer(conversation_id: &str) -> String {
     format!("Via: Moneypenny (conversation {conversation_id})")
-}
-
-/// The paths of a change, for a summary.
-fn paths(change: &AssistantChange) -> String {
-    change
-        .files
-        .keys()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// Moneypenny's state in one gateway.
@@ -634,6 +608,7 @@ impl Assistant {
         let skills = settings.skills_for(&person.id, &person.groups);
         // Read again for every message, so a permission removed reaches her next turn.
         let cables = cables::grants(gateway, &person, self.config.limits.cable_grants).await;
+        let remembered = memory::starting_headers(gateway, &person).await;
         {
             let mut desk = self.desk();
             let conversation = desk
@@ -677,8 +652,33 @@ impl Assistant {
                 .store
                 .owned(conversation_id, person_id)
                 .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
-            let context = guide::context();
+            let mut context = guide::context();
             let recap = recap(conversation, &self.config);
+            // What is left of the job's bound takes her memory's summaries; she searches for more.
+            let used = context.iter().map(String::len).sum::<usize>()
+                + recap.as_ref().map_or(0, String::len);
+            let room = match self.config.limits.context_bytes.get() {
+                Some(bound) => bound
+                    .saturating_sub(u64::try_from(used).unwrap_or(u64::MAX))
+                    .min(
+                        self.config
+                            .gateway
+                            .memory_context_bytes
+                            .get()
+                            .unwrap_or(u64::MAX),
+                    ),
+                None => self
+                    .config
+                    .gateway
+                    .memory_context_bytes
+                    .get()
+                    .unwrap_or(u64::MAX),
+            };
+            context.extend(memory::starting_summaries(
+                &remembered,
+                Limit::at(room),
+                self.config.gateway.result_chars,
+            ));
             let mut parts = std::mem::take(&mut conversation.notes);
             parts.push(message.to_owned());
             let job = AssistantJob {
@@ -704,13 +704,11 @@ impl Assistant {
                 cables,
                 cable_confirm: None,
                 cable_discard: None,
-                memory: None,
                 reach,
                 skills,
                 // The person's directory groups, so the Station applies its per-group narrowing.
                 groups: Some(person.groups.clone()),
             };
-            conversation.workspace = job.workspace.clone();
             // A new turn: proposals made from here rest on what she reads from here.
             conversation.turn_reads.clear();
             if let Some(text) = shown {
@@ -927,7 +925,6 @@ impl Assistant {
         }
         let max_entries = self.config.bounds();
         let mut refused = false;
-        let mut notify = false;
         let mut based = false;
         let mut after = cables::After::default();
         'locked: {
@@ -1053,7 +1050,6 @@ impl Assistant {
                 conversation.session_id = Some(session_id);
                 conversation.route = report.route.clone();
             }
-            let mut set_aside = Vec::new();
             for event in report
                 .events
                 .iter()
@@ -1063,11 +1059,8 @@ impl Assistant {
                     conversation.keep_shared_bases(&event.shared, self.config.limits.shared_bases);
                     based = true;
                 }
-                match (&event.change, event.kind.as_str()) {
-                    (Some(change), EVENT_MEMORY_CHANGES) => {
-                        set_aside.push((change.clone(), event.text.clone().unwrap_or_default()));
-                    }
-                    (_, EVENT_CABLE_PROPOSAL | EVENT_CABLE_SENT) => cables::apply(
+                match event.kind.as_str() {
+                    EVENT_CABLE_PROPOSAL | EVENT_CABLE_SENT => cables::apply(
                         conversation,
                         event,
                         &report.station_id,
@@ -1078,15 +1071,6 @@ impl Assistant {
                     _ => apply(conversation, event, max_entries),
                 }
             }
-            for (change, diff) in set_aside {
-                notify |= self.memory_change(
-                    &mut desk,
-                    &report.conversation_id,
-                    &report.station_id,
-                    change,
-                    &diff,
-                );
-            }
             if let Some(conversation) = desk.store.conversations.get(&report.conversation_id) {
                 let person = conversation.person_id.clone();
                 desk.store
@@ -1094,9 +1078,6 @@ impl Assistant {
             }
         }
         self.follow_up(gateway, after).await;
-        if notify {
-            self.ready.notify_waiters();
-        }
         if based {
             self.based.notify_waiters();
         }
@@ -1104,71 +1085,6 @@ impl Assistant {
             self.place(gateway, &report.conversation_id).await;
         }
         Ok(())
-    }
-
-    /// Handles a memory change a Station set aside for `conversation_id`: `station` is asked to
-    /// commit it at once, and the person sees the diff. The commit is refused when a file it
-    /// changes moved on `main` since she read it. Answers whether a job was queued.
-    fn memory_change(
-        &self,
-        desk: &mut Desk,
-        conversation_id: &str,
-        station: &str,
-        change: AssistantChange,
-        diff: &str,
-    ) -> bool {
-        let bounds = self.config.bounds();
-        let Some(conversation) = desk.store.conversations.get_mut(conversation_id) else {
-            return false;
-        };
-        let Some(workspace) = conversation.workspace.clone() else {
-            return false;
-        };
-        if let Err(reason) = change.validate(true, &self.config.limits) {
-            conversation.push(
-                Entry {
-                    role: Role::Error,
-                    text: format!("Moneypenny's memory change was refused: {reason}."),
-                    at: now(),
-                    data: None,
-                },
-                bounds,
-            );
-            return false;
-        }
-        let paths = paths(&change);
-        let commit = AssistantCommit {
-            kind: COMMIT_MEMORY.to_owned(),
-            repo: workspace.personal.clone(),
-            group: None,
-            change,
-            message: format!(
-                "moneypenny: remember {paths}\n\n{}",
-                trailer(conversation_id)
-            ),
-            author_name: workspace.author_name.clone(),
-            author_email: workspace.author_email.clone(),
-        };
-        conversation.push(
-            Entry {
-                role: Role::Notice,
-                text: format!("Moneypenny is saving to her memory: {paths}."),
-                at: now(),
-                data: Some(json!({"diff": diff})),
-            },
-            bounds,
-        );
-        desk.queue_commit(
-            conversation_id,
-            &self.config.agent_id,
-            station.to_owned(),
-            (commit, None),
-            Control::Commit {
-                proposal: None,
-                what: format!("Saving {paths} to Moneypenny's memory"),
-            },
-        );
-        true
     }
 
     /// The conversation `token` serves, its person and the person's access token, while the
@@ -1391,8 +1307,8 @@ impl Assistant {
         let mut desk = self.desk();
         match sent {
             Ok(station) => {
-                // A shared commit is checked against the person's groups as they are now.
-                let groups = commit.group.is_some().then(|| person.groups.clone());
+                // Checked against the person's groups as they are now.
+                let groups = Some(person.groups.clone());
                 desk.queue_commit(
                     conversation_id,
                     &self.config.agent_id,
@@ -1498,9 +1414,8 @@ impl Assistant {
         };
         let (author_name, author_email) = author_of(&person, self.config.gateway.author_chars);
         let commit = AssistantCommit {
-            kind: COMMIT_SHARED.to_owned(),
             repo: shared.repo().to_owned(),
-            group: Some(group.to_owned()),
+            group: group.to_owned(),
             change: AssistantChange::based(
                 std::collections::BTreeMap::from([(path.to_owned(), Some(content.to_owned()))]),
                 std::collections::BTreeMap::from([(path.to_owned(), base)]),
@@ -2593,11 +2508,6 @@ pub(crate) async fn reports(
     let Some(assistant) = gateway.assistant.clone() else {
         return Err(ApiError::not_found());
     };
-    match assistant.answer_memory(&report) {
-        Some(Ok(())) => return Ok(StatusCode::NO_CONTENT),
-        Some(Err(_)) => return Err(ApiError::forbidden()),
-        None => {}
-    }
     match assistant.report(&gateway, report).await {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(StatusCode::NOT_FOUND) => Err(ApiError::not_found()),

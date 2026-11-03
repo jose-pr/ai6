@@ -2316,8 +2316,8 @@
             "null"
           ],
           "title": "Personal repository",
-          "description": "Where each person's memory and work is kept: a repository address with {person} or {person_digest} in it. Leave it empty to keep nothing. Default: none.",
-          "x-section": "memory"
+          "description": "Where each person's work is kept: a repository address with {person} or {person_digest} in it. Leave it empty to keep none. Default: none.",
+          "x-section": "work"
         },
         "shared": {
           "type": "object",
@@ -2343,7 +2343,7 @@
           },
           "title": "Repositories teams share",
           "description": "A repository a directory group shares with her, by group name.",
-          "x-section": "memory",
+          "x-section": "work",
           "x-advanced": true,
           "default": {}
         },
@@ -2371,7 +2371,7 @@
           ],
           "title": "Repository everyone shares",
           "description": "A repository everyone shares with her. Default: none.",
-          "x-section": "memory",
+          "x-section": "work",
           "x-advanced": true
         },
         "allow_elevated": {
@@ -2990,7 +2990,7 @@
               ],
               "format": "bytes",
               "title": "Longest reported event",
-              "description": "Bytes of one reported event's text; longer text is cut, and a memory change whose diff is longer is not kept.",
+              "description": "Bytes of one reported event's text; longer text is cut.",
               "default": 65536
             },
             "events": {
@@ -3030,8 +3030,8 @@
                 }
               ],
               "format": "bytes",
-              "title": "File content in one memory change",
-              "description": "Bytes of file content in one memory change, commit, memory write or memory read.",
+              "title": "File content in one commit",
+              "description": "Bytes of file content in one commit.",
               "default": 65536
             },
             "change_files": {
@@ -3050,8 +3050,8 @@
                   }
                 }
               ],
-              "title": "Files in one memory change",
-              "description": "Files in one memory change or commit.",
+              "title": "Files in one commit",
+              "description": "Files in one commit.",
               "default": 32
             },
             "commit_message_bytes": {
@@ -3095,47 +3095,6 @@
               "description": "Shared-change bases one event carries, and Universal Exports keeps for one conversation until their calls arrive.",
               "default": 32
             },
-            "memory_list_files": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "title": "Files in a memory listing",
-              "description": "Files one memory listing names.",
-              "default": 1000
-            },
-            "memory_list_bytes": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "format": "bytes",
-              "title": "Paths in a memory listing",
-              "description": "Bytes of paths one memory listing names.",
-              "default": 131072
-            },
             "skills": {
               "anyOf": [
                 {
@@ -3156,90 +3115,7 @@
               "description": "Skills one job gives her.",
               "default": 64
             },
-            "inlined_memory_bytes": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "format": "bytes",
-              "title": "MEMORY.md in her context",
-              "description": "Bytes of MEMORY.md inlined into her standing context.",
-              "default": 32768
-            },
-            "memory_file_bytes": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "format": "bytes",
-              "title": "Longest memory file read",
-              "description": "Bytes of one memory file the desk reads; a longer file is read to this length.",
-              "default": 262144
-            },
-            "memory_files": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "title": "Memory files read per turn",
-              "description": "Memory files the desk reads at a turn's edge.",
-              "default": 1024
-            },
-            "memory_bytes": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "format": "bytes",
-              "title": "All memory read per turn",
-              "description": "Bytes over all the memory files the desk reads at a turn's edge.",
-              "default": 8388608
-            },
-            "memory_walk": {
+            "personal_walk": {
               "anyOf": [
                 {
                   "type": "integer",
@@ -3323,8 +3199,8 @@
             }
           },
           "additionalProperties": false,
-          "title": "Messages and memory",
-          "description": "What passes between Universal Exports and a Station for her, and how much of her memory a Station reads.",
+          "title": "Messages",
+          "description": "What passes between Universal Exports and a Station for her.",
           "x-section": "limits",
           "x-advanced": true,
           "default": {
@@ -3337,14 +3213,8 @@
             "change_files": 32,
             "commit_message_bytes": 4096,
             "shared_bases": 32,
-            "memory_list_files": 1000,
-            "memory_list_bytes": 131072,
             "skills": 64,
-            "inlined_memory_bytes": 32768,
-            "memory_file_bytes": 262144,
-            "memory_files": 1024,
-            "memory_bytes": 8388608,
-            "memory_walk": 10000,
+            "personal_walk": 10000,
             "page_file_bytes": 8388608,
             "page_files": 200,
             "page_bytes": 16777216
@@ -3484,26 +3354,6 @@
               "description": "Seconds between tries of a report that did not reach Universal Exports.",
               "default": 0.2
             },
-            "parked": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "title": "Memory changes kept undelivered",
-              "description": "Memory changes kept on the Station because they could not be delivered; past it the oldest is dropped.",
-              "default": 64
-            },
             "known": {
               "anyOf": [
                 {
@@ -3561,7 +3411,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Longest clone",
-              "description": "Seconds a clone of one of her repositories may take; a memory request's clone also stops at its deadline.",
+              "description": "Seconds a clone of one of her repositories may take.",
               "default": 120.0
             },
             "clone_bytes": {
@@ -3605,26 +3455,6 @@
               "title": "Largest save of her work",
               "description": "Bytes one save of her work in her personal folder may commit; past it nothing is saved and she is told.",
               "default": 16777216
-            },
-            "memory_requests": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "title": "Memory requests at once",
-              "description": "The app's memory requests a Station makes at once; past it the next is refused.",
-              "default": 4
             },
             "held_cables": {
               "anyOf": [
@@ -3693,7 +3523,6 @@
             "report_queue": 256,
             "report_attempts": 3,
             "report_retry": 0.2,
-            "parked": 64,
             "known": 1024,
             "close_wait": 10.0,
             "limit_fallback": 1800.0,
@@ -3702,7 +3531,6 @@
             "clone_timeout": 120.0,
             "clone_bytes": 536870912,
             "save_bytes": 16777216,
-            "memory_requests": 4,
             "held_cables": 32,
             "held_cable_ttl": 3600.0,
             "page_upload_timeout": 60.0
@@ -3875,46 +3703,6 @@
               "description": "Tool calls one conversation makes in a minute.",
               "default": 120
             },
-            "memory_requests_per_person": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "title": "Memory requests waiting per person",
-              "description": "The app's memory requests waiting for a Station for one person; `429` past it.",
-              "default": 2
-            },
-            "memory_requests": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "none"
-                  ],
-                  "x-enum-labels": {
-                    "none": "No limit"
-                  }
-                }
-              ],
-              "title": "Memory requests waiting in all",
-              "description": "The app's memory requests waiting for a Station in all.",
-              "default": 16
-            },
             "token_ttl": {
               "type": "number",
               "minimum": 0,
@@ -3946,14 +3734,6 @@
               "title": "Give up on a silent answer after",
               "description": "Seconds an accepted message may go without word from its Station before it is given up.",
               "default": 600.0
-            },
-            "memory_timeout": {
-              "type": "number",
-              "minimum": 0,
-              "format": "seconds",
-              "title": "A Station answers a memory request within",
-              "description": "Seconds a Station has to answer a memory request.",
-              "default": 30.0
             },
             "proposal_ttl": {
               "type": "number",
@@ -4004,7 +3784,7 @@
               "description": "Bytes of one message the person writes.",
               "default": 16384
             },
-            "memory_message_bytes": {
+            "memory_context_bytes": {
               "anyOf": [
                 {
                   "type": "integer",
@@ -4021,9 +3801,9 @@
                 }
               ],
               "format": "bytes",
-              "title": "Longest memory commit message",
-              "description": "Bytes of a commit message the person writes for a memory change.",
-              "default": 1024
+              "title": "Memory summaries in her context",
+              "description": "Bytes of her memory's summaries in a new harness's context; the job's context bound applies as well, and she can search for what does not fit.",
+              "default": 8192
             },
             "change_message_chars": {
               "anyOf": [
@@ -4285,17 +4065,14 @@
             "person_bytes": 4194304,
             "live_per_person": 2,
             "tool_calls_per_minute": 120,
-            "memory_requests_per_person": 2,
-            "memory_requests": 16,
             "token_ttl": 3600.0,
             "token_reuse_margin": 600.0,
             "answer_timeout": 60.0,
             "answer_deadline": 600.0,
-            "memory_timeout": 30.0,
             "proposal_ttl": 3600.0,
             "proposals": 32,
             "message_bytes": 16384,
-            "memory_message_bytes": 1024,
+            "memory_context_bytes": 8192,
             "change_message_chars": 200,
             "recap_bytes": 8192,
             "ready_entries": 100,
@@ -4657,8 +4434,8 @@
     "form": {
       "sections": [
         {
-          "id": "memory",
-          "title": "Memory and shared work",
+          "id": "work",
+          "title": "Work and shared work",
           "description": "Where she keeps each person's work, and what teams share with her."
         },
         {

@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 
-use ai6::{AssistantJob, AssistantSharedBase, AssistantWorkspace};
+use ai6::{AssistantJob, AssistantSharedBase};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -104,8 +104,6 @@ pub(crate) struct Conversation {
     /// The read tools called since the person's last message, oldest first, at most
     /// `[assistant.gateway] proposal_reads`: what a proposal made now is based on.
     pub(crate) turn_reads: Vec<ReadCall>,
-    /// The workspace the last job named, for the commits its reports lead to.
-    pub(crate) workspace: Option<AssistantWorkspace>,
     /// What the Station running the harness reported each shared change call was made from,
     /// oldest first, until the call takes it; at most `[assistant.limits] shared_bases`.
     pub(crate) shared_bases: VecDeque<AssistantSharedBase>,
@@ -180,7 +178,6 @@ impl Conversation {
             token: None,
             bytes: 0,
             turn_reads: Vec::new(),
-            workspace: None,
             shared_bases: VecDeque::new(),
             cut_off: None,
         }

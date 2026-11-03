@@ -19,7 +19,8 @@ use crate::Gateway;
 /// The arguments of a read tool call that are identifiers, by name: only these are kept of
 /// what she read, never free text (`text`, `reason` and the like).
 pub(crate) fn identifiers(input: &Value) -> std::collections::BTreeMap<String, String> {
-    const NAMES: [&str; 6] = [
+    const NAMES: [&str; 7] = [
+        "id",
         "operation_id",
         "mission_id",
         "station_id",

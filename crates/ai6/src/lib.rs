@@ -228,11 +228,10 @@ pub use directorates::section_00::assistant::{
     ASSISTANT_PUBLISH_PAGE_TOOL, ASSISTANT_SHARED_CHANGE_TOOL, AssistantCable,
     AssistantCableDecision, AssistantCableGrant, AssistantChange, AssistantCommit, AssistantEvent,
     AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantSharedBase,
-    AssistantWorkspace, COMMIT_MEMORY, COMMIT_SHARED, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL,
-    EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
-    EVENT_MEMORY_CHANGES, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, MemoryAction,
-    MemoryAnswer, MemoryCommit, MemoryFile, MemoryOp, SCRIPT_ENVIRONMENT, credential_dir_var,
-    host_pattern, interpreter_name, memory_path, page_call_digest,
+    AssistantWorkspace, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED,
+    EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE, EVENT_REJECTED,
+    EVENT_TEXT, EVENT_TOOL, SCRIPT_ENVIRONMENT, credential_dir_var, host_pattern, interpreter_name,
+    page_call_digest,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

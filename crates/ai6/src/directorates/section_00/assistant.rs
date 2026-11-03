@@ -6,9 +6,7 @@
 //! authenticated by a token bound to the person and the conversation, and every tool runs as
 //! that person. The Station takes [`AssistantJob`]s from Universal Exports (one per message
 //! the person sends), hands the harness the endpoint's URL and token in its environment, and
-//! reports what the harness says as [`AssistantReport`]s. A job may instead carry a
-//! [`MemoryOp`]: the person reading or changing her memory of them from the app, which the
-//! Station makes in a clone of the person's repository without any harness.
+//! reports what the harness says as [`AssistantReport`]s.
 //!
 //! [`AgentStart::assistant`]: super::agent::AgentStart::assistant
 
@@ -351,11 +349,6 @@ pub const EVENT_INTERRUPTED: &str = "interrupted";
 /// The Station closed the conversation's harness (idle, closed by request, or stopping). The
 /// provider Session can be resumed by a later job.
 pub const EVENT_CLOSED: &str = "closed";
-/// The assistant changed her memory (`memory/` of the personal repository) in a turn: the
-/// change was set aside, `text` is its unified diff and [`AssistantEvent::change`] the files.
-/// Universal Exports answers with an [`AssistantCommit`] of [`COMMIT_MEMORY`], or a proposal
-/// first.
-pub const EVENT_MEMORY_CHANGES: &str = "memory_changes";
 /// Something the person and the assistant should know about her workspace, in `text`: work
 /// saved to a branch of its own because `main` refused it, or a repository that could not be
 /// opened.
@@ -366,10 +359,6 @@ pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal";
 /// A Cable left on the person's behalf; [`AssistantEvent::cable`] says which.
 pub const EVENT_CABLE_SENT: &str = "cable_sent";
 
-/// An [`AssistantCommit`] to the personal repository's `memory/`.
-pub const COMMIT_MEMORY: &str = "memory";
-/// An [`AssistantCommit`] to a shared repository.
-pub const COMMIT_SHARED: &str = "shared";
 /// Moneypenny's tool that changes one file of a shared repository, as Universal Exports
 /// serves it; Claude Code calls it `mcp__moneypenny__propose_shared_change`.
 pub const ASSISTANT_SHARED_CHANGE_TOOL: &str = "propose_shared_change";
@@ -406,7 +395,7 @@ pub fn page_call_digest(path: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantWorkspace {
-    /// The person's personal repository: her working directory and memory for them.
+    /// The person's personal repository: her working directory for them.
     pub personal: String,
     /// The shared repositories the person reads, by the name each is checked out under (a
     /// directory group, or `org`).
@@ -418,8 +407,8 @@ pub struct AssistantWorkspace {
     pub author_email: String,
 }
 
-/// A memory change the desk set aside, or the files of a commit: each path, relative to the
-/// repository, with its new text, or `None` to remove it.
+/// The files of a commit: each path, relative to the repository, with its new text, or `None` to
+/// remove it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantChange {
@@ -494,12 +483,12 @@ impl AssistantChange {
 
     /// Checks the change: at most `limits.change_files` files and `limits.change_bytes` of
     /// text, each path one to eight `/`-separated names of letters, digits, `.`, `-` and `_`
-    /// not starting with `.`, under `memory/` when `memory`, and the digest matching.
+    /// not starting with `.`, and the digest matching.
     ///
     /// # Errors
     ///
     /// A message naming what is out of bounds.
-    pub fn validate(&self, memory: bool, limits: &AssistantLimits) -> Result<(), String> {
+    pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String> {
         if self.files.is_empty() || !limits.change_files.allows(self.files.len()) {
             return Err(format!("a change has 1 to {} files", limits.change_files));
         }
@@ -511,7 +500,7 @@ impl AssistantChange {
             ));
         }
         for path in self.files.keys() {
-            if !repository_path(path) || (memory && !path.starts_with("memory/")) {
+            if !repository_path(path) {
                 return Err(format!("{path:?} is not a file this change may write"));
             }
         }
@@ -535,21 +524,18 @@ pub fn repository_path(path: &str) -> bool {
     names.len() <= 8 && names.iter().all(|name| file_safe(name))
 }
 
-/// A commit Universal Exports asks a Station to make for a person: a memory change she made
-/// and the person let through, or a change to a shared repository.
+/// A commit Universal Exports asks a Station to make for a person: a change to a shared
+/// repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantCommit {
-    /// [`COMMIT_MEMORY`] or [`COMMIT_SHARED`].
-    pub kind: String,
-    /// The repository: the person's personal repository, or a shared one.
+    /// The shared repository.
     pub repo: String,
-    /// For a [`COMMIT_SHARED`] commit, the directory group whose repository it is, or
+    /// The directory group whose repository it is, or
     /// [`ORG_SHARED`](crate::directorates::m::assistant::ORG_SHARED); the job carrying it names
     /// the person's groups, so a Station checks the repository is that group's and the person
-    /// a member. `None` for a memory commit.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group: Option<String>,
+    /// a member.
+    pub group: String,
     /// What to write.
     pub change: AssistantChange,
     /// The commit message, its trailer included.
@@ -561,8 +547,7 @@ pub struct AssistantCommit {
 }
 
 impl AssistantCommit {
-    /// Checks the commit: a known kind, a group name (`file_safe`) for a shared commit and none
-    /// for a memory one, a repository of a known kind, the change as
+    /// Checks the commit: a group name (`file_safe`), a repository of a known kind, the change as
     /// [`AssistantChange::validate`] checks it, a message of 1 to `limits.commit_message_bytes`
     /// bytes and an author without control characters or `<`, `>`.
     ///
@@ -570,21 +555,11 @@ impl AssistantCommit {
     ///
     /// A message naming what is out of bounds.
     pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String> {
-        let memory = match self.kind.as_str() {
-            COMMIT_MEMORY => true,
-            COMMIT_SHARED => false,
-            other => return Err(format!("{other:?} is not a kind of commit")),
-        };
-        match (&self.group, memory) {
-            (None, true) => {}
-            (Some(group), false) if crate::directorates::m::assistant::file_safe(group) => {}
-            (Some(_), true) => return Err("a memory commit names no group".to_owned()),
-            (_, false) => {
-                return Err("a shared commit names the group whose repository it is".to_owned());
-            }
+        if !crate::directorates::m::assistant::file_safe(&self.group) {
+            return Err("a commit names the group whose repository it is".to_owned());
         }
         RepoKind::of(&self.repo)?;
-        self.change.validate(memory, limits)?;
+        self.change.validate(limits)?;
         commit_message(&self.message, limits)?;
         author(&self.author_name, &self.author_email)
     }
@@ -609,156 +584,6 @@ fn author(name: &str, email: &str) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// A look at, or a change to, the person's memory (`memory/` of their personal repository)
-/// that Universal Exports asks a Station to make for the person, from the app. The Station
-/// works in a clone of its own, which goes afterwards, and answers with a [`MemoryAnswer`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MemoryOp {
-    /// The person's personal repository; the Station takes only the one its own roster gives
-    /// the job's `person_id`.
-    pub repo: String,
-    /// What to do.
-    pub action: MemoryAction,
-}
-
-/// What a [`MemoryOp`] does. Every path is relative to the repository and under `memory/`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum MemoryAction {
-    /// Lists the files under `memory/` with their sizes.
-    List {},
-    /// Reads one file's text.
-    Read {
-        /// The file.
-        path: String,
-    },
-    /// Writes one file and commits it to `main`.
-    Write {
-        /// The file.
-        path: String,
-        /// Its new text.
-        text: String,
-        /// The hex SHA-256 of what the file must hold on `main` for the write to go ahead, as
-        /// [`MemoryAnswer::digest`] of a read gave it; `None` writes whatever it holds.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        base: Option<String>,
-        /// The commit to make.
-        commit: MemoryCommit,
-    },
-    /// Removes one file and commits the removal to `main`: "forget".
-    Forget {
-        /// The file.
-        path: String,
-        /// The commit to make.
-        commit: MemoryCommit,
-    },
-}
-
-/// The commit a [`MemoryAction::Write`] or [`MemoryAction::Forget`] makes: authored and
-/// committed by the person.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MemoryCommit {
-    /// The commit message, its trailer included.
-    pub message: String,
-    /// The author name: the person's.
-    pub author_name: String,
-    /// The author email: the person's.
-    pub author_email: String,
-}
-
-/// A Station's answer to a [`MemoryOp`], on the job's `accepted` or `rejected` event.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MemoryAnswer {
-    /// The commit `main` was read at, or the one a change made; `None` for a repository with
-    /// no commit yet.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub commit: Option<String>,
-    /// The files a listing found, by path relative to the repository, in path order; at most
-    /// [`AssistantLimits::memory_list_files`] and [`AssistantLimits::memory_list_bytes`] of
-    /// paths.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub files: Vec<MemoryFile>,
-    /// The listing found more files than it names.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub more: bool,
-    /// The text a read found.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    /// The hex SHA-256 of the text read or written: the `base` of a later write.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
-    /// Refused: the file is not there.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub missing: bool,
-    /// Refused: the file no longer holds the write's `base`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub changed: bool,
-}
-
-/// One file of a memory listing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MemoryFile {
-    /// The path, relative to the repository.
-    pub path: String,
-    /// Its size in bytes.
-    pub bytes: u64,
-}
-
-/// Whether `path` names a file of the person's memory: a [`repository_path`] under `memory/`.
-pub fn memory_path(path: &str) -> bool {
-    path.strip_prefix("memory/")
-        .is_some_and(|rest| !rest.is_empty() && repository_path(path))
-}
-
-impl MemoryOp {
-    /// Checks the operation: a repository of a known kind, paths as [`memory_path`] wants
-    /// them, text within `limits.change_bytes`, a base of 64 hex digits, and a commit as
-    /// [`AssistantCommit::validate`] wants its message and author.
-    ///
-    /// # Errors
-    ///
-    /// A message naming what is out of bounds.
-    pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String> {
-        RepoKind::of(&self.repo)?;
-        let (path, commit) = match &self.action {
-            MemoryAction::List {} => return Ok(()),
-            MemoryAction::Read { path } => (path, None),
-            MemoryAction::Write {
-                path,
-                text,
-                base,
-                commit,
-            } => {
-                if !limits.change_bytes.allows(text.len()) {
-                    return Err(format!(
-                        "a memory file holds at most {} bytes of text",
-                        limits.change_bytes
-                    ));
-                }
-                if base.as_ref().is_some_and(|base| {
-                    base.len() != 64 || !base.bytes().all(|b| b.is_ascii_hexdigit())
-                }) {
-                    return Err("a write's base is not a SHA-256 in hex".to_owned());
-                }
-                (path, Some(commit))
-            }
-            MemoryAction::Forget { path, commit } => (path, Some(commit)),
-        };
-        if !memory_path(path) {
-            return Err(format!("{path:?} is not a file of the person's memory"));
-        }
-        if let Some(commit) = commit {
-            commit_message(&commit.message, limits)?;
-            author(&commit.author_name, &commit.author_email)?;
-        }
-        Ok(())
-    }
 }
 
 impl AssistantWorkspace {
@@ -847,11 +672,6 @@ pub struct AssistantJob {
     /// Drop the Cable held for the person's confirmation; `message` is empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cable_discard: Option<AssistantCableDecision>,
-    /// Look at or change the person's memory instead of sending a message; `message` is
-    /// empty, and no harness is involved. The Station answers with a [`MemoryAnswer`] on its
-    /// `accepted` or `rejected` event. Requires `person_id`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory: Option<MemoryOp>,
     /// What the harness may run and reach for this person; the Station caps it by its own
     /// roster's `[assistant]` and never widens it. The default runs and reaches nothing.
     #[serde(default)]
@@ -921,9 +741,9 @@ pub struct AssistantCable {
 impl AssistantJob {
     /// Checks the job's bounds: identities of 1 to 256 bytes without control characters, a
     /// message within `limits.message_bytes` (empty only to close, interrupt, commit, confirm
-    /// or discard a held Cable, or look at or change the person's memory, of which a job does
-    /// one), context and recap within `limits.context_bytes`, a token of 32 to 512 bytes, a
-    /// workspace, commit and memory operation as their own `validate` checks them, Cable grants
+    /// or discard a held Cable, of which a job does one), context and recap within
+    /// `limits.context_bytes`, a token of 32 to 512 bytes, a workspace and commit as their own
+    /// `validate` checks them, Cable grants
     /// for at most `limits.cable_grants` distinct Operations, with the person they are for,
     /// and at most `limits.skills` distinct skill names.
     ///
@@ -965,12 +785,10 @@ impl AssistantJob {
             self.commit.is_some(),
             self.cable_confirm.is_some(),
             self.cable_discard.is_some(),
-            self.memory.is_some(),
         ];
         if controls.iter().filter(|set| **set).count() > 1 {
             return Err(
-                "a job closes, interrupts, commits, confirms or discards a Cable, or looks at \
-                 or changes the person's memory, only one"
+                "a job closes, interrupts, commits, or confirms or discards a Cable, only one"
                     .to_owned(),
             );
         }
@@ -987,15 +805,11 @@ impl AssistantJob {
         }
         if (self.workspace.is_some()
             || self.commit.is_some()
-            || self.memory.is_some()
             || !self.cables.is_empty()
             || self.groups.is_some())
             && self.person_id.is_none()
         {
-            return Err(
-                "a workspace, a commit, a memory operation, Cable grants or groups need person_id"
-                    .to_owned(),
-            );
+            return Err("a workspace, a commit, Cable grants or groups need person_id".to_owned());
         }
         for group in self.groups.iter().flatten() {
             if !valid_identity(group) {
@@ -1041,11 +855,6 @@ impl AssistantJob {
                 .validate(limits)
                 .map_err(|reason| format!("commit: {reason}"))?;
         }
-        if let Some(memory) = &self.memory {
-            memory
-                .validate(limits)
-                .map_err(|reason| format!("memory: {reason}"))?;
-        }
         self.reach
             .validate()
             .map_err(|reason| format!("reach: {reason}"))?;
@@ -1089,20 +898,11 @@ impl fmt::Debug for AssistantJob {
             .field("workspace", &self.workspace.is_some())
             .field(
                 "commit",
-                &self.commit.as_ref().map(|commit| commit.kind.as_str()),
+                &self.commit.as_ref().map(|commit| commit.group.as_str()),
             )
             .field("cables", &self.cables)
             .field("cable_confirm", &self.cable_confirm)
             .field("cable_discard", &self.cable_discard)
-            .field(
-                "memory",
-                &self.memory.as_ref().map(|memory| match &memory.action {
-                    MemoryAction::List {} => "list",
-                    MemoryAction::Read { .. } => "read",
-                    MemoryAction::Write { .. } => "write",
-                    MemoryAction::Forget { .. } => "forget",
-                }),
-            )
             .field("reach", &self.reach)
             .field("skills", &self.skills)
             .field("groups", &self.groups)
@@ -1186,16 +986,9 @@ pub struct AssistantEvent {
     /// The tools a [`EVENT_TOOL`] event called, as the harness names them.
     #[serde(default)]
     pub tools: Vec<String>,
-    /// The memory change an [`EVENT_MEMORY_CHANGES`] event set aside.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub change: Option<AssistantChange>,
     /// The Cable of an [`EVENT_CABLE_PROPOSAL`] or [`EVENT_CABLE_SENT`] event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cable: Option<AssistantCable>,
-    /// The answer to a memory job ([`AssistantJob::memory`]), on its `accepted` or `rejected`
-    /// event.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory: Option<MemoryAnswer>,
     /// What each [`ASSISTANT_SHARED_CHANGE_TOOL`] call of an [`EVENT_TOOL`] event was made
     /// from, at most [`AssistantLimits::shared_bases`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1209,9 +1002,7 @@ impl AssistantEvent {
             kind: kind.to_owned(),
             text,
             tools: Vec::new(),
-            change: None,
             cable: None,
-            memory: None,
             shared: Vec::new(),
         }
     }
@@ -1305,18 +1096,9 @@ mod tests {
             cables: Vec::new(),
             cable_confirm: None,
             cable_discard: None,
-            memory: None,
             reach: AssistantReach::default(),
             skills: Vec::new(),
             groups: None,
-        }
-    }
-
-    fn memory_commit() -> MemoryCommit {
-        MemoryCommit {
-            message: "Edit memory/prefs.md\n\nVia: Universal Exports".to_owned(),
-            author_name: "Eve".to_owned(),
-            author_email: "eve@example.invalid".to_owned(),
         }
     }
 
@@ -1354,102 +1136,6 @@ mod tests {
         let mut bad = reach(&[], "open", &[]);
         bad.network.denied = vec!["lan".to_owned()];
         assert!(bad.validate().is_err());
-    }
-
-    #[test]
-    fn a_memory_job_names_its_person_and_one_file_under_memory() {
-        let op = |action: MemoryAction| AssistantJob {
-            message: String::new(),
-            person_id: Some("eve".to_owned()),
-            memory: Some(MemoryOp {
-                repo: "/srv/mp/eve.git".to_owned(),
-                action,
-            }),
-            ..job()
-        };
-        let write = |path: &str| MemoryAction::Write {
-            path: path.to_owned(),
-            text: "tables".to_owned(),
-            base: None,
-            commit: memory_commit(),
-        };
-        for action in [
-            MemoryAction::List {},
-            MemoryAction::Read {
-                path: "memory/MEMORY.md".to_owned(),
-            },
-            write("memory/people/ana.md"),
-            MemoryAction::Forget {
-                path: "memory/prefs.md".to_owned(),
-                commit: memory_commit(),
-            },
-        ] {
-            let job = op(action);
-            assert_eq!(job.validate(&limits()), Ok(()), "{job:?}");
-            let encoded = serde_json::to_value(&job).unwrap();
-            assert_eq!(
-                serde_json::from_value::<AssistantJob>(encoded).unwrap(),
-                job
-            );
-        }
-        let mut unnamed = op(MemoryAction::List {});
-        unnamed.person_id = None;
-        assert!(unnamed.validate(&limits()).is_err(), "whose memory?");
-        let mut both = op(MemoryAction::List {});
-        both.close = true;
-        assert!(both.validate(&limits()).is_err(), "a job does one thing");
-        for path in [
-            "memory/",
-            "memory",
-            "notes/a.md",
-            "memory/../x.md",
-            "memory/.hidden",
-            "memory/a\\b.md",
-            "memory/a\u{7}.md",
-            "/memory/a.md",
-            "memory//a.md",
-        ] {
-            assert!(op(write(path)).validate(&limits()).is_err(), "{path}");
-        }
-        let large = op(MemoryAction::Write {
-            path: "memory/big.md".to_owned(),
-            text: "x".repeat(64 * 1024 + 1),
-            base: None,
-            commit: memory_commit(),
-        });
-        assert!(large.validate(&limits()).is_err());
-        let based = |base: &str| {
-            op(MemoryAction::Write {
-                path: "memory/a.md".to_owned(),
-                text: String::new(),
-                base: Some(base.to_owned()),
-                commit: memory_commit(),
-            })
-        };
-        assert_eq!(based(&"a".repeat(64)).validate(&limits()), Ok(()));
-        assert!(based("abc").validate(&limits()).is_err());
-        let mut forged = memory_commit();
-        forged.author_email = "eve>@example.invalid".to_owned();
-        assert!(
-            op(MemoryAction::Forget {
-                path: "memory/a.md".to_owned(),
-                commit: forged,
-            })
-            .validate(&limits())
-            .is_err()
-        );
-        let unknown =
-            serde_json::json!({"repo": "/srv/mp/eve.git", "action": {"kind": "list", "x": 1}});
-        assert!(serde_json::from_value::<MemoryOp>(unknown).is_err());
-        let answer = MemoryAnswer {
-            missing: true,
-            ..MemoryAnswer::default()
-        };
-        assert_eq!(
-            serde_json::to_value(&answer).unwrap(),
-            serde_json::json!({"missing": true}),
-            "an answer carries only what it says"
-        );
     }
 
     #[test]
@@ -1573,18 +1259,17 @@ mod tests {
 
     fn change() -> AssistantChange {
         AssistantChange::new(BTreeMap::from([(
-            "memory/prefs.md".to_owned(),
+            "docs/prefs.md".to_owned(),
             Some("tables".to_owned()),
         )]))
     }
 
     fn commit() -> AssistantCommit {
         AssistantCommit {
-            kind: COMMIT_MEMORY.to_owned(),
-            repo: "/srv/mp/eve.git".to_owned(),
-            group: None,
+            repo: "/srv/ops.git".to_owned(),
+            group: "ops".to_owned(),
             change: change(),
-            message: "moneypenny: remember\n\nVia: Moneypenny (conversation c-1)".to_owned(),
+            message: "moneypenny: docs\n\nVia: Moneypenny (conversation c-1)".to_owned(),
             author_name: "Eve".to_owned(),
             author_email: "eve@example.invalid".to_owned(),
         }
@@ -1604,40 +1289,22 @@ mod tests {
         assert!(both.validate(&limits()).is_err(), "a job does one thing");
 
         let mut forged = commit();
-        forged.change.files.insert("memory/x.md".to_owned(), None);
+        forged.change.files.insert("docs/x.md".to_owned(), None);
         assert!(forged.validate(&limits()).unwrap_err().contains("digest"));
-        let mut outside = commit();
-        outside.change = AssistantChange::new(BTreeMap::from([(
-            "notes/a.md".to_owned(),
-            Some("a".to_owned()),
-        )]));
+        let mut ungrouped = commit();
+        ungrouped.group = "../ops".to_owned();
         assert!(
-            outside.validate(&limits()).is_err(),
-            "a memory commit writes memory/ only"
+            ungrouped.validate(&limits()).is_err(),
+            "a commit names its group"
         );
-        outside.kind = COMMIT_SHARED.to_owned();
-        assert!(
-            outside.validate(&limits()).is_err(),
-            "a shared commit names its group"
-        );
-        outside.group = Some("ops".to_owned());
-        assert_eq!(outside.validate(&limits()), Ok(()));
-        let mut grouped = commit();
-        grouped.group = Some("ops".to_owned());
-        assert!(
-            grouped.validate(&limits()).is_err(),
-            "a memory commit names none"
-        );
-        for path in [".git/config", "memory/../x", "/etc/passwd", "a\\b"] {
+        for path in [".git/config", "docs/../x", "/etc/passwd", "a\\b"] {
             let mut bad = commit();
-            bad.kind = COMMIT_SHARED.to_owned();
-            bad.group = Some("ops".to_owned());
             bad.change = AssistantChange::new(BTreeMap::from([(path.to_owned(), None)]));
             assert!(bad.validate(&limits()).is_err(), "{path}");
         }
         let mut large = commit();
         large.change = AssistantChange::new(BTreeMap::from([(
-            "memory/big.md".to_owned(),
+            "docs/big.md".to_owned(),
             Some("x".repeat(64 * 1024 + 1)),
         )]));
         assert!(large.validate(&limits()).is_err());

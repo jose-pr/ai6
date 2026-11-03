@@ -119,7 +119,7 @@ An assistant Session is not a Mission: it has no Operation, and never appears on
 it reaches Agents only through [Cables](#cables), for the person. It works in a directory of
 its own, the same one each time its conversation's harness starts on that Station, because
 Claude Code resumes a Session only from the directory that recorded it; the directory is
-removed when the harness closes. With [personal repositories](#her-workspace-and-memory) the
+removed when the harness closes. With [personal repositories](#her-workspace) the
 directory is her workspace. A
 harness that starts afresh is given her instructions and a recap of the conversation; a
 resumed one only her instructions, which Claude Code uses once the prompt it recorded with
@@ -161,7 +161,7 @@ directories she may write, a context file), and Claude Code gets exactly the bui
 those parts call for: [scripts and the web](#her-scripts-and-the-web) as the roster allows,
 and [skills](#her-skills) from the roster's catalog. Codex gets the tools of
 [its sandbox](#her-scripts-on-codex) with interpreters and none without, and refuses skills. With a
-[workspace](#her-workspace-and-memory), Claude Code also gets its file
+[workspace](#her-workspace), Claude Code also gets its file
 tools (`Read`, `Write`, `Edit`, `Glob`, `Grep`) under `--permission-mode dontAsk`: she may
 read anything in her workspace (`--restricted` keeps the file tools inside it) and write
 only under `personal/` and `scratch/` (`Edit(/personal/**)`, `Edit(/scratch/**)`); every
@@ -250,7 +250,7 @@ Moneypenny changes nothing herself. Her write tools only propose:
 | `propose_access_change` | A role, the rule list or the delegation cap, global or of one Operation | `access.manage` there |
 | `propose_account_change` | An account made, disabled, enabled, given groups or its password reset | `account.manage` |
 | `propose_class_authorization` | A class authorisation | `approval.class` |
-| `propose_shared_change` | One file of a group's shared repository ([workspace](#her-workspace-and-memory)) | membership of the group |
+| `propose_shared_change` | One file of a group's shared repository ([workspace](#her-workspace)) | membership of the group |
 
 A proposal shows in the chat with the exact request, a summary and the permission it needs
 ("Proposal · needs `mission.control` on `operation:G`"), what she had read since your last
@@ -283,11 +283,12 @@ So text she reads cannot act through her: an issue body that tells her to change
 can at most make her propose it, in plain view, to a person who decides. Irreversible steps
 keep [green ink](missions.md#green-ink): she cannot sign it, only point you to the Green ink page.
 
-## Her workspace and memory
+## Her workspace
 
-When the roster gives people personal repositories, Moneypenny keeps her work and her
-memory of each person in that person's own repository, so both outlive the conversation and
-the Station. In the global `agents.toml` of a configuration directory:
+When the roster gives people personal repositories, Moneypenny keeps her work in that person's
+own repository, so it outlives the conversation and the Station. Her
+[memory](#her-memory) needs none of this. In the global `agents.toml` of a configuration
+directory:
 
 ```toml
 [assistant]
@@ -339,37 +340,21 @@ Her workspace on the Station holds:
 | Path | What |
 | --- | --- |
 | `personal/` | A clone of the person's repository on `main`: her working directory for them |
-| `personal/memory/` | Her memory of the person, indexed by `memory/MEMORY.md` (written on first use) |
 | `shared/<group>/`, `shared/org/` | The repositories of the person's directory groups and the organisation's, cloned afresh at each start, read-only for her |
 | `scratch/` | Anything temporary, gone with the workspace |
-| `CLAUDE.md`, `AGENTS.md` | Where things are and how her memory is kept; `CLAUDE.md` imports `@personal/memory/MEMORY.md`, `AGENTS.md` holds it |
+| `CLAUDE.md`, `AGENTS.md` | Where things are |
 
 Claude Code started with `--restricted` does not load a working directory's `CLAUDE.md`, so
-the same text, `MEMORY.md` included (at most 32 KiB), reaches her system prompt through a
-context file beside the workspace.
+the same text reaches her system prompt through a context file beside the workspace.
 
 After each answer, and when her harness closes, the Station saves her work: whatever she
-changed in `personal/` outside `memory/` is committed to `main`, authored by the person (a path
-with a name starting with `.`, such as `.gitattributes`, never is, nor is anything in
-`memory/`; when her memory cannot be put back as it was, nothing is saved), with
+changed in `personal/` is committed to `main`, authored by the person (a path with a name
+starting with `.`, such as `.gitattributes`, never is), with
 the message `moneypenny: update <paths>` and the trailer `Via: Moneypenny (conversation
 <id>)`. If `main` moved on meanwhile her commit is replayed on it once; if that conflicts, it
 is pushed to `moneypenny/<conversation digest>` instead and both of you are told.
 
-Her memory is committed at once, and you see it happen. At the start of each answer the
-Station copies `memory/`; at the end it puts that copy back and sends Universal Exports what
-she changed there, with a diff. Universal Exports sends it straight back as a commit, and the
-conversation shows what she kept, with the diff, whatever she has read. A memory change
-records what each of its files held when she made it, and its
-commit is refused when one of them has changed on `main` since (another conversation's
-memory, or the person's own edit), so nothing written meanwhile is lost: she proposes it
-again from what the file holds now. A memory change the Station cannot get to Universal
-Exports (it is down, or no longer waits for that answer) is kept on that Station and sent again
-with the conversation's next message there; no queue drops a memory change, a held Cable or
-a Station's answer to make room (64 kept changes at most per Station, the oldest logged and
-dropped past that).
-
-A change to a shared repository is a proposal too, through `propose_shared_change` (the
+A change to a shared repository is a proposal, through `propose_shared_change` (the
 group, a file path, its new text and a commit subject), and only for a member of that group;
 anyone else's request is refused. Confirmed, it is committed under the person's name with the
 same trailer. With `write = true` for that group (or for `org`) it is committed at once and
@@ -386,43 +371,64 @@ now. The Station sees the call in Claude Code's stream (the `tool_use` block) an
 nothing for within five seconds (her checkout of that repository could not be opened) is
 refused.
 
+## Her memory
+
+Moneypenny remembers each person in rows of the Registry, with nothing to set up: no repository,
+no Station and no clone stand behind it, so she has it on every Station and it survives each of
+them. An entry has an ID (a generated UUID, what every tool and route names it by), a one-line
+summary saying what it is for, an optional name, its content, and who wrote it and when. Names
+and summaries may repeat. Each new harness starts with the newest summaries, fenced as data
+(`[assistant.gateway] memory_context_bytes`, 8 KiB, and whatever the job's own bound leaves), and
+she reads what she needs:
+
+| Tool | What it does |
+| --- | --- |
+| `memory_search` | Finds entries by the words in their name, summary or content, best first, and answers their IDs, names and summaries |
+| `memory_read` | One entry's content and revision, fenced as data |
+| `memory_write` | Keeps something at once: a new entry, or a change to one that names the revision she read |
+| `memory_forget` | Forgets one entry, with its prior versions |
+
+A search counts words, not parts of words, and needs only one of them: entries holding more of
+them rank first, then those holding them in the name or summary, then the newest. It answers the
+same on every Registry, since the database's own index (FTS5 on SQLite, `tsvector` on PostgreSQL,
+a scan on the file Registry) only finds the candidates.
+
+What she keeps needs nobody's confirmation, and you see it happen: the conversation shows the
+summary and the diff as it is written. A change is refused when the entry has moved on from the
+revision she read (another conversation's change, or your own edit), so nothing written meanwhile
+is lost: she reads it again and makes the change from what it holds now.
+
 ## Your memory in the app
 
 What she remembers about you is yours to read and correct. In the app, **Ask Moneypenny**'s
-menu opens **Her memory of you**: the files of `memory/` in your personal repository, each to
-open, edit and save, and to forget (after you confirm). A new file is made there too. The page
-talks to Universal Exports, which has no checkout of any repository: it asks the Headquarters
-Station (else the first healthy one) to do it in a shallow clone of your repository of its
-own, and answers within 30 seconds or says that the Station did not. A Station gives the clone
-up at that deadline, refuses a request that reaches it later, and refuses one more than it
-makes at once (4 by default) rather than queue it. Universal Exports keeps at most 2 of your
-requests and 16 of everyone's waiting, and answers `429` past that. Reading or listing makes
-no repository: a local one is created only by your first change.
+menu opens **Her memory of you**: your entries with who wrote each, a search, and a form to add,
+edit and forget one (after you confirm).
 
 | Route | Does |
 | --- | --- |
-| `GET /v1/user/assistant/memory` | Lists the files, their sizes and the commit `main` is at |
-| `GET /v1/user/assistant/memory/{path}` | Reads one file, with a digest of its text |
-| `PUT /v1/user/assistant/memory/{path}` | Writes one file: `{"content", "message"?, "base"?}` |
-| `DELETE /v1/user/assistant/memory/{path}` | Forgets one file |
+| `GET /v1/user/assistant/memory[?q=TEXT]` | Lists your entries, newest change first, or searches them, best first: `{"person", "entries", "total"}`, with no content |
+| `POST /v1/user/assistant/memory` | Adds an entry: `{"name"?, "summary", "content"}` |
+| `GET /v1/user/assistant/memory/{id}` | One entry with its content |
+| `PUT /v1/user/assistant/memory/{id}` | Changes one: `{"name"?, "summary", "content", "revision"}` |
+| `DELETE /v1/user/assistant/memory/{id}[?revision=N]` | Forgets one, with its prior versions |
+| `GET /v1/user/assistant/memory/{id}/versions` | What it held before, newest first |
 
-`{path}` is relative to `memory/`: up to seven names of letters, digits, `.`, `-` and `_`,
-none starting with `.`; a file holds at most 64 KiB of text. Each save and each "forget" is
-a commit to `main` authored by you, its message yours or `Edit memory/<path>` /
-`Forget memory/<path>`, followed by `Via: Universal Exports`; history keeps what was there
-before. The app saves with the digest of the text it opened as `base`, so a file she changed
-meanwhile is refused (`409`) rather than overwritten: open it again and make the change from
-what it holds now. Likewise her own next change to a file you edited is refused, and she makes
-it again from your text. A conversation already running keeps the memory it read until her
-harness starts again.
+An entry holds at most 256 KiB, and your memory 1,024 entries and 8 MiB in all
+([`[registry.limits.memories]`](configuration.md#limits)); up to 8 prior versions of each are
+kept, and forgetting it removes them. A save names the revision that was opened, so an entry she
+changed meanwhile is refused (`409`, with the `revision` it is at) rather than overwritten: open
+it again and make the change from what it holds now. Likewise her next change to an entry you
+edited is refused, and she makes it again from your text. A conversation already running keeps
+what it already read.
 
 Your memory is yours alone. The deployment's administrators can read it, never change it: a
 person holding `assistant.memory.admin` on `config:assistant` ([access
-policy](access.md#the-access-policy)) adds `?person=<id>` to the two `GET` routes, and each
-such read is audited `assistant.memory.read` before it is made. Nobody, administrator or not,
-writes or forgets another person's memory. Your own changes are audited too
-(`assistant.memory.write`, `assistant.memory.forget`), and one that cannot be audited is not
-made.
+policy](access.md#the-access-policy)) adds `?person=<id>` to the `GET` routes, and each such read
+is audited `memory.read` before it is made. Without asking by name, another person's entry answers
+exactly as an ID that does not exist, to an administrator as to anyone. Nobody, administrator or
+not, writes or forgets another person's memory. Your own changes and hers are audited
+(`memory.write`, `memory.forget`, naming the entry and the conversation), and one that cannot be
+audited is not made.
 
 ## Her scripts and the web
 
@@ -499,9 +505,8 @@ Her web tools follow the same policy. Under `limited` she may fetch pages from t
 listed (`*.example.com` covers every name under `example.com`), and a hook refuses every other
 host, including the documentation sites Claude Code would otherwise fetch without asking.
 Under `denied`, and under `limited` with no host, she has no web tool at all. Under `open` she
-may fetch any page and search the web. A page she fetches, and a script that could reach a
-host, expose the conversation ([as her memory is](#her-workspace-and-memory)). Her MCP
-servers are the harness's own connections and need no entry.
+may fetch any page and search the web. Her MCP servers are the harness's own connections and
+need no entry.
 
 Claude Code's sandbox runs on macOS, and on Linux and WSL2 with `bubblewrap` and `socat`
 installed. On native Windows, or a Linux Station without them, she starts without scripts:
@@ -689,7 +694,7 @@ it as a plugin named `ai6` (`--plugin-dir`): she calls a skill as `ai6:<name>`, 
 `Skill` tool only when she has skills, and has no other skill to call. Injected commands are
 replaced with a notice (`disableSkillShellExecution`) unless `skills_allow_tools` is set; with
 it, they still go through her permission rules. A skill's other files she reads with her
-file tools, which she has with a [workspace](#her-workspace-and-memory). Skill text is the
+file tools, which she has with a [workspace](#her-workspace). Skill text is the
 deployment's own, like a shared repository: reading it exposes nothing. Codex keeps no list
 of allowed skills (it loads those of the project, the user's home directory and the system,
 and its own bundled ones: [Codex skills](https://learn.chatgpt.com/docs/build-skills)), so on
@@ -773,7 +778,7 @@ What this gives up, plainly:
   an issue, a web page or a Cable can hold instructions. The framing tells her not to follow
   them; nothing checks that she did not.
 - **Her memory is written without asking you.** Such text can persist into your later
-  conversations. The diff shows in the chat as it is committed, and you can
+  conversations. The diff shows in the chat as it is kept, and you can
   [edit her memory](#your-memory-in-the-app) afterwards; nothing stops it first.
 - **Her pages and offered links carry no warning.** A page, a view or a card she made after
   reading such text looks like any other. With **Open Moneypenny's links at once** on, a page she
@@ -782,7 +787,7 @@ What this gives up, plainly:
   you. Read what you confirm: it may have been written for you to confirm. A group's
   `write = true` lets a shared change through without you.
 
-What keeps it narrower, for a deployer: no `personal_repo` gives her no memory; the
+What keeps it narrower, for a deployer: the
 [network policy](#her-scripts-and-the-web) decides what she can fetch and where her scripts reach;
 `[assistant.pages]` `network` and `feeds` bound her pages; and her tools can never do more than
 the person using her may.
@@ -976,17 +981,17 @@ answered does nothing.
 | The Agent she is | `moneypenny` | the `unex` record's `assistant_agent` ([Configuration](configuration.md)) |
 | Serve her at all | yes | the `unex` record's `assistant` |
 | The bounds of her views | [Views she shows](#views-she-shows) | `[assistant.views]` |
-| What a job, a report and her memory may hold | 32 KiB a message, 64 events a report, and so on | `[assistant.limits]` ([Moneypenny's limits](configuration.md#moneypennys-limits)) |
+| What a job and a report may hold | 32 KiB a message, 64 events a report, and so on | `[assistant.limits]` ([Moneypenny's limits](configuration.md#moneypennys-limits)) |
 | Conversations kept | 20 a person, 2,000 in all, 7 days | `[assistant.gateway]` `conversations_per_person`, `conversations`, `conversation_age` |
 | Tool token lifetime | 1 hour, and past it for a turn already running while its Station is heard from | `[assistant.gateway] token_ttl` |
 | Time for a Station to take a message | 60 seconds | `[assistant.gateway] answer_timeout` |
 | Tool calls per conversation | 120 a minute | `[assistant.gateway] tool_calls_per_minute` |
 | Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `[assistant.gateway] live_per_person` |
 | How long an answer may go without word from its Station | 10 minutes, then it is given up | `[assistant.gateway] answer_deadline` |
-| Memory kept | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `[assistant.gateway]` `conversation_bytes`, `person_bytes`, `ready_entries` |
-| Memory requests waiting for a Station | 2 a person, 16 in all; `429` past either | `[assistant.gateway]` `memory_requests_per_person`, `memory_requests` |
+| Conversations' size | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `[assistant.gateway]` `conversation_bytes`, `person_bytes`, `ready_entries` |
+| Her memory | 256 KiB an entry, 1,024 entries and 8 MiB a person, 8 prior versions, 50 entries a search | `[registry.limits.memories]` ([Configuration](configuration.md#limits)) |
+| Her memory's summaries in a new harness | 8 KiB, and no more than the job's context leaves | `[assistant.gateway] memory_context_bytes` |
 | Assistant Sessions on one Station | 4 running or starting; closed after 10 idle minutes | `[assistant.desk]` `live`, `idle` |
-| Memory requests a Station makes at once | 4; the next is refused | `[assistant.desk] memory_requests` |
 | A clone of one of her repositories | 120 seconds and 512 MiB, then given up and removed | `[assistant.desk]` `clone_timeout`, `clone_bytes` |
 | What one save of her work commits | 16 MiB; past it nothing is saved and she is told | `[assistant.desk] save_bytes` |
 | Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml`, or the `assistant` record of a SQL roster |

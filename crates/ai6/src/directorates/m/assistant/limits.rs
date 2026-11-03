@@ -1,5 +1,5 @@
-//! The bounds and pace of Moneypenny: `[assistant.limits]`, what a job, a report and her
-//! memory may hold, which a Station and Universal Exports both check; `[assistant.desk]`, how a
+//! The bounds and pace of Moneypenny: `[assistant.limits]`, what a job and a report may hold,
+//! which a Station and Universal Exports both check; `[assistant.desk]`, how a
 //! Station's desk runs her harnesses; and `[assistant.gateway]`, how Universal Exports keeps
 //! her conversations. Each default is the value applied when the record says nothing.
 //!
@@ -17,7 +17,7 @@ const KIB: u64 = 1024;
 const MIB: u64 = 1024 * 1024;
 
 /// `[assistant.limits]`: the bounds of what passes between Universal Exports and a Station
-/// for Moneypenny, and of her memory on a Station.
+/// for Moneypenny.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
@@ -34,8 +34,7 @@ pub struct AssistantLimits {
     #[schema(title = "Standing context and recap", format = "bytes")]
     #[map(default = AssistantLimits::default().context_bytes)]
     pub context_bytes: Limit,
-    /// Bytes of one reported event's text; longer text is cut, and a memory change whose diff is
-    /// longer is not kept.
+    /// Bytes of one reported event's text; longer text is cut.
     #[schema(title = "Longest reported event", format = "bytes")]
     #[map(default = AssistantLimits::default().event_bytes)]
     pub event_bytes: Limit,
@@ -43,12 +42,12 @@ pub struct AssistantLimits {
     #[schema(title = "Events in one report")]
     #[map(default = AssistantLimits::default().events)]
     pub events: Limit,
-    /// Bytes of file content in one memory change, commit, memory write or memory read.
-    #[schema(title = "File content in one memory change", format = "bytes")]
+    /// Bytes of file content in one commit.
+    #[schema(title = "File content in one commit", format = "bytes")]
     #[map(default = AssistantLimits::default().change_bytes)]
     pub change_bytes: Limit,
-    /// Files in one memory change or commit.
-    #[schema(title = "Files in one memory change")]
+    /// Files in one commit.
+    #[schema(title = "Files in one commit")]
     #[map(default = AssistantLimits::default().change_files)]
     pub change_files: Limit,
     /// Bytes of one commit's message.
@@ -60,38 +59,14 @@ pub struct AssistantLimits {
     #[schema(title = "Shared change bases")]
     #[map(default = AssistantLimits::default().shared_bases)]
     pub shared_bases: Limit,
-    /// Files one memory listing names.
-    #[schema(title = "Files in a memory listing")]
-    #[map(default = AssistantLimits::default().memory_list_files)]
-    pub memory_list_files: Limit,
-    /// Bytes of paths one memory listing names.
-    #[schema(title = "Paths in a memory listing", format = "bytes")]
-    #[map(default = AssistantLimits::default().memory_list_bytes)]
-    pub memory_list_bytes: Limit,
     /// Skills one job gives her.
     #[schema(title = "Skills in one job")]
     #[map(default = AssistantLimits::default().skills)]
     pub skills: Limit,
-    /// Bytes of MEMORY.md inlined into her standing context.
-    #[schema(title = "MEMORY.md in her context", format = "bytes")]
-    #[map(default = AssistantLimits::default().inlined_memory_bytes)]
-    pub inlined_memory_bytes: Limit,
-    /// Bytes of one memory file the desk reads; a longer file is read to this length.
-    #[schema(title = "Longest memory file read", format = "bytes")]
-    #[map(default = AssistantLimits::default().memory_file_bytes)]
-    pub memory_file_bytes: Limit,
-    /// Memory files the desk reads at a turn's edge.
-    #[schema(title = "Memory files read per turn")]
-    #[map(default = AssistantLimits::default().memory_files)]
-    pub memory_files: Limit,
-    /// Bytes over all the memory files the desk reads at a turn's edge.
-    #[schema(title = "All memory read per turn", format = "bytes")]
-    #[map(default = AssistantLimits::default().memory_bytes)]
-    pub memory_bytes: Limit,
     /// Files of her personal folder looked at to name what a turn changed.
     #[schema(title = "Files looked at per turn")]
-    #[map(default = AssistantLimits::default().memory_walk)]
-    pub memory_walk: Limit,
+    #[map(default = AssistantLimits::default().personal_walk)]
+    pub personal_walk: Limit,
     /// Bytes of one file the Station reads to publish a page.
     #[schema(title = "Largest file read for a page", format = "bytes")]
     #[map(default = AssistantLimits::default().page_file_bytes)]
@@ -118,14 +93,8 @@ impl Default for AssistantLimits {
             change_files: Limit::at(32),
             commit_message_bytes: Limit::at(4_096),
             shared_bases: Limit::at(32),
-            memory_list_files: Limit::at(1_000),
-            memory_list_bytes: Limit::at(128 * KIB),
             skills: Limit::at(64),
-            inlined_memory_bytes: Limit::at(32 * KIB),
-            memory_file_bytes: Limit::at(256 * KIB),
-            memory_files: Limit::at(1_024),
-            memory_bytes: Limit::at(8 * MIB),
-            memory_walk: Limit::at(10_000),
+            personal_walk: Limit::at(10_000),
             page_file_bytes: Limit::at(8 * MIB),
             page_files: Limit::at(200),
             page_bytes: Limit::at(16 * MIB),
@@ -134,7 +103,7 @@ impl Default for AssistantLimits {
 }
 
 /// `[assistant.desk]`: how a Station's desk runs Moneypenny's harnesses. Read at each harness
-/// start, job and memory request; `known`, `parked` and `report_queue` at each use, and
+/// start and job; `known` and `report_queue` at each use, and
 /// `unlocked_stale` when the desk starts.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
@@ -185,11 +154,6 @@ pub struct AssistantDeskLimits {
     #[schema(title = "Retry a report after")]
     #[map(default = AssistantDeskLimits::default().report_retry)]
     pub report_retry: Seconds,
-    /// Memory changes kept on the Station because they could not be delivered; past it the
-    /// oldest is dropped.
-    #[schema(title = "Memory changes kept undelivered")]
-    #[map(default = AssistantDeskLimits::default().parked)]
-    pub parked: Limit,
     /// Conversations whose provider Session the desk remembers for a resume.
     #[schema(title = "Conversations remembered for a resume")]
     #[map(default = AssistantDeskLimits::default().known)]
@@ -211,8 +175,7 @@ pub struct AssistantDeskLimits {
     #[schema(title = "Sweep abandoned directories after")]
     #[map(default = AssistantDeskLimits::default().unlocked_stale)]
     pub unlocked_stale: Seconds,
-    /// Seconds a clone of one of her repositories may take; a memory request's clone also stops at
-    /// its deadline.
+    /// Seconds a clone of one of her repositories may take.
     #[schema(title = "Longest clone")]
     #[map(default = AssistantDeskLimits::default().clone_timeout)]
     pub clone_timeout: Seconds,
@@ -225,10 +188,6 @@ pub struct AssistantDeskLimits {
     #[schema(title = "Largest save of her work", format = "bytes")]
     #[map(default = AssistantDeskLimits::default().save_bytes)]
     pub save_bytes: Limit,
-    /// The app's memory requests a Station makes at once; past it the next is refused.
-    #[schema(title = "Memory requests at once")]
-    #[map(default = AssistantDeskLimits::default().memory_requests)]
-    pub memory_requests: Limit,
     /// Cables one conversation holds for the person's confirmation; past it a send is refused,
     /// and nothing the person has not seen to is dropped to make room.
     #[schema(title = "Cables held per conversation")]
@@ -257,7 +216,6 @@ impl Default for AssistantDeskLimits {
             report_queue: Limit::at(256),
             report_attempts: 3,
             report_retry: Seconds(std::time::Duration::from_millis(200)),
-            parked: Limit::at(64),
             known: Limit::at(1_024),
             close_wait: Seconds::new(10),
             limit_fallback: Seconds::new(
@@ -268,7 +226,6 @@ impl Default for AssistantDeskLimits {
             clone_timeout: Seconds::new(120),
             clone_bytes: Limit::at(512 * MIB),
             save_bytes: Limit::at(16 * MIB),
-            memory_requests: Limit::at(4),
             held_cables: Limit::at(32),
             held_cable_ttl: TimeLimit::secs(3_600),
             page_upload_timeout: Seconds::new(60),
@@ -315,14 +272,6 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Tool calls a minute")]
     #[map(default = AssistantGatewayLimits::default().tool_calls_per_minute)]
     pub tool_calls_per_minute: Limit,
-    /// The app's memory requests waiting for a Station for one person; `429` past it.
-    #[schema(title = "Memory requests waiting per person")]
-    #[map(default = AssistantGatewayLimits::default().memory_requests_per_person)]
-    pub memory_requests_per_person: Limit,
-    /// The app's memory requests waiting for a Station in all.
-    #[schema(title = "Memory requests waiting in all")]
-    #[map(default = AssistantGatewayLimits::default().memory_requests)]
-    pub memory_requests: Limit,
     /// Seconds a tool token given to a harness is accepted; past it, while that harness's answer runs
     /// and its Station was heard from within `answer_deadline`, until the person stops it.
     #[schema(title = "A tool token lasts")]
@@ -341,10 +290,6 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Give up on a silent answer after")]
     #[map(default = AssistantGatewayLimits::default().answer_deadline)]
     pub answer_deadline: Seconds,
-    /// Seconds a Station has to answer a memory request.
-    #[schema(title = "A Station answers a memory request within")]
-    #[map(default = AssistantGatewayLimits::default().memory_timeout)]
-    pub memory_timeout: Seconds,
     /// Seconds a proposal waits for the person's confirmation.
     #[schema(title = "A proposal waits")]
     #[map(default = AssistantGatewayLimits::default().proposal_ttl)]
@@ -357,10 +302,11 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Longest message a person writes", format = "bytes")]
     #[map(default = AssistantGatewayLimits::default().message_bytes)]
     pub message_bytes: Limit,
-    /// Bytes of a commit message the person writes for a memory change.
-    #[schema(title = "Longest memory commit message", format = "bytes")]
-    #[map(default = AssistantGatewayLimits::default().memory_message_bytes)]
-    pub memory_message_bytes: Limit,
+    /// Bytes of her memory's summaries in a new harness's context; the job's context bound
+    /// applies as well, and she can search for what does not fit.
+    #[schema(title = "Memory summaries in her context", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().memory_context_bytes)]
+    pub memory_context_bytes: Limit,
     /// Characters of the one-line message of a shared change she proposes.
     #[schema(title = "Longest shared change message")]
     #[map(default = AssistantGatewayLimits::default().change_message_chars)]
@@ -435,17 +381,14 @@ impl Default for AssistantGatewayLimits {
             person_bytes: Limit::at(4 * MIB),
             live_per_person: Limit::at(2),
             tool_calls_per_minute: Limit::at(120),
-            memory_requests_per_person: Limit::at(2),
-            memory_requests: Limit::at(16),
             token_ttl: Seconds::new(3_600),
             token_reuse_margin: Seconds::new(600),
             answer_timeout: Seconds::new(60),
             answer_deadline: Seconds::new(600),
-            memory_timeout: Seconds::new(30),
             proposal_ttl: Seconds::new(3_600),
             proposals: Limit::at(32),
             message_bytes: Limit::at(16 * KIB),
-            memory_message_bytes: Limit::at(1_024),
+            memory_context_bytes: Limit::at(8 * KIB),
             change_message_chars: Limit::at(200),
             recap_bytes: Limit::at(8 * KIB),
             ready_entries: Limit::at(100),
@@ -849,10 +792,10 @@ default_ttl = 3600",
             ["assistant.desk.live none is looser than the default 4"]
         );
         let limits: AssistantLimits =
-            crate::directorates::m::records::from_toml("memory_walk = 20000").unwrap();
+            crate::directorates::m::records::from_toml("personal_walk = 20000").unwrap();
         assert_eq!(
             limits.weakenings(),
-            ["assistant.limits.memory_walk 20000 is looser than the default 10000"]
+            ["assistant.limits.personal_walk 20000 is looser than the default 10000"]
         );
         let gateway: AssistantGatewayLimits =
             crate::directorates::m::records::from_toml("token_ttl = 7200\nsweep_every = 5")

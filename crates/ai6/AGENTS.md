@@ -708,20 +708,19 @@ impl AssistantViewLimits {
 // documented defaults (docs/configuration.md "Moneypenny's limits"), serde(default,
 // deny_unknown_fields); Limit / TimeLimit fields take a number, null or "none".
 pub struct AssistantLimits { pub cable_grants, message_bytes, context_bytes, event_bytes,
-    events, change_bytes, change_files, commit_message_bytes, shared_bases, memory_list_files,
-    memory_list_bytes, skills, inlined_memory_bytes, memory_file_bytes, memory_files,
-    memory_bytes, memory_walk: Limit }   // contract checks; both sides
-pub struct AssistantDeskLimits { pub idle: TimeLimit, pub live, job_bytes, report_queue, parked,
-    known, clone_bytes, save_bytes, memory_requests: Limit, pub report_attempts: u32,
+    events, change_bytes, change_files, commit_message_bytes, shared_bases, skills,
+    personal_walk: Limit }   // contract checks; both sides
+pub struct AssistantDeskLimits { pub idle: TimeLimit, pub live, job_bytes, report_queue,
+    known, clone_bytes, save_bytes: Limit, pub report_attempts: u32,
     pub token_margin, job_wait, call_margin, job_retry, report_retry, close_wait, remove_retry,
     unlocked_stale, clone_timeout: Seconds }   // a Station's desk; read per job / start / use
 pub struct AssistantGatewayLimits { pub conversations_per_person, conversations,
     conversation_entries, conversation_bytes, person_bytes, live_per_person,
-    tool_calls_per_minute, memory_requests_per_person, memory_requests, proposals,
-    message_bytes, memory_message_bytes, change_message_chars, recap_bytes, ready_entries,
+    tool_calls_per_minute, proposals,
+    message_bytes, memory_context_bytes, change_message_chars, recap_bytes, ready_entries,
     ready_bytes, socket_message_bytes, route_bytes, result_chars, author_chars,
     audit_target_bytes, proposal_reads: Limit, pub conversation_age: TimeLimit, pub event_buffer: u64,
-    pub token_ttl, token_reuse_margin, answer_timeout, answer_deadline, memory_timeout,
+    pub token_ttl, token_reuse_margin, answer_timeout, answer_deadline,
     proposal_ttl, hello_timeout, max_wait, sweep_every, shared_base_wait: Seconds }
 pub struct AssistantPageLimits { pub max_file_bytes, max_page_bytes, max_page_files, max_pages,
     max_person_bytes, max_total_bytes, inline_bytes, title_chars, max_feeds, feed_reads_per_minute,
@@ -2201,11 +2200,9 @@ adds a placement label, `with_theater` declares a Theater in code,
 rebuildable caches and how long a terminal Mission's safe house is left alone first,
 `with_loadouts(LoadoutCatalog)` replaces `loadouts.toml`,
 Moneypenny's desk runs by the roster's `[assistant.desk]` (`AssistantDeskLimits`, read per
-job, harness start and memory request): a clone of her repositories is given up and removed
-past `clone_timeout` or `clone_bytes`, a save of `personal/` past `save_bytes` saves nothing
-and a notice says why, and past `memory_requests` memory jobs at once the next is `rejected`;
-a memory job past its `token_expires_at` is `rejected` too, and its shallow clone (`depth` 1)
-is given up at that deadline;
+job and harness start): a clone of her repositories is given up and removed
+past `clone_timeout` or `clone_bytes`, and a save of `personal/` past `save_bytes` saves nothing
+and a notice says why;
 `with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets`,
 `with_account_login(impl AccountLogin + 'static)` replaces `CommandLogin` for Codex pool
 accounts, `with_account_homes(dir)` moves their per-Mission `CODEX_HOME`s from
@@ -2468,6 +2465,82 @@ pub trait HoldStore {   // part of RegistryBackend; `holds/OPERATION/AGENT--ROUT
 }
 pub struct HoldLimits { pub record_bytes, pub holds, pub text_bytes }   // [registry.limits.holds]
 ```
+
+### Memories
+
+Rows of text with a scope, the same three ways on every Registry. `ai6::directorates::m::memories`
+decides who may see and change one; every read goes through it. `Moneypenny`'s tools and routes are
+in `universal-exports`.
+
+```rust
+// ai6::directorates::registry::memories; re-exported at the crate root.
+pub enum MemoryScope { Person(String), Operation(String), Global } // "person:<id>", "operation:<id>", "global"
+impl MemoryScope { pub fn parse(text: &str) -> Option<Self>; }     // Display and serde as that text
+pub struct MemorySource { pub by: String /* person:ID, agent:CODENAME or moneypenny:PERSON */,
+    pub session: Option<String>, pub exposures: Vec<String> /* empty: not exposed */ }
+impl MemorySource { pub fn new(by, session) -> Self; pub fn exposed_by(self, exposures) -> Self;
+    pub fn exposed(&self) -> bool; }
+pub struct MemoryHeader { pub id: String /* a generated UUID, lower case */, pub scope: MemoryScope,
+    pub name: Option<String>, pub summary: String, pub created_at: f64, pub updated_at: f64,
+    pub updated_by: String, pub source: MemorySource, pub compartments: Vec<String>,
+    pub revision: u64 /* counts its writes */, pub bytes: u64 /* name + summary + content */ }
+pub struct MemoryEntry { pub header: MemoryHeader, pub content: String }
+impl MemoryEntry {
+    pub fn new(scope, name, summary, content, source, at) -> Self;  // a fresh ID, revision 1
+    pub fn with_id(id, scope, name, summary, content, source, at) -> Self;
+    pub fn behind(self, compartments) -> Self;                      // sorted, no repeats
+    pub fn validate(&self, &MemoryLimits) -> Result<(), String>;    // a message for the writer
+}
+pub enum MemoryError { Invalid(String), Full(String) /* says nothing of what the scope holds */,
+    Missing, Changed { revision: u64 }, Io(io::Error) }
+pub trait MemoryStore {  // part of RegistryBackend; `memories/<scope digest>/<id>.json`, table ai6_memories
+    fn write_memory(&self, entry: MemoryEntry, base: Option<u64>) -> Result<MemoryEntry, MemoryError>;
+        // base None: new, an ID taken is Changed. base Some: replaces it at that revision in its
+        // own scope (another scope is Missing), keeping the old as a prior version.
+    fn memory(&self, id: &str) -> io::Result<Option<MemoryEntry>>;  // not an ID: None
+    fn memory_headers(&self, scope: &MemoryScope) -> io::Result<Vec<MemoryHeader>>; // newest change first
+    fn memory_candidates(&self, scopes: &[MemoryScope], terms: &[String]) -> io::Result<Vec<MemoryEntry>>;
+        // at least what `matching` takes, whoever may see it: the caller filters, then ranks
+    fn memory_versions(&self, id: &str) -> io::Result<Vec<MemoryEntry>>; // newest first
+    fn forget_memory(&self, id: &str, base: Option<u64>) -> Result<MemoryEntry, MemoryError>;
+        // and its prior versions
+}
+pub fn search_terms(query: &str) -> Vec<String>;   // distinct runs of letters and digits, lower case
+pub fn matching(entries: Vec<MemoryEntry>, terms: &[String]) -> Vec<MemoryEntry>;
+    // holds at least one term, ranked: how many it holds, how many in its name or summary, newest
+    // change, ID. No terms: all of them, newest first.
+pub fn is_memory_id(id: &str) -> bool;
+pub struct MemoryLimits { pub content_bytes, entries, scope_bytes, versions, summary_bytes, name_bytes,
+    compartments, index_bytes, search_results, query_bytes: Limit } // [registry.limits.memories]
+
+// ai6::directorates::m::memories
+pub const AUDIT_WRITE, AUDIT_FORGET, AUDIT_READ, PERSON_RESOURCE, GLOBAL_RESOURCE: &str;
+pub enum MemoryWriteRight { Write, Refused }
+pub trait MemoryCaller {          // who is asking, read afresh for the call; what cannot be read is not held
+    fn by(&self) -> String; fn session(&self) -> Option<String>;
+    fn reads_scope(&self, &MemoryScope) -> bool;
+    fn writes_scope(&self, &MemoryScope) -> MemoryWriteRight;
+    fn read_in(&self, compartment: &str) -> bool; fn sees_all_compartments(&self) -> bool;
+    fn now(&self) -> f64;
+    fn audit(&self, action: &str, scope: &MemoryScope, target: &str) -> Result<(), String>;
+}
+pub enum MemoryRefusal { Missing /* one answer for not there and not visible */, Forbidden(String),
+    Invalid(String), Full(String), Changed { revision: u64 }, Failed(String) } // Display: for the caller
+pub fn read_entry(store, caller, id) -> Result<MemoryEntry, MemoryRefusal>;
+pub fn prior_versions(store, caller, id) -> Result<Vec<MemoryEntry>, MemoryRefusal>;
+pub fn list_entries(store, caller, scope) -> Result<Vec<MemoryHeader>, MemoryRefusal>;
+pub fn search_entries(store, caller, scopes, query, limits) -> Result<MemorySearch, MemoryRefusal>;
+    // filters, ranks, counts, then cuts to search_results; query past query_bytes is Invalid
+pub struct MemorySearch { pub hits: Vec<MemoryHeader>, pub total: usize }
+pub enum MemoryTarget { New(MemoryScope), Existing { id: String, revision: u64 } }
+pub struct MemoryChange { pub target, pub name, pub summary, pub content } // ::new(target, name, summary, content)
+pub struct MemoryWritten { pub entry: MemoryEntry, pub before: Option<String> }
+pub fn write_entry(store, caller, change) -> Result<MemoryWritten, MemoryRefusal>; // audited first
+pub fn forget_entry(store, caller, id, revision) -> Result<MemoryEntry, MemoryRefusal>; // audited first
+pub fn header_json(&MemoryHeader) -> Value; pub fn entry_json(&MemoryEntry) -> Value;
+pub fn summaries_for_a_model(headers, bytes: Limit, fence: impl Fn(&Value) -> String) -> Option<String>;
+```
+
 
 The Station's round (`station::server::stewardship`, Headquarters, with promotion) files each
 proposal as a green ink request under Session `m` and Mission `hold-AGENT`/`prefer-AGENT`,
@@ -4134,11 +4207,9 @@ pub const ASSISTANT_CABLE_MCP_SERVER: &str = "cables";
 // each validate(); both the Station and Universal Exports check them.
 pub const EVENT_ACCEPTED, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, EVENT_COMPLETED,
           EVENT_FAILED, EVENT_LIMIT, EVENT_INTERRUPTED, EVENT_CLOSED: &str; // "accepted", …
-pub const EVENT_MEMORY_CHANGES: &str = "memory_changes"; // text: unified diff; `change`: the files
 pub const EVENT_NOTICE: &str = "notice";       // text: work saved elsewhere than main, a repository not opened
 pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal"; // `cable`: held, body included
 pub const EVENT_CABLE_SENT: &str = "cable_sent";      // `cable`: sent, `cable_id` set
-pub const COMMIT_MEMORY: &str = "memory"; pub const COMMIT_SHARED: &str = "shared";
 pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
     pub route: Option<RouteRef> /* default, omitted when None: the route `session_id` ran on, the only one it resumes on */,
     pub message: String, pub context: Vec<String> /* default: standing context */,
@@ -4147,13 +4218,12 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
     pub token_expires_at: f64, pub session_id: Option<String> /* default */,
     pub close: bool /* default */,
     pub interrupt: bool /* default */,
-    pub person_id: Option<String> /* default, omitted when None; required with workspace, commit, memory or cables */,
+    pub person_id: Option<String> /* default, omitted when None; required with workspace, commit or cables */,
     pub workspace: Option<AssistantWorkspace> /* default, omitted when None */,
     pub commit: Option<AssistantCommit> /* default, omitted when None */,
     pub cables: Vec<AssistantCableGrant> /* default, omitted when empty */,
     pub cable_confirm: Option<AssistantCableDecision> /* default, omitted when None */,
     pub cable_discard: Option<AssistantCableDecision> /* default, omitted when None */,
-    pub memory: Option<MemoryOp> /* default, omitted when None: the person's memory from the app */,
     pub reach: AssistantReach /* default: runs and reaches nothing */,
     pub skills: Vec<String> /* default, omitted when empty: catalog skills the person is given */,
     pub groups: Option<Vec<String>> /* default, omitted when None; the person's directory groups,
@@ -4163,23 +4233,6 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
                                        refuse and gives no group's repository */ }
                                                      // Debug redacts the token
 impl AssistantJob { pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
-pub struct MemoryOp { pub repo: String /* the person's personal repository */,
-    pub action: MemoryAction }
-pub enum MemoryAction {                              // serde: {"kind": "list"|"read"|"write"|"forget", …}
-    List {}, Read { path: String },
-    Write { path: String, text: String, base: Option<String> /* hex SHA-256 the file must hold */,
-        commit: MemoryCommit },
-    Forget { path: String, commit: MemoryCommit } }
-pub struct MemoryCommit { pub message: String /* trailer included */,
-    pub author_name: String, pub author_email: String /* the person's, as committer too */ }
-impl MemoryOp { pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
-pub struct MemoryAnswer { pub commit: Option<String> /* main read at, or the commit made */,
-    pub files: Vec<MemoryFile> /* list, path order */, pub more: bool,
-    pub text: Option<String> /* read */, pub digest: Option<String> /* hex SHA-256 of text read or written */,
-    pub missing: bool /* refused: no such file */, pub changed: bool /* refused: base no longer held */ }
-                                                     // every field default, omitted when empty
-pub struct MemoryFile { pub path: String /* relative to the repository */, pub bytes: u64 }
-pub fn memory_path(path: &str) -> bool;              // a repository_path under memory/
 #[derive(Default)] // serde: every key default, unknown keys refused
 pub struct AssistantReach { pub interpreters: Vec<String>, pub network: AssistantNetwork,
                             pub unsandboxed_scripts: bool }
@@ -4203,12 +4256,10 @@ pub struct AssistantChange { pub digest: String /* hex SHA-256 of the files, the
         of the text it was made from, None = did not exist; a commit is refused when it differs */ }
 impl AssistantChange { pub fn new(files) -> Self /* no base */; pub fn based(files, base) -> Self;
     pub fn digest_of(&files) -> String; pub fn digest_over(&files, &base) -> String;
-    pub fn validate(&self, memory: bool, limits: &AssistantLimits) -> Result<(), String>; }
+    pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
     // bases only of its files, 64 hex
-pub struct AssistantCommit { pub kind: String /* COMMIT_MEMORY | COMMIT_SHARED */,
-    pub repo: String,
-    pub group: Option<String> /* default, omitted when None; required for COMMIT_SHARED (a group
-                                 or "org", file_safe), refused for COMMIT_MEMORY */,
+pub struct AssistantCommit { pub repo: String /* a shared repository */,
+    pub group: String /* a group or "org", file_safe */,
     pub change: AssistantChange, pub message: String /* trailer included */,
     pub author_name: String, pub author_email: String }
 impl AssistantCommit { pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
@@ -4232,9 +4283,7 @@ pub struct AssistantReport { pub station_id: String, pub conversation_id: String
 impl AssistantReport { pub fn cut_texts(&mut self, limits: &AssistantLimits); } // each text to
     // event_bytes, on a char boundary; the desk cuts every report it sends
 pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,
-    pub change: Option<AssistantChange> /* default, omitted when None */,
     pub cable: Option<AssistantCable> /* default, omitted when None */,
-    pub memory: Option<MemoryAnswer> /* default, omitted when None: a memory job's answer */,
     pub shared: Vec<AssistantSharedBase> /* default, omitted when empty: on a `tool` event,
         one per propose_shared_change call, at most shared_bases */ }
 impl AssistantEvent { pub fn new(kind: &str, text: Option<String>) -> Self; } // text as given
@@ -4249,18 +4298,16 @@ pub fn valid_identity(value: &str) -> bool;          // 1-256 bytes, no control 
 
 All are serde types with unknown fields refused. `validate(&AssistantLimits)` checks
 identities, a message of at most `message_bytes` (blank only with `close`, `interrupt`,
-`commit`, `cable_confirm`, `cable_discard` or `memory`, of which a job sets one), the
+`commit`, `cable_confirm` or `cable_discard`, of which a job sets one), the
 `context_bytes` bound (context and recap together), a token of 32-512 bytes without
 whitespace, a workspace (repositories of a known `RepoKind`, checkout names as `file_safe`
-names, an author without control characters, `<` or `>`), a commit (a known kind; the
-change's 1 to `change_files` files within `change_bytes`, each `repository_path`, under
-`memory/` for `COMMIT_MEMORY`, its digest matching; a message of 1 to `commit_message_bytes`),
-at most `cable_grants` Cable grants for distinct valid Operations, which need `person_id`, a
-memory operation (a repository of a known kind; a `memory_path`; text within `change_bytes`; a
-base of 64 hex digits; a commit message and an author as for a commit), which needs
-`person_id` too, and at most `skills` distinct `skill_name` skills. A job's
+names, an author without control characters, `<` or `>`), a commit (a `file_safe` group; the
+change's 1 to `change_files` files within `change_bytes`, each `repository_path`, its digest
+matching; a message of 1 to `commit_message_bytes`),
+at most `cable_grants` Cable grants for distinct valid Operations, which need `person_id`,
+and at most `skills` distinct `skill_name` skills. A job's
 answer is one report with its `job_id` and one `accepted` (for a commit, text saying where it
-landed) or `rejected` event (text: the reason), a memory job's with its `memory` answer; the
+landed) or `rejected` event (text: the reason); the
 harness's own events follow in reports without a `job_id`.
 
 A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVENT` with
@@ -4911,27 +4958,20 @@ skills_allow_tools`; the workspace's standing text lists them. When `Harness::sk
 
 A job with a `workspace` gets, through the `git` safe-house provider (`SafeHouseSpec::clone`,
 `CheckpointSpec::branch`): `personal/`, a clone of `workspace.personal` on `main` (a missing
-local or `file://` repository is made bare first; a first use writes and commits
-`memory/MEMORY.md`); `shared/<name>/` per shared repository, cloned afresh at each harness
+local or `file://` repository is made bare first); `shared/<name>/` per shared repository,
+cloned afresh at each harness
 start (one that cannot be opened is skipped with a `notice`); every git directory in
 `<conversation digest>.git/{personal,shared/<name>}` beside the conversation's directory, so
-none is inside it (`SafeHouseClone::git_dir`); `scratch/`; `CLAUDE.md` (the
-desk's instructions, then `@personal/memory/MEMORY.md`) and `AGENTS.md` (the same with
-`MEMORY.md` inlined, at most 32 KiB); and `<conversation digest>.context.md` beside the
-directory with the `AGENTS.md` text. The harness's mode is `moneypenny()` with `files =
-["personal", "scratch"]` and that `context_file`. At each turn's start the desk copies
-`personal/memory/`; when the turn's `completed` arrives, and again after the harness closes,
-it puts that copy back, reports what she changed there as one `memory_changes` event (before
-`completed`; a change beyond the bounds, or a file that is not UTF-8, is dropped with a
-`notice`), and commits the rest of `personal/` (`memory/` and paths with a name starting with
-`.` left out: `CheckpointSpec::exclude`; nothing is saved when her memory could not be put
-back, with a `notice`) to `main` as the person, message
+none is inside it (`SafeHouseClone::git_dir`); `scratch/`; `CLAUDE.md` and `AGENTS.md` (the
+desk's instructions); and `<conversation digest>.context.md` beside the
+directory with the same text. The harness's mode is `moneypenny()` with `files =
+["personal", "scratch"]` and that `context_file`. When the turn's `completed` arrives, and again
+after the harness closes, the desk commits `personal/` (paths with a name starting with
+`.` left out) to `main` as the person, message
 `moneypenny: update <paths>` (or `save her work`) with the trailer `Via: Moneypenny
 (conversation <id>)`; work `main` refuses twice lands on `moneypenny/<conversation digest>`
-with a `notice`. A `commit` job of `COMMIT_MEMORY` for a conversation running here is written
-into its `personal/` and copy and committed exactly (`CheckpointSpec::files`: nothing else a turn
-in progress wrote goes with it); otherwise, and for `COMMIT_SHARED`,
-the desk clones the commit's repository into a temporary directory, commits the files'
+with a `notice`. A `commit` job has
+the desk clone the commit's repository into a temporary directory, commit the files'
 text there exactly without writing them, pushes, and removes it; a file whose
 `AssistantChange::base` differs from what `main` holds refuses the commit. A `tool` event whose raw
 line is Claude Code's call of `mcp__moneypenny__propose_shared_change` (a `tool_use` block), or Codex's `item/started` of an `mcpToolCall` item with `server` `moneypenny`, `tool` `propose_shared_change` and its `arguments`, carries, in `shared`,
@@ -4941,19 +4981,6 @@ gets none. The desk never reads, writes
 or removes a file in the conversation's directory through a symbolic link, junction or other
 reparse point (refused, or skipped when it walks a tree), and the provider checks links out as
 plain files.
-
-A `memory` job starts no harness and runs on a task of its own (at most `[assistant.desk]
-memory_requests` at once, the next refused), so no conversation waits for it: the desk clones the person's repository
-into a temporary directory (a local one is created bare first, as for a conversation), does the
-action, and removes the clone. `List {}` answers every plain file under `memory/` (hidden names and links
-skipped, at most `memory_list_files` and `memory_list_bytes`, `more` beyond) and the commit
-`main` is at; `Read` the text (a file over `change_bytes` or not UTF-8 is refused) and its
-digest;
-`Write` and `Forget` commit exactly that file to `main` as the person (author and committer),
-with no fallback branch: a `main` that refuses it twice refuses the job. A `Write` whose
-`base` the file no longer holds is refused with `changed` (checked in the clone, then again
-against `main` as it commits); a `Read` or `Forget` of a missing file with `missing`. A
-conversation running anywhere keeps the memory it read until its harness starts again.
 
 Her scripts and network: the desk caps `job.reach` by its own roster's
 `assistant().reach_for(person_id, job.groups)` (a job with no `person_id` takes the strictest
@@ -4980,12 +5007,12 @@ derives the sandbox's `$TMPDIR` from the harness's `TMPDIR`, which would otherwi
 Her conversations carry no exposure: nothing she reads marks one, a Session's exposure
 (`medical::exposure`) is for a Mission's Session only.
 
-A job with a `workspace`, a `commit` or `memory` must name `person_id`, and the Station refuses
-one whose repositories its own roster does not give: the personal repository (of a workspace or
-a memory job) must be `personal_repo_for(person_id)` of its `[assistant]`, each shared one
+A job with a `workspace` or a `commit` must name `person_id`, and the Station refuses
+one whose repositories its own roster does not give: the personal repository of a workspace
+must be `personal_repo_for(person_id)` of its `[assistant]`, each shared one
 `shared_named(name, job.groups)` (`org`, or a group the job puts the person in), and a commit's
-repository the person's (memory) or `shared_named(commit.group, job.groups)` (shared): Universal
-Exports sends a shared commit's job with the person's groups as they are when it is sent.
+repository `shared_named(commit.group, job.groups)`: Universal
+Exports sends a commit's job with the person's groups as they are when it is sent.
 
 On a Station running elevated (`ai6::station::elevation::is_elevated() -> io::Result<bool>`,
 feature `daemon`: root on Unix, a High or

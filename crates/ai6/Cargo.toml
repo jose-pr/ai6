@@ -20,7 +20,7 @@ acp = ["dep:agent-client-protocol", "dep:coqui-acp", "dep:futures"]
 # The harness gate's client of a Station's Cable endpoint (`ai6::directorates::section_00::gate`).
 gate = ["dep:ureq", "dep:url"]
 # Adds bounded background event publication to the Universal Exports gateway.
-publisher = ["daemon", "dep:ai6-diptel", "dep:url", "dep:similar", "dep:webpki-root-certs"]
+publisher = ["daemon", "dep:ai6-diptel", "dep:url", "dep:webpki-root-certs"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]
 station-tls = ["dep:coqui-peer-tls", "dep:rustls"]
 # A Registry and roster kept in a SQLite database file.
@@ -98,7 +98,6 @@ webpki-root-certs = { workspace = true, optional = true }
 tokio-postgres = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 regex.workspace = true
-similar = { workspace = true, optional = true }
 subtle = { workspace = true, optional = true }
 sysinfo = { workspace = true, optional = true }
 tempfile.workspace = true

@@ -1,9 +1,9 @@
 //! Moneypenny's deployment settings: the `[assistant]` table of the global `agents.toml`.
 //!
-//! A person's personal repository is Moneypenny's working directory and memory for that
-//! person; each directory group may map to a shared repository she reads, and one more may be
-//! shared with everyone (`org`). Without a personal repository she works in an empty
-//! directory and keeps nothing between conversations.
+//! A person's personal repository is Moneypenny's working directory for that person; each
+//! directory group may map to a shared repository she reads, and one more may be shared with
+//! everyone (`org`). Without a personal repository she works in an empty directory. Her memory
+//! needs none of this: it is rows in the Registry (`directorates::m::memories`).
 //!
 //! ```toml
 //! [assistant]
@@ -71,7 +71,7 @@ pub const PERSON_DIGEST_PLACEHOLDER: &str = "{person_digest}";
 /// The name the organisation-wide shared repository is checked out under.
 pub const ORG_SHARED: &str = "org";
 
-/// The `[assistant]` table: where Moneypenny keeps each person's work and memory, what she
+/// The `[assistant]` table: where Moneypenny keeps each person's work, what she
 /// reads, what her scripts may run and reach, which skills she may use, and whether she may
 /// run on an elevated Station. The default keeps nothing, shares nothing, runs `python3` in the
 /// harness's sandbox, reaches no host, has no skill and refuses elevated Stations.
@@ -79,8 +79,8 @@ pub const ORG_SHARED: &str = "org";
 #[map(deny_unknown_fields)]
 #[form(
     section(
-        id = "memory",
-        label = "Memory and shared work",
+        id = "work",
+        label = "Work and shared work",
         help = "Where she keeps each person's work, and what teams share with her."
     ),
     section(
@@ -93,18 +93,18 @@ pub const ORG_SHARED: &str = "org";
     section(id = "limits", label = "Limits")
 )]
 pub struct AssistantSettings {
-    /// Where each person's memory and work is kept: a repository address with {person} or
-    /// {person_digest} in it. Leave it empty to keep nothing. Default: none.
-    #[schema(title = "Personal repository", section = "memory")]
+    /// Where each person's work is kept: a repository address with {person} or
+    /// {person_digest} in it. Leave it empty to keep none. Default: none.
+    #[schema(title = "Personal repository", section = "work")]
     #[form(placeholder = "/srv/moneypenny/{person_digest}.git")]
     personal_repo: Option<String>,
     /// A repository a directory group shares with her, by group name.
-    #[schema(title = "Repositories teams share", section = "memory", advanced)]
+    #[schema(title = "Repositories teams share", section = "work", advanced)]
     #[map(default)]
     #[form(form = SharedRepo)]
     shared: BTreeMap<String, SharedRepo>,
     /// A repository everyone shares with her. Default: none.
-    #[schema(title = "Repository everyone shares", section = "memory", advanced)]
+    #[schema(title = "Repository everyone shares", section = "work", advanced)]
     #[form(form = SharedRepo)]
     org: Option<SharedRepo>,
     /// Let her run on a Station that runs as an administrator. A weakening.
@@ -172,9 +172,8 @@ pub struct AssistantSettings {
     #[map(default, skip_serializing_if = AssistantViewLimits::is_unset)]
     #[form(form)]
     views: AssistantViewLimits,
-    /// What passes between Universal Exports and a Station for her, and how much of her memory a
-    /// Station reads.
-    #[schema(title = "Messages and memory", section = "limits", advanced)]
+    /// What passes between Universal Exports and a Station for her.
+    #[schema(title = "Messages", section = "limits", advanced)]
     #[map(default, skip_serializing_if = is_default)]
     #[form(form)]
     limits: AssistantLimits,
@@ -1255,7 +1254,7 @@ impl AssistantSettings {
                     });
             if filled {
                 return Err(format!(
-                    "is {key}'s repository for some person, whose memory would go there"
+                    "is {key}'s repository for some person, whose work would go there"
                 ));
             }
         }
@@ -1526,8 +1525,8 @@ impl AssistantSettings {
         }
         if self.personal_repo != current.personal_repo {
             changes.push(format!(
-                "assistant.personal_repo changes from {:?} to {:?}: each person's work and \
-                 memory go to another repository",
+                "assistant.personal_repo changes from {:?} to {:?}: each person's work goes to \
+                 another repository",
                 current.personal_repo.as_deref().unwrap_or("none"),
                 self.personal_repo.as_deref().unwrap_or("none")
             ));

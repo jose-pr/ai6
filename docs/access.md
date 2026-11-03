@@ -62,7 +62,7 @@ the person: send and reply, and read what is sent to her. The Station's `cables.
 has to let her Agent do it. A person reads and changes [Moneypenny's memory of
 them](assistant.md#your-memory-in-the-app) with no action at all, and nobody else's;
 `assistant.memory.admin` on `config:assistant` lets an administrator read anyone's, each read
-audited `assistant.memory.read`, and change none.
+audited `memory.read`, and change none.
 
 A rule on an Operation reaches the Operations under it: Universal Exports names a request's
 ancestors (the Operation's parent, then its parent's, nearest first, from the Stations'
