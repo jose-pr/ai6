@@ -1524,53 +1524,69 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     }
   }
 
-  /// The files of Moneypenny's memory of the signed-in person. Throws [MemoryRefused] with
-  /// Universal Exports' words when it cannot be read.
-  Future<MemoryListing> loadMemory() async {
+  /// Moneypenny's memory of the signed-in person, or what matches [query], best first. Throws
+  /// [MemoryRefused] with the gateway's own words.
+  Future<MemoryListing> loadMemory({String? query}) async {
     if (demo) return MemoryListing.demo();
-    final response = await _userRequest('GET', '/v1/user/assistant/memory');
+    final response = await _userRequest(
+      'GET',
+      Uri(path: _memoryPath, queryParameters: {'q': ?query}).toString(),
+    );
     if (response.statusCode != 200) throw _memoryRefused(response);
     return MemoryListing.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
   }
 
-  /// One file of that memory, by its path under `memory/`.
-  Future<MemoryText> readMemory(String path) async {
+  /// One entry of that memory, by its ID.
+  Future<MemoryRecord> readMemory(String id) async {
     if (demo) {
-      return MemoryText(
-        path: path,
-        text: '# Memory\n\n- preferences.md: how the operator likes answers\n',
+      return MemoryRecord(
+        summary: MemoryListing.demo().entries.firstWhere(
+          (entry) => entry.id == id,
+        ),
+        content: 'Prefers tables to prose, and the short version first.\n',
       );
     }
-    final response = await _userRequest('GET', _memoryUrl(path));
+    final response = await _userRequest('GET', '$_memoryPath/$id');
     if (response.statusCode != 200) throw _memoryRefused(response);
-    return MemoryText.fromJson(
+    return MemoryRecord.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
   }
 
-  /// Writes one file of that memory as a commit by the person. With [base], the digest of
-  /// the text it was made from, a file changed since is refused rather than replaced.
-  Future<void> saveMemory(String path, String text, {String? base}) async {
+  /// Adds an entry to that memory, or with [id] changes that one from [revision], which is refused
+  /// when the entry has moved on.
+  Future<void> saveMemory({
+    required String summary,
+    required String content,
+    String? id,
+    int? revision,
+    String? name,
+  }) async {
     if (demo) throw StateError('Memory changes are unavailable in preview.');
-    final response = await _userRequest(
-      'PUT',
-      _memoryUrl(path),
-      body: {'content': text, 'base': ?base},
-    );
+    final body = {
+      'name': ?name,
+      'summary': summary,
+      'content': content,
+      'revision': ?revision,
+    };
+    final response = id == null
+        ? await _userRequest('POST', _memoryPath, body: body)
+        : await _userRequest('PUT', '$_memoryPath/$id', body: body);
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw _memoryRefused(response);
+    }
+  }
+
+  /// Forgets one entry of that memory, with its earlier versions.
+  Future<void> forgetMemory(String id) async {
+    if (demo) throw StateError('Memory changes are unavailable in preview.');
+    final response = await _userRequest('DELETE', '$_memoryPath/$id');
     if (response.statusCode != 200) throw _memoryRefused(response);
   }
 
-  /// Forgets one file of that memory: a commit by the person that removes it.
-  Future<void> forgetMemory(String path) async {
-    if (demo) throw StateError('Memory changes are unavailable in preview.');
-    final response = await _userRequest('DELETE', _memoryUrl(path));
-    if (response.statusCode != 200) throw _memoryRefused(response);
-  }
-
-  String _memoryUrl(String path) =>
-      '/v1/user/assistant/memory/${path.split('/').map(Uri.encodeComponent).join('/')}';
+  static const _memoryPath = '/v1/user/assistant/memory';
 
   /// Universal Exports' own words for a refused memory request, when it gave any.
   MemoryRefused _memoryRefused(http.Response response) {

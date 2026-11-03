@@ -402,7 +402,9 @@ void main() {
     expect(find.text('View refused'), findsOneWidget);
   });
 
-  testWidgets('a memory change shows its diff in the chat', (tester) async {
+  testWidgets('what she keeps in her memory shows its diff in the chat', (
+    tester,
+  ) async {
     final channel = FakeChannel();
     final controller = AssistantController(
       token: 'user-token',
@@ -421,18 +423,16 @@ void main() {
       'entries': [
         {
           'role': 'notice',
-          'text': 'Moneypenny is saving to her memory: memory/prefs.md.',
+          'text': 'Moneypenny keeps in her memory: How they like answers',
           'at': 1.0,
-          'data': {
-            'diff': '--- /dev/null\n+++ b/memory/prefs.md\n+Prefers\u200b tables.\n',
-          },
+          'data': {'diff': '--- before\n+++ after\n+Prefers\u200b tables.\n'},
         },
         {'role': 'notice', 'text': 'Stopped.', 'at': 2.0},
       ],
     });
     await tester.pumpAndSettle();
-    expect(find.textContaining('saving to her memory'), findsOneWidget);
-    expect(find.text('+++ b/memory/prefs.md'), findsOneWidget);
+    expect(find.textContaining('keeps in her memory'), findsOneWidget);
+    expect(find.text('+++ after'), findsOneWidget);
     expect(
       find.text('+Prefers<U+200B> tables.'),
       findsOneWidget,

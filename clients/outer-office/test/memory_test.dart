@@ -12,15 +12,45 @@ import 'package:outer_office/main.dart';
 
 const _json = {'content-type': 'application/json'};
 
-/// The fixture's stand-in for the SHA-256 Universal Exports gives: the app only hands it back.
-String digestOf(String text) => 'digest:${base64.encode(utf8.encode(text))}';
+const _idPrefs = '6f1e4a6a-9c55-4a0c-9d5c-2f8a0b6c1e11';
+const _idCall = '0c8b7a35-5a4b-4d7a-8f50-9d2c6e1f7a22';
 
-/// Universal Exports' memory routes over [files] (path under `memory/` to text), recording
-/// every request; [refuse] answers a request instead when it returns a response.
+/// An entry as the gateway holds it, and shows it.
+Map<String, dynamic> entry(
+  String id,
+  String summary,
+  String content, {
+  String? name,
+  int revision = 1,
+  String by = 'person:operator-007',
+  List<String> exposures = const [],
+}) => {
+  'id': id,
+  'scope': 'person:operator-007',
+  'name': name,
+  'summary': summary,
+  'content': content,
+  'created_at': 1760000000.0,
+  'updated_at': 1760000000.0,
+  'updated_by': by,
+  'source': {
+    'by': by,
+    'session': null,
+    'exposed': exposures.isNotEmpty,
+    'exposures': exposures,
+  },
+  'compartments': <String>[],
+  'revision': revision,
+  'bytes': utf8.encode(summary).length + utf8.encode(content).length,
+};
+
+/// Universal Exports' memory routes over [entries] by ID, recording every request; [refuse]
+/// answers a request instead when it returns a response.
 class MemoryGateway {
-  MemoryGateway(this.files);
+  MemoryGateway(List<Map<String, dynamic>> entries)
+    : entries = {for (final entry in entries) entry['id'] as String: entry};
 
-  final Map<String, String> files;
+  final Map<String, Map<String, dynamic>> entries;
   final requests = <http.Request>[];
   http.Response? Function(http.Request request)? refuse;
 
@@ -31,62 +61,63 @@ class MemoryGateway {
     if (refuse?.call(request) case final refused?) return refused;
     final path = request.url.path;
     if (path == _prefix) {
+      if (request.method == 'POST') {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final made = entry(
+          'new-entry',
+          body['summary'] as String,
+          body['content'] as String,
+          name: body['name'] as String?,
+        );
+        entries['new-entry'] = made;
+        return http.Response(jsonEncode(made), 201, headers: _json);
+      }
+      final query = request.url.queryParameters['q']?.toLowerCase();
+      final found = entries.values
+          .where(
+            (entry) =>
+                query == null ||
+                '${entry['summary']} ${entry['content']}'
+                    .toLowerCase()
+                    .contains(query),
+          )
+          .toList();
       return http.Response(
         jsonEncode({
           'person': 'operator-007',
-          'commit': 'c0ffee1234567890',
-          'files': [
-            for (final MapEntry(:key, :value) in files.entries)
-              {'path': key, 'bytes': utf8.encode(value).length},
+          'entries': [
+            for (final entry in found) {...entry}..remove('content'),
           ],
-          'more': false,
+          'total': found.length,
         }),
         200,
         headers: _json,
       );
     }
-    final file = Uri.decodeComponent(path.substring(_prefix.length + 1));
+    final id = path.substring(_prefix.length + 1);
+    final held = entries[id];
+    if (held == null) {
+      return http.Response(
+        jsonEncode({'error': 'There is no such entry.'}),
+        404,
+        headers: _json,
+      );
+    }
     switch (request.method) {
       case 'GET':
-        final text = files[file];
-        if (text == null) {
-          return http.Response(
-            jsonEncode({
-              'error': 'memory/$file is not in the person\'s memory.',
-            }),
-            404,
-            headers: _json,
-          );
-        }
-        return http.Response(
-          jsonEncode({
-            'path': file,
-            'text': text,
-            'digest': digestOf(text),
-            'commit': 'c0ffee1234567890',
-          }),
-          200,
-          headers: _json,
-        );
+        return http.Response(jsonEncode(held), 200, headers: _json);
       case 'PUT':
         final body = jsonDecode(request.body) as Map<String, dynamic>;
-        files[file] = body['content'] as String;
-        return http.Response(
-          jsonEncode({
-            'path': file,
-            'digest': digestOf(files[file]!),
-            'commit': 'beef',
-          }),
-          200,
-          headers: _json,
-        );
+        entries[id] = {
+          ...held,
+          ...body,
+          'revision': (held['revision'] as int) + 1,
+          'bytes': utf8.encode(body['content'] as String).length,
+        };
+        return http.Response(jsonEncode(entries[id]), 200, headers: _json);
       case 'DELETE':
-        files.remove(file);
-        return http.Response(
-          jsonEncode({'path': file, 'commit': 'f00d'}),
-          200,
-          headers: _json,
-        );
+        entries.remove(id);
+        return http.Response(jsonEncode({'id': id}), 200, headers: _json);
     }
     return http.Response('', 405);
   }
@@ -140,104 +171,152 @@ class SilentChannel implements AssistantChannel {
 }
 
 void main() {
-  testWidgets(
-    'lists her memory, opens a file and saves it from what was opened',
-    (tester) async {
-      final gateway = MemoryGateway({
-        'MEMORY.md': '# Memory\n\n- prefs.md\n',
-        'prefs.md': 'Tables.\n',
-      });
-      await openMemory(tester, signedIn(gateway));
-
-      expect(gateway.requests.single.url.path, '/v1/user/assistant/memory');
-      expect(find.text('MEMORY.md'), findsOneWidget);
-      expect(find.text('prefs.md'), findsOneWidget);
-      expect(find.text('8 bytes'), findsOneWidget);
-      expect(find.text('As of commit c0ffee123456'), findsOneWidget);
-
-      await tester.tap(find.text('prefs.md'));
-      await tester.pumpAndSettle();
-      expect(
-        gateway.requests.last.url.path,
-        '/v1/user/assistant/memory/prefs.md',
-      );
-      final field = find.byKey(const Key('memory-text'));
-      expect(tester.widget<TextField>(field).controller!.text, 'Tables.\n');
-
-      await tester.enterText(field, 'Charts, not tables.\n');
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-      final put = gateway.sent('PUT').single;
-      expect(put.url.path, '/v1/user/assistant/memory/prefs.md');
-      expect(jsonDecode(put.body), {
-        'content': 'Charts, not tables.\n',
-        'base': digestOf('Tables.\n'),
-      });
-      expect(find.byKey(const Key('memory-text')), findsNothing);
-      expect(find.text('Saved prefs.md.'), findsOneWidget);
-      expect(find.text('20 bytes'), findsOneWidget, reason: 'listed again');
-    },
-  );
-
-  testWidgets('a new file is written without a base', (tester) async {
-    final gateway = MemoryGateway({'MEMORY.md': '# Memory\n'});
+  testWidgets('lists her memory, opens an entry and saves from its revision', (
+    tester,
+  ) async {
+    final gateway = MemoryGateway([
+      entry(_idPrefs, 'How they like answers', 'Tables.\n', revision: 3),
+      entry(_idCall, 'Who is on call', 'Ana.\n', name: 'on-call'),
+    ]);
     await openMemory(tester, signedIn(gateway));
 
-    await tester.tap(find.text('New file'));
+    expect(gateway.requests.single.url.path, '/v1/user/assistant/memory');
+    expect(find.text('How they like answers'), findsOneWidget);
+    expect(find.textContaining('on-call'), findsOneWidget);
+
+    await tester.tap(find.text('How they like answers'));
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('memory-new-path')),
-      'people/ana.md',
+    expect(
+      gateway.requests.last.url.path,
+      '/v1/user/assistant/memory/$_idPrefs',
     );
-    await tester.tap(find.text('Create'));
+    final field = find.byKey(const Key('memory-text'));
+    expect(tester.widget<TextField>(field).controller!.text, 'Tables.\n');
+
+    await tester.enterText(field, 'Charts, not tables.\n');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    final put = gateway.sent('PUT').single;
+    expect(put.url.path, '/v1/user/assistant/memory/$_idPrefs');
+    expect(jsonDecode(put.body), {
+      'summary': 'How they like answers',
+      'content': 'Charts, not tables.\n',
+      'revision': 3,
+    });
+    expect(find.byKey(const Key('memory-text')), findsNothing);
+    expect(find.text('Saved How they like answers.'), findsOneWidget);
+  });
+
+  testWidgets('a new entry is added by a form, with no revision', (
+    tester,
+  ) async {
+    final gateway = MemoryGateway([]);
+    await openMemory(tester, signedIn(gateway));
+    expect(find.text('She remembers nothing about you yet.'), findsOneWidget);
+
+    await tester.tap(find.text('New entry'));
     await tester.pumpAndSettle();
     expect(gateway.sent('GET').length, 1, reason: 'nothing to read yet');
-    expect(find.byTooltip('Forget people/ana.md'), findsNothing);
+    expect(find.byTooltip('Forget this entry'), findsNothing);
 
+    await tester.enterText(find.byKey(const Key('memory-summary')), 'Ana');
+    await tester.enterText(find.byKey(const Key('memory-name')), 'people');
     await tester.enterText(
       find.byKey(const Key('memory-text')),
       'Ana leads ops.\n',
     );
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
-    final put = gateway.sent('PUT').single;
-    expect(put.url.path, '/v1/user/assistant/memory/people/ana.md');
-    expect(jsonDecode(put.body), {'content': 'Ana leads ops.\n'});
-    expect(find.text('people/ana.md'), findsOneWidget);
+    final post = gateway.sent('POST').single;
+    expect(post.url.path, '/v1/user/assistant/memory');
+    expect(jsonDecode(post.body), {
+      'name': 'people',
+      'summary': 'Ana',
+      'content': 'Ana leads ops.\n',
+    });
+    expect(find.text('Ana'), findsOneWidget);
   });
 
-  testWidgets('a file is forgotten only once the person confirms', (
+  testWidgets('searching asks the gateway and says when nothing matches', (
     tester,
   ) async {
-    final gateway = MemoryGateway({
-      'MEMORY.md': '# Memory\n',
-      'prefs.md': 'Tables.\n',
-    });
+    final gateway = MemoryGateway([
+      entry(_idPrefs, 'How they like answers', 'Tables.\n'),
+      entry(_idCall, 'Who is on call', 'Ana.\n'),
+    ]);
+    await openMemory(tester, signedIn(gateway));
+    await tester.enterText(find.byKey(const Key('memory-search')), 'tables');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(gateway.requests.last.url.queryParameters['q'], 'tables');
+    expect(find.text('How they like answers'), findsOneWidget);
+    expect(find.text('Who is on call'), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('memory-search')), 'zebra');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing she keeps matches that.'), findsOneWidget);
+  });
+
+  testWidgets('its source and its mark are shown', (tester) async {
+    final gateway = MemoryGateway([
+      entry(
+        _idPrefs,
+        'From a Mission',
+        'Text.\n',
+        by: 'agent:007',
+        exposures: ['tool:WebFetch'],
+      ),
+      entry(_idCall, 'From her', 'Text.\n', by: 'moneypenny:operator-007'),
+    ]);
+    await openMemory(tester, signedIn(gateway));
+    expect(find.textContaining('Written by agent:007'), findsOneWidget);
+    expect(find.textContaining('tool:WebFetch'), findsOneWidget);
+    expect(
+      find.textContaining('Written by moneypenny:operator-007'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('From a Mission'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(find.byKey(const Key('memory-source'))).data,
+      contains('after reading outside text (tool:WebFetch)'),
+    );
+  });
+
+  testWidgets('an entry is forgotten only once the person confirms', (
+    tester,
+  ) async {
+    final gateway = MemoryGateway([
+      entry(_idPrefs, 'Prefs', 'Tables.\n'),
+      entry(_idCall, 'On call', 'Ana.\n'),
+    ]);
     await openMemory(tester, signedIn(gateway));
 
-    await tester.tap(find.byTooltip('Forget prefs.md'));
+    await tester.tap(find.byTooltip('Forget Prefs'));
     await tester.pumpAndSettle();
-    expect(find.text('Forget prefs.md?'), findsOneWidget);
+    expect(find.text('Forget "Prefs"?'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(gateway.sent('DELETE'), isEmpty);
-    expect(find.text('prefs.md'), findsOneWidget);
+    expect(find.text('Prefs'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Forget prefs.md'));
+    await tester.tap(find.byTooltip('Forget Prefs'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Forget'));
     await tester.pumpAndSettle();
     expect(
       gateway.sent('DELETE').single.url.path,
-      '/v1/user/assistant/memory/prefs.md',
+      '/v1/user/assistant/memory/$_idPrefs',
     );
-    expect(find.text('prefs.md'), findsNothing);
-    expect(find.text('Forgotten: prefs.md.'), findsOneWidget);
+    expect(find.text('Prefs'), findsNothing);
+    expect(find.text('Forgotten: Prefs.'), findsOneWidget);
 
-    // From the open file too.
-    await tester.tap(find.text('MEMORY.md'));
+    // From the open entry too.
+    await tester.tap(find.text('On call'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Forget MEMORY.md'));
+    await tester.tap(find.byTooltip('Forget this entry'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Forget'));
     await tester.pumpAndSettle();
@@ -246,41 +325,40 @@ void main() {
   });
 
   testWidgets('a refusal is shown in the gateway\'s own words', (tester) async {
-    final gateway = MemoryGateway({'prefs.md': 'Tables.\n'});
+    final gateway = MemoryGateway([entry(_idPrefs, 'Prefs', 'Tables.\n')]);
     const changed =
-        'Memory/prefs.md changed since it was opened, so nothing was saved: open it '
-        'again and make the change from what it holds now.';
+        'The entry changed since it was read, so nothing was saved: it is at revision 2. '
+        'Read it again and make the change from what it holds now.';
     gateway.refuse = (request) => request.method == 'PUT'
-        ? http.Response(jsonEncode({'error': changed}), 409, headers: _json)
+        ? http.Response(
+            jsonEncode({'error': changed, 'revision': 2}),
+            409,
+            headers: _json,
+          )
         : null;
     await openMemory(tester, signedIn(gateway));
-    await tester.tap(find.text('prefs.md'));
+    await tester.tap(find.text('Prefs'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('memory-text')), 'Charts.\n');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(find.text(changed), findsOneWidget);
     expect(
-      find.byKey(const Key('memory-text')),
-      findsOneWidget,
-      reason: 'the editor stays open with the text',
-    );
-    expect(
       tester
           .widget<TextField>(find.byKey(const Key('memory-text')))
           .controller!
           .text,
       'Charts.\n',
+      reason: 'the editor stays open with the text',
     );
   });
 
   testWidgets('a memory the gateway cannot list says why', (tester) async {
     const none =
-        'This deployment gives nobody a personal repository, so Moneypenny keeps no '
-        'memory.';
-    final empty = MemoryGateway({})
+        'This gateway keeps no Registry, so Moneypenny keeps no memory here.';
+    final empty = MemoryGateway([])
       ..refuse = (_) =>
-          http.Response(jsonEncode({'error': none}), 404, headers: _json);
+          http.Response(jsonEncode({'error': none}), 503, headers: _json);
     await openMemory(tester, signedIn(empty));
     expect(find.text(none), findsOneWidget);
     expect(find.text('Her memory is unavailable.'), findsOneWidget);
