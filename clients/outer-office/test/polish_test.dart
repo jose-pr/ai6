@@ -84,7 +84,7 @@ void main() {
     for (final tooltip in [
       OoSearch.tooltip,
       'Needs attention: 5',
-      'Your account and sign-out',
+      'Your account and settings',
     ]) {
       expect(find.byTooltip(tooltip), findsOneWidget, reason: tooltip);
     }

@@ -125,7 +125,7 @@ void main() {
         expect(find.byType(AssistantPanel), findsNothing);
         expect(find.text('Ask Moneypenny…'), findsNothing);
         expect(opened, 0, reason: 'nothing may open her socket');
-        await tester.tap(find.byTooltip('Settings'));
+        await tester.tap(find.byTooltip('Your account and settings'));
         await tester.pumpAndSettle();
         expect(find.text(moneypennyOffNote), findsOneWidget);
         expect(moneypennyOffNote, contains('off on this deployment'));
@@ -202,7 +202,7 @@ void main() {
       await board.login('ana', 'secret');
       await tester.pumpAndSettle();
       expect(find.text('MONEYPENNY'), findsOneWidget);
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Your account and settings'));
       await tester.pumpAndSettle();
       expect(find.text(moneypennyOffNote), findsNothing);
       await tester.pumpWidget(const SizedBox());

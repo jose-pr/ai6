@@ -415,9 +415,8 @@ void main() {
         tester.widget<Semantics>(choice(label)).properties.selected ?? false;
 
     for (final (size, entry) in [
-      (const Size(1440, 900), 'Settings'),
-      (const Size(1440, 900), 'Your account and sign-out'),
-      (const Size(390, 844), 'Your account and sign-out'),
+      (const Size(1440, 900), 'Your account and settings'),
+      (const Size(390, 844), 'Your account and settings'),
     ]) {
       for (final scale in [1.0, 2.0]) {
         testWidgets('opens from "$entry" at ${size.width.toInt()} px, '
@@ -467,7 +466,7 @@ void main() {
 
     testWidgets('works by keyboard', (tester) async {
       final board = await demoAt(tester, const Size(1440, 900));
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Your account and settings'));
       await tester.pumpAndSettle();
       Focus.of(tester.element(find.text('Light'))).requestFocus();
       await tester.pump();
@@ -488,7 +487,7 @@ void main() {
       tester.platformDispatcher.accessibilityFeaturesTestValue =
           const FakeAccessibilityFeatures(highContrast: true);
       final board = await demoAt(tester, const Size(1440, 900));
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Your account and settings'));
       await tester.pumpAndSettle();
       expect(find.text(OoAppearanceChooser.wallpaperOffHint), findsOneWidget);
       final wallpaper = tester.widget<SwitchListTile>(

@@ -4522,12 +4522,6 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               onOpen: _openRoute,
             ),
           ),
-          if (!phone)
-            IconButton(
-              tooltip: 'Settings',
-              onPressed: () => _showAppearance(context, widget.board),
-              icon: const OoIcon(OoIconName.settings),
-            ),
           const SizedBox(width: 4),
           AnimatedBuilder(
             animation: widget.board,
@@ -5896,31 +5890,7 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
   );
 }
 
-/// The top bar's settings: the operator menu's appearance settings on their own.
-Future<void> _showAppearance(BuildContext context, MissionBoard board) =>
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Settings'),
-        content: SizedBox(
-          width: 440,
-          child: SingleChildScrollView(
-            child: AnimatedBuilder(
-              animation: board,
-              builder: (context, _) => _ThemeChooser(board: board),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-
-/// The operator menu's and the top bar's appearance settings, applied and stored at once.
+/// The operator menu's appearance settings, applied and stored at once.
 class _ThemeChooser extends StatelessWidget {
   const _ThemeChooser({required this.board});
 

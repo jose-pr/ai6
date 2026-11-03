@@ -534,7 +534,7 @@ class UserChip extends StatelessWidget {
             ),
     );
     return Tooltip(
-      message: 'Your account and sign-out',
+      message: 'Your account and settings',
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(24),

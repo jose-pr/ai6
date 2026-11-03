@@ -159,7 +159,7 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   reason a try was refused; the login limit's wait counts down and holds **Continue**.
 - Six themes from the Outer Office design kit (Night Ops, the default, Black Ops, Dusk,
   Classic, Light and Red File) or the system's light or dark setting, stored per device as
-  `oo.theme`. Settings (the top bar's gear and the operator menu) show each
+  `oo.theme`. Settings (the person's chip in the top bar) show each
   theme as a miniature of its page, panel, selected row and button, with its name, a line
   on its character and a check mark on the chosen one; a choice applies at once. Every
   colour text is drawn in reaches WCAG AA (4.5:1) where it is drawn, panels over art
