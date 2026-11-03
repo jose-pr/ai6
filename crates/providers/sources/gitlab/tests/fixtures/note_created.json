@@ -1,0 +1,47 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/projects/1000/issues/1/notes",
+    "body": {
+      "body": "AI6 test data: a status comment. ñandú 🧪\n\n<!-- ai6:status -->"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "14",
+      "ratelimit-remaining": "86",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "id": 4151757723,
+      "type": null,
+      "body": "AI6 test data: a status comment. ñandú 🧪\n\n<!-- ai6:status -->",
+      "author": {
+        "id": 1,
+        "username": "reporter",
+        "name": "Sam Reporter",
+        "state": "active",
+        "locked": false,
+        "avatar_url": "https://example.invalid/avatar.png",
+        "web_url": "https://gitlab.com/reporter"
+      },
+      "created_at": "2026-11-03T15:25:24.739Z",
+      "updated_at": "2026-11-03T15:25:24.739Z",
+      "system": false,
+      "noteable_id": 208991844,
+      "noteable_type": "Issue",
+      "project_id": 1000,
+      "resolvable": false,
+      "confidential": false,
+      "internal": false,
+      "imported": false,
+      "imported_from": "none",
+      "noteable_iid": 1,
+      "commands_changes": {}
+    }
+  }
+}

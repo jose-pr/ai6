@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "GET",
+    "target": "/projects/1000/members/all/1",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "22",
+      "ratelimit-remaining": "78",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "id": 1,
+      "username": "reporter",
+      "name": "Sam Reporter",
+      "state": "active",
+      "locked": false,
+      "avatar_url": "https://example.invalid/avatar.png",
+      "web_url": "https://gitlab.com/reporter",
+      "access_level": 50,
+      "created_at": "2026-11-03T15:14:24.997Z",
+      "expires_at": null,
+      "membership_state": "active"
+    }
+  }
+}

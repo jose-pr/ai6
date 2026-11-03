@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "target": "/projects/1000/members/all/1",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "23",
+      "ratelimit-remaining": "77",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "message": "404 Not found"
+    }
+  }
+}

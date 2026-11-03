@@ -1,0 +1,91 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/projects/o%2Fr/issues",
+    "body": {
+      "title": "AI6 test data: a child (1793720009)",
+      "description": "A child.",
+      "labels": "ai6:working",
+      "issue_type": "task"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "11",
+      "ratelimit-remaining": "89",
+      "ratelimit-reset": "1793720040"
+    },
+    "body": {
+      "id": 208993096,
+      "iid": 14,
+      "project_id": 1000,
+      "title": "AI6 test data: a child (1793720009)",
+      "description": "A child.",
+      "state": "opened",
+      "created_at": "2026-11-03T15:33:54.755Z",
+      "updated_at": "2026-11-03T15:33:54.755Z",
+      "closed_at": null,
+      "closed_by": null,
+      "labels": [
+        "ai6:working"
+      ],
+      "milestone": null,
+      "assignees": [],
+      "author": {
+        "id": 1,
+        "username": "reporter",
+        "name": "Sam Reporter",
+        "state": "active",
+        "locked": false,
+        "avatar_url": "https://example.invalid/avatar.png",
+        "web_url": "https://gitlab.com/reporter"
+      },
+      "type": "TASK",
+      "assignee": null,
+      "user_notes_count": 0,
+      "merge_requests_count": 0,
+      "upvotes": 0,
+      "downvotes": 0,
+      "start_date": null,
+      "due_date": null,
+      "confidential": false,
+      "discussion_locked": null,
+      "issue_type": "task",
+      "web_url": "https://gitlab.com/o/r/-/work_items/14",
+      "time_stats": {
+        "time_estimate": 0,
+        "total_time_spent": 0,
+        "human_time_estimate": null,
+        "human_total_time_spent": null
+      },
+      "task_completion_status": {
+        "count": 0,
+        "completed_count": 0
+      },
+      "blocking_issues_count": 0,
+      "has_tasks": true,
+      "task_status": "0 of 0 checklist items completed",
+      "_links": {
+        "self": "https://gitlab.com/api/v4/projects/1000/issues/14",
+        "notes": "https://gitlab.com/api/v4/projects/1000/issues/14/notes",
+        "award_emoji": "https://gitlab.com/api/v4/projects/1000/issues/14/award_emoji",
+        "project": "https://gitlab.com/api/v4/projects/1000",
+        "closed_as_duplicate_of": null
+      },
+      "references": {
+        "short": "#14",
+        "relative": "#14",
+        "full": "o/r#14"
+      },
+      "severity": "UNKNOWN",
+      "subscribed": true,
+      "moved_to_id": null,
+      "imported": false,
+      "imported_from": "none"
+    }
+  }
+}

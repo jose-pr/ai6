@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "target": "/projects/1000/issues?per_page=1",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "500",
+      "ratelimit-name": "throttle_unauthenticated_api",
+      "ratelimit-observed": "2",
+      "ratelimit-remaining": "498",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "message": "404 Project Not Found"
+    }
+  }
+}

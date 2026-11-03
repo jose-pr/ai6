@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/projects/1000/issues/1/links",
+    "body": {
+      "target_project_id": "1000",
+      "target_issue_iid": "4",
+      "link_type": "relates_to"
+    }
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "33",
+      "ratelimit-remaining": "67",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "message": "Issue(s) already assigned"
+    }
+  }
+}

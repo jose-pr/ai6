@@ -240,6 +240,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai6-source-gitlab"
+version = "0.1.0"
+dependencies = [
+ "ai6",
+ "rcgen",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
+ "ureq",
+ "url",
+ "webpki-root-certs",
+]
+
+[[package]]
 name = "ai6-source-jira"
 version = "0.1.0"
 dependencies = [

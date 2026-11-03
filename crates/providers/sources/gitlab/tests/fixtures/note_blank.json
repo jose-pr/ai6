@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/projects/1000/issues/1/notes",
+    "body": {
+      "body": " \n "
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "16",
+      "ratelimit-remaining": "84",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "message": "400 Bad request - Note {:note=>[\"can't be blank\"]}"
+    }
+  }
+}

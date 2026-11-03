@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "target": "/projects/o%2Fr-nope",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "40",
+      "ratelimit-remaining": "60",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "message": "404 Project Not Found"
+    }
+  }
+}

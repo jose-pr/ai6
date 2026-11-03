@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "PUT",
+    "target": "/projects/1000/issues/1",
+    "body": {
+      "state_event": "archive"
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "41",
+      "ratelimit-remaining": "59",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "error": "state_event does not have a valid value"
+    }
+  }
+}

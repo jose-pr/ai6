@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/api/graphql",
+    "body": {
+      "query": "mutation($id: WorkItemID!, $parent: WorkItemID!) { workItemUpdate(input: {id: $id, hierarchyWidget: {parentId: $parent}}) { errors } }",
+      "variables": {
+        "id": "gid://gitlab/WorkItem/208993096",
+        "parent": "gid://gitlab/WorkItem/208993077"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {},
+    "body": {
+      "data": {
+        "workItemUpdate": {
+          "errors": []
+        }
+      }
+    }
+  }
+}

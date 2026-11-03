@@ -1,0 +1,54 @@
+{
+  "request": {
+    "method": "POST",
+    "target": "/api/graphql",
+    "body": {
+      "query": "query($path: ID!, $iid: String!) { project(fullPath: $path) { workItems(iid: $iid) { nodes { widgets { ... on WorkItemWidgetHierarchy { parent { iid namespace { fullPath } } } } } } } }",
+      "variables": {
+        "path": "o/r",
+        "iid": "14"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {},
+    "body": {
+      "data": {
+        "project": {
+          "workItems": {
+            "nodes": [
+              {
+                "widgets": [
+                  {},
+                  {},
+                  {},
+                  {},
+                  {},
+                  {},
+                  {
+                    "parent": {
+                      "iid": "12",
+                      "namespace": {
+                        "fullPath": "o/r"
+                      }
+                    }
+                  },
+                  {},
+                  {},
+                  {},
+                  {},
+                  {},
+                  {},
+                  {},
+                  {},
+                  {}
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

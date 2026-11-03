@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "PUT",
+    "target": "/projects/1000/issues/99999",
+    "body": {
+      "remove_labels": "ai6:ready"
+    }
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json",
+      "ratelimit-limit": "100",
+      "ratelimit-name": "burst_traffic_per_user_free_plan",
+      "ratelimit-observed": "38",
+      "ratelimit-remaining": "62",
+      "ratelimit-reset": "1793719560"
+    },
+    "body": {
+      "message": "404 Not found"
+    }
+  }
+}
