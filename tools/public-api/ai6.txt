@@ -1074,6 +1074,7 @@ pub ai6::directorates::m::config::StationRuntime::provision: ai6::station::limit
 pub ai6::directorates::m::config::StationRuntime::publisher: ai6::station::limits::PublisherLimits
 pub ai6::directorates::m::config::StationRuntime::recovery: ai6::station::limits::RecoveryLimits
 pub ai6::directorates::m::config::StationRuntime::resources_every: core::option::Option<f64>
+pub ai6::directorates::m::config::StationRuntime::review: ai6::station::limits::ReviewLimits
 pub ai6::directorates::m::config::StationRuntime::roles: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::m::config::StationRuntime::runner: ai6::station::limits::RunnerLimits
 pub ai6::directorates::m::config::StationRuntime::safe_house_cache_age: core::option::Option<f64>
@@ -1500,6 +1501,7 @@ pub ai6::directorates::m::mission::Mission::parked_until: core::option::Option<i
 pub ai6::directorates::m::mission::Mission::plan: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::prompt: alloc::string::String
 pub ai6::directorates::m::mission::Mission::provenance: core::option::Option<ai6::directorates::registry::bona_fides::Provenance>
+pub ai6::directorates::m::mission::Mission::review_naming: core::option::Option<ai6::directorates::m::review::BriefNaming>
 pub ai6::directorates::m::mission::Mission::revision: u64
 pub ai6::directorates::m::mission::Mission::role_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::safe_house: core::option::Option<ai6::directorates::q::safehouse::SafeHouseReport>
@@ -1522,6 +1524,7 @@ pub fn ai6::directorates::m::mission::MissionStore::quarantine(&mut self, &str) 
 pub fn ai6::directorates::m::mission::MissionStore::reassign(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_name(&mut self, &str, alloc::string::String) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_provenance(&mut self, &str, ai6::directorates::registry::bona_fides::Provenance) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::record_review_naming(&mut self, &str, ai6::directorates::m::review::BriefNaming) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::requeue_for(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::retry(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -1776,6 +1779,16 @@ pub fn ai6::directorates::m::review::PanelSeat::label(&self) -> alloc::string::S
 pub fn ai6::directorates::m::review::PanelSeat::role(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::review::PanelSeat::weighing(self, u32) -> Self
 pub fn ai6::directorates::m::review::PanelSeat::with_veto(self) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::review::PanelTarget
+pub ai6::directorates::m::review::PanelTarget::gate: ai6::directorates::m::review::ReviewGate
+pub ai6::directorates::m::review::PanelTarget::iteration: u32
+pub ai6::directorates::m::review::PanelTarget::mission: alloc::string::String
+pub ai6::directorates::m::review::PanelTarget::round: u32
+pub ai6::directorates::m::review::PanelTarget::seat: usize
+impl ai6::directorates::m::review::PanelTarget
+pub fn ai6::directorates::m::review::PanelTarget::entry(&self, &str) -> ai6::directorates::registry::mission_ids::MissionEntry
+pub fn ai6::directorates::m::review::PanelTarget::new(&str, ai6::directorates::m::review::ReviewGate, u32, u32, usize) -> Self
+pub fn ai6::directorates::m::review::PanelTarget::review_id(&self) -> alloc::string::String
 #[non_exhaustive] pub struct ai6::directorates::m::review::PolicyLookup<'a>
 pub ai6::directorates::m::review::PolicyLookup::author: core::option::Option<&'a str>
 pub ai6::directorates::m::review::PolicyLookup::brief: core::option::Option<&'a ai6::directorates::m::review::BriefNaming>
@@ -1820,6 +1833,8 @@ pub const ai6::directorates::m::review::BRIEF_REVIEW_KEY: &str
 pub const ai6::directorates::m::review::DEFAULT_REVIEWER_TIMEOUT_SECS: u64
 pub const ai6::directorates::m::review::NO_REVIEW: &str
 pub const ai6::directorates::m::review::OUTPUT_REASON: &str
+pub const ai6::directorates::m::review::PANEL_DATA_KEY: &str
+pub const ai6::directorates::m::review::PANEL_SOURCE: &str
 pub const ai6::directorates::m::review::PLAN_REASON: &str
 pub const ai6::directorates::m::review::REDO_REASON: &str
 pub fn ai6::directorates::m::review::applicable(&ai6::directorates::m::review::PolicyLookup<'_>) -> core::result::Result<ai6::directorates::m::review::AppliedPolicy, ai6::directorates::m::review::ReviewRefusal>
@@ -1827,13 +1842,19 @@ pub fn ai6::directorates::m::review::choice_in_data(&alloc::collections::btree::
 pub fn ai6::directorates::m::review::choice_in_labels(&[alloc::string::String]) -> core::option::Option<ai6::directorates::m::review::ReviewChoice>
 pub fn ai6::directorates::m::review::choose_panel(&ai6::directorates::m::review::ReviewPolicy, &ai6::directorates::m::review::PanelCandidate, &[ai6::directorates::m::review::PanelCandidate]) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::review::Reviewer>, ai6::directorates::m::review::PanelRefusal>
 pub fn ai6::directorates::m::review::decide(&ai6::directorates::m::review::ReviewPolicy, usize, &[ai6::directorates::m::review::Ballot], u32) -> ai6::directorates::m::review::Decision
+pub fn ai6::directorates::m::review::is_panel_reference(&str) -> bool
+pub fn ai6::directorates::m::review::is_panel_review(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::directorates::m::review::is_review_reason(&str) -> bool
 pub fn ai6::directorates::m::review::models_of(&ai6::directorates::m::roster::Agent) -> alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub fn ai6::directorates::m::review::next_step(&ai6::directorates::m::review::ReviewPolicy, ai6::directorates::m::review::ReviewGate, ai6::directorates::m::review::Decision, u32) -> ai6::directorates::m::review::Step
 pub fn ai6::directorates::m::review::no_agreement(&ai6::directorates::m::review::ReviewPolicy, ai6::directorates::m::review::ReviewGate) -> ai6::directorates::m::review::Step
+pub fn ai6::directorates::m::review::one_line(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::m::review::out_of_budget(&ai6::directorates::m::review::ReviewPolicy, u64, u64) -> bool
+pub fn ai6::directorates::m::review::panel_brief(&ai6::directorates::registry::reviews::MissionReview, &ai6::directorates::m::review::Reviewer, &ai6::directorates::m::review::PanelTarget, &ai6::station::limits::ReviewLimits, (&str, i64)) -> ai6::directorates::registry::store::Brief
+pub fn ai6::directorates::m::review::panel_target(&ai6::directorates::registry::store::Brief) -> core::option::Option<ai6::directorates::m::review::PanelTarget>
 pub fn ai6::directorates::m::review::policies_from_records(impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, serde_json::value::Value)>) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::review::ReviewPolicy>, alloc::string::String>
 pub fn ai6::directorates::m::review::read_vote(&str, ai6::bounds::Limit, ai6::bounds::Limit, ai6::bounds::Limit) -> ai6::directorates::m::review::VoteAnswer
+pub fn ai6::directorates::m::review::redo_message(ai6::directorates::m::review::ReviewGate, &[alloc::string::String], u32, u32) -> alloc::string::String
 pub mod ai6::directorates::m::roster
 #[non_exhaustive] pub enum ai6::directorates::m::roster::OnLost
 pub ai6::directorates::m::roster::OnLost::Fail
@@ -2833,6 +2854,9 @@ pub ai6::directorates::q::safehouse::SafeHouseClone::git_dir: core::option::Opti
 pub ai6::directorates::q::safehouse::SafeHouseClone::max_bytes: core::option::Option<u64>
 pub ai6::directorates::q::safehouse::SafeHouseClone::path: alloc::string::String
 pub ai6::directorates::q::safehouse::SafeHouseClone::timeout_secs: core::option::Option<u64>
+pub struct ai6::directorates::q::safehouse::SafeHouseDiff
+pub ai6::directorates::q::safehouse::SafeHouseDiff::cut: bool
+pub ai6::directorates::q::safehouse::SafeHouseDiff::text: alloc::string::String
 pub struct ai6::directorates::q::safehouse::SafeHouseExports
 pub ai6::directorates::q::safehouse::SafeHouseExports::dirty: bool
 pub ai6::directorates::q::safehouse::SafeHouseExports::ignored: alloc::vec::Vec<alloc::string::String>
@@ -2874,6 +2898,8 @@ pub fn ai6::directorates::q::safehouse::SafeHouseSession::changes(&self) -> core
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::diff(&self, u64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::safehouse::SafeHouseSession::diff_in(&self, u64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::discard(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::exports(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::safehouse::SafeHouseSession::exports_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -2887,6 +2913,8 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::diff(&self, u64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::diff_in(&self, u64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::discard(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::exports(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::exports_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -4096,6 +4124,18 @@ pub fn ai6::directorates::registry::store::FileRegistry::settle_issue_question(&
 pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
 pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
+pub trait ai6::directorates::registry::backend::MissionReviewStore
+pub fn ai6::directorates::registry::backend::MissionReviewStore::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::backend::MissionReviewStore::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::backend::MissionReviewStore::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub trait ai6::directorates::registry::backend::QuarantineStore
 pub fn ai6::directorates::registry::backend::QuarantineStore::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::QuarantineStore::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -4114,8 +4154,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
 pub trait ai6::directorates::registry::backend::SessionStore
 pub fn ai6::directorates::registry::backend::SessionStore::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -5310,6 +5350,97 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub mod ai6::directorates::registry::reviews
+#[non_exhaustive] pub enum ai6::directorates::registry::reviews::ReviewStatus
+pub ai6::directorates::registry::reviews::ReviewStatus::Passed
+pub ai6::directorates::registry::reviews::ReviewStatus::Person
+pub ai6::directorates::registry::reviews::ReviewStatus::Redoing
+pub ai6::directorates::registry::reviews::ReviewStatus::Refused
+pub ai6::directorates::registry::reviews::ReviewStatus::Reviewing
+pub ai6::directorates::registry::reviews::ReviewStatus::SendingBack
+pub ai6::directorates::registry::reviews::ReviewStatus::Waiting
+impl ai6::directorates::registry::reviews::ReviewStatus
+pub const fn ai6::directorates::registry::reviews::ReviewStatus::as_str(self) -> &'static str
+#[non_exhaustive] pub struct ai6::directorates::registry::reviews::AskedReviewer
+pub ai6::directorates::registry::reviews::AskedReviewer::at: f64
+pub ai6::directorates::registry::reviews::AskedReviewer::iteration: u32
+pub ai6::directorates::registry::reviews::AskedReviewer::review_id: alloc::string::String
+pub ai6::directorates::registry::reviews::AskedReviewer::round: u32
+pub ai6::directorates::registry::reviews::AskedReviewer::seat: usize
+#[non_exhaustive] pub struct ai6::directorates::registry::reviews::MissionReview
+pub ai6::directorates::registry::reviews::MissionReview::asked: alloc::vec::Vec<ai6::directorates::registry::reviews::AskedReviewer>
+pub ai6::directorates::registry::reviews::MissionReview::author: alloc::string::String
+pub ai6::directorates::registry::reviews::MissionReview::gate: ai6::directorates::m::review::ReviewGate
+pub ai6::directorates::registry::reviews::MissionReview::iteration: u32
+pub ai6::directorates::registry::reviews::MissionReview::material: ai6::directorates::registry::reviews::ReviewMaterial
+pub ai6::directorates::registry::reviews::MissionReview::mission_id: alloc::string::String
+pub ai6::directorates::registry::reviews::MissionReview::opened_at: f64
+pub ai6::directorates::registry::reviews::MissionReview::operation: alloc::string::String
+pub ai6::directorates::registry::reviews::MissionReview::overrule: core::option::Option<ai6::directorates::registry::reviews::Overrule>
+pub ai6::directorates::registry::reviews::MissionReview::panel: alloc::vec::Vec<ai6::directorates::m::review::Reviewer>
+pub ai6::directorates::registry::reviews::MissionReview::policy: ai6::directorates::m::review::ReviewPolicy
+pub ai6::directorates::registry::reviews::MissionReview::policy_name: alloc::string::String
+pub ai6::directorates::registry::reviews::MissionReview::revision: u64
+pub ai6::directorates::registry::reviews::MissionReview::round: u32
+pub ai6::directorates::registry::reviews::MissionReview::sent_back: u32
+pub ai6::directorates::registry::reviews::MissionReview::status: ai6::directorates::registry::reviews::ReviewStatus
+pub ai6::directorates::registry::reviews::MissionReview::tokens: u64
+pub ai6::directorates::registry::reviews::MissionReview::votes: alloc::vec::Vec<ai6::directorates::registry::reviews::RecordedVote>
+pub ai6::directorates::registry::reviews::MissionReview::why: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::reviews::MissionReview
+pub fn ai6::directorates::registry::reviews::MissionReview::asked_of(&self, usize) -> core::option::Option<&ai6::directorates::registry::reviews::AskedReviewer>
+pub fn ai6::directorates::registry::reviews::MissionReview::ballots(&self) -> alloc::vec::Vec<ai6::directorates::m::review::Ballot>
+pub fn ai6::directorates::registry::reviews::MissionReview::open((&str, &str, ai6::directorates::m::review::ReviewGate), (&str, &ai6::directorates::m::review::ReviewPolicy), &str, ai6::directorates::registry::reviews::ReviewMaterial, f64) -> Self
+pub fn ai6::directorates::registry::reviews::MissionReview::others_reasons(&self, usize) -> alloc::vec::Vec<(alloc::string::String, ai6::directorates::m::review::Vote, alloc::string::String)>
+pub fn ai6::directorates::registry::reviews::MissionReview::record_vote(&mut self, (u32, u32), ai6::directorates::registry::reviews::RecordedVote) -> bool
+pub fn ai6::directorates::registry::reviews::MissionReview::redo_reasons(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::registry::reviews::MissionReview::turns(&self) -> u64
+pub fn ai6::directorates::registry::reviews::MissionReview::vote_of(&self, usize) -> core::option::Option<&ai6::directorates::registry::reviews::RecordedVote>
+#[non_exhaustive] pub struct ai6::directorates::registry::reviews::Overrule
+pub ai6::directorates::registry::reviews::Overrule::at: f64
+pub ai6::directorates::registry::reviews::Overrule::by: alloc::string::String
+pub ai6::directorates::registry::reviews::Overrule::decision: alloc::string::String
+pub ai6::directorates::registry::reviews::Overrule::reason: alloc::string::String
+impl ai6::directorates::registry::reviews::Overrule
+pub fn ai6::directorates::registry::reviews::Overrule::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::reviews::RecordedVote
+pub ai6::directorates::registry::reviews::RecordedVote::agent: alloc::string::String
+pub ai6::directorates::registry::reviews::RecordedVote::at: f64
+pub ai6::directorates::registry::reviews::RecordedVote::iteration: u32
+pub ai6::directorates::registry::reviews::RecordedVote::model: alloc::string::String
+pub ai6::directorates::registry::reviews::RecordedVote::reasons: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::reviews::RecordedVote::round: u32
+pub ai6::directorates::registry::reviews::RecordedVote::seat: usize
+pub ai6::directorates::registry::reviews::RecordedVote::vote: ai6::directorates::m::review::Vote
+pub ai6::directorates::registry::reviews::RecordedVote::weight: u32
+#[non_exhaustive] pub struct ai6::directorates::registry::reviews::ReviewMaterial
+pub ai6::directorates::registry::reviews::ReviewMaterial::base: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reviews::ReviewMaterial::branch: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reviews::ReviewMaterial::commits: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::reviews::ReviewMaterial::diff: alloc::string::String
+pub ai6::directorates::registry::reviews::ReviewMaterial::diff_note: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reviews::ReviewMaterial::goals: alloc::string::String
+pub ai6::directorates::registry::reviews::ReviewMaterial::submitted: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::reviews::ReviewTally
+pub ai6::directorates::registry::reviews::ReviewTally::absent: u64
+pub ai6::directorates::registry::reviews::ReviewTally::disagreed: u64
+pub ai6::directorates::registry::reviews::ReviewTally::put_up: u64
+pub ai6::directorates::registry::reviews::ReviewTally::sent_back: u64
+pub ai6::directorates::registry::reviews::ReviewTally::votes: u64
+pub trait ai6::directorates::registry::reviews::MissionReviewStore
+pub fn ai6::directorates::registry::reviews::MissionReviewStore::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::reviews::MissionReviewStore::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::reviews::MissionReviewStore::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::reviews::tally(&[ai6::directorates::registry::reviews::MissionReview]) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::reviews::ReviewTally>
+pub fn ai6::directorates::registry::reviews::update_mission_review(&dyn ai6::directorates::registry::reviews::MissionReviewStore, (&str, ai6::directorates::m::review::ReviewGate), usize, impl core::ops::function::FnMut(&mut ai6::directorates::registry::reviews::MissionReview) -> bool) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub mod ai6::directorates::registry::sessions
 #[non_exhaustive] pub enum ai6::directorates::registry::sessions::SessionError
 pub ai6::directorates::registry::sessions::SessionError::Ended
@@ -5651,6 +5782,10 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -5877,6 +6012,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -6978,6 +7117,18 @@ pub ai6::station::limits::RecoveryLimits::notes_every: ai6::bounds::Seconds
 pub ai6::station::limits::RecoveryLimits::probe_timeout: ai6::bounds::Seconds
 impl core::default::Default for ai6::station::limits::RecoveryLimits
 pub fn ai6::station::limits::RecoveryLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::station::limits::ReviewLimits
+pub ai6::station::limits::ReviewLimits::answer_tail_bytes: ai6::bounds::Limit
+pub ai6::station::limits::ReviewLimits::commits: ai6::bounds::Limit
+pub ai6::station::limits::ReviewLimits::diff_bytes: ai6::bounds::Limit
+pub ai6::station::limits::ReviewLimits::goals_bytes: ai6::bounds::Limit
+pub ai6::station::limits::ReviewLimits::reason_bytes: ai6::bounds::Limit
+pub ai6::station::limits::ReviewLimits::reasons: ai6::bounds::Limit
+pub ai6::station::limits::ReviewLimits::station_window: ai6::bounds::Seconds
+pub ai6::station::limits::ReviewLimits::submitted_bytes: ai6::bounds::Limit
+pub ai6::station::limits::ReviewLimits::write_tries: ai6::bounds::Limit
+impl core::default::Default for ai6::station::limits::ReviewLimits
+pub fn ai6::station::limits::ReviewLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::RunnerLimits
 pub ai6::station::limits::RunnerLimits::answer_wait: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::cable_connect_timeout: ai6::bounds::Seconds
@@ -7038,6 +7189,7 @@ pub ai6::station::limits::StationLimits::providers: alloc::collections::btree::m
 pub ai6::station::limits::StationLimits::provision: ai6::station::limits::ProvisionLimits
 pub ai6::station::limits::StationLimits::publisher: ai6::station::limits::PublisherLimits
 pub ai6::station::limits::StationLimits::recovery: ai6::station::limits::RecoveryLimits
+pub ai6::station::limits::StationLimits::review: ai6::station::limits::ReviewLimits
 pub ai6::station::limits::StationLimits::runner: ai6::station::limits::RunnerLimits
 pub ai6::station::limits::StationLimits::scheduler: ai6::station::limits::SchedulerLimits
 pub ai6::station::limits::StationLimits::secrets: ai6::station::limits::SecretLimits
@@ -7233,6 +7385,7 @@ pub fn ai6::station::safehouse::SafeHouse::base(&self) -> core::option::Option<&
 pub fn ai6::station::safehouse::SafeHouse::branch(&self) -> core::option::Option<&str>
 pub fn ai6::station::safehouse::SafeHouse::changes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::safehouse::Change>, ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::checkpoint(&self, &ai6::directorates::q::safehouse::CheckpointSpec) -> core::result::Result<ai6::directorates::q::safehouse::SafeHouseCheckpoint, ai6::station::safehouse::SafeHouseError>
+pub fn ai6::station::safehouse::SafeHouse::diff(&self, ai6::bounds::Limit) -> core::result::Result<ai6::directorates::q::safehouse::SafeHouseDiff, ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::discard(&self) -> core::result::Result<(), ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::exports(&self) -> core::result::Result<core::option::Option<ai6::directorates::q::safehouse::SafeHouseExports>, ai6::station::safehouse::SafeHouseError>
 pub fn ai6::station::safehouse::SafeHouse::finish(&self) -> core::result::Result<ai6::directorates::q::safehouse::SafeHouseReport, ai6::station::safehouse::SafeHouseError>
@@ -9315,6 +9468,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -10860,6 +11017,10 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -11071,6 +11232,7 @@ pub ai6::StationRuntime::provision: ai6::station::limits::ProvisionLimits
 pub ai6::StationRuntime::publisher: ai6::station::limits::PublisherLimits
 pub ai6::StationRuntime::recovery: ai6::station::limits::RecoveryLimits
 pub ai6::StationRuntime::resources_every: core::option::Option<f64>
+pub ai6::StationRuntime::review: ai6::station::limits::ReviewLimits
 pub ai6::StationRuntime::roles: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::StationRuntime::runner: ai6::station::limits::RunnerLimits
 pub ai6::StationRuntime::safe_house_cache_age: core::option::Option<f64>
@@ -12067,8 +12229,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
 pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
@@ -12080,6 +12242,8 @@ pub fn ai6::SafeHouseSession::changes(&self) -> core::result::Result<guatiao::va
 pub fn ai6::SafeHouseSession::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::diff(&self, u64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SafeHouseSession::diff_in(&self, u64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::discard(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::exports(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SafeHouseSession::exports_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -12093,6 +12257,8 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::changes_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::checkpoint_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::diff(&self, u64) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::diff_in(&self, u64, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::discard(&self) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::exports(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::exports_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
