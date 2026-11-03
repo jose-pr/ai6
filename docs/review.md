@@ -110,3 +110,26 @@ again when it did not. Every vote, weight, reason, model and round is on the Ope
 `transition` to `done` is refused while a Mission waits for its review. An operator's `resume` starts
 the author again, and what it then says is done is reviewed again.
 
+## The plan gate
+
+Under a `plan` policy, a Mission's Agent first works at clearance `read`, which only AI6 sets: it can
+read and search its working directory, and its only AI6 tool is `submit_plan`. It cannot edit, run a
+command, send a Cable, write to an issue or propose a Mission; the checkout's own settings are not
+loaded. It submits its plan (or gives it as its final message) and ends its turn; the Mission waits as
+`blocked`, reason `review-plan`, and the panel judges the plan against the goals, as above. A redo
+resumes it, still at `read`, with the reasons. A pass resumes the same Session at the Mission's own
+clearance, with the Mission's tools.
+
+That needs a harness that takes up new tools on a resume of the same Session. A handler says whether
+it can, and a Mission under a plan gate does not start on one that cannot; it waits, with the reason
+on the Mission:
+
+| Handler | Under a plan gate |
+| --- | --- |
+| `claude` | reads and searches (`Read`, `Glob`, `Grep`) and calls `submit_plan`; everything else is denied by name. A resume passes its own tool flags |
+| `codex` | holds the thread to `desk` with no file change at all: a patch ends it. It has no command tool there, so it reads only what its prompt and AI6's tools give it |
+| `antigravity`, `acp` | refuses: a resumed conversation keeps the tools of its first launch, or AI6 does not choose the agent's tools |
+
+A Mission in remote-hands mode does not start under a plan gate: the Theater's tools can change it
+whatever the handler offers.
+
