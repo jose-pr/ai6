@@ -89,7 +89,10 @@ agent-client-protocol = { version = "3.6", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await", "executor"] }
 # The ACP client above the SDK: connect, resume and turn state, permission deciding, line transports.
 # Pinned by revision until a release.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "59ecf70c28181a41c856ade747cfc4725684228a" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "3c2b30eef29450fd4f23e1efc4a87c31e03e3c69" }
+# The agent session kind a handler returns and its events, shared with every project hosting agent
+# providers. Same revision as coqui-acp, and on the same Guatiao revision as above.
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "3c2b30eef29450fd4f23e1efc4a87c31e03e3c69" }
 # Sends Moneypenny's tool calls through Universal Exports' own router; axum already builds it.
 tower = { version = "0.5", default-features = false, features = ["util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

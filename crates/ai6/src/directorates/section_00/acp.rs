@@ -14,9 +14,9 @@
 //! [`EVENT_NOTIFICATION`] notification, which an agent advertises with [`EVENTS_CAPABILITY`].
 //! An agent that does not is driven by the standard `session/update` stream alone.
 //!
-//! [`AgentSession`]: super::agent::AgentSession
+//! [`AgentSession`]: coqui_acp_provider::AgentSession
 //! [`AgentHandler`]: super::agent::AgentHandler
-//! [`AgentEvent`]: super::agent::AgentEvent
+//! [`AgentEvent`]: coqui_acp_provider::AgentEvent
 
 mod client;
 mod facade;
@@ -25,12 +25,14 @@ mod gate_decider;
 mod lines;
 mod meta;
 
+pub use client::{
+    AcpOptions, AcpSession, DEFAULT_MAX_TOOL_KINDS, DEFAULT_TEXT_FLUSH_BYTES, DisconnectDetail,
+};
 #[cfg_attr(not(feature = "daemon"), allow(unused_imports))]
-pub(crate) use client::duration_of;
-pub use client::{AcpOptions, AcpSession, DisconnectDetail};
+pub(crate) use client::{duration_of, ends_turn};
 pub use coqui_acp::{
-    Authenticate, Decider as PermissionDecider, Decision as PermissionDecision, PermissionOption,
-    PermissionRequest, RefuseAll, RpcFailure, exchange,
+    Authenticate, Decider as PermissionDecider, Decision as PermissionDecision, Exchange,
+    PermissionOption, PermissionRequest, RefuseAll, RpcFailure,
 };
 pub use facade::{AcpFacade, Credential, FacadeAuth, TerminalFactory};
 #[cfg(feature = "gate")]
@@ -45,7 +47,7 @@ pub const LAUNCH_META_KEY: &str = "dev.coqui.ai6/launch";
 /// The `agentCapabilities._meta` key with which an agent says it sends [`EVENT_NOTIFICATION`].
 pub const EVENTS_CAPABILITY: &str = "dev.coqui.ai6/events";
 
-/// The notification carrying one [`AgentEvent`](super::agent::AgentEvent) verbatim, beside the
+/// The notification carrying one [`AgentEvent`](coqui_acp_provider::AgentEvent) verbatim, beside the
 /// provider Session ID: `{"sessionId", "providerSessionId", "event"}`; no `event` marks the
 /// start of the operation.
 pub const EVENT_NOTIFICATION: &str = "_ai6/event";

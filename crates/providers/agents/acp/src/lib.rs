@@ -7,20 +7,24 @@
 ai6::guatiao::providers!(AcpHandler);
 
 use std::collections::BTreeMap;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::time::Duration;
 
-use ai6::HarnessStdio;
 use ai6::directorates::q::terminal::{AgentTerminal, ExitInfo, STREAM_COLS, Spec, TerminalSession};
 use ai6::directorates::section_00::acp::{
-    AcpOptions, AcpSession, GateDecider, TerminalIo, UNBOUNDED_LINE_BYTES,
+    AcpOptions, AcpSession, DEFAULT_MAX_TOOL_KINDS, DEFAULT_TEXT_FLUSH_BYTES, Exchange,
+    GateDecider, TerminalIo, UNBOUNDED_LINE_BYTES, UNBOUNDED_MS,
 };
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentSession, AgentStart, AssistantMode, clearance_runs_commands,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
+use ai6::{AgentSession, HarnessStdio, ModelInfo, ModelListing};
 use coqui_acp::lines::{Diagnostics, over_io};
+use coqui_acp::{Answer, DescribeLimits};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
@@ -89,6 +93,31 @@ pub struct AcpSettings {
     /// is passed over until the limit is likely over.
     #[serde(default = "limit_phrases")]
     pub limit_phrases: Vec<String>,
+    /// UTF-8 bytes of agent text gathered before they are delivered mid-message.
+    #[serde(default = "text_flush")]
+    pub text_flush_bytes: usize,
+    /// The tool calls whose kind is kept, by which a later message about one that does not say
+    /// its kind is judged; past it the oldest is forgotten, and such a message is of unknown kind.
+    #[serde(default = "tool_kinds")]
+    pub max_tool_kinds: usize,
+    /// What asking the agent for its models, before any Session, keeps of its answer: options.
+    #[serde(default = "describe_options")]
+    pub describe_options: usize,
+    /// Values kept of each option.
+    #[serde(default = "describe_values")]
+    pub describe_values: usize,
+    /// Modes kept.
+    #[serde(default = "describe_modes")]
+    pub describe_modes: usize,
+    /// Sessions kept of the agent's list, across its pages.
+    #[serde(default = "describe_sessions")]
+    pub describe_sessions: usize,
+    /// UTF-8 bytes past which an identifier is dropped and other text cut.
+    #[serde(default = "describe_text")]
+    pub describe_text_bytes: usize,
+    /// Pages of the agent's session list asked for.
+    #[serde(default = "describe_pages")]
+    pub describe_pages: usize,
 }
 
 /// How the Grok CLI words a limit (`Rate limited`, with xAI's `subscription:free-usage-exhausted`;
@@ -132,6 +161,30 @@ fn exit_wait() -> i64 {
 }
 fn poll() -> i64 {
     200
+}
+fn text_flush() -> usize {
+    DEFAULT_TEXT_FLUSH_BYTES
+}
+fn tool_kinds() -> usize {
+    DEFAULT_MAX_TOOL_KINDS
+}
+fn describe_options() -> usize {
+    DescribeLimits::new().options
+}
+fn describe_values() -> usize {
+    DescribeLimits::new().values
+}
+fn describe_modes() -> usize {
+    DescribeLimits::new().modes
+}
+fn describe_sessions() -> usize {
+    DescribeLimits::new().sessions
+}
+fn describe_text() -> usize {
+    DescribeLimits::new().text
+}
+fn describe_pages() -> usize {
+    DescribeLimits::new().pages
 }
 
 /// Runs an ACP agent for each Session.
@@ -348,6 +401,8 @@ impl AcpHandler {
                 let exit_wait_ms = settings.exit_wait_ms;
                 Box::new(move || lost_agent(&process, &diagnostics, exit_wait_ms))
             }),
+            text_flush_bytes: settings.text_flush_bytes,
+            max_tool_kinds: settings.max_tool_kinds,
         };
         let ended = process.clone();
         let stopper = io.clone();
@@ -371,10 +426,111 @@ impl AcpHandler {
     }
 }
 
+/// A wait in milliseconds as `coqui_acp` takes it: [`UNBOUNDED_MS`] is none.
+fn wait_of(ms: u64) -> Option<Duration> {
+    (ms != UNBOUNDED_MS).then(|| Duration::from_millis(ms))
+}
+
+/// The models the agent's option of category `model` offers, from its values or its groups'.
+fn models_of(options: &[Value]) -> ModelListing {
+    let Some(option) = options
+        .iter()
+        .find(|option| option["category"] == "model" && option["type"] == "select")
+    else {
+        return ModelListing::unknown("the agent offers no model to choose before a Session");
+    };
+    let value = |entry: &Value| {
+        Some(ModelInfo {
+            id: entry["value"].as_str()?.to_owned(),
+            name: entry["name"].as_str().map(str::to_owned),
+            description: entry["description"].as_str().map(str::to_owned),
+        })
+    };
+    let models = option["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| match entry["options"].as_array() {
+            Some(group) => group.iter().filter_map(value).collect(),
+            None => value(entry).into_iter().collect::<Vec<_>>(),
+        })
+        .collect();
+    ModelListing::of(models)
+}
+
+impl AcpHandler {
+    /// Starts the agent with exactly `environment` over the settings' own, as a Session would
+    /// be, and asks what it offers before any Session; the agent is ended once it has answered.
+    fn describe(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, String> {
+        let settings = self.settings().map_err(|error| error.to_string())?;
+        let mut merged = settings.env.clone();
+        merged.extend(environment);
+        let mut child = Command::new(&settings.command)
+            .args(&settings.args)
+            .env_clear()
+            .envs(&merged)
+            .current_dir(std::env::temp_dir())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("{} could not be started: {error}", settings.command))?;
+        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "{} has no standard input or output",
+                settings.command
+            ));
+        };
+        let described = over_io(stdout, stdin, 0, UNBOUNDED_LINE_BYTES)
+            .map_err(|error| error.to_string())
+            .and_then(|(lines, _)| {
+                Exchange::new()
+                    .client_info("ai6", env!("CARGO_PKG_VERSION"))
+                    .initialize_timeout(wait_of(settings.initialize_timeout_ms))
+                    .request_timeout(wait_of(settings.request_timeout_ms))
+                    .describe_limits(
+                        DescribeLimits::new()
+                            .options(settings.describe_options)
+                            .values(settings.describe_values)
+                            .modes(settings.describe_modes)
+                            .sessions(settings.describe_sessions)
+                            .text(settings.describe_text_bytes)
+                            .pages(settings.describe_pages),
+                    )
+                    .describe(lines)
+                    .map_err(|error| format!("the agent could not be asked: {error}"))
+            });
+        let _ = child.kill();
+        let _ = child.wait();
+        Ok(match described?.options {
+            Answer::Known(options) => models_of(
+                &options
+                    .iter()
+                    .filter_map(|option| serde_json::to_value(option).ok())
+                    .collect::<Vec<_>>(),
+            ),
+            Answer::Unknown(reason) => ModelListing::unknown(reason),
+            Answer::NotSupported => {
+                ModelListing::unknown("the agent does not say what it offers before a Session")
+            }
+        })
+    }
+}
+
 impl AgentHandler for AcpHandler {
     /// An ACP agent speaks JSON-RPC on plain pipes.
     fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
         Ok(HarnessStdio::Json)
+    }
+
+    /// What the agent's model option offers, asked before any Session; an agent that does not
+    /// say is unknown, with its reason.
+    fn models(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, ProviderError> {
+        Ok(self
+            .describe(environment)
+            .unwrap_or_else(ModelListing::unknown))
     }
 
     /// AI6 does not choose an ACP agent's tools, so it cannot keep commands from a `desk` Session.

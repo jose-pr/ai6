@@ -30,13 +30,13 @@ use crate::directorates::registry::mission_issues::{
     OutboxState, ProposalState, ProposedIssue, QuestionState, ReplyState,
 };
 use crate::directorates::registry::store::AuditRecord;
-use crate::directorates::section_00::agent::AgentMessage;
 use crate::station::issues::{ISSUE_REASON, audit, instances, is_intake_label, update_payload};
 use crate::station::limits::SourceLimits;
 use crate::station::sources::{SourceSetup, source_setups};
 use crate::{MissionId, SessionId};
 use axum::Json;
 use axum::extract::{Path, State};
+use coqui_acp_provider::AgentMessage;
 
 /// Who is calling a tool: the Agent's Session, as the Cable endpoint bound it.
 #[derive(Clone)]

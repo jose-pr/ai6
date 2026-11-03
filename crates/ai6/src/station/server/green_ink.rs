@@ -24,8 +24,8 @@ use crate::directorates::registry::approvals::{
 };
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
-use crate::directorates::section_00::agent::{AgentEvent, AgentMessage, AgentSession};
 use crate::{MissionId, SessionId};
+use coqui_acp_provider::{AgentEvent, AgentMessage, AgentSession};
 
 /// The event kind that reports a request waiting for green ink, and its decision.
 pub(super) const GREEN_INK_EVENT: &str = "green_ink";
@@ -1181,7 +1181,7 @@ mod tests {
         command: &'static str,
     ) -> (Vec<AgentEvent>, String) {
         use crate::directorates::section_00::acp::{AcpOptions, AcpSession, GateDecider};
-        use crate::directorates::section_00::agent::AgentSession as _;
+        use coqui_acp_provider::AgentSession as _;
         let outcome = Arc::new(std::sync::Mutex::new(None));
         let channel = crate::station::acp::testing::command_agent(command, outcome.clone());
         let options = AcpOptions {

@@ -16,8 +16,7 @@ use ai6::directorates::q::terminal::{
     TerminalSession, exit_code_text,
 };
 use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    DENIED_EVENT, LIMIT_EVENT, ModelInfo, ModelListing, QuotaReport, TokenUsage, UsageLimit,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing,
     clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
@@ -28,6 +27,10 @@ use ai6::directorates::section_00::programs;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
+use ai6::{
+    AgentEvent, AgentMessage, AgentSession, DENIED_EVENT, LIMIT_EVENT, QuotaReport, TokenUsage,
+    UsageLimit,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -287,7 +290,7 @@ impl AgentHandler for ClaudeHandler {
         &self,
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
-    ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
+    ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
         let mut argv = vec![
             self.config.executable.clone(),
             "-p".to_string(),
@@ -341,7 +344,7 @@ impl AgentHandler for ClaudeHandler {
         &self,
         request: AgentResume,
         terminal: Object<dyn AgentTerminal>,
-    ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
+    ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
         let expected_session_id = request.session_id.clone();
         let mut argv = vec![
             self.config.executable.clone(),
@@ -1689,9 +1692,9 @@ fn control_answered(value: &Value) {
     }
 }
 
-impl ai6::directorates::section_00::agent::AgentSession for ClaudeSession {
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-        Ok(lock(&self.session_id)?.clone())
+impl ai6::AgentSession for ClaudeSession {
+    fn session_id(&self) -> Result<Option<String>, ProviderError> {
+        Ok(lock(&self.session_id)?.clone().map(String::from))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -2434,7 +2437,7 @@ mod tests {
             )
             .unwrap();
         let first_events = read_to_completion(&started);
-        assert_eq!(started.session_id().unwrap(), Some(session_id.clone()));
+        assert_eq!(started.session_id().unwrap(), Some(session_id.to_string()));
         assert!(first_events.iter().any(|event| {
             event.kind == "completed" && event.text.as_deref() == Some("first process turn")
         }));
@@ -2465,7 +2468,7 @@ mod tests {
             )
             .unwrap();
         let resumed_events = read_to_completion(&resumed);
-        assert_eq!(resumed.session_id().unwrap(), Some(session_id.clone()));
+        assert_eq!(resumed.session_id().unwrap(), Some(session_id.to_string()));
         assert!(resumed_events.iter().any(|event| {
             event.kind == "completed" && event.text.as_deref() == Some("resumed process turn")
         }));
@@ -2650,7 +2653,7 @@ mod tests {
         );
         let event = session.next_event(50).unwrap().unwrap();
         assert_eq!(event.kind, "system");
-        assert_eq!(session.session_id().unwrap(), Some(session_id));
+        assert_eq!(session.session_id().unwrap(), Some(session_id.to_string()));
 
         let spec = spec.lock().unwrap().clone().unwrap();
         assert!(
@@ -2940,11 +2943,7 @@ mod tests {
         };
         assert!(error.contains("different Session"), "{error}");
         assert_eq!(
-            session
-                .session_id()
-                .unwrap()
-                .as_ref()
-                .map(SessionId::as_str),
+            session.session_id().unwrap().as_deref(),
             Some("different-session")
         );
     }
@@ -2996,11 +2995,7 @@ mod tests {
             event.kind == "completed" && event.text.as_deref() == Some("are you there?")
         }));
         assert_eq!(
-            resumed
-                .session_id()
-                .unwrap()
-                .as_ref()
-                .map(SessionId::as_str),
+            resumed.session_id().unwrap().as_deref(),
             Some("claude-silent-session")
         );
         resumed.close().unwrap();

@@ -32,14 +32,16 @@ use ai6::directorates::q::terminal::{
     TerminalSession, exit_code_text,
 };
 use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    LIMIT_EVENT, ModelInfo, ModelListing, QuotaReport, TokenUsage, UsageLimit,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing,
     clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::directorates::section_00::listing;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
+use ai6::{
+    AgentEvent, AgentMessage, AgentSession, LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
+};
 use serde_json::{Value, json};
 
 /// The models in the app server's answer to `model/list`; unknown when it has none. A model the
@@ -243,7 +245,7 @@ impl AgentHandler for CodexHandler {
         &self,
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
-    ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
+    ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
         let gate = station_gate(&request.environment);
         self.start_gated(request, terminal, gate)
     }
@@ -252,7 +254,7 @@ impl AgentHandler for CodexHandler {
         &self,
         request: AgentResume,
         terminal: Object<dyn AgentTerminal>,
-    ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
+    ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
         let profile = scripts_profile(
             &self.config.executable,
             &request.working_directory,
@@ -377,7 +379,7 @@ impl CodexHandler {
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
         gate: Option<Gate>,
-    ) -> Result<Object<dyn ai6::directorates::section_00::agent::AgentSession>, ProviderError> {
+    ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
         let scripts = Scripts::of(request.assistant.as_ref());
         let mut instructions = request.initial_context.clone();
         if let Some(mode) = &request.assistant {
@@ -1503,8 +1505,8 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
 }
 
 impl AgentSession for CodexSession {
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-        Ok(self.thread_id.clone())
+    fn session_id(&self) -> Result<Option<String>, ProviderError> {
+        Ok(self.thread_id.clone().map(String::from))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -2505,7 +2507,7 @@ mod tests {
             )
             .unwrap();
         let first_events = read_to_completion(&started);
-        assert_eq!(started.session_id().unwrap(), Some(session_id.clone()));
+        assert_eq!(started.session_id().unwrap(), Some(session_id.to_string()));
         assert!(first_events.iter().any(|event| {
             event.kind == "text" && event.text.as_deref() == Some("first process turn")
         }));
@@ -2536,7 +2538,7 @@ mod tests {
                 terminal.clone().into_object(),
             )
             .unwrap();
-        assert_eq!(resumed.session_id().unwrap(), Some(session_id.clone()));
+        assert_eq!(resumed.session_id().unwrap(), Some(session_id.to_string()));
         let resumed_events = read_to_completion(&resumed);
         assert!(resumed_events.iter().any(|event| {
             event.kind == "text" && event.text.as_deref() == Some("resumed process turn")
@@ -3542,7 +3544,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(session.session_id().unwrap(), Some(session_id));
+        assert_eq!(session.session_id().unwrap(), Some(session_id.to_string()));
 
         let spec = spec.lock().unwrap().clone().unwrap();
         assert_eq!(

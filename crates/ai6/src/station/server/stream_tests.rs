@@ -169,8 +169,14 @@ impl StreamSession {
 }
 
 impl AgentSession for StreamSession {
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-        Ok(self.stream.lock().unwrap().session_id.clone())
+    fn session_id(&self) -> Result<Option<String>, ProviderError> {
+        Ok(self
+            .stream
+            .lock()
+            .unwrap()
+            .session_id
+            .clone()
+            .map(String::from))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {

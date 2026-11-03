@@ -16,10 +16,10 @@ use subtle::ConstantTimeEq;
 use super::{Hosted, Launch, Runner, lock_of};
 use crate::directorates::section_00::acp::{
     EVENT_NOTIFICATION, EVENTS_CAPABILITY, LAUNCH_META_KEY, LaunchMeta, RUNNER_TOKEN_METHOD,
-    ResumeMeta, UNBOUNDED_LINE_BYTES,
+    ResumeMeta, UNBOUNDED_LINE_BYTES, ends_turn,
 };
-use crate::directorates::section_00::agent::{AgentMessage, LIMIT_EVENT};
 use coqui_acp::lines::over_io;
+use coqui_acp_provider::{AgentMessage, CANCELLED_EVENT};
 
 /// The `_meta` key of `session/load`: replay what follows this sequence number.
 const AFTER_KEY: &str = "dev.coqui.ai6/after";
@@ -523,10 +523,7 @@ fn feed(connection: &Arc<Connection>, binding: &Arc<Binding>, hosted: &Arc<Hoste
                 }
                 for entry in spooled {
                     sent = entry.seq;
-                    let last = matches!(
-                        entry.event.kind.as_str(),
-                        "completed" | "failed" | LIMIT_EVENT
-                    );
+                    let last = ends_turn(&entry.event);
                     let kind = entry.event.kind.clone();
                     let text = entry.event.text.clone();
                     send(json!({
@@ -540,6 +537,9 @@ fn feed(connection: &Arc<Connection>, binding: &Arc<Binding>, hosted: &Arc<Hoste
                         match kind.as_str() {
                             "completed" => answer(&binding, |responder| {
                                 responder.respond(json!({"stopReason": "end_turn"}))
+                            }),
+                            CANCELLED_EVENT | "blocked" => answer(&binding, |responder| {
+                                responder.respond(json!({"stopReason": "cancelled"}))
                             }),
                             _ => answer(&binding, |responder| {
                                 responder.respond_with_error(

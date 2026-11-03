@@ -8,11 +8,10 @@ use std::time::Duration;
 
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::q::terminal::AgentTerminal;
-use crate::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart,
-};
+use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 use crate::guatiao::library::{Object, ProviderError};
 use crate::guatiao::{Provider, Status};
+use coqui_acp_provider::{AgentEvent, AgentMessage, AgentSession};
 
 /// Each author's start, as the handler was asked for it.
 pub(super) static AUTHOR_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new());
@@ -69,12 +68,12 @@ impl ScriptSession {
 }
 
 impl AgentSession for ScriptSession {
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
+    fn session_id(&self) -> Result<Option<String>, ProviderError> {
         Ok(self
             .reported
             .lock()
             .unwrap()
-            .then(|| self.session_id.clone()))
+            .then(|| self.session_id.to_string()))
     }
 
     fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {

@@ -6,12 +6,11 @@ use std::time::{Duration, Instant};
 use ai6::MissionId;
 use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, TerminalBridge};
-use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentResume, AgentSession, AgentStart, AssistantMode,
-};
+use ai6::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart, AssistantMode};
 use ai6::directorates::section_00::assistant::{ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV};
 use ai6::guatiao::library::Object;
 use ai6::station::plugins::Plugins;
+use ai6::{AgentEvent, AgentSession};
 use ai6_agent_acp::{AcpConfig, AcpHandler};
 
 fn handler(extra: &str) -> AcpHandler {
@@ -154,7 +153,7 @@ fn a_refusal_and_an_error_fail_the_session() {
 }
 
 #[test]
-fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_blocks() {
+fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_is_cancelled() {
     let session = handler("")
         .start(start(environment(&[("FAKE_HOLD", "1")])), terminal())
         .expect("the agent starts");
@@ -167,7 +166,81 @@ fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_blocks() {
             terminal(),
         )
         .expect("the agent starts");
-    until(&session, &["blocked"]);
+    until(&session, &["cancelled"]);
+}
+
+/// What the Grok CLI answers a prompt with when its account is out of credits.
+const OUT_OF_CREDITS: &str = r#"{"message": "API error (status 402 Payment Required): personal-team-blocked:spending-limit: You have run out of credits ...", "http_status": 402}"#;
+
+#[test]
+fn grok_out_of_credits_stops_the_session_as_limited_by_the_default_words() {
+    let session = handler("")
+        .start(
+            start(environment(&[("FAKE_ERROR_DATA", OUT_OF_CREDITS)])),
+            terminal(),
+        )
+        .expect("the agent starts");
+    let events = until(&session, &["completed", "failed", "limit"]);
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, "limit", "{events:?}");
+    assert!(
+        last.text
+            .as_deref()
+            .unwrap()
+            .starts_with("Internal error: API error (status 402 Payment Required)"),
+        "{last:?}"
+    );
+}
+
+#[test]
+fn an_agent_that_dies_saying_it_is_limited_has_failed_not_reached_a_limit() {
+    let (_, events) = run(
+        &[("FAKE_DIE", "1"), ("FAKE_LAST_WORDS", "Rate limited")],
+        "",
+    );
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, "failed", "{events:?}");
+    let said = last.text.as_deref().unwrap();
+    assert!(said.contains("the agent closed its connection"), "{said}");
+    assert!(said.contains("Rate limited"), "{said}");
+}
+
+#[test]
+fn the_models_are_what_the_agent_offers_before_any_session() {
+    let listed = handler("")
+        .models(environment(&[("FAKE_OPTIONS", "1")]))
+        .unwrap();
+    assert!(listed.known, "{listed:?}");
+    let ids: Vec<_> = listed
+        .models
+        .iter()
+        .map(|model| model.id.as_str())
+        .collect();
+    assert_eq!(ids, ["fast", "deep"]);
+    assert_eq!(
+        listed.models[1].description.as_deref(),
+        Some("Thinks longer")
+    );
+
+    let kept = handler("describe_values = 1\n")
+        .models(environment(&[("FAKE_OPTIONS", "1")]))
+        .unwrap();
+    assert_eq!(
+        kept.models.len(),
+        1,
+        "the values kept are a setting: {kept:?}"
+    );
+
+    let silent = handler("").models(environment(&[])).unwrap();
+    assert!(!silent.known);
+    assert!(
+        silent
+            .unknown_because
+            .as_deref()
+            .unwrap()
+            .contains("does not say"),
+        "{silent:?}"
+    );
 }
 
 #[test]

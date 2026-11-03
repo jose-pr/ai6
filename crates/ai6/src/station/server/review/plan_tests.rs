@@ -282,9 +282,7 @@ fn a_handler_says_it_cannot_hold_reading_unless_it_says_it_can() {
             _: crate::directorates::section_00::agent::AgentStart,
             _: crate::guatiao::library::Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<
-            crate::guatiao::library::Object<
-                dyn crate::directorates::section_00::agent::AgentSession,
-            >,
+            crate::guatiao::library::Object<dyn coqui_acp_provider::AgentSession>,
             crate::guatiao::library::ProviderError,
         > {
             unreachable!()
@@ -294,9 +292,7 @@ fn a_handler_says_it_cannot_hold_reading_unless_it_says_it_can() {
             _: crate::directorates::section_00::agent::AgentResume,
             _: crate::guatiao::library::Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<
-            crate::guatiao::library::Object<
-                dyn crate::directorates::section_00::agent::AgentSession,
-            >,
+            crate::guatiao::library::Object<dyn coqui_acp_provider::AgentSession>,
             crate::guatiao::library::ProviderError,
         > {
             unreachable!()

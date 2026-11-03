@@ -12,7 +12,8 @@ use crate::directorates::section_00::acp::{
     AcpFacade, AcpOptions, AcpSession, LAUNCH_META_KEY, LaunchMeta, ResumeMeta, UNBOUNDED_MS,
     duplex,
 };
-use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentSession, AgentStart};
+use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
+use coqui_acp_provider::AgentSession;
 
 /// A façade over `handler` whose operation spawns through `terminal`, once.
 fn facade(handler: Box<dyn AgentHandler>, terminal: Object<dyn AgentTerminal>) -> AcpFacade {
@@ -130,7 +131,7 @@ impl crate::directorates::q::terminal::TerminalInputTarget for MessageInput {
                     self.session
                         .lock()
                         .map_err(|_| FAILED)?
-                        .send_message(crate::directorates::section_00::agent::AgentMessage { text })
+                        .send_message(coqui_acp_provider::AgentMessage { text })
                         .map_err(|_| FAILED)?;
                 }
                 0x03 => {
@@ -237,9 +238,8 @@ pub(crate) mod testing {
 #[cfg(all(test, feature = "publisher"))]
 mod tests {
     use super::*;
-    use crate::SessionId;
     use crate::directorates::q::terminal::TerminalInputTarget;
-    use crate::directorates::section_00::agent::{AgentEvent, AgentMessage};
+    use coqui_acp_provider::{AgentEvent, AgentMessage};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Default)]
@@ -251,7 +251,7 @@ mod tests {
     struct Recording(Arc<Recorder>);
 
     impl AgentSession for Recording {
-        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
             Ok(None)
         }
 

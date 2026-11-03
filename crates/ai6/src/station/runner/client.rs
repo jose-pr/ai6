@@ -21,14 +21,15 @@ use crate::directorates::m::theaters::{RunnerSettings, Theater, TheaterAccess};
 use crate::directorates::q::terminal::{STREAM_COLS, Spec, TerminalSession};
 use crate::directorates::q::transport::{RunSpec, TransportClient, describe};
 use crate::directorates::section_00::acp::{
-    AcpOptions, AcpSession, Authenticate, HandlerSpec, LAUNCH_META_KEY, LaunchMeta,
+    AcpOptions, AcpSession, Authenticate, Exchange, HandlerSpec, LAUNCH_META_KEY, LaunchMeta,
     RUNNER_TOKEN_METHOD, ResumeMeta, RpcFailure, TerminalIo, UNBOUNDED_LINE_BYTES, UNBOUNDED_MS,
-    duration_of, exchange,
+    duration_of,
 };
-use crate::directorates::section_00::agent::{AgentEvent, AgentMessage, AgentSession};
+use crate::directorates::section_00::agent::provider_session_id;
 use crate::station::limits::RunnerLimits;
 use crate::station::reach::ReachWatch;
 use coqui_acp::lines::{IoLines, over_io};
+use coqui_acp_provider::{AgentEvent, AgentMessage, AgentSession};
 
 /// The line `ai6 runner connect` prints once its terminal is raw and it is authenticated, so
 /// the Station writes nothing a cooked terminal would echo.
@@ -275,13 +276,14 @@ impl RunnerLink {
         calls: Vec<(String, serde_json::Value)>,
     ) -> Result<Vec<Result<serde_json::Value, RpcFailure>>, Unreachable> {
         let connection = self.connect()?;
-        let answered = exchange(
-            connection.lines,
-            connection.authenticate,
-            duration_of(self.timeouts.initialize_ms),
-            duration_of(self.timeouts.request_ms),
-            calls,
-        );
+        let mut exchange = Exchange::new()
+            .client_info("ai6", env!("CARGO_PKG_VERSION"))
+            .initialize_timeout(duration_of(self.timeouts.initialize_ms))
+            .request_timeout(duration_of(self.timeouts.request_ms));
+        if let Some(authenticate) = connection.authenticate {
+            exchange = exchange.authenticate(authenticate);
+        }
+        let answered = exchange.run(connection.lines, calls);
         if let Some(on_close) = connection.on_close {
             on_close();
         }
@@ -440,7 +442,8 @@ impl RunnerLink {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
-            session_id: session.session_id().map_err(|error| error.to_string())?,
+            session_id: provider_session_id(session.session_id())
+                .map_err(|error| error.to_string())?,
             ended: false,
             last: info
                 .get("last")
@@ -683,13 +686,13 @@ impl RemoteSession {
 }
 
 impl AgentSession for RemoteSession {
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
+    fn session_id(&self) -> Result<Option<String>, ProviderError> {
         let inner = self.inner();
         Ok(inner
             .session
             .as_ref()
             .and_then(|session| session.session_id().ok().flatten())
-            .or_else(|| inner.session_id.clone()))
+            .or_else(|| inner.session_id.clone().map(String::from)))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {

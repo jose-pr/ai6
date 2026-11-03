@@ -3,8 +3,11 @@
 //! `FAKE_ASK=KIND` has it ask leave to use a tool of that kind and report the answer,
 //! `FAKE_UNASKED=KIND` runs such a tool without asking, `FAKE_COST=AMOUNT` reports a cost,
 //! `FAKE_STOP=REASON` ends the turn with that stop reason, `FAKE_ERROR=1` fails the prompt,
+//! `FAKE_ERROR_DATA=JSON` fails it as an internal error carrying that `data`,
 //! `FAKE_NO_HTTP=1` leaves out HTTP MCP support, `FAKE_INIT_DELAY_MS=N` delays `initialize`,
-//! `FAKE_RESUME=1` advertises `session/resume`.
+//! `FAKE_RESUME=1` advertises `session/resume`, `FAKE_DIE=1` exits mid-turn after writing
+//! `FAKE_LAST_WORDS` (or its own) to standard error, and `FAKE_OPTIONS=1` says what a Session
+//! can start with before any Session: a model option of two values.
 
 use std::sync::{Arc, Mutex};
 
@@ -55,6 +58,9 @@ fn handle(
                         "sessionCapabilities": {
                             "resume": if var("FAKE_RESUME").is_some() { json!({}) } else { Value::Null },
                         },
+                        "_meta": {
+                            "dev.boriken.coqui.acp/session_options": var("FAKE_OPTIONS").is_some(),
+                        },
                     },
                 }));
             });
@@ -66,11 +72,35 @@ fn handle(
         "session/close" => {
             let _ = responder.respond(json!({}));
         }
+        "_coqui_acp/session_options" if var("FAKE_OPTIONS").is_some() => {
+            let _ = responder.respond(json!({
+                "configOptions": [{
+                    "id": "model",
+                    "name": "Model",
+                    "category": "model",
+                    "type": "select",
+                    "currentValue": "fast",
+                    "options": [
+                        {"value": "fast", "name": "Fast"},
+                        {"value": "deep", "name": "Deep", "description": "Thinks longer"},
+                    ],
+                }],
+                "unknown": {"modes": "the fake agent has no modes"},
+            }));
+        }
         "session/prompt" => {
             let cwd = cwd.lock().unwrap().clone();
             let held = held.clone();
             std::thread::spawn(move || {
                 let prompt = params["prompt"][0]["text"].as_str().unwrap_or_default();
+                if let Some(data) = var("FAKE_ERROR_DATA")
+                    .and_then(|data| serde_json::from_str::<Value>(&data).ok())
+                {
+                    let _ = responder.respond_with_error(
+                        agent_client_protocol::Error::internal_error().data(data),
+                    );
+                    return;
+                }
                 if var("FAKE_ERROR").is_some() {
                     let _ = responder.respond_with_error(
                         agent_client_protocol::Error::internal_error()
@@ -88,7 +118,11 @@ fn handle(
                     return;
                 }
                 if var("FAKE_DIE").is_some() {
-                    eprintln!("the fake agent ran out of road");
+                    eprintln!(
+                        "{}",
+                        var("FAKE_LAST_WORDS")
+                            .unwrap_or_else(|| "the fake agent ran out of road".to_owned())
+                    );
                     std::process::exit(3);
                 }
                 let mut reply = format!("cwd:{cwd} prompt:{prompt}");

@@ -108,6 +108,7 @@ dependencies = [
  "coqui-access-proxy-plugin",
  "coqui-access-system-plugin",
  "coqui-acp",
+ "coqui-acp-provider",
  "coqui-peer",
  "coqui-peer-tls",
  "coqui-roles",
@@ -1008,11 +1009,25 @@ dependencies = [
 [[package]]
 name = "coqui-acp"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=59ecf70c28181a41c856ade747cfc4725684228a#59ecf70c28181a41c856ade747cfc4725684228a"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=3c2b30eef29450fd4f23e1efc4a87c31e03e3c69#3c2b30eef29450fd4f23e1efc4a87c31e03e3c69"
 dependencies = [
  "agent-client-protocol",
  "futures",
  "serde_json",
+]
+
+[[package]]
+name = "coqui-acp-provider"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=3c2b30eef29450fd4f23e1efc4a87c31e03e3c69#3c2b30eef29450fd4f23e1efc4a87c31e03e3c69"
+dependencies = [
+ "agent-client-protocol",
+ "futures",
+ "guatiao",
+ "guatiao-serde",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

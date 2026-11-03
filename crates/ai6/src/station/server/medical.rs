@@ -18,7 +18,7 @@ use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::sessions::SessionUpdate;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
 use crate::directorates::registry::store::{AuditRecord, Brief};
-use crate::directorates::section_00::agent::{AgentEvent, AgentSession, TokenUsage};
+use coqui_acp_provider::{AgentEvent, AgentSession, TokenUsage};
 
 /// The `blocked_reason` of a Mission a budget stopped.
 pub(super) const BUDGET_REASON: &str = "budget";

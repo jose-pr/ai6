@@ -507,7 +507,7 @@ mod tests {
     use crate::directorates::m::mission::{LaunchManifest, MissionState, SessionHold};
     use crate::directorates::registry::sessions::NewSession;
     use crate::directorates::registry::store::Brief;
-    use crate::directorates::section_00::agent::AgentEvent;
+    use coqui_acp_provider::AgentEvent;
 
     /// 2027-01-31T00:01:00Z, a minute into the retirement day.
     const AFTER_RETIREMENT: i64 = 1_801_353_660;

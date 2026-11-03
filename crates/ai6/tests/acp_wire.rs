@@ -10,12 +10,12 @@ use ai6::directorates::section_00::acp::{
     AcpFacade, AcpOptions, AcpSession, LAUNCH_META_KEY, LaunchMeta, PermissionDecider,
     PermissionDecision, PermissionRequest, ResumeMeta, duplex,
 };
-use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, QuotaReport,
-    TokenUsage, UsageLimit,
-};
+use ai6::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{Status, Value as GuatiaoValue};
+use coqui_acp_provider::{
+    AgentEvent, AgentMessage, AgentSession, QuotaReport, TokenUsage, UsageLimit,
+};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -94,8 +94,8 @@ impl AgentHandler for FakeHandler {
 }
 
 impl AgentSession for FakeSession {
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-        Ok(Some(SessionId::try_new(self.id.clone()).unwrap()))
+    fn session_id(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(self.id.clone()))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {

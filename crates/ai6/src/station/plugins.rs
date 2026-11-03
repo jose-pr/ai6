@@ -2338,9 +2338,8 @@ pub(crate) mod testing {
     use crate::directorates::q::terminal::{
         AgentTerminal, HarnessStdio, Terminal, TerminalSession,
     };
-    use crate::directorates::section_00::agent::{
-        AgentHandler, AgentResume, AgentSession, AgentStart,
-    };
+    use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
+    use coqui_acp_provider::AgentSession;
 
     /// What the mock providers answer when asked to start anything: the choice comes before.
     pub(crate) const REFUSED_START: &str = "the mock provider starts nothing";
@@ -2435,13 +2434,11 @@ pub(crate) mod testing {
 
     pub(crate) struct StreamSession {
         id: crate::SessionId,
-        events: std::sync::Mutex<
-            std::collections::VecDeque<crate::directorates::section_00::agent::AgentEvent>,
-        >,
+        events: std::sync::Mutex<std::collections::VecDeque<coqui_acp_provider::AgentEvent>>,
     }
 
-    fn said(kind: &str, text: String) -> crate::directorates::section_00::agent::AgentEvent {
-        crate::directorates::section_00::agent::AgentEvent {
+    fn said(kind: &str, text: String) -> coqui_acp_provider::AgentEvent {
+        coqui_acp_provider::AgentEvent {
             kind: kind.to_owned(),
             text: Some(text),
             data: None,
@@ -2489,13 +2486,13 @@ pub(crate) mod testing {
     }
 
     impl AgentSession for StreamSession {
-        fn session_id(&self) -> Result<Option<crate::SessionId>, ProviderError> {
-            Ok(Some(self.id.clone()))
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
+            Ok(Some(self.id.to_string()))
         }
 
         fn send_message(
             &self,
-            message: crate::directorates::section_00::agent::AgentMessage,
+            message: coqui_acp_provider::AgentMessage,
         ) -> Result<(), ProviderError> {
             let event = if message.text == "finish" {
                 said("completed", "finished".to_owned())
@@ -2509,8 +2506,7 @@ pub(crate) mod testing {
         fn next_event(
             &self,
             timeout_ms: i64,
-        ) -> Result<Option<crate::directorates::section_00::agent::AgentEvent>, ProviderError>
-        {
+        ) -> Result<Option<coqui_acp_provider::AgentEvent>, ProviderError> {
             let next = self.events.lock().unwrap().pop_front();
             if next.is_none() {
                 std::thread::sleep(std::time::Duration::from_millis(

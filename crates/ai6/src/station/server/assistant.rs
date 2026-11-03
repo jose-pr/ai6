@@ -64,8 +64,7 @@ use crate::directorates::m::roster::{Agent, RouteRef};
 use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    DENIED_EVENT, LIMIT_EVENT, TURN_CANCELLED,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, checked_session_id,
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
@@ -76,6 +75,10 @@ use crate::directorates::section_00::assistant::{
 };
 use crate::guatiao::library::Object;
 use crate::station::publisher::gateway_agent;
+use coqui_acp_provider::{
+    AgentEvent, AgentMessage, AgentSession, CANCELLED_EVENT, DENIED_EVENT, LIMIT_EVENT,
+    TURN_CANCELLED,
+};
 use workspace::{Houses, PERSONAL, SCRATCH, Workspace};
 
 /// How long one read of a harness's events waits, so a message never waits long for the lock.
@@ -1908,13 +1911,22 @@ impl Pump {
             }
             let read = match self.session.read() {
                 Ok(session) => {
-                    if session_id.is_none() {
-                        session_id = session.session_id().ok().flatten();
-                        if let Some(id) = &session_id {
-                            self.remember(id.as_str());
+                    let reported = if session_id.is_none() {
+                        checked_session_id(session.session_id().ok().flatten())
+                    } else {
+                        Ok(None)
+                    };
+                    match reported {
+                        Ok(reported) => {
+                            if let Some(id) = reported {
+                                self.remember(id.as_str());
+                                session_id = Some(id);
+                            }
+                            session.next_event(READ_SLICE_MS)
                         }
+                        // A Session whose ID cannot be recorded could not be resumed: it fails.
+                        Err(why) => Ok(Some(AgentEvent::new("failed", Some(why)))),
                     }
-                    session.next_event(READ_SLICE_MS)
                 }
                 Err(_) => break Some("assistant Session lock failed".to_owned()),
             };
@@ -1955,8 +1967,9 @@ impl Pump {
                     let ended = matches!(event.kind.as_str(), "failed" | LIMIT_EVENT);
                     // An agent that ends a turn itself sends no `completed`, and the person
                     // would wait for one until the harness is closed for silence.
-                    let cancelled =
-                        event.kind == "blocked" && event.text.as_deref() == Some(TURN_CANCELLED);
+                    let cancelled = event.kind == CANCELLED_EVENT
+                        || (event.kind == "blocked"
+                            && event.text.as_deref() == Some(TURN_CANCELLED));
                     let mut stopped = false;
                     let mut events: Vec<AssistantEvent> = std::mem::take(&mut self.notices)
                         .into_iter()
@@ -3088,7 +3101,7 @@ mod tests {
                     events.push_back(event("completed", Some(&format!("answer: {message}"))));
                 }
                 Script::CancelsTurn => {
-                    events.push_back(event("blocked", Some(TURN_CANCELLED)));
+                    events.push_back(event(CANCELLED_EVENT, Some(TURN_CANCELLED)));
                 }
                 Script::Refused => {
                     events.push_back(event(DENIED_EVENT, Some("read_file")));
@@ -3163,8 +3176,8 @@ mod tests {
     }
 
     impl AgentSession for ScriptedSession {
-        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-            Ok(self.session_id.clone())
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
+            Ok(self.session_id.clone().map(String::from))
         }
 
         fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -3650,8 +3663,8 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
     }
 
     impl AgentSession for RoutedSession {
-        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-            Ok(Some(self.id.clone()))
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
+            Ok(Some(self.id.to_string()))
         }
 
         fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -3696,7 +3709,7 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
             {
                 events.extend(self.before_limit.lock().unwrap().clone());
                 let mut limit = event(LIMIT_EVENT, Some(GROK_LIMIT));
-                limit.limit = Some(crate::directorates::section_00::agent::UsageLimit {
+                limit.limit = Some(coqui_acp_provider::UsageLimit {
                     resets_at: None,
                     window: None,
                 });

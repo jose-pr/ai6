@@ -1,12 +1,12 @@
-//! The ACP client's own bookkeeping, against an agent that leaves, stays silent or cancels on
-//! its own: what the Station is told, and what it acknowledges.
+//! The ACP client's own bookkeeping, against an agent that leaves, stays silent, cancels on its
+//! own, runs out of credits or lost output: what the Station is told, and what it acknowledges.
 
 use agent_client_protocol::{
     Agent, Channel, Client, ConnectionTo, Responder, UntypedMessage, on_receive_notification,
     on_receive_request,
 };
 use ai6::directorates::section_00::acp::{AcpOptions, AcpSession, duplex};
-use ai6::directorates::section_00::agent::{AgentEvent, AgentSession, TURN_CANCELLED};
+use coqui_acp_provider::{AgentEvent, AgentSession, CANCELLED_EVENT, LIMIT_EVENT, TURN_CANCELLED};
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -22,6 +22,13 @@ enum Behaviour {
     NeverStarts,
     /// A plain ACP agent that answers its prompt as cancelled.
     CancelsByItself,
+    /// A plain ACP agent that hangs up with its turn unfinished.
+    PlainLeavesMidTurn,
+    /// A plain ACP agent that fails its prompt as the Grok CLI does when its account is out of
+    /// credits: an internal error whose reason is in an object.
+    OutOfCredits,
+    /// A plain ACP agent that says a bridge lost some of its output, then ends the turn.
+    LosesOutput,
 }
 
 #[derive(Default)]
@@ -68,7 +75,13 @@ fn serve(behaviour: Behaviour, seen: Arc<Seen>, transport: Channel) {
                                 cx: ConnectionTo<Client>| {
                         match message.method() {
                             "initialize" => {
-                                let meta = if matches!(behaviour, Behaviour::CancelsByItself) {
+                                let meta = if matches!(
+                                    behaviour,
+                                    Behaviour::CancelsByItself
+                                        | Behaviour::PlainLeavesMidTurn
+                                        | Behaviour::OutOfCredits
+                                        | Behaviour::LosesOutput
+                                ) {
                                     json!({})
                                 } else {
                                     json!({"dev.coqui.ai6/events": true})
@@ -136,6 +149,34 @@ fn serve(behaviour: Behaviour, seen: Arc<Seen>, transport: Channel) {
                                         Behaviour::CancelsByItself => {
                                             responder
                                                 .respond(json!({"stopReason": "cancelled"}))
+                                                .unwrap();
+                                        }
+                                        Behaviour::PlainLeavesMidTurn => {
+                                            let _ = &responder;
+                                            leave();
+                                        }
+                                        Behaviour::OutOfCredits => {
+                                            responder
+                                                .respond_with_error(
+                                                    agent_client_protocol::Error::internal_error()
+                                                        .data(json!({
+                                                            "message": "API error (status 402 Payment Required): personal-team-blocked:spending-limit: You have run out of credits. Add credits to continue.",
+                                                            "http_status": 402,
+                                                        })),
+                                                )
+                                                .unwrap();
+                                        }
+                                        Behaviour::LosesOutput => {
+                                            cx.send_notification(
+                                                UntypedMessage::new(
+                                                    "_dev.boriken.coqui.acp/output_lost",
+                                                    json!({"lines": 3, "bytes": 120}),
+                                                )
+                                                .unwrap(),
+                                            )
+                                            .unwrap();
+                                            responder
+                                                .respond(json!({"stopReason": "end_turn"}))
                                                 .unwrap();
                                         }
                                     }
@@ -318,7 +359,7 @@ fn an_operation_that_never_starts_is_a_start_failure_with_its_own_limit() {
 }
 
 #[test]
-fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_is_blocked() {
+fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_is_cancelled() {
     let (session, _) = connect(Behaviour::CancelsByItself, options());
     let session = session.unwrap();
     session.interrupt().unwrap();
@@ -328,6 +369,67 @@ fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_is_blocked(
     let (session, _) = connect(Behaviour::CancelsByItself, options());
     let events = events_until(&session.unwrap(), |events| !events.is_empty());
     let last = events.last().unwrap();
-    assert_eq!(last.kind, "blocked");
+    assert_eq!(last.kind, CANCELLED_EVENT);
     assert_eq!(last.text.as_deref(), Some(TURN_CANCELLED));
+}
+
+#[test]
+fn a_prompt_error_with_its_reason_in_an_object_is_a_limit_when_its_words_say_so() {
+    let (session, _) = connect(
+        Behaviour::OutOfCredits,
+        AcpOptions {
+            limit_phrases: vec!["spending-limit".to_owned()],
+            ..options()
+        },
+    );
+    let events = events_until(&session.unwrap(), |events| !events.is_empty());
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, LIMIT_EVENT, "{events:?}");
+    let text = last.text.as_deref().unwrap();
+    assert!(
+        text.starts_with("Internal error: API error (status 402 Payment Required)"),
+        "the reason in the error's object is kept: {text}"
+    );
+    assert!(last.limit.is_some());
+}
+
+#[test]
+fn a_lost_connection_is_never_read_as_a_limit_whatever_the_agent_last_wrote() {
+    let (session, _) = connect(
+        Behaviour::PlainLeavesMidTurn,
+        AcpOptions {
+            limit_phrases: vec!["rate limited".to_owned()],
+            disconnect_detail: Some(Box::new(|| Some("it last wrote: Rate limited".to_owned()))),
+            ..options()
+        },
+    );
+    let events = events_until(&session.unwrap(), |events| !events.is_empty());
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, "failed", "{events:?}");
+    let text = last.text.as_deref().unwrap();
+    assert!(text.contains("the agent closed its connection"), "{text}");
+    assert!(text.contains("Rate limited"), "{text}");
+    assert!(last.limit.is_none());
+}
+
+#[test]
+fn output_a_bridge_lost_fails_the_turn_with_what_was_lost() {
+    let (session, _) = connect(Behaviour::LosesOutput, options());
+    let events = events_until(&session.unwrap(), |events| {
+        events.iter().any(|event| event.kind == "completed")
+    });
+    let failed = events
+        .iter()
+        .position(|event| event.kind == "failed")
+        .expect("the lost output fails the turn");
+    let completed = events
+        .iter()
+        .position(|event| event.kind == "completed")
+        .unwrap();
+    assert!(failed < completed, "{events:?}");
+    let text = events[failed].text.as_deref().unwrap();
+    assert!(
+        text.contains("3 lines") && text.contains("120 bytes"),
+        "{text}"
+    );
 }

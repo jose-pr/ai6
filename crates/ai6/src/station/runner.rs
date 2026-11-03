@@ -42,11 +42,11 @@ use serde::{Deserialize, Serialize};
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::q::terminal::{HarnessStdio, TerminalBridge};
 use crate::directorates::section_00::acp::HandlerSpec;
-use crate::directorates::section_00::agent::{
-    AgentEvent, AgentResume, AgentSession, AgentStart, LIMIT_EVENT,
-};
+use crate::directorates::section_00::acp::ends_turn;
+use crate::directorates::section_00::agent::{AgentResume, AgentStart, checked_session_id};
 use crate::station::limits::{ApiLimits, RunnerLimits};
 use crate::station::plugins::Plugins;
+use coqui_acp_provider::{AgentEvent, AgentSession};
 
 #[cfg(feature = "cables-mcp")]
 pub(crate) use cable::URL_KEY as CABLE_URL_KEY;
@@ -740,8 +740,13 @@ impl Hosted {
                     break;
                 };
                 let polled = guard.next_event(poll_ms);
-                let session_id = guard.session_id().ok().flatten();
-                (polled, session_id)
+                match checked_session_id(guard.session_id().ok().flatten()) {
+                    Ok(session_id) => (polled, session_id),
+                    Err(why) => {
+                        self.append(event("failed", &why));
+                        break;
+                    }
+                }
             };
             if let (_, Some(session_id)) = &result {
                 let mut known = lock_of(&self.session_id);
@@ -753,7 +758,7 @@ impl Hosted {
             }
             match result.0 {
                 Ok(Some(event)) => {
-                    let last = matches!(event.kind.as_str(), "completed" | "failed" | LIMIT_EVENT);
+                    let last = ends_turn(&event);
                     self.append(event);
                     if last {
                         break;
@@ -988,9 +993,18 @@ impl Runner {
                 return Err(error.to_string());
             }
         };
-        if let Ok(Some(session_id)) = harness.session_id() {
-            *lock_of(&hosted.session_id) = Some(session_id);
-            hosted.persist();
+        match checked_session_id(harness.session_id().ok().flatten()) {
+            Ok(Some(session_id)) => {
+                *lock_of(&hosted.session_id) = Some(session_id);
+                hosted.persist();
+            }
+            Ok(None) => {}
+            Err(why) => {
+                let _ = harness.close();
+                hosted.append(event("failed", &why));
+                hosted.close();
+                return Err(why);
+            }
         }
         let harness = Arc::new(Mutex::new(harness));
         *lock_of(&hosted.harness) = Some(harness.clone());
@@ -1173,8 +1187,8 @@ mod tests {
     }
 
     use crate::directorates::section_00::acp::{
-        AcpOptions, AcpSession, Authenticate, LAUNCH_META_KEY, LaunchMeta, RUNNER_TOKEN_METHOD,
-        UNBOUNDED_LINE_BYTES, exchange,
+        AcpOptions, AcpSession, Authenticate, Exchange, LAUNCH_META_KEY, LaunchMeta,
+        RUNNER_TOKEN_METHOD, UNBOUNDED_LINE_BYTES,
     };
     use coqui_acp::lines::{IoLines, over_io};
 
@@ -1278,10 +1292,7 @@ mod tests {
         }
     }
 
-    fn events_until(
-        session: &AcpSession,
-        wanted: usize,
-    ) -> Vec<crate::directorates::section_00::agent::AgentEvent> {
+    fn events_until(session: &AcpSession, wanted: usize) -> Vec<coqui_acp_provider::AgentEvent> {
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
         let mut seen = Vec::new();
         while seen.len() < wanted && std::time::Instant::now() < deadline {
@@ -1292,14 +1303,14 @@ mod tests {
         seen
     }
 
-    fn texts(events: &[crate::directorates::section_00::agent::AgentEvent]) -> Vec<String> {
+    fn texts(events: &[coqui_acp_provider::AgentEvent]) -> Vec<String> {
         events
             .iter()
             .filter_map(|event| event.text.clone())
             .collect()
     }
 
-    use crate::directorates::section_00::agent::AgentMessage;
+    use coqui_acp_provider::AgentMessage;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_session_runs_over_acp_and_a_dropped_connection_replays_the_spool_once() {
@@ -1558,11 +1569,8 @@ mod tests {
         // With the right token the runner answers, and says it has no such Session.
         let (transport, auth) = (serving.transport(), serving.authenticate(&serving.token()));
         let answered = tokio::task::spawn_blocking(move || {
-            exchange(
+            Exchange::new().authenticate(auth).run(
                 transport,
-                Some(auth),
-                Some(Duration::from_millis(20_000)),
-                Some(Duration::from_millis(30_000)),
                 vec![(
                     "_ai6/session_status".to_owned(),
                     serde_json::json!({"key": "none"}),
@@ -1578,11 +1586,8 @@ mod tests {
         // A wrong token is refused.
         let (transport, auth) = (serving.transport(), serving.authenticate("wrong"));
         let refused = tokio::task::spawn_blocking(move || {
-            exchange(
+            Exchange::new().authenticate(auth).run(
                 transport,
-                Some(auth),
-                Some(Duration::from_millis(20_000)),
-                Some(Duration::from_millis(30_000)),
                 vec![(
                     "_ai6/session_status".to_owned(),
                     serde_json::json!({"key": "none"}),

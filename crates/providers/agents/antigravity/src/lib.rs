@@ -11,10 +11,11 @@ mod session;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use ai6::AgentSession;
 use ai6::HarnessStdio;
 use ai6::directorates::q::terminal::{AgentTerminal, STREAM_COLS, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentSession, AgentStart, AssistantMode, clearance_runs_commands,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV, GATE_PROGRAM_ENV};
 use ai6::guatiao::library::{Object, ProviderError};

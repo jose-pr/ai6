@@ -1,5 +1,8 @@
-//! The Guatiao contract for launching and driving one agent Session.
+//! The Guatiao contract for launching one agent Session. The Session a handler returns, and the
+//! events it reports, are `coqui_acp_provider`'s agent session kind, shared with every host of
+//! agent providers.
 
+use coqui_acp_provider::AgentSession;
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
 use serde::{Deserialize, Serialize};
@@ -196,6 +199,28 @@ pub fn clearance_reads_only(clearance: &str) -> bool {
     clearance == READ_CLEARANCE
 }
 
+/// The provider-issued Session ID a Session reported, as AI6 records it. One that is no valid
+/// identity fails the Session, with this sentence.
+#[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+pub(crate) fn checked_session_id(reported: Option<String>) -> Result<Option<SessionId>, String> {
+    reported
+        .map(|id| {
+            SessionId::try_from(id).map_err(|error| {
+                format!("the provider reported a Session ID AI6 cannot record: {error}")
+            })
+        })
+        .transpose()
+}
+
+/// [`checked_session_id`] of what `session_id` answered; the provider's own error passes as it is.
+#[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+pub(crate) fn provider_session_id(
+    reported: Result<Option<String>, ProviderError>,
+) -> Result<Option<SessionId>, ProviderError> {
+    checked_session_id(reported?)
+        .map_err(|why| ProviderError::new(guatiao::Status::GUATIAO_ERR_BAD_VALUE, &why))
+}
+
 /// How AI6 resumes a provider-issued Session.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
@@ -246,80 +271,6 @@ pub struct AgentResume {
     pub initial_context: Vec<String>,
 }
 
-/// A message AI6 sends to an already running Agent Session.
-#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[map(crate = ::guatiao)]
-pub struct AgentMessage {
-    /// Message text, kept separate from the initial context.
-    pub text: String,
-}
-
-/// The event kind a handler emits when the provider refuses further work until a quota
-/// resets. The event carries the details in [`AgentEvent::limit`].
-pub const LIMIT_EVENT: &str = "limit";
-
-/// The text of the `blocked` event for a turn the agent itself ended as cancelled, as the Grok CLI
-/// does when one of its tools is refused. No `completed` event follows it.
-pub const TURN_CANCELLED: &str = "the agent cancelled the turn";
-
-/// The event kind a handler emits, before a turn's `completed` or `failed` event, when the harness
-/// refused calls in that turn by its permission rules. The event's text names the tools, separated
-/// by `, `; [`AgentEvent::tools`] stays empty, since these calls did not run.
-pub const DENIED_EVENT: &str = "denied";
-
-/// A provider usage or rate limit that stopped the Session.
-///
-/// A handler emits it as an [`AgentEvent`] of kind [`LIMIT_EVENT`] in place of the
-/// `completed` or `failed` event the same output would otherwise produce.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[map(crate = ::guatiao)]
-pub struct UsageLimit {
-    /// When the provider says the quota resets, as Unix seconds. `None` when it did not say.
-    pub resets_at: Option<i64>,
-    /// Which window was exhausted (`five_hour`, `weekly`, ...) when the provider names it.
-    pub window: Option<String>,
-}
-
-/// Tokens and cost a provider reported for a Session, as the provider reports them.
-///
-/// Money is an integer count of millionths of a dollar so records never carry floats.
-#[derive(
-    ToValue, FromValue, Schema, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
-)]
-#[map(crate = ::guatiao)]
-pub struct TokenUsage {
-    /// Prompt tokens that were not served from the cache.
-    pub input: u64,
-    /// Tokens the model generated.
-    pub output: u64,
-    /// Prompt tokens read from the provider's cache.
-    pub cache_read: u64,
-    /// Prompt tokens written to the provider's cache.
-    pub cache_write: u64,
-    /// Cost in millionths of a dollar; `0` when the provider reports no cost.
-    pub cost_micro_usd: u64,
-    /// Whether the figures are running totals since the provider process started (`true`)
-    /// or only what the last step added (`false`).
-    pub cumulative: bool,
-}
-
-/// How much of one provider quota window the Session's account has used, as the provider
-/// reported it. A handler attaches one per window to the event that carried the report.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[map(crate = ::guatiao)]
-pub struct QuotaReport {
-    /// The window (`five_hour`, `weekly`, ...) as the provider names it, or its position
-    /// (`primary`, `secondary`) when it gives no name.
-    pub window: String,
-    /// Thousandths of the window used, when the provider reports a figure.
-    pub used_permille: Option<u16>,
-    /// When the window resets, as Unix seconds, when the provider says.
-    pub resets_at: Option<i64>,
-    /// The provider's verdict for the window (`allowed`, `allowed_warning`, `rejected`), when
-    /// it reports one.
-    pub status: Option<String>,
-}
-
 /// One model a harness says an account may use.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[map(crate = ::guatiao)]
@@ -364,27 +315,6 @@ impl ModelListing {
             models,
         }
     }
-}
-
-/// One provider event returned to the daemon.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[map(crate = ::guatiao)]
-pub struct AgentEvent {
-    /// Provider-neutral event name such as `text`, `blocked`, `tool`, `completed` or `limit`.
-    pub kind: String,
-    /// Human-readable event text when the provider supplies it.
-    pub text: Option<String>,
-    /// Provider data that has no text representation.
-    pub data: Option<Vec<u8>>,
-    /// The limit that stopped the Session; set only on a `limit` event.
-    pub limit: Option<UsageLimit>,
-    /// Token usage and cost the provider reported with this event.
-    pub usage: Option<TokenUsage>,
-    /// Names of the tools the event calls, as the harness names them (`WebFetch`).
-    pub tools: Vec<String>,
-    /// Quota windows the provider reported with this event.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub quota: Vec<QuotaReport>,
 }
 
 /// Starts or resumes the configured Agent implementation.
@@ -472,29 +402,33 @@ pub trait AgentHandler: Send + Sync {
     }
 }
 
-/// One provider-owned, resumable agent operation.
-#[guatiao::kind(object, name = "ai6_agent_session")]
-pub trait AgentSession: Send + Sync {
-    /// The provider-issued Session ID, once the provider has created it.
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError>;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    /// Submits a message to the active operation.
-    fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError>;
+    // A changed required signature affects every built provider; the Session's table is the
+    // shared kind's, whose header names the same value.
+    #[test]
+    fn floor_hashes_are_pinned() {
+        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 3986097841);
+        assert_eq!(
+            coqui_acp_provider::AgentSessionVtable::FLOOR_HASH,
+            1414216972
+        );
+    }
 
-    /// Reads one event, or returns `None` when `timeout_ms` expires.
-    ///
-    /// A handler must report terminal process exit as a `completed` or `failed` event, the
-    /// `failed` text saying how the harness ended and what it wrote last; returning `None`
-    /// permanently after end-of-file leaves the daemon waiting forever. A terminal may keep its
-    /// output open after the harness exits, so a handler asks the terminal's `exit_status` when
-    /// a read times out.
-    fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError>;
-
-    /// Requests that the provider interrupt the operation.
-    fn interrupt(&self) -> Result<(), ProviderError>;
-
-    /// Closes the operation and releases provider resources. It returns once the harness has
-    /// exited, or after a short wait when the terminal cannot tell, since the caller may remove
-    /// the harness's working directory next.
-    fn close(&self) -> Result<(), ProviderError>;
+    #[test]
+    fn a_provider_session_id_ai6_cannot_record_fails_the_session() {
+        assert_eq!(checked_session_id(None), Ok(None));
+        assert_eq!(
+            checked_session_id(Some("provider-1".to_owned())),
+            Ok(Some(SessionId::try_new("provider-1").unwrap()))
+        );
+        for bad in [String::new(), "a\nb".to_owned(), "x".repeat(10_000)] {
+            let refused = checked_session_id(Some(bad)).unwrap_err();
+            assert!(refused.contains("cannot record"), "{refused}");
+        }
+        let refused = provider_session_id(Ok(Some(String::new()))).unwrap_err();
+        assert!(refused.to_string().contains("cannot record"), "{refused}");
+    }
 }

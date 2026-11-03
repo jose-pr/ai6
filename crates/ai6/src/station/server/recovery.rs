@@ -30,9 +30,9 @@ use crate::directorates::registry::sessions::{
     SessionError, SessionLaunch, SessionRecord, SessionStatus, SessionUpdate,
 };
 use crate::directorates::registry::store::{DEFAULT_LEASE, Lease, LeaseRecovery};
-use crate::directorates::section_00::agent::{AgentEvent, AgentSession};
 use crate::station::reach::ReachWatch;
 use crate::{MissionId, SessionId};
+use coqui_acp_provider::{AgentEvent, AgentSession};
 
 /// How long a lease this Station gives up is renewed for: it lapses at once, so the
 /// Registry treats the Session or brief like one whose Station stopped renewing it.

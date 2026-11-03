@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::directorates::section_00::agent::AgentEvent;
+use coqui_acp_provider::AgentEvent;
 
 const EVENTS_FILE: &str = "events.jsonl";
 const CURSOR_FILE: &str = "cursor";

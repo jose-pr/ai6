@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 
 use super::{EVENT_NOTIFICATION, EVENTS_CAPABILITY, LAUNCH_META_KEY, LaunchMeta, ResumeMeta};
 use crate::directorates::q::terminal::AgentTerminal;
-use crate::directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentSession, LIMIT_EVENT,
+use crate::directorates::section_00::agent::AgentHandler;
+use coqui_acp_provider::{
+    AgentEvent, AgentMessage, AgentSession, CANCELLED_EVENT, LIMIT_EVENT, TURN_CANCELLED,
 };
 
 /// Makes the terminal an operation's handler spawns through: one per start or resume.
@@ -458,7 +459,7 @@ fn attach(inner: &Arc<Inner>, operation: &Arc<Operation>, session: Object<dyn Ag
     if let Ok(mut slot) = operation.session.lock() {
         *slot = Some(session.clone());
     }
-    let provider = session.session_id().ok().flatten().map(|id| id.to_string());
+    let provider = session.session_id().ok().flatten();
     notify(operation, &provider, None);
     let operation = operation.clone();
     let inner = inner.clone();
@@ -469,7 +470,7 @@ fn attach(inner: &Arc<Inner>, operation: &Arc<Operation>, session: Object<dyn Ag
                 let polled = session.next_event(100);
                 // After the read: a harness's first event may be what reports its Session, and
                 // nothing else may follow it for a whole model turn.
-                let provider = session.session_id().ok().flatten().map(|id| id.to_string());
+                let provider = session.session_id().ok().flatten();
                 match polled {
                     Ok(Some(event)) => {
                         notify(&operation, &provider, Some(&event));
@@ -509,6 +510,14 @@ fn end_turn(operation: &Operation, provider: &Option<String>, event: &AgentEvent
         LIMIT_EVENT => answer_all(operation, |responder| {
             responder.respond(json!({"stopReason": "refusal", "_meta": meta}))
         }),
+        CANCELLED_EVENT => answer_all(operation, |responder| {
+            responder.respond(json!({"stopReason": "cancelled", "_meta": meta}))
+        }),
+        "blocked" if event.text.as_deref() == Some(TURN_CANCELLED) => {
+            answer_all(operation, |responder| {
+                responder.respond(json!({"stopReason": "cancelled", "_meta": meta}))
+            });
+        }
         "failed" | "blown" => {
             let text = event.text.clone().unwrap_or_else(|| event.kind.clone());
             answer_all(operation, |responder| {

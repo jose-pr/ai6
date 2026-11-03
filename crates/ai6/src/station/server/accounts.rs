@@ -25,7 +25,7 @@ use crate::directorates::registry::accounts::{
 };
 use crate::directorates::registry::sessions::SessionRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
-use crate::directorates::section_00::agent::QuotaReport;
+use coqui_acp_provider::QuotaReport;
 
 use super::DaemonState;
 
@@ -1150,12 +1150,12 @@ pub(super) mod testing {
 
     use crate::directorates::m::identity::SessionId;
     use crate::directorates::q::terminal::AgentTerminal;
-    use crate::directorates::section_00::agent::{
-        AgentEvent, AgentHandler, AgentResume, AgentSession, AgentStart, LIMIT_EVENT, QuotaReport,
-        TokenUsage, UsageLimit,
-    };
+    use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError};
     use crate::guatiao::{Provider, Status};
+    use coqui_acp_provider::{
+        AgentEvent, AgentSession, LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
+    };
 
     use super::super::tests::MockSession;
 

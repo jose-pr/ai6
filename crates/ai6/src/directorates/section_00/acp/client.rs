@@ -16,9 +16,9 @@ use super::{
     EVENT_NOTIFICATION, EVENTS_CAPABILITY, PermissionDecider, PermissionDecision,
     PermissionRequest, RESTRICTED_KINDS, RefuseAll, UNBOUNDED_MS,
 };
-use crate::directorates::m::identity::SessionId;
-use crate::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, AgentSession, LIMIT_EVENT, TURN_CANCELLED, TokenUsage, UsageLimit,
+use coqui_acp_provider::{
+    AgentEvent, AgentMessage, AgentSession, CANCELLED_EVENT, LIMIT_EVENT, TURN_CANCELLED,
+    TokenUsage, UsageLimit,
 };
 
 /// The `_meta` key of `session/load` that asks a runner to replay what follows a sequence number.
@@ -26,9 +26,6 @@ const AFTER_KEY: &str = "dev.coqui.ai6/after";
 
 /// The method of the notification that acknowledges a runner's event.
 const ACK_NOTIFICATION: &str = "_ai6/ack";
-
-/// What `coqui_acp` says when an agent ends a turn as cancelled.
-const CANCELLED_TURN: &str = "the turn was cancelled";
 
 /// How often a wait for the operation to start looks at the connection.
 const START_POLL: Duration = Duration::from_millis(50);
@@ -82,18 +79,29 @@ pub struct AcpOptions {
     /// Whether dropping the session without closing it closes the agent's session. A Station
     /// reattaching to a runner's Session sets it off, so a lost connection ends nothing.
     pub close_on_drop: bool,
-    /// Whether a connection that ends without being closed is a `failed` event. A runner's
-    /// Session is not failed by its link dropping: the Station attaches again.
+    /// Whether a connection that ends mid-turn without being closed is a `failed` event. A
+    /// runner's Session is not failed by its link dropping: the Station attaches again.
     pub fail_on_disconnect: bool,
     /// What marks a failed prompt as a provider's usage or rate limit, found in its error without
-    /// regard to case. Empty counts no failure as a limit.
+    /// regard to case. Empty counts no failure as a limit. A lost connection is never one.
     pub limit_phrases: Vec<String>,
     /// Says what became of the agent, for that `failed` event: an exit status, its last words.
     pub disconnect_detail: Option<DisconnectDetail>,
+    /// UTF-8 bytes of agent text gathered before they are delivered mid-message.
+    pub text_flush_bytes: usize,
+    /// The tool calls whose kind is kept, by which a later message about one that does not say
+    /// its kind is judged; past it the oldest is forgotten, and such a message is of unknown kind.
+    pub max_tool_kinds: usize,
 }
 
-/// Asked once a connection has ended without being closed.
-pub type DisconnectDetail = Box<dyn Fn() -> Option<String> + Send + Sync>;
+/// Asked at most once, when a connection has ended mid-turn without being closed.
+pub type DisconnectDetail = Box<dyn FnOnce() -> Option<String> + Send>;
+
+/// The default of [`AcpOptions::text_flush_bytes`]: 64 KiB.
+pub const DEFAULT_TEXT_FLUSH_BYTES: usize = 64 * 1024;
+
+/// The default of [`AcpOptions::max_tool_kinds`].
+pub const DEFAULT_MAX_TOOL_KINDS: usize = 4096;
 
 impl Default for AcpOptions {
     fn default() -> Self {
@@ -119,6 +127,8 @@ impl Default for AcpOptions {
             fail_on_disconnect: true,
             disconnect_detail: None,
             limit_phrases: Vec::new(),
+            text_flush_bytes: DEFAULT_TEXT_FLUSH_BYTES,
+            max_tool_kinds: DEFAULT_MAX_TOOL_KINDS,
         }
     }
 }
@@ -154,8 +164,25 @@ fn limit_event(text: String) -> AgentEvent {
     }
 }
 
-fn is_terminal(kind: &str) -> bool {
-    matches!(kind, "completed" | "failed" | LIMIT_EVENT | "blown")
+/// Whether an event ends its turn: `blocked` does only as the agent's own cancel.
+pub(crate) fn ends_turn(event: &AgentEvent) -> bool {
+    turn_ending(&event.kind, event.text.as_deref())
+}
+
+fn turn_ending(kind: &str, text: Option<&str>) -> bool {
+    matches!(
+        kind,
+        "completed" | "failed" | LIMIT_EVENT | CANCELLED_EVENT | "blown"
+    ) || (kind == "blocked" && text == Some(TURN_CANCELLED))
+}
+
+/// Whether a notification of a facade's event stream carries an event that ends its turn.
+fn notification_ends_turn(method: &str, params: &Value) -> bool {
+    method == EVENT_NOTIFICATION
+        && params.get("event").is_some_and(|event| {
+            let field = |key: &str| event.get(key).and_then(Value::as_str);
+            field("kind").is_some_and(|kind| turn_ending(kind, field("text")))
+        })
 }
 
 /// Whether a restricted Session lets the agent have what it asked for: reading, and the tools of
@@ -238,7 +265,7 @@ struct State {
 
 impl State {
     fn push(&mut self, seq: Option<u64>, event: AgentEvent) {
-        if is_terminal(&event.kind) {
+        if ends_turn(&event) {
             self.finished = true;
         }
         self.queue.push_back((seq, event));
@@ -275,9 +302,7 @@ pub struct AcpSession {
     reader: Mutex<()>,
     state: Mutex<State>,
     events_capability: bool,
-    fail_on_disconnect: bool,
     limit_phrases: Vec<String>,
-    disconnect_detail: Option<DisconnectDetail>,
 }
 
 impl AcpSession {
@@ -290,7 +315,7 @@ impl AcpSession {
     /// session error, an agent without the capability the Session needs, a start timeout.
     pub fn connect(
         transport: impl ConnectTo<Role> + 'static,
-        options: AcpOptions,
+        mut options: AcpOptions,
         on_close: Option<Box<dyn FnOnce() + Send>>,
     ) -> Result<Self, ProviderError> {
         let waits =
@@ -298,6 +323,9 @@ impl AcpSession {
         let start_timeout = duration_of(options.start_timeout_ms);
         let has_prompt = options.prompt.is_some();
         let mut session = Self::builder(&options);
+        if let Some(detail) = options.disconnect_detail.take() {
+            session = session.disconnect_detail(detail);
+        }
         if let Some(on_close) = on_close {
             session = session.on_close(on_close);
         }
@@ -317,9 +345,7 @@ impl AcpSession {
             }),
             session,
             events_capability,
-            fail_on_disconnect: options.fail_on_disconnect,
             limit_phrases: options.limit_phrases,
-            disconnect_detail: options.disconnect_detail,
         };
         if events_capability && waits {
             // A façade starts its operation on the first prompt, and a resumed one says it is
@@ -335,11 +361,14 @@ impl AcpSession {
         let mut builder = Client::builder(options.cwd.clone())
             .client_info("ai6", env!("CARGO_PKG_VERSION"))
             .turn_end_by(EVENTS_CAPABILITY)
+            .ends_turn(notification_ends_turn)
             .initialize_timeout(duration_of(options.initialize_timeout_ms))
             .request_timeout(duration_of(options.request_timeout_ms))
             .close_grace(duration_of(options.close_grace_ms))
             // The reader is the Station, which keeps up; no bound on what waits for it.
             .max_pending_events(usize::MAX)
+            .text_flush(options.text_flush_bytes)
+            .max_tool_kinds(options.max_tool_kinds)
             .close_on_drop(options.close_on_drop)
             .fail_on_disconnect(options.fail_on_disconnect);
         for server in &options.mcp_servers {
@@ -399,6 +428,7 @@ impl AcpSession {
     /// answer; a resumed operation that never says is let through.
     fn await_start(&self, prompted: bool, timeout: Option<Duration>) -> Result<(), String> {
         let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
+        let mut drained = false;
         loop {
             {
                 let state = self
@@ -415,6 +445,13 @@ impl AcpSession {
                 }
             }
             if self.session.connection_lost() {
+                // What the agent said before it left is read before its leaving: it may have
+                // started, or said why it could not.
+                if !drained {
+                    while self.pump(Duration::ZERO) {}
+                    drained = true;
+                    continue;
+                }
                 return if prompted {
                     Err("the agent closed its connection before the operation started".to_owned())
                 } else {
@@ -466,22 +503,7 @@ impl AcpSession {
             .any(|phrase| text.contains(&phrase.to_lowercase()))
     }
 
-    fn finished(&self) -> bool {
-        self.state
-            .lock()
-            .map(|state| state.finished)
-            .unwrap_or(true)
-    }
-
     fn absorb(&self, incoming: Event) {
-        // A failure after the connection ended is the connection's, worded with what became of
-        // the agent. Asked before the state is held, since it may wait on the agent's exit.
-        let ended = matches!(incoming, Event::Failed(_))
-            && self.fail_on_disconnect
-            && self.session.connection_lost();
-        let detail = (ended && !self.finished())
-            .then(|| self.disconnect_detail.as_ref().and_then(|detail| detail()))
-            .flatten();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -530,30 +552,41 @@ impl AcpSession {
                 state.push(None, event("permission", Some(text)));
             }
             Event::Completed { .. } => state.push(None, event("completed", None)),
-            Event::Failed(text) if ended => {
-                // An operation that already ended its turn is not failed by the agent leaving.
-                if !state.finished {
-                    let said = detail.map_or(text.clone(), |detail| format!("{text}: {detail}"));
-                    state.push(None, event("failed", Some(said)));
-                }
-            }
             Event::Failed(text) => {
-                let failed = if !self.events_capability && self.is_limit(&text) {
+                // A lost connection's failure may quote the agent's last words, which are no
+                // provider's answer: only a turn's own failure counts as a limit.
+                let failed = if !self.events_capability
+                    && !self.session.connection_lost()
+                    && self.is_limit(&text)
+                {
                     limit_event(text)
                 } else {
                     event("failed", Some(text))
                 };
                 state.push(None, failed);
             }
-            Event::Blocked(text) if text == CANCELLED_TURN => {
+            Event::Cancelled => {
                 // An interrupted turn ends as a native handler's does; one the agent gave up by
                 // itself is another matter.
                 if state.cancelling {
                     state.push(None, event("completed", None));
                 } else {
-                    state.push(None, event("blocked", Some(TURN_CANCELLED.to_owned())));
+                    state.push(
+                        None,
+                        event(CANCELLED_EVENT, Some(TURN_CANCELLED.to_owned())),
+                    );
                 }
             }
+            Event::OutputLost { lines, bytes } => state.push(
+                None,
+                event(
+                    "failed",
+                    Some(format!(
+                        "the agent's output was lost while no one was connected ({lines} lines, \
+                         {bytes} bytes), so what this Session shows has a gap"
+                    )),
+                ),
+            ),
             Event::Blocked(text) => state.push(
                 None,
                 event(
@@ -605,16 +638,14 @@ impl AcpSession {
 }
 
 impl AgentSession for AcpSession {
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
+    fn session_id(&self) -> Result<Option<String>, ProviderError> {
         self.catch_up();
-        let id = self
+        Ok(self
             .state
             .lock()
             .map_err(|_| provider_error("ACP state lock was poisoned"))?
             .provider_session
-            .clone();
-        id.map(|id| SessionId::try_new(id).map_err(|error| provider_error(error.to_string())))
-            .transpose()
+            .clone())
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {

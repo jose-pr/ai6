@@ -86,9 +86,7 @@ use crate::directorates::registry::sessions::{
 use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
 use crate::directorates::section_00::agent::READ_CLEARANCE;
-use crate::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, AgentResume, AgentSession, AgentStart, DENIED_EVENT, LIMIT_EVENT,
-};
+use crate::directorates::section_00::agent::{AgentResume, AgentStart, provider_session_id};
 use crate::station::limits::StationLimits;
 use crate::station::plugins;
 #[cfg(feature = "publisher")]
@@ -104,6 +102,9 @@ use crate::station::safehouse::SafeHouse;
 use crate::station::sources::SourceDesk;
 use crate::station::transports::Transports;
 use crate::{MissionId, SessionId};
+use coqui_acp_provider::{
+    AgentEvent, AgentMessage, AgentSession, CANCELLED_EVENT, DENIED_EVENT, LIMIT_EVENT,
+};
 
 /// The loopback address used by the daemon's private health endpoint.
 pub const DEFAULT_LISTEN: SocketAddr =
@@ -4633,7 +4634,7 @@ async fn start_mission(
         );
     }
     let identity = tokio::task::spawn_blocking(move || {
-        let session_id = session.session_id();
+        let session_id = provider_session_id(session.session_id());
         (session, session_id)
     })
     .await;
@@ -5399,7 +5400,8 @@ async fn resume_mission(
                 let expected_session_id = resume_request.session_id.clone();
                 let resumed = crate::station::acp::resume(handler, terminal_handle, resume_request)
                     .map_err(|error| error.to_string())?;
-                let reported = resumed.session_id().map_err(|error| error.to_string())?;
+                let reported =
+                    provider_session_id(resumed.session_id()).map_err(|error| error.to_string())?;
                 if another_session(reported.as_ref(), &expected_session_id) {
                     let _ = resumed.close();
                     return Err(RESUME_NOT_RETAINED.to_owned());
@@ -5998,7 +6000,8 @@ fn spawn_event_pump_with_monitor(
                 let event = session
                     .next_event(1_000)
                     .map_err(|error| error.to_string())?;
-                let session_id = session.session_id().map_err(|error| error.to_string())?;
+                let session_id =
+                    provider_session_id(session.session_id()).map_err(|error| error.to_string())?;
                 Ok::<_, String>((event, session_id))
             })();
             if !is_current_session(&state, &mission_id, &session) {
@@ -6029,7 +6032,10 @@ fn spawn_event_pump_with_monitor(
                             &mut budget_notices,
                         )
                         .is_some()
-                        && !matches!(event.kind.as_str(), "completed" | "failed" | LIMIT_EVENT)
+                        && !matches!(
+                            event.kind.as_str(),
+                            "completed" | "failed" | LIMIT_EVENT | CANCELLED_EVENT
+                        )
                     {
                         queue_event(&state, &mission_id, event);
                         medical::stop_for_budget(&state, &mission_id, &session);
@@ -6047,8 +6053,10 @@ fn spawn_event_pump_with_monitor(
                     if event.kind == DENIED_EVENT {
                         note_denied_tools(&state, &mission_id, &event);
                     }
-                    if matches!(event.kind.as_str(), "completed" | "failed")
-                        && end_interrupted_turn(&state, &mission_id, &session)
+                    if matches!(
+                        event.kind.as_str(),
+                        "completed" | "failed" | CANCELLED_EVENT
+                    ) && end_interrupted_turn(&state, &mission_id, &session)
                     {
                         queue_event(
                             &state,
@@ -6516,7 +6524,8 @@ fn apply_event_state(
     event: &AgentEvent,
 ) -> Option<MissionState> {
     let target = match event.kind.as_str() {
-        "blocked" => MissionState::Blocked,
+        // A turn the agent gave up waits for a person, as one it was blocked in does.
+        "blocked" | CANCELLED_EVENT => MissionState::Blocked,
         "stalled" => MissionState::Stalled,
         "completed" => MissionState::Done,
         "failed" => MissionState::Failed,
@@ -7559,11 +7568,10 @@ queue = 1
     use crate::directorates::registry::cables::{
         CableAction, CableGrant, CablePolicy, CableScope, CableTarget,
     };
-    use crate::directorates::section_00::agent::{
-        AgentHandler, AgentResume, AgentStart, TokenUsage, UsageLimit,
-    };
+    use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError, Registry};
     use crate::guatiao::{FromValue, Provider, Status, ToValue, Value};
+    use coqui_acp_provider::{TokenUsage, UsageLimit};
     use std::sync::atomic::AtomicI64;
 
     /// A Registry directory of its own for each test: a shared one carries incidents and
@@ -8253,8 +8261,8 @@ queue = 1
     }
 
     impl AgentSession for MockSession {
-        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-            Ok(Some(self.session_id.clone()))
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
+            Ok(Some(self.session_id.to_string()))
         }
 
         fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -13090,8 +13098,8 @@ queue = 1
     }
 
     impl AgentSession for DripSession {
-        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-            Ok(Some(self.session_id.clone()))
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
+            Ok(Some(self.session_id.to_string()))
         }
 
         fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
@@ -13461,8 +13469,8 @@ queue = 1
     }
 
     impl AgentSession for LineSession {
-        fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-            Ok(SessionId::try_new("provider-session-lines").ok())
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
+            Ok(Some("provider-session-lines".to_owned()))
         }
 
         fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {

@@ -9,11 +9,9 @@ use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{
     AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, StreamLine, TerminalSession, exit_code_text,
 };
-use ai6::directorates::section_00::agent::{
-    AgentEvent, AgentMessage, DENIED_EVENT, LIMIT_EVENT, TokenUsage, UsageLimit,
-};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status};
+use ai6::{AgentEvent, AgentMessage, DENIED_EVENT, LIMIT_EVENT, TokenUsage, UsageLimit};
 use serde_json::{Value, json};
 
 use crate::files::SessionFiles;
@@ -548,9 +546,9 @@ impl AntigravitySession {
     }
 }
 
-impl ai6::directorates::section_00::agent::AgentSession for AntigravitySession {
-    fn session_id(&self) -> Result<Option<SessionId>, ProviderError> {
-        Ok(lock(&self.session_id)?.clone())
+impl ai6::AgentSession for AntigravitySession {
+    fn session_id(&self) -> Result<Option<String>, ProviderError> {
+        Ok(lock(&self.session_id)?.clone().map(String::from))
     }
 
     /// A message while agy runs goes to it as the next turn, once it has named its conversation.

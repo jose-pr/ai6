@@ -10,7 +10,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::directorates::section_00::agent::TokenUsage;
+use coqui_acp_provider::TokenUsage;
 
 /// Thousandths of a limit at which a warning is raised unless configured otherwise (80%).
 pub const DEFAULT_WARN_AT_PERMILLE: u16 = 800;

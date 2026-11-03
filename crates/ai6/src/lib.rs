@@ -17,6 +17,10 @@ pub use bounds::{Limit, Rate, Seconds, TimeLimit};
 pub mod directorates;
 pub mod station;
 
+pub use coqui_acp_provider::{
+    AgentEvent, AgentMessage, AgentSession, DENIED_EVENT, LIMIT_EVENT, QuotaReport, TokenUsage,
+    UsageLimit,
+};
 pub use directorates::m::access::{
     ACTIONS, AccessPolicy, AccessPolicyError, AccessSet, AccountInfo, AccountPut, Accounts,
     Attempt, Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer, CHIEF_ROLE,
@@ -225,10 +229,8 @@ pub use directorates::registry::tracker::{
 };
 pub use directorates::registry::vetting::{Clearance, HeldBrief};
 pub use directorates::section_00::agent::{
-    AgentEvent, AgentHandler, AgentMessage, AgentResume, AgentSession, AgentStart, AssistantMode,
-    AssistantNetwork, DENIED_EVENT, LIMIT_EVENT, McpServerRef, ModelInfo, ModelListing,
-    QuotaReport, READ_CLEARANCE, TokenUsage, UsageLimit, clearance_reads_only,
-    clearance_runs_commands,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, AssistantNetwork, McpServerRef,
+    ModelInfo, ModelListing, READ_CLEARANCE, clearance_reads_only, clearance_runs_commands,
 };
 pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_ENV_PREFIX, ASSISTANT_CABLE_MCP_SERVER, ASSISTANT_CABLE_MCP_TOKEN_ENV,

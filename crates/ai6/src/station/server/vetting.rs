@@ -1356,11 +1356,10 @@ pub(super) mod testing {
 
     use crate::directorates::m::identity::SessionId;
     use crate::directorates::q::terminal::AgentTerminal;
-    use crate::directorates::section_00::agent::{
-        AgentEvent, AgentHandler, AgentResume, AgentSession, AgentStart,
-    };
+    use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError};
     use crate::guatiao::{Provider, Status};
+    use coqui_acp_provider::{AgentEvent, AgentSession};
 
     use super::super::tests::MockSession;
 
