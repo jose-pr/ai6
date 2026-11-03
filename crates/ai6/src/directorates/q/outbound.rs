@@ -122,6 +122,8 @@ static CREDENTIALS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         r"gh[pousr]_[A-Za-z0-9]{20,}",
         r"github_pat_[A-Za-z0-9_]{20,}",
+        // GitLab's token families: personal, deploy, runner, trigger, feed, OAuth and the rest.
+        r"\bgl(?:pat|dt|rt|ptt|ft|imt|agent|oas|soat|cbt|ffct)-[A-Za-z0-9_.\-]{20,}",
         r"ATATT[A-Za-z0-9_=\-]{20,}",
         r"xox[abprs]-[A-Za-z0-9-]{10,}",
         r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",
@@ -314,6 +316,8 @@ mod tests {
         for secret in [
             "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
             "github_pat_abcdefghijklmnopqrstuvwxyz",
+            "glpat-abcdefghijklmnopqrst",
+            "gldt-abcdefghijklmnopqrstuv",
             "ATATT3xFfGF0abcdefghijklmnopqrstuvwx",
             "xoxb-1234567890-abcdefghij",
             "AKIAABCDEFGHIJKLMNOP",
@@ -327,6 +331,7 @@ mod tests {
             );
         }
         assert!(check_default("a normal ghp_ reference").is_ok());
+        assert!(check_default("the glpat- prefix names a GitLab token").is_ok());
     }
 
     #[test]
