@@ -47,6 +47,7 @@ are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.
 `assistant.memory.admin`, `audit.read`,
 `cable.read`, `cable.send`, `issue.comment`, `issue.create`, `issue.link`, `issue.update`,
 `memory.write`, `mission.control`, `mission.create`, `mission.read`,
+`mission.control`, `mission.create`, `mission.read`, `mission.review`,
 `pool.manage`, `pool.read`,
 `roster.manage`, `roster.read`, `session.input`, `session.read`, `station.configure` and
 `station.read`. `roster.read` and `roster.manage` at `config:roster` list and edit the
@@ -57,7 +58,9 @@ may draw from, never a credential; `pool.manage` lifts an account's limit. `miss
 (cancel, retry, resume and interrupt a Mission) is separate from `session.input`: typing into
 a Session does not grant stopping it. `approval.decide` signs or refuses an Agent's request
 for [green ink](missions.md#green-ink) and `approval.class` manages class authorisations;
-neither comes with `mission.create` or `mission.control`. `cable.send` and `cable.read` on
+neither comes with `mission.create` or `mission.control`. `mission.review` decides over a
+Mission's [review](review.md) panel, with a reason, and lets a brief name a review policy, which
+may weaken one. `cable.send` and `cable.read` on
 `operation:<id>` are what [Moneypenny](assistant.md#cables) may do with Cables there for
 the person: send and reply, and read what is sent to her. The Station's `cables.toml` still
 has to let her Agent do it. A person reads and changes [Moneypenny's memory of
@@ -202,7 +205,7 @@ The policy has four built-in role names and two places to write more.
 | Role | What it holds | Written |
 | --- | --- | --- |
 | `chief` | every action, including any added later; not stored and not editable | only through the chief list (`chief = [...]` in the `access` record, `[unex.access] chief` in `ai6.cfg`) |
-| `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `access.manage`, `account.manage`, `audit.read` and `access.read` | seeded; ordinary data you may edit or delete |
+| `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `mission.review`, `access.manage`, `account.manage`, `audit.read` and `access.read` | seeded; ordinary data you may edit or delete |
 | `operator` | the read actions (`mission.read`, `session.read`, `agent.read`, `roster.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `session.input`, `cable.send`, `approval.decide`, `issue.link`, `issue.comment`, `issue.update`, `issue.create` | seeded |
 | `auditor` | the read actions, `audit.read` and `access.read` | seeded |
 

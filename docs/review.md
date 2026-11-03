@@ -133,3 +133,35 @@ on the Mission:
 A Mission in remote-hands mode does not start under a plan gate: the Theater's tools can change it
 whatever the handler offers.
 
+## People
+
+The Mission page in Outer Office shows each gate's review: the policy, where it stands and why, the
+panel with each seat's weight and veto, and every vote with its round and reasons. A person with
+`mission.review` decides over the panel with a reason: pass it, send it back (the reason goes to the
+author and counts as a send-back) or refuse it. The decision is audited and on the timeline, and the
+Station holding the Mission acts on it at its next round. The same through `ai6ctl`:
+
+```bash
+ai6ctl reviews show --operation G G-12
+ai6ctl reviews overrule --operation G G-12 --gate output --decision pass --reason "checked by hand"
+```
+
+A review policy is a record like any other: Outer Office's roster page edits review policies with a
+form drawn from the record's declaration, and an Operation's or a role's form picks one per gate. A
+Mission created through Universal Exports can name one (`review: {output: "..."}`), which needs
+`mission.review`, since a person's naming may weaken it.
+
+
+<!-- schema:record.review:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `panel` | none | **Panel.** Who reviews: Agents or roles, each with a weight and an optional veto. |
+| `pass_at` | 1 | **Share that must pass.** The share of the weight, above 0 and at most 1, that must vote to pass. Abstentions are left out of the share. Leave it at 1 for all of it. |
+| `distinct_models` | 1 | **Different models.** How many different models must be behind the votes, none of them the author's. |
+| `rounds` | 1 | **Rounds to agree.** How many rounds the panel has to agree before `on_no_agreement`. |
+| `redo_limit` | 1 | **Times sent back.** How many times the author is sent back before a person decides. |
+| `on_no_agreement` | `person` | **When the panel does not agree.** What happens when the panel does not agree, or the budget runs out. |
+| `max_turns` | none | **Turns one review may spend.** Reviewer turns one review may spend. Leave it empty for no limit of its own. |
+| `max_tokens` | none | **Tokens one review may spend.** Tokens one review may spend. Leave it empty for no limit of its own. |
+| `reviewer_timeout_secs` | 3,600 | **A reviewer answers within.** How long one reviewer has to answer before it counts as absent; 0 is no limit. |
+<!-- schema:record.review:end -->
