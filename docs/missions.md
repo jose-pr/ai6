@@ -26,7 +26,8 @@ from it:
 | A person, `ai6ctl`, Moneypenny, an Agent's proposal, a review | `<operation>-<n>` | `ai6-42` |
 | A Jira Source | `<operation>-<item key>` | `ai6-AI6-64` |
 | A GitHub Source | `<operation>-gh-<number>` | `ai6-gh-63` |
-| A Source instance that is not its provider's only one in the Operation | its instance name replaces `gh`; a Jira key already names its project | `ai6-backend-63` |
+| A GitLab Source | `<operation>-gl-<iid>` | `ai6-gl-12` |
+| A Source instance that is not its provider's only one in the Operation | its instance name replaces `gh` or `gl`; a Jira key already names its project | `ai6-backend-63` |
 | A Sleeper | `<operation>-<sleeper>-<n>`, the same counter | `ai6-nightly-43` |
 
 - The counter is per Operation and shared by every Station and gateway on the Registry. Numbers
@@ -568,7 +569,8 @@ past that, a brief that would be held waits in the queue.
 ## Sources
 
 A **Source** is a Guatiao provider that polls a tracker or CI system for work: `github`
-(labeled issues and pull requests) and `jira` (a JQL search). The same providers also serve
+(labeled issues and pull requests), `gitlab` (labeled issues, on gitlab.com or a self-managed
+instance) and `jira` (a JQL search). The same providers also serve
 the **Tracker** kind, which reads, comments on, labels and creates issues, so the outcome goes
 back through the tracker the work came from. An Operation names its tracker instances under
 `sources.<name>` in `operations.toml` ([settings](operations.md#sources)).
@@ -599,7 +601,8 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
   credential is an error, also on Jira Cloud, which answers its search with an empty page: an
   empty Jira Cloud poll makes one more request to tell the two apart.
 - **Lag.** A tracker's listing can show a new or changed issue seconds late, so it can arrive
-  one poll later.
+  one poll later. GitLab leaves an issue's change time alone for a change within about a minute
+  of its last one, so its `settling_secs` defaults to 120.
 - **CX report.** When a Mission ends, the Headquarters Station posts a comment on the
   item (and may add the instance's `done` or `failed` status label or make its status
   transition): the outcome, plus what the
@@ -614,7 +617,7 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
 ## Linked issues
 
 A Mission that started from an issue is **linked** to it, and keeps it current. A link names a
-tracker instance and an item (`github:jose-pr/ai6#12`, `jira:GUA-12`), how the issue relates to
+tracker instance and an item (`github:jose-pr/ai6#12`, `gitlab:group/project#12`, `jira:GUA-12`), how the issue relates to
 the Mission (`source`, `related`, `child`, `parent`, `mirror`), who linked it, and whether it
 is in force (`proposed`, `active`, `unlinked`). The source issue is linked when its brief is
 queued, so the Mission's page can show it before it is placed. A Mission holds at most 32
@@ -637,9 +640,10 @@ question is an outbox entry like any other, the Mission becomes `blocked` with r
 and its Watchdog pauses. The Headquarters Station reads new comments on the source, related and
 child issues of unfinished Missions every `reply_every` (60 s), cursor per tracker instance in
 the Registry. A comment is delivered only from someone allowed to answer for the issue: the
-issue's author or reporter, a GitHub owner, member or collaborator, a Jira assignee, or a
+issue's author or reporter, a GitHub owner, member or collaborator, a GitLab project member at
+the instance's `reply_min_access` (Developer) or above, a Jira assignee, or a
 login in the instance's `reply_authors`. AI6's own comments are skipped, told by the mark AI6
-leaves on what it writes (a hidden `<!-- ai6:… -->` on GitHub, the comment property
+leaves on what it writes (a hidden `<!-- ai6:… -->` on GitHub and GitLab, the comment property
 `dev.coqui.ai6` on Jira) and never by their author, so one person's token works: that person's
 own reply is delivered like anyone's. Any other author is a timeline event naming them, never
 their text. The Station that holds the Mission delivers a
@@ -683,7 +687,8 @@ Headquarters Station then adds the labels in that person's name (audit `issue.re
 vetting and the Chief of Staff decide what runs, as for any issue. When intake takes an issue AI6
 created, its Mission is linked to the issue it was split from, read-only.
 
-A child goes under its parent where the tracker can: a GitHub sub-issue; on Jira Cloud a sub-task
+A child goes under its parent where the tracker can: a GitHub sub-issue; on GitLab a task under an
+issue (a task takes no children); on Jira Cloud a sub-task
 under a standard issue and a standard issue under an epic; on Server a sub-task. Where it cannot,
 the child names its parent in its first line and the parent gets one comment listing the children;
 a Jira child of a sub-task is created beside it and tied by `link_type` (`Relates`). A mirror copies

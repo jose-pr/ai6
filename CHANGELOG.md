@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   modes, 500 sessions, 10 pages, 4096 bytes of text; any value). `text_flush_bytes` (64 KiB) and
   `max_tool_kinds` (4096) are settings too. An agent that does not say is listed as unknown, with the
   reason.
+- The `gitlab` Source and Tracker (`ai6-source-gitlab`): open issues of a gitlab.com or
+  self-managed project that carry the intake labels become Missions `<operation>-gl-<iid>`, and
+  the outcome comes back as a marked comment. As a Tracker it reads, comments on and edits,
+  labels, assigns, closes and creates issues, attaches a child as a task under its parent,
+  makes `relates_to` links, and lists replies from the issue's author, a project member at
+  `reply_min_access` (Developer) or above, or `reply_authors`. Its token is `PRIVATE-TOKEN` from
+  `token_env` (`GITLAB_TOKEN`); every page, page count and timeout is a setting. `settling_secs`
+  defaults to 120: gitlab.com leaves an issue's `updated_at` alone for a change within about a
+  minute of its last one. Tested against recorded gitlab.com answers and, on request, live.
 - The `antigravity` handler (`ai6-agent-antigravity`) runs the Antigravity CLI, `agy`, through its
   stream-json mode, measured on agy 1.4.12 on x86-64 Linux. A Session's ID is read from its stream,
   and a resume sends nothing until the stream names the conversation asked for. A tool refused by the

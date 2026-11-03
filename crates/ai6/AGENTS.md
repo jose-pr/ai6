@@ -3167,9 +3167,9 @@ wording follows `Cover::disclosure()`: `Hidden` (covert), `Assisted` (partial) o
 
 ## Trackers (`ai6::directorates::registry::tracker`)
 
-A Tracker is the second Guatiao kind (`ai6_tracker`) the tracker providers (`github`, `jira`)
-serve, built from the same `SourceConfig` as their Source. Every method is blocking and names
-an issue by its item ID (`owner/repo#12`, `GUA-12`). An item outside the instance's
+A Tracker is the second Guatiao kind (`ai6_tracker`) the tracker providers (`github`, `gitlab`,
+`jira`) serve, built from the same `SourceConfig` as their Source. Every method is blocking and
+names an issue by its item ID (`owner/repo#12`, `group/project#12`, `GUA-12`). An item outside the instance's
 repository or project fails `GUATIAO_ERR_BAD_VALUE` (`foreign item ...`); a call the
 instance cannot make fails `GUATIAO_ERR_UNSUPPORTED` naming what it can do.
 

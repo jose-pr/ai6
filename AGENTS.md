@@ -13,7 +13,7 @@ One Cargo workspace (`Cargo.toml`, one `Cargo.lock`).
 | `crates/universal-exports/` | Universal Exports: the authenticated public API gateway, Moneypenny's conversations and tools (`src/moneypenny/`), and the `universal-exports` command |
 | `crates/ai6-diptel/` | The DipTel wire contract (lifecycle and terminal frames), native and wasm |
 | `crates/ai6ctl/` | The operator command: reads, and cancels, retries, resumes and interrupts Missions |
-| `crates/providers/{agents,terminals,transports,theaters,safehouses,sources}/` | Guatiao providers: Claude, Codex, Antigravity CLI and `acp` (any Agent Client Protocol agent) handlers, the `pty` terminal, the `local`, `ssh`, `adb`, `container` and `qemu` transports, the `ephemeral-container` Theater provider, the `git` and `copy` safe houses, GitHub and Jira Sources |
+| `crates/providers/{agents,terminals,transports,theaters,safehouses,sources}/` | Guatiao providers: Claude, Codex, Antigravity CLI and `acp` (any Agent Client Protocol agent) handlers, the `pty` terminal, the `local`, `ssh`, `adb`, `container` and `qemu` transports, the `ephemeral-container` Theater provider, the `git` and `copy` safe houses, GitHub, GitLab and Jira Sources |
 | `clients/outer-office/` | Outer Office (short name OO), the Flutter Linux, Windows and web operator app; Moneypenny is the AI assistant inside it |
 | `examples/config/` | A runnable Operation and Agent roster |
 | `docs/`, `mkdocs.yml` | Narrative guides; the Rust API reference is published under `/rust/` |
@@ -55,7 +55,7 @@ Stations failing over); `AI6_TEST_POSTGRES_TLS_URL` names a TLS-only server, wit
 `cargo test -- --nocapture` prints how many were skipped. CI's Linux legs start both
 servers in Docker. Building the `sqlite` feature compiles SQLite, so it needs a C compiler.
 
-The `tests/live.rs` of `crates/providers/sources/{github,jira}` run a provider against the real
+The `tests/live.rs` of `crates/providers/sources/{github,gitlab,jira}` run a provider against the real
 service. They are ignored by default and need `AI6_TEST_LIVE_SOURCES` and the settings each
 file names; asked for without them, they fail. Their fixtures are recorded and scrubbed:
 `tests/fixtures_scrubbed.rs` refuses a token, an address or an account ID in one.

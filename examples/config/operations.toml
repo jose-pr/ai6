@@ -55,3 +55,11 @@ small_sample = 5
 # reorder_gap = 0.3     # propose putting an Agent ahead of one sharing a role across this gap
 # auto_hold = false     # true: M holds by itself (audited; a person lifts it)
 # never_prefer = ["claude-fable-5-1"]
+
+# Open issues of a GitLab project that carry every intake label become Missions, and the outcome
+# comes back as a comment (docs/operations.md, "Sources"). The Station holding the Headquarters
+# lease reads the token from GITLAB_TOKEN; a self-managed instance adds api_url.
+# [operation.G.sources.gitlab]
+# project = "group/project"
+# labels = ["ai6:ready"]
+# status_labels = { working = "ai6:working", done = "ai6:done", failed = "ai6:blocked" }

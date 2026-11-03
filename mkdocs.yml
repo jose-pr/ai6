@@ -76,6 +76,7 @@ nav:
           - ai6-safehouse-git: https://jose-pr.github.io/ai6/rust/ai6_safehouse_git/index.html
           - ai6-safehouse-copy: https://jose-pr.github.io/ai6/rust/ai6_safehouse_copy/index.html
           - ai6-source-github: https://jose-pr.github.io/ai6/rust/ai6_source_github/index.html
+          - ai6-source-gitlab: https://jose-pr.github.io/ai6/rust/ai6_source_gitlab/index.html
           - ai6-source-jira: https://jose-pr.github.io/ai6/rust/ai6_source_jira/index.html
       # The access kinds, providers and Station mutual TLS are shared crates with their own sites.
       - Shared crates:
