@@ -421,6 +421,14 @@ CREATE TABLE IF NOT EXISTS ai6_config_compartment (
     PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE IF NOT EXISTS ai6_config_review (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
+);
+
 -- The issues a Mission is linked to, as one JSON list per Mission.
 CREATE TABLE IF NOT EXISTS ai6_mission_issues (
     mission_id TEXT PRIMARY KEY,

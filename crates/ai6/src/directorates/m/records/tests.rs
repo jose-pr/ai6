@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::directorates::m::config::{StationRuntime, UnexRecord};
 
-const KINDS: [ConfigRecord; 7] = [
+const KINDS: [ConfigRecord; 8] = [
     ConfigRecord::Operation,
     ConfigRecord::Agent,
     ConfigRecord::Role,
@@ -13,6 +13,7 @@ const KINDS: [ConfigRecord; 7] = [
     ConfigRecord::Assistant,
     ConfigRecord::Roster,
     ConfigRecord::Compartment,
+    ConfigRecord::Review,
 ];
 
 /// Every key of an Operation's `issues`, apart, since a single `json!` has a recursion limit.
@@ -145,6 +146,7 @@ fn full_example(record: ConfigRecord) -> Value {
                 "auto_hold": false,
                 "never_prefer": ["claude-fable-5-1"]
             });
+            operation["review"] = json!({"plan": "none", "output": "two-models"});
             operation
         }
         ConfigRecord::Agent => json!({
@@ -188,7 +190,11 @@ fn full_example(record: ConfigRecord) -> Value {
             "on_retire": "retired",
             "retire_warning_days": 3
         }),
-        ConfigRecord::Role => json!({"purpose": "Runs cases", "policy": "Follow the brief"}),
+        ConfigRecord::Role => json!({
+            "purpose": "Runs cases",
+            "policy": "Follow the brief",
+            "review": {"plan": "none", "output": "two-models"}
+        }),
         ConfigRecord::Cover => json!({
             "description": "Named",
             "agent_author": true,
@@ -229,6 +235,20 @@ fn full_example(record: ConfigRecord) -> Value {
             "pages": {"max_pages": 3, "network": "own", "scripts": false, "open_ttl": 60}
         }),
         ConfigRecord::Roster => json!({"max_operation_depth": 3, "max_compartment_rules": 100}),
+        ConfigRecord::Review => json!({
+            "panel": [
+                {"role": "reviewer", "weight": 2, "veto": true},
+                {"agent": "Tanner"}
+            ],
+            "pass_at": 0.66,
+            "distinct_models": 2,
+            "rounds": 2,
+            "redo_limit": 2,
+            "on_no_agreement": "refuse",
+            "max_turns": 12,
+            "max_tokens": 100000,
+            "reviewer_timeout_secs": 600
+        }),
         ConfigRecord::Compartment => json!({
             "description": "Release work",
             "actions": ["mission.status", "product.read"],
@@ -382,6 +402,9 @@ fn records_parse(record: ConfigRecord, definition: &Value) -> Result<(), String>
         ConfigRecord::Assistant => from_json::<AssistantSettings>(definition).map(drop),
         ConfigRecord::Roster => from_json::<RosterSettings>(definition).map(drop),
         ConfigRecord::Compartment => from_json::<CompartmentSettings>(definition).map(drop),
+        ConfigRecord::Review => {
+            from_json::<crate::directorates::m::review::ReviewPolicy>(definition).map(drop)
+        }
         other => panic!("no type for {other:?}"),
     }
 }
@@ -658,6 +681,7 @@ fn the_app_s_copy_of_the_forms_is_current() {
         ("assistant", ConfigRecord::Assistant),
         ("roster", ConfigRecord::Roster),
         ("compartments", ConfigRecord::Compartment),
+        ("reviews", ConfigRecord::Review),
     ]
     .into_iter()
     .map(|(kind, record)| {

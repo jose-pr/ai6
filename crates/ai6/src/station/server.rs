@@ -9896,6 +9896,7 @@ queue = 1
                     id: "case-officer".to_owned(),
                     purpose: "Coordinate this Operation's work".to_owned(),
                     policy: "Use the Operation-specific role policy".to_owned(),
+                    review: Default::default(),
                 },
             )
             .unwrap();

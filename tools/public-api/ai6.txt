@@ -912,6 +912,7 @@ pub ai6::directorates::m::config::ConfigRecord::Operation
 pub ai6::directorates::m::config::ConfigRecord::OperationAccess
 pub ai6::directorates::m::config::ConfigRecord::Plugin
 pub ai6::directorates::m::config::ConfigRecord::Pool
+pub ai6::directorates::m::config::ConfigRecord::Review
 pub ai6::directorates::m::config::ConfigRecord::Role
 pub ai6::directorates::m::config::ConfigRecord::Roster
 pub ai6::directorates::m::config::ConfigRecord::Sandbox
@@ -921,7 +922,7 @@ pub ai6::directorates::m::config::ConfigRecord::Theater
 pub ai6::directorates::m::config::ConfigRecord::Tls
 pub ai6::directorates::m::config::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 20]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 21]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -1122,7 +1123,7 @@ pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directora
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
-pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 20]
+pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 21]
 pub trait ai6::directorates::m::config::ConfigProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::definitions(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope) -> core::result::Result<ai6::directorates::m::config::ConfigDefinitions, ai6::directorates::m::roster::RosterError>
@@ -1675,6 +1676,162 @@ pub mod ai6::directorates::m::recovery
 pub const ai6::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS: u64
 pub fn ai6::directorates::m::recovery::adopter(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts], &ai6::directorates::registry::sessions::SessionRecord) -> core::result::Result<ai6::directorates::m::placement::PlacementChoice, alloc::string::String>
 pub fn ai6::directorates::m::recovery::reattach_delay(u32, &ai6::station::limits::RecoveryLimits) -> core::time::Duration
+pub mod ai6::directorates::m::review
+#[non_exhaustive] pub enum ai6::directorates::m::review::BriefAuthority
+pub ai6::directorates::m::review::BriefAuthority::Outside
+pub ai6::directorates::m::review::BriefAuthority::Person
+pub ai6::directorates::m::review::BriefAuthority::ZeroZero(alloc::string::String)
+#[non_exhaustive] pub enum ai6::directorates::m::review::Decision
+pub ai6::directorates::m::review::Decision::NextRound
+pub ai6::directorates::m::review::Decision::NoAgreement
+pub ai6::directorates::m::review::Decision::Pass
+pub ai6::directorates::m::review::Decision::Redo
+pub ai6::directorates::m::review::Decision::Vetoed
+pub ai6::directorates::m::review::Decision::Waiting
+#[non_exhaustive] pub enum ai6::directorates::m::review::OnNoAgreement
+pub ai6::directorates::m::review::OnNoAgreement::Person
+pub ai6::directorates::m::review::OnNoAgreement::Refuse
+#[non_exhaustive] pub enum ai6::directorates::m::review::PanelRefusal
+pub ai6::directorates::m::review::PanelRefusal::NoAgent
+pub ai6::directorates::m::review::PanelRefusal::NoAgent::seat: alloc::string::String
+pub ai6::directorates::m::review::PanelRefusal::NoAgent::why: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::review::PanelRefusal::TooFewModels
+pub ai6::directorates::m::review::PanelRefusal::TooFewModels::found: u32
+pub ai6::directorates::m::review::PanelRefusal::TooFewModels::wanted: u32
+impl core::error::Error for ai6::directorates::m::review::PanelRefusal
+impl core::fmt::Display for ai6::directorates::m::review::PanelRefusal
+pub fn ai6::directorates::m::review::PanelRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::m::review::PolicySource
+pub ai6::directorates::m::review::PolicySource::Default
+pub ai6::directorates::m::review::PolicySource::Mission
+pub ai6::directorates::m::review::PolicySource::Operation
+pub ai6::directorates::m::review::PolicySource::Role
+#[non_exhaustive] pub enum ai6::directorates::m::review::ReviewGate
+pub ai6::directorates::m::review::ReviewGate::Output
+pub ai6::directorates::m::review::ReviewGate::Plan
+impl ai6::directorates::m::review::ReviewGate
+pub const fn ai6::directorates::m::review::ReviewGate::as_str(self) -> &'static str
+pub const fn ai6::directorates::m::review::ReviewGate::reason(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::m::review::ReviewGate
+pub fn ai6::directorates::m::review::ReviewGate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::m::review::ReviewRefusal
+pub ai6::directorates::m::review::ReviewRefusal::UnknownPolicy
+pub ai6::directorates::m::review::ReviewRefusal::UnknownPolicy::from: ai6::directorates::m::review::PolicySource
+pub ai6::directorates::m::review::ReviewRefusal::UnknownPolicy::name: alloc::string::String
+impl core::error::Error for ai6::directorates::m::review::ReviewRefusal
+impl core::fmt::Display for ai6::directorates::m::review::ReviewRefusal
+pub fn ai6::directorates::m::review::ReviewRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::m::review::Step
+pub ai6::directorates::m::review::Step::AskAgain
+pub ai6::directorates::m::review::Step::Pass
+pub ai6::directorates::m::review::Step::Person(&'static str)
+pub ai6::directorates::m::review::Step::Refuse
+pub ai6::directorates::m::review::Step::SendBack
+pub ai6::directorates::m::review::Step::Wait
+#[non_exhaustive] pub enum ai6::directorates::m::review::Vote
+pub ai6::directorates::m::review::Vote::Absent
+pub ai6::directorates::m::review::Vote::Abstain
+pub ai6::directorates::m::review::Vote::Pass
+pub ai6::directorates::m::review::Vote::Redo
+impl ai6::directorates::m::review::Vote
+pub const fn ai6::directorates::m::review::Vote::as_str(self) -> &'static str
+#[non_exhaustive] pub struct ai6::directorates::m::review::AppliedPolicy
+pub ai6::directorates::m::review::AppliedPolicy::from: ai6::directorates::m::review::PolicySource
+pub ai6::directorates::m::review::AppliedPolicy::ignored: core::option::Option<ai6::directorates::m::review::IgnoredNaming>
+pub ai6::directorates::m::review::AppliedPolicy::name: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::review::AppliedPolicy::weakens: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::review::Ballot
+pub ai6::directorates::m::review::Ballot::model: alloc::string::String
+pub ai6::directorates::m::review::Ballot::veto: bool
+pub ai6::directorates::m::review::Ballot::vote: ai6::directorates::m::review::Vote
+pub ai6::directorates::m::review::Ballot::weight: u32
+impl ai6::directorates::m::review::Ballot
+pub fn ai6::directorates::m::review::Ballot::of(&ai6::directorates::m::review::Reviewer, ai6::directorates::m::review::Vote) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::review::BriefNaming
+pub ai6::directorates::m::review::BriefNaming::authority: ai6::directorates::m::review::BriefAuthority
+pub ai6::directorates::m::review::BriefNaming::choice: ai6::directorates::m::review::ReviewChoice
+impl ai6::directorates::m::review::BriefNaming
+pub fn ai6::directorates::m::review::BriefNaming::new(ai6::directorates::m::review::ReviewChoice, ai6::directorates::m::review::BriefAuthority) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::review::IgnoredNaming
+pub ai6::directorates::m::review::IgnoredNaming::named: alloc::string::String
+pub ai6::directorates::m::review::IgnoredNaming::why: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::m::review::PanelCandidate
+pub ai6::directorates::m::review::PanelCandidate::id: alloc::string::String
+pub ai6::directorates::m::review::PanelCandidate::models: alloc::collections::btree::set::BTreeSet<alloc::string::String>
+pub ai6::directorates::m::review::PanelCandidate::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::review::PanelCandidate::unavailable: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::review::PanelCandidate
+pub fn ai6::directorates::m::review::PanelCandidate::new(impl core::convert::Into<alloc::string::String>, &[&str], &[&str], core::option::Option<&str>) -> Self
+pub fn ai6::directorates::m::review::PanelCandidate::of(&ai6::directorates::m::roster::Agent, core::option::Option<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::review::PanelSeat
+pub ai6::directorates::m::review::PanelSeat::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::review::PanelSeat::role: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::review::PanelSeat::veto: bool
+pub ai6::directorates::m::review::PanelSeat::weight: u32
+impl ai6::directorates::m::review::PanelSeat
+pub fn ai6::directorates::m::review::PanelSeat::agent(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::review::PanelSeat::label(&self) -> alloc::string::String
+pub fn ai6::directorates::m::review::PanelSeat::role(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::review::PanelSeat::weighing(self, u32) -> Self
+pub fn ai6::directorates::m::review::PanelSeat::with_veto(self) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::review::PolicyLookup<'a>
+pub ai6::directorates::m::review::PolicyLookup::author: core::option::Option<&'a str>
+pub ai6::directorates::m::review::PolicyLookup::brief: core::option::Option<&'a ai6::directorates::m::review::BriefNaming>
+pub ai6::directorates::m::review::PolicyLookup::gate: ai6::directorates::m::review::ReviewGate
+pub ai6::directorates::m::review::PolicyLookup::operation: core::option::Option<&'a ai6::directorates::m::review::ReviewChoice>
+pub ai6::directorates::m::review::PolicyLookup::policies: &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::review::ReviewPolicy>
+pub ai6::directorates::m::review::PolicyLookup::role: core::option::Option<&'a ai6::directorates::m::review::ReviewChoice>
+impl<'a> ai6::directorates::m::review::PolicyLookup<'a>
+pub fn ai6::directorates::m::review::PolicyLookup<'a>::new(ai6::directorates::m::review::ReviewGate, &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::review::ReviewPolicy>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::review::ReviewChoice
+pub ai6::directorates::m::review::ReviewChoice::output: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::review::ReviewChoice::plan: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::review::ReviewChoice
+pub fn ai6::directorates::m::review::ReviewChoice::at(&self, ai6::directorates::m::review::ReviewGate) -> core::option::Option<&str>
+pub fn ai6::directorates::m::review::ReviewChoice::named(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+#[non_exhaustive] pub struct ai6::directorates::m::review::ReviewPolicy
+pub ai6::directorates::m::review::ReviewPolicy::distinct_models: u32
+pub ai6::directorates::m::review::ReviewPolicy::max_tokens: core::option::Option<u64>
+pub ai6::directorates::m::review::ReviewPolicy::max_turns: core::option::Option<u64>
+pub ai6::directorates::m::review::ReviewPolicy::on_no_agreement: ai6::directorates::m::review::OnNoAgreement
+pub ai6::directorates::m::review::ReviewPolicy::panel: alloc::vec::Vec<ai6::directorates::m::review::PanelSeat>
+pub ai6::directorates::m::review::ReviewPolicy::pass_at: f64
+pub ai6::directorates::m::review::ReviewPolicy::redo_limit: u32
+pub ai6::directorates::m::review::ReviewPolicy::reviewer_timeout_secs: u64
+pub ai6::directorates::m::review::ReviewPolicy::rounds: u32
+impl ai6::directorates::m::review::ReviewPolicy
+pub fn ai6::directorates::m::review::ReviewPolicy::at_least_as_strict_as(&self, &Self) -> bool
+pub fn ai6::directorates::m::review::ReviewPolicy::new(alloc::vec::Vec<ai6::directorates::m::review::PanelSeat>) -> Self
+pub fn ai6::directorates::m::review::ReviewPolicy::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::review::ReviewPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::review::Reviewer
+pub ai6::directorates::m::review::Reviewer::agent: alloc::string::String
+pub ai6::directorates::m::review::Reviewer::model: alloc::string::String
+pub ai6::directorates::m::review::Reviewer::role: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::review::Reviewer::seat: usize
+pub ai6::directorates::m::review::Reviewer::veto: bool
+pub ai6::directorates::m::review::Reviewer::weight: u32
+#[non_exhaustive] pub struct ai6::directorates::m::review::VoteAnswer
+pub ai6::directorates::m::review::VoteAnswer::reasons: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::review::VoteAnswer::vote: ai6::directorates::m::review::Vote
+pub const ai6::directorates::m::review::BRIEF_REVIEW_KEY: &str
+pub const ai6::directorates::m::review::DEFAULT_REVIEWER_TIMEOUT_SECS: u64
+pub const ai6::directorates::m::review::NO_REVIEW: &str
+pub const ai6::directorates::m::review::OUTPUT_REASON: &str
+pub const ai6::directorates::m::review::PLAN_REASON: &str
+pub const ai6::directorates::m::review::REDO_REASON: &str
+pub fn ai6::directorates::m::review::applicable(&ai6::directorates::m::review::PolicyLookup<'_>) -> core::result::Result<ai6::directorates::m::review::AppliedPolicy, ai6::directorates::m::review::ReviewRefusal>
+pub fn ai6::directorates::m::review::choice_in_data(&alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::option::Option<ai6::directorates::m::review::ReviewChoice>
+pub fn ai6::directorates::m::review::choice_in_labels(&[alloc::string::String]) -> core::option::Option<ai6::directorates::m::review::ReviewChoice>
+pub fn ai6::directorates::m::review::choose_panel(&ai6::directorates::m::review::ReviewPolicy, &ai6::directorates::m::review::PanelCandidate, &[ai6::directorates::m::review::PanelCandidate]) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::review::Reviewer>, ai6::directorates::m::review::PanelRefusal>
+pub fn ai6::directorates::m::review::decide(&ai6::directorates::m::review::ReviewPolicy, usize, &[ai6::directorates::m::review::Ballot], u32) -> ai6::directorates::m::review::Decision
+pub fn ai6::directorates::m::review::is_review_reason(&str) -> bool
+pub fn ai6::directorates::m::review::models_of(&ai6::directorates::m::roster::Agent) -> alloc::collections::btree::set::BTreeSet<alloc::string::String>
+pub fn ai6::directorates::m::review::next_step(&ai6::directorates::m::review::ReviewPolicy, ai6::directorates::m::review::ReviewGate, ai6::directorates::m::review::Decision, u32) -> ai6::directorates::m::review::Step
+pub fn ai6::directorates::m::review::no_agreement(&ai6::directorates::m::review::ReviewPolicy, ai6::directorates::m::review::ReviewGate) -> ai6::directorates::m::review::Step
+pub fn ai6::directorates::m::review::out_of_budget(&ai6::directorates::m::review::ReviewPolicy, u64, u64) -> bool
+pub fn ai6::directorates::m::review::policies_from_records(impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, serde_json::value::Value)>) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::review::ReviewPolicy>, alloc::string::String>
+pub fn ai6::directorates::m::review::read_vote(&str, ai6::bounds::Limit, ai6::bounds::Limit, ai6::bounds::Limit) -> ai6::directorates::m::review::VoteAnswer
 pub mod ai6::directorates::m::roster
 #[non_exhaustive] pub enum ai6::directorates::m::roster::OnLost
 pub ai6::directorates::m::roster::OnLost::Fail
@@ -1758,9 +1915,11 @@ pub fn ai6::directorates::m::roster::AgentQuery<'a>::tags(self, &'a [alloc::stri
 pub ai6::directorates::m::roster::AgentRole::id: alloc::string::String
 pub ai6::directorates::m::roster::AgentRole::policy: alloc::string::String
 pub ai6::directorates::m::roster::AgentRole::purpose: alloc::string::String
+pub ai6::directorates::m::roster::AgentRole::review: ai6::directorates::m::review::ReviewChoice
 impl ai6::directorates::m::roster::AgentRole
 pub fn ai6::directorates::m::roster::AgentRole::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::AgentRole::with_review(self, ai6::directorates::m::review::ReviewChoice) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::AgentRoute
 pub ai6::directorates::m::roster::AgentRoute::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::AgentRoute::env: ai6::directorates::q::SessionEnv
@@ -1803,6 +1962,7 @@ pub ai6::directorates::m::roster::Operation::placement: ai6::directorates::m::pl
 pub ai6::directorates::m::roster::Operation::pools: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::m::roster::Operation::promotion: ai6::directorates::m::promotion::PromotionPolicy
 pub ai6::directorates::m::roster::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
+pub ai6::directorates::m::roster::Operation::review: ai6::directorates::m::review::ReviewChoice
 pub ai6::directorates::m::roster::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::scorecard: ai6::directorates::m::scorecard::ScorecardPolicy
 pub ai6::directorates::m::roster::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
@@ -1837,6 +1997,7 @@ pub fn ai6::directorates::m::roster::Roster::load(impl core::convert::Into<std::
 pub fn ai6::directorates::m::roster::Roster::operation(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::Operation, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::Operation>
 pub fn ai6::directorates::m::roster::Roster::parent(&self, &str) -> core::option::Option<&str>
+pub fn ai6::directorates::m::roster::Roster::reviews(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::review::ReviewPolicy>
 pub fn ai6::directorates::m::roster::Roster::role(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::AgentRole, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::roles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::AgentRole>
 pub fn ai6::directorates::m::roster::Roster::select_agent(&self, &ai6::directorates::m::roster::AgentQuery<'_>) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
@@ -1851,6 +2012,7 @@ pub fn ai6::directorates::m::roster::RosterBuilder::cover(self, ai6::directorate
 pub fn ai6::directorates::m::roster::RosterBuilder::max_compartment_rules(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directorates::m::roster::Operation) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::review(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::review::ReviewPolicy) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::directorates::m::roster::RosterSettings) -> Self
 pub struct ai6::directorates::m::roster::RosterError
@@ -6686,7 +6848,7 @@ pub fn ai6::directorates::section_00::programs::station_paths(&std::path::Path, 
 pub fn ai6::directorates::section_00::programs::variable(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, &str) -> core::option::Option<alloc::string::String>
 pub mod ai6::settings
 pub mod ai6::settings::reference
-pub const ai6::settings::reference::DOCS: [&str; 4]
+pub const ai6::settings::reference::DOCS: [&str; 5]
 pub const ai6::settings::reference::OO_DART: &str
 pub fn ai6::settings::reference::rewritten(&str) -> core::result::Result<alloc::string::String, alloc::string::String>
 pub fn ai6::settings::reference::stale(&std::path::Path) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, alloc::string::String>
@@ -7184,6 +7346,10 @@ pub ai6::ApprovalStatus::Pending(ai6::directorates::registry::approvals::Approva
 impl ai6::directorates::registry::approvals::ApprovalStatus
 pub fn ai6::directorates::registry::approvals::ApprovalStatus::name(&self) -> &'static str
 pub fn ai6::directorates::registry::approvals::ApprovalStatus::request(&self) -> &ai6::directorates::registry::approvals::ApprovalRequest
+#[non_exhaustive] pub enum ai6::BriefAuthority
+pub ai6::BriefAuthority::Outside
+pub ai6::BriefAuthority::Person
+pub ai6::BriefAuthority::ZeroZero(alloc::string::String)
 #[non_exhaustive] pub enum ai6::BudgetLevel
 pub ai6::BudgetLevel::Limit
 pub ai6::BudgetLevel::Warn
@@ -7263,6 +7429,7 @@ pub ai6::ConfigRecord::Operation
 pub ai6::ConfigRecord::OperationAccess
 pub ai6::ConfigRecord::Plugin
 pub ai6::ConfigRecord::Pool
+pub ai6::ConfigRecord::Review
 pub ai6::ConfigRecord::Role
 pub ai6::ConfigRecord::Roster
 pub ai6::ConfigRecord::Sandbox
@@ -7272,7 +7439,7 @@ pub ai6::ConfigRecord::Theater
 pub ai6::ConfigRecord::Tls
 pub ai6::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 20]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 21]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -7432,6 +7599,9 @@ pub fn ai6::directorates::m::assistant::NetworkPolicy::as_str(self) -> &'static 
 #[non_exhaustive] pub enum ai6::OnLost
 pub ai6::OnLost::Fail
 pub ai6::OnLost::Retry
+#[non_exhaustive] pub enum ai6::OnNoAgreement
+pub ai6::OnNoAgreement::Person
+pub ai6::OnNoAgreement::Refuse
 #[non_exhaustive] pub enum ai6::OnRetire
 pub ai6::OnRetire::Desk
 pub ai6::OnRetire::Retired
@@ -7455,6 +7625,16 @@ pub ai6::PageNetwork::Own
 impl ai6::PageNetwork
 pub fn ai6::PageNetwork::as_str(self) -> &'static str
 pub fn ai6::PageNetwork::tighter(self, Self) -> Self
+#[non_exhaustive] pub enum ai6::PanelRefusal
+pub ai6::PanelRefusal::NoAgent
+pub ai6::PanelRefusal::NoAgent::seat: alloc::string::String
+pub ai6::PanelRefusal::NoAgent::why: alloc::vec::Vec<alloc::string::String>
+pub ai6::PanelRefusal::TooFewModels
+pub ai6::PanelRefusal::TooFewModels::found: u32
+pub ai6::PanelRefusal::TooFewModels::wanted: u32
+impl core::error::Error for ai6::directorates::m::review::PanelRefusal
+impl core::fmt::Display for ai6::directorates::m::review::PanelRefusal
+pub fn ai6::directorates::m::review::PanelRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum ai6::PinCheck
 pub ai6::PinCheck::Accepted(alloc::string::String)
 pub ai6::PinCheck::Refused(alloc::string::String)
@@ -7474,6 +7654,11 @@ pub const fn ai6::directorates::registry::bona_fides::PluginProfile::default_for
 impl core::str::traits::FromStr for ai6::directorates::registry::bona_fides::PluginProfile
 pub type ai6::directorates::registry::bona_fides::PluginProfile::Err = alloc::string::String
 pub fn ai6::directorates::registry::bona_fides::PluginProfile::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub enum ai6::PolicySource
+pub ai6::PolicySource::Default
+pub ai6::PolicySource::Mission
+pub ai6::PolicySource::Operation
+pub ai6::PolicySource::Role
 pub enum ai6::PoolChoice<'a>
 pub ai6::PoolChoice::Pools(alloc::vec::Vec<&'a ai6::AccountPool>)
 pub ai6::PoolChoice::Refused(alloc::string::String)
@@ -7545,6 +7730,35 @@ pub ai6::Retirement::Retiring
 pub ai6::Retirement::Serving
 impl ai6::directorates::m::roster::Retirement
 pub fn ai6::directorates::m::roster::Retirement::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::ReviewDecision
+pub ai6::ReviewDecision::NextRound
+pub ai6::ReviewDecision::NoAgreement
+pub ai6::ReviewDecision::Pass
+pub ai6::ReviewDecision::Redo
+pub ai6::ReviewDecision::Vetoed
+pub ai6::ReviewDecision::Waiting
+#[non_exhaustive] pub enum ai6::ReviewGate
+pub ai6::ReviewGate::Output
+pub ai6::ReviewGate::Plan
+impl ai6::directorates::m::review::ReviewGate
+pub const fn ai6::directorates::m::review::ReviewGate::as_str(self) -> &'static str
+pub const fn ai6::directorates::m::review::ReviewGate::reason(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::m::review::ReviewGate
+pub fn ai6::directorates::m::review::ReviewGate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::ReviewRefusal
+pub ai6::ReviewRefusal::UnknownPolicy
+pub ai6::ReviewRefusal::UnknownPolicy::from: ai6::directorates::m::review::PolicySource
+pub ai6::ReviewRefusal::UnknownPolicy::name: alloc::string::String
+impl core::error::Error for ai6::directorates::m::review::ReviewRefusal
+impl core::fmt::Display for ai6::directorates::m::review::ReviewRefusal
+pub fn ai6::directorates::m::review::ReviewRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::ReviewStep
+pub ai6::ReviewStep::AskAgain
+pub ai6::ReviewStep::Pass
+pub ai6::ReviewStep::Person(&'static str)
+pub ai6::ReviewStep::Refuse
+pub ai6::ReviewStep::SendBack
+pub ai6::ReviewStep::Wait
 #[non_exhaustive] pub enum ai6::ReviewTarget
 pub ai6::ReviewTarget::Brief
 pub ai6::ReviewTarget::Brief::digest: alloc::string::String
@@ -7678,6 +7892,13 @@ pub fn ai6::directorates::m::vetting::VettingScope::applies(self, bool) -> bool
 pub ai6::VettingVerdict::Hold
 pub ai6::VettingVerdict::Pass
 pub ai6::VettingVerdict::Refuse
+#[non_exhaustive] pub enum ai6::Vote
+pub ai6::Vote::Absent
+pub ai6::Vote::Abstain
+pub ai6::Vote::Pass
+pub ai6::Vote::Redo
+impl ai6::directorates::m::review::Vote
+pub const fn ai6::directorates::m::review::Vote::as_str(self) -> &'static str
 #[non_exhaustive] pub struct ai6::AccessPolicy
 pub ai6::AccessPolicy::chief: alloc::vec::Vec<alloc::string::String>
 pub ai6::AccessPolicy::delegable: core::option::Option<alloc::vec::Vec<alloc::string::String>>
@@ -7943,9 +8164,11 @@ pub ai6::AgentResume::working_directory: alloc::string::String
 pub ai6::AgentRole::id: alloc::string::String
 pub ai6::AgentRole::policy: alloc::string::String
 pub ai6::AgentRole::purpose: alloc::string::String
+pub ai6::AgentRole::review: ai6::directorates::m::review::ReviewChoice
 impl ai6::directorates::m::roster::AgentRole
 pub fn ai6::directorates::m::roster::AgentRole::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::AgentRole::with_review(self, ai6::directorates::m::review::ReviewChoice) -> Self
 #[non_exhaustive] pub struct ai6::AgentRoleLimits
 pub ai6::AgentRoleLimits::record_bytes: ai6::bounds::Limit
 pub ai6::AgentRoleLimits::records: ai6::bounds::Limit
@@ -7994,6 +8217,11 @@ pub fn ai6::directorates::registry::agent_records::AgentTally::count(&self, ai6:
 pub fn ai6::directorates::registry::agent_records::AgentTally::failure_rate(&self) -> core::option::Option<f64>
 pub fn ai6::directorates::registry::agent_records::AgentTally::last(&self, ai6::directorates::registry::agent_records::AgentOutcome) -> core::option::Option<f64>
 pub fn ai6::directorates::registry::agent_records::AgentTally::latest(&self, &[ai6::directorates::registry::agent_records::AgentOutcome]) -> core::option::Option<f64>
+#[non_exhaustive] pub struct ai6::AppliedPolicy
+pub ai6::AppliedPolicy::from: ai6::directorates::m::review::PolicySource
+pub ai6::AppliedPolicy::ignored: core::option::Option<ai6::directorates::m::review::IgnoredNaming>
+pub ai6::AppliedPolicy::name: core::option::Option<alloc::string::String>
+pub ai6::AppliedPolicy::weakens: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::Approval
 pub ai6::Approval::at: f64
 pub ai6::Approval::decision: ai6::directorates::registry::approvals::Decision
@@ -8379,6 +8607,13 @@ pub ai6::AuditRecord::id: alloc::string::String
 pub ai6::AuditRecord::operation: alloc::string::String
 pub ai6::AuditRecord::resource: core::option::Option<alloc::string::String>
 pub ai6::AuditRecord::target: alloc::string::String
+#[non_exhaustive] pub struct ai6::Ballot
+pub ai6::Ballot::model: alloc::string::String
+pub ai6::Ballot::veto: bool
+pub ai6::Ballot::vote: ai6::directorates::m::review::Vote
+pub ai6::Ballot::weight: u32
+impl ai6::directorates::m::review::Ballot
+pub fn ai6::directorates::m::review::Ballot::of(&ai6::directorates::m::review::Reviewer, ai6::directorates::m::review::Vote) -> Self
 pub struct ai6::Brief
 pub ai6::Brief::agent: core::option::Option<alloc::string::String>
 pub ai6::Brief::body: alloc::string::String
@@ -8408,6 +8643,11 @@ pub ai6::BriefLimits::record_bytes: ai6::bounds::Limit
 pub ai6::BriefLimits::records: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::BriefLimits
 pub fn ai6::directorates::registry::limits::BriefLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::BriefNaming
+pub ai6::BriefNaming::authority: ai6::directorates::m::review::BriefAuthority
+pub ai6::BriefNaming::choice: ai6::directorates::m::review::ReviewChoice
+impl ai6::directorates::m::review::BriefNaming
+pub fn ai6::directorates::m::review::BriefNaming::new(ai6::directorates::m::review::ReviewChoice, ai6::directorates::m::review::BriefAuthority) -> Self
 pub struct ai6::Budget
 pub ai6::Budget::mission_cost_micro_usd: core::option::Option<u64>
 pub ai6::Budget::mission_tokens: core::option::Option<u64>
@@ -9244,6 +9484,9 @@ pub ai6::HoldLimits::record_bytes: ai6::bounds::Limit
 pub ai6::HoldLimits::text_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::HoldLimits
 pub fn ai6::directorates::registry::limits::HoldLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::IgnoredNaming
+pub ai6::IgnoredNaming::named: alloc::string::String
+pub ai6::IgnoredNaming::why: alloc::string::String
 pub struct ai6::Incident
 pub ai6::Incident::at: f64
 pub ai6::Incident::kind: ai6::directorates::medical::quarantine::IncidentKind
@@ -9558,6 +9801,7 @@ pub ai6::Operation::placement: ai6::directorates::m::placement::PlacementStrateg
 pub ai6::Operation::pools: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::Operation::promotion: ai6::directorates::m::promotion::PromotionPolicy
 pub ai6::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
+pub ai6::Operation::review: ai6::directorates::m::review::ReviewChoice
 pub ai6::Operation::roster: alloc::vec::Vec<alloc::string::String>
 pub ai6::Operation::scorecard: ai6::directorates::m::scorecard::ScorecardPolicy
 pub ai6::Operation::sleepers: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sleepers::Sleeper>
@@ -9612,6 +9856,25 @@ pub ai6::Output::stderr: guatiao::value::convert::Bytes
 pub ai6::Output::stdout: guatiao::value::convert::Bytes
 pub ai6::Output::timed_out: bool
 pub ai6::Output::truncated: bool
+#[non_exhaustive] pub struct ai6::PanelCandidate
+pub ai6::PanelCandidate::id: alloc::string::String
+pub ai6::PanelCandidate::models: alloc::collections::btree::set::BTreeSet<alloc::string::String>
+pub ai6::PanelCandidate::roles: alloc::vec::Vec<alloc::string::String>
+pub ai6::PanelCandidate::unavailable: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::review::PanelCandidate
+pub fn ai6::directorates::m::review::PanelCandidate::new(impl core::convert::Into<alloc::string::String>, &[&str], &[&str], core::option::Option<&str>) -> Self
+pub fn ai6::directorates::m::review::PanelCandidate::of(&ai6::directorates::m::roster::Agent, core::option::Option<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::PanelSeat
+pub ai6::PanelSeat::agent: core::option::Option<alloc::string::String>
+pub ai6::PanelSeat::role: core::option::Option<alloc::string::String>
+pub ai6::PanelSeat::veto: bool
+pub ai6::PanelSeat::weight: u32
+impl ai6::directorates::m::review::PanelSeat
+pub fn ai6::directorates::m::review::PanelSeat::agent(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::review::PanelSeat::label(&self) -> alloc::string::String
+pub fn ai6::directorates::m::review::PanelSeat::role(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::review::PanelSeat::weighing(self, u32) -> Self
+pub fn ai6::directorates::m::review::PanelSeat::with_veto(self) -> Self
 #[non_exhaustive] pub struct ai6::PinSet
 pub ai6::PinSet::libraries: alloc::vec::Vec<ai6::directorates::registry::bona_fides::LibraryPin>
 impl ai6::directorates::registry::bona_fides::PinSet
@@ -9646,6 +9909,15 @@ pub ai6::PlacementRequest::deciding_station: core::option::Option<alloc::string:
 pub ai6::PlacementRequest::role: core::option::Option<alloc::string::String>
 pub ai6::PlacementRequest::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::PlacementRequest::tags: alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::PolicyLookup<'a>
+pub ai6::PolicyLookup::author: core::option::Option<&'a str>
+pub ai6::PolicyLookup::brief: core::option::Option<&'a ai6::directorates::m::review::BriefNaming>
+pub ai6::PolicyLookup::gate: ai6::directorates::m::review::ReviewGate
+pub ai6::PolicyLookup::operation: core::option::Option<&'a ai6::directorates::m::review::ReviewChoice>
+pub ai6::PolicyLookup::policies: &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::review::ReviewPolicy>
+pub ai6::PolicyLookup::role: core::option::Option<&'a ai6::directorates::m::review::ReviewChoice>
+impl<'a> ai6::directorates::m::review::PolicyLookup<'a>
+pub fn ai6::directorates::m::review::PolicyLookup<'a>::new(ai6::directorates::m::review::ReviewGate, &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::review::ReviewPolicy>) -> Self
 pub struct ai6::PostedComment
 pub ai6::PostedComment::id: alloc::string::String
 pub ai6::PostedComment::url: core::option::Option<alloc::string::String>
@@ -9945,6 +10217,34 @@ impl ai6::directorates::m::placement::Resources
 pub fn ai6::directorates::m::placement::Resources::cpu_busy(&self) -> core::option::Option<f64>
 pub fn ai6::directorates::m::placement::Resources::memory_used(&self) -> core::option::Option<f64>
 impl core::cmp::Eq for ai6::directorates::m::placement::Resources
+#[non_exhaustive] pub struct ai6::ReviewChoice
+pub ai6::ReviewChoice::output: core::option::Option<alloc::string::String>
+pub ai6::ReviewChoice::plan: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::review::ReviewChoice
+pub fn ai6::directorates::m::review::ReviewChoice::at(&self, ai6::directorates::m::review::ReviewGate) -> core::option::Option<&str>
+pub fn ai6::directorates::m::review::ReviewChoice::named(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+#[non_exhaustive] pub struct ai6::ReviewPolicy
+pub ai6::ReviewPolicy::distinct_models: u32
+pub ai6::ReviewPolicy::max_tokens: core::option::Option<u64>
+pub ai6::ReviewPolicy::max_turns: core::option::Option<u64>
+pub ai6::ReviewPolicy::on_no_agreement: ai6::directorates::m::review::OnNoAgreement
+pub ai6::ReviewPolicy::panel: alloc::vec::Vec<ai6::directorates::m::review::PanelSeat>
+pub ai6::ReviewPolicy::pass_at: f64
+pub ai6::ReviewPolicy::redo_limit: u32
+pub ai6::ReviewPolicy::reviewer_timeout_secs: u64
+pub ai6::ReviewPolicy::rounds: u32
+impl ai6::directorates::m::review::ReviewPolicy
+pub fn ai6::directorates::m::review::ReviewPolicy::at_least_as_strict_as(&self, &Self) -> bool
+pub fn ai6::directorates::m::review::ReviewPolicy::new(alloc::vec::Vec<ai6::directorates::m::review::PanelSeat>) -> Self
+pub fn ai6::directorates::m::review::ReviewPolicy::validate(&self) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::review::ReviewPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::Reviewer
+pub ai6::Reviewer::agent: alloc::string::String
+pub ai6::Reviewer::model: alloc::string::String
+pub ai6::Reviewer::role: core::option::Option<alloc::string::String>
+pub ai6::Reviewer::seat: usize
+pub ai6::Reviewer::veto: bool
+pub ai6::Reviewer::weight: u32
 pub struct ai6::Revocation
 pub ai6::Revocation::at: f64
 pub ai6::Revocation::by: alloc::string::String
@@ -9968,6 +10268,7 @@ pub fn ai6::directorates::m::roster::Roster::load(impl core::convert::Into<std::
 pub fn ai6::directorates::m::roster::Roster::operation(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::Operation, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::Operation>
 pub fn ai6::directorates::m::roster::Roster::parent(&self, &str) -> core::option::Option<&str>
+pub fn ai6::directorates::m::roster::Roster::reviews(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::review::ReviewPolicy>
 pub fn ai6::directorates::m::roster::Roster::role(&self, &str) -> core::result::Result<&ai6::directorates::m::roster::AgentRole, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::roles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::m::roster::AgentRole>
 pub fn ai6::directorates::m::roster::Roster::select_agent(&self, &ai6::directorates::m::roster::AgentQuery<'_>) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
@@ -9982,6 +10283,7 @@ pub fn ai6::directorates::m::roster::RosterBuilder::cover(self, ai6::directorate
 pub fn ai6::directorates::m::roster::RosterBuilder::max_compartment_rules(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::max_operation_depth(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directorates::m::roster::Operation) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::review(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::review::ReviewPolicy) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::directorates::m::roster::RosterSettings) -> Self
 pub struct ai6::RosterError
@@ -11156,6 +11458,9 @@ pub fn ai6::directorates::m::vetting::VettingPolicy::off() -> Self
 pub fn ai6::directorates::m::vetting::VettingPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::vetting::VettingPolicy
 pub fn ai6::directorates::m::vetting::VettingPolicy::default() -> Self
+#[non_exhaustive] pub struct ai6::VoteAnswer
+pub ai6::VoteAnswer::reasons: alloc::vec::Vec<alloc::string::String>
+pub ai6::VoteAnswer::vote: ai6::directorates::m::review::Vote
 pub struct ai6::Watchdog
 impl ai6::directorates::medical::watchdog::Watchdog
 pub fn ai6::directorates::medical::watchdog::Watchdog::is_max_runtime_exceeded(&self) -> bool
@@ -11270,6 +11575,7 @@ pub const ai6::DEFAULT_READ_LIMIT: u64
 pub const ai6::DEFAULT_REQUEST_TTL: core::time::Duration
 pub const ai6::DEFAULT_RESOURCES_EVERY: core::time::Duration
 pub const ai6::DEFAULT_RETIRE_WARNING_DAYS: u32
+pub const ai6::DEFAULT_REVIEWER_TIMEOUT_SECS: u64
 pub const ai6::DEFAULT_SMALL_SAMPLE: u64
 pub const ai6::DEFAULT_STALLS: u32
 pub const ai6::DEFAULT_STALL_TIMEOUT: core::time::Duration
@@ -11299,6 +11605,7 @@ pub const ai6::LOCAL_THEATER: &str
 pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::NOT_DELEGABLE: [&str; 3]
 pub const ai6::NO_OPERATION: &str
+pub const ai6::NO_REVIEW: &str
 pub const ai6::OPERATION_ACTIONS: &[&str]
 pub const ai6::PREFER_KIND: &str
 pub const ai6::PROJECT_DIRECTORIES: [&str; 4]
@@ -12055,10 +12362,12 @@ pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::access_from_toml(&str, ai6::bounds::Limit) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
+pub fn ai6::applicable_review(&ai6::directorates::m::review::PolicyLookup<'_>) -> core::result::Result<ai6::directorates::m::review::AppliedPolicy, ai6::directorates::m::review::ReviewRefusal>
 pub fn ai6::cable_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &ai6::EffectiveAccess, &ai6::Lineage) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::check_operation_change(&str, &ai6::OperationAccess, &ai6::OperationAccess, &ai6::Editor, &ai6::EffectiveAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64, u16) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
+pub fn ai6::choose_panel(&ai6::directorates::m::review::ReviewPolicy, &ai6::directorates::m::review::PanelCandidate, &[ai6::directorates::m::review::PanelCandidate]) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::review::Reviewer>, ai6::directorates::m::review::PanelRefusal>
 pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
 pub fn ai6::choose_route(ai6::PoolStrategy, &[ai6::RouteStanding], u16) -> core::option::Option<usize>
 pub fn ai6::choose_terminal(ai6::directorates::q::terminal::HarnessStdio, &[ai6::directorates::q::terminal::TerminalOffer], core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
@@ -12070,6 +12379,7 @@ pub fn ai6::compile(&ai6::AccessPolicy, &[alloc::string::String]) -> core::resul
 pub fn ai6::compile_with_operations(&ai6::AccessPolicy, &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>, &ai6::Lineage) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::content_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
 pub fn ai6::credential_dir_var(&str) -> bool
+pub fn ai6::decide_review(&ai6::directorates::m::review::ReviewPolicy, usize, &[ai6::directorates::m::review::Ballot], u32) -> ai6::directorates::m::review::Decision
 pub fn ai6::default_delegable() -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::describe(&guatiao::library::kind::ProviderError) -> alloc::string::String
 pub fn ai6::execution_mode(&ai6::directorates::m::theaters::TheaterSummary) -> core::result::Result<ai6::directorates::m::placement::ExecutionMode, alloc::string::String>
@@ -12088,14 +12398,18 @@ pub fn ai6::library_pin(&[u8]) -> coqui_peer::id::PeerId
 pub fn ai6::load_access(impl core::convert::AsRef<std::path::Path>, ai6::bounds::Limit) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::load_policy(impl core::convert::AsRef<std::path::Path>, ai6::bounds::Limit) -> core::result::Result<ai6::AccessPolicy, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::micro_usd(f64) -> u64
+pub fn ai6::models_of(&ai6::directorates::m::roster::Agent) -> alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub fn ai6::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities, &ai6::station::limits::ProvisionLimits) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
 pub fn ai6::propose_from_scorecard(&ai6::directorates::m::scorecard::Scorecard, &[ai6::directorates::m::placement::AgentFacts], &[ai6::directorates::registry::holds::RosterHold], &ai6::directorates::m::stewardship::StewardshipPolicy) -> alloc::vec::Vec<ai6::directorates::m::stewardship::Proposal>
 pub fn ai6::read_definition<T: guatiao::value::convert::FromValue>(&serde_json::value::Value) -> core::result::Result<T, alloc::string::String>
 pub fn ai6::read_review(&str, &ai6::station::limits::VettingLimits) -> ai6::directorates::m::vetting::Vetting
+pub fn ai6::read_vote(&str, ai6::bounds::Limit, ai6::bounds::Limit, ai6::bounds::Limit) -> ai6::directorates::m::review::VoteAnswer
 pub fn ai6::record_digest(&ai6::directorates::registry::store::Brief) -> alloc::string::String
 pub fn ai6::review_brief(&ai6::directorates::registry::store::Brief, &ai6::directorates::m::vetting::ReviewTarget, (&str, &str), (&[ai6::directorates::m::vetting::KnownWork], &ai6::station::limits::VettingLimits), (&str, i64)) -> ai6::directorates::registry::store::Brief
+pub fn ai6::review_next_step(&ai6::directorates::m::review::ReviewPolicy, ai6::directorates::m::review::ReviewGate, ai6::directorates::m::review::Decision, u32) -> ai6::directorates::m::review::Step
+pub fn ai6::review_out_of_budget(&ai6::directorates::m::review::ReviewPolicy, u64, u64) -> bool
 pub fn ai6::review_target(&ai6::directorates::registry::store::Brief) -> core::option::Option<ai6::directorates::m::vetting::ReviewTarget>
 pub fn ai6::role_authorizer() -> coqui_roles::RoleAuthorizerBuilder
 pub fn ai6::roles_left_empty(&[ai6::directorates::m::placement::AgentFacts], &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>, &[alloc::string::String], &[ai6::directorates::registry::holds::RosterHold]) -> alloc::vec::Vec<alloc::string::String>

@@ -3495,6 +3495,7 @@ mod tests {
             id: id.to_owned(),
             purpose: purpose.to_owned(),
             policy: "Follow the Operation policy.".to_owned(),
+            review: Default::default(),
         }
     }
 

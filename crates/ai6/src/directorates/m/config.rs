@@ -106,11 +106,14 @@ pub enum ConfigRecord {
     /// A Compartment ([`Compartment`](crate::Compartment)): the keys of a `[compartment.<id>]`
     /// table; global only.
     Compartment,
+    /// A review policy ([`ReviewPolicy`](crate::ReviewPolicy)): the keys of a `[review.<name>]`
+    /// table; global only.
+    Review,
 }
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Roster,
         Self::Operation,
         Self::Agent,
@@ -131,6 +134,7 @@ impl ConfigRecord {
         Self::OperationAccess,
         Self::Unex,
         Self::Compartment,
+        Self::Review,
     ];
 
     /// The key of a singleton family's one record.
@@ -138,7 +142,7 @@ impl ConfigRecord {
 
     /// The family's name: `operation`, `agent`, `role`, `assistant`, `cover`, `theater`,
     /// `loadout`, `sandbox`, `mcp`, `secret`, `pool`, `cables`, `plugin`, `station`, `tls`,
-    /// `access`, `unex`, `roster` or `compartment`. For a family that shares its file, it is also its table there.
+    /// `access`, `unex`, `roster`, `compartment` or `review`. For a family that shares its file, it is also its table there.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Operation => "operation",
@@ -161,6 +165,7 @@ impl ConfigRecord {
             Self::Unex => "unex",
             Self::Roster => "roster",
             Self::Compartment => "compartment",
+            Self::Review => "review",
         }
     }
 
@@ -185,6 +190,7 @@ impl ConfigRecord {
             Self::OperationAccess => "operation_access",
             Self::Unex => "unex",
             Self::Compartment => "compartments",
+            Self::Review => "reviews",
         }
     }
 
@@ -1257,7 +1263,7 @@ pub fn references_to(
 
 /// The families in the order an import stores them, so each refers only to records already
 /// stored: roles before the Agents that hold them, Agents before the Operations that name them.
-pub const IMPORT_ORDER: [ConfigRecord; 20] = [
+pub const IMPORT_ORDER: [ConfigRecord; 21] = [
     ConfigRecord::Roster,
     ConfigRecord::Role,
     ConfigRecord::Cover,
@@ -1278,6 +1284,7 @@ pub const IMPORT_ORDER: [ConfigRecord; 20] = [
     ConfigRecord::OperationAccess,
     ConfigRecord::Unex,
     ConfigRecord::Compartment,
+    ConfigRecord::Review,
 ];
 
 /// One family's records as the part of its family file they make: `[name.<key>]` tables, a
@@ -1522,6 +1529,7 @@ pub(crate) fn assemble(
             operations: family(ConfigRecord::Operation),
             agents: family(ConfigRecord::Agent),
             roles: family(ConfigRecord::Role),
+            reviews: family(ConfigRecord::Review),
             assistant,
             settings,
         },

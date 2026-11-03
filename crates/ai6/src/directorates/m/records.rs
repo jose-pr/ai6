@@ -13,6 +13,7 @@ use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::compartments::CompartmentSettings;
 use crate::directorates::m::config::ConfigRecord;
 use crate::directorates::m::cover::CoverDefinition;
+use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
     AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
 };
@@ -161,6 +162,10 @@ impl ConfigRecord {
             Self::Compartment => built::<CompartmentSettings>(named(
                 "Codeword",
                 "What this compartment is known by, such as KESTREL. It cannot be changed later.",
+            )),
+            Self::Review => built::<ReviewPolicy>(named(
+                "Policy name",
+                "What Operations, roles and briefs choose this policy by. It cannot be changed later.",
             )),
             _ => return Ok(None),
         }

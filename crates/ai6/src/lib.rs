@@ -70,6 +70,14 @@ pub use directorates::m::promotion::{
 pub use directorates::m::records::{
     RecordForm, RecordFormError, RecordKey, from_json as read_definition,
 };
+pub use directorates::m::review::{
+    AppliedPolicy, Ballot, BriefAuthority, BriefNaming, DEFAULT_REVIEWER_TIMEOUT_SECS,
+    Decision as ReviewDecision, IgnoredNaming, NO_REVIEW, OnNoAgreement, PanelCandidate,
+    PanelRefusal, PanelSeat, PolicyLookup, PolicySource, ReviewChoice, ReviewGate, ReviewPolicy,
+    ReviewRefusal, Reviewer, Step as ReviewStep, Vote, VoteAnswer, applicable as applicable_review,
+    choose_panel, decide as decide_review, models_of, next_step as review_next_step,
+    out_of_budget as review_out_of_budget, read_vote,
+};
 pub use directorates::m::roster::{
     Agent, AgentQuery, AgentRole, AgentRoute, CoverIdentity, DEFAULT_CHECKPOINT_SECS,
     DEFAULT_MAX_OPERATION_DEPTH, DEFAULT_RETIRE_WARNING_DAYS, OnLost, OnRetire, Operation,

@@ -15,6 +15,7 @@ use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::compartments::CompartmentSettings;
 use crate::directorates::m::config::{StationRuntime, UnexRecord};
 use crate::directorates::m::cover::CoverDefinition;
+use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
     AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
 };
@@ -41,6 +42,7 @@ fn roots() -> Vec<(&'static str, Value)> {
         ("record.cover", json_of::<CoverDefinition>()),
         ("record.roster", json_of::<RosterSettings>()),
         ("record.compartment", json_of::<CompartmentSettings>()),
+        ("record.review", json_of::<ReviewPolicy>()),
     ];
     #[cfg(feature = "daemon")]
     roots.push((

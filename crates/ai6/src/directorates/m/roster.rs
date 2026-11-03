@@ -26,6 +26,7 @@ use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
 use crate::directorates::m::records;
 use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
+use crate::directorates::m::review::{ReviewChoice, ReviewPolicy, policies_from_records};
 use crate::directorates::m::scorecard::{ScorecardDefinition, ScorecardPolicy};
 use crate::directorates::m::stewardship::StewardshipPolicy;
 use crate::directorates::m::vetting::{VettingPolicy, VettingSetting, policy_of};
@@ -42,6 +43,8 @@ const AGENTS_FILE: &str = "agents.toml";
 /// An Operation's own agents file, without its extension.
 const AGENTS_STEM: &str = "agents";
 const OPERATIONS_FILE: &str = "operations.toml";
+/// The review policies' file.
+const REVIEWS_FILE: &str = "reviews.toml";
 /// The clearances, lowest first.
 pub(crate) const CLEARANCES: &[&str] = &["desk", "field", "00"];
 
@@ -508,6 +511,13 @@ pub struct AgentRole {
     pub purpose: String,
     /// Instructions for performing this role. These do not grant permissions.
     pub policy: String,
+    /// Which review policy applies to this role's Missions at each gate, before the Operation's.
+    #[serde(default, skip_serializing_if = "review_choice_is_empty")]
+    pub review: ReviewChoice,
+}
+
+fn review_choice_is_empty(choice: &ReviewChoice) -> bool {
+    *choice == ReviewChoice::default()
 }
 
 impl AgentRole {
@@ -522,7 +532,15 @@ impl AgentRole {
             id: id.into(),
             purpose: purpose.into(),
             policy: policy.into(),
+            review: ReviewChoice::default(),
         }
+    }
+
+    /// This role with `review` choosing its Missions' review policies.
+    #[must_use]
+    pub fn with_review(mut self, review: ReviewChoice) -> Self {
+        self.review = review;
+        self
     }
 
     /// Validates a role configuration before it is persisted or used to start a Mission.
@@ -610,6 +628,8 @@ pub struct Operation {
     pub memory_write: Option<String>,
     /// How briefs are vetted before they are placed; every check on unless configured.
     pub vetting: VettingPolicy,
+    /// Which review policy applies to its Missions at each gate; none unless configured.
+    pub review: ReviewChoice,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
@@ -769,6 +789,7 @@ pub struct Roster {
     covers: Covers,
     assistant: AssistantSettings,
     settings: RosterSettings,
+    reviews: BTreeMap<String, ReviewPolicy>,
 }
 
 /// How deep an Operation may sit in the tree of Operations by default: 64 levels, a root
@@ -937,6 +958,7 @@ pub struct RosterBuilder {
     covers: Covers,
     assistant: AssistantSettings,
     settings: RosterSettings,
+    reviews: BTreeMap<String, ReviewPolicy>,
 }
 
 impl RosterBuilder {
@@ -955,6 +977,12 @@ impl RosterBuilder {
     /// Adds an Agent role.
     pub fn role(mut self, role: AgentRole) -> Self {
         self.roles.push(role);
+        self
+    }
+
+    /// Adds a review policy; [`RosterBuilder::build`] checks it and what names it.
+    pub fn review(mut self, name: impl Into<String>, policy: ReviewPolicy) -> Self {
+        self.reviews.insert(name.into(), policy);
         self
     }
 
@@ -1007,6 +1035,13 @@ impl RosterBuilder {
             self.covers,
         )?;
         roster.assistant = self.assistant;
+        for (name, policy) in &self.reviews {
+            policy
+                .validate()
+                .map_err(|reason| error(format!("review {name:?}: {reason}")))?;
+        }
+        roster.reviews = self.reviews;
+        roster.check_reviews()?;
         Ok(roster)
     }
 }
@@ -1075,8 +1110,8 @@ impl<'a> AgentQuery<'a> {
 }
 
 impl Roster {
-    /// Loads global `operations.toml` and `agents.toml` from a configuration directory.
-    /// Missing files mean an empty registry; invalid files fail closed.
+    /// Loads global `operations.toml`, `agents.toml` and `reviews.toml` from a configuration
+    /// directory. Missing files mean an empty registry; invalid files fail closed.
     pub fn load(root: impl Into<PathBuf>) -> Result<Self, RosterError> {
         let root = root.into();
         let mut roster = Self {
@@ -1125,7 +1160,64 @@ impl Roster {
                 roster.assistant = assistant;
             }
         }
+        let reviews_file = root.join(REVIEWS_FILE);
+        if reviews_file.exists() {
+            let document: ReviewsDocument = parse_file(&reviews_file)?;
+            let source = reviews_file.display();
+            roster.reviews = policies_from_records(document.review)
+                .map_err(|reason| error(format!("{source}: {reason}")))?;
+        }
+        roster.check_reviews()?;
         Ok(roster)
+    }
+
+    /// The review policies there are, by name.
+    pub fn reviews(&self) -> &BTreeMap<String, ReviewPolicy> {
+        &self.reviews
+    }
+
+    /// Checks that what names a review policy names one that exists, and that a panel's seats name
+    /// Agents and roles the global roster has: a review takes neither from a checkout's files.
+    fn check_reviews(&self) -> Result<(), RosterError> {
+        for (name, policy) in &self.reviews {
+            for seat in &policy.panel {
+                if let Some(agent) = &seat.agent
+                    && !self.agents.contains_key(agent)
+                {
+                    return Err(error(format!(
+                        "review {name:?}: its panel names Agent {agent:?}, which is not on the \
+                         roster"
+                    )));
+                }
+                if let Some(role) = &seat.role
+                    && self.role(role).is_err()
+                {
+                    return Err(error(format!(
+                        "review {name:?}: its panel names role {role:?}, which does not exist"
+                    )));
+                }
+            }
+        }
+        let choosers = self
+            .operations
+            .values()
+            .map(|operation| (format!("Operation {:?}", operation.id), &operation.review))
+            .chain(
+                self.roles
+                    .values()
+                    .map(|role| (format!("role {:?}", role.id), &role.review)),
+            );
+        for (who, choice) in choosers {
+            if let Some(name) = choice
+                .named()
+                .find(|name| !self.reviews.contains_key(*name))
+            {
+                return Err(error(format!(
+                    "{who} names review policy {name:?}, which does not exist"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Moneypenny's settings, the `[assistant]` table of the global `agents.toml`; the default
@@ -1530,6 +1622,13 @@ impl Roster {
 
 #[derive(Debug, Default, FromValue)]
 #[map(deny_unknown_fields)]
+struct ReviewsDocument {
+    #[map(with = guatiao_serde::adapt::any, default)]
+    review: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Default, FromValue)]
+#[map(deny_unknown_fields)]
 struct OperationsDocument {
     #[map(with = guatiao_serde::adapt::any, default)]
     operation: BTreeMap<String, serde_json::Value>,
@@ -1833,6 +1932,11 @@ pub(crate) struct OperationDefinition {
     /// How briefs are checked before they are placed.
     #[schema(title = "Vetting", section = "safety", advanced)]
     vetting: Option<VettingSetting>,
+    /// Which review policy checks the plan and the output of its Missions.
+    #[schema(title = "Review", section = "safety", advanced)]
+    #[map(default)]
+    #[form(form)]
+    review: ReviewChoice,
     /// When its Agents may load settings their working directory carries.
     #[schema(
         title = "Harness settings in the checkout",
@@ -1896,6 +2000,7 @@ impl Default for OperationDefinition {
             issues: IssuePolicy::default(),
             memory_write: None,
             vetting: None,
+            review: ReviewChoice::default(),
             harness: HarnessPolicy::default(),
             promotion: PromotionDefinition::default(),
             scorecard: ScorecardDefinition::default(),
@@ -2047,6 +2152,7 @@ impl OperationDefinition {
             issues,
             memory_write,
             vetting,
+            review: self.review,
             sources: self.sources,
             sleepers: self.sleepers,
             pools: self.pools,
@@ -2312,6 +2418,12 @@ pub(crate) struct AgentRoleDefinition {
     #[map(default)]
     #[form(widget = "textarea")]
     policy: String,
+    /// Which review policy checks the plan and the output of this role's Missions, before what
+    /// the Operation says.
+    #[schema(title = "Review", advanced)]
+    #[map(default)]
+    #[form(form)]
+    review: ReviewChoice,
 }
 
 impl AgentRoleDefinition {
@@ -2320,6 +2432,7 @@ impl AgentRoleDefinition {
             id,
             purpose: self.purpose,
             policy: self.policy,
+            review: self.review,
         };
         role.validate()
             .map_err(|validation| error(format!("{source}: {validation}")))?;
@@ -2336,6 +2449,8 @@ pub(crate) struct RosterDefinitions {
     pub(crate) agents: Vec<(String, serde_json::Value)>,
     /// `[role.<id>]` tables.
     pub(crate) roles: Vec<(String, serde_json::Value)>,
+    /// `[review.<name>]` tables.
+    pub(crate) reviews: Vec<(String, serde_json::Value)>,
     /// The `[assistant]` table; `None` is the default settings.
     pub(crate) assistant: Option<serde_json::Value>,
     /// The `[roster]` table; `None` is the default settings.
@@ -2359,6 +2474,7 @@ pub(crate) fn roster_from_definitions(
         operations,
         agents,
         roles,
+        reviews,
         assistant,
         settings,
     } = definitions;
@@ -2417,6 +2533,11 @@ pub(crate) fn roster_from_definitions(
     let mut roster = Roster::from_parts_with(settings, parsed, resolved, typed_roles, covers)
         .map_err(|reason| error(format!("{source}: {reason}")))?;
     roster.assistant = assistant;
+    roster.reviews =
+        policies_from_records(reviews).map_err(|reason| error(format!("{source}: {reason}")))?;
+    roster
+        .check_reviews()
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
     Ok(roster)
 }
 

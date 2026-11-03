@@ -214,6 +214,54 @@ live in memory. `coqui_access_ldap` also takes `cache` (on by default). The host
 beside the test binary; after removing or renaming a plugin, clean `target/`, because the host
 loads every library it finds.
 
+## Review (`ai6::directorates::m::review`)
+
+Who decides a Mission's plan or output is good enough. Pure: no I/O, so what a reviewer or a
+Mission's output says reaches a decision only as a `Vote`. The `review` family is global and applies
+live; a seat or a choice naming something the global roster lacks makes the configuration invalid.
+
+```rust
+pub const NO_REVIEW: &str /* "none" */; pub const BRIEF_REVIEW_KEY: &str /* "review" */;
+pub const PLAN_REASON: &str /* "review-plan" */; pub const OUTPUT_REASON: &str /* "review-output" */;
+pub const REDO_REASON: &str /* "review-redo" */; pub const DEFAULT_REVIEWER_TIMEOUT_SECS: u64 /* 3600 */;
+#[non_exhaustive] pub enum ReviewGate { Plan, Output } // as_str, reason
+pub fn is_review_reason(reason: &str) -> bool;
+#[non_exhaustive] pub struct ReviewChoice { pub plan: Option<String>, pub output: Option<String> } // at, named
+#[non_exhaustive] pub struct PanelSeat { pub agent: Option<String>, pub role: Option<String>, pub weight: u32 /* 1 */, pub veto: bool }
+                  // PanelSeat::agent, PanelSeat::role, weighing, with_veto, label
+#[non_exhaustive] pub enum OnNoAgreement { Person /* default */, Refuse }
+#[non_exhaustive] pub struct ReviewPolicy { pub panel: Vec<PanelSeat>, pub pass_at: f64 /* 1.0 */, pub distinct_models: u32 /* 1 */,
+    pub rounds: u32 /* 1 */, pub redo_limit: u32 /* 1 */, pub on_no_agreement: OnNoAgreement, pub max_turns: Option<u64>,
+    pub max_tokens: Option<u64>, pub reviewer_timeout_secs: u64 /* 3600; 0 no limit */ }
+                  // new, validate -> Result<(), String>, weakenings, at_least_as_strict_as
+pub fn policies_from_records(records) -> Result<BTreeMap<String, ReviewPolicy>, String>;
+#[non_exhaustive] pub enum BriefAuthority { Person, ZeroZero(String), Outside }
+#[non_exhaustive] pub struct BriefNaming { pub choice: ReviewChoice, pub authority: BriefAuthority } // new
+pub fn choice_in_data(data: &BTreeMap<String, Value>) -> Option<ReviewChoice>;
+pub fn choice_in_labels(labels: &[String]) -> Option<ReviewChoice>; // review:<name>, review-plan:<name>
+#[non_exhaustive] pub struct PolicyLookup<'a> { pub gate, pub brief: Option<&BriefNaming>, pub role: Option<&ReviewChoice>,
+    pub operation: Option<&ReviewChoice>, pub author: Option<&str>, pub policies: &BTreeMap<..> } // new
+#[non_exhaustive] pub struct AppliedPolicy { pub name: Option<String>, pub from: PolicySource, pub weakens: Option<String>, pub ignored: Option<IgnoredNaming> }
+pub fn applicable(lookup: &PolicyLookup<'_>) -> Result<AppliedPolicy, ReviewRefusal>;
+#[non_exhaustive] pub struct PanelCandidate { pub id, pub roles, pub models: BTreeSet<String>, pub unavailable: Option<String> } // of, new
+pub fn models_of(agent: &Agent) -> BTreeSet<String>; // a route or Agent naming no model is handler:<id>
+#[non_exhaustive] pub struct Reviewer { pub seat: usize, pub agent, pub role, pub weight: u32, pub veto: bool, pub model }
+pub fn choose_panel(policy, author: &PanelCandidate, candidates: &[PanelCandidate]) -> Result<Vec<Reviewer>, PanelRefusal>;
+#[non_exhaustive] pub enum Vote { Pass, Redo, Abstain, Absent } // Absent keeps its weight in the share
+#[non_exhaustive] pub enum Decision { Waiting, Pass, Redo, Vetoed, NextRound, NoAgreement }
+pub fn decide(policy, seats: usize, ballots: &[Ballot], round: u32) -> Decision;
+#[non_exhaustive] pub enum Step { Wait, Pass, SendBack, AskAgain, Person(&'static str), Refuse }
+pub fn next_step(policy, gate, decision, sent_back: u32) -> Step;
+pub fn no_agreement(policy, gate) -> Step;
+pub fn out_of_budget(policy, turns: u64, tokens: u64) -> bool;
+pub fn read_vote(text: &str, tail: Limit, reasons: Limit, reason_bytes: Limit) -> VoteAnswer;
+```
+
+The crate root re-exports these, `decide` as `decide_review`, `applicable` as `applicable_review`,
+`next_step` as `review_next_step`, `out_of_budget` as `review_out_of_budget`, `Decision` as
+`ReviewDecision` and `Step` as `ReviewStep`. `RosterBuilder::review(name, policy)` adds a policy and
+`Roster::reviews()` lists them; `AgentRole::with_review` and `Operation.review` choose one per gate.
+
 ## Compartments (`ai6::directorates::m::compartments`)
 
 Need-to-know access across Operations; clearance stays the autonomy level. A compartment carries

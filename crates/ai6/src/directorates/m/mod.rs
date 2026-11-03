@@ -18,6 +18,7 @@ pub mod placement;
 pub mod promotion;
 pub mod records;
 pub mod recovery;
+pub mod review;
 pub mod roster;
 pub mod scorecard;
 pub mod stewardship;

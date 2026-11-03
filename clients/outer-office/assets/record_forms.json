@@ -1212,6 +1212,41 @@
           "x-section": "safety",
           "x-advanced": true
         },
+        "review": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "record:reviews",
+              "title": "Review the plan",
+              "description": "The policy that reviews a plan before work starts, or none.",
+              "examples": [
+                "none"
+              ]
+            },
+            "output": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "record:reviews",
+              "title": "Review the output",
+              "description": "The policy that reviews the output before the Mission is done, or none.",
+              "examples": [
+                "none"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "title": "Review",
+          "description": "Which review policy checks the plan and the output of its Missions.",
+          "x-section": "safety",
+          "x-advanced": true,
+          "default": {}
+        },
         "harness": {
           "type": "object",
           "properties": {
@@ -1589,6 +1624,9 @@
           "form": {}
         },
         "issues": {
+          "form": {}
+        },
+        "review": {
           "form": {}
         },
         "harness": {
@@ -2219,6 +2257,40 @@
           "title": "Instructions",
           "description": "Instructions for doing this job. They do not grant permissions.",
           "default": ""
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "record:reviews",
+              "title": "Review the plan",
+              "description": "The policy that reviews a plan before work starts, or none.",
+              "examples": [
+                "none"
+              ]
+            },
+            "output": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "record:reviews",
+              "title": "Review the output",
+              "description": "The policy that reviews the output before the Mission is done, or none.",
+              "examples": [
+                "none"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "title": "Review",
+          "description": "Which review policy checks the plan and the output of this role's Missions, before what the Operation says.",
+          "x-advanced": true,
+          "default": {}
         }
       },
       "additionalProperties": false
@@ -2230,6 +2302,9 @@
         },
         "policy": {
           "widget": "textarea"
+        },
+        "review": {
+          "form": {}
         }
       }
     },
@@ -4799,6 +4874,146 @@
     "key": {
       "title": "Codeword",
       "description": "What this compartment is known by, such as KESTREL. It cannot be changed later."
+    }
+  },
+  "reviews": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "panel": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "record:agents",
+                "title": "Agent",
+                "description": "The Agent who sits here, by codename; leave it empty to name a role."
+              },
+              "role": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "record:roles",
+                "title": "Role",
+                "description": "The role an Agent must hold to sit here; leave it empty to name an Agent."
+              },
+              "weight": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295,
+                "title": "Weight",
+                "description": "How much this seat's vote counts.",
+                "default": 1
+              },
+              "veto": {
+                "type": "boolean",
+                "title": "Veto",
+                "description": "Whether this seat sending the work back ends the round as a redo, whatever the others say.",
+                "default": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "title": "Panel",
+          "description": "Who reviews: Agents or roles, each with a weight and an optional veto."
+        },
+        "pass_at": {
+          "type": "number",
+          "title": "Share that must pass",
+          "description": "The share of the weight, above 0 and at most 1, that must vote to pass. Abstentions are left out of the share. Leave it at 1 for all of it.",
+          "default": 1
+        },
+        "distinct_models": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Different models",
+          "description": "How many different models must be behind the votes, none of them the author's.",
+          "default": 1
+        },
+        "rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Rounds to agree",
+          "description": "How many rounds the panel has to agree before `on_no_agreement`.",
+          "default": 1
+        },
+        "redo_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Times sent back",
+          "description": "How many times the author is sent back before a person decides.",
+          "default": 1
+        },
+        "on_no_agreement": {
+          "type": "string",
+          "enum": [
+            "person",
+            "refuse"
+          ],
+          "x-enum-labels": {
+            "person": "A person decides",
+            "refuse": "The Mission fails"
+          },
+          "title": "When the panel does not agree",
+          "description": "What happens when the panel does not agree, or the budget runs out.",
+          "default": "person"
+        },
+        "max_turns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Turns one review may spend",
+          "description": "Reviewer turns one review may spend. Leave it empty for no limit of its own."
+        },
+        "max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Tokens one review may spend",
+          "description": "Tokens one review may spend. Leave it empty for no limit of its own."
+        },
+        "reviewer_timeout_secs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "format": "seconds",
+          "title": "A reviewer answers within",
+          "description": "How long one reviewer has to answer before it counts as absent; 0 is no limit.",
+          "x-advanced": true,
+          "default": 3600
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "panel"
+      ]
+    },
+    "form": {
+      "fields": {
+        "panel": {
+          "form": {}
+        }
+      }
+    },
+    "key": {
+      "title": "Policy name",
+      "description": "What Operations, roles and briefs choose this policy by. It cannot be changed later."
     }
   }
 }
