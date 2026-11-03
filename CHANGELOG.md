@@ -377,6 +377,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   lost, rather than leaving a silent gap.
 - A Session whose agent said it started and left at once is no longer refused as never started: what
   it said is read before the lost connection is.
+- The outbound screen refuses GitLab tokens (`glpat-`, `gldt-`, `glrt-` and the other `gl…-` families) in
+  what an Agent posts or sends, as it already did GitHub's.
 
 - A page Moneypenny publishes loads on the API's own origin. Its `frame-ancestors` carried the `/pages`
   path, which never matches a parent's origin, so a browser refused to show it. The guide now lists
