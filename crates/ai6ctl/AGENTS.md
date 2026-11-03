@@ -70,11 +70,12 @@ origin leaves the public roots alone.
   TITLE SHARED_BY` (`EXPIRES_UNIX` is `remembered` without an expiry; `SHARED_BY` is `-` for
   your own pages, else whose the shared page is);
   `pages open <ID> [--network none|own]` prints the link `POST /v1/user/pages/{id}/open` gives
-  (open it in a browser; it is bound to the access token); `pages remember <ID>` and `pages
-  forget <ID>` post `.../remember`; `pages share <ID> [SUBJECT...]` puts `.../shares`
-  (`person:`, `group:`, `account:`, `compartment:` or `operation:` and an ID; none shares with
-  nobody) and prints `ID: shared with SUBJECT...` or `ID: shared with nobody`; `pages rm <ID>`
-  deletes. The ID is encoded as one path segment; 404 reads "no such page of yours" (another
+  (open it in a browser at once; it is bound to the access token and to the first browser that
+  opens it, so a copy opens nothing elsewhere); `pages remember <ID>` and `pages forget <ID>`
+  post `.../remember`; `pages share <ID> [SUBJECT...]` puts `.../shares` (`person:`, `group:`,
+  `account:`, `compartment:` or `operation:` and an ID; none shares with nobody) and prints
+  `ID: shared with SUBJECT...` or `ID: shared with nobody`; `pages public <ID> on|off` puts
+  `.../public` and prints `ID: public at URL` or `ID: no public link`; `pages rm <ID>` deletes. The ID is encoded as one path segment; 404 reads "no such page of yours" (another
   person's page too); a refusal with a reason prints the gateway's reason.
 - `ai6ctl pools --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/pools`
   as tab-separated `POOL ACCOUNT KIND SESSIONS WINDOWS LIMITED_UNTIL_UNIX TOKENS_TODAY`:

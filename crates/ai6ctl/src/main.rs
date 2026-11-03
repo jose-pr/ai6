@@ -98,7 +98,7 @@ enum Command {
         operation: String,
     },
     /// The pages Moneypenny published for you and those shared with you: list them, print a
-    /// link to open one, keep or release one, share one, delete one.
+    /// link to open one, keep or release one, share one, give one a public link, delete one.
     Pages {
         #[command(subcommand)]
         command: PagesCommand,
@@ -632,7 +632,8 @@ enum PagesCommand {
     /// a shared one is.
     List,
     /// Print a link to a page, valid for the time the gateway sets (an hour by default); open
-    /// it in a browser. The link is bound to this access token.
+    /// it in a browser at once. The link is bound to this access token, and to the browser
+    /// that first opens it: a copy opens nothing anywhere else.
     Open {
         /// The page's id.
         id: String,
@@ -659,6 +660,15 @@ enum PagesCommand {
         id: String,
         /// Whom to share it with.
         subjects: Vec<String>,
+    },
+    /// Give a page a public link, which anyone holding it opens with no sign-in and no live
+    /// data, and print it; or take it away.
+    Public {
+        /// The page's id.
+        id: String,
+        /// `on` (the same link while it stays on) or `off`.
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
     },
     /// Delete a page.
     Rm {
@@ -1600,6 +1610,9 @@ async fn pages(
         PagesCommand::Share { id, subjects } => client
             .put(pages_url(server, Some(id), Some("shares")))
             .json(&serde_json::json!({"subjects": subjects})),
+        PagesCommand::Public { id, state } => client
+            .put(pages_url(server, Some(id), Some("public")))
+            .json(&serde_json::json!({"on": state == "on"})),
         PagesCommand::Rm { id } => client.delete(pages_url(server, Some(id), None)),
     };
     let response = request
@@ -1653,6 +1666,13 @@ async fn pages(
                 println!("{}: shared with nobody", plain(&id));
             } else {
                 println!("{}: shared with {}", plain(&id), shares.join(" "));
+            }
+        }
+        PagesCommand::Public { id, .. } => {
+            let page: serde_json::Value = response.json().await.map_err(|_| invalid())?;
+            match page["public_url"].as_str() {
+                Some(url) => println!("{}: public at {}", plain(&id), plain(url)),
+                None => println!("{}: no public link", plain(&id)),
             }
         }
         PagesCommand::Rm { id } => println!("{}: deleted", plain(&id)),

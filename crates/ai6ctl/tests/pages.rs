@@ -91,6 +91,23 @@ async fn start() -> (String, Seen) {
             ),
         )
         .route(
+            "/v1/user/pages/{id}/public",
+            put(
+                |State(seen): State<Seen>,
+                 headers: HeaderMap,
+                 Path(id): Path<String>,
+                 Json(body): Json<Value>| async move {
+                    record(&seen, "PUT", format!("/v1/user/pages/{id}/public"), &headers, body.clone());
+                    if body["on"] == true {
+                        Json(json!({"id": id, "public": true,
+                                    "public_url": format!("https://pages.example/s/public-{id}/")}))
+                    } else {
+                        Json(json!({"id": id, "public": false}))
+                    }
+                },
+            ),
+        )
+        .route(
             "/v1/user/pages/{id}",
             delete(
                 |State(seen): State<Seen>, headers: HeaderMap, Path(id): Path<String>| async move {
@@ -287,5 +304,30 @@ async fn pages_encode_the_id_as_one_segment_and_read_a_refusal() {
         err(&no_token).contains("UNEX_ACCESS_TOKEN"),
         "{}",
         err(&no_token)
+    );
+}
+
+#[tokio::test]
+async fn pages_public_turns_the_public_link_on_and_off_and_prints_it() {
+    let (server, seen) = start().await;
+    let on = ai6ctl(&server, Some("tok"), &["pages", "public", "page-a", "on"]).await;
+    assert!(on.status.success(), "{}", err(&on));
+    assert_eq!(
+        out(&on),
+        "page-a: public at https://pages.example/s/public-page-a/\n"
+    );
+    let off = ai6ctl(&server, Some("tok"), &["pages", "public", "page-a", "off"]).await;
+    assert_eq!(out(&off), "page-a: no public link\n");
+    let bad = ai6ctl(&server, Some("tok"), &["pages", "public", "page-a", "yes"]).await;
+    assert!(!bad.status.success());
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.iter()
+            .map(|(method, path, _, body)| (method.as_str(), path.as_str(), body.clone()))
+            .collect::<Vec<_>>(),
+        [
+            ("PUT", "/v1/user/pages/page-a/public", json!({"on": true})),
+            ("PUT", "/v1/user/pages/page-a/public", json!({"on": false})),
+        ]
     );
 }
