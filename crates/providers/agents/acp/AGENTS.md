@@ -22,7 +22,7 @@ pub struct AcpSettings {
     pub exit_wait_ms: i64,                      // 1000
     pub poll_ms: i64,                           // 200
     pub unconfined_desk: bool,                  // false
-    pub limit_phrases: Vec<String>,             // "rate limited", "rate limit exceeded", "usage-exhausted", "usage limit", "quota exceeded"
+    pub limit_phrases: Vec<String>,             // "rate limited", "rate limit exceeded", "usage-exhausted", "usage limit", "quota exceeded", "spending-limit", "run out of credits", "402 payment required"
 }
 pub struct AcpHandler;                           // AgentHandler provider id "acp"; stdio() = Json (pipe)
 ```

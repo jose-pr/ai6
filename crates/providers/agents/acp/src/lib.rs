@@ -91,8 +91,9 @@ pub struct AcpSettings {
     pub limit_phrases: Vec<String>,
 }
 
-/// How the Grok CLI words a limit (`Rate limited`, with xAI's `subscription:free-usage-exhausted`)
-/// and how other agents commonly do.
+/// How the Grok CLI words a limit (`Rate limited`, with xAI's `subscription:free-usage-exhausted`;
+/// out of credits, `402 Payment Required` with `personal-team-blocked:spending-limit`) and how other
+/// agents commonly do.
 fn limit_phrases() -> Vec<String> {
     [
         "rate limited",
@@ -100,6 +101,9 @@ fn limit_phrases() -> Vec<String> {
         "usage-exhausted",
         "usage limit",
         "quota exceeded",
+        "spending-limit",
+        "run out of credits",
+        "402 payment required",
     ]
     .map(str::to_owned)
     .to_vec()
@@ -498,6 +502,21 @@ unconfined_desk = true
                 .iter()
                 .any(|phrase| phrase == "rate limited"),
             "the Grok CLI's words count by default"
+        );
+        let session = |text: &str| {
+            confined
+                .settings()
+                .unwrap()
+                .limit_phrases
+                .iter()
+                .any(|phrase| text.to_lowercase().contains(phrase))
+        };
+        assert!(
+            session(
+                "Internal error: API error (status 402 Payment Required): \
+                 personal-team-blocked:spending-limit: You have run out of credits"
+            ),
+            "Grok out of credits is a limit"
         );
         let own = handler("command = \"x\"\nlimit_phrases = [\"out of credits\"]\n");
         assert_eq!(
