@@ -633,8 +633,8 @@ async fn a_label_cannot_turn_a_review_off_and_a_person_can_with_an_audit() {
     person
         .data
         .insert("review".to_owned(), serde_json::json!({ "output": "none" }));
-    let provenance =
-        Provenance::new(Origin::Operator, &person, "universal-exports", 1).with_principal("jose");
+    let provenance = Provenance::new(Origin::Operator, &person, "universal-exports", 1)
+        .with_principal("operator-1");
     person.provenance = Some(provenance);
     state.intake.submit_brief(&person).unwrap();
     until(&state, "done", |state| {
@@ -649,7 +649,7 @@ async fn a_label_cannot_turn_a_review_off_and_a_person_can_with_an_audit() {
         .into_iter()
         .find(|record| record.action == "mission.review.weakened")
         .expect("the weakening is audited");
-    assert_eq!(audited.actor, "jose");
+    assert_eq!(audited.actor, "operator-1");
     assert!(audited.target.starts_with("rv-person:output:one:none"));
     stop(&state);
 }
