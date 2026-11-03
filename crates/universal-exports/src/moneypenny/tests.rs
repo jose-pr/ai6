@@ -4245,8 +4245,9 @@ async fn open_page(
     .unwrap()
 }
 
-/// The URL of a page link on the test listener it is served from.
-async fn page_url(served: &Served, bearer: &str, id: &str, network: Option<&str>) -> String {
+/// The address-bar URL of a new link to page `id`, on the test listener it is served from, not
+/// yet opened.
+async fn frame_url(served: &Served, bearer: &str, id: &str, network: Option<&str>) -> String {
     let response = open_page(served, bearer, id, network).await;
     assert_eq!(response.status(), StatusCode::OK);
     let url = response.json::<Value>().await.unwrap()["url"]
@@ -4261,6 +4262,60 @@ async fn page_url(served: &Served, bearer: &str, id: &str, network: Option<&str>
             1,
         ),
     }
+}
+
+/// A link opened as a browser opens it: its frame's URL, the cookie its first request set, and
+/// the base of the page's own files and feeds the frame names (`…/v/{view}/`).
+struct Opened {
+    frame: String,
+    cookie: String,
+    view: String,
+}
+
+impl Opened {
+    /// The frame again, as the browser that opened it asks.
+    async fn reload(&self) -> reqwest::Response {
+        plain()
+            .get(&self.frame)
+            .header("cookie", format!("ai6_page={}", self.cookie))
+            .send()
+            .await
+            .unwrap()
+    }
+}
+
+/// Opens frame `url` once, as a browser does.
+async fn open_frame(url: &str) -> Opened {
+    let response = plain().get(url).send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "{url}");
+    let cookie = response.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .and_then(|pair| pair.strip_prefix("ai6_page="))
+        .unwrap()
+        .to_owned();
+    let html = response.text().await.unwrap();
+    let view = html
+        .split("<iframe src=\"../")
+        .nth(1)
+        .and_then(|rest| rest.split("/f/").next())
+        .unwrap()
+        .to_owned();
+    let token = url.trim_end_matches('/').rsplit('/').next().unwrap();
+    Opened {
+        frame: url.to_owned(),
+        cookie,
+        view: format!("{}{view}/", url.trim_end_matches(&format!("{token}/"))),
+    }
+}
+
+/// A new link to page `id`, opened: the base of its own files and feeds (`…/v/{view}/`).
+async fn page_url(served: &Served, bearer: &str, id: &str, network: Option<&str>) -> String {
+    open_frame(&frame_url(served, bearer, id, network).await)
+        .await
+        .view
 }
 
 fn plain() -> reqwest::Client {
@@ -4974,7 +5029,8 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
         )
         .await,
     );
-    let url = page_url(&served, &served.operator, &id, None).await;
+    let opened = open_frame(&frame_url(&served, &served.operator, &id, None).await).await;
+    let url = opened.view.clone();
     let base = "https://localhost/pages".to_owned();
     // The page file: the sandbox, never allow-same-origin, open to its own fetches.
     let file = plain()
@@ -4995,8 +5051,12 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
             .contains("default-src")
     );
     // The frame: the bar names the person, kind, title (escaped) and expiry; no script runs.
-    let frame = plain().get(&url).send().await.unwrap();
+    let frame = opened.reload().await;
     assert_eq!(frame.status(), StatusCode::OK);
+    assert!(
+        frame.headers().get("set-cookie").is_none(),
+        "only the first request sets the cookie"
+    );
     let csp = frame.headers()["content-security-policy"]
         .to_str()
         .unwrap()
@@ -5020,12 +5080,16 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
     );
     assert!(!html.contains("<b>Board</b>"));
     assert!(html.contains("Expires "));
-    assert!(html.contains("<iframe src=\"f/index.html\""));
+    let view = url.trim_end_matches('/').rsplit('/').next().unwrap();
+    assert!(
+        html.contains(&format!("<iframe src=\"../{view}/f/index.html\"")),
+        "{html}"
+    );
     assert!(html.contains("sandbox=\"allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-scripts\""));
     assert!(!html.contains("allow-same-origin"));
     assert!(!html.contains("<script"));
     assert!(html.contains("class=\"bar\""), "{html}");
-    // A top-level request for a file goes to the frame.
+    // A top-level request for a file goes to the frame, which needs the browser's cookie.
     let top = plain()
         .get(format!("{url}f/index.html"))
         .header("sec-fetch-dest", "document")
@@ -5035,7 +5099,9 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
     assert_eq!(top.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         top.headers()["location"].to_str().unwrap(),
-        url.replacen(&format!("{}/pages", served.base), &base, 1)
+        opened
+            .frame
+            .replacen(&format!("{}/pages", served.base), &base, 1)
     );
     // The link and the bar both say "Remembered" once the person keeps it.
     reqwest::Client::new()
@@ -5045,14 +5111,7 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
         .send()
         .await
         .unwrap();
-    let html = plain()
-        .get(&url)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+    let html = opened.reload().await.text().await.unwrap();
     assert!(html.contains("Remembered."));
     assert!(!html.contains("Expires "));
 }
@@ -5070,7 +5129,8 @@ async fn pages_the_network_profiles_and_the_options_change_the_csp() {
         )
         .await,
     );
-    let url = page_url(&served, &served.operator, &id, None).await;
+    let opened = open_frame(&frame_url(&served, &served.operator, &id, None).await).await;
+    let url = opened.view.clone();
     let file = plain()
         .get(format!("{url}f/index.html"))
         .header("sec-fetch-dest", "iframe")
@@ -5105,14 +5165,7 @@ async fn pages_the_network_profiles_and_the_options_change_the_csp() {
         StatusCode::BAD_REQUEST
     );
     // The frame's iframe has the same tokens.
-    let html = plain()
-        .get(&url)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+    let html = opened.reload().await.text().await.unwrap();
     assert!(!html.contains("allow-scripts"));
 }
 
@@ -5342,7 +5395,8 @@ async fn pages_a_page_made_after_reading_a_brief_is_framed_as_any_other() {
     let served = served_with(AssistantConfig::default(), Some(roster)).await;
     let (_app, job) = accepted(&served, &served.operator, "Report.").await;
     let token = &job.mcp_token;
-    // With `frame = false` a top-level request is served without the bar, whatever she read.
+    // With `frame = false` the frame has no bar, whatever she read; a top-level request for a
+    // file still goes to the frame, which keeps the link in the browser that opened it.
     call_tool(&served, token, "missions", json!({})).await;
     let id = published_id(
         &publish(
@@ -5352,14 +5406,17 @@ async fn pages_a_page_made_after_reading_a_brief_is_framed_as_any_other() {
         )
         .await,
     );
-    let url = page_url(&served, &served.operator, &id, None).await;
+    let opened = open_frame(&frame_url(&served, &served.operator, &id, None).await).await;
+    let html = opened.reload().await.text().await.unwrap();
+    assert!(!html.contains("class=\"bar\""), "{html}");
+    assert!(html.contains("<iframe src=\"../"), "{html}");
     let direct = plain()
-        .get(format!("{url}f/index.html"))
+        .get(format!("{}f/index.html", opened.view))
         .header("sec-fetch-dest", "document")
         .send()
         .await
         .unwrap();
-    assert_eq!(direct.status(), StatusCode::OK, "no frame was asked for");
+    assert_eq!(direct.status(), StatusCode::SEE_OTHER);
 
     // With the frame, the bar says who made it and nothing about what she read.
     let served = served_with(AssistantConfig::default(), None).await;
@@ -5373,7 +5430,7 @@ async fn pages_a_page_made_after_reading_a_brief_is_framed_as_any_other() {
         )
         .await,
     );
-    let url = page_url(&served, &served.operator, &id, None).await;
+    let url = frame_url(&served, &served.operator, &id, None).await;
     let html = plain()
         .get(&url)
         .send()
@@ -5603,62 +5660,314 @@ const out = {{}};
     )
 }
 
-/// Loads `url` in the browser and answers the probe's record.
-async fn probe(browser: &str, url: String) -> Value {
-    let profile = tempfile::tempdir().unwrap();
-    let browser = browser.to_owned();
-    let dom = tokio::task::spawn_blocking(move || {
-        let output = std::process::Command::new(browser)
+/// A headless Chromium of its own profile, driven over the DevTools protocol.
+struct Browser {
+    child: std::process::Child,
+    socket: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    next: u64,
+    _profile: tempfile::TempDir,
+}
+
+impl Drop for Browser {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Browser {
+    /// Starts `binary` headless on a new profile and connects to it.
+    async fn start(binary: &str) -> Self {
+        use std::io::BufRead;
+        let profile = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new(binary)
             .args([
                 "--headless=new",
                 "--disable-gpu",
-                "--no-sandbox",
                 "--no-first-run",
-                "--virtual-time-budget=10000",
-                "--dump-dom",
+                "--no-default-browser-check",
+                "--remote-debugging-port=0",
             ])
             .arg(format!("--user-data-dir={}", profile.path().display()))
-            .arg(url)
-            .output()
+            .arg("about:blank")
+            .stderr(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
             .unwrap();
-        String::from_utf8_lossy(&output.stdout).into_owned()
-    })
-    .await
-    .unwrap();
-    let record = dom
-        .split("PROBE ")
-        .nth(1)
-        .and_then(|rest| rest.split("</title>").next())
-        .unwrap_or_else(|| panic!("the probe did not finish: {dom}"));
-    serde_json::from_str(&record.replace("&quot;", "\"").replace("&amp;", "&"))
-        .unwrap_or_else(|error| panic!("{error}: {record}"))
+        let stderr = child.stderr.take().unwrap();
+        let url = tokio::task::spawn_blocking(move || {
+            let mut lines = std::io::BufReader::new(stderr).lines();
+            let url = lines
+                .by_ref()
+                .map_while(Result::ok)
+                .find_map(|line| {
+                    line.split("DevTools listening on ")
+                        .nth(1)
+                        .map(|url| url.trim().to_owned())
+                })
+                .expect("the browser names its DevTools address");
+            // Keep reading, so the browser never blocks on a full pipe.
+            std::thread::spawn(move || lines.for_each(drop));
+            url
+        })
+        .await
+        .unwrap();
+        let (socket, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        Self {
+            child,
+            socket,
+            next: 0,
+            _profile: profile,
+        }
+    }
+
+    /// One DevTools call, on `session` when given; events in between are dropped.
+    async fn call(
+        &mut self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, String> {
+        self.next += 1;
+        let id = self.next;
+        let mut message = json!({"id": id, "method": method, "params": params});
+        if let Some(session) = session {
+            message["sessionId"] = json!(session);
+        }
+        self.socket
+            .send(WsMessage::Text(message.to_string().into()))
+            .await
+            .unwrap();
+        loop {
+            let Some(Ok(WsMessage::Text(text))) = self.socket.next().await else {
+                continue;
+            };
+            let reply: Value = serde_json::from_str(&text).unwrap();
+            if reply["id"] == id {
+                return match reply.get("error") {
+                    Some(error) => Err(format!("{method}: {error}")),
+                    None => Ok(reply["result"].clone()),
+                };
+            }
+        }
+    }
+
+    /// Opens `url` in a new tab, closing every other, so the frame read is this tab's;
+    /// answers the tab's session.
+    async fn open(&mut self, url: &str) -> String {
+        let target = self
+            .call(None, "Target.createTarget", json!({"url": url}))
+            .await
+            .unwrap()["targetId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let targets = self
+            .call(None, "Target.getTargets", json!({}))
+            .await
+            .unwrap();
+        for other in targets["targetInfos"].as_array().unwrap() {
+            if other["type"] == "page" && other["targetId"] != target.as_str() {
+                let _ = self
+                    .call(
+                        None,
+                        "Target.closeTarget",
+                        json!({"targetId": other["targetId"]}),
+                    )
+                    .await;
+            }
+        }
+        self.call(
+            None,
+            "Target.attachToTarget",
+            json!({"targetId": target, "flatten": true}),
+        )
+        .await
+        .unwrap()["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// `expression` evaluated in the tab's top document.
+    async fn evaluate(&mut self, session: &str, expression: &str) -> Value {
+        self.call(
+            Some(session),
+            "Runtime.evaluate",
+            json!({"expression": expression, "returnByValue": true}),
+        )
+        .await
+        .map(|result| result["result"]["value"].clone())
+        .unwrap_or(Value::Null)
+    }
+
+    /// The title of the document framed in the tab, wherever the browser runs it: in the tab's
+    /// process, read through an isolated world, or in a process of its own (a sandboxed frame
+    /// may be), read through its own target.
+    async fn framed_title(&mut self, session: &str) -> Option<String> {
+        // The frame this tab's document names: a closed tab's frame may linger a moment.
+        let src = self
+            .evaluate(session, "document.querySelector('iframe').src")
+            .await;
+        let src = src.as_str()?;
+        let targets = self.call(None, "Target.getTargets", json!({})).await.ok()?;
+        let framed = targets["targetInfos"]
+            .as_array()?
+            .iter()
+            .find(|target| target["type"] == "iframe" && target["url"] == src)
+            .and_then(|target| target["targetId"].as_str())
+            .map(str::to_owned);
+        if let Some(target) = framed {
+            let inner = self
+                .call(
+                    None,
+                    "Target.attachToTarget",
+                    json!({"targetId": target, "flatten": true}),
+                )
+                .await
+                .ok()?["sessionId"]
+                .as_str()?
+                .to_owned();
+            return self
+                .evaluate(&inner, "document.title")
+                .await
+                .as_str()
+                .map(str::to_owned);
+        }
+        let tree = self
+            .call(Some(session), "Page.getFrameTree", json!({}))
+            .await
+            .ok()?;
+        let frame = tree["frameTree"]["childFrames"][0]["frame"]["id"]
+            .as_str()?
+            .to_owned();
+        let world = self
+            .call(
+                Some(session),
+                "Page.createIsolatedWorld",
+                json!({"frameId": frame}),
+            )
+            .await
+            .ok()?;
+        self.call(
+            Some(session),
+            "Runtime.evaluate",
+            json!({"expression": "document.title", "returnByValue": true,
+                   "contextId": world["executionContextId"]}),
+        )
+        .await
+        .ok()?["result"]["value"]
+            .as_str()
+            .map(str::to_owned)
+    }
+
+    /// The record the probe page framed in the tab writes in its title, within 20 seconds.
+    async fn probe(&mut self, session: &str) -> Value {
+        for _ in 0..100 {
+            if let Some(title) = self.framed_title(session).await
+                && let Some(record) = title.strip_prefix("PROBE ")
+            {
+                return serde_json::from_str(record).unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        let top = self
+            .evaluate(session, "document.documentElement.outerHTML")
+            .await;
+        panic!("the framed probe did not finish; the tab holds {top}");
+    }
+
+    /// What the tab's top document is, once it has loaded: whether it frames anything and
+    /// shows the bar.
+    async fn top(&mut self, session: &str) -> Value {
+        for _ in 0..100 {
+            let state = self
+                .evaluate(
+                    session,
+                    "JSON.stringify({ready: document.readyState, url: location.href, \
+                     iframe: !!document.querySelector('iframe'), \
+                     bar: !!document.querySelector('.bar')})",
+                )
+                .await;
+            if let Some(state) = state.as_str()
+                && let Ok(state) = serde_json::from_str::<Value>(state)
+                && state["ready"] == "complete"
+                && state["url"] != "about:blank"
+            {
+                return state;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        panic!("the tab never loaded");
+    }
 }
 
-/// Loads a probe page in a real browser, as `AI6_TEST_BROWSER` names it (a Chromium), and
-/// records what the page can reach. Skipped, and ignored by default, without it.
+/// The probe's record says the page ran as an opaque origin, reached its own files, and
+/// reached outside only under `open`.
+fn assert_probe(record: &Value, open: bool, what: &str) {
+    eprintln!("{what}: {record}");
+    assert_eq!(record["localStorage"], "threw SecurityError", "{what}");
+    let cookie = record["cookie"].as_str().unwrap();
+    assert!(
+        cookie == "\"\"" || cookie.starts_with("threw"),
+        "{what}: no cookie of the host: {cookie}"
+    );
+    let api = record["api"].as_str().unwrap();
+    assert!(
+        api.starts_with("blocked") || api == "status 401",
+        "{what}: {api}"
+    );
+    assert_eq!(record["own"], "status 200 {\"own\":true}", "{what}");
+    if open {
+        assert_eq!(record["outside"], "status 200 from outside", "{what}");
+    } else {
+        assert!(
+            record["outside"].as_str().unwrap().starts_with("blocked"),
+            "{what}: {}",
+            record["outside"]
+        );
+    }
+}
+
+/// Opens pages in real browsers, as `AI6_TEST_BROWSER` names one (a Chromium), on the pages' own
+/// origin: a probe page loads and runs in its frame as an opaque origin, under each network
+/// profile; its link reloads in the browser that opened it, even one sent there from another
+/// site, and opens nothing in another browser profile; a public link opens anywhere. Skipped,
+/// and ignored by default, without it.
 #[tokio::test]
 #[ignore = "needs AI6_TEST_BROWSER to name a Chromium binary"]
-async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_the_profiles_hold() {
-    let Ok(browser) = std::env::var("AI6_TEST_BROWSER") else {
+async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_its_link_stays_in_its_browser() {
+    let Ok(binary) = std::env::var("AI6_TEST_BROWSER") else {
         eprintln!("skipped: AI6_TEST_BROWSER names no browser");
         return;
     };
-    // Somewhere outside that answers anyone: a page may fetch it under `open` only.
+    // Somewhere outside that answers anyone, and a page there that sends its visitor on: on
+    // `localhost`, another site than the pages' `127.0.0.1`.
     let outside = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let outside_url = format!("http://{}", outside.local_addr().unwrap());
+    let port = outside.local_addr().unwrap().port();
+    let outside_url = format!("http://127.0.0.1:{port}");
     tokio::spawn(async move {
-        let app = axum::Router::new().route(
-            "/",
-            axum::routing::get(|| async {
-                ([("access-control-allow-origin", "*")], "from outside")
-            }),
-        );
+        let app = axum::Router::new()
+            .route(
+                "/",
+                axum::routing::get(|| async {
+                    ([("access-control-allow-origin", "*")], "from outside")
+                }),
+            )
+            .route(
+                "/opener",
+                axum::routing::get(|| async {
+                    axum::response::Html(
+                        "<script>location.href = new URLSearchParams(location.search)\
+                         .get('to');</script>",
+                    )
+                }),
+            );
         let _ = axum::serve(outside, app).await;
     });
-    // `frame = false`: the page is served top-level, without the bar, so the browser loads it
-    // as the page itself.
-    let roster = pages_roster(json!({"frame": false}));
-    let served = served_full(AssistantConfig::default(), Some(roster), true).await;
+    let served = served_full(AssistantConfig::default(), None, true).await;
     let (_app, job) = accepted(&served, &served.operator, "Probe.").await;
     station_bundle(
         &served,
@@ -5681,31 +5990,89 @@ async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_the_profiles_ho
         )
         .await,
     );
-    for (profile, network) in [("open", None), ("none", Some("none"))] {
-        let url = page_url(&served, &served.operator, &id, network).await;
-        let record = probe(&browser, format!("{url}f/index.html")).await;
-        eprintln!("{profile}: {record}");
-        assert_eq!(record["localStorage"], "threw SecurityError", "{profile}");
-        let cookie = record["cookie"].as_str().unwrap();
-        assert!(
-            cookie == "\"\"" || cookie.starts_with("threw"),
-            "{profile}: no cookie of the host: {cookie}"
-        );
-        let api = record["api"].as_str().unwrap();
-        assert!(
-            api.starts_with("blocked") || api == "status 401",
-            "{profile}: {api}"
-        );
-        assert_eq!(record["own"], "status 200 {\"own\":true}", "{profile}");
-        match profile {
-            "open" => assert_eq!(record["outside"], "status 200 from outside"),
-            _ => assert!(
-                record["outside"].as_str().unwrap().starts_with("blocked"),
-                "{profile}: {}",
-                record["outside"]
-            ),
+    let mut mine = Browser::start(&binary).await;
+    let mut other = Browser::start(&binary).await;
+
+    // The page and its scripts load in the frame, under the bar, as an opaque origin.
+    let link = frame_url(&served, &served.operator, &id, None).await;
+    let tab = mine.open(&link).await;
+    let top = mine.top(&tab).await;
+    assert_eq!(
+        (top["iframe"].clone(), top["bar"].clone()),
+        (json!(true), json!(true))
+    );
+    assert_probe(&mine.probe(&tab).await, true, "open");
+    // A reload in the same browser works.
+    mine.evaluate(&tab, "window.before = 1").await;
+    mine.call(Some(&tab), "Page.reload", json!({}))
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if mine.evaluate(&tab, "window.before === undefined").await == json!(true) {
+            break;
         }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    assert_probe(&mine.probe(&tab).await, true, "open, reloaded");
+    // Another browser profile, given the copied address, gets nothing.
+    let copied = other.open(&link).await;
+    let top = other.top(&copied).await;
+    assert_eq!(
+        (top["iframe"].clone(), top["bar"].clone()),
+        (json!(false), json!(false)),
+        "{top}"
+    );
+
+    // With the network off the page reaches nothing outside.
+    let none = frame_url(&served, &served.operator, &id, Some("none")).await;
+    let tab = mine.open(&none).await;
+    assert_probe(&mine.probe(&tab).await, false, "none");
+
+    // A link another site sends its viewer to opens there. Its reload is a navigation that site
+    // started, so the `SameSite=Strict` cookie stays home and the reload opens nothing: on
+    // pages of another registrable domain than the app's, the app opens the page again.
+    let sent = frame_url(&served, &served.operator, &id, None).await;
+    let opener = format!(
+        "http://localhost:{port}/opener?to={}",
+        sent.replace(':', "%3A").replace('/', "%2F")
+    );
+    let tab = mine.open(&opener).await;
+    assert_probe(&mine.probe(&tab).await, true, "sent from another site");
+    mine.evaluate(&tab, "window.before = 1").await;
+    mine.call(Some(&tab), "Page.reload", json!({}))
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if mine.evaluate(&tab, "window.before === undefined").await == json!(true) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let top = mine.top(&tab).await;
+    assert_eq!(
+        (top["iframe"].clone(), top["bar"].clone()),
+        (json!(false), json!(false)),
+        "sent from another site, reloaded: {top}"
+    );
+
+    // A public link opens in any browser, with no sign-in.
+    let public = reqwest::Client::new()
+        .put(format!("{}/v1/user/pages/{id}/public", served.base))
+        .bearer_auth(&served.operator)
+        .json(&json!({"on": true}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap()["public_url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let tab = other.open(&public).await;
+    let top = other.top(&tab).await;
+    assert_eq!(top["bar"], true, "{top}");
+    assert_probe(&other.probe(&tab).await, true, "public");
 }
 
 /// Links `gh:o/r#1` to Mission `mission-g`, which the served Registry holds a Session of.
@@ -5884,4 +6251,5 @@ async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation()
     finish(&served, &mut app, &job).await;
 }
 
+mod privacy;
 mod sharing;

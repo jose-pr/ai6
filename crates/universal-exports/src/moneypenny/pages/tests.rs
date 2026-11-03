@@ -32,6 +32,7 @@ fn page(id: &str, person: &str, files: &BTreeMap<String, Vec<u8>>) -> Page {
         expires_at: Some(now() + 3600.0),
         feeds: Vec::new(),
         shares: Vec::new(),
+        public: None,
     }
 }
 
@@ -336,12 +337,26 @@ fn links_stand_for_their_page_and_time_and_are_counted() {
         ("p", PageNetwork::Own)
     );
     assert!(store.link("not-the-token").is_none());
-    assert!(store.first_open(&token));
-    assert!(!store.first_open(&token));
+    // The address-bar token and the view token each find the link only through their own door.
+    assert_ne!(link.view, token);
+    assert!(store.viewed(&link.view).is_some());
+    assert!(store.viewed(&token).is_none());
+    assert!(store.link(&link.view).is_none());
+    // The first request binds a cookie; later ones need it.
+    let Admit::First(cookie) = store.admit(&token, &[]) else {
+        panic!("the first request binds the link");
+    };
+    assert_eq!(store.admit(&token, &[]), Admit::Refused);
+    assert_eq!(store.admit(&token, &["other"]), Admit::Refused);
+    assert_eq!(store.admit(&token, &["other", &cookie]), Admit::Again);
+    assert_eq!(store.admit("not-the-token", &[&cookie]), Admit::Refused);
     for _ in 0..3 {
-        assert!(store.note_read(&token, 3));
+        assert!(store.note_read(&link.view, 3));
     }
-    assert!(!store.note_read(&token, 3), "the fourth read in a minute");
+    assert!(
+        !store.note_read(&link.view, 3),
+        "the fourth read in a minute"
+    );
     let (short, _) = store.mint(&made, "p", "b", PageNetwork::Open, Duration::ZERO);
     assert!(
         store.link(&short).is_none(),
@@ -349,6 +364,42 @@ fn links_stand_for_their_page_and_time_and_are_counted() {
     );
     store.delete("page-1");
     assert!(store.link(&token).is_none(), "the page's links go with it");
+    assert!(store.viewed(&link.view).is_none());
+}
+
+#[test]
+fn a_public_link_is_kept_while_on_and_ends_with_its_page() {
+    let (dir, store) = store();
+    let files = one("index.html", "x");
+    keep(
+        &store,
+        page("page-1", "p", &files),
+        &files,
+        &AssistantPageLimits::default(),
+    )
+    .unwrap();
+    let on = store.set_public("page-1", true).unwrap().unwrap();
+    let token = on.public.clone().unwrap();
+    assert_eq!(token.len(), 43);
+    assert_eq!(store.public(&token).unwrap().id, "page-1");
+    // On again keeps the same link, and it survives a restart.
+    let again = store.set_public("page-1", true).unwrap().unwrap();
+    assert_eq!(again.public.as_deref(), Some(token.as_str()));
+    let reopened = PageStore::open(dir.path().join("pages")).unwrap();
+    assert_eq!(reopened.public(&token).unwrap().id, "page-1");
+    assert!(reopened.public("not-the-token").is_none());
+    // Off ends it; on again is a new link.
+    reopened.set_public("page-1", false).unwrap();
+    assert!(reopened.public(&token).is_none());
+    let renewed = reopened.set_public("page-1", true).unwrap().unwrap();
+    assert_ne!(renewed.public.as_deref(), Some(token.as_str()));
+    assert!(reopened.set_public("page-nope", true).unwrap().is_none());
+    reopened.delete("page-1");
+    assert!(
+        reopened
+            .public(renewed.public.as_deref().unwrap())
+            .is_none()
+    );
 }
 
 #[test]

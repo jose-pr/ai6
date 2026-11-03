@@ -539,8 +539,9 @@ pub struct AssistantPageLimits {
     #[schema(title = "Dashboards read live feeds")]
     #[map(default = AssistantPageLimits::default().feeds)]
     pub feeds: bool,
-    /// Whether a page is shown in the gateway's frame with the classification bar.
-    #[schema(title = "Show pages in the gateway's frame")]
+    /// Whether a page's frame shows the classification bar. The page stays in the gateway's
+    /// frame either way, which keeps a viewer's link in the browser that opened it.
+    #[schema(title = "Show the classification bar")]
     #[map(default = AssistantPageLimits::default().frame)]
     pub frame: bool,
     /// Whether a person may share a page.
@@ -551,6 +552,11 @@ pub struct AssistantPageLimits {
     #[schema(title = "Subjects a page is shared with")]
     #[map(default = AssistantPageLimits::default().max_shares)]
     pub max_shares: Limit,
+    /// Whether a person may give a page a public link, which opens it for anyone holding the
+    /// link, with no sign-in and no feeds. Off, every public link stops answering.
+    #[schema(title = "People may make public links")]
+    #[map(default = AssistantPageLimits::default().public)]
+    pub public: bool,
 }
 
 impl Default for AssistantPageLimits {
@@ -578,6 +584,7 @@ impl Default for AssistantPageLimits {
             frame: true,
             sharing: true,
             max_shares: Limit::at(32),
+            public: true,
         }
     }
 }

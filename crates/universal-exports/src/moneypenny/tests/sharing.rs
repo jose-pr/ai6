@@ -118,19 +118,12 @@ async fn pages_a_member_of_a_shared_group_opens_it_with_their_own_data_until_it_
     assert_eq!(audited[0].target, format!("{id} group:ops"));
 
     // The member opens it, and its feed reads with the member's permissions, not the author's.
-    let own = page_url(&served, &served.operator, &id, None).await;
-    let theirs = page_url(&served, &served.member, &id, None).await;
+    let own = open_frame(&frame_url(&served, &served.operator, &id, None).await).await;
+    let theirs = open_frame(&frame_url(&served, &served.member, &id, None).await).await;
     let text = |value: &Value| value.to_string();
-    assert!(text(&feed(&own).await).contains("mission-g"));
-    assert!(!text(&feed(&theirs).await).contains("mission-g"));
-    let bar = plain()
-        .get(&theirs)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+    assert!(text(&feed(&own.view).await).contains("mission-g"));
+    assert!(!text(&feed(&theirs.view).await).contains("mission-g"));
+    let bar = theirs.reload().await.text().await.unwrap();
     assert!(bar.contains("Shared by operator-007."), "{bar}");
     // It is listed to the member as shared, naming whose it is and not whom else it reaches.
     let listed: Value = reqwest::Client::new()
@@ -168,14 +161,15 @@ async fn pages_a_member_of_a_shared_group_opens_it_with_their_own_data_until_it_
         StatusCode::OK
     );
     assert_eq!(
-        status_of(format!("{theirs}f/index.html")).await,
+        status_of(format!("{}f/index.html", theirs.view)).await,
         StatusCode::NOT_FOUND
     );
-    assert_eq!(status_of(theirs.clone()).await, StatusCode::NOT_FOUND);
+    assert_eq!(theirs.reload().await.status(), StatusCode::NOT_FOUND);
     assert_eq!(
-        status_of(format!("{own}f/index.html")).await,
+        status_of(format!("{}f/index.html", own.view)).await,
         StatusCode::OK
     );
+    assert_eq!(own.reload().await.status(), StatusCode::OK);
     assert_eq!(
         open_page(&served, &served.member, &id, None).await.status(),
         StatusCode::NOT_FOUND
@@ -214,8 +208,8 @@ async fn pages_a_share_names_only_an_operation_or_compartment_the_sharer_reads()
             .status(),
         StatusCode::OK
     );
-    let viewer = page_url(&served, &served.viewer, &id, None).await;
-    assert_eq!(status_of(viewer.clone()).await, StatusCode::OK);
+    let viewer = open_frame(&frame_url(&served, &served.viewer, &id, None).await).await;
+    assert_eq!(viewer.reload().await.status(), StatusCode::OK);
     assert_eq!(
         open_page(&served, &served.member, &id, None).await.status(),
         StatusCode::NOT_FOUND
@@ -229,17 +223,17 @@ async fn pages_a_share_names_only_an_operation_or_compartment_the_sharer_reads()
         StatusCode::OK
     );
     assert_eq!(
-        status_of(viewer).await,
+        viewer.reload().await.status(),
         StatusCode::NOT_FOUND,
         "no longer named"
     );
-    let member = page_url(&served, &served.member, &id, None).await;
-    assert_eq!(status_of(member.clone()).await, StatusCode::OK);
+    let member = open_frame(&frame_url(&served, &served.member, &id, None).await).await;
+    assert_eq!(member.reload().await.status(), StatusCode::OK);
     // Reading the member out ends their view on the next request.
     source
         .remove(ConfigRecord::Compartment, &ConfigScope::Global, "OSPREY")
         .unwrap();
-    assert_eq!(status_of(member).await, StatusCode::NOT_FOUND);
+    assert_eq!(member.reload().await.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -262,11 +256,11 @@ async fn pages_with_sharing_off_a_share_is_refused_and_grants_nothing() {
             .status(),
         StatusCode::OK
     );
-    let member = page_url(&served, &served.member, &id, None).await;
-    assert_eq!(status_of(member.clone()).await, StatusCode::OK);
+    let member = open_frame(&frame_url(&served, &served.member, &id, None).await).await;
+    assert_eq!(member.reload().await.status(), StatusCode::OK);
 
     put_pages(&source, json!({"sharing": false}));
-    assert_eq!(status_of(member).await, StatusCode::NOT_FOUND);
+    assert_eq!(member.reload().await.status(), StatusCode::NOT_FOUND);
     assert_eq!(
         open_page(&served, &served.member, &id, None).await.status(),
         StatusCode::NOT_FOUND
@@ -278,6 +272,6 @@ async fn pages_with_sharing_off_a_share_is_refused_and_grants_nothing() {
         StatusCode::FORBIDDEN
     );
     // Its person still opens it.
-    let own = page_url(&served, &served.operator, &id, None).await;
-    assert_eq!(status_of(own).await, StatusCode::OK);
+    let own = open_frame(&frame_url(&served, &served.operator, &id, None).await).await;
+    assert_eq!(own.reload().await.status(), StatusCode::OK);
 }

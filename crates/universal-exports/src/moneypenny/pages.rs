@@ -2,8 +2,10 @@
 //!
 //! A page is what she makes for the person to open in a browser tab outside Outer Office: a
 //! dashboard reading live data, a report (a snapshot) or one file. The gateway keeps pages in
-//! a [`PageStore`] (a directory, so remembered pages outlive a restart), serves each through
-//! a capability link (`{base}/v/{token}/`) and never lets a page act as the app: every page
+//! a [`PageStore`] (a directory, so remembered pages outlive a restart), serves each to the
+//! person and whom they share it with through a link of their own (`{base}/v/{token}/`) that
+//! opens only in the browser that first asks for it, or to anyone through a public link
+//! (`{base}/s/{token}/`) the person makes, and never lets a page act as the app: every page
 //! response carries a CSP `sandbox` without `allow-same-origin`, so the page is an opaque
 //! origin, and `/v1` answers no cross-origin request. A page is shown in the gateway's own
 //! frame under a classification bar that says who made it and when it expires.
@@ -19,10 +21,10 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use ai6::{AssistantPageFile, AssistantPageLimits, PageNetwork, Person};
-use axum::extract::{Path as UrlPath, Query, Request, State};
+use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::header::{
-    CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, LOCATION,
-    REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
+    CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE, LOCATION,
+    REFERRER_POLICY, SET_COOKIE, X_CONTENT_TYPE_OPTIONS,
 };
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -75,7 +77,7 @@ impl Kind {
 }
 
 /// A live read a dashboard declares: the page asks for `data/{name}` and the gateway runs
-/// the read tool `tool` with the fixed `input` as whoever holds the link.
+/// the read tool `tool` with the fixed `input` as the link's viewer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Feed {
     pub(crate) name: String,
@@ -110,6 +112,10 @@ pub(crate) struct Page {
     /// Subjects the person shares it with.
     #[serde(default)]
     pub(crate) shares: Vec<String>,
+    /// The token of its public link (`{base}/s/{token}/`), while the person keeps one. It sits
+    /// beside the files it opens, so keeping it here exposes nothing they do not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) public: Option<String>,
 }
 
 impl Page {
@@ -117,6 +123,16 @@ impl Page {
     pub(crate) fn summary(&self) -> Value {
         let mut summary = self.common();
         summary["shares"] = json!(self.shares);
+        summary["public"] = json!(self.public.is_some());
+        summary
+    }
+
+    /// [`summary`](Self::summary) with the address of its public link, under `base`.
+    pub(crate) fn summary_with_link(&self, base: &str) -> Value {
+        let mut summary = self.summary();
+        if let Some(token) = &self.public {
+            summary["public_url"] = json!(format!("{base}/s/{token}/"));
+        }
         summary
     }
 
@@ -328,7 +344,11 @@ fn now() -> f64 {
 // The store
 // ---------------------------------------------------------------------------------------
 
-/// A capability link: who may read which page, with what network, until when.
+/// A link for one viewer: who may read which page, with what network, until when.
+///
+/// Its token, in the address bar, opens only the gateway's frame, and only in the browser its
+/// first request bound with a cookie. The frame names the page's files and feeds under a second
+/// token, `view`, which no address bar shows.
 #[derive(Debug, Clone)]
 pub(crate) struct Link {
     pub(crate) page: String,
@@ -338,8 +358,23 @@ pub(crate) struct Link {
     pub(crate) bearer: String,
     pub(crate) network: PageNetwork,
     pub(crate) expires: f64,
-    /// Whether the first request was audited.
-    pub(crate) opened: bool,
+    /// The address-bar token, to send a file asked for on its own back to the frame.
+    pub(crate) token: String,
+    /// The token of the page's own files and feeds.
+    pub(crate) view: String,
+    /// The SHA-256 of the cookie the first request set; `None` until then.
+    pub(crate) cookie: Option<String>,
+}
+
+/// What a request for the frame is, against the link's cookie.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Admit {
+    /// The first request: the link is bound to this cookie, which the answer sets.
+    First(String),
+    /// A later request carrying the cookie.
+    Again,
+    /// A request without it: answered as a link that does not exist.
+    Refused,
 }
 
 /// Files a Station sent for a `publish_page` call, until the call takes them.
@@ -358,6 +393,8 @@ struct Inner {
     staged: HashMap<(String, String), Staged>,
     /// Links by the SHA-256 of their token.
     links: HashMap<String, Link>,
+    /// The key of each link in `links` by the SHA-256 of its view token.
+    views: HashMap<String, String>,
     /// Feed reads in the current minute, by link.
     reads: HashMap<String, (Instant, u32)>,
 }
@@ -627,7 +664,7 @@ impl PageStore {
     pub(crate) fn delete(&self, id: &str) -> Option<Page> {
         let mut state = self.state();
         let page = state.pages.remove(id)?;
-        state.links.retain(|_, link| link.page != id);
+        Self::retain_links(&mut state, |link| link.page != id);
         let _ = std::fs::remove_dir_all(self.dir.join(id));
         Some(page)
     }
@@ -675,15 +712,10 @@ impl PageStore {
                 gone.push(page);
             }
         }
-        let pages = &state.pages;
-        let live: Vec<String> = state
-            .links
-            .iter()
-            .filter(|(_, link)| link.expires > at && pages.contains_key(&link.page))
-            .map(|(key, _)| key.clone())
-            .collect();
-        state.links.retain(|key, _| live.contains(key));
-        state.reads.retain(|key, _| live.contains(key));
+        let pages: std::collections::BTreeSet<String> = state.pages.keys().cloned().collect();
+        Self::retain_links(&mut state, |link| {
+            link.expires > at && pages.contains(&link.page)
+        });
         state
             .staged
             .retain(|_, staged| staged.at.elapsed() < stage_ttl);
@@ -702,31 +734,34 @@ impl PageStore {
         network: PageNetwork,
         ttl: Duration,
     ) -> (String, f64) {
-        let token = random_token();
+        let (token, view) = (random_token(), random_token());
         let mut expires = now() + ttl.as_secs_f64();
         if let Some(end) = page.expires_at {
             expires = expires.min(end);
         }
-        self.state().links.insert(
-            sha256_hex(token.as_bytes()),
+        let key = sha256_hex(token.as_bytes());
+        let mut state = self.state();
+        state.views.insert(sha256_hex(view.as_bytes()), key.clone());
+        state.links.insert(
+            key,
             Link {
                 page: page.id.clone(),
                 viewer: viewer.to_owned(),
                 bearer: bearer.to_owned(),
                 network,
                 expires,
-                opened: false,
+                token: token.clone(),
+                view,
+                cookie: None,
             },
         );
         (token, expires)
     }
 
-    /// The link for `token` and its page while both stand.
-    pub(crate) fn link(&self, token: &str) -> Option<(Link, Page)> {
-        let key = sha256_hex(token.as_bytes());
+    /// The link under `key` and its page while both stand.
+    fn standing_link(state: &Inner, key: &str) -> Option<(Link, Page)> {
         let at = now();
-        let state = self.state();
-        let link = state.links.get(&key)?;
+        let link = state.links.get(key)?;
         let page = state.pages.get(&link.page)?;
         if link.expires <= at || page.expires_at.is_some_and(|end| end <= at) {
             return None;
@@ -734,36 +769,107 @@ impl PageStore {
         Some((link.clone(), page.clone()))
     }
 
-    /// Marks the link opened; true the first time.
-    pub(crate) fn first_open(&self, token: &str) -> bool {
-        let key = sha256_hex(token.as_bytes());
+    /// The link whose address-bar token is `token`, and its page, while both stand.
+    pub(crate) fn link(&self, token: &str) -> Option<(Link, Page)> {
+        Self::standing_link(&self.state(), &sha256_hex(token.as_bytes()))
+    }
+
+    /// The link whose view token is `view`, and its page, while both stand.
+    pub(crate) fn viewed(&self, view: &str) -> Option<(Link, Page)> {
+        let state = self.state();
+        let key = state.views.get(&sha256_hex(view.as_bytes()))?;
+        Self::standing_link(&state, key)
+    }
+
+    /// Admits a request for the frame of link `token` carrying `cookies`, the values of every
+    /// page cookie it sent: the first request binds the link to a new cookie, and every later
+    /// one must carry it.
+    pub(crate) fn admit(&self, token: &str, cookies: &[&str]) -> Admit {
         let mut state = self.state();
-        match state.links.get_mut(&key) {
-            Some(link) if !link.opened => {
-                link.opened = true;
-                true
+        let Some(link) = state.links.get_mut(&sha256_hex(token.as_bytes())) else {
+            return Admit::Refused;
+        };
+        match &link.cookie {
+            None => {
+                let cookie = random_token();
+                link.cookie = Some(sha256_hex(cookie.as_bytes()));
+                Admit::First(cookie)
             }
-            _ => false,
+            Some(bound)
+                if cookies
+                    .iter()
+                    .any(|cookie| sha256_hex(cookie.as_bytes()) == *bound) =>
+            {
+                Admit::Again
+            }
+            Some(_) => Admit::Refused,
         }
+    }
+
+    /// Keeps only the links `keep` accepts, with their view tokens and read counts.
+    fn retain_links(state: &mut Inner, keep: impl Fn(&Link) -> bool) {
+        state.links.retain(|_, link| keep(link));
+        let links = &state.links;
+        state.views.retain(|_, key| links.contains_key(key));
+        state.reads.retain(|key, _| links.contains_key(key));
     }
 
     /// Drops every link to `page` held by a viewer who no longer qualifies.
     pub(crate) fn revoke_viewers(&self, page: &str, keep: &dyn Fn(&str) -> bool) {
-        self.state()
-            .links
-            .retain(|_, link| link.page != page || keep(&link.viewer));
+        Self::retain_links(&mut self.state(), |link| {
+            link.page != page || keep(&link.viewer)
+        });
     }
 
-    /// Counts a feed read on `token`; false past `most` in the minute.
-    pub(crate) fn note_read(&self, token: &str, most: usize) -> bool {
-        let key = sha256_hex(token.as_bytes());
+    /// Counts a feed read on the link viewed through `view`; false past `most` in the minute.
+    pub(crate) fn note_read(&self, view: &str, most: usize) -> bool {
         let mut state = self.state();
+        let Some(key) = state.views.get(&sha256_hex(view.as_bytes())).cloned() else {
+            return false;
+        };
         let entry = state.reads.entry(key).or_insert((Instant::now(), 0));
         if entry.0.elapsed() >= Duration::from_secs(60) {
             *entry = (Instant::now(), 0);
         }
         entry.1 += 1;
         usize::try_from(entry.1).is_ok_and(|count| ai6::Limit::at(most as u64).allows(count))
+    }
+
+    // ---- public links
+
+    /// Gives page `id` a public link, keeping the one it has; `None` turns it off. Answers the
+    /// page as it now stands.
+    ///
+    /// # Errors
+    ///
+    /// The record could not be written; nothing changed.
+    pub(crate) fn set_public(&self, id: &str, on: bool) -> io::Result<Option<Page>> {
+        let mut state = self.state();
+        let Some(page) = state.pages.get(id) else {
+            return Ok(None);
+        };
+        let mut changed = page.clone();
+        changed.public = match (on, changed.public.take()) {
+            (true, Some(kept)) => Some(kept),
+            (true, None) => Some(random_token()),
+            (false, _) => None,
+        };
+        self.save(&changed)?;
+        state.pages.insert(changed.id.clone(), changed.clone());
+        Ok(Some(changed))
+    }
+
+    /// The page whose public link is `token`, while it stands.
+    pub(crate) fn public(&self, token: &str) -> Option<Page> {
+        let at = now();
+        self.state()
+            .pages
+            .values()
+            .find(|page| {
+                page.public.as_deref() == Some(token)
+                    && !page.expires_at.is_some_and(|end| end <= at)
+            })
+            .cloned()
     }
 
     // ---- uploads from Stations
@@ -1047,13 +1153,22 @@ pub(crate) fn pages_base(gateway: &Gateway) -> String {
     }
 }
 
-/// The routes of pages: `/v/{token}/` (the frame), `/v/{token}/f/{path}` (a file) and
-/// `/v/{token}/data/{name}` (a feed). Nothing of `/v1`.
+/// The path of the pages' base, `""` on an origin of their own: where a link's cookie applies.
+fn base_path(base: &str) -> &str {
+    &base[origin_of(base).len()..]
+}
+
+/// The routes of pages. `/v/{token}/` is a viewer's frame, bound to the browser that first
+/// asked for it; `/v/{view}/f/{path}` and `/v/{view}/data/{name}` are the page's files and feeds
+/// under the view token the frame names. `/s/{token}/` and `/s/{token}/f/{path}` are a public
+/// link's frame and files, with no feed. Nothing of `/v1`.
 pub(crate) fn pages_router() -> Router<Gateway> {
     Router::new()
         .route("/v/{token}/", get(frame))
         .route("/v/{token}/f/{*path}", get(file))
         .route("/v/{token}/data/{name}", get(feed))
+        .route("/s/{token}/", get(public_frame))
+        .route("/s/{token}/f/{*path}", get(public_file))
 }
 
 fn gone() -> Response {
@@ -1121,32 +1236,117 @@ pub(crate) async fn may_view(
     false
 }
 
-/// A link that stands: not expired, its page there, and its viewer still signed in and still
-/// allowed to read the page. Also the live `[assistant.pages]`.
-async fn standing(gateway: &Gateway, token: &str) -> Option<(Link, Page, AssistantPageLimits)> {
+/// The live `[assistant.pages]`; `None` when the roster cannot be read.
+async fn page_limits(gateway: &Gateway) -> Option<AssistantPageLimits> {
+    Some(
+        super::assistant_settings(gateway)
+            .await
+            .ok()?
+            .pages()
+            .clone(),
+    )
+}
+
+/// Whether the viewer of `link` is still signed in and still may read `page`, with the live
+/// `[assistant.pages]`; a viewer who may not loses every link to it.
+async fn stands_for(gateway: &Gateway, link: &Link, page: &Page) -> Option<AssistantPageLimits> {
     let store = gateway.pages.clone()?;
-    let (link, page) = store.link(token)?;
     let viewer = crate::resolve_user(gateway, &link.bearer).await.ok()?;
-    let limits = super::assistant_settings(gateway)
-        .await
-        .ok()?
-        .pages()
-        .clone();
-    if viewer.id != link.viewer || !may_view(gateway, &page, &viewer, &limits).await {
+    let limits = page_limits(gateway).await?;
+    if viewer.id != link.viewer || !may_view(gateway, page, &viewer, &limits).await {
         store.revoke_viewers(&page.id, &|held| held != link.viewer);
         return None;
     }
-    Some((link, page, limits))
+    Some(limits)
 }
 
-async fn frame(State(gateway): State<Gateway>, UrlPath(token): UrlPath<String>) -> Response {
-    let Some((link, page, limits)) = standing(&gateway, &token).await else {
+/// The cookie that binds a viewer's link to the browser that first asked for it.
+const VIEW_COOKIE: &str = "ai6_page";
+
+/// The value of every page cookie a request carries; a client speaking HTTP/2 may split
+/// `Cookie` over several headers.
+fn view_cookies(headers: &HeaderMap) -> Vec<&str> {
+    headers
+        .get_all(COOKIE)
+        .iter()
+        .filter_map(|line| line.to_str().ok())
+        .flat_map(|line| line.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .filter(|(name, _)| *name == VIEW_COOKIE)
+        .map(|(_, value)| value)
+        .collect()
+}
+
+/// The `Set-Cookie` that binds link `token` to this browser: sent only to that link's frame,
+/// never to a script, never from another site, and gone when the link ends.
+fn view_cookie(base: &str, token: &str, value: &str, expires: f64) -> Option<HeaderValue> {
+    let seconds = (expires - now()).ceil().max(1.0);
+    HeaderValue::from_str(&format!(
+        "{VIEW_COOKIE}={value}; Path={}/v/{token}/; HttpOnly; Secure; SameSite=Strict; \
+         Max-Age={seconds:.0}",
+        base_path(base)
+    ))
+    .ok()
+}
+
+/// A `303 See Other` to `to`.
+fn see_other(to: &str) -> Response {
+    let mut response = StatusCode::SEE_OTHER.into_response();
+    if let Ok(to) = HeaderValue::from_str(to) {
+        response.headers_mut().insert(LOCATION, to);
+    }
+    response
+}
+
+/// Whether a request is a top-level navigation: the frame's own load is an `iframe` and a
+/// page's loads are other destinations.
+fn top_level(headers: &HeaderMap) -> bool {
+    headers
+        .get("sec-fetch-dest")
+        .and_then(|value| value.to_str().ok())
+        == Some("document")
+}
+
+/// `GET /v/{token}/`: the frame of a viewer's link. Its first request binds the link to this
+/// browser with a cookie and audits the opening; any later request without that cookie, as
+/// from a copied address, is answered as a link that does not exist.
+async fn frame(
+    State(gateway): State<Gateway>,
+    UrlPath(token): UrlPath<String>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(store) = gateway.pages.clone() else {
+        return gone();
+    };
+    let Some((link, page)) = store.link(&token) else {
+        return gone();
+    };
+    let cookies = view_cookies(&headers);
+    if let Some(bound) = &link.cookie
+        && !cookies
+            .iter()
+            .any(|cookie| sha256_hex(cookie.as_bytes()) == *bound)
+    {
+        return gone();
+    }
+    let Some(limits) = stands_for(&gateway, &link, &page).await else {
         return gone();
     };
     let base = pages_base(&gateway);
-    first_open(&gateway, &token, &link, &page).await;
-    let mut response = frame_html(&page, &link, &limits).into_response();
+    let set_cookie = match store.admit(&token, &cookies) {
+        Admit::Refused => return gone(),
+        Admit::Again => None,
+        Admit::First(cookie) => {
+            audit_opened(&gateway, &link, &page).await;
+            view_cookie(&base, &token, &cookie, link.expires)
+        }
+    };
+    let src = format!("../{}/f/", link.view);
+    let mut response = frame_html(&page, &Viewing::Link(&link), &src, &limits).into_response();
     *response.headers_mut() = frame_headers(&base);
+    if let Some(set_cookie) = set_cookie {
+        response.headers_mut().insert(SET_COOKIE, set_cookie);
+    }
     response
 }
 
@@ -1161,14 +1361,8 @@ fn frame_headers(base: &str) -> HeaderMap {
     headers
 }
 
-/// Audits a link's first request, as the viewer.
-async fn first_open(gateway: &Gateway, token: &str, link: &Link, page: &Page) {
-    let Some(store) = gateway.pages.clone() else {
-        return;
-    };
-    if !store.first_open(token) {
-        return;
-    }
+/// Audits a link's first request, as its viewer.
+async fn audit_opened(gateway: &Gateway, link: &Link, page: &Page) {
     if let Ok(person) = crate::resolve_user(gateway, &link.bearer).await {
         let _ = super::audit(
             gateway,
@@ -1182,21 +1376,53 @@ async fn first_open(gateway: &Gateway, token: &str, link: &Link, page: &Page) {
     }
 }
 
-/// The frame: the classification bar above an iframe of the page's entry.
-fn frame_html(page: &Page, link: &Link, limits: &AssistantPageLimits) -> String {
-    let mut note = format!(
-        "Made by Moneypenny for {}, not part of Outer Office. {} <b>{}</b>. {}",
-        escape(&page.person_id),
+/// Whom a frame is shown to.
+enum Viewing<'a> {
+    /// A signed-in viewer, through their link.
+    Link(&'a Link),
+    /// Anyone holding the page's public link.
+    Public,
+}
+
+/// The frame: the classification bar above an iframe of the page's entry under `src`. A
+/// viewer's frame drops the bar with `[assistant.pages] frame = false`; a public one never does.
+fn frame_html(page: &Page, viewing: &Viewing, src: &str, limits: &AssistantPageLimits) -> String {
+    let expiry = match page.expires_at {
+        Some(end) => format!("Expires {}.", escape(&utc_text(end))),
+        None => "Remembered.".to_owned(),
+    };
+    let what = format!(
+        "{} <b>{}</b>.",
         escape(page.kind.as_str()),
-        escape(&page.title),
-        match page.expires_at {
-            Some(end) => format!("Expires {}.", escape(&utc_text(end))),
-            None => "Remembered.".to_owned(),
-        }
+        escape(&page.title)
     );
-    if link.viewer != page.person_id {
-        let _ = write!(note, " Shared by {}.", escape(&page.person_id));
-    }
+    let (note, bar) = match viewing {
+        Viewing::Link(link) => {
+            let mut note = format!(
+                "Made by Moneypenny for {}, not part of Outer Office. {what} {expiry}",
+                escape(&page.person_id),
+            );
+            if link.viewer != page.person_id {
+                let _ = write!(note, " Shared by {}.", escape(&page.person_id));
+            }
+            (note, limits.frame)
+        }
+        Viewing::Public => (
+            format!(
+                "Made by Moneypenny, not part of Outer Office. {what} Public: anyone with this \
+                 link sees this page, without live data. {expiry}"
+            ),
+            true,
+        ),
+    };
+    let bar = if bar {
+        format!(
+            "<input type=\"checkbox\" id=\"c\" aria-label=\"Hide the notice\">\
+<div class=\"bar\" role=\"note\"><span>{note}</span><label for=\"c\" title=\"Hide for this view\">&#10005;</label></div>"
+        )
+    } else {
+        String::new()
+    };
     let sandbox = frame_sandbox(limits.scripts);
     let entry = page
         .entry
@@ -1212,10 +1438,8 @@ html,body{{height:100%;margin:0}}body{{display:flex;flex-direction:column;font:1
 border-bottom:1px solid #9fb3cf}}\
 .bar span{{flex:1}}.bar label{{cursor:pointer;font-weight:700;padding:0 .4rem}}\
 #c{{position:absolute;opacity:0;pointer-events:none}}#c:checked~.bar{{display:none}}\
-iframe{{flex:1;border:0;width:100%;background:#fff}}</style></head><body>\
-<input type=\"checkbox\" id=\"c\" aria-label=\"Hide the notice\">\
-<div class=\"bar\" role=\"note\"><span>{note}</span><label for=\"c\" title=\"Hide for this view\">&#10005;</label></div>\
-<iframe src=\"f/{entry}\" sandbox=\"{sandbox}\" allow=\"fullscreen\" referrerpolicy=\"no-referrer\" \
+iframe{{flex:1;border:0;width:100%;background:#fff}}</style></head><body>{bar}\
+<iframe src=\"{src}{entry}\" sandbox=\"{sandbox}\" allow=\"fullscreen\" referrerpolicy=\"no-referrer\" \
 title=\"{title}\"></iframe></body></html>",
         title = escape(&page.title),
     )
@@ -1250,46 +1474,45 @@ struct FileQuery {
     source: Option<String>,
 }
 
+/// `GET /v/{view}/f/{path}`: a file of the page, under the view token its frame names. A
+/// top-level request is sent to the frame, which carries the bar and needs the browser's
+/// cookie, so a view token in an address bar opens nothing elsewhere.
 async fn file(
     State(gateway): State<Gateway>,
-    UrlPath((token, path)): UrlPath<(String, String)>,
+    UrlPath((view, path)): UrlPath<(String, String)>,
     Query(query): Query<FileQuery>,
-    request: Request,
+    headers: HeaderMap,
 ) -> Response {
-    let Some((link, page, limits)) = standing(&gateway, &token).await else {
-        return gone();
-    };
-    let headers = request.headers();
-    let base = pages_base(&gateway);
-    // A top-level request for a file is sent to the frame, which carries the bar; the framed
-    // request is a `Sec-Fetch-Dest: iframe` and a page's own loads are other destinations.
-    let top_level = headers
-        .get("sec-fetch-dest")
-        .and_then(|value| value.to_str().ok())
-        == Some("document");
-    if top_level && limits.frame {
-        let mut response = StatusCode::SEE_OTHER.into_response();
-        if let Ok(to) = HeaderValue::from_str(&format!("{base}/v/{token}/")) {
-            response.headers_mut().insert(LOCATION, to);
-        }
-        return response;
-    }
     let Some(store) = gateway.pages.clone() else {
         return gone();
     };
-    let Some(bytes) = store.read_file(&page, &path) else {
+    let Some((link, page)) = store.viewed(&view) else {
         return gone();
     };
-    first_open(&gateway, &token, &link, &page).await;
-    let profile = link.network.tighter(limits.network);
-    let mut headers = page_headers(&page_csp(&base, profile, limits.scripts));
+    let Some(limits) = stands_for(&gateway, &link, &page).await else {
+        return gone();
+    };
+    let base = pages_base(&gateway);
+    if top_level(&headers) {
+        return see_other(&format!("{base}/v/{}/", link.token));
+    }
+    let csp = page_csp(&base, link.network.tighter(limits.network), limits.scripts);
+    serve_file(&store, &page, &path, query.source.is_some(), &csp)
+}
+
+/// One listed file of `page`, by its format, under `csp`.
+fn serve_file(store: &PageStore, page: &Page, path: &str, source: bool, csp: &str) -> Response {
+    let Some(bytes) = store.read_file(page, path) else {
+        return gone();
+    };
+    let mut headers = page_headers(csp);
     let content_type = |value: &'static str| HeaderValue::from_static(value);
-    let body: Vec<u8> = match classify(&path) {
+    let body: Vec<u8> = match classify(path) {
         Serve::Html => {
             headers.insert(CONTENT_TYPE, content_type("text/html; charset=utf-8"));
             bytes
         }
-        Serve::Markdown if query.source.is_some() => {
+        Serve::Markdown if source => {
             headers.insert(CONTENT_TYPE, content_type("text/plain; charset=utf-8"));
             bytes
         }
@@ -1322,14 +1545,18 @@ async fn file(
     (headers, body).into_response()
 }
 
+/// `GET /v/{view}/data/{name}`: a feed of the page, run as the link's viewer.
 async fn feed(
     State(gateway): State<Gateway>,
-    UrlPath((token, name)): UrlPath<(String, String)>,
+    UrlPath((view, name)): UrlPath<(String, String)>,
 ) -> Response {
-    let Some((link, page, limits)) = standing(&gateway, &token).await else {
+    let Some(store) = gateway.pages.clone() else {
         return gone();
     };
-    let Some(store) = gateway.pages.clone() else {
+    let Some((link, page)) = store.viewed(&view) else {
+        return gone();
+    };
+    let Some(limits) = stands_for(&gateway, &link, &page).await else {
         return gone();
     };
     let base = pages_base(&gateway);
@@ -1345,7 +1572,7 @@ async fn feed(
     let Some(feed) = page.feeds.iter().find(|feed| feed.name == name) else {
         return gone();
     };
-    if !store.note_read(&token, limits.feed_reads_per_minute.or_max()) {
+    if !store.note_read(&view, limits.feed_reads_per_minute.or_max()) {
         return reply(
             StatusCode::TOO_MANY_REQUESTS,
             json!({"error": "too many reads this minute"}),
@@ -1367,6 +1594,49 @@ async fn feed(
             _ => reply(StatusCode::BAD_GATEWAY, json!({"error": "the read failed"})),
         },
     }
+}
+
+/// The page a public link opens, while public links are allowed, with the live
+/// `[assistant.pages]`.
+async fn public_page(gateway: &Gateway, token: &str) -> Option<(Page, AssistantPageLimits)> {
+    let store = gateway.pages.clone()?;
+    let limits = page_limits(gateway).await?;
+    if !limits.public {
+        return None;
+    }
+    Some((store.public(token)?, limits))
+}
+
+/// `GET /s/{token}/`: a public link's frame, for anyone holding it; its bar says it is public.
+async fn public_frame(State(gateway): State<Gateway>, UrlPath(token): UrlPath<String>) -> Response {
+    let Some((page, limits)) = public_page(&gateway, &token).await else {
+        return gone();
+    };
+    let mut response = frame_html(&page, &Viewing::Public, "f/", &limits).into_response();
+    *response.headers_mut() = frame_headers(&pages_base(&gateway));
+    response
+}
+
+/// `GET /s/{token}/f/{path}`: a file of a public page, under the deployment's network profile.
+/// A public link has no feed: nobody signed in to read with.
+async fn public_file(
+    State(gateway): State<Gateway>,
+    UrlPath((token, path)): UrlPath<(String, String)>,
+    Query(query): Query<FileQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let Some((page, limits)) = public_page(&gateway, &token).await else {
+        return gone();
+    };
+    let Some(store) = gateway.pages.clone() else {
+        return gone();
+    };
+    let base = pages_base(&gateway);
+    if top_level(&headers) {
+        return see_other(&format!("{base}/s/{token}/"));
+    }
+    let csp = page_csp(&base, limits.network, limits.scripts);
+    serve_file(&store, &page, &path, query.source.is_some(), &csp)
 }
 
 /// Checks the declared feeds of a dashboard: each a read tool with input its schema accepts, at

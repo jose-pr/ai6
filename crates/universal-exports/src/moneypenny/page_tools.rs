@@ -231,7 +231,11 @@ impl Assistant {
             created_at: at,
             expires_at: Some(at + limits.default_ttl.0.as_secs_f64()),
             feeds,
-            shares: previous.map(|page| page.shares).unwrap_or_default(),
+            shares: previous
+                .as_ref()
+                .map(|page| page.shares.clone())
+                .unwrap_or_default(),
+            public: previous.as_ref().and_then(|page| page.public.clone()),
         };
         let prepared = match store.prepare(page, &files, &limits) {
             Ok(prepared) => prepared,
@@ -244,6 +248,20 @@ impl Assistant {
             prepared.page.bytes,
             granted.conversation_id,
         );
+        if prepared.page.public.is_some()
+            && let Err(reason) = audit(
+                gateway,
+                &person,
+                "moneypenny.page.public",
+                String::new(),
+                Some(RESOURCE.to_owned()),
+                &format!("{} on, kept by a replace", prepared.page.id),
+            )
+            .await
+        {
+            store.discard(prepared);
+            return refused(reason);
+        }
         if let Err(reason) = audit(
             gateway,
             &person,
@@ -450,7 +468,12 @@ pub(crate) async fn list(
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     let limits = page_limits(&gateway).await?;
-    let mut listed: Vec<Value> = store.of(&person.id).iter().map(Page::summary).collect();
+    let base = pages::pages_base(&gateway);
+    let mut listed: Vec<Value> = store
+        .of(&person.id)
+        .iter()
+        .map(|page| page.summary_with_link(&base))
+        .collect();
     for page in store.shared_by_others(&person.id) {
         if pages::may_view(&gateway, &page, &person, &limits).await {
             listed.push(page.summary_for(&person.id));
@@ -536,7 +559,7 @@ pub(crate) async fn remember(
     let page = store
         .remember(&id, request.remember, limits.default_ttl.0)
         .ok_or_else(ApiError::not_found)?;
-    Ok(Json(page.summary()))
+    Ok(Json(page.summary_with_link(&pages::pages_base(&gateway))))
 }
 
 #[derive(Deserialize)]
@@ -648,7 +671,55 @@ pub(crate) async fn share(
         }
     }
     store.revoke_viewers(&id, &|viewer| kept.iter().any(|kept| kept == viewer));
-    Ok(Json(page.summary()).into_response())
+    Ok(Json(page.summary_with_link(&pages::pages_base(&gateway))).into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PublicRequest {
+    on: bool,
+}
+
+/// `PUT /v1/user/pages/{id}/public {on}`: gives the page a public link, `{pages
+/// base}/s/{token}/`, which opens it for anyone holding the link with no sign-in and no feeds,
+/// until the person turns it off or the page goes; turning it on again keeps the same link.
+/// Only the page's person, and only while `[assistant.pages] public` is on; turning it off is
+/// always allowed. Audited as `moneypenny.page.public`. Answers the page as its person lists
+/// it, with `public_url`.
+pub(crate) async fn public(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+    Json(request): Json<PublicRequest>,
+) -> Result<Response, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
+    match store.get(&id) {
+        Some(page) if page.person_id == person.id => {}
+        _ => return Err(ApiError::not_found()),
+    }
+    let limits = page_limits(&gateway).await?;
+    if request.on && !limits.public {
+        return Ok(refusal(
+            StatusCode::FORBIDDEN,
+            "this deployment turns public links off",
+        ));
+    }
+    audit(
+        &gateway,
+        &person,
+        "moneypenny.page.public",
+        String::new(),
+        Some(RESOURCE.to_owned()),
+        &format!("{id} {}", if request.on { "on" } else { "off" }),
+    )
+    .await
+    .map_err(|_| ApiError::internal())?;
+    let page = store
+        .set_public(&id, request.on)
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(ApiError::not_found)?;
+    Ok(Json(page.summary_with_link(&pages::pages_base(&gateway))).into_response())
 }
 
 /// `DELETE /v1/user/pages/{id}`: deletes the page. Only the page's person.

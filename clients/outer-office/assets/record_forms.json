@@ -4487,8 +4487,8 @@
             },
             "frame": {
               "type": "boolean",
-              "title": "Show pages in the gateway's frame",
-              "description": "Whether a page is shown in the gateway's frame with the classification bar.",
+              "title": "Show the classification bar",
+              "description": "Whether a page's frame shows the classification bar. The page stays in the gateway's frame either way, which keeps a viewer's link in the browser that opened it.",
               "default": true
             },
             "sharing": {
@@ -4516,6 +4516,12 @@
               "title": "Subjects a page is shared with",
               "description": "Subjects one page is shared with.",
               "default": 32
+            },
+            "public": {
+              "type": "boolean",
+              "title": "People may make public links",
+              "description": "Whether a person may give a page a public link, which opens it for anyone holding the link, with no sign-in and no feeds. Off, every public link stops answering.",
+              "default": true
             }
           },
           "additionalProperties": false,
@@ -4545,7 +4551,8 @@
             "feeds": true,
             "frame": true,
             "sharing": true,
-            "max_shares": 32
+            "max_shares": 32,
+            "public": true
           }
         }
       },

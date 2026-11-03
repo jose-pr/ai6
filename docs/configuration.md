@@ -1387,9 +1387,10 @@ never a weakening, and nothing is evicted when one is lowered. Pages are open by
 | `scripts` | `true` | **Run pages' scripts.** Whether a page's scripts run. |
 | `network` | `open` | **What a page may reach.** What a page may reach from the browser. |
 | `feeds` | `true` | **Dashboards read live feeds.** Whether dashboards may read live feeds. |
-| `frame` | `true` | **Show pages in the gateway's frame.** Whether a page is shown in the gateway's frame with the classification bar. |
+| `frame` | `true` | **Show the classification bar.** Whether a page's frame shows the classification bar. The page stays in the gateway's frame either way, which keeps a viewer's link in the browser that opened it. |
 | `sharing` | `true` | **People may share pages.** Whether a person may share a page. |
 | `max_shares` | 32 | **Subjects a page is shared with.** Subjects one page is shared with. |
+| `public` | `true` | **People may make public links.** Whether a person may give a page a public link, which opens it for anyone holding the link, with no sign-in and no feeds. Off, every public link stops answering. |
 <!-- schema:record.assistant.pages:end -->
 
 A Station reads `[assistant.limits]` `page_file_bytes` (8 MiB), `page_files` (200) and

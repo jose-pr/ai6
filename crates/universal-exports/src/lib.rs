@@ -1401,6 +1401,10 @@ impl Gateway {
             .route(
                 "/v1/user/pages/{id}/shares",
                 axum::routing::put(moneypenny::page_tools::share),
+            )
+            .route(
+                "/v1/user/pages/{id}/public",
+                axum::routing::put(moneypenny::page_tools::public),
             );
         let router = Router::new()
             .route("/health", get(health))

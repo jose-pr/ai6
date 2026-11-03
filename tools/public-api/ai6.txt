@@ -656,6 +656,7 @@ pub ai6::directorates::m::assistant::AssistantPageLimits::max_shares: ai6::bound
 pub ai6::directorates::m::assistant::AssistantPageLimits::max_total_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::network: ai6::PageNetwork
 pub ai6::directorates::m::assistant::AssistantPageLimits::open_ttl: ai6::bounds::Seconds
+pub ai6::directorates::m::assistant::AssistantPageLimits::public: bool
 pub ai6::directorates::m::assistant::AssistantPageLimits::scripts: bool
 pub ai6::directorates::m::assistant::AssistantPageLimits::sharing: bool
 pub ai6::directorates::m::assistant::AssistantPageLimits::stage_ttl: ai6::bounds::Seconds
@@ -8634,6 +8635,7 @@ pub ai6::AssistantPageLimits::max_shares: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::max_total_bytes: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::network: ai6::PageNetwork
 pub ai6::AssistantPageLimits::open_ttl: ai6::bounds::Seconds
+pub ai6::AssistantPageLimits::public: bool
 pub ai6::AssistantPageLimits::scripts: bool
 pub ai6::AssistantPageLimits::sharing: bool
 pub ai6::AssistantPageLimits::stage_ttl: ai6::bounds::Seconds

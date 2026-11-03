@@ -284,6 +284,11 @@ async fn run(cli: Cli) -> Result<(), String> {
         gateway = gateway
             .with_pages(config)
             .map_err(|error| format!("pages: {error}"))?;
+        if let Some(weakening) =
+            public_pages_weakening(pages.origin.is_some(), assistant_record.pages().public)
+        {
+            eprintln!("universal-exports: warning: {weakening}");
+        }
         if let Some(origin) = &pages.origin {
             let listen = settings.located.pages_listen();
             let own = gateway.clone();
@@ -705,8 +710,24 @@ async fn shutdown_signal() {
     }
 }
 
+/// What a public link gives up when pages share the API's origin: an outsider then sees a page
+/// she made under the app's own address.
+fn public_pages_weakening(own_origin: bool, public: bool) -> Option<&'static str> {
+    (public && !own_origin).then_some(
+        "[assistant.pages] public = true with no [unex.pages] origin: a public link shows a page \
+         Moneypenny made, to anyone holding it, under the app's own address",
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_public_link_on_the_apis_own_origin_is_a_weakening() {
+        assert!(super::public_pages_weakening(false, true).is_some());
+        assert!(super::public_pages_weakening(true, true).is_none());
+        assert!(super::public_pages_weakening(false, false).is_none());
+    }
+
     use super::*;
     use clap::CommandFactory;
 
