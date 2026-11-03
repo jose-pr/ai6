@@ -149,7 +149,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   she had read, the page it affects as a chip that only opens it, and how it stands:
   Waiting for you, Applying, Applied, Refused with the reason, Cancelled, Expired, or an
   outcome unknown when it has been applying for thirty seconds); **Stop**
-  ends an answer she is still giving. Her menu opens **Her memory of you**: the entries she keeps
+  ends an answer she is still giving. **Copy** beside each of her answers copies it as she wrote
+  it, Markdown included, and any text in the app can be selected and copied. Her menu's **Export
+  conversation** saves the conversation as Markdown: a download in a browser, a new file in
+  Downloads on a desktop. Her menu opens **Her memory of you**: the entries she keeps
   of the operator, searched, opened in a form, saved, added or forgotten (after a confirmation).
   The same page shows the global memory and each Operation's the operator may read, with who wrote
   each entry and what Agents proposed for it. See the

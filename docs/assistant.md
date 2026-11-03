@@ -408,6 +408,11 @@ menu opens **Her memory of you**: your entries with who wrote each, a search, an
 edit and forget one (after you confirm). The same page shows the global memory and each
 Operation's you may read ([Memories](memories.md#in-the-app)).
 
+**Export conversation**, in the same menu, saves the conversation as you see it as a Markdown
+file: a heading per entry with who said it and when, and the data of a proposal, view or page as a
+JSON block. In a browser it is a download; on a desktop it is a new file in your Downloads folder,
+never written over another. **Copy** beside each of her answers copies it as she wrote it.
+
 | Route | Does |
 | --- | --- |
 | `GET /v1/user/assistant/memory[?q=TEXT]` | Lists your entries, newest change first, or searches them, best first: `{"person", "entries", "total"}`, with no content |

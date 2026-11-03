@@ -118,6 +118,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   repository also downloads. `tools/sdk/crates.py use DEPS_DIR` sets up a build from them with no
   network, `sync` and `refresh` keep them equal to the lock, and `tools/sdk/check_lock.py` fails when
   the commit `sdk.lock` names does not cover it.
+- Outer Office: any text can be selected and copied, across a whole page or dialog. Moneypenny's
+  answers have a **Copy** that copies her Markdown, and her menu's **Export conversation** saves the
+  conversation as Markdown with frontmatter.
 
 ### Changed
 
