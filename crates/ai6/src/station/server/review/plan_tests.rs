@@ -227,6 +227,11 @@ async fn a_handler_that_cannot_hold_a_session_to_reading_never_starts_it() {
 async fn the_submitted_plan_is_what_the_panel_reads() {
     let root = tempfile::tempdir().unwrap();
     let state = station(root.path(), &agents("mock-author", "silent"), PLAN_GATE);
+    // The author ends its turn only after it has submitted, as a real one does.
+    super::testing::HELD
+        .lock()
+        .unwrap()
+        .insert("rv-plan-tool".to_owned());
     submit(&state, "rv-plan-tool");
     until(&state, "running", |state| {
         mission(state, "rv-plan-tool").is_some_and(|mission| !mission.session_ids.is_empty())
@@ -236,6 +241,7 @@ async fn the_submitted_plan_is_what_the_panel_reads() {
     let answer = PlanDesk::new(state.clone(), "rv-plan-tool".to_owned())
         .submit("1. read the code\n2. add the widget, with a test");
     assert!(answer.contains("End your turn"), "{answer}");
+    super::testing::HELD.lock().unwrap().remove("rv-plan-tool");
     until(&state, "the plan is up", |state| {
         plan_review(state, "rv-plan-tool").is_some()
     })

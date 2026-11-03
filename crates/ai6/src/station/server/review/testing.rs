@@ -23,6 +23,9 @@ pub(super) static REVIEWER_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new(
 /// The Session IDs a stream has reported, which are all a resume can find.
 static REPORTED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+/// Words that hold back an author's `completed` while any of them is in its prompt, as a real
+/// harness calls a tool before it ends its turn.
+pub(super) static HELD: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
 fn event(kind: &str, text: Option<String>) -> AgentEvent {
     AgentEvent {
@@ -50,6 +53,8 @@ pub(super) struct ScriptSession {
     session_id: SessionId,
     reported: Mutex<bool>,
     events: Mutex<VecDeque<AgentEvent>>,
+    /// The word in [`HELD`] that holds back `completed`, if any.
+    hold: Option<String>,
 }
 
 impl ScriptSession {
@@ -58,6 +63,7 @@ impl ScriptSession {
             session_id,
             reported: Mutex::new(reported),
             events: Mutex::new(events.into()),
+            hold: None,
         }
     }
 }
@@ -76,7 +82,20 @@ impl AgentSession for ScriptSession {
     }
 
     fn next_event(&self, _timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
-        let next = self.events.lock().unwrap().pop_front();
+        let held = self.hold.as_ref().is_some_and(|word| {
+            HELD.lock().unwrap().contains(word)
+                && self
+                    .events
+                    .lock()
+                    .unwrap()
+                    .front()
+                    .is_some_and(|event| event.kind == "completed")
+        });
+        let next = if held {
+            None
+        } else {
+            self.events.lock().unwrap().pop_front()
+        };
         match next {
             Some(event) => {
                 *self.reported.lock().unwrap() = true;
@@ -127,15 +146,21 @@ impl AgentHandler for MockAuthorHandler {
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
         AUTHOR_STARTS.lock().unwrap().push(request.clone());
         let output = scripted_output(&request.prompt);
-        Ok(ScriptSession::new(
+        let mut session = ScriptSession::new(
             fresh("author")?,
             false,
             vec![
                 event("text", Some("working".to_owned())),
                 event("completed", Some(output)),
             ],
-        )
-        .into_object())
+        );
+        session.hold = HELD
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|word| request.prompt.contains(word.as_str()))
+            .cloned();
+        Ok(session.into_object())
     }
 
     fn resume(
