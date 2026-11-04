@@ -5613,7 +5613,13 @@ that table, so a provider with a configuration of its own declares it too.
 - `ai6 plugins pin [--publisher KEY] FILE...` prints the `plugins.toml` entries that pin AI6
   provider libraries by SHA-256, or with `--publisher` (`ed25519:HEX` or a key file) accept what
   that key signed, with its weakening on standard error; anything else is refused with a
-  non-zero exit. The runner's `--pins PATH` must name an existing file.
+  non-zero exit. The runner's `--pins PATH` must name an existing file. With `--import
+  [--scope station:ID] [--config PATH]` it stores them instead as `plugin` records of a
+  writable provider in one `ConfigProvider::put_all`, each replacing the record of its file name
+  and leaving the others, and prints `added|changed|unchanged FILE: ...` per library (`changed`
+  shows old `->` new) and how many it wrote; a record already the same is not rewritten. A
+  provider that takes no changes (a directory) and two libraries of one file name are refused
+  before anything is written.
 - `ai6 plugins check [--config PATH] [PATH...]` prints `PATH  DIGEST  VERDICT` per library named,
   else on `[station.plugins] paths`, against the `plugin` records of this host's Station under `strict`
   (`check_libraries`); it opens only the configuration provider, loads nothing, writes no copy,

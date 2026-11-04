@@ -222,6 +222,16 @@ enum PluginsCommand {
         /// key's file. Anything it signed for that name then loads, older builds included.
         #[arg(long, value_name = "KEY")]
         publisher: Option<String>,
+        /// Store the entries as `plugin` records of the configuration provider, which must take
+        /// changes (SQL), in place of printing them: each replaces the record of its file name,
+        /// and the other records stay. Prints each library's change.
+        #[arg(long)]
+        import: bool,
+        /// With --import, `station:<id>` for one Station's own records (default: the global ones).
+        #[arg(long, requires = "import")]
+        scope: Option<String>,
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
         /// Library files to pin.
         #[arg(required = true)]
         paths: Vec<PathBuf>,
@@ -1099,7 +1109,13 @@ fn plugins_command(command: PluginsCommand) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        PluginsCommand::Pin { publisher, paths } => {
+        PluginsCommand::Pin {
+            publisher,
+            import,
+            scope,
+            bootstrap,
+            paths,
+        } => {
             let publisher = match publisher.as_deref().map(publisher_of).transpose() {
                 Ok(publisher) => publisher,
                 Err(error) => {
@@ -1121,6 +1137,18 @@ fn plugins_command(command: PluginsCommand) -> ExitCode {
             for weakening in pins.weakenings() {
                 eprintln!("ai6: warning: {weakening}");
             }
+            if import {
+                return match import_pins(&pins, scope.as_deref().unwrap_or_default(), &bootstrap) {
+                    Ok(changes) => {
+                        print!("{changes}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(error) => {
+                        eprintln!("ai6: {error}");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
             match toml::to_string(&pins) {
                 Ok(text) => {
                     print!("{text}");
@@ -1140,6 +1168,111 @@ fn plugins_command(command: PluginsCommand) -> ExitCode {
             }
         },
     }
+}
+
+/// Runs `ai6 plugins pin --import`: stores each entry of `pins` as the `plugin` record of its file
+/// name at `scope`, as one change, and returns a line per library saying whether it was added,
+/// changed or already so. A record that already says the same is not written again.
+fn import_pins(
+    pins: &ai6::PinSet,
+    scope: &str,
+    bootstrap: &BootstrapArg,
+) -> Result<String, String> {
+    use ai6::{ConfigRecord, ConfigScope};
+    let scope = ConfigScope::parse(scope)
+        .ok_or_else(|| format!("--scope {scope:?}: \"\" or station:<id>"))?;
+    let mut files: Vec<&str> = pins
+        .libraries
+        .iter()
+        .map(|library| library.file.as_str())
+        .collect();
+    files.sort_unstable();
+    if let Some(twice) = files.windows(2).find(|pair| pair[0] == pair[1]) {
+        return Err(format!("two libraries are named {:?}", twice[0]));
+    }
+    let located = load_bootstrap(bootstrap)?;
+    let location = located
+        .provider_location()
+        .map_err(|error| error.to_string())?;
+    let provider = open_provider(&location, &located.value)?;
+    let held = provider
+        .definitions(ConfigRecord::Plugin, &scope)
+        .map_err(|error| error.to_string())?;
+    if !held.writable {
+        return Err(format!(
+            "the configuration provider at {} takes no changes: add the entries `ai6 plugins pin` \
+             prints to its plugins file instead",
+            ai6::directorates::registry::sql::redact(&location)
+        ));
+    }
+    let mut report = String::new();
+    let mut records = Vec::new();
+    for library in &pins.libraries {
+        let stored = held
+            .records
+            .iter()
+            .find(|(file, _)| *file == library.file)
+            .map(|(_, definition)| {
+                let mut entry = definition.clone();
+                if let Some(table) = entry.as_object_mut() {
+                    table.insert("file".to_owned(), library.file.clone().into());
+                }
+                serde_json::from_value::<ai6::LibraryPin>(entry).map_or_else(
+                    |_| "an entry it cannot read".to_owned(),
+                    |old| pin_terms(&old),
+                )
+            });
+        let now = pin_terms(library);
+        match stored {
+            Some(before) if before == now => {
+                report.push_str(&format!("unchanged {}: {now}\n", library.file));
+                continue;
+            }
+            Some(before) => {
+                report.push_str(&format!("changed {}: {before} -> {now}\n", library.file));
+            }
+            None => report.push_str(&format!("added {}: {now}\n", library.file)),
+        }
+        let mut definition = serde_json::to_value(library).map_err(|error| error.to_string())?;
+        if let Some(table) = definition.as_object_mut() {
+            table.remove("file");
+        }
+        records.push((ConfigRecord::Plugin, library.file.clone(), definition));
+    }
+    if !records.is_empty() {
+        provider
+            .put_all(&scope, &records)
+            .map_err(|error| error.to_string())?;
+        let station = match &scope {
+            ConfigScope::Station(id) => id.clone(),
+            _ => String::new(),
+        };
+        provider.load(&station).map_err(|error| error.to_string())?;
+    }
+    report.push_str(&format!(
+        "{} of {} plugin records written at {scope}; a Station applies them at restart\n",
+        records.len(),
+        pins.libraries.len()
+    ));
+    Ok(report)
+}
+
+/// What a pin-set entry accepts, in words: `pin sha256:..`, `publisher ed25519:..`, or both
+/// joined by `or`, or by `and` under `require = "both"`.
+fn pin_terms(library: &ai6::LibraryPin) -> String {
+    let terms: Vec<String> = [
+        library.pin.map(|pin| format!("pin {pin}")),
+        library.publisher.map(|key| format!("publisher {key}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let joiner = if library.require == ai6::Require::Both {
+        " and "
+    } else {
+        " or "
+    };
+    terms.join(joiner)
 }
 
 /// The publisher `--publisher` names: `ed25519:HEX`, else the public half of the key in that file.

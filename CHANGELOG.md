@@ -161,6 +161,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   open in the app; a Mission reference also offers its linked issues and its Sources' boards. A web
   link opens at once on a known tracker and after showing its full address anywhere else. Moneypenny's
   text uses the same renderer with web links off.
+- `ai6 plugins pin --import [--scope station:ID]` stores the entries as `plugin` records of a
+  provider that takes changes, each replacing the record of its file name and leaving the others,
+  and prints which libraries were added, changed (old and new) or already so. A rebuild is one
+  command, where it was a print, an edit and an `ai6 config import`.
 
 ### Changed
 

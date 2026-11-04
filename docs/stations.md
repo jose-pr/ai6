@@ -401,6 +401,24 @@ A pin set's `plugin` family applies at restart, so run it after importing and be
 Copy `FILE.sig` with its library wherever libraries are copied, field runners included. A new
 library name still takes one record, once: naming what may load is the policy.
 
+### Storing pins
+
+`pin` prints entries for a `plugins.toml`. With a configuration provider that takes changes
+(SQL), `--import` stores them as its `plugin` records instead, which suits digest pins, renewed
+with every build:
+
+```console
+ai6 plugins pin --import --config ai6.cfg lib/*.dll                     # the global records
+ai6 plugins pin --import --scope station:s1 --config ai6.cfg lib/*.dll  # one Station's own
+```
+
+Each entry replaces the record of its file name, and records for other names stay as they are.
+It prints a line per library, `added`, `changed` (with the old entry and the new) or
+`unchanged`, and how many records it wrote; the change is checked and kept whole, as `ai6
+config import` does. A directory of family files takes no changes, so `--import` is refused
+there and writes nothing: add the printed entries to its `plugins.toml`. A Station applies
+`plugin` records at restart.
+
 ### What a publisher entry gives up
 
 **A publisher entry is weaker than a digest pin, and the compromise of its key matters more.**

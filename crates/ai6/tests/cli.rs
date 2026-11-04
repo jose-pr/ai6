@@ -69,6 +69,126 @@ fn plugins_pin_prints_an_entry_for_a_provider_library_and_refuses_anything_else(
     assert!(!output.status.success());
 }
 
+#[test]
+fn plugins_pin_import_replaces_a_rebuilt_library_s_record_and_keeps_the_others() {
+    use ai6::ConfigProvider as _;
+
+    let root = tempfile::tempdir().unwrap();
+    let config = bootstrap(root.path(), "[provider]\nlocation = \"sqlite:ai6.db\"\n");
+    let plugins = root.path().join("plugins");
+    std::fs::create_dir(&plugins).unwrap();
+    let built = std::fs::read(built_plugin("coqui_roles_plugin")).unwrap();
+    let name = |stem: &str| format!("{stem}.{}", std::env::consts::DLL_EXTENSION);
+    let (first, second) = (plugins.join(name("first")), plugins.join(name("second")));
+    std::fs::write(&first, &built).unwrap();
+    std::fs::write(&second, &built).unwrap();
+    let digest = |bytes: &[u8]| format!("sha256:{}", hex(&sha256(bytes)));
+    let import = |paths: &[&std::path::Path]| {
+        let mut command = ai6();
+        command.args(["plugins", "pin", "--import", "--config"]);
+        command.arg(&config).args(paths);
+        command.output().expect("the AI6 command should start")
+    };
+    let stored = || {
+        let sql =
+            ai6::SqlProvider::open(&format!("sqlite:{}", root.path().join("ai6.db").display()))
+                .unwrap();
+        sql.definitions(ai6::ConfigRecord::Plugin, &ai6::ConfigScope::Global)
+            .unwrap()
+            .records
+            .into_iter()
+            .map(|(file, definition)| (file, definition["pin"].as_str().unwrap().to_owned()))
+            .collect::<Vec<_>>()
+    };
+
+    let output = import(&[&first, &second]);
+    assert!(output.status.success(), "{output:?}");
+    let said = text(&output.stdout);
+    assert!(
+        said.contains(&format!("added {}: pin {}", name("first"), digest(&built))),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("added {}", name("second"))),
+        "{said}"
+    );
+    assert_eq!(
+        stored(),
+        [
+            (name("first"), digest(&built)),
+            (name("second"), digest(&built))
+        ]
+    );
+
+    // One library is rebuilt: its record follows its bytes, and the other stays as it was.
+    let mut rebuilt = built.clone();
+    rebuilt.extend_from_slice(b"rebuilt");
+    std::fs::write(&first, &rebuilt).unwrap();
+    let output = import(&[&first, &second]);
+    assert!(output.status.success(), "{output:?}");
+    let said = text(&output.stdout);
+    assert!(
+        said.contains(&format!(
+            "changed {}: pin {} -> pin {}",
+            name("first"),
+            digest(&built),
+            digest(&rebuilt)
+        )),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("unchanged {}", name("second"))),
+        "{said}"
+    );
+    assert!(
+        said.contains("1 of 2 plugin records written at global"),
+        "{said}"
+    );
+    assert_eq!(
+        stored(),
+        [
+            (name("first"), digest(&rebuilt)),
+            (name("second"), digest(&built))
+        ]
+    );
+
+    // Naming one library leaves every other record alone.
+    std::fs::write(&first, &built).unwrap();
+    let output = import(&[&first]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        stored(),
+        [
+            (name("first"), digest(&built)),
+            (name("second"), digest(&built))
+        ]
+    );
+
+    // A directory of family files takes no changes: nothing is written there.
+    let files = tempfile::tempdir().unwrap();
+    let read_only = bootstrap(files.path(), "");
+    let output = ai6()
+        .args(["plugins", "pin", "--import", "--config"])
+        .arg(&read_only)
+        .arg(&first)
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        text(&output.stderr).contains("takes no changes"),
+        "{output:?}"
+    );
+    assert!(!files.path().join("plugins.toml").exists());
+
+    // --scope means nothing without --import.
+    let output = ai6()
+        .args(["plugins", "pin", "--scope", "station:a"])
+        .arg(&first)
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+}
+
 /// An access plugin Cargo built beside this test binary: they are dev-dependencies.
 fn built_plugin(name: &str) -> std::path::PathBuf {
     let deps = std::env::current_exe().unwrap();
