@@ -144,6 +144,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- AI6 builds on Guatiao 266baf9c, coqui-acp ee19118 and coqui-access add863cf, one Guatiao revision for
+  every kind and plugin; no kind's floor hash moved, so plugins built against it load as before once
+  rebuilt together. coqui-acp's bridge proves a new identity by Noise.
 - **Breaking for handler plugins**: the Session a handler returns is the shared agent session kind of
   `coqui-acp-provider` (object kind `agent_session`, pinned with `coqui-acp` at `3c2b30e`), in place
   of AI6's own `ai6_agent_session`. `AgentSession`, `AgentMessage`, `AgentEvent`, `UsageLimit`,
