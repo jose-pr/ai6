@@ -4992,6 +4992,7 @@ dependencies = [
  "futures-util",
  "governor",
  "guatiao",
+ "hmac",
  "pulldown-cmark",
  "reqwest 0.12.28",
  "roxmltree",

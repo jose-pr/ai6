@@ -522,6 +522,32 @@ pub struct Gateway {
     job_poll_max_wait: Duration,
     pages: Option<Arc<moneypenny::pages::PageStore>>,
     pages_config: Option<PagesConfig>,
+    /// The person each live [`StandIn`] reads as, by the SHA-256 of its bearer.
+    stand_ins: Arc<std::sync::Mutex<HashMap<String, String>>>,
+}
+
+/// A bearer the gateway makes for itself to read, in this process, as a person who proved who
+/// they are some other way (a page's viewer). It is never stored or sent anywhere, and it stops
+/// working when dropped.
+pub(crate) struct StandIn {
+    token: String,
+    digest: String,
+    stand_ins: Arc<std::sync::Mutex<HashMap<String, String>>>,
+}
+
+impl StandIn {
+    pub(crate) fn token(&self) -> &str {
+        &self.token
+    }
+}
+
+impl Drop for StandIn {
+    fn drop(&mut self) {
+        self.stand_ins
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.digest);
+    }
 }
 
 impl fmt::Debug for Gateway {
@@ -602,6 +628,22 @@ impl Gateway {
             job_poll_max_wait: ai6::AssistantGatewayLimits::default().max_wait.0,
             pages: None,
             pages_config: None,
+            stand_ins: Arc::default(),
+        }
+    }
+
+    /// A [`StandIn`] reading as `person_id` until it is dropped.
+    pub(crate) fn stand_in(&self, person_id: &str) -> StandIn {
+        let token = new_secret();
+        let digest = access_token_digest(&token);
+        self.stand_ins
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(digest.clone(), person_id.to_owned());
+        StandIn {
+            token,
+            digest,
+            stand_ins: self.stand_ins.clone(),
         }
     }
 
@@ -3502,13 +3544,35 @@ async fn store_session_cookie(
 }
 
 async fn resolve_user(gateway: &Gateway, token: &str) -> Result<Person, ApiError> {
-    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let digest = access_token_digest(token);
-    let record = tokio::task::spawn_blocking(move || registry.find_access_token(&digest))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|_| ApiError::internal())?
-        .ok_or_else(ApiError::unauthorized)?;
+    resolve_digest(gateway, access_token_digest(token)).await
+}
+
+/// The person whose access token, or live [`StandIn`], has the digest `digest`.
+async fn resolve_digest(gateway: &Gateway, digest: String) -> Result<Person, ApiError> {
+    let standing_in = gateway
+        .stand_ins
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&digest)
+        .cloned();
+    let person_id = match standing_in {
+        Some(person_id) => person_id,
+        None => {
+            let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+            tokio::task::spawn_blocking(move || registry.find_access_token(&digest))
+                .await
+                .map_err(|_| ApiError::internal())?
+                .map_err(|_| ApiError::internal())?
+                .ok_or_else(ApiError::unauthorized)?
+                .person_id()
+                .to_owned()
+        }
+    };
+    person_by_id(gateway, person_id).await
+}
+
+/// The person with ID `person_id` in the directory, now.
+async fn person_by_id(gateway: &Gateway, person_id: String) -> Result<Person, ApiError> {
     let directory = gateway
         .access
         .as_ref()
@@ -3518,7 +3582,7 @@ async fn resolve_user(gateway: &Gateway, token: &str) -> Result<Person, ApiError
     tokio::task::spawn_blocking(move || {
         directory.lookup(Lookup {
             by: "id".to_owned(),
-            value: record.person_id().to_owned(),
+            value: person_id,
         })
     })
     .await

@@ -40,6 +40,15 @@ fn one(name: &str, text: &str) -> BTreeMap<String, Vec<u8>> {
     BTreeMap::from([(name.to_owned(), text.as_bytes().to_vec())])
 }
 
+/// The entries of `dir` but the hidden ones, the links and the key.
+fn visible(dir: &std::path::Path) -> usize {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+        .count()
+}
+
 fn store() -> (tempfile::TempDir, PageStore) {
     let dir = tempfile::tempdir().unwrap();
     let store = PageStore::open(dir.path().join("pages")).unwrap();
@@ -188,7 +197,7 @@ fn a_page_is_checked_against_every_quota_before_anything_is_stored() {
             .contains("not a path")
     );
     // Nothing was written by a refusal.
-    assert_eq!(std::fs::read_dir(store.dir.clone()).unwrap().count(), 0);
+    assert_eq!(visible(&store.dir), 0);
 
     let tight = limits(json!({"max_pages": 2, "max_person_bytes": 20, "max_total_bytes": 30}));
     keep(&store, page("page-1", "p", &files), &files, &tight).unwrap();
@@ -267,10 +276,7 @@ fn a_discarded_page_leaves_nothing_and_a_committed_one_survives_a_restart() {
         .unwrap();
     store.discard(prepared);
     assert!(store.get("page-gone").is_none());
-    assert_eq!(
-        std::fs::read_dir(dir.path().join("pages")).unwrap().count(),
-        0
-    );
+    assert_eq!(visible(&dir.path().join("pages")), 0);
 
     keep(&store, page("page-kept", "p", &files), &files, &defaults).unwrap();
     store
@@ -331,17 +337,18 @@ fn links_stand_for_their_page_and_time_and_are_counted() {
         Duration::from_secs(3600),
     );
     assert!(expires <= made.expires_at.unwrap());
-    let (link, _) = store.link(&token).unwrap();
+    let (key, link, _) = store.link(&token).unwrap();
     assert_eq!(
         (link.viewer.as_str(), link.network),
         ("p", PageNetwork::Own)
     );
     assert!(store.link("not-the-token").is_none());
     // The address-bar token and the view token each find the link only through their own door.
-    assert_ne!(link.view, token);
-    assert!(store.viewed(&link.view).is_some());
+    let view = store.view_token(&key);
+    assert_ne!(view, token);
+    assert!(store.viewed(&view).is_some());
     assert!(store.viewed(&token).is_none());
-    assert!(store.link(&link.view).is_none());
+    assert!(store.link(&view).is_none());
     // The first request binds a cookie; later ones need it.
     let Admit::First(cookie) = store.admit(&token, &[]) else {
         panic!("the first request binds the link");
@@ -351,12 +358,20 @@ fn links_stand_for_their_page_and_time_and_are_counted() {
     assert_eq!(store.admit(&token, &["other", &cookie]), Admit::Again);
     assert_eq!(store.admit("not-the-token", &[&cookie]), Admit::Refused);
     for _ in 0..3 {
-        assert!(store.note_read(&link.view, 3));
+        assert!(store.note_read(&key, 3));
     }
-    assert!(
-        !store.note_read(&link.view, 3),
-        "the fourth read in a minute"
+    assert!(!store.note_read(&key, 3), "the fourth read in a minute");
+    // A restart keeps the link, its view token and its cookie, but not its address-bar token.
+    let reopened = PageStore::open(_dir.path().join("pages")).unwrap();
+    let (again, kept, _) = reopened.viewed(&view).unwrap();
+    assert_eq!(again, key);
+    assert_eq!(
+        (kept.viewer.as_str(), kept.sign_in.as_str()),
+        ("p", "bearer")
     );
+    assert!(kept.token.is_none());
+    assert_eq!(reopened.admit(&token, &[&cookie]), Admit::Again);
+    assert_eq!(reopened.admit(&token, &[]), Admit::Refused);
     let (short, _) = store.mint(&made, "p", "b", PageNetwork::Open, Duration::ZERO);
     assert!(
         store.link(&short).is_none(),
@@ -364,7 +379,7 @@ fn links_stand_for_their_page_and_time_and_are_counted() {
     );
     store.delete("page-1");
     assert!(store.link(&token).is_none(), "the page's links go with it");
-    assert!(store.viewed(&link.view).is_none());
+    assert!(store.viewed(&view).is_none());
 }
 
 #[test]

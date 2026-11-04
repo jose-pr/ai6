@@ -270,7 +270,15 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         gateway = gateway.with_assistant(assistant);
         let pages = &settings.located.value.unex.pages;
-        let mut config = universal_exports::PagesConfig::new(settings.located.pages_dir());
+        let pages_dir = settings
+            .located
+            .pages_dir()
+            .map_err(|error| format!("[unex.pages] dir: {error}"))?;
+        eprintln!(
+            "universal-exports: pages are kept in {}",
+            pages_dir.display()
+        );
+        let mut config = universal_exports::PagesConfig::new(pages_dir);
         if let Some(origin) = &pages.origin {
             let listen = settings.located.pages_listen();
             if listen.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {

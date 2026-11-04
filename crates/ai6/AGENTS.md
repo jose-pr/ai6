@@ -1138,7 +1138,7 @@ impl Located<Bootstrap> {
     pub fn unex_registry_location(&self) -> Result<String, BootstrapError>; // as registry_location, in unex_state_dir
     pub fn unex_listen(&self) -> SocketAddr;                             // [unex] listen
     pub fn proxy_secret_min_bytes(&self) -> u64;                         // [unex] proxy_secret_min_bytes, else 32
-    pub fn pages_dir(&self) -> PathBuf;                                  // [unex.pages] dir, else pages/ beside the file
+    pub fn pages_dir(&self) -> Result<PathBuf, BootstrapError>;          // [unex.pages] dir, else pages/ in unex_state_dir()
     pub fn pages_listen(&self) -> SocketAddr;                            // [unex.pages] listen
     pub fn unex_weakenings(&self) -> Vec<String>;
 }

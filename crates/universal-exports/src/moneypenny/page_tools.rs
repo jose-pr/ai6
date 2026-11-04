@@ -515,7 +515,13 @@ pub(crate) async fn open(
         Some(_) => return Err(ApiError::bad_request()),
     };
     let network = pages::profile(&limits, asked);
-    let (link, expires) = store.mint(&page, &person.id, token, network, limits.open_ttl.0);
+    let (link, expires) = store.mint(
+        &page,
+        &person.id,
+        &crate::access_token_digest(token),
+        network,
+        limits.open_ttl.0,
+    );
     Ok(Json(json!({
         "url": format!("{}/v/{link}/", pages::pages_base(&gateway)),
         "expires_at": expires,
@@ -665,8 +671,8 @@ pub(crate) async fn share(
         .map_err(|_| ApiError::internal())?
         .ok_or_else(ApiError::not_found)?;
     let mut kept = Vec::new();
-    for (viewer, token) in store.viewers(&id) {
-        if let Ok(holder) = resolve_user(&gateway, &token).await
+    for (viewer, sign_in) in store.viewers(&id) {
+        if let Ok(holder) = crate::resolve_digest(&gateway, sign_in).await
             && pages::may_view(&gateway, &page, &holder, &limits).await
         {
             kept.push(viewer);

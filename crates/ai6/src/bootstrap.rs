@@ -518,8 +518,7 @@ pub struct AccessSettings {
 #[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct PagesSettings {
-    /// Where pages are kept. Default: `pages` beside the bootstrap file (the working directory
-    /// without one).
+    /// Where pages are kept. Default: `pages` in the gateway's state directory.
     #[schema(title = "Pages directory")]
     pub dir: Option<PathBuf>,
     /// The pages' own origin, such as `https://pages.example.net`, served by a second
@@ -618,14 +617,16 @@ pub struct Bootstrap {
 }
 
 impl Located<Bootstrap> {
-    /// Where the gateway keeps pages: `[unex.pages] dir`, else `pages` beside the bootstrap file,
-    /// else `pages` in the working directory.
-    pub fn pages_dir(&self) -> PathBuf {
+    /// Where the gateway keeps pages: `[unex.pages] dir`, else `pages` in the gateway's state
+    /// directory.
+    ///
+    /// # Errors
+    ///
+    /// As [`unex_state_dir`](Self::unex_state_dir), when no directory is set.
+    pub fn pages_dir(&self) -> Result<PathBuf, BootstrapError> {
         match &self.value.unex.pages.dir {
-            Some(dir) => dir.clone(),
-            None => self
-                .dir()
-                .map_or_else(|| PathBuf::from("pages"), |dir| dir.join("pages")),
+            Some(dir) => Ok(dir.clone()),
+            None => Ok(self.unex_state_dir()?.join("pages")),
         }
     }
 

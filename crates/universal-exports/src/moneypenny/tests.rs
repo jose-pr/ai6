@@ -173,11 +173,140 @@ struct Served {
     pages_server: Option<(String, tokio::task::JoinHandle<()>)>,
     /// Where pages are kept.
     pages_dir: std::path::PathBuf,
+    /// The gateway as it was built, for a test to read its state.
+    gateway: Gateway,
     /// Her desk, for a test to move its clock.
     assistant: Arc<super::Assistant>,
     /// Actions the policy refuses from now on, whatever the roles say.
     denied: Arc<std::sync::Mutex<Vec<String>>>,
+    /// What the gateway was built with, to build it again on the same state.
+    setup: Setup,
     _directory: tempfile::TempDir,
+}
+
+/// The settings a test gateway is built from.
+#[derive(Clone)]
+struct Setup {
+    config: AssistantConfig,
+    roster: Option<Arc<dyn ai6::ConfigProvider>>,
+    own_origin: bool,
+}
+
+/// A test gateway over `registry`, keeping pages in `pages_dir`; with `pages_origin` its pages
+/// have an origin and listener of their own.
+fn test_gateway(
+    registry: &FileRegistry,
+    pages_dir: &std::path::Path,
+    denied: &Arc<std::sync::Mutex<Vec<String>>>,
+    setup: &Setup,
+    pages_origin: Option<(&str, SocketAddr)>,
+) -> Gateway {
+    let gateway = Gateway::with_access(
+        GatewayConfig::new(
+            "https://localhost",
+            STATION_TOKEN,
+            GatewayLimits::default(),
+            Duration::from_secs(30),
+            Duration::from_secs(30),
+        )
+        .unwrap(),
+        Arc::new(registry.clone()),
+        AccessProviders::new(
+            Arc::new(People),
+            Arc::new(People),
+            Arc::new(Revocable {
+                inner: Arc::new(access_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
+                denied: denied.clone(),
+            }),
+        ),
+    )
+    .with_assistant(setup.config.clone());
+    let pages = match pages_origin {
+        Some((origin, listen)) => crate::PagesConfig::new(pages_dir).with_origin(origin, listen),
+        None => crate::PagesConfig::new(pages_dir),
+    };
+    let gateway = gateway.with_pages(pages).unwrap();
+    match setup.roster.clone() {
+        Some(roster) => gateway.with_roster(roster),
+        None => gateway,
+    }
+}
+
+/// The listeners serving a test gateway: its base URL and task, and its pages' own when it has
+/// them.
+struct Serving {
+    base: String,
+    server: tokio::task::JoinHandle<()>,
+    pages_server: Option<(String, tokio::task::JoinHandle<()>)>,
+}
+
+/// Builds the gateway of `setup` and serves it on fresh loopback listeners.
+async fn serve_gateway(
+    registry: &FileRegistry,
+    pages_dir: &std::path::Path,
+    denied: &Arc<std::sync::Mutex<Vec<String>>>,
+    setup: &Setup,
+) -> (Gateway, Serving) {
+    let pages_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let pages_address = pages_listener.local_addr().unwrap();
+    let pages_origin = format!("http://{pages_address}");
+    let gateway = test_gateway(
+        registry,
+        pages_dir,
+        denied,
+        setup,
+        setup
+            .own_origin
+            .then_some((pages_origin.as_str(), pages_address)),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let pages_server = gateway.pages_router().map(|router| {
+        (
+            pages_origin.clone(),
+            tokio::spawn(async move {
+                let _ = axum::serve(
+                    pages_listener,
+                    router.into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .await;
+            }),
+        )
+    });
+    let router = gateway.clone().router();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    (
+        gateway,
+        Serving {
+            base,
+            server,
+            pages_server,
+        },
+    )
+}
+
+impl Served {
+    /// Stops the gateway and starts a new one on the same Registry and pages directory, as a
+    /// restart does: everything it held only in memory is gone.
+    async fn restart(&mut self) {
+        self.server.abort();
+        if let Some((_, server)) = &self.pages_server {
+            server.abort();
+        }
+        let (gateway, serving) =
+            serve_gateway(&self.registry, &self.pages_dir, &self.denied, &self.setup).await;
+        self.assistant = gateway.assistant.clone().unwrap();
+        self.gateway = gateway;
+        self.base = serving.base;
+        self.server = serving.server;
+        self.pages_server = serving.pages_server;
+    }
 }
 
 impl Drop for Served {
@@ -253,39 +382,12 @@ async fn served_full(
             .unwrap();
     }
     registry.elect("hq", Duration::from_secs(120)).unwrap();
-    let gateway = Gateway::with_access(
-        GatewayConfig::new(
-            "https://localhost",
-            STATION_TOKEN,
-            GatewayLimits::default(),
-            Duration::from_secs(30),
-            Duration::from_secs(30),
-        )
-        .unwrap(),
-        Arc::new(registry.clone()),
-        AccessProviders::new(
-            Arc::new(People),
-            Arc::new(People),
-            Arc::new(Revocable {
-                inner: Arc::new(access_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
-                denied: denied.clone(),
-            }),
-        ),
-    )
-    .with_assistant(config);
-    let pages_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let pages_origin = format!("http://{}", pages_listener.local_addr().unwrap());
-    let pages = if own_origin {
-        crate::PagesConfig::new(&pages_dir)
-            .with_origin(&pages_origin, pages_listener.local_addr().unwrap())
-    } else {
-        crate::PagesConfig::new(&pages_dir)
+    let setup = Setup {
+        config,
+        roster,
+        own_origin,
     };
-    let gateway = gateway.with_pages(pages).unwrap();
-    let gateway = match roster {
-        Some(roster) => gateway.with_roster(roster),
-        None => gateway,
-    };
+    let (gateway, serving) = serve_gateway(&registry, &pages_dir, &denied, &setup).await;
     let (operation, mission) = (
         ai6_diptel::OperationId::new("G").unwrap(),
         ai6_diptel::MissionId::new("mission-g").unwrap(),
@@ -343,37 +445,20 @@ async fn served_full(
     let viewer = token("viewer-007").await;
     let admin = token("admin-007").await;
     let member = token("member-007").await;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    let pages_server = gateway.pages_router().map(|router| {
-        (
-            pages_origin.clone(),
-            tokio::spawn(async move {
-                let _ = axum::serve(pages_listener, router.into_make_service()).await;
-            }),
-        )
-    });
-    let assistant = gateway.assistant.clone().unwrap();
-    let router = gateway.router();
-    let server = tokio::spawn(async move {
-        let _ = axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await;
-    });
     Served {
-        base,
+        base: serving.base,
         registry,
         operator,
         viewer,
         admin,
         member,
-        server,
-        pages_server,
+        server: serving.server,
+        pages_server: serving.pages_server,
         pages_dir,
-        assistant,
+        assistant: gateway.assistant.clone().unwrap(),
+        gateway,
         denied,
+        setup,
         _directory: directory,
     }
 }
@@ -4398,6 +4483,8 @@ fn page_dirs(served: &Served) -> Vec<String> {
             entries
                 .flatten()
                 .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                // The links and the key are kept beside the pages.
+                .filter(|name| !name.starts_with('.'))
                 .collect()
         })
         .unwrap_or_default()
@@ -4998,7 +5085,8 @@ async fn pages_a_link_fails_after_its_ttl_and_after_sign_out() {
         .await
         .unwrap();
     assert_eq!(out.status(), StatusCode::NO_CONTENT);
-    assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::NOT_FOUND);
+    // and says so.
+    assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::FORBIDDEN);
     // An unknown token is no link at all.
     assert_eq!(
         get(format!("{}/pages/v/AAAA/f/page.txt", served.base)).await,
@@ -6275,6 +6363,7 @@ async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation()
     finish(&served, &mut app, &job).await;
 }
 
+mod opening;
 mod privacy;
 mod sharing;
 mod transcripts;

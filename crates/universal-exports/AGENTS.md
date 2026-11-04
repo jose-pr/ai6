@@ -691,7 +691,10 @@ gets 404. Page routes: `GET /v/{token}/` (the frame: the bar and an `<iframe>`),
 (a file; a top-level request redirects to the frame), `/v/{token}/data/{feed}` (`{data, at}`;
 403 when feeds or the network are off or the viewer may not read it, 429 past
 `feed_reads_per_minute`). A link stands only while its page, its time and its viewer's
-sign-in do. Every page response carries the sandbox CSP (no `allow-same-origin`), `nosniff`,
+sign-in do; links are kept in `{dir}/.links.json` by token digest and the view token is an HMAC
+under `{dir}/.key`, so a restart keeps them. An ended sign-in answers 403 with "The link's owner
+is signed out"; every other refusal is a bare 404, its reason logged once per link (stderr).
+Every page response carries the sandbox CSP (no `allow-same-origin`), `nosniff`,
 `no-referrer`, `no-store`, CORP `cross-origin` and `Access-Control-Allow-Origin: *`; no `/v1`
 route ever answers CORS.
 
