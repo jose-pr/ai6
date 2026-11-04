@@ -146,16 +146,15 @@ pub ai6::bootstrap::public::PublicFile::left_out: alloc::vec::Vec<alloc::string:
 pub ai6::bootstrap::public::PublicFile::text: alloc::string::String
 pub fn ai6::bootstrap::public::public_file(&ai6::bootstrap::Bootstrap) -> core::result::Result<ai6::bootstrap::public::PublicFile, ai6::bootstrap::public::PublicError>
 #[non_exhaustive] pub enum ai6::bootstrap::SecretRef
-pub ai6::bootstrap::SecretRef::Env(alloc::string::String)
-pub ai6::bootstrap::SecretRef::File(std::path::PathBuf)
-pub ai6::bootstrap::SecretRef::Inline(zeroize::Zeroizing<alloc::string::String>)
+pub ai6::bootstrap::SecretRef::Named(alloc::string::String)
+pub ai6::bootstrap::SecretRef::Provider(ai6::directorates::q::secret_kind::SecretSource)
 impl ai6::bootstrap::SecretRef
 pub fn ai6::bootstrap::SecretRef::describe(&self) -> alloc::string::String
+pub fn ai6::bootstrap::SecretRef::env(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::bootstrap::SecretRef::file(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::bootstrap::SecretRef::read(&self) -> core::io::error::Result<zeroize::Zeroizing<alloc::string::String>>
 pub fn ai6::bootstrap::SecretRef::relative_to(self, &std::path::Path) -> Self
 pub fn ai6::bootstrap::SecretRef::weakening(&self) -> core::option::Option<alloc::string::String>
-impl core::fmt::Debug for ai6::bootstrap::SecretRef
-pub fn ai6::bootstrap::SecretRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl guatiao::schema::describe::Schema for ai6::bootstrap::SecretRef
 pub fn ai6::bootstrap::SecretRef::kind(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
 impl guatiao::value::convert::FromValue for ai6::bootstrap::SecretRef
@@ -930,12 +929,13 @@ pub ai6::directorates::m::config::ConfigRecord::Role
 pub ai6::directorates::m::config::ConfigRecord::Roster
 pub ai6::directorates::m::config::ConfigRecord::Sandbox
 pub ai6::directorates::m::config::ConfigRecord::Secret
+pub ai6::directorates::m::config::ConfigRecord::SecretProvider
 pub ai6::directorates::m::config::ConfigRecord::Station
 pub ai6::directorates::m::config::ConfigRecord::Theater
 pub ai6::directorates::m::config::ConfigRecord::Tls
 pub ai6::directorates::m::config::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 22]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 23]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -1138,7 +1138,7 @@ pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directora
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
-pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 22]
+pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 23]
 pub trait ai6::directorates::m::config::ConfigProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::definitions(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope) -> core::result::Result<ai6::directorates::m::config::ConfigDefinitions, ai6::directorates::m::roster::RosterError>
@@ -3259,6 +3259,193 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub mod ai6::directorates::q::secret_kind
+pub mod ai6::directorates::q::secret_kind::builtin
+pub struct ai6::directorates::q::secret_kind::builtin::EnvSecrets
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::EnvSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl core::convert::From<ai6::directorates::q::secret_kind::builtin::EnvSecretsConfig> for ai6::directorates::q::secret_kind::builtin::EnvSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::from(ai6::directorates::q::secret_kind::builtin::EnvSecretsConfig) -> Self
+impl guatiao::library::kind::parts::ProviderDecl for ai6::directorates::q::secret_kind::builtin::EnvSecrets
+pub const ai6::directorates::q::secret_kind::builtin::EnvSecrets::KINDS: &'static [&'static str]
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub struct ai6::directorates::q::secret_kind::builtin::EnvSecretsConfig
+impl core::convert::From<ai6::directorates::q::secret_kind::builtin::EnvSecretsConfig> for ai6::directorates::q::secret_kind::builtin::EnvSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::from(ai6::directorates::q::secret_kind::builtin::EnvSecretsConfig) -> Self
+pub struct ai6::directorates::q::secret_kind::builtin::FileSecrets
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::FileSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl core::convert::From<ai6::directorates::q::secret_kind::builtin::FileSecretsConfig> for ai6::directorates::q::secret_kind::builtin::FileSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::from(ai6::directorates::q::secret_kind::builtin::FileSecretsConfig) -> Self
+impl guatiao::library::kind::parts::ProviderDecl for ai6::directorates::q::secret_kind::builtin::FileSecrets
+pub const ai6::directorates::q::secret_kind::builtin::FileSecrets::KINDS: &'static [&'static str]
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub struct ai6::directorates::q::secret_kind::builtin::FileSecretsConfig
+pub ai6::directorates::q::secret_kind::builtin::FileSecretsConfig::dir: core::option::Option<std::path::PathBuf>
+impl core::convert::From<ai6::directorates::q::secret_kind::builtin::FileSecretsConfig> for ai6::directorates::q::secret_kind::builtin::FileSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::from(ai6::directorates::q::secret_kind::builtin::FileSecretsConfig) -> Self
+pub struct ai6::directorates::q::secret_kind::builtin::InlineFields
+pub ai6::directorates::q::secret_kind::builtin::InlineFields::value: guatiao::value::secret::Secret<alloc::string::String>
+pub struct ai6::directorates::q::secret_kind::builtin::InlineSecrets
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::InlineSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl core::convert::From<ai6::directorates::q::secret_kind::builtin::InlineSecretsConfig> for ai6::directorates::q::secret_kind::builtin::InlineSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::from(ai6::directorates::q::secret_kind::builtin::InlineSecretsConfig) -> Self
+impl guatiao::library::kind::parts::ProviderDecl for ai6::directorates::q::secret_kind::builtin::InlineSecrets
+pub const ai6::directorates::q::secret_kind::builtin::InlineSecrets::KINDS: &'static [&'static str]
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub struct ai6::directorates::q::secret_kind::builtin::InlineSecretsConfig
+impl core::convert::From<ai6::directorates::q::secret_kind::builtin::InlineSecretsConfig> for ai6::directorates::q::secret_kind::builtin::InlineSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::from(ai6::directorates::q::secret_kind::builtin::InlineSecretsConfig) -> Self
+pub fn ai6::directorates::q::secret_kind::builtin::library(guatiao::library::raw::host::Host) -> core::option::Option<guatiao::library::kind::parts::LibraryParts>
+#[non_exhaustive] pub enum ai6::directorates::q::secret_kind::SecretStoreError
+pub ai6::directorates::q::secret_kind::SecretStoreError::Conflict
+pub ai6::directorates::q::secret_kind::SecretStoreError::Failed(guatiao::library::kind::ProviderError)
+pub ai6::directorates::q::secret_kind::SecretStoreError::NotOffered
+impl core::error::Error for ai6::directorates::q::secret_kind::SecretStoreError
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretStoreError
+pub fn ai6::directorates::q::secret_kind::SecretStoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for ai6::directorates::q::secret_kind::SecretStoreError
+pub fn ai6::directorates::q::secret_kind::SecretStoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::secret_kind::SecretAsk
+pub ai6::directorates::q::secret_kind::SecretAsk::fields: guatiao::value::types::map::Map
+pub ai6::directorates::q::secret_kind::SecretAsk::key: alloc::string::String
+pub struct ai6::directorates::q::secret_kind::SecretFields(_)
+impl ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::as_json(&self) -> &serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::q::secret_kind::SecretFields::get(&self, &str) -> core::option::Option<&serde_json::value::Value>
+pub fn ai6::directorates::q::secret_kind::SecretFields::is_empty(&self) -> bool
+pub fn ai6::directorates::q::secret_kind::SecretFields::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::directorates::q::secret_kind::SecretFields::new(serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> Self
+pub fn ai6::directorates::q::secret_kind::SecretFields::to_map_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::types::map::Map, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::drop(&mut self)
+pub struct ai6::directorates::q::secret_kind::SecretKeeper
+impl ai6::directorates::q::secret_kind::SecretKeeper
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::check_fields(&self, &ai6::directorates::q::secret_kind::SecretFields) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::fields(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::lease(&self, &str, &ai6::directorates::q::secret_kind::SecretFields, f64, &str, &str) -> core::result::Result<core::option::Option<ai6::directorates::q::secret_kind::SecretLeased>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::new(alloc::boxed::Box<dyn ai6::directorates::q::secret_kind::SecretProvider>) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::read(&self, &str, &ai6::directorates::q::secret_kind::SecretFields) -> core::result::Result<ai6::directorates::q::secret_kind::SecretRead, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::store(&self, &str, &ai6::directorates::q::secret_kind::SecretFields, &str, core::option::Option<&str>) -> core::result::Result<ai6::directorates::q::secret_kind::SecretStored, ai6::directorates::q::secret_kind::SecretStoreError>
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretKeeper
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::secret_kind::SecretLeaseAsk
+pub ai6::directorates::q::secret_kind::SecretLeaseAsk::fields: guatiao::value::types::map::Map
+pub ai6::directorates::q::secret_kind::SecretLeaseAsk::holder: alloc::string::String
+pub ai6::directorates::q::secret_kind::SecretLeaseAsk::key: alloc::string::String
+pub ai6::directorates::q::secret_kind::SecretLeaseAsk::station: alloc::string::String
+pub ai6::directorates::q::secret_kind::SecretLeaseAsk::ttl_secs: f64
+pub struct ai6::directorates::q::secret_kind::SecretLeased
+pub ai6::directorates::q::secret_kind::SecretLeased::lease: alloc::string::String
+pub ai6::directorates::q::secret_kind::SecretLeased::value: guatiao::value::secret::Secret<alloc::string::String>
+pub struct ai6::directorates::q::secret_kind::SecretRead
+pub ai6::directorates::q::secret_kind::SecretRead::revision: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::secret_kind::SecretRead::value: guatiao::value::secret::Secret<alloc::string::String>
+pub struct ai6::directorates::q::secret_kind::SecretSource
+pub ai6::directorates::q::secret_kind::SecretSource::fields: ai6::directorates::q::secret_kind::SecretFields
+pub ai6::directorates::q::secret_kind::SecretSource::key: alloc::string::String
+pub ai6::directorates::q::secret_kind::SecretSource::provider: alloc::string::String
+impl ai6::directorates::q::secret_kind::SecretSource
+pub fn ai6::directorates::q::secret_kind::SecretSource::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretSource
+pub fn ai6::directorates::q::secret_kind::SecretSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::secret_kind::SecretStore
+pub ai6::directorates::q::secret_kind::SecretStore::expect: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::secret_kind::SecretStore::fields: guatiao::value::types::map::Map
+pub ai6::directorates::q::secret_kind::SecretStore::key: alloc::string::String
+pub ai6::directorates::q::secret_kind::SecretStore::value: guatiao::value::secret::Secret<alloc::string::String>
+pub struct ai6::directorates::q::secret_kind::SecretStored
+pub ai6::directorates::q::secret_kind::SecretStored::revision: core::option::Option<alloc::string::String>
+pub const ai6::directorates::q::secret_kind::BUILT_IN: [&str; 3]
+pub const ai6::directorates::q::secret_kind::RESERVED_FIELDS: [&str; 7]
+pub trait ai6::directorates::q::secret_kind::SecretProvider: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::secret_kind::SecretProvider::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretProvider::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretProvider::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretProvider::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretProvider::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretProvider::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretProvider::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretProvider::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretProvider::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::EnvSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::FileSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::InlineSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub mod ai6::directorates::q::terminal
 pub use ai6::directorates::q::terminal::guatiao
 pub enum ai6::directorates::q::terminal::HarnessStdio
@@ -3619,9 +3806,11 @@ pub fn ai6::directorates::q::LoadoutCatalog::overlays(&self) -> &alloc::collecti
 pub fn ai6::directorates::q::LoadoutCatalog::parse(&str, &ai6::directorates::m::config::ConfigLimits) -> core::result::Result<Self, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::pool(&self, &str) -> core::option::Option<&ai6::AccountPool>
 pub fn ai6::directorates::q::LoadoutCatalog::pools(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::AccountPool>
+pub fn ai6::directorates::q::LoadoutCatalog::provider_of<'a>(&'a self, &'a str) -> &'a str
 pub fn ai6::directorates::q::LoadoutCatalog::sandbox_for(&self, &ai6::directorates::q::Loadout) -> core::option::Option<&ai6::directorates::q::SandboxProfile>
 pub fn ai6::directorates::q::LoadoutCatalog::sandboxes(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::SandboxProfile>
 pub fn ai6::directorates::q::LoadoutCatalog::secret(&self, &str) -> ai6::directorates::q::SecretDefinition
+pub fn ai6::directorates::q::LoadoutCatalog::secret_providers(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::SecretInstance>
 pub fn ai6::directorates::q::LoadoutCatalog::secrets(&self) -> alloc::vec::Vec<ai6::directorates::q::SecretDefinition>
 pub fn ai6::directorates::q::LoadoutCatalog::servers_for(&self, &ai6::directorates::q::Loadout) -> core::result::Result<alloc::vec::Vec<&ai6::directorates::q::McpServer>, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::with_pool(self, ai6::AccountPool) -> core::result::Result<Self, ai6::directorates::q::QError>
@@ -3664,19 +3853,11 @@ impl ai6::SandboxRequest
 pub fn ai6::SandboxRequest::new(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
 pub fn ai6::SandboxRequest::with_allowed_root(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::SandboxRequest::with_executable(self, impl core::convert::Into<alloc::string::String>) -> Self
-pub struct ai6::directorates::q::SecretBackendFailure
-impl ai6::SecretBackendFailure
-pub const fn ai6::SecretBackendFailure::new() -> Self
-impl core::default::Default for ai6::SecretBackendFailure
-pub fn ai6::SecretBackendFailure::default() -> Self
-impl core::error::Error for ai6::SecretBackendFailure
-impl core::fmt::Display for ai6::SecretBackendFailure
-pub fn ai6::SecretBackendFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::q::SecretBroker
 impl ai6::SecretBroker
 pub fn ai6::SecretBroker::lease(&self, &ai6::directorates::q::Loadout, ai6::SecretLeaseRequest) -> core::result::Result<ai6::SecretLease, ai6::SecretError>
 pub fn ai6::SecretBroker::lease_names(&self, &ai6::directorates::q::Loadout, &[alloc::string::String], ai6::SecretLeaseRequest) -> core::result::Result<ai6::SecretLease, ai6::SecretError>
-pub fn ai6::SecretBroker::new(impl ai6::SecretBackend + 'static) -> Self
+pub fn ai6::SecretBroker::new(alloc::sync::Arc<ai6::directorates::q::LoadoutCatalog>, impl core::ops::function::Fn(&str) -> core::result::Result<alloc::sync::Arc<ai6::directorates::q::secret_kind::SecretKeeper>, alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::SecretBroker::with_max_ttl(self, ai6::bounds::TimeLimit) -> Self
 impl core::fmt::Debug for ai6::SecretBroker
 pub fn ai6::SecretBroker::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -3688,9 +3869,37 @@ pub fn ai6::directorates::q::SecretDefinition::green_ink_weakening(&self) -> cor
 pub fn ai6::directorates::q::SecretDefinition::kinds(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::SecretDefinition::name(&self) -> &str
 pub fn ai6::directorates::q::SecretDefinition::new(impl core::convert::Into<alloc::string::String>) -> Self
-pub fn ai6::directorates::q::SecretDefinition::source(&self) -> &ai6::bootstrap::SecretRef
+pub fn ai6::directorates::q::SecretDefinition::source(&self) -> &ai6::directorates::q::secret_kind::SecretSource
 pub fn ai6::directorates::q::SecretDefinition::targets(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::SecretDefinition::unlocked_by(&self, &str, &str) -> bool
+pub struct ai6::directorates::q::SecretFields(_)
+impl ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::as_json(&self) -> &serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::q::secret_kind::SecretFields::get(&self, &str) -> core::option::Option<&serde_json::value::Value>
+pub fn ai6::directorates::q::secret_kind::SecretFields::is_empty(&self) -> bool
+pub fn ai6::directorates::q::secret_kind::SecretFields::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::directorates::q::secret_kind::SecretFields::new(serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> Self
+pub fn ai6::directorates::q::secret_kind::SecretFields::to_map_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::types::map::Map, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::drop(&mut self)
+pub struct ai6::directorates::q::SecretInstance
+impl ai6::directorates::q::SecretInstance
+pub fn ai6::directorates::q::SecretInstance::name(&self) -> &str
+pub fn ai6::directorates::q::SecretInstance::provider(&self) -> &str
+pub fn ai6::directorates::q::SecretInstance::settings(&self) -> &ai6::directorates::q::secret_kind::SecretFields
+pub struct ai6::directorates::q::SecretKeeper
+impl ai6::directorates::q::secret_kind::SecretKeeper
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::check_fields(&self, &ai6::directorates::q::secret_kind::SecretFields) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::fields(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::lease(&self, &str, &ai6::directorates::q::secret_kind::SecretFields, f64, &str, &str) -> core::result::Result<core::option::Option<ai6::directorates::q::secret_kind::SecretLeased>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::new(alloc::boxed::Box<dyn ai6::directorates::q::secret_kind::SecretProvider>) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::read(&self, &str, &ai6::directorates::q::secret_kind::SecretFields) -> core::result::Result<ai6::directorates::q::secret_kind::SecretRead, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::store(&self, &str, &ai6::directorates::q::secret_kind::SecretFields, &str, core::option::Option<&str>) -> core::result::Result<ai6::directorates::q::secret_kind::SecretStored, ai6::directorates::q::secret_kind::SecretStoreError>
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretKeeper
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::q::SecretLease
 impl ai6::SecretLease
 pub fn ai6::SecretLease::expires_at(&self) -> std::time::Instant
@@ -3708,14 +3917,14 @@ pub fn ai6::SecretLeaseRequest::mission_id(&self) -> &str
 pub fn ai6::SecretLeaseRequest::station(&self) -> &str
 pub const fn ai6::SecretLeaseRequest::ttl(&self) -> core::time::Duration
 pub fn ai6::SecretLeaseRequest::with_ttl(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::time::Duration) -> core::result::Result<Self, ai6::SecretError>
-pub struct ai6::directorates::q::SecretRequest
-impl ai6::SecretRequest
-pub fn ai6::SecretRequest::lease_id(&self) -> &str
-pub fn ai6::SecretRequest::mission_id(&self) -> &str
-pub fn ai6::SecretRequest::station(&self) -> &str
-pub const fn ai6::SecretRequest::ttl(&self) -> core::time::Duration
-impl core::fmt::Debug for ai6::SecretRequest
-pub fn ai6::SecretRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::SecretSource
+pub ai6::directorates::q::SecretSource::fields: ai6::directorates::q::secret_kind::SecretFields
+pub ai6::directorates::q::SecretSource::key: alloc::string::String
+pub ai6::directorates::q::SecretSource::provider: alloc::string::String
+impl ai6::directorates::q::secret_kind::SecretSource
+pub fn ai6::directorates::q::secret_kind::SecretSource::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretSource
+pub fn ai6::directorates::q::secret_kind::SecretSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::q::SecretValue(_)
 impl ai6::SecretValue
 pub fn ai6::SecretValue::new(impl core::convert::Into<alloc::string::String>) -> Self
@@ -3729,27 +3938,75 @@ impl ai6::directorates::q::SessionEnv
 pub fn ai6::directorates::q::SessionEnv::values(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 impl core::convert::From<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>> for ai6::directorates::q::SessionEnv
 pub fn ai6::directorates::q::SessionEnv::from(alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> Self
-pub struct ai6::directorates::q::StationSecrets
-impl ai6::StationSecrets
-pub fn ai6::StationSecrets::new(impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::q::SecretDefinition>) -> Self
-pub fn ai6::StationSecrets::relative_to(self, &std::path::Path) -> Self
-impl ai6::SecretBackend for ai6::StationSecrets
-pub fn ai6::StationSecrets::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
-pub fn ai6::StationSecrets::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
 pub const ai6::directorates::q::CREDENTIAL_VARIABLES: &[&str]
 pub trait ai6::directorates::q::AccountLogin: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::AccountLogin::login(&self, &ai6::AccountPool, &ai6::Account, &std::path::Path, &str) -> core::result::Result<(), alloc::string::String>
 impl ai6::AccountLogin for ai6::CommandLogin
 pub fn ai6::CommandLogin::login(&self, &ai6::AccountPool, &ai6::Account, &std::path::Path, &str) -> core::result::Result<(), alloc::string::String>
-pub trait ai6::directorates::q::SecretBackend: core::marker::Send + core::marker::Sync
-pub fn ai6::directorates::q::SecretBackend::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
-pub fn ai6::directorates::q::SecretBackend::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
-impl ai6::SecretBackend for ai6::StationSecrets
-pub fn ai6::StationSecrets::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
-pub fn ai6::StationSecrets::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
+pub trait ai6::directorates::q::SecretProvider: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::SecretProvider::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::SecretProvider::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::SecretProvider::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::SecretProvider::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::SecretProvider::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::SecretProvider::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::SecretProvider::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::SecretProvider::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::SecretProvider::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::EnvSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::FileSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::InlineSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
 pub fn ai6::directorates::q::choose_route(ai6::PoolStrategy, &[ai6::RouteStanding], u16) -> core::option::Option<usize>
 pub fn ai6::directorates::q::claude_mcp_config(&ai6::directorates::q::LoadoutCatalog, &ai6::directorates::q::Loadout) -> core::result::Result<serde_json::value::Value, ai6::directorates::q::QError>
+pub type ai6::directorates::q::SecretProviderLookup = (dyn core::ops::function::Fn(&str) -> core::result::Result<alloc::sync::Arc<ai6::directorates::q::secret_kind::SecretKeeper>, alloc::string::String> + core::marker::Send + core::marker::Sync)
 pub mod ai6::directorates::registry
 pub mod ai6::directorates::registry::accounts
 pub struct ai6::directorates::registry::accounts::AccountCandidate
@@ -7822,16 +8079,20 @@ pub fn ai6::station::plugins::Plugins::authorizers(&self) -> alloc::vec::Vec<ai6
 pub fn ai6::station::plugins::Plugins::cached_authorizer(&self, &str, core::option::Option<&guatiao::value::value::Value>, coqui_access_kit::cache::CacheOptions) -> core::result::Result<alloc::sync::Arc<coqui_access_kit::cache::Cached<dyn coqui_access::kind::Authorizer>>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::cached_directory(&self, &str, core::option::Option<&guatiao::value::value::Value>, coqui_access_kit::cache::CacheOptions) -> core::result::Result<alloc::sync::Arc<coqui_access_kit::cache::Cached<dyn coqui_access::kind::Directory>>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::choose_terminal(&self, ai6::directorates::q::terminal::HarnessStdio, core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
+pub fn ai6::station::plugins::Plugins::config_schema(&self, &str) -> core::option::Option<serde_json::value::Value>
 pub fn ai6::station::plugins::Plugins::directories(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::directory(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn coqui_access::kind::Directory>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::handler(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::handler_with(&self, &str, &serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::section_00::agent::AgentHandler>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::handlers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::has_provider(&self, &str) -> bool
 pub fn ai6::station::plugins::Plugins::safehouse(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::safehouse::SafeHouseProvider>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::safehouses(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::scan(&[std::path::PathBuf]) -> Self
 pub fn ai6::station::plugins::Plugins::scan_summary(&self) -> &ai6::station::plugins::PluginScanSummary
 pub fn ai6::station::plugins::Plugins::scan_with(&[std::path::PathBuf], &ai6::station::plugins::PluginPolicy) -> Self
+pub fn ai6::station::plugins::Plugins::secret_provider(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::secret_kind::SecretProvider>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::secret_providers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::source(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::sources::Source>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::sources(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::terminal(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>, ai6::station::plugins::PluginBuildError>
@@ -7970,7 +8231,6 @@ pub fn ai6::station::server::StationConfig::with_protected_path(self, impl core:
 pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_safe_house_hygiene(self, ai6::station::safehouse::SafeHouseHygiene) -> Self
-pub fn ai6::station::server::StationConfig::with_secret_backend(self, impl ai6::SecretBackend + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_state_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
@@ -8122,12 +8382,13 @@ pub ai6::ConfigRecord::Role
 pub ai6::ConfigRecord::Roster
 pub ai6::ConfigRecord::Sandbox
 pub ai6::ConfigRecord::Secret
+pub ai6::ConfigRecord::SecretProvider
 pub ai6::ConfigRecord::Station
 pub ai6::ConfigRecord::Theater
 pub ai6::ConfigRecord::Tls
 pub ai6::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 22]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 23]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -10340,9 +10601,11 @@ pub fn ai6::directorates::q::LoadoutCatalog::overlays(&self) -> &alloc::collecti
 pub fn ai6::directorates::q::LoadoutCatalog::parse(&str, &ai6::directorates::m::config::ConfigLimits) -> core::result::Result<Self, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::pool(&self, &str) -> core::option::Option<&ai6::AccountPool>
 pub fn ai6::directorates::q::LoadoutCatalog::pools(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::AccountPool>
+pub fn ai6::directorates::q::LoadoutCatalog::provider_of<'a>(&'a self, &'a str) -> &'a str
 pub fn ai6::directorates::q::LoadoutCatalog::sandbox_for(&self, &ai6::directorates::q::Loadout) -> core::option::Option<&ai6::directorates::q::SandboxProfile>
 pub fn ai6::directorates::q::LoadoutCatalog::sandboxes(&self) -> impl core::iter::traits::iterator::Iterator<Item = &ai6::directorates::q::SandboxProfile>
 pub fn ai6::directorates::q::LoadoutCatalog::secret(&self, &str) -> ai6::directorates::q::SecretDefinition
+pub fn ai6::directorates::q::LoadoutCatalog::secret_providers(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::SecretInstance>
 pub fn ai6::directorates::q::LoadoutCatalog::secrets(&self) -> alloc::vec::Vec<ai6::directorates::q::SecretDefinition>
 pub fn ai6::directorates::q::LoadoutCatalog::servers_for(&self, &ai6::directorates::q::Loadout) -> core::result::Result<alloc::vec::Vec<&ai6::directorates::q::McpServer>, ai6::directorates::q::QError>
 pub fn ai6::directorates::q::LoadoutCatalog::with_pool(self, ai6::AccountPool) -> core::result::Result<Self, ai6::directorates::q::QError>
@@ -11233,19 +11496,11 @@ impl serde_core::ser::Serialize for ai6::bounds::Seconds
 pub fn ai6::bounds::Seconds::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for ai6::bounds::Seconds
 pub fn ai6::bounds::Seconds::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
-pub struct ai6::SecretBackendFailure
-impl ai6::SecretBackendFailure
-pub const fn ai6::SecretBackendFailure::new() -> Self
-impl core::default::Default for ai6::SecretBackendFailure
-pub fn ai6::SecretBackendFailure::default() -> Self
-impl core::error::Error for ai6::SecretBackendFailure
-impl core::fmt::Display for ai6::SecretBackendFailure
-pub fn ai6::SecretBackendFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::SecretBroker
 impl ai6::SecretBroker
 pub fn ai6::SecretBroker::lease(&self, &ai6::directorates::q::Loadout, ai6::SecretLeaseRequest) -> core::result::Result<ai6::SecretLease, ai6::SecretError>
 pub fn ai6::SecretBroker::lease_names(&self, &ai6::directorates::q::Loadout, &[alloc::string::String], ai6::SecretLeaseRequest) -> core::result::Result<ai6::SecretLease, ai6::SecretError>
-pub fn ai6::SecretBroker::new(impl ai6::SecretBackend + 'static) -> Self
+pub fn ai6::SecretBroker::new(alloc::sync::Arc<ai6::directorates::q::LoadoutCatalog>, impl core::ops::function::Fn(&str) -> core::result::Result<alloc::sync::Arc<ai6::directorates::q::secret_kind::SecretKeeper>, alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::SecretBroker::with_max_ttl(self, ai6::bounds::TimeLimit) -> Self
 impl core::fmt::Debug for ai6::SecretBroker
 pub fn ai6::SecretBroker::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -11257,9 +11512,37 @@ pub fn ai6::directorates::q::SecretDefinition::green_ink_weakening(&self) -> cor
 pub fn ai6::directorates::q::SecretDefinition::kinds(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::SecretDefinition::name(&self) -> &str
 pub fn ai6::directorates::q::SecretDefinition::new(impl core::convert::Into<alloc::string::String>) -> Self
-pub fn ai6::directorates::q::SecretDefinition::source(&self) -> &ai6::bootstrap::SecretRef
+pub fn ai6::directorates::q::SecretDefinition::source(&self) -> &ai6::directorates::q::secret_kind::SecretSource
 pub fn ai6::directorates::q::SecretDefinition::targets(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::SecretDefinition::unlocked_by(&self, &str, &str) -> bool
+pub struct ai6::SecretFields(_)
+impl ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::as_json(&self) -> &serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub fn ai6::directorates::q::secret_kind::SecretFields::get(&self, &str) -> core::option::Option<&serde_json::value::Value>
+pub fn ai6::directorates::q::secret_kind::SecretFields::is_empty(&self) -> bool
+pub fn ai6::directorates::q::secret_kind::SecretFields::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn ai6::directorates::q::secret_kind::SecretFields::new(serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> Self
+pub fn ai6::directorates::q::secret_kind::SecretFields::to_map_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::types::map::Map, guatiao::library::kind::ProviderError>
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for ai6::directorates::q::secret_kind::SecretFields
+pub fn ai6::directorates::q::secret_kind::SecretFields::drop(&mut self)
+pub struct ai6::SecretInstance
+impl ai6::directorates::q::SecretInstance
+pub fn ai6::directorates::q::SecretInstance::name(&self) -> &str
+pub fn ai6::directorates::q::SecretInstance::provider(&self) -> &str
+pub fn ai6::directorates::q::SecretInstance::settings(&self) -> &ai6::directorates::q::secret_kind::SecretFields
+pub struct ai6::SecretKeeper
+impl ai6::directorates::q::secret_kind::SecretKeeper
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::check_fields(&self, &ai6::directorates::q::secret_kind::SecretFields) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::fields(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::lease(&self, &str, &ai6::directorates::q::secret_kind::SecretFields, f64, &str, &str) -> core::result::Result<core::option::Option<ai6::directorates::q::secret_kind::SecretLeased>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::new(alloc::boxed::Box<dyn ai6::directorates::q::secret_kind::SecretProvider>) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::read(&self, &str, &ai6::directorates::q::secret_kind::SecretFields) -> core::result::Result<ai6::directorates::q::secret_kind::SecretRead, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::store(&self, &str, &ai6::directorates::q::secret_kind::SecretFields, &str, core::option::Option<&str>) -> core::result::Result<ai6::directorates::q::secret_kind::SecretStored, ai6::directorates::q::secret_kind::SecretStoreError>
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretKeeper
+pub fn ai6::directorates::q::secret_kind::SecretKeeper::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::SecretLease
 impl ai6::SecretLease
 pub fn ai6::SecretLease::expires_at(&self) -> std::time::Instant
@@ -11277,14 +11560,14 @@ pub fn ai6::SecretLeaseRequest::mission_id(&self) -> &str
 pub fn ai6::SecretLeaseRequest::station(&self) -> &str
 pub const fn ai6::SecretLeaseRequest::ttl(&self) -> core::time::Duration
 pub fn ai6::SecretLeaseRequest::with_ttl(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::time::Duration) -> core::result::Result<Self, ai6::SecretError>
-pub struct ai6::SecretRequest
-impl ai6::SecretRequest
-pub fn ai6::SecretRequest::lease_id(&self) -> &str
-pub fn ai6::SecretRequest::mission_id(&self) -> &str
-pub fn ai6::SecretRequest::station(&self) -> &str
-pub const fn ai6::SecretRequest::ttl(&self) -> core::time::Duration
-impl core::fmt::Debug for ai6::SecretRequest
-pub fn ai6::SecretRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::SecretSource
+pub ai6::SecretSource::fields: ai6::directorates::q::secret_kind::SecretFields
+pub ai6::SecretSource::key: alloc::string::String
+pub ai6::SecretSource::provider: alloc::string::String
+impl ai6::directorates::q::secret_kind::SecretSource
+pub fn ai6::directorates::q::secret_kind::SecretSource::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::fmt::Debug for ai6::directorates::q::secret_kind::SecretSource
+pub fn ai6::directorates::q::secret_kind::SecretSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::SecretValue(_)
 impl ai6::SecretValue
 pub fn ai6::SecretValue::new(impl core::convert::Into<alloc::string::String>) -> Self
@@ -11793,7 +12076,6 @@ pub fn ai6::station::server::StationConfig::with_protected_path(self, impl core:
 pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_safe_house_hygiene(self, ai6::station::safehouse::SafeHouseHygiene) -> Self
-pub fn ai6::station::server::StationConfig::with_secret_backend(self, impl ai6::SecretBackend + 'static) -> Self
 pub fn ai6::station::server::StationConfig::with_state_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
@@ -11891,13 +12173,6 @@ impl ai6::directorates::m::config::StationRuntime
 pub fn ai6::directorates::m::config::StationRuntime::duration(core::option::Option<f64>) -> core::option::Option<core::time::Duration>
 pub fn ai6::directorates::m::config::StationRuntime::limits(&self) -> ai6::station::limits::StationLimits
 pub fn ai6::directorates::m::config::StationRuntime::validate(&self) -> core::result::Result<(), alloc::string::String>
-pub struct ai6::StationSecrets
-impl ai6::StationSecrets
-pub fn ai6::StationSecrets::new(impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::q::SecretDefinition>) -> Self
-pub fn ai6::StationSecrets::relative_to(self, &std::path::Path) -> Self
-impl ai6::SecretBackend for ai6::StationSecrets
-pub fn ai6::StationSecrets::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
-pub fn ai6::StationSecrets::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
 #[non_exhaustive] pub struct ai6::StationSettings
 impl ai6::directorates::registry::store::StationSettings
 pub fn ai6::directorates::registry::store::StationSettings::max_concurrent_missions(&self) -> usize
@@ -12908,12 +13183,66 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
-pub trait ai6::SecretBackend: core::marker::Send + core::marker::Sync
-pub fn ai6::SecretBackend::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
-pub fn ai6::SecretBackend::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
-impl ai6::SecretBackend for ai6::StationSecrets
-pub fn ai6::StationSecrets::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
-pub fn ai6::StationSecrets::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
+pub trait ai6::SecretProvider: core::marker::Send + core::marker::Sync
+pub fn ai6::SecretProvider::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SecretProvider::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SecretProvider::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SecretProvider::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SecretProvider::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SecretProvider::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SecretProvider::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::SecretProvider::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::SecretProvider::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::EnvSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::FileSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::FileSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::InlineSecrets
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::secret_kind::builtin::InlineSecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::secret_kind::SecretProvider>::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::secret_kind::SecretProvider>::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub trait ai6::SessionContextStore
 pub fn ai6::SessionContextStore::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
 pub fn ai6::SessionContextStore::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
