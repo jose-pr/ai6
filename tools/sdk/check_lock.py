@@ -182,10 +182,11 @@ class Checker:
             self.error(f"deps is not a commit: {deps.version}", deps.line)
         app = ROOT / "clients/outer-office"
         cdn = json.loads((app / "tool/cdn_files.json").read_text(encoding="utf-8"))
-        if cdn.get("engine_revision") != item.version:
+        engines = cdn.get("engine_revisions")
+        if not isinstance(engines, list) or item.version not in engines:
             self.error(
-                f"tool/cdn_files.json names Flutter {cdn.get('engine_revision')}, "
-                f"the lock {item.version}",
+                f"tool/cdn_files.json lists Flutter engines {engines}, "
+                f"not the lock's {item.version}",
                 item.line,
             )
         metadata = re.search(r'revision: "([0-9a-f]{40})"', (app / ".metadata").read_text("utf-8"))

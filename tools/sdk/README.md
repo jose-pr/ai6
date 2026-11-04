@@ -105,7 +105,8 @@ lacks, so a new dependency cannot land ahead of a refreshed branch.
   floating stable, so a new compiler is still noticed.
 - **Flutter**: one change. Refresh the `deps` branch for the new engine, then update the lock
   (`flutter`, `flutter-version`, `flutter-engine`, `dart`, `deps`), `tool/cdn_files.json` and the
-  defaults of the `deps` branch's Dockerfiles together.
+  defaults of the `deps` branch's Dockerfiles together. `check_lock.py` wants the lock's engine
+  among the list's `engine_revisions`; other engines it lists are allowed.
 - **`pubspec.lock`**: refresh `pub/` on the `deps` branch (its README says how) and update `deps`.
 - **`Cargo.lock`**: `python3 tools/sdk/crates.py refresh DEPS_DIR`, with `DEPS_DIR` a worktree on the
   `deps` branch, then push that branch first, without rebasing it. `check_lock.py` fails when the

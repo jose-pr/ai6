@@ -1,15 +1,21 @@
-// Files the web app would otherwise fetch from a CDN, listed in `tool/cdn_files.json`.
+// Files the web app would otherwise fetch from a CDN, listed in `tool/cdn_files.json` for
+// each engine it names in `engine_revisions`. An engine's own files are those under
+// `/flutter-canvaskit/<revision>/`; the fallback fonts serve every engine listed.
 //
 //   dart run tool/cdn_files.dart fill [--deps DIR] [--web build/web]
 //     Puts every file the web build serves itself (the Noto fallback fonts) into the build,
-//     each checked against its SHA-256, and checks the build's own engine files. Run it
-//     after `flutter build web`. With --deps, files come from DIR/cdn/<host>/<path> (a
-//     checkout of the repository's `deps` branch); otherwise they are downloaded.
+//     each checked against its SHA-256, and checks the build's own engine files against
+//     its engine's entry; a build of an engine not listed is warned about. Run it after
+//     `flutter build web`. With --deps, files come from DIR/cdn/<host>/<path> (a checkout
+//     of the repository's `deps` branch); otherwise they are downloaded.
 //   dart run tool/cdn_files.dart mirror --out DIR [--deps DIR]
 //     Writes every listed file to DIR/<host>/<path>: the `cdn/` directory of `deps`.
 //   dart run tool/cdn_files.dart update --sdk FLUTTER_SDK [--web build/web] [--extra FILE]
-//     Rebuilds the list for the SDK's engine: its fallback fonts, the engine files of the
-//     build, and the URLs in FILE (one per line), downloading each once to hash it.
+//     Rebuilds the list for the SDK's engine alone: its fallback fonts, the engine files of
+//     the build, and the URLs in FILE (one per line), downloading each once to hash it.
+//   dart run tool/cdn_files.dart add --sdk FLUTTER_SDK [--web build/web] [--extra FILE]
+//     As update, keeping the other engines listed: the files of the SDK's engine are
+//     replaced, and only those not listed yet are downloaded.
 
 import 'dart:async';
 import 'dart:convert';
@@ -44,13 +50,14 @@ Future<void> main(List<String> arguments) async {
         final out = options['out'];
         if (out == null) return usage();
         await mirror(out: out, deps: options['deps']);
-      case 'update':
+      case 'update' || 'add':
         final sdk = options['sdk'];
         if (sdk == null) return usage();
         await update(
           sdk: sdk,
           web: options['web'] ?? 'build/web',
           extra: options['extra'],
+          keepOthers: arguments.first == 'add',
         );
       default:
         return usage();
@@ -67,7 +74,7 @@ void usage() {
   stderr.writeln(
     'usage: dart run tool/cdn_files.dart fill [--deps DIR] [--web DIR]\n'
     '       dart run tool/cdn_files.dart mirror --out DIR [--deps DIR]\n'
-    '       dart run tool/cdn_files.dart update --sdk FLUTTER_SDK [--web DIR] '
+    '       dart run tool/cdn_files.dart update|add --sdk FLUTTER_SDK [--web DIR] '
     '[--extra FILE]',
   );
   exitCode = 64;
@@ -124,29 +131,45 @@ class CdnFile {
 }
 
 class Manifest {
-  Manifest(this.engineRevision, this.files);
+  Manifest(this.engineRevisions, this.files);
 
-  factory Manifest.read() {
-    final json = jsonDecode(
-      File(manifestPath).readAsStringSync(),
-    ) as Map<String, dynamic>;
-    return Manifest(json['engine_revision'] as String, [
+  factory Manifest.read([String path = manifestPath]) {
+    final json =
+        jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
+    final revisions = json['engine_revisions'];
+    if (revisions is! List ||
+        revisions.isEmpty ||
+        revisions.any((r) => r is! String)) {
+      throw CdnFileError('$path: engine_revisions is not a list of revisions.');
+    }
+    return Manifest(revisions.cast<String>(), [
       for (final file in json['files'] as List<dynamic>)
         CdnFile.fromJson(file as Map<String, dynamic>),
     ]);
   }
 
-  final String engineRevision;
+  final List<String> engineRevisions;
   final List<CdnFile> files;
 
-  void write() {
+  /// The engine's own files, which its build holds under `canvaskit/`.
+  List<CdnFile> engineFiles(String revision) => [
+    for (final file in files)
+      if (file.host == engineHost &&
+          file.path.startsWith(enginePrefix(revision)))
+        file,
+  ];
+
+  void write([String path = manifestPath]) {
     final text = const JsonEncoder.withIndent('  ').convert({
-      'engine_revision': engineRevision,
+      'engine_revisions': engineRevisions,
       'files': [for (final file in files) file.toJson()],
     });
-    File(manifestPath).writeAsStringSync('$text\n');
+    File(path).writeAsStringSync('$text\n');
   }
 }
+
+/// Where the engine `revision` keeps its files on [engineHost].
+String enginePrefix(String revision) => '/flutter-canvaskit/$revision/';
 
 /// The engine revision a web build loads, from its `flutter_bootstrap.js`.
 String buildEngineRevision(String web) {
@@ -219,23 +242,33 @@ Future<void> pool<T>(
   await Future.wait([for (var i = 0; i < width; i++) worker()]);
 }
 
-Future<void> fill({required String web, String? deps}) async {
-  final manifest = Manifest.read();
+Future<void> fill({
+  required String web,
+  String? deps,
+  String manifestFile = manifestPath,
+  void Function(String) warn = _warn,
+}) async {
+  final manifest = Manifest.read(manifestFile);
   final revision = buildEngineRevision(web);
-  // Another engine still serves its own CanvasKit; only fonts the engine added since the
+  // An engine not listed still serves its own CanvasKit; only fonts it added since the
   // list was made would be missing, so the build goes on and says so.
-  final sameEngine = revision == manifest.engineRevision;
-  if (!sameEngine) {
-    stderr.writeln(
-      'warning: the build is engine $revision but $manifestPath lists '
-      '${manifest.engineRevision}; run the update command for this SDK.',
+  final listed = manifest.engineRevisions.contains(revision);
+  if (!listed) {
+    warn(
+      'warning: the build is engine $revision, which $manifestFile does not list '
+      '(${manifest.engineRevisions.join(', ')}); run the add command for this SDK.',
     );
   }
-  final engineFiles = sameEngine
-      ? manifest.files.where((file) => file.host == engineHost).toList()
+  final engineFiles = listed
+      ? manifest.engineFiles(revision)
       : const <CdnFile>[];
+  if (listed && engineFiles.isEmpty) {
+    throw CdnFileError(
+      '$manifestFile lists engine $revision with no files of its own.',
+    );
+  }
   for (final file in engineFiles) {
-    final relative = file.path.split('/$revision/').last;
+    final relative = file.path.substring(enginePrefix(revision).length);
     final built = File('$web/canvaskit/$relative');
     if (!built.existsSync()) {
       throw CdnFileError('$web/canvaskit/$relative is missing from the build.');
@@ -261,6 +294,8 @@ Future<void> fill({required String web, String? deps}) async {
   );
 }
 
+void _warn(String message) => stderr.writeln(message);
+
 Future<void> mirror({required String out, String? deps}) async {
   final manifest = Manifest.read();
   await pool(manifest.files, (file) async {
@@ -275,8 +310,16 @@ Future<void> update({
   required String sdk,
   required String web,
   String? extra,
+  bool keepOthers = false,
 }) async {
   final revision = buildEngineRevision(web);
+  final listed = keepOthers ? Manifest.read() : Manifest(const [], const []);
+  // What `add` keeps: every listed file but this engine's own, which the build replaces.
+  final ownFiles = listed.engineFiles(revision).toSet();
+  final kept = [
+    for (final file in listed.files)
+      if (!ownFiles.contains(file)) file,
+  ];
   final source = File(
     '$sdk/engine/src/flutter/lib/web_ui/lib/src/engine/font_fallback_data.dart',
   );
@@ -310,9 +353,9 @@ Future<void> update({
             null,
           ),
   ];
-  final seen = <String>{};
+  final seen = {for (final file in kept) '${file.host}${file.path}'};
   final skipped = <String>[];
-  final files = <CdnFile>[];
+  final files = [...kept];
   await pool(wanted, (entry) async {
     final (host, path, licence, serve) = entry;
     if (!seen.add('$host$path')) return;
@@ -339,10 +382,11 @@ Future<void> update({
     );
   });
   files.sort((a, b) => '${a.host}${a.path}'.compareTo('${b.host}${b.path}'));
-  Manifest(revision, files).write();
+  final revisions = {...listed.engineRevisions, revision}.toList()..sort();
+  Manifest(revisions, files).write();
   final total = files.fold(0, (sum, file) => sum + file.bytes);
   stdout.writeln(
     'Listed ${files.length} files, ${(total / 1048576).toStringAsFixed(1)} MiB, '
-    'for engine $revision; not on $engineHost: ${skipped.join(', ')}.',
+    'for engines ${revisions.join(', ')}; not on $engineHost: ${skipped.join(', ')}.',
   );
 }

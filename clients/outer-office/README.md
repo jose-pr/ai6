@@ -338,19 +338,24 @@ Thai 21 KiB). The engine fetches a file only when the text needs one of its char
 CJK comes in slices of about 60 KiB, emoji in ten of about 200 KiB.
 
 They are not in this repository. `tool/cdn_files.json` lists every file the web app would
-otherwise take from a CDN, with its host, path, size, SHA-256 and licence, and
+otherwise take from a CDN, with its host, path, size, SHA-256 and licence, for each Flutter
+engine in its `engine_revisions`: an engine's own files are those under
+`/flutter-canvaskit/<revision>/`, and the fonts serve them all. It lists the engine
+`tools/sdk/sdk.lock` names, and may list others, such as that of a vendored SDK.
 `tool/cdn_files.dart` fetches them:
 
 - `dart run tool/cdn_files.dart fill [--deps DEPS] [--web build/web]` puts the fonts into
-  the build and checks the build's engine files against the list. With `--deps`, a
-  checkout of this repository's `deps` branch, it reads `DEPS/cdn/` and needs no
-  network; otherwise it downloads from `fonts.gstatic.com`. A file whose SHA-256 differs
+  the build and checks the build's engine files against its engine's entry. A build of an
+  engine the list does not name gets the fonts and a warning, with no engine check. With
+  `--deps`, a checkout of this repository's `deps` branch, it reads `DEPS/cdn/` and needs
+  no network; otherwise it downloads from `fonts.gstatic.com`. A file whose SHA-256 differs
   from the list stops it.
 - `dart run tool/cdn_files.dart mirror --out DIR` writes every listed file to
   `DIR/<host>/<path>`, which is how `deps` keeps its `cdn/`.
-- `dart run tool/cdn_files.dart update --sdk FLUTTER_SDK` rebuilds the list for a new
+- `dart run tool/cdn_files.dart update --sdk FLUTTER_SDK` rebuilds the list for one
   Flutter engine, after `flutter build web`, from the engine's own fallback font table and
-  the build's `canvaskit/` files.
+  the build's `canvaskit/` files; `add` in its place keeps the other engines listed and
+  downloads only what the list does not have yet.
 
 A web deployment may opt in with `[oo.assets] cdn` in the public `ai6.cfg` beside `index.html`,
 read by `web/flutter_bootstrap.js` before the engine starts:

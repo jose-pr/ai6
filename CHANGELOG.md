@@ -165,6 +165,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provider that takes changes, each replacing the record of its file name and leaving the others,
   and prints which libraries were added, changed (old and new) or already so. A rebuild is one
   command, where it was a print, an edit and an `ai6 config import`.
+- Outer Office's `tool/cdn_files.json` lists files for several Flutter engines
+  (`engine_revisions`, which replaces `engine_revision`), and `tool/cdn_files.dart add` lists
+  another SDK's engine beside those already there. `fill` checks a build against its own engine's
+  files and warns only for an engine the list does not name, so a vendored SDK on another engine
+  no longer gets a warning on every build. `tools/sdk/check_lock.py` wants the lock's engine among
+  them.
 
 ### Changed
 

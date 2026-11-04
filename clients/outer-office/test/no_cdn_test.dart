@@ -95,10 +95,32 @@ void main() {
         reason: family,
       );
     }
+    final revisions = (manifest['engine_revisions'] as List<dynamic>)
+        .cast<String>();
+    expect(revisions, isNotEmpty);
     for (final file in engine) {
-      expect(file['path'], contains('/${manifest['engine_revision']}/'));
+      expect(
+        revisions.where(
+          (revision) => (file['path'] as String).startsWith(
+            '/flutter-canvaskit/$revision/',
+          ),
+        ),
+        hasLength(1),
+        reason: '${file['path']} belongs to one engine listed',
+      );
       expect(file['licence'], 'BSD-3-Clause');
       expect(file.containsKey('serve'), isFalse);
+    }
+    for (final revision in revisions) {
+      expect(
+        engine.where(
+          (file) => (file['path'] as String).startsWith(
+            '/flutter-canvaskit/$revision/',
+          ),
+        ),
+        isNotEmpty,
+        reason: 'engine $revision has its files',
+      );
     }
   });
 
