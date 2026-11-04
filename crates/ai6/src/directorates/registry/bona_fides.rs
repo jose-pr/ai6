@@ -158,11 +158,15 @@ impl Provenance {
     }
 }
 
-/// `sha256:HEX` of the brief record without its provenance, as canonical JSON: every field,
-/// object keys sorted at every depth, no whitespace.
+/// `sha256:HEX` of the brief record without its provenance or the Mission ID and handle the
+/// Registry gives it, as canonical JSON: every other field, object keys sorted at every depth,
+/// no whitespace. A rename, or a new key for a stored brief, leaves its provenance and
+/// clearances valid.
 pub fn record_digest(brief: &Brief) -> String {
     let record = Brief {
         provenance: None,
+        mission_id: None,
+        handle: None,
         ..brief.clone()
     };
     let canonical = serde_json::to_value(&record)

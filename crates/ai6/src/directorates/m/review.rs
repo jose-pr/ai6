@@ -1408,6 +1408,7 @@ pub fn panel_brief(
         body,
         id: id.clone(),
         mission_id: None,
+        handle: None,
         name: None,
         source: PANEL_SOURCE.to_owned(),
         operation: Some(review.operation.clone()),

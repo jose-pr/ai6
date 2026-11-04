@@ -203,7 +203,9 @@ pub use directorates::registry::logbook::{
 pub use directorates::registry::memories::{
     MemoryEntry, MemoryError, MemoryHeader, MemoryProposal, MemoryScope, MemorySource, MemoryStore,
 };
-pub use directorates::registry::mission_ids::{MissionEntry, run_id};
+pub use directorates::registry::mission_ids::{
+    MissionEntry, MissionHandle, is_uid, new_uid, run_handle, valid_handle,
+};
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
     NewSession, SessionError, SessionLaunch, SessionRecord, SessionResult, SessionStatus,

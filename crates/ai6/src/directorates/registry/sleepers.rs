@@ -348,6 +348,7 @@ pub fn sleeper_brief(
         body: sleeper.prompt.clone(),
         id,
         mission_id: None,
+        handle: None,
         name: None,
         source: SLEEPER_BRIEF_SOURCE.to_owned(),
         operation: Some(operation.to_owned()),
@@ -714,9 +715,9 @@ pub(super) mod tests {
             );
         }
         let mut queued = headquarters.list_new().unwrap();
-        queued.sort_by_key(Brief::key);
+        queued.sort_by_key(Brief::shown_handle);
         assert_eq!(
-            queued.iter().map(Brief::key).collect::<Vec<_>>(),
+            queued.iter().map(Brief::shown_handle).collect::<Vec<_>>(),
             ["G-deps-1", "G-deps-2"]
         );
         assert_eq!(queued[0].stations, ["station-a"]);
@@ -746,7 +747,7 @@ pub(super) mod tests {
         );
         let queued = first_hq.list_new().unwrap();
         assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].key(), "G-deps-1");
+        assert_eq!(queued[0].shown_handle(), "G-deps-1");
         assert_eq!(queued[0].role.as_deref(), Some("maintenance"));
         assert_eq!(queued[0].operation.as_deref(), Some("G"));
         let provenance = queued[0]

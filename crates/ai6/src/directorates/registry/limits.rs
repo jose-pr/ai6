@@ -351,12 +351,12 @@ pub struct BriefLimits {
     #[schema(title = "Longest brief provenance", format = "bytes")]
     #[map(default = BriefLimits::default().provenance_bytes)]
     pub provenance_bytes: Limit,
-    /// Bytes of a Mission ID: a longer one keeps its start and adds a short hash. It is a file name,
-    /// so it stays under 240 bytes whatever this says. The default leaves a run's attempt room within
-    /// `[registry.limits.sessions] id_bytes`.
-    #[schema(title = "Longest Mission ID", format = "bytes")]
-    #[map(default = BriefLimits::default().mission_id_bytes)]
-    pub mission_id_bytes: Limit,
+    /// Bytes of a Mission's handle: a longer one AI6 gives keeps its start and adds a short hash,
+    /// and a rename to a longer one is refused. It names a Git branch, so it stays under 240
+    /// bytes whatever this says.
+    #[schema(title = "Longest Mission handle", format = "bytes")]
+    #[map(default = BriefLimits::default().handle_bytes)]
+    pub handle_bytes: Limit,
 }
 
 impl Default for BriefLimits {
@@ -365,7 +365,7 @@ impl Default for BriefLimits {
             record_bytes: Limit::at(MIB),
             records: Limit::at(1_000),
             provenance_bytes: Limit::at(16 * KIB),
-            mission_id_bytes: Limit::at(120),
+            handle_bytes: Limit::at(120),
         }
     }
 }

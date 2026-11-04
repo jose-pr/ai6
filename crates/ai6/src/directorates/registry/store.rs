@@ -24,7 +24,7 @@ use crate::directorates::m::vetting::{Vetting, is_invisible};
 use crate::directorates::registry::bona_fides::{self, Provenance, proposal_provenance};
 use crate::directorates::registry::cables::{Cable, CableError, CableState};
 use crate::directorates::registry::limits::{ProposalLimits, RegistryLimits, StationLimits};
-use crate::directorates::registry::mission_ids::{self, MissionBook, MissionEntry};
+use crate::directorates::registry::mission_ids::{self, MissionBook, MissionEntry, MissionHandle};
 use crate::directorates::registry::sources::{SOURCE_BRIEF_PREFIX, settle_report};
 use crate::directorates::registry::timeline::{TimelineEvent, record_event_locked};
 
@@ -45,12 +45,16 @@ pub struct Brief {
     /// Mission's ID.
     #[serde(default = "default_id")]
     pub id: String,
-    /// The Mission ID AI6 chose where the brief entered ([`MissionEntry`]): its Registry key,
+    /// The Mission's UID, minted where the brief entered ([`MissionEntry`]): its Registry key,
     /// and its Mission's ID, for its whole life. A brief dropped into the queue by hand has
-    /// none and goes by `{source}--{id}`.
+    /// none and goes by `{source}--{id}`, or by the Registry key it names here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mission_id: Option<String>,
-    /// A name to show beside the Mission ID, for a brief whose `title` is not one: an issue's
+    /// What the Mission is called: the handle the rule gave where the brief entered, or the
+    /// one it was renamed to. The Registry keeps it current; no digest of the brief covers it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
+    /// A name to show beside the handle, for a brief whose `title` is not one: an issue's
     /// title, one line and cut. Untrusted data, never part of [`Brief::prompt`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -92,7 +96,7 @@ pub struct Brief {
 }
 
 impl Brief {
-    /// Filesystem-safe key within the Registry: the Mission ID.
+    /// Filesystem-safe key within the Registry: the Mission's UID.
     pub fn key(&self) -> String {
         match &self.mission_id {
             Some(id) => safe_component(id),
@@ -104,7 +108,23 @@ impl Brief {
         }
     }
 
-    /// What to show beside the Mission ID: [`Brief::name`], else the title, on one line and
+    /// Gives the brief the Mission the Registry allotted it.
+    pub(super) fn enter_as(&mut self, mission: MissionHandle) {
+        self.mission_id = Some(mission.mission_id);
+        self.handle = Some(mission.handle);
+    }
+
+    /// What the Mission shows as its name: its handle, else its key.
+    pub fn shown_handle(&self) -> String {
+        self.handle.clone().unwrap_or_else(|| self.key())
+    }
+
+    /// The Mission's key and the handle it shows.
+    pub fn mission_handle(&self) -> MissionHandle {
+        MissionHandle::new(self.key(), self.shown_handle())
+    }
+
+    /// What to show beside the handle: [`Brief::name`], else the title, on one line and
     /// within `bytes`. Data for a person to read; it goes in no prompt.
     pub fn display_name(&self, bytes: usize) -> String {
         one_line_within(self.name.as_deref().unwrap_or(&self.title), bytes)
@@ -147,6 +167,13 @@ impl Brief {
         }
         if let Some(id) = &self.mission_id {
             validate_registry_key(id).map_err(|error| invalid_data(error.to_string()))?;
+        }
+        if let Some(handle) = &self.handle
+            && (self.mission_id.is_none() || !mission_ids::valid_handle(handle))
+        {
+            return Err(invalid_data(
+                "a brief's handle needs a Mission ID and the handle character set",
+            ));
         }
         Ok(())
     }
@@ -695,7 +722,7 @@ impl FileRegistry {
     }
 
     /// Allots under the Registry lock the caller holds.
-    pub(super) fn allot_locked(&self, entry: &MissionEntry) -> io::Result<String> {
+    pub(super) fn allot_locked(&self, entry: &MissionEntry) -> io::Result<MissionHandle> {
         mission_ids::allot(&mut FileBook(self), entry, &self.limits.briefs)
     }
 
@@ -706,19 +733,69 @@ impl FileRegistry {
             .join(format!("{}.json", mission_ids::book_digest(name)))
     }
 
-    fn entered_id(&self, name: &str) -> io::Result<Option<String>> {
-        let bytes = match fs::read(self.book_entry_path(name)) {
+    fn book_handle_path(&self, handle: &str) -> PathBuf {
+        self.root
+            .join("mission-ids")
+            .join("issued")
+            .join(format!("{}.json", mission_ids::folded(handle)))
+    }
+
+    fn read_issued(path: &Path) -> io::Result<Option<IssuedId>> {
+        let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
         let issued: IssuedId =
             serde_json::from_slice(&bytes).map_err(|error| invalid_data(error.to_string()))?;
-        validate_registry_key(&issued.mission_id)?;
-        if issued.entry.as_deref() != Some(name) {
-            return Err(invalid_data("Mission ID record names another entry"));
+        if !mission_ids::is_uid(&issued.mission_id) || !mission_ids::valid_handle(&issued.handle) {
+            return Err(invalid_data("invalid Mission handle record"));
         }
-        Ok(Some(issued.mission_id))
+        Ok(Some(issued))
+    }
+
+    fn entered_id(&self, name: &str) -> io::Result<Option<MissionHandle>> {
+        let Some(issued) = Self::read_issued(&self.book_entry_path(name))? else {
+            return Ok(None);
+        };
+        if issued.entry.as_deref() != Some(name) {
+            return Err(invalid_data("Mission handle record names another entry"));
+        }
+        Ok(Some(MissionHandle::new(issued.mission_id, issued.handle)))
+    }
+
+    /// What the book says `handle` was given to, current or former, compared without case.
+    fn issued_handle(&self, handle: &str) -> io::Result<Option<IssuedId>> {
+        if !mission_ids::valid_handle(handle) {
+            return Ok(None);
+        }
+        Self::read_issued(&self.book_handle_path(handle))
+    }
+
+    /// Sets the handle on every copy of the brief `key` the Registry holds, under the lock the
+    /// caller holds. What the brief says, and its provenance, stay as they were.
+    fn rehandle_locked(&self, key: &str, handle: &str) -> io::Result<()> {
+        for state in BRIEF_STATES {
+            let path = self.root.join(state).join(format!("{key}.json"));
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            let bytes = if state == "held" {
+                let mut held: super::vetting::HeldBrief = serde_json::from_slice(&bytes)
+                    .map_err(|error| invalid_data(error.to_string()))?;
+                held.brief.handle = Some(handle.to_owned());
+                serde_json::to_vec_pretty(&held).map_err(io::Error::other)?
+            } else {
+                let mut brief: Brief = serde_json::from_slice(&bytes)
+                    .map_err(|error| invalid_data(error.to_string()))?;
+                brief.handle = Some(handle.to_owned());
+                serde_json::to_vec_pretty(&brief).map_err(io::Error::other)?
+            };
+            self.write_atomic(&path, &bytes)?;
+        }
+        Ok(())
     }
 
     fn provenance_path(&self, key: &str) -> PathBuf {
@@ -823,39 +900,40 @@ impl FileRegistry {
     }
 }
 
-/// One ID the file Registry issued, under `mission-ids/`.
+/// One handle the file Registry gave, under `mission-ids/`: the Mission's UID, the handle as
+/// given, and the entry it was given for when that entry can come again.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct IssuedId {
     mission_id: String,
+    handle: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     entry: Option<String>,
 }
 
-/// The file Registry's Mission IDs, used while the caller holds the Registry lock: a counter
-/// per Operation in `mission-ids/counters/`, every ID issued in `mission-ids/issued/` by its
-/// lower-case form, and each repeatable entry's ID in `mission-ids/entries/` by digest.
+/// The file Registry's handle book, used while the caller holds the Registry lock: a counter
+/// per Operation in `mission-ids/counters/`, every handle given, current or former, in
+/// `mission-ids/issued/` by its lower-case form, and the Mission and current handle of each
+/// repeatable entry in `mission-ids/entries/` by digest.
 struct FileBook<'a>(&'a FileRegistry);
 
 impl MissionBook for FileBook<'_> {
-    fn entered(&mut self, name: &str) -> io::Result<Option<String>> {
+    fn entered(&mut self, name: &str) -> io::Result<Option<MissionHandle>> {
         self.0.entered_id(name)
     }
 
-    fn taken(&mut self, id: &str) -> io::Result<bool> {
-        let root = &self.0.root;
-        let folded = mission_ids::folded(id);
-        if root
-            .join("mission-ids")
-            .join("issued")
-            .join(format!("{folded}.json"))
-            .exists()
-        {
-            return Ok(true);
-        }
-        Ok(["new", "held", "claimed", "done", "failed"]
-            .into_iter()
-            .any(|state| root.join(state).join(format!("{id}.json")).exists()))
+    fn holder(&mut self, handle: &str) -> io::Result<Option<String>> {
+        Ok(self
+            .0
+            .issued_handle(handle)?
+            .map(|issued| issued.mission_id))
+    }
+
+    fn entry_of(&mut self, handle: &str) -> io::Result<Option<String>> {
+        Ok(self
+            .0
+            .issued_handle(handle)?
+            .and_then(|issued| issued.entry))
     }
 
     fn next_number(&mut self, name: &str) -> io::Result<u64> {
@@ -875,9 +953,10 @@ impl MissionBook for FileBook<'_> {
         Ok(next)
     }
 
-    fn issue(&mut self, id: &str, name: Option<&str>) -> io::Result<()> {
+    fn issue(&mut self, mission: &MissionHandle, name: Option<&str>) -> io::Result<()> {
         let issued = serde_json::to_vec(&IssuedId {
-            mission_id: id.to_owned(),
+            mission_id: mission.mission_id.clone(),
+            handle: mission.handle.clone(),
             entry: name.map(str::to_owned),
         })
         .map_err(io::Error::other)?;
@@ -885,15 +964,8 @@ impl MissionBook for FileBook<'_> {
             self.0
                 .write_atomic(&self.0.book_entry_path(name), &issued)?;
         }
-        self.0.write_atomic(
-            &self
-                .0
-                .root
-                .join("mission-ids")
-                .join("issued")
-                .join(format!("{}.json", mission_ids::folded(id))),
-            &issued,
-        )
+        self.0
+            .write_atomic(&self.0.book_handle_path(&mission.handle), &issued)
     }
 }
 
@@ -921,8 +993,12 @@ impl FileRegistry {
             return match read_mission_proposal(&approved, self.limits.proposals.record_bytes) {
                 Ok(proposal) => {
                     let mut brief = proposal.brief;
-                    brief.mission_id =
-                        self.entered_mission_id(&MissionEntry::proposal(operation, proposal_id))?;
+                    if let Some(name) = MissionEntry::proposal(operation, proposal_id).book_name()
+                        && let Some(entered) = self.entered_id(&name)?
+                    {
+                        brief.mission_id = Some(entered.mission_id);
+                        brief.handle = Some(entered.handle);
+                    }
                     self.attach_provenance(&mut brief);
                     Ok(brief)
                 }
@@ -952,8 +1028,7 @@ impl FileRegistry {
             ));
         }
         let mut brief = proposal.brief.clone();
-        brief.mission_id =
-            Some(self.allot_locked(&MissionEntry::proposal(operation, proposal_id))?);
+        brief.enter_as(self.allot_locked(&MissionEntry::proposal(operation, proposal_id))?);
         let key = brief.key();
         for state in ["claimed", "done", "failed"] {
             if self.root.join(state).join(format!("{key}.json")).exists() {
@@ -968,6 +1043,7 @@ impl FileRegistry {
             let bytes = fs::read(&queued)?;
             let existing: Brief =
                 serde_json::from_slice(&bytes).map_err(|error| invalid_data(error.to_string()))?;
+            brief.handle.clone_from(&existing.handle);
             if existing.provenance.is_some() || existing != brief {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
@@ -1064,24 +1140,44 @@ pub trait BriefStore {
     /// A key already present in any Registry state is never overwritten.
     fn submit_brief(&self, brief: &Brief) -> io::Result<()>;
 
-    /// The Mission ID for `entry`: the one it was already given, or a new one by the rule in
-    /// [`mission_ids`], recorded for good. Numbers are atomic per Operation
-    /// across every process sharing the Registry and are never reused, including when no brief
-    /// follows.
+    /// The Mission for `entry`: the one it already names, with its current handle, or a new UID
+    /// with a handle by the rule in [`mission_ids`], recorded for good. Numbers are atomic per
+    /// Operation across every process sharing the Registry and are never reused, including
+    /// when no brief follows.
     ///
     /// # Errors
     ///
     /// Returns an error when the Registry cannot be read or written.
-    fn allot_mission_id(&self, entry: &MissionEntry) -> io::Result<String>;
+    fn allot_mission_id(&self, entry: &MissionEntry) -> io::Result<MissionHandle>;
 
-    /// The Mission ID `entry` was given, without giving one.
+    /// The UID of the Mission `entry` names, without giving one.
     ///
     /// # Errors
     ///
     /// Returns an error when the Registry cannot be read.
     fn entered_mission_id(&self, entry: &MissionEntry) -> io::Result<Option<String>>;
 
-    /// Gives `brief` its Mission ID for `entry` and queues it, in one step, and returns it as
+    /// The Mission `id` names, with the handle it goes by now: `id` is its UID, the key of a
+    /// brief dropped by hand, or any handle it was ever given, compared without case. `None`
+    /// when nothing in the Registry goes by `id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be read.
+    fn resolve_mission(&self, id: &str) -> io::Result<Option<MissionHandle>>;
+
+    /// Renames the Mission whose UID is `mission_id` to `handle`, and returns it as renamed.
+    /// The old handle stays reserved and still names the Mission; nothing keyed by the UID
+    /// changes, nor what the brief says or its provenance.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when no brief has that UID; `InvalidInput` for a malformed handle or a brief
+    /// with no handle (one dropped by hand); `AlreadyExists` when another Mission was ever given
+    /// `handle`; otherwise Registry I/O failures.
+    fn rename_mission(&self, mission_id: &str, handle: &str) -> io::Result<MissionHandle>;
+
+    /// Gives `brief` its Mission for `entry` and queues it, in one step, and returns it as
     /// queued.
     ///
     /// # Errors
@@ -1218,6 +1314,17 @@ pub trait BriefStore {
     ///
     /// Returns an error when the Registry cannot be read.
     fn filed_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<FiledBrief>>;
+}
+
+/// The Mission `brief` names and its handle, for a rename; a brief dropped by hand has none.
+pub(super) fn current_handle(brief: &Brief) -> io::Result<MissionHandle> {
+    match (&brief.mission_id, &brief.handle) {
+        (Some(mission_id), Some(handle)) => Ok(MissionHandle::new(mission_id, handle)),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a brief dropped by hand has no handle to rename",
+        )),
+    }
 }
 
 /// The newest `limit` of `briefs`.
@@ -1616,23 +1723,52 @@ impl BriefStore for FileRegistry {
         self.write_brief(&self.root.join("new").join(format!("{key}.json")), brief)
     }
 
-    fn allot_mission_id(&self, entry: &MissionEntry) -> io::Result<String> {
+    fn allot_mission_id(&self, entry: &MissionEntry) -> io::Result<MissionHandle> {
         let _registry_lock = self.lock()?;
         self.allot_locked(entry)
     }
 
     fn entered_mission_id(&self, entry: &MissionEntry) -> io::Result<Option<String>> {
         match entry.book_name() {
-            Some(name) => self.entered_id(&name),
+            Some(name) => Ok(self.entered_id(&name)?.map(|entered| entered.mission_id)),
             None => Ok(None),
         }
+    }
+
+    fn resolve_mission(&self, id: &str) -> io::Result<Option<MissionHandle>> {
+        if validate_registry_key(id).is_err() {
+            return Ok(None);
+        }
+        // A handle first: a brief dropped by hand may go by a key that reads as one.
+        if let Some(issued) = self.issued_handle(id)? {
+            return Ok(Some(match self.filed_brief(&issued.mission_id)? {
+                Some(filed) => filed.brief.mission_handle(),
+                None => MissionHandle::new(issued.mission_id, issued.handle),
+            }));
+        }
+        Ok(self
+            .filed_brief(id)?
+            .map(|filed| filed.brief.mission_handle()))
+    }
+
+    fn rename_mission(&self, mission_id: &str, handle: &str) -> io::Result<MissionHandle> {
+        validate_registry_key(mission_id)?;
+        let _registry_lock = self.lock()?;
+        let filed = self
+            .filed_brief(mission_id)?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no Mission has this UID"))?;
+        let current = current_handle(&filed.brief)?;
+        let renamed =
+            mission_ids::rename(&mut FileBook(self), &current, handle, &self.limits.briefs)?;
+        self.rehandle_locked(mission_id, &renamed.handle)?;
+        Ok(renamed)
     }
 
     fn enter_brief(&self, brief: &Brief, entry: &MissionEntry) -> io::Result<Brief> {
         brief.validate()?;
         let mut entered = brief.clone();
         let _registry_lock = self.lock()?;
-        entered.mission_id = Some(self.allot_locked(entry)?);
+        entered.enter_as(self.allot_locked(entry)?);
         let key = entered.key();
         for state in ["new", "held", "claimed", "done", "failed"] {
             if self.root.join(state).join(format!("{key}.json")).exists() {
@@ -3511,6 +3647,7 @@ mod tests {
                 body: "Bounded child brief".to_owned(),
                 id: "child".to_owned(),
                 mission_id: None,
+                handle: None,
                 name: None,
                 source: "agent".to_owned(),
                 operation: Some("ignored-operation".to_owned()),
@@ -3874,12 +4011,13 @@ mod tests {
         assert_eq!(
             Brief {
                 mission_id: None,
+                handle: None,
                 provenance: None,
                 ..promoted.clone()
             },
             approved.brief
         );
-        assert_eq!(promoted.key(), "operation-a-1");
+        assert_eq!(promoted.shown_handle(), "operation-a-1");
         assert_eq!(
             registry
                 .promote_mission_proposal("operation-a", &approved.id, "station-a")
@@ -3939,6 +4077,7 @@ mod tests {
             body: "Check the Operation context.".to_owned(),
             id: "mission-123".to_owned(),
             mission_id: None,
+            handle: None,
             name: None,
             source: "universal-exports".to_owned(),
             operation: Some("operation-a".to_owned()),

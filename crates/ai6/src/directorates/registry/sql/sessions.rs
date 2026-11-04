@@ -10,8 +10,8 @@ use crate::directorates::medical::exposure::Exposure;
 use crate::directorates::registry::limits::SessionLimits;
 use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionRecord, SessionStore, SessionUpdate, apply_fenced, latest,
-    lose, merged_exposure, opened, parse_session, session_json, take, validate_new_session,
-    validate_session_id,
+    lose, merged_exposure, opened, parse_session, same_run, session_json, take,
+    validate_new_session, validate_session_id,
 };
 use crate::directorates::registry::store::{invalid_data, validate_station_id};
 
@@ -105,7 +105,11 @@ impl SqlRegistry {
     ) -> Result<SessionRecord, SessionError> {
         validate_new_session(&new, &self.limits.sessions)?;
         self.write(|tx, revision| {
-            if session_in(tx, &new.session_id, &self.limits.sessions)?.is_some() {
+            if session_in(tx, &new.session_id, &self.limits.sessions)?.is_some()
+                || records(tx, Some(&new.mission_id), &self.limits.sessions)?
+                    .iter()
+                    .any(|record| same_run(record, &new))
+            {
                 return Err(SessionError::Exists);
             }
             let count = tx

@@ -522,6 +522,7 @@ mod tests {
     ) -> SessionRecord {
         SessionRecord {
             session_id: format!("{id}.1"),
+            handle: None,
             mission_id: id.to_owned(),
             operation: Some("G".to_owned()),
             provider_session_id: None,

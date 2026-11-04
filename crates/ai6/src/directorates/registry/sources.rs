@@ -163,6 +163,7 @@ pub fn source_brief(
         body: quoted_material(provider, item, limits),
         id: item.id.clone(),
         mission_id: None,
+        handle: None,
         name: Some(one_line_within(&item.title, limits.name_bytes.or_max())),
         source: format!("{SOURCE_BRIEF_PREFIX}{provider}"),
         operation: Some(operation.to_owned()),
@@ -287,6 +288,7 @@ pub(super) fn refresh_queued(brief: &mut Brief, existing: Brief) -> Ingest {
         return Ingest::Unchanged;
     }
     brief.created = existing.created;
+    brief.handle = existing.handle;
     brief.priority = existing.priority;
     brief.agent = existing.agent;
     brief.role = existing.role;
@@ -450,7 +452,7 @@ impl SourceStore for FileRegistry {
         let mut brief = source_brief(operation, provider, item, &self.limits.sources);
         brief.validate()?;
         let _lock = self.lock()?;
-        brief.mission_id = Some(self.allot_locked(&source_entry(operation, provider, item))?);
+        brief.enter_as(self.allot_locked(&source_entry(operation, provider, item))?);
         brief.provenance = Some(source_provenance(provider, item, &brief, received_by));
         let name = format!("{}.json", brief.key());
         for state in ["done", "failed"] {
@@ -704,7 +706,7 @@ mod tests {
         );
         let queued = registry.list_new().unwrap();
         assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].key(), "G-github-o_r_1");
+        assert_eq!(queued[0].shown_handle(), "G-github-o_r_1");
         assert_eq!(queued[0].created, "2026-01-01T00:00:00Z");
         assert!(queued[0].body.contains("It fails on macOS."));
         let provenance = queued[0]
@@ -829,6 +831,7 @@ mod tests {
             body: String::new(),
             id: "m1".to_owned(),
             mission_id: None,
+            handle: None,
             name: None,
             source: "manual".to_owned(),
             operation: None,
@@ -857,7 +860,7 @@ mod tests {
         }
         let listed = registry.unreported_source_briefs().unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].brief.key(), "G-github-o_r_5");
+        assert_eq!(listed[0].brief.shown_handle(), "G-github-o_r_5");
         registry.mark_source_reported(&listed[0], true).unwrap();
         assert!(registry.unreported_source_briefs().unwrap().is_empty());
     }

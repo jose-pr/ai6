@@ -290,7 +290,7 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | `record_bytes` | 1 MiB | **Largest brief.** Bytes of one brief. |
 | `records` | 1,000 | Queued briefs. |
 | `provenance_bytes` | 16 KiB | **Longest brief provenance.** Bytes of a brief's provenance. |
-| `mission_id_bytes` | 120 | **Longest Mission ID.** Bytes of a Mission ID: a longer one keeps its start and adds a short hash. It is a file name, so it stays under 240 bytes whatever this says. The default leaves a run's attempt room within `[registry.limits.sessions] id_bytes`. |
+| `handle_bytes` | 120 | **Longest Mission handle.** Bytes of a Mission's handle: a longer one AI6 gives keeps its start and adds a short hash, and a rename to a longer one is refused. It names a Git branch, so it stays under 240 bytes whatever this says. |
 <!-- schema:registry.limits.briefs:end -->
 
 `[registry.limits.cables]`

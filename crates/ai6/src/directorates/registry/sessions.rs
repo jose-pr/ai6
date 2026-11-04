@@ -20,7 +20,7 @@ use crate::directorates::q::safehouse::SafeHouseCheckpoint;
 use super::accounts::AccountRef;
 
 use super::limits::SessionLimits;
-use super::mission_ids::run_id;
+use super::mission_ids::{new_uid, run_handle};
 use super::store::{FileRegistry, invalid_data, read_headquarters, unix_time};
 
 /// Where a Session stands, as far as the Registry knows.
@@ -146,10 +146,14 @@ impl SessionLaunch {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionRecord {
-    /// AI6's identifier for this Session, distinct from the provider's.
+    /// AI6's identifier for this Session, distinct from the provider's: the run's UID.
     pub session_id: String,
-    /// The Mission the Session works for.
+    /// The UID of the Mission the Session works for.
     pub mission_id: String,
+    /// The run's handle, `<mission handle>.<attempt>`, from the handle the Mission had when the
+    /// run opened; a rename of the Mission later leaves it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
     /// The Operation the Mission belongs to, when the Station that opened the Session knew it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
@@ -261,7 +265,8 @@ impl SessionRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSession {
     pub(super) session_id: String,
-    mission_id: String,
+    pub(super) mission_id: String,
+    mission_handle: Option<String>,
     operation: Option<String>,
     station: String,
     provider_session_id: Option<String>,
@@ -283,6 +288,7 @@ impl NewSession {
         Self {
             session_id: session_id.into(),
             mission_id: mission_id.into(),
+            mission_handle: None,
             operation: None,
             station: station.into(),
             provider_session_id: None,
@@ -293,6 +299,18 @@ impl NewSession {
             launch: None,
             account: None,
         }
+    }
+
+    /// Names the run by the Mission's handle now: the record's handle is
+    /// `<mission_handle>.<attempt>`.
+    pub fn with_handle(mut self, mission_handle: impl Into<String>) -> Self {
+        self.mission_handle = Some(mission_handle.into());
+        self
+    }
+
+    /// The attempt this Session would be.
+    pub fn attempt(&self) -> u32 {
+        self.attempt
     }
 
     /// Records the Operation the Mission belongs to.
@@ -338,12 +356,11 @@ impl NewSession {
         self
     }
 
-    /// This Session as the attempt after it, the run ID within `id_bytes`, replacing the record
-    /// this one would have been; `None` past the last attempt a record can count.
-    pub fn next_attempt(mut self, id_bytes: usize) -> Option<Self> {
+    /// This Session as the attempt after it, with a new UID, replacing the record this one
+    /// would have been; `None` past the last attempt a record can count.
+    pub fn next_attempt(mut self) -> Option<Self> {
         self.attempt = self.attempt.checked_add(1)?;
-        let id = run_id(&self.mission_id, self.attempt, id_bytes);
-        self.predecessor = Some(std::mem::replace(&mut self.session_id, id));
+        self.predecessor = Some(std::mem::replace(&mut self.session_id, new_uid()));
         Some(self)
     }
 }
@@ -505,7 +522,12 @@ impl FileRegistry {
         validate_new_session(&new, &self.limits.sessions)?;
         let _lock = self.lock()?;
         let path = self.session_path(&new.session_id);
-        if path.exists() {
+        if path.exists()
+            || self
+                .sessions_locked()?
+                .iter()
+                .any(|record| same_run(record, &new))
+        {
             return Err(SessionError::Exists);
         }
         if fs::read_dir(self.root.join("sessions"))
@@ -586,6 +608,12 @@ impl FileRegistry {
     }
 }
 
+/// Whether `record` is the run `new` would be: the same attempt at the same Mission, which has
+/// one record whatever its UID.
+pub(super) fn same_run(record: &SessionRecord, new: &NewSession) -> bool {
+    record.mission_id == new.mission_id && record.attempt == new.attempt
+}
+
 /// Checks the identities of a Session to record.
 pub(super) fn validate_new_session(new: &NewSession, limits: &SessionLimits) -> io::Result<()> {
     validate_session_id(&new.session_id, limits)?;
@@ -596,6 +624,9 @@ pub(super) fn validate_new_session(new: &NewSession, limits: &SessionLimits) -> 
 /// Headquarters `term` (at least 1).
 pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> SessionRecord {
     SessionRecord {
+        handle: new
+            .mission_handle
+            .map(|handle| run_handle(&handle, new.attempt)),
         session_id: new.session_id,
         mission_id: new.mission_id,
         operation: new.operation,
@@ -785,7 +816,8 @@ pub trait SessionStore {
     ///
     /// # Errors
     ///
-    /// `Exists` when the ID is taken; `Io` for an invalid ID, record or Registry failure.
+    /// `Exists` when the ID is taken or the Mission already has a record of that attempt; `Io`
+    /// for an invalid ID, record or Registry failure.
     fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>;
 
     /// Reads one Session record.
@@ -882,24 +914,7 @@ impl SessionStore for FileRegistry {
 
     fn sessions(&self) -> io::Result<Vec<SessionRecord>> {
         let _lock = self.lock()?;
-        let mut records = Vec::new();
-        let entries = match fs::read_dir(self.root.join("sessions")) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(records),
-            Err(error) => return Err(error),
-        };
-        for entry in entries {
-            let path = entry?.path();
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-                && let Some(record) = read_session(&path, &self.limits.sessions)?
-            {
-                records.push(record);
-            }
-        }
-        records.sort_by(|left, right| left.session_id.cmp(&right.session_id));
-        Ok(records)
+        self.sessions_locked()
     }
 
     fn take_session(
@@ -948,6 +963,30 @@ impl SessionStore for FileRegistry {
                 .into_iter()
                 .filter(|record| record.mission_id == mission_id),
         ))
+    }
+}
+
+impl FileRegistry {
+    /// Every Session record, in ID order, under the lock the caller holds.
+    fn sessions_locked(&self) -> io::Result<Vec<SessionRecord>> {
+        let mut records = Vec::new();
+        let entries = match fs::read_dir(self.root.join("sessions")) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(records),
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let path = entry?.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+                && let Some(record) = read_session(&path, &self.limits.sessions)?
+            {
+                records.push(record);
+            }
+        }
+        records.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        Ok(records)
     }
 }
 

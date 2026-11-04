@@ -52,10 +52,13 @@ CREATE TABLE IF NOT EXISTS ai6_mission_counters (
     revision INTEGER NOT NULL
 );
 
--- Every Mission ID issued, by its lower-case form, since two that differ only by case are one
--- file and one branch elsewhere. entry names what can enter again and must get the same ID.
+-- Every Mission handle given, current or former, by its lower-case form, since two that
+-- differ only by case are one branch elsewhere; handle is as given, mission_id the Mission's
+-- UID. entry names what can enter again and must name the same Mission: it sits on the row of
+-- the Mission's current handle.
 CREATE TABLE IF NOT EXISTS ai6_mission_ids (
     folded TEXT PRIMARY KEY,
+    handle TEXT NOT NULL,
     mission_id TEXT NOT NULL,
     entry TEXT UNIQUE,
     revision INTEGER NOT NULL

@@ -190,13 +190,13 @@ fn registry_limits_in_the_file_bound_the_registry_it_opens() {
         )
         .unwrap();
         let ttl = std::time::Duration::from_secs(60);
-        for id in ["s-1", "s-2"] {
+        for (id, mission) in [("s-1", "mission-1"), ("s-2", "mission-2")] {
             opened
-                .open_session(ai6::NewSession::new(id, "mission-1", "station-a"), ttl)
+                .open_session(ai6::NewSession::new(id, mission, "station-a"), ttl)
                 .unwrap();
         }
         let refused = opened
-            .open_session(ai6::NewSession::new("s-3", "mission-1", "station-a"), ttl)
+            .open_session(ai6::NewSession::new("s-3", "mission-3", "station-a"), ttl)
             .unwrap_err();
         assert!(
             refused.to_string().contains("too many Session records"),

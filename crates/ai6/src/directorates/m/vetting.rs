@@ -802,6 +802,7 @@ pub fn review_brief(
         body,
         id: target.review_id(),
         mission_id: None,
+        handle: None,
         name: None,
         source: REVIEW_SOURCE.to_owned(),
         operation: Some(operation.to_owned()),

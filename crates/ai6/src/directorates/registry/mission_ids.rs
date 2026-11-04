@@ -1,33 +1,111 @@
-//! Mission IDs: the one rule that names a brief's Mission where the brief enters the Registry.
+//! Missions' keys and handles: the one rule that names a brief's Mission where the brief enters
+//! the Registry.
 //!
-//! An ID names its Operation and either a number from the Operation's counter or the tracker's
-//! code: `ai6-42`, `ai6-nightly-43`, `ai6-gh-63`, `ai6-AI6-64`. The ID is chosen once, kept on
-//! the brief, and is opaque from then on: nothing reads a code or a number back out of it.
+//! A Mission, and each run of it, is keyed by a UID: a UUIDv7 in lower-case text, which every
+//! Registry key, relation and route uses and which never changes. What people see is its
+//! handle: the Operation and either a number from the Operation's counter or the tracker's code
+//! (`ai6-42`, `ai6-nightly-43`, `ai6-gh-63`, `ai6-AI6-64`); a run's is `<handle>.<attempt>`. A
+//! handle can be renamed, and nothing reads a code or a number back out of one.
 //!
-//! The Registry keeps every ID it issued, with the [`MissionEntry`] it was issued to when that
-//! entry can come again (a re-polled item, a Sleeper's round, a review, a repeated approval), so
-//! the same entry always gets the same ID, on any Station, however its brief moved since. No two
-//! IDs differ only by case, since an ID becomes a file name and a branch.
+//! The Registry keeps a book of every handle it gave, current and former, each naming its
+//! Mission's UID, with the [`MissionEntry`] it was given for when that entry can come again (a
+//! re-polled item, a Sleeper's round, a review, a repeated approval), so the same entry always
+//! names the same Mission, on any Station, however its brief moved since. A handle is never
+//! given to a second Mission, and no two differ only by case, since a handle names a branch.
 
 use std::io;
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::limits::BriefLimits;
 use super::store::hex_digest;
 
-/// What stands for the Operation in the ID of a brief that names none.
+/// What stands for the Operation in the handle of a brief that names none.
 const NO_OPERATION: &str = "mission";
 
 /// Separates the parts of an entry's name in the book. Operation, instance and Sleeper names
 /// hold no control character, and a SQL script can write this one with `chr(31)`.
 const SEPARATOR: char = '\u{1f}';
 
-/// The most bytes a Mission ID can have, whatever `mission_id_bytes` says: it is a file name,
-/// 255 bytes on every platform here, with a suffix of up to 15 (`.outcome.json`, `.N.json`).
-const FILE_NAME_ROOM: usize = 240;
+/// The most bytes a handle can have, whatever `handle_bytes` says: it names a Git branch, whose
+/// ref is a file, 255 bytes on every platform here, with room for a branch template's suffix.
+const BRANCH_ROOM: usize = 240;
 
-/// Where a brief enters, which decides its Mission ID.
+/// A Mission's key and the handle it shows.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissionHandle {
+    /// The Mission's UID: its Registry key, which every relation uses.
+    pub mission_id: String,
+    /// What the Mission is called now.
+    pub handle: String,
+}
+
+impl MissionHandle {
+    /// The Mission `mission_id`, called `handle`.
+    pub fn new(mission_id: impl Into<String>, handle: impl Into<String>) -> Self {
+        Self {
+            mission_id: mission_id.into(),
+            handle: handle.into(),
+        }
+    }
+}
+
+/// A new UID for a Mission or a run: a UUIDv7 in lower-case text, so UIDs sort by when they
+/// were made.
+pub fn new_uid() -> String {
+    uuid::Uuid::now_v7().to_string()
+}
+
+/// Whether `text` is a UID as AI6 writes one: a UUID, hyphenated and in lower case.
+pub fn is_uid(text: &str) -> bool {
+    uuid::Uuid::parse_str(text).is_ok_and(|uid| uid.hyphenated().to_string() == text)
+}
+
+/// A run's handle: its Mission's handle when the run opened, and its attempt, `ai6-42.2`.
+pub fn run_handle(mission_handle: &str, attempt: u32) -> String {
+    format!("{mission_handle}.{attempt}")
+}
+
+/// Whether `handle` can name a Mission: only ASCII letters, digits, `_` and `-`, so it is valid
+/// in a file name on any platform, in a Git branch and in a URL without escaping; neither
+/// starting nor ending with `-`; within 240 bytes; and not a UID, which routes take as well.
+pub fn valid_handle(handle: &str) -> bool {
+    !handle.is_empty()
+        && handle.len() <= BRANCH_ROOM
+        && handle
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+        && !handle.starts_with('-')
+        && !handle.ends_with('-')
+        && !is_uid(handle)
+}
+
+/// Checks a handle a person chose, within `[registry.limits.briefs] handle_bytes`.
+///
+/// # Errors
+///
+/// `InvalidInput`, saying what is wrong, for a handle [`valid_handle`] refuses or one longer
+/// than the limit.
+pub(super) fn check_handle(handle: &str, limits: &BriefLimits) -> io::Result<()> {
+    if !valid_handle(handle) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a handle is ASCII letters, digits, '_' and '-', neither starting nor ending with \
+             '-', and is not a UID",
+        ));
+    }
+    if handle.len() > id_bytes(limits) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("a handle is at most {} bytes", id_bytes(limits)),
+        ));
+    }
+    Ok(())
+}
+
+/// Where a brief enters, which decides its Mission's handle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissionEntry {
     operation: Option<String>,
@@ -100,7 +178,7 @@ impl MissionEntry {
     /// An item of a Source instance: `<operation>-<tag>-<code>`, or `<operation>-<code>` for a
     /// code that names its own project, or `<operation>-<instance>-<item>` when the provider
     /// gives no code. `tag` and `code` count only the first time the item is seen: the item
-    /// keeps the ID it was given if the Operation's instances change later.
+    /// keeps the Mission it was given if the Operation's instances change later.
     pub fn source(
         operation: &str,
         instance: &str,
@@ -146,7 +224,7 @@ impl MissionEntry {
         Some(parts.join(&SEPARATOR.to_string()))
     }
 
-    /// The label the ID starts with, and the counter's name once folded.
+    /// The label the handle starts with, and the counter's name once folded.
     fn label(&self) -> String {
         let label = part(self.operation.as_deref().unwrap_or_default());
         if label.is_empty() {
@@ -182,9 +260,9 @@ impl MissionEntry {
     }
 }
 
-/// A name as it may stand in an ID: only ASCII letters, digits, `_` and `-`, so it is valid in a
-/// file name on any platform, in a Git branch and in a URL without escaping. A `.` goes too: it
-/// is what makes `..`, a trailing `.lock` and a trailing dot, and it separates a run's attempt.
+/// A name as it may stand in a handle: only ASCII letters, digits, `_` and `-`. A `.` goes too:
+/// it is what makes `..`, a trailing `.lock` and a trailing dot, and it separates a run's
+/// attempt.
 fn part(text: &str) -> String {
     let mut safe = String::with_capacity(text.len());
     let mut replacing = false;
@@ -200,28 +278,28 @@ fn part(text: &str) -> String {
     safe.trim_matches('-').to_owned()
 }
 
-/// `id` within `bytes`: its start and a short hash of the whole of it, when it is longer.
-fn fit(id: String, bytes: usize) -> String {
-    if id.len() <= bytes {
-        return id;
+/// `handle` within `bytes`: its start and a short hash of the whole of it, when it is longer.
+fn fit(handle: String, bytes: usize) -> String {
+    if handle.len() <= bytes {
+        return handle;
     }
-    let start = id[..bytes.saturating_sub(9)].trim_end_matches('-');
-    format!("{start}-{}", short_hash(&id))
+    let start = handle[..bytes.saturating_sub(9)].trim_end_matches('-');
+    format!("{start}-{}", short_hash(&handle))
 }
 
 fn short_hash(text: &str) -> String {
     hex_digest(&Sha256::digest(text.as_bytes()))[..8].to_owned()
 }
 
-/// The longest ID `limits` allow.
+/// The longest handle `limits` allow.
 fn id_bytes(limits: &BriefLimits) -> usize {
-    limits.mission_id_bytes.or_max().min(FILE_NAME_ROOM)
+    limits.handle_bytes.or_max().min(BRANCH_ROOM)
 }
 
-/// An ID as the book compares it: two IDs that differ only by case are one file on Windows and
-/// macOS, and one branch once fetched there.
-pub(super) fn folded(id: &str) -> String {
-    id.to_ascii_lowercase()
+/// A handle as the book compares it: two that differ only by case are one branch once fetched
+/// on Windows or macOS.
+pub(super) fn folded(handle: &str) -> String {
+    handle.to_ascii_lowercase()
 }
 
 /// The name of an entry's file, for a backend that cannot hold it as a key.
@@ -231,88 +309,101 @@ pub(super) fn book_digest(name: &str) -> String {
 
 /// What a backend keeps for the rule, read and written under its one writer's lock.
 pub(super) trait MissionBook {
-    /// The ID an entry was given.
-    fn entered(&mut self, name: &str) -> io::Result<Option<String>>;
-    /// Whether `id` was issued, compared without case, or a brief already goes by it.
-    fn taken(&mut self, id: &str) -> io::Result<bool>;
+    /// The Mission an entry names, with the handle it goes by now.
+    fn entered(&mut self, name: &str) -> io::Result<Option<MissionHandle>>;
+    /// The UID of the Mission `handle` was given to, compared without case, current or former.
+    fn holder(&mut self, handle: &str) -> io::Result<Option<String>>;
     /// The next number of the counter `name`, written before it is used, so it is never reused.
     fn next_number(&mut self, name: &str) -> io::Result<u64>;
-    /// Records `id` as issued to the entry `name`.
-    fn issue(&mut self, id: &str, name: Option<&str>) -> io::Result<()>;
+    /// Records `mission`'s handle as given to it, and for the entry `name`, which then names
+    /// this handle, when the entry can come again.
+    fn issue(&mut self, mission: &MissionHandle, name: Option<&str>) -> io::Result<()>;
+    /// The entry `handle` was given for, when it can come again.
+    fn entry_of(&mut self, handle: &str) -> io::Result<Option<String>>;
 }
 
-/// The Mission ID for `entry`: the one it was given, or a new one by the rule.
+/// Whether the book or a route could mistake `handle` for another Mission.
+fn taken(book: &mut dyn MissionBook, handle: &str) -> io::Result<bool> {
+    Ok(is_uid(handle) || book.holder(handle)?.is_some())
+}
+
+/// The Mission for `entry`: the one it already names, or a new UID with a handle by the rule.
 ///
-/// A number another entry's ID already reads as is skipped, and never used. A code whose ID is
-/// taken, by `ai6-gh`'s Mission 63 for `ai6`'s GitHub item 63, adds a short hash of the entry.
+/// A number another Mission's handle already reads as is skipped, and never used. A code whose
+/// handle is taken, by `ai6-gh`'s Mission 63 for `ai6`'s GitHub item 63, adds a short hash of
+/// the entry.
 pub(super) fn allot(
     book: &mut dyn MissionBook,
     entry: &MissionEntry,
     limits: &BriefLimits,
-) -> io::Result<String> {
+) -> io::Result<MissionHandle> {
     let name = entry.book_name();
     if let Some(name) = &name
-        && let Some(id) = book.entered(name)?
+        && let Some(entered) = book.entered(name)?
     {
-        return Ok(id);
+        return Ok(entered);
     }
     let bytes = id_bytes(limits);
-    let id = if entry.counted() {
+    let handle = if entry.counted() {
         let counter = folded(&fit(entry.label(), bytes));
         loop {
-            let id = fit(entry.shaped(Some(book.next_number(&counter)?)), bytes);
-            if !book.taken(&id)? {
-                break id;
+            let handle = fit(entry.shaped(Some(book.next_number(&counter)?)), bytes);
+            if !taken(book, &handle)? {
+                break handle;
             }
         }
     } else {
         let name = name.as_deref().unwrap_or_default();
-        let id = fit(entry.shaped(None), bytes);
-        if book.taken(&id)? {
-            let id = format!(
+        let handle = fit(entry.shaped(None), bytes);
+        if taken(book, &handle)? {
+            let handle = format!(
                 "{}-{}",
-                &id[..id.len().min(bytes.saturating_sub(9))],
+                &handle[..handle.len().min(bytes.saturating_sub(9))],
                 short_hash(name)
             );
-            if book.taken(&id)? {
+            if taken(book, &handle)? {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
-                    format!("Mission ID {id} is taken by another entry"),
+                    format!("handle {handle} is taken by another entry"),
                 ));
             }
-            id
+            handle
         } else {
-            id
+            handle
         }
     };
-    book.issue(&id, name.as_deref())?;
-    Ok(id)
+    let mission = MissionHandle::new(new_uid(), handle);
+    book.issue(&mission, name.as_deref())?;
+    Ok(mission)
 }
 
-/// The ID of a run of a Mission, `<mission>.<attempt>`, within `bytes`: a Session record's ID.
-/// A longer Mission ID keeps its start and adds a short hash of the whole.
-pub fn run_id(mission_id: &str, attempt: u32, bytes: usize) -> String {
-    let safe: String = mission_id
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let safe = safe.trim_start_matches('.');
-    let suffix = format!(".{attempt}");
-    if safe == mission_id && mission_id.len() + suffix.len() <= bytes {
-        return format!("{mission_id}{suffix}");
+/// Renames `mission`, which goes by `mission.handle` now, to `handle`. A handle another Mission
+/// was ever given is refused; one of its own former handles can be taken back. The old handle
+/// stays in the book, naming this Mission, and an entry that named it names the new one.
+///
+/// # Errors
+///
+/// `InvalidInput` for a malformed handle, `AlreadyExists` for one that is taken.
+pub(super) fn rename(
+    book: &mut dyn MissionBook,
+    mission: &MissionHandle,
+    handle: &str,
+    limits: &BriefLimits,
+) -> io::Result<MissionHandle> {
+    check_handle(handle, limits)?;
+    if book
+        .holder(handle)?
+        .is_some_and(|holder| holder != mission.mission_id)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("handle {handle} is taken by another Mission"),
+        ));
     }
-    let room = bytes.saturating_sub(suffix.len() + 9).min(safe.len());
-    let mut start = room;
-    while !safe.is_char_boundary(start) {
-        start -= 1;
-    }
-    format!("{}-{}{suffix}", &safe[..start], short_hash(mission_id))
+    let entry = book.entry_of(&mission.handle)?;
+    let renamed = MissionHandle::new(mission.mission_id.clone(), handle);
+    book.issue(&renamed, entry.as_deref())?;
+    Ok(renamed)
 }
 
 #[cfg(test)]
@@ -320,6 +411,7 @@ mod tests {
     use super::*;
     use crate::directorates::registry::backend::*;
     use crate::directorates::registry::limits::RegistryLimits;
+    use crate::directorates::registry::sessions::NewSession;
     use crate::directorates::registry::sources::{Ingest, SourceItem};
     use crate::directorates::registry::store::{
         Brief, DEFAULT_LEASE, FileRegistry, MissionProposal,
@@ -330,22 +422,33 @@ mod tests {
     backend_tests!(
         concurrent_people_get_distinct_consecutive_numbers,
         each_entry_point_yields_its_shape,
-        a_repeated_entry_keeps_its_id_and_a_number_is_never_reused,
-        a_re_polled_item_keeps_its_id_and_creates_nothing,
-        jira_and_github_codes_shape_the_id,
-        an_item_keeps_its_id_when_its_instance_stops_being_the_only_one,
+        a_repeated_entry_keeps_its_mission_and_a_number_is_never_reused,
+        a_re_polled_item_keeps_its_mission_and_creates_nothing,
+        jira_and_github_codes_shape_the_handle,
+        an_item_keeps_its_handle_when_its_instance_stops_being_the_only_one,
         odd_codes_become_valid_as_a_branch_a_path_and_a_url_part,
-        operations_whose_ids_would_collide_never_share_one,
-        a_brief_keeps_its_id_through_a_requeue_and_a_hold,
+        operations_whose_handles_would_collide_never_share_one,
+        a_brief_keeps_its_mission_through_a_requeue_and_a_hold,
         a_proposal_gets_one_number_however_often_it_is_approved,
-        a_dropped_record_cannot_name_a_path_or_take_a_number,
+        a_dropped_record_cannot_name_a_path,
         a_finished_brief_from_elsewhere_owes_no_report,
+        a_rename_keeps_the_uid_and_every_handle_finds_it,
+        a_rename_reaches_the_brief_in_every_state,
+        a_taken_or_malformed_handle_is_refused,
+        a_former_handle_is_never_given_again,
+        a_renamed_item_keeps_its_new_handle_when_polled_again,
+        run_handles_follow_the_current_handle_only_for_new_runs,
     );
 
     fn person(registry: &dyn RegistryBackend, operation: Option<&str>) -> String {
         registry
             .allot_mission_id(&MissionEntry::person(operation))
             .unwrap()
+            .handle
+    }
+
+    fn handle_of(brief: &Brief) -> String {
+        brief.handle.clone().expect("an entered brief has a handle")
     }
 
     fn numbered(operation: &str, count: usize, threads: usize, store: &dyn Store) -> Vec<String> {
@@ -367,9 +470,9 @@ mod tests {
     }
 
     fn concurrent_people_get_distinct_consecutive_numbers(store: &dyn Store) {
-        let ids = numbered("ops", 10, 6, store);
-        let distinct: BTreeSet<_> = ids.iter().cloned().collect();
-        assert_eq!(distinct.len(), 60, "{ids:?}");
+        let handles = numbered("ops", 10, 6, store);
+        let distinct: BTreeSet<_> = handles.iter().cloned().collect();
+        assert_eq!(distinct.len(), 60, "{handles:?}");
         let expected: BTreeSet<_> = (1..=60).map(|number| format!("ops-{number}")).collect();
         assert_eq!(distinct, expected);
     }
@@ -412,14 +515,16 @@ mod tests {
         registry
             .fire_sleeper("ai6", "nightly", &sleeper, (1_792_922_400, None), "hq")
             .unwrap();
-        assert_eq!(registry.list_new().unwrap()[0].key(), "ai6-nightly-2");
+        let round = &registry.list_new().unwrap()[0];
+        assert_eq!(handle_of(round), "ai6-nightly-2");
+        assert!(is_uid(&round.key()), "{}", round.key());
 
         let proposal = proposal_of("ai6", "one");
         registry.submit_mission_proposal(&proposal).unwrap();
         let promoted = registry
             .promote_mission_proposal("ai6", &proposal.id, "hq")
             .unwrap();
-        assert_eq!(promoted.key(), "ai6-3");
+        assert_eq!(handle_of(&promoted), "ai6-3");
         assert_eq!(promoted.source, "ai6-agent-proposal");
         assert_eq!(promoted.id, proposal.id);
 
@@ -428,7 +533,7 @@ mod tests {
         let review = registry
             .enter_brief(&review, &MissionEntry::review("ai6", "review-1"))
             .unwrap();
-        assert_eq!(review.key(), "ai6-4");
+        assert_eq!(handle_of(&review), "ai6-4");
 
         registry
             .ingest_source_item(
@@ -439,41 +544,54 @@ mod tests {
             )
             .unwrap();
         let queued = registry.list_new().unwrap();
-        assert!(queued.iter().any(|brief| brief.key() == "ai6-AI6-64"));
+        assert!(queued.iter().any(|brief| handle_of(brief) == "ai6-AI6-64"));
         // A person's next number comes after everything the counter gave.
         assert_eq!(person(registry.as_ref(), Some("ai6")), "ai6-5");
+        let keys: BTreeSet<String> = queued.iter().map(Brief::key).collect();
+        assert_eq!(
+            keys.len(),
+            queued.len(),
+            "every Mission has a UID of its own"
+        );
     }
 
-    fn a_repeated_entry_keeps_its_id_and_a_number_is_never_reused(store: &dyn Store) {
+    fn a_repeated_entry_keeps_its_mission_and_a_number_is_never_reused(store: &dyn Store) {
         let registry = store.handle();
         let entry = MissionEntry::sleeper("G", "deps", "20261025T0300Z", Some("a"));
         let first = registry.allot_mission_id(&entry).unwrap();
-        assert_eq!(first, "G-deps-1");
+        assert_eq!(first.handle, "G-deps-1");
+        assert!(is_uid(&first.mission_id));
         assert_eq!(registry.allot_mission_id(&entry).unwrap(), first);
         // Another handle, as another Station opens it, reads the same book.
         assert_eq!(
             store.handle().allot_mission_id(&entry).unwrap(),
             first,
-            "a second Station gives the entry a second number"
+            "a second Station gives the entry a second Mission"
         );
-        assert_eq!(registry.entered_mission_id(&entry).unwrap(), Some(first));
+        assert_eq!(
+            registry.entered_mission_id(&entry).unwrap(),
+            Some(first.mission_id.clone())
+        );
         let other = MissionEntry::sleeper("G", "deps", "20261025T0300Z", Some("b"));
         assert_eq!(registry.entered_mission_id(&other).unwrap(), None);
-        assert_eq!(registry.allot_mission_id(&other).unwrap(), "G-deps-2");
+        assert_eq!(
+            registry.allot_mission_id(&other).unwrap().handle,
+            "G-deps-2"
+        );
 
         // A brief that entered and finished leaves its number spent.
         let entered = registry
             .enter_brief(&brief("gone"), &MissionEntry::person(Some("G")))
             .unwrap();
-        assert_eq!(entered.key(), "G-3");
-        let claimed = registry.claim_new(Some("G-3")).unwrap().unwrap();
+        assert_eq!(handle_of(&entered), "G-3");
+        let claimed = registry.claim_new(Some(&entered.key())).unwrap().unwrap();
         registry
             .finish(&claimed, &serde_json::json!({}), true, None, None)
             .unwrap();
         assert_eq!(person(registry.as_ref(), Some("G")), "G-4");
     }
 
-    fn a_re_polled_item_keeps_its_id_and_creates_nothing(store: &dyn Store) {
+    fn a_re_polled_item_keeps_its_mission_and_creates_nothing(store: &dyn Store) {
         let registry = store.handle();
         let item = source_item("o/r#63", Some("63"), Some("gh"));
         let ingest = |item: &SourceItem| {
@@ -484,18 +602,20 @@ mod tests {
         assert_eq!(ingest(&item), Ingest::Queued);
         assert_eq!(ingest(&item), Ingest::Unchanged);
         assert_eq!(registry.list_new().unwrap().len(), 1);
-        assert_eq!(registry.list_new().unwrap()[0].key(), "ai6-gh-63");
+        let queued = registry.list_new().unwrap().remove(0);
+        assert_eq!(handle_of(&queued), "ai6-gh-63");
+        let key = queued.key();
 
         let mut changed = item.clone();
         changed.body = "It broke again.".to_owned();
         assert_eq!(ingest(&changed), Ingest::Updated);
-        assert_eq!(registry.list_new().unwrap()[0].key(), "ai6-gh-63");
+        assert_eq!(registry.list_new().unwrap()[0].key(), key);
 
         let lease = registry
             .claim_with_lease(None, "station-a", DEFAULT_LEASE, BTreeMap::new())
             .unwrap()
             .unwrap();
-        assert_eq!(lease.key(), "ai6-gh-63");
+        assert_eq!(lease.key(), key);
         assert_eq!(ingest(&changed), Ingest::InFlight);
         let claimed = registry.read_claimed(lease.key()).unwrap().unwrap();
         registry
@@ -516,10 +636,10 @@ mod tests {
                 .unwrap(),
             Ingest::Queued
         );
-        assert_eq!(registry.list_new().unwrap()[0].key(), "other-gh-63");
+        assert_eq!(handle_of(&registry.list_new().unwrap()[0]), "other-gh-63");
     }
 
-    fn jira_and_github_codes_shape_the_id(store: &dyn Store) {
+    fn jira_and_github_codes_shape_the_handle(store: &dyn Store) {
         let registry = store.handle();
         for (instance, item) in [
             ("jira", source_item("AI6-64", Some("AI6-64"), None)),
@@ -534,14 +654,9 @@ mod tests {
                 .ingest_source_item("ai6", instance, &item, "hq")
                 .unwrap();
         }
-        let keys: BTreeSet<_> = registry
-            .list_new()
-            .unwrap()
-            .iter()
-            .map(Brief::key)
-            .collect();
+        let handles: BTreeSet<_> = registry.list_new().unwrap().iter().map(handle_of).collect();
         assert_eq!(
-            keys,
+            handles,
             BTreeSet::from(
                 [
                     "ai6-AI6-64",
@@ -554,7 +669,7 @@ mod tests {
         );
     }
 
-    fn an_item_keeps_its_id_when_its_instance_stops_being_the_only_one(store: &dyn Store) {
+    fn an_item_keeps_its_handle_when_its_instance_stops_being_the_only_one(store: &dyn Store) {
         let registry = store.handle();
         let alone = source_item("o/r#63", Some("63"), Some("gh"));
         let beside = source_item("o/r#63", Some("63"), Some("github"));
@@ -568,29 +683,34 @@ mod tests {
             Ingest::Unchanged
         );
         assert_eq!(registry.list_new().unwrap().len(), 1);
-        assert_eq!(registry.list_new().unwrap()[0].key(), "ai6-gh-63");
+        assert_eq!(handle_of(&registry.list_new().unwrap()[0]), "ai6-gh-63");
     }
 
     /// What Git's `check-ref-format` refuses in a branch, what a Windows or case-insensitive
     /// file system cannot hold, and what a URL would have to escape.
-    fn assert_valid_everywhere(id: &str) {
-        assert!(!id.is_empty() && id.len() <= FILE_NAME_ROOM, "{id}");
+    fn assert_valid_everywhere(handle: &str) {
         assert!(
-            id.chars().all(
+            !handle.is_empty() && handle.len() <= BRANCH_ROOM,
+            "{handle}"
+        );
+        assert!(
+            handle.chars().all(
                 |character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
             ),
-            "{id}"
+            "{handle}"
         );
-        assert!(!id.starts_with('-'), "{id}");
-        assert!(!id.ends_with('-'), "{id}");
-        assert!(!id.contains(".."), "{id}");
-        assert!(!id.ends_with(".lock"), "{id}");
-        assert!(!id.ends_with('.'), "{id}");
+        assert!(!handle.starts_with('-'), "{handle}");
+        assert!(!handle.ends_with('-'), "{handle}");
+        assert!(!handle.contains(".."), "{handle}");
+        assert!(!handle.ends_with(".lock"), "{handle}");
+        assert!(!handle.ends_with('.'), "{handle}");
+        assert!(valid_handle(handle), "{handle}");
     }
 
     fn odd_codes_become_valid_as_a_branch_a_path_and_a_url_part(store: &dyn Store) {
         let registry = store.handle();
         let long = "x".repeat(400);
+        let uid_code = new_uid();
         for (index, code) in [
             "a/b c",
             "..",
@@ -606,33 +726,38 @@ mod tests {
             "@{1}",
             "a\nb",
             long.as_str(),
+            uid_code.as_str(),
         ]
         .into_iter()
         .enumerate()
         {
-            let item = source_item(&format!("item-{index}"), Some(code), Some("gh"));
+            let item = source_item(&format!("item-{index}"), Some(code), None);
             registry
                 .ingest_source_item("ops", "github", &item, "hq")
                 .unwrap();
         }
         let queued = registry.list_new().unwrap();
-        assert_eq!(queued.len(), 14);
+        assert_eq!(queued.len(), 15);
         for brief in &queued {
-            assert_valid_everywhere(&brief.key());
-            assert!(brief.key().len() <= DEFAULT_ID_BYTES, "{}", brief.key());
+            assert_valid_everywhere(&handle_of(brief));
+            assert!(
+                handle_of(brief).len() <= DEFAULT_ID_BYTES,
+                "{}",
+                handle_of(brief)
+            );
         }
         let cut = queued
             .iter()
-            .find(|brief| brief.key().contains("xxxx"))
-            .unwrap()
-            .key();
-        assert!(cut.starts_with("ops-gh-xxx"), "{cut}");
+            .map(handle_of)
+            .find(|handle| handle.contains("xxxx"))
+            .unwrap();
+        assert!(cut.starts_with("ops-xxx"), "{cut}");
         assert_eq!(
             registry
                 .ingest_source_item(
                     "ops",
                     "github",
-                    &source_item("item-13", Some(&long), Some("gh")),
+                    &source_item("item-13", Some(&long), None),
                     "hq"
                 )
                 .unwrap(),
@@ -645,7 +770,7 @@ mod tests {
         }
     }
 
-    fn operations_whose_ids_would_collide_never_share_one(store: &dyn Store) {
+    fn operations_whose_handles_would_collide_never_share_one(store: &dyn Store) {
         let registry = store.handle();
         // Two Operations a case-insensitive file system cannot tell apart.
         let upper = person(registry.as_ref(), Some("OPS"));
@@ -666,24 +791,27 @@ mod tests {
             Ingest::Queued,
             "another Operation's Mission must not read as this item finished"
         );
-        let key = registry.list_new().unwrap()[0].key();
-        assert!(key.starts_with("ai6-gh-63-") && key.len() > 10, "{key}");
+        let handle = handle_of(&registry.list_new().unwrap()[0]);
+        assert!(
+            handle.starts_with("ai6-gh-63-") && handle.len() > 10,
+            "{handle}"
+        );
         assert_eq!(
             registry
                 .ingest_source_item("ai6", "github", &item, "hq")
                 .unwrap(),
             Ingest::Unchanged
         );
-        assert_eq!(registry.list_new().unwrap()[0].key(), key);
+        assert_eq!(handle_of(&registry.list_new().unwrap()[0]), handle);
 
         // Sleeper `b` of Operation `a` and the Missions of Operation `a-b`.
         let plain = person(registry.as_ref(), Some("a-b"));
         assert_eq!(plain, "a-b-1");
         let round = MissionEntry::sleeper("a", "b", "w", None);
-        assert_eq!(registry.allot_mission_id(&round).unwrap(), "a-b-2");
+        assert_eq!(registry.allot_mission_id(&round).unwrap().handle, "a-b-2");
     }
 
-    fn a_brief_keeps_its_id_through_a_requeue_and_a_hold(store: &dyn Store) {
+    fn a_brief_keeps_its_mission_through_a_requeue_and_a_hold(store: &dyn Store) {
         let registry = store.handle();
         let mut asked = brief("asked");
         asked.operation = Some("G".to_owned());
@@ -691,7 +819,8 @@ mod tests {
             .enter_brief(&asked, &MissionEntry::person(Some("G")))
             .unwrap();
         let key = entered.key();
-        assert_eq!(key, "G-1");
+        assert_eq!(handle_of(&entered), "G-1");
+        assert_eq!(entered.mission_id.as_deref(), Some(key.as_str()));
         let vetting = crate::directorates::m::vetting::Vetting::pass();
         assert!(
             registry
@@ -712,7 +841,7 @@ mod tests {
         let queued = registry.list_new().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].key(), key);
-        assert_eq!(queued[0].mission_id.as_deref(), Some("G-1"));
+        assert_eq!(handle_of(&queued[0]), "G-1");
         let again = registry
             .claim_with_lease(Some(&key), "hq", DEFAULT_LEASE, BTreeMap::new())
             .unwrap()
@@ -728,32 +857,47 @@ mod tests {
         let first = registry
             .promote_mission_proposal("G", &proposal.id, "hq")
             .unwrap();
-        assert_eq!(first.key(), "G-1");
+        assert_eq!(handle_of(&first), "G-1");
         let again = store
             .handle()
             .promote_mission_proposal("G", &proposal.id, "other")
             .unwrap();
-        assert_eq!(again.key(), "G-1");
+        assert_eq!(again.key(), first.key());
+        assert_eq!(handle_of(&again), "G-1");
         assert_eq!(again.provenance, first.provenance);
         assert_eq!(registry.list_new().unwrap().len(), 1);
         assert_eq!(person(registry.as_ref(), Some("G")), "G-2");
     }
 
-    fn a_dropped_record_cannot_name_a_path_or_take_a_number(store: &dyn Store) {
+    fn a_dropped_record_cannot_name_a_path(store: &dyn Store) {
         let registry = store.handle();
         registry.drop_brief(
             "escape",
             r#"{"title":"Evil","id":"x","mission_id":"../../escape"}"#,
         );
+        registry.drop_brief("y", r#"{"title":"Early","id":"y","handle":"G-1"}"#);
+        let uid = new_uid();
+        registry.drop_brief(
+            &uid,
+            &format!(r#"{{"title":"Odd","id":"z","mission_id":"{uid}","handle":"../x"}}"#),
+        );
         assert!(
             registry.list_new().unwrap().is_empty(),
-            "a Mission ID that is no Registry key makes the record invalid"
+            "a Mission ID that is no Registry key, or a handle without one or that is no handle, \
+             makes the record invalid"
         );
         registry.drop_brief("G-1", r#"{"title":"Early","id":"y","mission_id":"G-1"}"#);
+        let allotted = registry
+            .allot_mission_id(&MissionEntry::person(Some("G")))
+            .unwrap();
         assert_eq!(
-            person(registry.as_ref(), Some("G")),
-            "G-2",
-            "a number a dropped brief goes by is skipped"
+            allotted.handle, "G-1",
+            "a key a dropped brief goes by takes no handle"
+        );
+        assert_eq!(
+            registry.resolve_mission("G-1").unwrap(),
+            Some(allotted),
+            "a handle names its Mission before a dropped key does"
         );
     }
 
@@ -774,9 +918,270 @@ mod tests {
             .unreported_source_briefs()
             .unwrap()
             .iter()
-            .map(|finished| finished.brief.key())
+            .map(|finished| handle_of(&finished.brief))
             .collect();
-        assert_eq!(listed, ["G-github-o_r_1"], "{} owes nothing", asked.key());
+        assert_eq!(
+            listed,
+            ["G-github-o_r_1"],
+            "{} owes nothing",
+            handle_of(&asked)
+        );
+    }
+
+    fn a_rename_keeps_the_uid_and_every_handle_finds_it(store: &dyn Store) {
+        let registry = store.handle();
+        let entered = registry
+            .enter_brief(&brief("asked"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        let uid = entered.key();
+        let renamed = registry.rename_mission(&uid, "G-build-fix").unwrap();
+        assert_eq!(renamed, MissionHandle::new(uid.clone(), "G-build-fix"));
+        let current = Some(renamed.clone());
+        assert_eq!(registry.resolve_mission(&uid).unwrap(), current);
+        assert_eq!(registry.resolve_mission("G-1").unwrap(), current);
+        assert_eq!(registry.resolve_mission("g-1").unwrap(), current);
+        assert_eq!(registry.resolve_mission("g-BUILD-fix").unwrap(), current);
+        // Another Station reads the same book.
+        assert_eq!(store.handle().resolve_mission("G-1").unwrap(), current);
+        assert_eq!(registry.resolve_mission("G-2").unwrap(), None);
+        assert_eq!(registry.resolve_mission(&new_uid()).unwrap(), None);
+        assert_eq!(registry.resolve_mission("../x").unwrap(), None);
+        let queued = registry.list_new().unwrap();
+        assert_eq!(queued[0].key(), uid);
+        assert_eq!(handle_of(&queued[0]), "G-build-fix");
+        // A brief dropped by hand goes by its key, and has no handle to rename.
+        registry.submit_brief(&brief("manual")).unwrap();
+        assert_eq!(
+            registry.resolve_mission("manual--manual").unwrap(),
+            Some(MissionHandle::new("manual--manual", "manual--manual"))
+        );
+        assert_eq!(
+            registry
+                .rename_mission("manual--manual", "G-x")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            registry
+                .rename_mission(&new_uid(), "G-y")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    fn a_rename_reaches_the_brief_in_every_state(store: &dyn Store) {
+        let registry = store.handle();
+        registry
+            .ingest_source_item(
+                "G",
+                "github",
+                &source_item("o/r#7", Some("7"), Some("gh")),
+                "hq",
+            )
+            .unwrap();
+        let key = registry.list_new().unwrap()[0].key();
+        let vetting = crate::directorates::m::vetting::Vetting::pass();
+        registry.hold_brief("G", &key, &vetting, 1.0).unwrap();
+        registry.rename_mission(&key, "G-held").unwrap();
+        let held = registry.held_briefs("G", 10).unwrap();
+        assert_eq!(handle_of(&held[0].brief), "G-held");
+        assert!(registry.requeue_held("G", &key).unwrap());
+        let queued = registry.list_new().unwrap().remove(0);
+        assert_eq!(handle_of(&queued), "G-held");
+        assert!(
+            queued.provenance.is_some(),
+            "a rename leaves what the brief says, and its provenance, as they were"
+        );
+
+        let lease = registry
+            .claim_with_lease(Some(&key), "hq", DEFAULT_LEASE, BTreeMap::new())
+            .unwrap()
+            .unwrap();
+        registry.rename_mission(&key, "G-claimed").unwrap();
+        let claimed = registry.read_claimed(lease.key()).unwrap().unwrap();
+        assert_eq!(handle_of(&claimed), "G-claimed");
+        assert!(claimed.provenance.is_some());
+        registry
+            .finish(&claimed, &serde_json::json!({}), true, None, Some("hq"))
+            .unwrap();
+        registry.rename_mission(&key, "G-done").unwrap();
+        let filed = registry.filed_brief(&key).unwrap().unwrap();
+        assert_eq!(filed.state, "done");
+        assert_eq!(handle_of(&filed.brief), "G-done");
+        for former in ["G-gh-7", "G-held", "G-claimed", "G-done"] {
+            assert_eq!(
+                registry.resolve_mission(former).unwrap(),
+                Some(MissionHandle::new(key.clone(), "G-done")),
+                "{former}"
+            );
+        }
+        let unreported = registry.unreported_source_briefs().unwrap();
+        assert_eq!(handle_of(&unreported[0].brief), "G-done");
+        assert!(crate::directorates::registry::sources::reportable(
+            &unreported[0].brief,
+            "github"
+        ));
+    }
+
+    fn a_taken_or_malformed_handle_is_refused(store: &dyn Store) {
+        let registry = store.handle();
+        let first = registry
+            .enter_brief(&brief("one"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        let second = registry
+            .enter_brief(&brief("two"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        registry.rename_mission(&first.key(), "G-first").unwrap();
+        for taken in ["G-first", "g-FIRST", "G-1"] {
+            assert_eq!(
+                registry
+                    .rename_mission(&second.key(), taken)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::AlreadyExists,
+                "{taken}"
+            );
+        }
+        let long = "y".repeat(DEFAULT_ID_BYTES + 1);
+        for malformed in [
+            "",
+            "a b",
+            "-lead",
+            "trail-",
+            "a.b",
+            "a/b",
+            "ünï",
+            long.as_str(),
+            first.key().as_str(),
+        ] {
+            assert_eq!(
+                registry
+                    .rename_mission(&second.key(), malformed)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput,
+                "{malformed:?}"
+            );
+        }
+        assert_eq!(
+            handle_of(&registry.filed_brief(&second.key()).unwrap().unwrap().brief),
+            "G-2"
+        );
+        // A Mission may take back a handle of its own.
+        registry.rename_mission(&first.key(), "G-1").unwrap();
+        assert_eq!(
+            registry.resolve_mission("G-first").unwrap().unwrap().handle,
+            "G-1"
+        );
+    }
+
+    fn a_former_handle_is_never_given_again(store: &dyn Store) {
+        let registry = store.handle();
+        let entered = registry
+            .enter_brief(&brief("one"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        registry.rename_mission(&entered.key(), "G-2").unwrap();
+        assert_eq!(
+            person(registry.as_ref(), Some("G")),
+            "G-3",
+            "a handle a rename took is skipped by the counter"
+        );
+        let other = registry
+            .enter_brief(&brief("two"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        assert_eq!(handle_of(&other), "G-4");
+        assert_eq!(
+            registry
+                .rename_mission(&other.key(), "G-1")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::AlreadyExists,
+            "a former handle stays with its Mission"
+        );
+    }
+
+    fn a_renamed_item_keeps_its_new_handle_when_polled_again(store: &dyn Store) {
+        let registry = store.handle();
+        let item = source_item("o/r#9", Some("9"), Some("gh"));
+        registry
+            .ingest_source_item("G", "github", &item, "hq")
+            .unwrap();
+        let key = registry.list_new().unwrap()[0].key();
+        registry.rename_mission(&key, "G-nine").unwrap();
+        assert_eq!(
+            registry
+                .ingest_source_item("G", "github", &item, "hq")
+                .unwrap(),
+            Ingest::Unchanged
+        );
+        let mut changed = item.clone();
+        changed.body = "Still broken.".to_owned();
+        assert_eq!(
+            store
+                .handle()
+                .ingest_source_item("G", "github", &changed, "hq")
+                .unwrap(),
+            Ingest::Updated
+        );
+        let queued = registry.list_new().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(
+            (queued[0].key(), handle_of(&queued[0])),
+            (key, "G-nine".to_owned())
+        );
+        assert!(queued[0].provenance.is_some());
+    }
+
+    fn run_handles_follow_the_current_handle_only_for_new_runs(store: &dyn Store) {
+        let registry = store.handle();
+        let entered = registry
+            .enter_brief(&brief("one"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        let uid = entered.key();
+        let open = |attempt: u32, handle: &str| {
+            registry.open_session(
+                NewSession::new(new_uid(), &uid, "hq")
+                    .with_handle(handle)
+                    .with_attempt(attempt, None),
+                DEFAULT_LEASE,
+            )
+        };
+        let first = open(1, "G-1").unwrap();
+        assert!(is_uid(&first.session_id));
+        assert_eq!(first.handle.as_deref(), Some("G-1.1"));
+        assert!(
+            matches!(
+                open(1, "G-1"),
+                Err(crate::directorates::registry::sessions::SessionError::Exists)
+            ),
+            "one record per attempt, whatever its UID"
+        );
+        let renamed = registry.rename_mission(&uid, "G-fix").unwrap();
+        let second = open(2, &renamed.handle).unwrap();
+        assert_eq!(second.handle.as_deref(), Some("G-fix.2"));
+        assert_eq!(
+            registry
+                .session(&first.session_id)
+                .unwrap()
+                .unwrap()
+                .handle
+                .as_deref(),
+            Some("G-1.1"),
+            "a run keeps the handle it opened with"
+        );
+        let next = NewSession::new(new_uid(), &uid, "hq")
+            .with_handle("G-fix")
+            .with_attempt(2, None)
+            .next_attempt()
+            .unwrap();
+        let third = registry.open_session(next, DEFAULT_LEASE).unwrap();
+        assert_eq!(
+            (third.attempt, third.handle.as_deref()),
+            (3, Some("G-fix.3"))
+        );
+        assert_ne!(third.session_id, second.session_id);
     }
 
     #[test]
@@ -786,8 +1191,8 @@ mod tests {
         let entered = registry
             .enter_brief(&brief("gone"), &MissionEntry::person(Some("G")))
             .unwrap();
-        assert_eq!(entered.key(), "G-1");
-        let claimed = registry.claim_new(Some("G-1")).unwrap().unwrap();
+        assert_eq!(handle_of(&entered), "G-1");
+        let claimed = registry.claim_new(Some(&entered.key())).unwrap().unwrap();
         registry
             .finish(&claimed, &serde_json::json!({}), true, None, None)
             .unwrap();
@@ -808,7 +1213,7 @@ mod tests {
         let entered = registry
             .enter_brief(&brief("gone"), &MissionEntry::person(Some("G")))
             .unwrap();
-        assert_eq!(entered.key(), "G-1");
+        assert_eq!(handle_of(&entered), "G-1");
         rusqlite::Connection::open(&path)
             .unwrap()
             .execute("DELETE FROM ai6_briefs", [])
@@ -847,48 +1252,54 @@ mod tests {
             .unwrap();
         let listed = registry.unreported_source_briefs().unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].brief.key(), "Z-github-o_r_1");
+        assert_eq!(handle_of(&listed[0].brief), "Z-github-o_r_1");
     }
 
     const DEFAULT_ID_BYTES: usize = 120;
 
     #[test]
-    fn the_limit_on_an_id_is_a_setting_and_the_default_leaves_a_run_room() {
+    fn the_limit_on_a_handle_is_a_setting() {
         let limits = RegistryLimits::default();
         assert_eq!(id_bytes(&limits.briefs), DEFAULT_ID_BYTES);
-        let long = "y".repeat(400);
-        let id = fit(long, DEFAULT_ID_BYTES);
-        let run = run_id(&id, 4_000_000, 128);
-        assert!(run.starts_with(&id), "{run}");
-        assert!(run.ends_with(".4000000"), "{run}");
-        assert!(run.len() <= 128);
+        let handle = fit("y".repeat(400), DEFAULT_ID_BYTES);
+        assert_eq!(handle.len(), DEFAULT_ID_BYTES);
+        assert_eq!(run_handle(&handle, 4_000_000), format!("{handle}.4000000"));
 
         let root = tempfile::tempdir().unwrap();
         let mut narrow = RegistryLimits::default();
-        narrow.briefs.mission_id_bytes = crate::bounds::Limit::at(16);
+        narrow.briefs.handle_bytes = crate::bounds::Limit::at(16);
         let registry = FileRegistry::open(root.path()).with_limits(narrow);
-        let id = registry
+        let allotted = registry
             .allot_mission_id(&MissionEntry::person(Some(&"operation".repeat(9))))
             .unwrap();
-        assert!(id.len() <= 16, "{id}");
+        assert!(allotted.handle.len() <= 16, "{}", allotted.handle);
+        let entered = registry
+            .enter_brief(&brief("x"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        assert_eq!(
+            registry
+                .rename_mission(&entered.key(), &"z".repeat(17))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+        registry
+            .rename_mission(&entered.key(), &"z".repeat(16))
+            .unwrap();
     }
 
     #[test]
-    fn a_run_is_the_mission_and_its_attempt() {
-        assert_eq!(run_id("ai6-42", 1, 128), "ai6-42.1");
-        assert_eq!(run_id("ai6-42", 2, 128), "ai6-42.2");
-        assert_eq!(
-            run_id("universal-exports--00000000-0000", 3, 128),
-            "universal-exports--00000000-0000.3"
-        );
-        // An ID a Station was handed directly can hold anything but a control character.
-        let odd = run_id("a/b c", 1, 128);
-        assert!(odd.starts_with("a_b_c-") && odd.ends_with(".1"), "{odd}");
-        assert_ne!(odd, run_id("a b/c", 1, 128));
-        let dotted = run_id(".hidden", 1, 128);
-        assert!(!dotted.starts_with('.'), "{dotted}");
-        let long = run_id(&"z".repeat(300), 12, 128);
-        assert!(long.len() <= 128 && long.ends_with(".12"), "{long}");
+    fn a_uid_is_a_lower_case_uuid_v7_and_never_a_handle() {
+        let uid = new_uid();
+        assert!(is_uid(&uid));
+        assert_eq!(uuid::Uuid::parse_str(&uid).unwrap().get_version_num(), 7);
+        assert!(!is_uid(&uid.to_ascii_uppercase()));
+        assert!(!is_uid(&uid.replace('-', "")));
+        assert!(!is_uid("ai6-42"));
+        assert!(!valid_handle(&uid));
+        assert!(valid_handle(&uid.to_ascii_uppercase()));
+        assert!(new_uid() > uid, "UIDs sort by when they were made");
+        assert_eq!(run_handle("ai6-42", 2), "ai6-42.2");
     }
 
     #[test]
@@ -913,9 +1324,9 @@ mod tests {
     fn two_processes_share_one_file_counter() {
         if let Some(root) = std::env::var_os(CHILD_ROOT) {
             let registry = FileRegistry::open(&root);
-            let ids: Vec<String> = (0..25).map(|_| person(&registry, Some("ops"))).collect();
+            let handles: Vec<String> = (0..25).map(|_| person(&registry, Some("ops"))).collect();
             let out = std::path::Path::new(&root).join(format!("ids-{}.txt", std::process::id()));
-            std::fs::write(out, ids.join("\n")).unwrap();
+            std::fs::write(out, handles.join("\n")).unwrap();
             return;
         }
         let root = tempfile::tempdir().unwrap();
@@ -936,19 +1347,19 @@ mod tests {
         for mut child in children {
             assert!(child.wait().unwrap().success());
         }
-        let mut ids = BTreeSet::new();
+        let mut handles = BTreeSet::new();
         let mut files = 0;
         for entry in std::fs::read_dir(root.path()).unwrap() {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|extension| extension == "txt") {
                 files += 1;
                 for line in std::fs::read_to_string(path).unwrap().lines() {
-                    assert!(ids.insert(line.to_owned()), "{line} was given twice");
+                    assert!(handles.insert(line.to_owned()), "{line} was given twice");
                 }
             }
         }
         assert_eq!(files, 3, "a child process ran no test");
         let expected: BTreeSet<_> = (1..=75).map(|number| format!("ops-{number}")).collect();
-        assert_eq!(ids, expected);
+        assert_eq!(handles, expected);
     }
 }
