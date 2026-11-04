@@ -156,8 +156,21 @@ keeps up to date. A role that cannot make what is missing stops at start, naming
 and what is missing: start that build once as a role that may, or create them from
 `crates/ai6/src/directorates/registry/sql/schema/postgres.sql`, and grant them to it. A script still
 does what moves data. A database whose schema version is newer than the Station knows is refused,
-when it is opened and on every write. Every write first takes the Registry's row in `ai6_clock`, so writers
-queue as they do on the directory's lock, and leases, the Headquarters term and Session
+when it is opened and on every write.
+
+A column added to a table that exists is a schema step: a name and its statements in
+`crates/ai6/src/directorates/registry/sql/steps.rs`. After making what is missing, each open runs
+the steps the database's `ai6_schema_steps` table does not record, one transaction each and in
+order, and records each with the time. A step whose column is there already, made by this build or
+added by hand, is recorded without running. The first, `mission_ids.handle`, adds the handle
+book's `handle` column to a database from before Mission handles; a handle book with rows refuses
+it, naming the step, since those Missions need UIDs. On PostgreSQL only the table's owner may run
+a step, so another role stops at start naming itself and the step. Then every table is compared with the columns this
+build makes it with: one that lacks a column, such as one dropped by hand, stops the Station naming
+table and column, while a column the build does not know, as a later build leaves after a
+rollback, is allowed.
+
+Every write first takes the Registry's row in `ai6_clock`, so writers queue as they do on the directory's lock, and leases, the Headquarters term and Session
 fencing behave the same on every backend. A Station that stalls inside a write (a paused
 VM, a half-open connection) loses its session after a quarter of the Headquarters lease,
 so it cannot hold the others back from taking over: the statement, lock and idle

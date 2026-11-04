@@ -237,6 +237,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   open), and when something is missing it stops at start, naming the role, the schema and what is
   missing, rather than at first use. Two Stations opening a new SQLite file together no longer fail on
   changing the journal mode.
+- Schema steps: a SQL Registry or roster also gains a column its table lacks when it is opened.
+  Each step is named and runs once, recorded in the new table `ai6_schema_steps`; one whose column
+  is already there is recorded without running. The first, `mission_ids.handle`, adds the handle
+  book's `handle` column to a database from before Mission handles, which needed a hand
+  `ALTER TABLE`. Every open then compares each table with the columns this build makes it with and
+  stops, naming table and column, at one that lacks a column; a column it does not know is allowed.
+  The version stays 1.
 - `tools/sdk/check_lock.py` fails when `pubspec.lock` names a package the `deps` commit's `pub/` lacks,
   which only an offline build found out before.
 - Moneypenny's chat comes back by itself after a socket fails, and says `Reconnecting…` meanwhile:
