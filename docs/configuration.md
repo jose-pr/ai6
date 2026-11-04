@@ -1046,6 +1046,8 @@ provider applied before it was a key; the provider's API header lists them with 
 | `send_attempts` | 5 | **Tries to send an outbox entry.** Sends tried before an outbox entry fails. |
 | `retry_backoff` | 30 | **Retry a failed send after.** Seconds before a failed send is tried again; each attempt doubles it. |
 | `replies_read` | 10 | **Replies shown of a linked issue.** Stored replies `issue_read` shows of a linked issue, newest first. |
+| `reopen_watch_every` | 300 | **Read settled items every.** Seconds between rounds reading the newest settled items again, so a label taken off one is seen and its return reopens it. |
+| `reopen_watch` | 20 | **Settled items read per round.** Settled items read in each of those rounds, per tracker instance, newest first; each is one request to the tracker. |
 <!-- schema:record.station.sources:end -->
 
 `[transports]`

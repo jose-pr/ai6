@@ -2148,6 +2148,11 @@ entered_mission_id(entry: &MissionEntry) -> io::Result<Option<String>>  // the U
 resolve_mission(id: &str) -> io::Result<Option<MissionHandle>>  // UID, dropped key or any handle ever given, without case
 rename_mission(mission_id: &str, handle: &str) -> io::Result<MissionHandle>  // NotFound / InvalidInput / AlreadyExists
 enter_brief(brief: &Brief, entry: &MissionEntry) -> io::Result<Brief>  // AlreadyExists when the entry's brief is in any state
+reenter_brief(brief: &Brief, entry: &MissionEntry, again: &dyn Fn(&Brief) -> bool) -> io::Result<Reentry>
+    // the Mission `entry` names, finished and accepted by `again`, queued again as `brief`: same UID,
+    // handle and claim count (the next claim is its next attempt); its outcome, report marks and
+    // spent provenance dropped; provenance is the brief's own
+#[non_exhaustive] pub enum Reentry { Queued(Brief), Unchanged(FiledBrief) /* in flight, or refused */, Unknown }
 claim_with_lease(key: Option<&str>, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>
 lease(key: &str) -> io::Result<Option<Lease>>
 read_claimed(key: &str) -> io::Result<Option<Brief>>
@@ -2184,6 +2189,10 @@ impl MissionEntry {
     pub fn proposal(operation: &str, proposal_id: &str) -> Self; // <operation>-<n>, once per proposal
     pub fn review(operation: &str, review_id: &str) -> Self;     // <operation>-<n>, once per review
     pub fn sleeper(operation: &str, name: &str, window: &str, station: Option<&str>) -> Self; // <operation>-<name>-<n>
+    pub fn standing(operation: &str, name: &str, station: Option<&str>) -> Self; // <operation>-<name>-<n>, one for every window
+    pub fn follow_up(operation: &str, instance: &str, item: &str) -> Self;
+        // the item's Mission's handle now and its next follow-up number from 2 (`G-gh-31-2`); a new
+        // Mission each time; NotFound when the item has no Mission
     pub fn source(operation: &str, instance: &str, item: &str, code: Option<&str>, tag: Option<&str>) -> Self;
         // <operation>-<tag>-<code>, <operation>-<code> with no tag, <operation>-<instance>-<item> with no code
 }
@@ -2407,6 +2416,7 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub opened_at: Option<f64>,              // Unix seconds
     pub closed_at: Option<f64>,              // set when it becomes Ended or Lost
     pub result: Option<SessionResult>,       // how its Mission stood at the holder's last write
+    pub window: Option<String>,              // the standing Sleeper's window the run answers
 }
 #[non_exhaustive] pub struct SessionResult { pub state: String /* the Mission state: working, blocked,
     stalled, done, failed, blown, abandoned, parked, quarantined */, pub reason: Option<String>
@@ -2420,6 +2430,7 @@ pub struct NewSession   // NewSession::new(session_id, mission_id, station); nex
                         //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
                         //   .with_operation(id)
                         //   .with_exposure(Vec<Exposure>) .with_launch(SessionLaunch) .with_account(AccountRef)
+                        //   .with_window(label)
 pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStatus) .parked_until(f64)
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
                           //   .launch(SessionLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
@@ -3183,6 +3194,8 @@ pub enum Ingest { Queued, Updated, Unchanged, InFlight, Finished }
 pub struct FinishedSourceBrief { pub brief: Brief, pub outcome: serde_json::Value, pub ok: bool }
 pub fn source_brief(operation: &str, provider: &str, item: &SourceItem, limits: &SourceLimits) -> Brief;  // no provenance, no Mission ID; text cut to item_text_bytes, name to name_bytes
 pub fn source_entry(operation: &str, instance: &str, item: &SourceItem) -> MissionEntry;
+pub fn reopened_brief((operation, provider): (&str, &str), item: &SourceItem, comments: &[Reply],
+    limits: &SourceLimits, received_by: &str) -> Brief;  // the item now and the comments since, fenced; Source provenance
 pub fn settled_cursor(cursor: &str, settling_secs: u64) -> Option<String>;  // the ISO 8601 cursor that much earlier on its own clock; None when it does not read as a time
 pub fn reportable(brief: &Brief, provider: &str) -> bool;  // a `source` provenance naming provider and item
 
@@ -3245,7 +3258,9 @@ pub struct TrackerCapabilities {
 }
 pub struct TrackerIssue { pub id, native_id, title, body, state /* open|closed */: String,
     pub labels: Vec<String>, pub assignees: Vec<String>, pub url: Option<String>,
-    pub updated: String, pub parent: Option<String>, pub author_id: Option<String> }
+    pub updated: String, pub parent: Option<String>, pub author_id: Option<String>,
+    pub priority: Option<String>, pub code: Option<String>, pub code_tag: Option<String> }
+    // code and code_tag as SourceItem's: what a Mission created with the issue is numbered by
 pub struct ReplyPoll { pub items: Vec<String>, pub since: Option<String> }
 pub struct Reply { pub id, item, author_id, author: String, pub permitted: bool,
     pub own: bool, pub body: String, pub created: String }   // body untrusted
@@ -3296,7 +3311,12 @@ pub enum QuestionState { Open, Answered, Expired, Withdrawn }
 pub struct IssueQuestion { pub id: String /* q-… when empty */, mission_id, tracker, item, entry: String, asked_at: f64, expires_at: f64, state: QuestionState }
 pub enum ReplyState { Pending, Delivered, Ignored }
 pub struct IssueReply { pub id /* the tracker's comment ID */, mission_id, tracker, item, author_id, author, body /* untrusted */, created: String, state: ReplyState }
-pub struct OutboxResult { pub comment_id: Option<String>, url: Option<String>, created_item: Option<String> }
+pub struct OutboxResult { pub comment_id: Option<String>, url: Option<String>, created_item: Option<String>,
+    created_code: Option<(String, Option<String>)> /* the created issue's code and tag */, dropped: Vec<String>,
+    attached_to: Option<String> }
+// ProposedIssue::mission: Option<Brief>: a person's Mission created with the issue; once the issue
+// exists the Headquarters Station enters it with MissionEntry::source (numbered by the issue) and
+// links it as its source, audited `mission.create.entered`
 pub enum OutboxSettle { Posted(OutboxResult), Refused(String), Retry { error: String, not_before: f64, max_attempts: u32 } }
 pub trait MissionIssueStore {   // on FileRegistry and SqlRegistry; part of RegistryBackend
     fn link_issue(&self, link: &IssueLink) -> io::Result<IssueLink>;      // upsert by (Mission, tracker, item); at most [registry.limits.issues] links_per_mission live ones
@@ -3401,7 +3421,18 @@ reads the issue into the link's `snapshot`, and unlinks it when it cannot be rea
 `ai6::settings_from_table::<T>(toml::Table)` builds a provider's settings through a Guatiao value, so
 its one declaration gives its parsing, defaults and schema. `source_setups` strips `provider`,
 `intake`, `interval_secs` and the keys of `InstanceKeys` (`status_labels`, `status_transitions`,
-`agent_labels`, `agent_transitions`, `priority_map`) before a provider sees the table.
+`agent_labels`, `agent_transitions`, `priority_map`, `reopen`) before a provider sees the table.
+
+`reopen` (`label` default, `comment`, `never`) decides what queues a settled item again as its
+Mission's next attempt (`BriefStore::reenter_brief`, only over the item's own Source brief): a poll
+that finds a label the item's Source link snapshot lacks, AI6's status and Agent labels aside;
+with `comment`, also a permitted reply AI6 did not write on a settled Source link, read by the
+reply round, which then marks the reply delivered. The snapshot is refreshed while the Mission is
+in flight, on each poll of the settled item, and for the newest `[sources] reopen_watch` settled
+items per instance every `reopen_watch_every`. Reopens are audited `mission.reopened` and on the
+timeline as `source`/`reopened`; `comment` is a start-up weakening. A Station whose book holds the
+ended Mission and claims its brief again (`Mission::claim` lower than the lease's attempt) queues
+it with `MissionStore::reopen` (new prompt and name, the Session hold let go).
 
 ## Sleepers (`ai6::directorates::registry::sleepers`)
 
@@ -3418,14 +3449,18 @@ pub struct Sleeper {
     pub priority: i64,
     pub stations: Vec<String>,   // narrows its briefs, like Brief.stations; empty adds no limit
     pub each_station: bool,      // one round per eligible Station per window (default false)
-}
+    pub standing: bool,          // one Mission, each window an attempt of it (default false)
+    pub resume: bool,            // needs standing: resume the last attempt's provider Session
+}   // standing and resume are left out of the serialized form when false, so the fingerprint
+    // of a Sleeper that sets neither is what it was before they existed
 impl Sleeper {
     pub fn validate(&self) -> Result<(), String>;   // also refuses a `stations` entry that is no Station ID
     pub fn fingerprint(&self) -> String;   // SHA-256 over every field; any edit changes it
     pub fn due_window(&self, now: i64, authorized_at: i64, limits: &SleeperLimits) -> Option<i64>;   // no older than window_age
 }
 pub struct SleeperAuthorization { pub fingerprint: String, pub authorized_by: String, pub at: i64 }
-pub enum Fire { Queued, AlreadyFired }
+pub enum Fire { Queued, AlreadyFired, InFlight /* a standing Sleeper's earlier attempt is still in flight */ }
+pub fn window_of(brief: &Brief) -> Option<&str>;   // the window a Sleeper's brief was queued for
 pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
 
 pub struct Cron;
@@ -3451,7 +3486,13 @@ never matches within a year (`0 0 30 2 *`) parses but never fires.
 `...<window>.<station>`, the ID made key-safe with a digest when it had to change) with the entry
 `MissionEntry::sleeper` for that window and Station, and reports `AlreadyFired` when that entry's
 brief exists in `new`, `claimed`, `done` or `failed`, which is what makes a window, or one
-Station's round in it, fire once across Stations. A brief's
+Station's round in it, fire once across Stations. A `standing` Sleeper enters its first window
+with `MissionEntry::standing` and every later one through `reenter_brief`: `AlreadyFired` when the
+brief is for that window, `InFlight` (logged once per window) when an earlier window's attempt is
+queued, held or claimed. Its data's `sleeper` object also carries `standing` and `resume`; a
+start whose claimed brief says `resume`, with the Registry's Sleeper provenance, resumes the
+latest run's provider Session when that run had the same handler, and records `sleeper`/
+`resumed` or `started` on the timeline. A brief's
 `stations` is the sleeper's, or `[station]` for a round; its data's `sleeper` object names
 `operation`, `name`, `window` and, for a round, `station`. For an `each_station` sleeper the
 Headquarters holder fires one round for each Station whose last check-in placement accepts
@@ -3600,7 +3641,9 @@ pub struct VettingPolicy {   // Default: every check on
 impl VettingPolicy { pub fn off() -> Self; pub fn weakenings(&self) -> Vec<String>; }
 pub struct VettingDefinition;   // the `[operation.ID.vetting]` table; .resolve() -> Result<VettingPolicy, String>
                                 // a rate limit of 0 is no limit; `vetting = "off"` (or "on") in TOML
-#[non_exhaustive] pub struct KnownWork { pub reference: String, pub title: String, pub url: Option<String> }
+#[non_exhaustive] pub struct KnownWork { pub reference: String, pub title: String, pub url: Option<String>,
+    pub sleeper: Option<(String, String)> }   // Operation and Sleeper; windows of one Sleeper are no duplicates
+pub fn sleeper_of(brief: &Brief) -> Option<(String, String)>;   // data's Sleeper, with a Sleeper provenance naming it
 impl KnownWork { pub fn of(brief: &Brief, reference: impl Into<String>) -> Self; }
 #[non_exhaustive] #[derive(Default)]
 pub struct VettingContext {
@@ -4824,7 +4867,12 @@ it needs a time); `due_parked(now)` lists parked Missions at or past their time;
 `retry(id, agent_id: Option<String>)` queues a `Stalled`, `Done`, `Failed`, `Blown` or
 `Abandoned` Mission again as a new attempt, for `agent_id` when given and otherwise its
 Agent; it keeps `session_ids` and the safe house report, and refuses every other state
-with `InvalidTransition`. A
+with `InvalidTransition`. `reopen(id, agent_id, prompt, claim)` queues a `Done`, `Failed`,
+`Blown` or `Abandoned` Mission as its next attempt for a later claim of its brief (a reopened
+item, a standing Sleeper's window): the new prompt, the Agent, `Mission.claim`, and the launch
+manifest's Session hold and runner let go, so the next start records a run after the last
+(`InvalidTransition` otherwise). `record_claim(id, claim)` records `Mission.claim`
+(`Option<u32>`, serde default: which claim of its Registry brief the Mission runs for). A
 parked Mission leaves `Parked` through `Working`, `Failed`, `Abandoned` or `requeue_for`,
 and any transition clears `parked_until`.
 `quarantined` means Medical or an operator stopped the work because its Agent is

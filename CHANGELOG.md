@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A settled Source item reopens as its Mission's next attempt (same UID and handle): an
+  instance's `reopen` is `label` (the default: a label added since AI6 last read the item, its own
+  status and Agent labels aside), `comment` (also a comment, not AI6's, by someone the tracker lets
+  answer for the item; reported as a weakening) or `never`. The attempt is briefed from the item as
+  it reads then and the comments that reopened it; nothing reopens while an attempt is in flight.
+  Each reopen is audited (`mission.reopened`) and on the timeline (`source`, `reopened`). `[sources]
+  reopen_watch` (20) and `reopen_watch_every` (300 s) bound how the Headquarters Station reads
+  settled items again to see a label taken off. `BriefStore::reenter_brief` queues a finished
+  brief as its Mission's next attempt.
+- A standing Sleeper: `standing = true` makes a Sleeper one Mission (one per Station with
+  `each_station`), each window a new attempt whose run records the window (`SessionRecord::window`);
+  a window that comes while an attempt is in flight is skipped (`Fire::InFlight`) and logged once.
+  `resume = true` (needs `standing`) resumes the last attempt's provider Session when its handler
+  can, else starts a new one, and says which on the timeline. A Sleeper that sets neither keeps
+  its fingerprint and its approval.
+- Missions numbered by their ticket: Mission create takes `issue = { tracker, item }` to follow up
+  an item that has a Mission (`G-gh-31-2`, then `-3`, linked to the item), or `create_issue = {
+  tracker, title?, body? }` (needs `issue.create`) to create the ticket first: the Headquarters
+  Station enters the Mission once the issue exists, numbered by it (`G-gh-104`) and linked to it
+  as its source. `ai6ctl missions create` takes `--issue TRACKER:ITEM` or `--create-issue
+  TRACKER`. `TrackerIssue` carries the issue's `code` and `code_tag`, so a tracker library built
+  before them gives none and its created issues are numbered by item ID.
 - A brief no Station has taken, queued or held, can be withdrawn: `POST
   /v1/user/operations/{op}/missions/{id}/withdraw` with an optional `note`, under
   `mission.control`, files it as failed with who withdrew it and the note, audited as
@@ -461,6 +483,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A Sleeper's windows are no longer held as duplicates of each other for sharing its title; a
+  person's brief with the same title is still a duplicate of an open window.
 - `ai6 config rm secret NAME` counts only real references to a secret: a `secrets` list entry, a
   `secret` value and a pool account of its name that reads one. A secret named like a setting, such
   as `path`, is no longer refused because every Operation has a `path`.

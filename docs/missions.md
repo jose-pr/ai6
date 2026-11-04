@@ -110,6 +110,28 @@ Outer Office's Operations view offers the same action. The AI6 daemon claims the
 from the shared file-backed Registry, then resolves the Agent role, Operation
 cover, Station capacity and provider handler before it starts a Session.
 
+Work on a ticket is numbered by the ticket:
+
+- `"issue": {"tracker": "gh", "item": "o/r#31"}` follows up an item of one of the Operation's
+  tracker instances that already has a Mission (`G-gh-31`). The new Mission takes that Mission's
+  handle as it is now and the item's next follow-up number, from 2: `G-gh-31-2`, then
+  `G-gh-31-3`. It is linked to the item (`related`). An item with no Mission is refused `400`
+  with the reason.
+- `"create_issue": {"tracker": "gh", "title": "...", "body": "..."}` creates the Mission's
+  ticket first, and needs `issue.create` as well; the title and body default to the Mission's.
+  The answer is `202` with `state: "awaiting_issue"` and the issue `proposal` (an approved one),
+  and no handle yet: the Headquarters Station creates the issue and then enters the Mission,
+  numbered by it as its Source numbers items (`G-gh-104`) and linked to it as its source. A
+  tracker that cannot create issues says so on the proposal (`failed`), and no Mission enters.
+  The item, polled later, leaves the person's brief as it is.
+
+```bash
+ai6ctl missions create --operation G --title "Add the regression test" \
+  --prompt "Cover the fix." --issue gh:o/r#31
+ai6ctl missions create --operation G --title "Fix the login page" \
+  --prompt "It times out." --create-issue gh
+```
+
 `"stations": ["ID", ...]` pins the Mission to those Stations. A pin is an exact Station ID (`[station]
 id`, or the `HOST-xxxxxxxx` a Station gives itself), so one that names no Station that ever checked in,
 or one the Operation's own `stations` leaves out, is refused `400` with the reason; an unknown pin is
@@ -620,7 +642,7 @@ cost no tokens:
 | Check | Applies to | Finding |
 | --- | --- | --- |
 | Size and visible text | every brief | `malformed`: the brief is **refused** |
-| Same URL or title as queued, held or running work | every brief | `duplicate`, naming that work |
+| Same URL or title as queued, held or running work, other than another window of the same Sleeper | every brief | `duplicate`, naming that work |
 | Untrusted briefs passed in the last hour, per Operation and per Source | untrusted briefs | `rate` |
 | The Operation's spend today at `operation_cost_usd_per_day` | every brief | `budget` |
 | Unicode tag characters (outside an emoji flag), bidirectional overrides and unbalanced embeddings or isolates, runs of zero-width characters, variation selectors or fillers, invisible operators, HTML comments outside the quoted item, lines that imitate the markers around quoted text, manipulation phrases | untrusted briefs | `screening` |
@@ -695,8 +717,8 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
 - **Brief identity.** An item's Mission ID comes from its Operation, instance and item
   ([the table above](#mission-and-session-identities)), and polling it again finds the same
   one. If the item changes while its brief is still in `new/`, the brief is updated in place.
-  Once a Station has claimed it, polling leaves it alone; a finished item is never queued
-  again, so a Mission is never duplicated.
+  Once a Station has claimed it, polling leaves it alone, so a Mission is never duplicated. A
+  finished item can only come back as the same Mission's next attempt ([reopening](#reopening-a-settled-item)).
 - **Untrusted text.** The brief's title is generated. The tracker's own title, labels and
   description are placed between fenced markers and introduced as data that cannot change
   the Agent's task or permissions. A description cannot close the fence. Labels are information
@@ -719,6 +741,32 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
   that fails is retried a few times, then dropped.
 - **Limits.** Review comments on a pull request are not forwarded to the Mission's
   Session. Jira issues are not transitioned when a Mission starts, only when it ends.
+
+### Reopening a settled item
+
+An item whose Mission settled (its report was written on the item) is queued again, as the
+**same Mission's next attempt** (same UID and handle, a run `<handle>.<attempt>` after the last),
+when the instance's `reopen` says so:
+
+| `reopen` | What reopens it |
+| --- | --- |
+| `label` (default) | A poll finds the item with a label it did not have when AI6 last read it: the trigger label taken off and put back, or one added. The labels AI6 writes (`status_labels`) and those its Agents may touch (`agent_labels`) do not count. |
+| `comment` | As `label`, and also a comment AI6 did not write, by someone the tracker lets answer for the item (its author, a member, someone `reply_authors` names). |
+| `never` | Nothing: a settled item stays settled. |
+
+The attempt is briefed from the item as it reads now, and from the comments that reopened it,
+quoted as untrusted data as the item is. Nothing reopens while an attempt is queued, held or
+running. Each reopen is audited (`mission.reopened`) and on the Operation's timeline (`source`,
+`reopened`, with the reason).
+
+To see a label taken off, the Headquarters Station reads the newest settled items of each such
+instance again, at most `[sources] reopen_watch` (20) per instance every `reopen_watch_every`
+(300 s); each read is one request to the tracker. A label taken off and put back between two of
+those reads is not seen.
+
+A Source's text is untrusted already. With `comment`, anyone the tracker lets answer for an item
+can start its work again with what they write, so `comment` is reported as a weakening at start
+and at check-in.
 
 ## Linked issues
 
@@ -862,8 +910,21 @@ ai6 sleeper revoke G nightly-deps
   exclude it (its round waits for room); a Station that has gone dark gets its round when it
   checks in again within the window. This is how the [Head of
   Station](stations.md#head-of-station) runs.
+- **A standing Mission.** With `standing = true` the sleeper is one Mission (one per Station with
+  `each_station`), `<operation>-<sleeper>-<n>`, and each window is a new attempt of it: the run
+  `<handle>.<attempt>` records the window it answers (`window` on its Session record), and the
+  board and scorecards show one Mission with a run history. A window that comes while an attempt
+  is queued, held or running is skipped and named once in the Headquarters Station's log; it
+  fires when the attempt settles only if it is still the latest window and less than a day old.
+  With `resume = true` as well, an attempt resumes the last attempt's provider Session when that
+  attempt ran on the same handler and its provider gave it an ID, and starts a new Session
+  otherwise; the timeline says which (`sleeper`, `resumed` or `started`, with the window).
+  `resume` without `standing` is refused when the roster loads.
+- **Duplicates.** A Sleeper's windows share its title, and are never held as duplicates of each
+  other; a person's brief with the same title is still a duplicate of an open window.
 - **Fingerprint.** Every field the sleeper sets is part of what `authorize` approves, so
-  adding `stations` or `each_station` withdraws the approval until it is given again.
+  adding `stations`, `each_station`, `standing` or `resume` withdraws the approval until it is
+  given again; a sleeper that sets none of them keeps the approval it has.
 - **Events.** There is no event trigger; a CI failure or a new issue arrives through a
   [Source](#sources).
 

@@ -207,6 +207,7 @@ lists its own (`reply_authors` and `labels` on all three, `reply_min_access` on 
 | `agent_labels` | none | **Labels Agents may touch.** The only labels an Agent may add or remove on a linked issue. |
 | `agent_transitions` | none | **Transitions Agents may make.** The workflow transitions an Agent may make without green ink. |
 | `priority_map` | none | **Priority map.** The priority a mirrored issue takes here, by the priority it has where it comes from. |
+| `reopen` | `label` | **Reopen a settled item on.** What queues an item whose Mission settled again, as the Mission's next attempt. |
 <!-- schema:record.source:end -->
 
 `status_labels` and `status_transitions` name a label or a workflow transition for `working`,
@@ -386,6 +387,8 @@ authorizes them with `ai6 sleeper authorize`. See [Sleepers](missions.md#sleeper
 schedule = "0 3 * * *"
 title = "Update dependencies"
 prompt = "Update the lockfile and run the tests."
+standing = true   # optional: one Mission, each window an attempt of it
+resume = true     # optional, needs standing: resume the last attempt's Session
 ```
 
 ## Subordinate Operations

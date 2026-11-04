@@ -98,6 +98,12 @@ origin leaves the public roots alone.
 - `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
   `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the
   gateway's words and exits `1`. The Operation is looked up when not given.
+- `ai6ctl missions create --operation <ID> --title <T> --prompt <P> [--agent A] [--role R]
+  [--tag T]... [--station S]... [--issue TRACKER:ITEM | --create-issue TRACKER [--issue-title T]
+  [--issue-body B]]` (`mission.create`; `--create-issue` also `issue.create`) posts
+  `.../operations/{op}/missions` and prints `HANDLE (UID) queued`, or for `--create-issue`
+  `waiting for its ticket: issue proposal ID`. `--issue` that is not `TRACKER:ITEM` is refused
+  before anything is sent.
 - `ai6ctl operations` reads `GET /v1/user/profile` and prints `OPERATION\tACTIONS`, each
   Operation indented two spaces under its `parent` (the nearest one the person may read; a
   hidden ancestor is never named), roots and siblings in ID order.
