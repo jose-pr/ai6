@@ -16,7 +16,7 @@ use crate::directorates::registry::sources::{
     source_brief, source_entry, source_provenance,
 };
 use crate::directorates::registry::store::{
-    Brief, BriefStore, FiledBrief, Lease, LeaseRecovery, MissionProposal, current_handle,
+    Brief, BriefStore, FiledBrief, Lease, LeaseRecovery, MissionProposal, Reentry, current_handle,
     invalid_data, lost_outcome, newest_first, unix_time, validate_registry_key,
 };
 use crate::directorates::registry::vetting::{
@@ -740,6 +740,52 @@ impl BriefStore for SqlRegistry {
             }
             insert_brief(tx, &entered, revision, &self.limits.briefs)?;
             Ok(entered)
+        })
+    }
+
+    fn reenter_brief(
+        &self,
+        brief: &Brief,
+        entry: &MissionEntry,
+        again: &dyn Fn(&Brief) -> bool,
+    ) -> io::Result<Reentry> {
+        brief.validate()?;
+        let Some(name) = entry.book_name() else {
+            return Ok(Reentry::Unknown);
+        };
+        self.write(|tx, revision| {
+            let Some(mission) = entered_in(tx, &name)? else {
+                return Ok(Reentry::Unknown);
+            };
+            let mut entered = brief.clone();
+            entered.enter_as(mission);
+            let key = entered.key();
+            let Some(row) = tx.query_opt(
+                "SELECT brief, coalesce(provenance, finished_provenance), state, attempts, \
+                 outcome FROM ai6_briefs WHERE key = $1",
+                &[key.as_str().into()],
+            )?
+            else {
+                return Ok(Reentry::Unknown);
+            };
+            let filed = filed_row(&row)?;
+            if !matches!(filed.state.as_str(), "done" | "failed") || !again(&filed.brief) {
+                return Ok(Reentry::Unchanged(filed));
+            }
+            tx.execute(
+                "UPDATE ai6_briefs SET state = 'new', brief = $2, provenance = $3, outcome = NULL, \
+                 transcript = NULL, report_attempts = 0, reported = $4, \
+                 finished_provenance = NULL, cancel_requested_at = NULL, revision = $5 \
+                 WHERE key = $1",
+                &[
+                    key.as_str().into(),
+                    brief_json(&entered, &self.limits.briefs)?.into(),
+                    provenance_json(&entered)?.into(),
+                    false.into(),
+                    revision.into(),
+                ],
+            )?;
+            Ok(Reentry::Queued(entered))
         })
     }
 

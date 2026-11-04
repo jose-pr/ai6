@@ -311,6 +311,16 @@ pub struct SourceLimits {
     #[schema(title = "Replies shown of a linked issue")]
     #[map(default = SourceLimits::default().replies_read)]
     pub replies_read: Limit,
+    /// Seconds between rounds reading the newest settled items again, so a label taken off one
+    /// is seen and its return reopens it.
+    #[schema(title = "Read settled items every")]
+    #[map(default = SourceLimits::default().reopen_watch_every)]
+    pub reopen_watch_every: Seconds,
+    /// Settled items read in each of those rounds, per tracker instance, newest first; each is
+    /// one request to the tracker.
+    #[schema(title = "Settled items read per round")]
+    #[map(default = SourceLimits::default().reopen_watch)]
+    pub reopen_watch: Limit,
 }
 
 impl Default for SourceLimits {
@@ -326,6 +336,8 @@ impl Default for SourceLimits {
             send_attempts: Limit::at(5),
             retry_backoff: Seconds::new(30),
             replies_read: Limit::at(10),
+            reopen_watch_every: Seconds::new(300),
+            reopen_watch: Limit::at(20),
         }
     }
 }

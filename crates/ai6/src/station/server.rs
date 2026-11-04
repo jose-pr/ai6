@@ -1825,8 +1825,13 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
             continue;
         };
         if lease.station() == station
-            && let Err(error) =
-                create_intake_mission(state, &brief, &mission_id, operation_id, agent_id, role_id)
+            && let Err(error) = create_intake_mission(
+                state,
+                &brief,
+                &mission_id,
+                (operation_id, agent_id, role_id),
+                lease.attempt(),
+            )
         {
             let _ = finish_intake_claim(
                 state,
@@ -3326,24 +3331,34 @@ fn configured_agent_role(
         .map_err(|error| error.to_string())
 }
 
+/// Whether `existing`, a Mission of this Station's book, ended and its brief was claimed again
+/// since (`claim`): a reopened item or a standing Sleeper's next window, its next attempt.
+fn claimed_again(existing: &Mission, operation_id: &str, claim: u32) -> bool {
+    is_terminal_state(existing.state)
+        && existing.operation_id.as_deref() == Some(operation_id)
+        && existing.claim.is_some_and(|ran| claim > ran)
+}
+
 fn create_intake_mission(
     state: &DaemonState,
     brief: &Brief,
     mission_id: &MissionId,
-    operation_id: String,
-    agent_id: String,
-    role_id: Option<String>,
+    (operation_id, agent_id, role_id): (String, String, Option<String>),
+    claim: u32,
 ) -> Result<(), String> {
     // An attempt this Station gave up as lost may come back to it as the next one.
-    let ended_here = state
+    let (ended_here, again) = state
         .missions
         .lock()
         .map_err(|_| "Mission book lock was poisoned".to_owned())?
         .get(mission_id.as_str())
-        .is_some_and(|existing| {
-            is_terminal_state(existing.state)
-                && existing.operation_id.as_deref() == Some(operation_id.as_str())
-                && existing.prompt == brief.prompt()
+        .map_or((false, false), |existing| {
+            (
+                is_terminal_state(existing.state)
+                    && existing.operation_id.as_deref() == Some(operation_id.as_str())
+                    && existing.prompt == brief.prompt(),
+                claimed_again(existing, &operation_id, claim),
+            )
         });
     let retry = ended_here && recovery::retries_lost_attempt(state, mission_id.as_str());
     let naming = review::naming_of(state, brief);
@@ -3351,11 +3366,26 @@ fn create_intake_mission(
         .missions
         .lock()
         .map_err(|_| "Mission book lock was poisoned".to_owned())?;
-    if retry {
+    if again && !retry {
+        missions
+            .reopen(mission_id.as_str(), agent_id, brief.prompt(), claim)
+            .map_err(|error| format!("could not queue the Mission's next attempt: {error:?}"))?;
         return missions
-            .retry(mission_id.as_str(), Some(agent_id))
+            .record_name(
+                mission_id.as_str(),
+                brief.display_name(state.intake.limits().sources.name_bytes.or_max()),
+            )
             .map(drop)
-            .map_err(|error| format!("could not queue the Mission again: {error:?}"));
+            .map_err(|error| format!("could not record the Mission's name: {error:?}"));
+    }
+    if retry {
+        missions
+            .retry(mission_id.as_str(), Some(agent_id))
+            .map_err(|error| format!("could not queue the Mission again: {error:?}"))?;
+        return missions
+            .record_claim(mission_id.as_str(), claim)
+            .map(drop)
+            .map_err(|error| format!("could not record the Mission's claim: {error:?}"));
     }
     if let Some(existing) = missions.get(mission_id.as_str()) {
         if existing.operation_id.as_deref() == Some(operation_id.as_str())
@@ -3382,6 +3412,9 @@ fn create_intake_mission(
             brief.display_name(state.intake.limits().sources.name_bytes.or_max()),
         )
         .map_err(|error| format!("could not record the Mission's name: {error:?}"))?;
+    missions
+        .record_claim(mission_id.as_str(), claim)
+        .map_err(|error| format!("could not record the Mission's claim: {error:?}"))?;
     if let Some(handle) = &brief.handle {
         missions
             .record_handle(mission_id.as_str(), handle.clone())
@@ -3428,13 +3461,16 @@ fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), Strin
         .get(mission_id.as_str())
         .cloned();
     if let Some(existing) = existing {
-        if existing.prompt != brief.prompt() {
-            return Err(format!("Mission ID {mission_id} is already in use"));
-        }
-        if !is_terminal_state(existing.state)
-            || !recovery::retries_lost_attempt(state, mission_id.as_str())
-        {
-            return Ok(());
+        let operation = existing.operation_id.as_deref().unwrap_or_default();
+        if !claimed_again(&existing, operation, lease.attempt()) {
+            if existing.prompt != brief.prompt() {
+                return Err(format!("Mission ID {mission_id} is already in use"));
+            }
+            if !is_terminal_state(existing.state)
+                || !recovery::retries_lost_attempt(state, mission_id.as_str())
+            {
+                return Ok(());
+            }
         }
     }
     let assignment = match (
@@ -3477,8 +3513,7 @@ fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), Strin
             Ok((operation_id, agent, role_id))
         }),
     }?;
-    let (operation_id, agent_id, role_id) = assignment;
-    create_intake_mission(state, &brief, &mission_id, operation_id, agent_id, role_id)
+    create_intake_mission(state, &brief, &mission_id, assignment, lease.attempt())
 }
 
 fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()> {
@@ -11328,9 +11363,8 @@ queue = 1
             &state,
             &brief,
             &MissionId::try_new("mission-t").unwrap(),
-            "G".to_owned(),
-            "007".to_owned(),
-            None,
+            ("G".to_owned(), "007".to_owned(), None),
+            1,
         )
         .unwrap();
         // Another Station's first attempt: this one holds nothing and its record is closed to
@@ -11428,9 +11462,8 @@ queue = 1
             &state,
             &brief,
             &MissionId::try_new(&mission_id).unwrap(),
-            "G".to_owned(),
-            "007".to_owned(),
-            None,
+            ("G".to_owned(), "007".to_owned(), None),
+            1,
         )
         .unwrap();
         start_mission_by_id(&state, &mission_id).await;
@@ -11536,9 +11569,8 @@ queue = 1
             &state,
             &brief,
             &MissionId::try_new("mission-s").unwrap(),
-            "G".to_owned(),
-            "007".to_owned(),
-            None,
+            ("G".to_owned(), "007".to_owned(), None),
+            1,
         )
         .unwrap();
         assert_eq!(

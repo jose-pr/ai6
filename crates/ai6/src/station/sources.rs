@@ -83,16 +83,40 @@ pub(crate) struct InstanceKeys {
     #[schema(title = "Priority map")]
     #[map(default)]
     pub priority_map: BTreeMap<String, String>,
+    /// What queues an item whose Mission settled again, as the Mission's next attempt.
+    #[schema(title = "Reopen a settled item on")]
+    #[map(default)]
+    pub reopen: Reopen,
 }
 
 impl InstanceKeys {
-    const NAMES: [&str; 5] = [
+    const NAMES: [&str; 6] = [
         "status_labels",
         "status_transitions",
         "agent_labels",
         "agent_transitions",
         "priority_map",
+        "reopen",
     ];
+}
+
+/// What reopens an item whose Mission settled. A reopened item is queued again as the same
+/// Mission's next attempt, from the item as it reads then; never while an attempt is in flight.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(rename_all = "lowercase")]
+pub(crate) enum Reopen {
+    /// A label added after the Mission settled: a poll finds the item with a label it did not
+    /// have when AI6 last read it. The labels AI6 and its Agents write do not count.
+    #[default]
+    #[schema(label = "A label added again")]
+    Label,
+    /// As `label`, and also a comment that AI6 did not write, by anyone the tracker lets answer
+    /// for the item. Reported as a weakening: such a person can then start work again.
+    #[schema(label = "A label or a comment")]
+    Comment,
+    /// Nothing: a settled item stays settled.
+    #[schema(label = "Never")]
+    Never,
 }
 
 impl StatusWords {
@@ -129,6 +153,8 @@ pub(crate) struct PollSummary {
     pub updated: usize,
     pub unchanged: usize,
     pub skipped: usize,
+    /// Settled items queued again as their Mission's next attempt.
+    pub reopened: usize,
 }
 
 /// A tracker instance as configured for one Operation.
@@ -152,6 +178,45 @@ pub(crate) struct SourceSetup {
     pub agent_transitions: Vec<String>,
     /// The priority a mirrored issue takes here, by the priority it has where it comes from.
     pub priority_map: BTreeMap<String, String>,
+    /// What reopens an item whose Mission settled.
+    pub reopen: Reopen,
+}
+
+impl SourceSetup {
+    /// How a poll of this instance treats an item whose Mission settled.
+    pub(crate) fn reopening(&self) -> Reopening {
+        let own = self
+            .status_labels
+            .all()
+            .into_iter()
+            .chain(self.agent_labels.iter().map(String::as_str))
+            .map(str::to_owned)
+            .collect();
+        Reopening {
+            on: self.reopen,
+            own,
+        }
+    }
+}
+
+/// How a poll treats an item whose Mission settled ([`Reopen`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Reopening {
+    /// What reopens it.
+    pub on: Reopen,
+    /// Labels AI6 or its Agents write, which reopen nothing.
+    pub own: BTreeSet<String>,
+}
+
+impl Reopening {
+    /// Nothing reopens a settled item.
+    #[cfg(test)]
+    pub(crate) fn never() -> Self {
+        Self {
+            on: Reopen::Never,
+            own: BTreeSet::new(),
+        }
+    }
 }
 
 /// Reads an Operation's `sources` table into per-instance settings.
@@ -233,6 +298,7 @@ pub(crate) fn source_setups(
                 agent_labels: keys.agent_labels,
                 agent_transitions: keys.agent_transitions,
                 priority_map: keys.priority_map,
+                reopen: keys.reopen,
             })
         })
         .collect()
@@ -270,14 +336,15 @@ fn build_tracker(
 
 /// Polls one source once and queues what it found; the cursor advances after the items
 /// are stored, so a crash repeats work that is already idempotent. `shared` says the instance is
-/// not its provider's only one in the Operation: its name replaces an item's code tag.
+/// not its provider's only one in the Operation: its name replaces an item's code tag. An item
+/// whose Mission settled is reopened as `reopening` says.
 pub(crate) fn poll_source(
     registry: &dyn RegistryBackend,
     station: &str,
-    operation: &str,
-    provider: &str,
+    (operation, provider): (&str, &str),
     shared: bool,
     source: &dyn Source,
+    reopening: &Reopening,
 ) -> Result<PollSummary, String> {
     let cursor = registry
         .source_cursor(operation, provider)
@@ -304,7 +371,25 @@ pub(crate) fn poll_source(
                 summary.unchanged += 1;
                 link_source(registry, operation, provider, item);
             }
-            Ok(Ingest::InFlight | Ingest::Finished) => summary.skipped += 1,
+            Ok(Ingest::Finished)
+                if reopen_on_labels(registry, station, (operation, provider), item, reopening) =>
+            {
+                summary.reopened += 1;
+            }
+            Ok(Ingest::InFlight) => {
+                summary.skipped += 1;
+                // What the item says while its Mission works is what a reopen compares with.
+                if let Some(link) = item_link(registry, (operation, provider), item) {
+                    let _ = registry.set_issue_snapshot(
+                        &link.mission_id,
+                        provider,
+                        &item.id,
+                        item.url.as_deref(),
+                        &snapshot_of(item),
+                    );
+                }
+            }
+            Ok(Ingest::Finished) => summary.skipped += 1,
             Err(error) => eprintln!(
                 "ai6: source {provider}: item {:?} not queued: {error}",
                 item.id
@@ -317,6 +402,234 @@ pub(crate) fn poll_source(
             .map_err(|error| format!("cursor not stored: {error}"))?;
     }
     Ok(summary)
+}
+
+/// The link from the Mission `item` entered as to the item, when there is one.
+fn item_link(
+    registry: &dyn RegistryBackend,
+    (operation, provider): (&str, &str),
+    item: &crate::directorates::registry::sources::SourceItem,
+) -> Option<IssueLink> {
+    let entry = crate::directorates::registry::sources::source_entry(operation, provider, item);
+    let mission = registry.entered_mission_id(&entry).ok()??;
+    registry
+        .issue_links(&mission)
+        .ok()?
+        .into_iter()
+        .find(|link| {
+            link.relation == LinkRelation::Source
+                && link.tracker == provider
+                && link.item == item.id
+        })
+}
+
+/// What `item` says, as a link keeps it.
+fn snapshot_of(item: &crate::directorates::registry::sources::SourceItem) -> IssueSnapshot {
+    IssueSnapshot {
+        title: item.title.clone(),
+        body: item.body.clone(),
+        state: Some("open".to_owned()),
+        labels: item.labels.clone(),
+        priority: None,
+    }
+}
+
+/// Reopens the settled `item` when a poll finds it with a label it did not have when AI6 last
+/// read it, other than one AI6 or its Agents write. Either way its link then keeps the item as it
+/// reads now, so the next poll compares with that. Whether it was reopened.
+fn reopen_on_labels(
+    registry: &dyn RegistryBackend,
+    station: &str,
+    (operation, provider): (&str, &str),
+    item: &crate::directorates::registry::sources::SourceItem,
+    reopening: &Reopening,
+) -> bool {
+    if reopening.on == Reopen::Never {
+        return false;
+    }
+    let Some(link) = item_link(registry, (operation, provider), item) else {
+        return false;
+    };
+    let added: Vec<&str> = match &link.snapshot {
+        Some(seen) => item
+            .labels
+            .iter()
+            .filter(|label| !seen.labels.contains(label) && !reopening.own.contains(*label))
+            .map(String::as_str)
+            .collect(),
+        None => Vec::new(),
+    };
+    let reopened = !added.is_empty()
+        && reopen_item(
+            registry,
+            station,
+            (operation, provider),
+            item,
+            &[],
+            &format!("label {} added", added.join(", ")),
+        );
+    if let Err(error) = registry.set_issue_snapshot(
+        &link.mission_id,
+        provider,
+        &item.id,
+        item.url.as_deref(),
+        &snapshot_of(item),
+    ) {
+        eprintln!(
+            "ai6: source {provider}: item {:?} not read back into its link: {error}",
+            item.id
+        );
+    }
+    reopened
+}
+
+/// Queues the settled `item` again as its Mission's next attempt, from the item as it reads now
+/// and the `comments` made on it since, and records `why` on the timeline and in the audit log.
+/// Whether it was queued: an attempt in flight, or an item that never entered, is left alone.
+pub(crate) fn reopen_item(
+    registry: &dyn RegistryBackend,
+    station: &str,
+    (operation, provider): (&str, &str),
+    item: &crate::directorates::registry::sources::SourceItem,
+    comments: &[crate::Reply],
+    why: &str,
+) -> bool {
+    use crate::directorates::registry::sources::{reopened_brief, source_entry};
+    use crate::directorates::registry::store::{AuditRecord, Reentry};
+    use crate::directorates::registry::timeline::TimelineEvent;
+    let brief = reopened_brief(
+        (operation, provider),
+        item,
+        comments,
+        &registry.limits().sources,
+        station,
+    );
+    // Only the item's own brief: a person's Mission created with the issue stays theirs.
+    let queued =
+        match registry.reenter_brief(&brief, &source_entry(operation, provider, item), &|filed| {
+            filed.source == brief.source
+        }) {
+            Ok(Reentry::Queued(queued)) => queued,
+            Ok(_) => return false,
+            Err(error) => {
+                eprintln!(
+                    "ai6: source {provider}: item {:?} not reopened: {error}",
+                    item.id
+                );
+                return false;
+            }
+        };
+    let (mission, now) = (queued.key(), unix_seconds() as f64);
+    eprintln!(
+        "ai6: source {provider}: item {:?} reopened Mission {} ({why})",
+        item.id,
+        queued.shown_handle()
+    );
+    let record = AuditRecord {
+        id: format!("source-reopened-{}", uuid::Uuid::new_v4().simple()),
+        actor: "m".to_owned(),
+        action: "mission.reopened".to_owned(),
+        operation: operation.to_owned(),
+        resource: None,
+        target: format!("{mission} {provider}:{}", item.id),
+        at: now,
+    };
+    if let Err(error) = registry.record_audit(&record) {
+        eprintln!("ai6: the reopen of Mission {mission} was not audited: {error}");
+    }
+    let event = TimelineEvent::new("source", "reopened", operation, now)
+        .mission(mission)
+        .actor("m")
+        .detail("tracker", provider.to_owned())
+        .detail("item", item.id.clone())
+        .detail("reason", why.to_owned());
+    let _ = registry.record_event(&event);
+    true
+}
+
+/// Reads again the newest settled items of each instance whose items reopen, at most
+/// `limits.reopen_watch` per instance, so a label taken off one is seen and its return reopens
+/// it ([`Reopen::Label`]). Only the Headquarters Station does; returns how many it read.
+pub(crate) fn watch_settled(
+    registry: &dyn RegistryBackend,
+    roster: &Roster,
+    build: &TrackerBuilder<'_>,
+    station: &str,
+    limits: &SourceLimits,
+) -> usize {
+    if !registry
+        .headquarters()
+        .ok()
+        .flatten()
+        .is_some_and(|lease| lease.station() == station)
+    {
+        return 0;
+    }
+    let Ok(links) = registry.active_issue_links() else {
+        return 0;
+    };
+    let mut read = 0;
+    for operation in roster.operations() {
+        for setup in source_setups(operation, limits).into_iter().flatten() {
+            if setup.reopen == Reopen::Never {
+                continue;
+            }
+            let mut settled: Vec<&IssueLink> = links
+                .iter()
+                .filter(|link| {
+                    link.operation == operation.id
+                        && link.tracker == setup.name
+                        && link.relation == LinkRelation::Source
+                        && matches!(link.phase.as_deref(), Some("done" | "failed"))
+                })
+                .collect();
+            if settled.is_empty() {
+                continue;
+            }
+            settled.sort_by(|left, right| right.linked_at.total_cmp(&left.linked_at));
+            settled.truncate(limits.reopen_watch.or_max());
+            let tracker = match build(&setup.provider, &setup.settings) {
+                Ok(tracker) => tracker,
+                Err(error) => {
+                    eprintln!(
+                        "ai6: tracker {} for Operation {}: {error}",
+                        setup.name, operation.id
+                    );
+                    continue;
+                }
+            };
+            for link in settled {
+                match tracker.issue(link.item.clone()) {
+                    Ok(issue) => {
+                        let snapshot = IssueSnapshot {
+                            title: issue.title,
+                            body: issue.body,
+                            state: Some(issue.state),
+                            labels: issue.labels,
+                            priority: issue.priority,
+                        };
+                        if registry
+                            .set_issue_snapshot(
+                                &link.mission_id,
+                                &link.tracker,
+                                &link.item,
+                                issue.url.as_deref(),
+                                &snapshot,
+                            )
+                            .is_ok()
+                        {
+                            read += 1;
+                        }
+                    }
+                    Err(error) => eprintln!(
+                        "ai6: settled item {}:{} not read: {error}",
+                        link.tracker, link.item
+                    ),
+                }
+            }
+        }
+    }
+    read
 }
 
 /// The outcome of a Mission, worded for the item that started it.
@@ -773,6 +1086,7 @@ pub(crate) struct SourceDesk {
     next_report: Mutex<Instant>,
     next_drain: Mutex<Instant>,
     next_replies: Mutex<Instant>,
+    next_watch: Mutex<Instant>,
     drained: DrainState,
     next_sleepers: Mutex<Instant>,
     warned: Mutex<BTreeSet<String>>,
@@ -792,6 +1106,7 @@ impl SourceDesk {
             next_report: Mutex::new(Instant::now()),
             next_drain: Mutex::new(Instant::now()),
             next_replies: Mutex::new(Instant::now()),
+            next_watch: Mutex::new(Instant::now()),
             drained: DrainState::new(),
             next_sleepers: Mutex::new(Instant::now()),
             warned: Mutex::new(BTreeSet::new()),
@@ -866,17 +1181,23 @@ impl SourceDesk {
                     poll_source(
                         registry,
                         &self.station,
-                        &operation.id,
-                        &setup.name,
+                        (&operation.id, &setup.name),
                         providers.iter().filter(|p| **p == setup.provider).count() > 1,
                         source.as_ref(),
+                        &setup.reopening(),
                     )
                 });
                 match result {
-                    Ok(summary) if summary.queued + summary.updated > 0 => eprintln!(
-                        "ai6: source {} for Operation {}: {} queued, {} updated",
-                        setup.name, operation.id, summary.queued, summary.updated
-                    ),
+                    Ok(summary) if summary.queued + summary.updated + summary.reopened > 0 => {
+                        eprintln!(
+                            "ai6: source {} for Operation {}: {} queued, {} updated, {} reopened",
+                            setup.name,
+                            operation.id,
+                            summary.queued,
+                            summary.updated,
+                            summary.reopened
+                        );
+                    }
                     Ok(_) => {}
                     Err(error) => eprintln!(
                         "ai6: source {} for Operation {}: {error}",
@@ -940,6 +1261,20 @@ impl SourceDesk {
                 &self.station,
                 unix_seconds() as f64,
             );
+        }
+        let watch_due = self
+            .next_watch
+            .lock()
+            .map(|mut next| {
+                let due = *next <= now;
+                if due {
+                    *next = now + self.limits.reopen_watch_every.0;
+                }
+                due
+            })
+            .unwrap_or(false);
+        if watch_due {
+            watch_settled(registry, roster, build_tracker, &self.station, &self.limits);
         }
         let sleepers_due = self
             .next_sleepers
@@ -1218,7 +1553,15 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
         let keys = |instance: &str, shared: bool, source: Coded| {
-            poll_source(&registry, "station-a", "ai6", instance, shared, &source).unwrap();
+            poll_source(
+                &registry,
+                "station-a",
+                ("ai6", instance),
+                shared,
+                &source,
+                &Reopening::never(),
+            )
+            .unwrap();
             registry
                 .entered_mission_id(&MissionEntry::source(
                     "ai6",
@@ -1267,8 +1610,17 @@ mod tests {
         }
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
-        let poll =
-            || poll_source(&registry, "station-a", "G", "repeating", false, &Repeating).unwrap();
+        let poll = || {
+            poll_source(
+                &registry,
+                "station-a",
+                ("G", "repeating"),
+                false,
+                &Repeating,
+                &Reopening::never(),
+            )
+            .unwrap()
+        };
 
         assert_eq!(poll().queued, 1);
         let again = poll();
@@ -2235,5 +2587,334 @@ Branch: `agent/br-1`"
             .lock()
             .unwrap()
             .retain(|reply| reply.item != "rp-1");
+    }
+}
+
+/// Reopening settled items, on every Registry backend.
+#[cfg(test)]
+mod reopen_tests {
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    use guatiao::library::ProviderError;
+
+    use super::*;
+    use crate::directorates::registry::mission_issues::ReplyState;
+    use crate::directorates::registry::sources::{SourceBatch, SourceItem};
+    use crate::directorates::registry::suite::{Store, backend_tests};
+    use crate::{
+        IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, TrackerCapabilities, TrackerIssue,
+        TrackerLink, TrackerPost, TrackerUpdate,
+    };
+
+    backend_tests!(
+        a_finished_item_with_its_label_added_again_is_its_missions_next_attempt,
+        an_item_that_never_reopens_stays_finished,
+        a_comment_reopens_a_settled_item_and_one_ai6_wrote_does_not,
+    );
+
+    /// One item, as the tracker shows it now, its comments, and polls that find it changed.
+    #[derive(Clone, Default)]
+    struct Issue {
+        labels: Arc<Mutex<Vec<String>>>,
+        replies: Arc<Mutex<Vec<Reply>>>,
+        polls: Arc<Mutex<u32>>,
+    }
+
+    impl Issue {
+        fn label(&self, labels: &[&str]) {
+            *self.labels.lock().unwrap() = labels.iter().map(|label| (*label).to_owned()).collect();
+        }
+
+        fn item(&self) -> SourceItem {
+            SourceItem {
+                id: "o/r#7".to_owned(),
+                title: "The build fails".to_owned(),
+                body: "It broke.".to_owned(),
+                url: Some("https://tracker.test/o/r/7".to_owned()),
+                labels: self.labels.lock().unwrap().clone(),
+                author: Some("reporter".to_owned()),
+                updated: format!("2026-11-05T00:00:{:02}Z", *self.polls.lock().unwrap()),
+                code: Some("7".to_owned()),
+                code_tag: Some("gh".to_owned()),
+            }
+        }
+    }
+
+    impl Source for Issue {
+        fn poll(&self, _: SourcePoll) -> Result<SourceBatch, ProviderError> {
+            *self.polls.lock().unwrap() += 1;
+            Ok(SourceBatch {
+                items: vec![self.item()],
+                cursor: None,
+            })
+        }
+    }
+
+    impl Tracker for Issue {
+        fn capabilities(&self, _: Option<String>) -> Result<TrackerCapabilities, ProviderError> {
+            Ok(TrackerCapabilities::default())
+        }
+
+        fn issue(&self, item: String) -> Result<TrackerIssue, ProviderError> {
+            let found = self.item();
+            Ok(TrackerIssue {
+                id: item,
+                title: found.title,
+                body: found.body,
+                state: "open".to_owned(),
+                labels: found.labels,
+                url: found.url,
+                updated: found.updated,
+                ..TrackerIssue::default()
+            })
+        }
+
+        fn replies(&self, request: ReplyPoll) -> Result<ReplyBatch, ProviderError> {
+            Ok(ReplyBatch {
+                replies: self
+                    .replies
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|reply| request.items.contains(&reply.item))
+                    .cloned()
+                    .collect(),
+                cursor: None,
+            })
+        }
+
+        fn post(&self, _: TrackerPost) -> Result<PostedComment, ProviderError> {
+            Ok(PostedComment {
+                id: "c1".to_owned(),
+                url: None,
+            })
+        }
+
+        fn update(&self, _: TrackerUpdate) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn create(&self, _: IssueSpec) -> Result<TrackerIssue, ProviderError> {
+            Ok(TrackerIssue::default())
+        }
+
+        fn link(&self, _: TrackerLink) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    /// Operation `G` with one instance, `gh`, reopening on `reopen`, and its setup.
+    fn roster(reopen: &str) -> (tempfile::TempDir, Roster, SourceSetup) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("operations.toml"),
+            format!(
+                "[operation.G]\nsources = {{ gh = {{ provider = \"fake\", reopen = \"{reopen}\", \
+                 status_labels = {{ done = \"ai6:done\" }} }} }}\n"
+            ),
+        )
+        .unwrap();
+        let roster = Roster::load(dir.path()).unwrap();
+        let setup = source_setups(roster.operation("G").unwrap(), &SourceLimits::default())
+            .remove(0)
+            .unwrap();
+        (dir, roster, setup)
+    }
+
+    fn poll(registry: &dyn RegistryBackend, issue: &Issue, setup: &SourceSetup) -> PollSummary {
+        poll_source(
+            registry,
+            "station-a",
+            ("G", "gh"),
+            false,
+            issue,
+            &setup.reopening(),
+        )
+        .unwrap()
+    }
+
+    /// Claims the item's brief, finishes it and writes its report's phase, as a run does.
+    fn settle(registry: &dyn RegistryBackend, attempt: u32) -> String {
+        let lease = registry
+            .claim_with_lease(None, "station-a", crate::DEFAULT_LEASE, BTreeMap::new())
+            .unwrap()
+            .expect("the item's brief is queued");
+        assert_eq!(lease.attempt(), attempt);
+        let brief = registry.read_claimed(lease.key()).unwrap().unwrap();
+        assert_eq!(brief.handle.as_deref(), Some("G-gh-7"));
+        registry
+            .finish(
+                &brief,
+                &serde_json::json!({"state": "done"}),
+                true,
+                None,
+                None,
+            )
+            .unwrap();
+        registry
+            .set_issue_status(lease.key(), "gh", "o/r#7", None, Some("done"))
+            .unwrap();
+        lease.key().to_owned()
+    }
+
+    fn reopened(registry: &dyn RegistryBackend) -> Vec<String> {
+        registry
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "source" && event.action == "reopened")
+            .map(|event| event.detail["reason"].clone())
+            .collect()
+    }
+
+    fn a_finished_item_with_its_label_added_again_is_its_missions_next_attempt(store: &dyn Store) {
+        let handle = store.handle();
+        let registry: &dyn RegistryBackend = handle.as_ref();
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
+        let (_dir, roster, setup) = roster("label");
+        let issue = Issue::default();
+        issue.label(&["ai6"]);
+        assert_eq!(poll(registry, &issue, &setup).queued, 1);
+        let key = settle(registry, 1);
+
+        // Changed, its labels as they were, or with only AI6's own: still settled.
+        issue.label(&["ai6", "ai6:done"]);
+        let summary = poll(registry, &issue, &setup);
+        assert_eq!((summary.reopened, summary.skipped), (0, 1));
+
+        // The label is taken off, and a later round reads the item without it.
+        issue.label(&["ai6:done"]);
+        let build = |_: &str, _: &toml::Table| -> Result<Box<dyn Tracker>, String> {
+            Ok(Box::new(issue.clone()))
+        };
+        assert_eq!(
+            watch_settled(
+                registry,
+                &roster,
+                &build,
+                "station-b",
+                &SourceLimits::default()
+            ),
+            0,
+            "only the Headquarters Station reads settled items"
+        );
+        assert_eq!(
+            watch_settled(
+                registry,
+                &roster,
+                &build,
+                "station-a",
+                &SourceLimits::default()
+            ),
+            1
+        );
+
+        // Put back, it reopens the same Mission as its next attempt, once.
+        issue.label(&["ai6", "ai6:done"]);
+        assert_eq!(poll(registry, &issue, &setup).reopened, 1);
+        let queued = registry.list_new().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(
+            (queued[0].key(), queued[0].shown_handle()),
+            (key.clone(), "G-gh-7".to_owned())
+        );
+        assert_eq!(poll(registry, &issue, &setup).reopened, 0);
+        assert_eq!(reopened(registry), ["label ai6 added"]);
+        assert!(
+            registry
+                .audit_records()
+                .unwrap()
+                .iter()
+                .any(
+                    |record| record.action == "mission.reopened" && record.target.starts_with(&key)
+                )
+        );
+        assert_eq!(settle(registry, 2), key, "attempt 2 of the same Mission");
+    }
+
+    fn an_item_that_never_reopens_stays_finished(store: &dyn Store) {
+        let handle = store.handle();
+        let registry: &dyn RegistryBackend = handle.as_ref();
+        let (_dir, _roster, setup) = roster("never");
+        let issue = Issue::default();
+        issue.label(&["ai6"]);
+        poll(registry, &issue, &setup);
+        let key = settle(registry, 1);
+        registry
+            .set_issue_snapshot(&key, "gh", "o/r#7", None, &Default::default())
+            .unwrap();
+        issue.label(&["ai6", "bug"]);
+        let summary = poll(registry, &issue, &setup);
+        assert_eq!((summary.reopened, summary.skipped), (0, 1));
+        assert!(registry.list_new().unwrap().is_empty());
+        assert_eq!(registry.filed_brief(&key).unwrap().unwrap().state, "done");
+        assert!(reopened(registry).is_empty());
+    }
+
+    fn a_comment_reopens_a_settled_item_and_one_ai6_wrote_does_not(store: &dyn Store) {
+        let handle = store.handle();
+        let registry: &dyn RegistryBackend = handle.as_ref();
+        registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
+        let (_dir, roster, setup) = roster("comment");
+        let issue = Issue::default();
+        issue.label(&["ai6"]);
+        poll(registry, &issue, &setup);
+        let key = settle(registry, 1);
+        let build = |_: &str, _: &toml::Table| -> Result<Box<dyn Tracker>, String> {
+            Ok(Box::new(issue.clone()))
+        };
+        let comment = |id: &str, author: &str, own: bool| Reply {
+            id: id.to_owned(),
+            item: "o/r#7".to_owned(),
+            author_id: author.to_owned(),
+            author: author.to_owned(),
+            permitted: true,
+            own,
+            body: format!("{id}: it broke again"),
+            created: "2099-11-05T10:00:00Z".to_owned(),
+        };
+        issue
+            .replies
+            .lock()
+            .unwrap()
+            .push(comment("c1", "ai6-bot", true));
+        poll_replies(registry, &roster, &build, "station-a", 5.0);
+        assert!(registry.list_new().unwrap().is_empty(), "AI6's own comment");
+
+        issue
+            .replies
+            .lock()
+            .unwrap()
+            .push(comment("c2", "reporter", false));
+        assert_eq!(poll_replies(registry, &roster, &build, "station-a", 6.0), 1);
+        let queued = registry.list_new().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].key(), key);
+        let begin = queued[0].body.find("BEGIN gh ITEM").unwrap();
+        let end = queued[0].body.find("END gh ITEM").unwrap();
+        assert!(
+            queued[0].body[begin..end].contains("Comment by reporter"),
+            "the comment is quoted as the item is: {}",
+            queued[0].body
+        );
+        assert!(queued[0].body[begin..end].contains("c2: it broke again"));
+        assert!(!queued[0].body.contains("c1: it broke again"));
+        let stored = registry.issue_replies(&key).unwrap();
+        assert_eq!(
+            stored
+                .iter()
+                .find(|reply| reply.id == "c2")
+                .map(|reply| reply.state),
+            Some(ReplyState::Delivered)
+        );
+        assert_eq!(reopened(registry), ["1 new comment(s)"]);
+        assert_eq!(settle(registry, 2), key);
+        assert!(
+            crate::station::issues::weakenings(&roster)
+                .iter()
+                .any(|line| line.contains("reopens a settled item on a comment")),
+            "a comment that reopens is a weakening"
+        );
     }
 }

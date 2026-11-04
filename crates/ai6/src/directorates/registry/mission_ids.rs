@@ -414,7 +414,7 @@ mod tests {
     use crate::directorates::registry::sessions::NewSession;
     use crate::directorates::registry::sources::{Ingest, SourceItem};
     use crate::directorates::registry::store::{
-        Brief, DEFAULT_LEASE, FileRegistry, MissionProposal,
+        Brief, DEFAULT_LEASE, FileRegistry, MissionProposal, Reentry,
     };
     use crate::directorates::registry::suite::{Store, backend_tests, brief};
     use std::collections::{BTreeMap, BTreeSet};
@@ -629,6 +629,69 @@ mod tests {
             .unwrap();
         assert_eq!(ingest(&changed), Ingest::Finished);
         assert!(registry.list_new().unwrap().is_empty());
+
+        // Reopened, the item is the same Mission's next attempt, and only from a finished brief.
+        let reopened = crate::directorates::registry::sources::reopened_brief(
+            ("ai6", "github"),
+            &changed,
+            &[],
+            &Default::default(),
+            "station-a",
+        );
+        let entry = crate::directorates::registry::sources::source_entry("ai6", "github", &item);
+        let Reentry::Queued(queued) = registry
+            .reenter_brief(&reopened, &entry, &|_| true)
+            .unwrap()
+        else {
+            panic!("a finished brief is queued again");
+        };
+        assert_eq!(
+            (queued.key(), handle_of(&queued)),
+            (key.clone(), "ai6-gh-63".to_owned())
+        );
+        assert!(matches!(
+            registry.reenter_brief(&reopened, &entry, &|_| true).unwrap(),
+            Reentry::Unchanged(filed) if filed.state == "new"
+        ));
+        assert_eq!(ingest(&changed), Ingest::Unchanged);
+        let again = registry
+            .claim_with_lease(None, "station-a", DEFAULT_LEASE, BTreeMap::new())
+            .unwrap()
+            .unwrap();
+        assert_eq!((again.key(), again.attempt()), (key.as_str(), 2));
+        let claimed = registry.read_claimed(again.key()).unwrap().unwrap();
+        assert!(crate::directorates::registry::sources::reportable(
+            &claimed, "github"
+        ));
+        registry
+            .finish(
+                &claimed,
+                &serde_json::json!({}),
+                true,
+                None,
+                Some("station-a"),
+            )
+            .unwrap();
+        assert_eq!(
+            registry.unreported_source_briefs().unwrap().len(),
+            1,
+            "the next attempt owes its own report"
+        );
+        assert!(matches!(
+            registry.reenter_brief(&reopened, &entry, &|_| false).unwrap(),
+            Reentry::Unchanged(filed) if filed.state == "done" && filed.attempts == 2
+        ));
+        let unknown = crate::directorates::registry::sources::source_entry(
+            "ai6",
+            "github",
+            &source_item("o/r#64", Some("64"), Some("gh")),
+        );
+        assert_eq!(
+            registry
+                .reenter_brief(&reopened, &unknown, &|_| true)
+                .unwrap(),
+            Reentry::Unknown
+        );
         // The same number in another Operation is another Mission.
         assert_eq!(
             registry

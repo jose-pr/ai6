@@ -228,7 +228,7 @@ pub use directorates::registry::sources::{
 pub use directorates::registry::sql::{SqlOptions, SqlRegistry};
 pub use directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, FiledBrief, HeadquartersLease, Lease,
-    LeaseRecovery, MissionProposal, StationRecord, StationSettings,
+    LeaseRecovery, MissionProposal, Reentry, StationRecord, StationSettings,
 };
 pub use directorates::registry::timeline::TimelineEvent;
 pub use directorates::registry::tracker::{

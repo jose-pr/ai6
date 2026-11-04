@@ -137,6 +137,32 @@ pub fn source_brief(
     item: &SourceItem,
     limits: &SourceLimits,
 ) -> Brief {
+    item_brief(operation, provider, item, &[], limits)
+}
+
+/// The brief a settled item is queued again with, as `received_by` read it: the item as it reads
+/// now and the `comments` made on it since its Mission settled, quoted as the item is, with a
+/// Source provenance. [`BriefStore::reenter_brief`](super::store::BriefStore::reenter_brief)
+/// queues it as the Mission's next attempt.
+pub fn reopened_brief(
+    (operation, provider): (&str, &str),
+    item: &SourceItem,
+    comments: &[crate::Reply],
+    limits: &SourceLimits,
+    received_by: &str,
+) -> Brief {
+    let mut brief = item_brief(operation, provider, item, comments, limits);
+    brief.provenance = Some(source_provenance(provider, item, &brief, received_by));
+    brief
+}
+
+fn item_brief(
+    operation: &str,
+    provider: &str,
+    item: &SourceItem,
+    comments: &[crate::Reply],
+    limits: &SourceLimits,
+) -> Brief {
     let fingerprint = hex_digest(&Sha256::digest(
         serde_json::to_vec(&(&item.title, &item.body, &item.labels, &item.updated))
             .unwrap_or_default(),
@@ -160,7 +186,7 @@ pub fn source_brief(
     );
     Brief {
         title: format!("Resolve {provider} item {}", one_line(&item.id)),
-        body: quoted_material(provider, item, limits),
+        body: quoted_material(provider, item, comments, limits),
         id: item.id.clone(),
         mission_id: None,
         handle: None,
@@ -228,8 +254,15 @@ pub fn reportable(brief: &Brief, provider: &str) -> bool {
         })
 }
 
-/// Wraps an item's own words so an Agent reads them as data, not as instructions.
-fn quoted_material(provider: &str, item: &SourceItem, limits: &SourceLimits) -> String {
+/// Wraps an item's own words, and the comments made on it since its Mission settled, so an
+/// Agent reads them as data, not as instructions. The comments together are cut to the same
+/// `item_text_bytes` as the body.
+fn quoted_material(
+    provider: &str,
+    item: &SourceItem,
+    comments: &[crate::Reply],
+    limits: &SourceLimits,
+) -> String {
     let mut text = format!("Title: {}\n", one_line(&item.title));
     if let Some(author) = &item.author {
         text.push_str(&format!("Author: {}\n", one_line(author)));
@@ -240,6 +273,19 @@ fn quoted_material(provider: &str, item: &SourceItem, limits: &SourceLimits) -> 
     }
     text.push('\n');
     text.push_str(truncate(&item.body, limits.item_text_bytes.or_max()));
+    if !comments.is_empty() {
+        let mut said = String::new();
+        for comment in comments {
+            said.push_str(&format!(
+                "\n\nComment by {} at {}:\n{}",
+                one_line(&comment.author),
+                one_line(&comment.created),
+                comment.body
+            ));
+        }
+        text.push_str("\n\nComments since the last attempt settled:");
+        text.push_str(truncate(&said, limits.item_text_bytes.or_max()));
+    }
     let mut fence = "=====".to_owned();
     while text.contains(&fence) {
         fence.push('=');

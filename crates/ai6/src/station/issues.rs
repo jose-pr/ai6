@@ -25,7 +25,7 @@ use crate::directorates::registry::tracker::{
     IssueSpec, Tracker, TrackerLink, TrackerPost, TrackerUpdate,
 };
 use crate::station::limits::SourceLimits;
-use crate::station::sources::{SourceSetup, StatusWords, source_setups};
+use crate::station::sources::{Reopen, SourceSetup, StatusWords, source_setups};
 use guatiao::{Status, library::ProviderError};
 
 /// `blocked_reason` of a Mission waiting for an answer on its issue.
@@ -164,7 +164,18 @@ pub(crate) fn weakenings(roster: &Roster) -> Vec<String> {
                     operation.id
                 ))
             });
-            issues.chain(trusted).collect::<Vec<_>>()
+            let reopened = setups_of(operation)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|setup| setup.reopen == Reopen::Comment)
+                .map(|setup| {
+                    format!(
+                        "Operation {:?} source {:?} reopens a settled item on a comment, so \
+                         anyone the tracker lets answer for it can start its work again",
+                        operation.id, setup.name
+                    )
+                });
+            issues.chain(trusted).chain(reopened).collect::<Vec<_>>()
         })
         .collect()
 }
@@ -275,6 +286,8 @@ pub(crate) fn poll_replies(
             continue;
         };
         for setup in setups {
+            // A settled item's comments are read only where a comment reopens it.
+            let reopens = setup.reopen == Reopen::Comment;
             let watched: Vec<&IssueLink> = links
                 .iter()
                 .filter(|link| {
@@ -284,9 +297,10 @@ pub(crate) fn poll_replies(
                             link.relation,
                             LinkRelation::Source | LinkRelation::Related | LinkRelation::Child
                         )
-                        && !matches!(link.phase.as_deref(), Some("done" | "failed"))
+                        && (!settled(link) || (reopens && link.relation == LinkRelation::Source))
                 })
                 .collect();
+            let mut reopening: BTreeMap<String, Vec<(crate::Reply, String)>> = BTreeMap::new();
             if watched.is_empty() {
                 continue;
             }
@@ -341,6 +355,13 @@ pub(crate) fn poll_replies(
                         record.body = String::new();
                     }
                     match registry.store_issue_reply(&record) {
+                        Ok(true) if reply.permitted && settled(link) => {
+                            stored += 1;
+                            reopening
+                                .entry(reply.item.clone())
+                                .or_default()
+                                .push((reply.clone(), link.mission_id.clone()));
+                        }
                         Ok(true) if reply.permitted => stored += 1,
                         Ok(true) => {
                             let event = TimelineEvent::new(
@@ -363,6 +384,16 @@ pub(crate) fn poll_replies(
                     }
                 }
             }
+            for (item, replies) in reopening {
+                reopen_on_comments(
+                    registry,
+                    tracker.as_ref(),
+                    station,
+                    (&operation.id, &setup.name),
+                    &item,
+                    &replies,
+                );
+            }
             if let Some(next) = batch.cursor
                 && cursor.as_deref() != Some(next.as_str())
             {
@@ -374,6 +405,63 @@ pub(crate) fn poll_replies(
         }
     }
     stored
+}
+
+/// Whether a link's Mission settled: its report was written on the issue.
+fn settled(link: &IssueLink) -> bool {
+    matches!(link.phase.as_deref(), Some("done" | "failed"))
+}
+
+/// Reopens the settled item `item` for the comments made on it since, each with the Mission
+/// whose link it came in on, reading the item as it is now. The comments travel in the brief, so
+/// they are marked delivered; an attempt in flight leaves them for it.
+fn reopen_on_comments(
+    registry: &dyn RegistryBackend,
+    tracker: &dyn Tracker,
+    station: &str,
+    (operation, instance): (&str, &str),
+    item: &str,
+    replies: &[(crate::Reply, String)],
+) {
+    let issue = match tracker.issue(item.to_owned()) {
+        Ok(issue) => issue,
+        Err(error) => {
+            eprintln!("ai6: {instance}:{item} not read to reopen it: {error}");
+            return;
+        }
+    };
+    let comments: Vec<crate::Reply> = replies.iter().map(|(reply, _)| reply.clone()).collect();
+    // The item as its link names it, whatever spelling the tracker answers with.
+    let found = crate::directorates::registry::sources::SourceItem {
+        id: item.to_owned(),
+        title: issue.title,
+        body: issue.body,
+        url: issue.url,
+        labels: issue.labels,
+        author: None,
+        updated: issue.updated,
+        code: issue.code,
+        code_tag: issue.code_tag,
+    };
+    let why = format!("{} new comment(s)", comments.len());
+    if crate::station::sources::reopen_item(
+        registry,
+        station,
+        (operation, instance),
+        &found,
+        &comments,
+        &why,
+    ) {
+        for (reply, mission) in replies {
+            let _ = registry.mark_issue_reply(
+                mission,
+                instance,
+                item,
+                &reply.id,
+                ReplyState::Delivered,
+            );
+        }
+    }
 }
 
 /// Reads a link's issue and records what it says, for the tools that show it.

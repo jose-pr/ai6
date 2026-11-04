@@ -1082,6 +1082,19 @@ pub struct FiledBrief {
     pub outcome: Option<serde_json::Value>,
 }
 
+/// What [`BriefStore::reenter_brief`] did.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reentry {
+    /// Queued again as its Mission's next attempt; the brief as queued.
+    Queued(Brief),
+    /// The Mission's brief as filed, left as it was: queued, held or claimed, or finished and
+    /// not to be replaced.
+    Unchanged(FiledBrief),
+    /// The entry names no Mission, or its Mission has no brief.
+    Unknown,
+}
+
 /// The brief queue: Mission proposals, queued briefs, their leases and outcomes.
 pub trait BriefStore {
     /// Stores an Agent-authored Mission proposal outside the scheduler's queue.
@@ -1185,6 +1198,22 @@ pub trait BriefStore {
     /// `AlreadyExists` when the entry's brief is already in any Registry state; otherwise an
     /// invalid brief or Registry I/O failures.
     fn enter_brief(&self, brief: &Brief, entry: &MissionEntry) -> io::Result<Brief>;
+
+    /// Queues `brief` as the next attempt of the Mission `entry` already names, when that
+    /// Mission's brief finished and `again` accepts the brief as filed. The Mission keeps its UID,
+    /// its handle and the count of its claims, so the next claim is its next attempt; what the
+    /// last attempt filed (its outcome, its report and its spent provenance) is dropped. The
+    /// provenance is `brief`'s own.
+    ///
+    /// # Errors
+    ///
+    /// An invalid brief, or Registry I/O failures.
+    fn reenter_brief(
+        &self,
+        brief: &Brief,
+        entry: &MissionEntry,
+        again: &dyn Fn(&Brief) -> bool,
+    ) -> io::Result<Reentry>;
 
     /// Atomically claims one queued brief, or the highest-priority queued brief. Concurrent
     /// Stations never claim the same brief.
@@ -1796,6 +1825,43 @@ impl BriefStore for FileRegistry {
         }
         self.write_brief(&self.root.join("new").join(format!("{key}.json")), &entered)?;
         Ok(entered)
+    }
+
+    fn reenter_brief(
+        &self,
+        brief: &Brief,
+        entry: &MissionEntry,
+        again: &dyn Fn(&Brief) -> bool,
+    ) -> io::Result<Reentry> {
+        brief.validate()?;
+        let Some(name) = entry.book_name() else {
+            return Ok(Reentry::Unknown);
+        };
+        let _registry_lock = self.lock()?;
+        let Some(mission) = self.entered_id(&name)? else {
+            return Ok(Reentry::Unknown);
+        };
+        let mut entered = brief.clone();
+        entered.enter_as(mission);
+        let key = entered.key();
+        let Some(filed) = self.filed_brief(&key)? else {
+            return Ok(Reentry::Unknown);
+        };
+        if !matches!(filed.state.as_str(), "done" | "failed") || !again(&filed.brief) {
+            return Ok(Reentry::Unchanged(filed));
+        }
+        // Queued first: a crash before the old record goes leaves it finished and queued, as a
+        // brief finished without a claim is, never neither.
+        self.write_brief(&self.root.join("new").join(format!("{key}.json")), &entered)?;
+        let finished = self.root.join(&filed.state);
+        for suffix in ["outcome.json", "reported", "provenance", "log", "json"] {
+            match fs::remove_file(finished.join(format!("{key}.{suffix}"))) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(Reentry::Queued(entered))
     }
 
     fn claim_new(&self, key: Option<&str>) -> io::Result<Option<Brief>> {
