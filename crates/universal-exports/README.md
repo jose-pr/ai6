@@ -254,8 +254,9 @@ it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.
 The command reads the one bootstrap file every program reads, `ai6.cfg`: `--config PATH`, else
 the file `AI6_CONFIG` names, else `ai6.cfg` in the user's then the system's configuration directory
 (`ai6::bootstrap::Bootstrap`). Unknown keys are refused; relative paths are relative to the file; a
-secret is `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself, and the
-last two are printed as a warning at start.
+secret is `{ provider = "file", key = "PATH" }`, `{ provider = "env", key = "NAME" }` or
+`{ provider = "inline", value = "…" }` (the built-in secret providers, the only ones this file can
+name), and the last two are printed as a warning at start.
 
 | Key | Effect | Default |
 | --- | --- | --- |
@@ -274,8 +275,8 @@ last two are printed as a warning at start.
 | --- | --- | --- |
 | `AI6_CONFIG` | The bootstrap file; must exist when set. | `ai6.cfg` in the user's, then the system's configuration directory |
 
-Secret references in `ai6.cfg` may name others (`{ env = "NAME" }`), which is reported as a
-weakening. The `unex` record's keys are listed in [Configuration](https://jose-pr.github.io/ai6/configuration/).
+A secret reference in `ai6.cfg` may name an environment variable (`{ provider = "env", key =
+"NAME" }`), which is reported as a weakening. The `unex` record's keys are listed in [Configuration](https://jose-pr.github.io/ai6/configuration/).
 
 ## Exit status
 

@@ -643,49 +643,54 @@ secrets = ["anthropic", "forge", "release"]
 
 [secret.anthropic]
 env = "ANTHROPIC_API_KEY"                    # default: the name in upper case, - and . as _
-                                             # read from secrets/anthropic in this directory
+                                             # default: provider "file", key "anthropic",
+                                             # secrets/anthropic in this directory
 
 [secret.forge]
 env = "GH_TOKEN"
-from = { file = "/etc/ai6/secrets/forge" }   # or { env = "VAR" }: weaker, see below
+provider = "keys"                            # an instance below, or a loaded provider
+key = "forge"
 
 [secret.release]                             # a credential for protected targets
 env = "RELEASE_TOKEN"
 green_ink = true
 kinds = ["release", "push"]                  # approvals that unlock it; default: any
 targets = ["tag v*", "origin:refs/tags/*"]   # globs on the approval's target; default: any
+
+[secret_provider.keys]                       # an instance: a provider and its settings, once
+provider = "file"
+dir = "/etc/ai6/secrets"
 ```
 
-- When a Session starts or resumes, the Station leases the Agent's secrets from its secret
-  backend and puts each value in the harness's environment under `env`, replacing what the
+- When a Session starts or resumes, the Station leases the Agent's secrets from their
+  providers and puts each value in the harness's environment under `env`, replacing what the
   Mission's earlier Session held. A value is never written to disk: not in the safe house,
   the launch record, the Registry, nor on the Theater. The [detached
   wrapper](theaters.md#the-detached-wrapper) hands the environment over through a FIFO; a
-  runner keeps it in memory. A Session refuses to start when its backend refuses an
+  runner keeps it in memory. A Session refuses to start when a provider refuses an
   ordinary secret.
-- The Station's own backend reads each value when it is leased, from a file on the Station
-  (`secrets/<name>` in its configuration directory by default; a relative `from = { file }`
-  is relative to that directory) or, with `from = { env = "VAR" }`, from the Station's own
-  environment. The environment is the weaker choice, logged as a weakening at start: every
-  process the Station starts on its own host inherits it, a harness among them, green ink
-  or not. `StationConfig::with_secret_backend` puts another backend in its place, such as a
-  vault client whose leases expire on their own. Leases last an hour (the `station` record's
+- The built-in providers read each value when it is leased: `file` from a file on the Station
+  (`secrets/<name>` in its configuration directory by default; a relative `key` is relative to
+  that directory), `env` from the Station's own environment. The environment is the weaker
+  choice, logged as a weakening at start: every process the Station starts on its own host
+  inherits it, a harness among them, green ink or not. A provider that leases, such as a vault
+  client whose leases expire on their own, revokes what it issued. Leases last an hour (the `station` record's
   `[secrets] lease_ttl`, at most `max_lease_ttl`) and are revoked when the Mission ends or
   its Session stops on that Station; a value already in a harness's environment stays there
   until the harness ends.
 - A harness on the Station's own host runs as the Station's user, so it can read what that
   user can, the secret files among them. Keep green ink credentials out of reach of local
-  harnesses: give them to Missions on other Theaters, or use a backend the harness cannot
+  harnesses: give them to Missions on other Theaters, or use a provider the harness cannot
   query.
 - A `green_ink` secret is leased only while the Mission holds a live [green
   ink](missions.md#green-ink) approval of one of its `kinds` whose target matches one of its
   `targets`: once per approval, ever (the Registry records the use, so another Station or a
   restart does not lease it again), for no longer than the approval lasts. A green ink secret
-  without `targets`, and one served from the Station's own files or environment (whose value a
-  revocation cannot take back), is logged as a weakening at start. The Agent asks with `request_approval`, and the
+  without `targets`, and one served by a built-in provider (whose value a revocation cannot take
+  back), is logged as a weakening at start. The Agent asks with `request_approval`, and the
   credential is in its environment from the next Session start or resume after the
   operator signs. When the approval expires or is revoked, the Station revokes the lease at
-  its backend within a scheduler pass (`credential` / `revoked` on the timeline); a backend
+  its provider within a scheduler pass (`credential` / `revoked` on the timeline); a provider
   that issues credentials of its own stops honouring it, while a value already in the
   harness's environment stays there.
 - A Session the Operation's [exposure](medical.md) policy restricts with `secrets` gets no
@@ -697,6 +702,38 @@ targets = ["tag v*", "origin:refs/tags/*"]   # globs on the approval's target; d
 Credentials already on a Theater outside these leases (a git credential helper, an SSH
 agent, a CLI login) are reported as weakenings; see [Fitting a Theater
 out](theaters.md#fitting-a-theater-out).
+
+### Secret providers
+
+A secret's value is read by a **secret provider**, a Guatiao provider of kind `ai6_secret`.
+`[secret.<name>]` names one with `provider` (default `file`) and the secret there with `key`
+(default the secret's name); whatever further fields that provider declares sit beside them, flat.
+`provider`, `key`, `secret`, `env`, `green_ink`, `kinds` and `targets` are AI6's, and a provider
+that declares one of them as a field of its own is refused when the Station builds it.
+
+Three are built in, so they work before anything loads:
+
+| Provider | `key` | Settings | Notes |
+| --- | --- | --- | --- |
+| `file` | a path, relative to `dir` | `dir`, default the Station's secrets directory (`[station.secrets] dir`) | one trailing newline is dropped |
+| `env` | an environment variable of the Station | none | a weakening: every process the Station starts inherits it |
+| `inline` | none | none | the value is the field `value`; a weakening: it sits in the configuration |
+
+Others load from `[station.plugins]` like any provider, under the same checks. A provider may lease
+(a vault whose leases expire): the Station then asks for a lease of the lease's time and revokes it
+when the lease ends; a provider that does not lease is read.
+
+`[secret_provider.<name>]` is an **instance**: a loaded provider (`provider`) and its settings,
+flat, written once and named by many secrets. It is global, or one Station's own when that
+Station's path or address differs. An instance may not take the name of a built-in or a loaded
+provider, and its `provider` is a loaded provider, never another instance. A setting its provider
+marks sensitive (a session, a password) is itself a secret reference, `{ provider = "file", key =
+"…" }` or `{ secret = "name" }`, read when the instance is built; one that leads back to the instance
+is refused. The Station builds each instance once and keeps it until its record changes.
+
+A provider's own error text is never shown, since it could quote what it was given: a lease it
+refuses is `secret backend request failed`, and a provider the Station cannot build is logged by
+name with its reason withheld.
 
 ### Values that are no secret
 
@@ -768,7 +805,7 @@ kind = "openai-api-key"
 
 `env = "VAR"` puts the value (or directory) in another variable; a handler other than
 `claude` or `codex` needs it for `config-dir`. Each account's secret is an ordinary loadout
-secret: it is leased from the same backend, never written to the Registry, the safe house or
+secret: it is leased from the same provider, never written to the Registry, the safe house or
 the timeline. A `green_ink` secret cannot back an account: the load fails, since a pool hands
 its accounts to every Session that draws them while a green ink credential is only for a step
 a person approved.

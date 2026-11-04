@@ -95,7 +95,7 @@ configuration directory (`XDG_CONFIG_HOME/ai6`, `%APPDATA%\ai6`, `~/.config/ai6`
 # ai6.cfg: every key optional here; relative paths are relative to this file.
 [provider]                       # where the configuration provider is
 location = "."                   # a directory, sqlite:PATH or postgres://...; default: this file's directory
-password = { file = "db-password" }   # or { env = "NAME" } or the value (a weakening)
+password = { provider = "file", key = "db-password" }   # or provider "env" or "inline" (a weakening)
 poll = 5                         # seconds; 0 turns reloading off
 
 [registry]
@@ -104,7 +104,7 @@ headquarters_lease = 60          # seconds; also sets the SQL timeouts
 
 [unex]
 url = "https://ai6.example"      # Universal Exports; ai6ctl reads only this and ca_file
-station_token = { file = "station-token" }  # the Station publishes only with it
+station_token = { provider = "file", key = "station-token" }  # the Station publishes only with it
 ca_file = "enterprise-ca.pem"    # authorities to trust for it; default: the public roots alone
 
 [station]

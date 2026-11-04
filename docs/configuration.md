@@ -54,33 +54,40 @@ type before the setting is asked, so `n`, `yes` or `123` in a text setting is re
 
 ### Secrets
 
-A password or token is never a value the file has to hold. It is a secret reference:
+A password or token is never a value the file has to hold. It is a secret reference, the
+same shape everywhere AI6 takes one: a [secret provider](agents.md#secret-providers), the secret's
+`key` there and whatever further fields that provider declares, flat beside them.
 
 ```toml
-password = { file = "db-password" }   # a file; one trailing newline is dropped
-password = { env = "AI6_DB_PASSWORD" } # an environment variable
-password = "the value itself"          # inline
+password = { provider = "file", key = "db-password" }     # a file; one trailing newline is dropped
+password = { provider = "env", key = "AI6_DB_PASSWORD" }  # an environment variable
+password = { provider = "inline", value = "the value" }   # inline
 ```
 
-A file is the default and the strongest form. A variable is inherited by every process the
-reader starts, and an inline value is copied and committed with the file, so both are
-**weakenings**: printed at start, and sent at check-in as `bootstrap_weakened`, as is a
-limit looser than its default ([Limits](#limits)). They are allowed. A secret's value never
-appears in a message, a log or `Debug` output.
+`file`, `env` and `inline` are built in, and they are the only providers this file can name: it is
+read before any provider library loads, and before the configuration provider that holds
+`[secret.<name>]` and `[secret_provider.<name>]` records. A relative `file` key is relative to this
+file.
+
+A file is the strongest form. A variable is inherited by every process the reader starts, and an
+inline value is copied and committed with the file, so both are **weakenings**: printed at start,
+and sent at check-in as `bootstrap_weakened`, as is a limit looser than its default
+([Limits](#limits)). They are allowed. A secret's value never appears in a message, a log or
+`Debug` output.
 
 ### What it holds
 
 ```toml
 [provider]                            # shared: where the configuration provider is
 location = "."                        # a directory, sqlite:PATH or postgres://...
-password = { file = "db-password" }   # when a SQL location gives none
+password = { provider = "file", key = "db-password" }   # when a SQL location gives none
 poll = 5                              # seconds between checks for changes; 0 turns reloading off
 loadout_bytes = 1048576               # and the other limits under Limits below
 
 [registry]                            # shared: where the Registry is, and how much it keeps
 location = "postgres://db/ai6"        # default: the provider's database when it is SQL,
                                       # else registry/ in the reading program's state directory
-password = { file = "db-password" }   # default: the provider's, when the Registry is its database
+password = { provider = "file", key = "db-password" }   # default: the provider's, when the Registry is its database
 headquarters_lease = 60               # seconds; also sets the SQL connections' timeouts
 sqlite_busy_timeout = 30              # seconds a SQLite connection waits for a lock
 
@@ -92,11 +99,11 @@ records = 100000
 url = "https://ai6.example"           # its origin; ai6ctl reads this and ca_file, nothing else here
 ca_file = "enterprise-ca.pem"         # certificate authorities to trust for it; default: the public roots alone
 # Both sides of the Station channel.
-station_token = { file = "station-token" }   # a Station publishes with it, and the gateway requires it
+station_token = { provider = "file", key = "station-token" }   # a Station publishes with it, and the gateway requires it
 # The gateway.
 listen = "127.0.0.1:7082"             # loopback, behind the HTTPS reverse proxy
 public_origin = "https://ai6.example" # required
-proxy_secret = { file = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
+proxy_secret = { provider = "file", key = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
 state_dir = "/var/lib/unex"           # verified provider libraries, and a default Registry
 
 [unex.plugins]                        # the gateway's provider libraries, as [station.plugins]
@@ -199,7 +206,7 @@ records = "none"                      # keep every audit record; reported as a w
 | `location` | see meaning | **Where the configuration provider is.** A configuration directory, `sqlite:PATH` or a `postgres://` URL. Default: the directory holding the bootstrap file, else the user's configuration directory. |
 | `password` | none | **Database password.** The database password, when the location needs one and gives none. |
 | `poll` | 5 | **Between checks for changes.** Seconds between checks for changes; 0 turns reloading off. |
-| `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool` records together). |
+| `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` records together). |
 | `loadout_value_chars` | 4,096 | **One loadout value, in characters.** Characters of one text value in the loadout document. |
 | `access_policy_bytes` | 1 MiB | **Access policy.** Bytes of the access policy (the `access` record). |
 | `replace_retry` | 2 | **Wait for a reader of a family file.** Seconds a directory provider's replacement of a family file waits for a reader that has the file open. |

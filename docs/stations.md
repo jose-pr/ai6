@@ -136,7 +136,7 @@ location therefore configures a whole HA deployment:
 # /etc/ai6/ai6.cfg
 [provider]
 location = "postgres://ai6@db.internal/ai6?sslrootcert=/etc/ai6/db-ca.pem"
-password = { file = "db-password" }   # relative to this file
+password = { provider = "file", key = "db-password" }   # relative to this file
 ```
 
 In a directory Registry lease expiry uses each Station's clock, so Stations need
@@ -183,9 +183,9 @@ roots, or only against `sslrootcert=PATH` when the location names a CA file. A l
 may weaken that with `sslmode=require` (encrypted, server not verified) or
 `sslmode=disable` (no TLS); `ai6 serve` and Universal Exports then print a warning at
 start. Keep the password out of the location, where a process listing shows it: `ai6.cfg`'s
-`[provider]` and `[registry] password` take `{ file = "PATH" }` (the default form), `{ env =
-"NAME" }` or the value itself; the last two are printed as a warning and reported at
-check-in. Messages print locations with the password hidden.
+`[provider]` and `[registry] password` take a [secret reference](configuration.md#secrets):
+`{ provider = "file", key = "PATH" }`, `{ provider = "env", key = "NAME" }` or `{ provider =
+"inline", value = "…" }`; the last two are printed as a warning and reported at check-in. Messages print locations with the password hidden.
 
 Stations and Universal Exports reach the Registry only through the `RegistryBackend`
 traits (one per kind of record: briefs, Stations, Sessions, Cables, approvals and so on),

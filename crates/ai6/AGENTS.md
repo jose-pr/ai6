@@ -1075,14 +1075,20 @@ pub const DEFAULT_LISTEN: SocketAddr;        // 127.0.0.1:7081
 pub const DEFAULT_UNEX_LISTEN: SocketAddr;   // 127.0.0.1:7082
 pub const DEFAULT_POLL: Duration;            // 5 s
 
-#[non_exhaustive] #[derive(Clone, PartialEq, Eq)]   // Debug shows Inline(***)
-pub enum SecretRef { File(PathBuf), Env(String), Inline(Zeroizing<String>) }
-// written `{ file = "PATH" }`, `{ env = "NAME" }` or the value itself; FromValue, Schema; ToValue refuses Inline
+#[non_exhaustive] #[derive(Debug, Clone, PartialEq, Eq)]   // Debug shows field names, never values
+pub enum SecretRef { Provider(SecretSource), Named(String) }
+// the one shape of every secret setting: `{ provider = "NAME", key = "KEY", ..fields }` (fields flat
+// beside them, none named provider/key/secret/env/green_ink/kinds/targets) or `{ secret = "NAME" }`;
+// a bare string, `{ file = .. }` and `{ env = .. }` are refused. Built in: `{ provider = "file", key =
+// "PATH" }`, `{ provider = "env", key = "VAR" }`, `{ provider = "inline", value = ".." }`.
+// FromValue, Schema; ToValue refuses inline. Bootstrap::read refuses Named (no [secret] is read yet).
 impl SecretRef {
-    pub fn weakening(&self) -> Option<String>;      // Some for Env and Inline
-    pub fn relative_to(self, dir: &Path) -> Self;
-    pub fn read(&self) -> io::Result<Zeroizing<String>>; // a file's one trailing newline dropped; empty is InvalidData
-    pub fn describe(&self) -> String;               // the file or variable, never the value
+    pub fn file(key: impl Into<String>) -> Self;    pub fn env(name: impl Into<String>) -> Self;
+    pub fn weakening(&self) -> Option<String>;      // Some for env and inline
+    pub fn relative_to(self, dir: &Path) -> Self;   // a relative `file` key joined to dir
+    pub fn read(&self) -> io::Result<Zeroizing<String>>; // built-ins only (else Unsupported); a file's one
+                                                    // trailing newline dropped; empty is InvalidData
+    pub fn describe(&self) -> String;               // the file, variable or provider, never the value
 }
 
 // every field Option or defaulted; #[non_exhaustive], ToValue, FromValue, Schema, deny_unknown_fields;
@@ -2334,7 +2340,6 @@ Moneypenny's desk runs by the roster's `[assistant.desk]` (`AssistantDeskLimits`
 job and harness start): a clone of her repositories is given up and removed
 past `clone_timeout` or `clone_bytes`, and a save of `personal/` past `save_bytes` saves nothing
 and a notice says why;
-`with_secret_backend(impl SecretBackend + 'static)` replaces `StationSecrets`,
 `with_account_login(impl AccountLogin + 'static)` replaces `CommandLogin` for Codex pool
 accounts, `with_account_homes(dir)` moves their per-Mission `CODEX_HOME`s from
 `<state>/accounts` (cleanup removes only the directories it made, marked
@@ -4001,25 +4006,82 @@ impl LoadoutCatalog {
     pub fn overlay(&self, name: &str) -> Option<&OverlayRecord>;  // name compared as an identity
     pub fn secret(&self, name: &str) -> SecretDefinition;   // its [secret.<name>], or every default
     pub fn secrets(&self) -> Vec<SecretDefinition>;         // every name a loadout, table or pool account names
+    pub fn secret_providers(&self) -> &BTreeMap<String, SecretInstance>;  // [secret_provider.<name>]
+    pub fn provider_of<'a>(&'a self, provider: &'a str) -> &'a str;       // an instance's provider, else itself
 }
 impl FromStr for LoadoutCatalog { type Err = QError; }
 pub struct SecretDefinition;
 impl SecretDefinition {
-    pub fn new(name: impl Into<String>) -> Self;  // env = NAME upper, -/. as _; source File("secrets/<name>")
+    pub fn new(name: impl Into<String>) -> Self;  // env = NAME upper, -/. as _; source: file provider, key <name>
     pub fn name(&self) -> &str; pub fn env(&self) -> &str;
     pub fn green_ink(&self) -> bool; pub fn kinds(&self) -> &[String];   // empty: any approval kind
     pub fn targets(&self) -> &[String];                   // globs on the approval's target; empty: any
     pub fn unlocked_by(&self, kind: &str, target: &str) -> bool;
     pub fn green_ink_weakening(&self) -> Option<String>;  // Some for green ink without targets
-    pub fn source(&self) -> &SecretRef;
+    pub fn source(&self) -> &SecretSource;
 }
-// ai6::bootstrap::SecretRef (below); a loadout's `from` is only File or Env, a relative file
-// relative to the Station's secrets directory.
+pub struct SecretInstance;   // name(), provider() (a loaded provider, never another instance), settings() -> &SecretFields
+pub struct SecretSource { pub provider: String, pub key: String, pub fields: SecretFields }  // Debug: names only
+impl SecretSource { pub fn new(provider: impl Into<String>, key: impl Into<String>) -> Self; }
+pub struct SecretFields;     // a JSON map; Debug shows names only; every text zeroed on drop
+impl SecretFields { pub fn new(serde_json::Map<..>) -> Self; pub fn get(&self, name) -> Option<&serde_json::Value>;
+    pub fn names(&self) -> impl Iterator<Item = &str>; pub fn is_empty(&self) -> bool;
+    pub fn as_json(&self) -> &serde_json::Map<..>; pub fn to_map_in(&self, Alloc) -> Result<guatiao::Map, ProviderError>; }
 ```
 
+### Secret providers (`ai6::directorates::q::secret_kind`)
+
+A secret is read from a Guatiao provider of kind `ai6_secret`. `file`, `env` and `inline` are built
+in (`secret_kind::builtin`, registered by `Plugins` before any scan, so a library offering one of
+their IDs is skipped); others load through `[station.plugins]` like any provider. Slot order is the
+ABI; optional slots answer `GUATIAO_ERR_UNSUPPORTED` by default.
+
+```rust
+pub const RESERVED_FIELDS: [&str; 7];  // provider, key, secret, env, green_ink, kinds, targets
+pub const BUILT_IN: [&str; 3];         // file, env, inline
+#[guatiao::kind(name = "ai6_secret")]
+pub trait SecretProvider: Send + Sync {
+    #[sensitive] fn read(&self, ask: &Value) -> Result<Value, ProviderError>;   // SecretAsk -> SecretRead
+    fn fields(&self) -> Result<Value, ProviderError>;   // JSON Schema of a secret's further fields; default none
+    #[sensitive] fn lease(&self, ask: &Value) -> Result<Value, ProviderError>;  // SecretLeaseAsk -> SecretLeased
+    fn revoke(&self, lease: &str) -> Result<(), ProviderError>;
+    #[sensitive] fn store(&self, request: &Value) -> Result<Value, ProviderError>; // SecretStore -> SecretStored;
+}                                       // GUATIAO_ERR_BUSY when it holds a revision other than `expect`
+// models (ToValue, FromValue, Schema; values are guatiao::Secret<String>, built in Alloc::wiping()):
+pub struct SecretAsk { key: String, fields: Map }
+pub struct SecretRead { value: Secret<String>, revision: Option<String> }
+pub struct SecretLeaseAsk { key: String, fields: Map, ttl_secs: f64, station: String, holder: String }
+pub struct SecretLeased { lease: String, value: Secret<String> }
+pub struct SecretStore { key: String, fields: Map, value: Secret<String>, expect: Option<String> }  // expect None: no check
+pub struct SecretStored { revision: Option<String> }
+pub struct SecretKeeper;   // a built provider with typed calls
+impl SecretKeeper {
+    pub fn new(provider: Box<dyn SecretProvider>) -> Result<Self, String>;  // refuses a RESERVED_FIELDS field
+    pub fn fields(&self) -> &[String];
+    pub fn check_fields(&self, fields: &SecretFields) -> Result<(), String>; // names an undeclared field
+    pub fn read(&self, key: &str, fields: &SecretFields) -> Result<SecretRead, ProviderError>;
+    pub fn lease(&self, key, fields, ttl_secs: f64, station, holder) -> Result<Option<SecretLeased>, ProviderError>; // None: does not lease
+    pub fn revoke(&self, lease: &str) -> Result<(), ProviderError>;
+    pub fn store(&self, key, fields, value: &str, expect: Option<&str>) -> Result<SecretStored, SecretStoreError>;
+}
+pub enum SecretStoreError { Conflict, NotOffered, Failed(ProviderError) }   // #[non_exhaustive]
+// builtin: FileSecrets (config FileSecretsConfig { dir: Option<PathBuf> }; key a path, relative to
+// dir, one trailing newline dropped), EnvSecrets (key a variable), InlineSecrets (field `value`);
+// none takes another field; builtin::library is their local_providers! entry.
+```
+
+The Station builds one provider per `[secret_provider.<name>]` instance, or per provider named
+directly with its default settings (the `file` provider's `dir` is the Station's secrets directory),
+and keeps it while its definition is unchanged. An instance's setting its provider's config schema
+marks `x-sensitive` is a `SecretRef`, read before the instance is built; one leading back to itself
+is refused. An instance may not take a loaded provider's ID. A provider's own error text is never
+shown: the broker answers `SecretError::Backend`, and a build refusal says only which provider.
+
 Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]`,
-`[secret.<name>]` (`env`, `green_ink`, `kinds` and `targets` (globs, only with `green_ink`), `from = { env = "…" }
-| { file = "…" }`; never a value) and `[pool.<id>]` (`handler`, `operations`, `strategy`,
+`[secret.<name>]` (`env`, `green_ink`, `kinds` and `targets` (globs, only with `green_ink`),
+`provider` (an instance or a loaded provider; default `file`), `key` (default the name), and that
+provider's fields flat beside them, refused for a built-in that does not take them), `[secret_provider.<name>]`
+(`provider`, a loaded provider, and its settings flat; a built-in's name is refused) and `[pool.<id>]` (`handler`, `operations`, `strategy`,
 `login_command`, accounts `[pool.<id>.account.<name>]` with `kind`, `secret`, `dir`, `env`,
 `priority`, `max_concurrent`, `labels`) and `[overlay.<name>]` (exactly one of `source`, an
 AOS source string, and `path`; `pin`, a `sha256:` digest; `secrets`, names) TOML tables; a
@@ -4122,39 +4184,22 @@ impl SecretLeaseRequest {
     pub fn mission_id(&self) -> &str;
     pub const fn ttl(&self) -> Duration;
 }
-pub struct SecretRequest;
-impl SecretRequest {
-    pub fn lease_id(&self) -> &str;
-    pub fn station(&self) -> &str;
-    pub fn mission_id(&self) -> &str;
-    pub const fn ttl(&self) -> Duration;
-}
-pub struct SecretBackendFailure;
-impl Default for SecretBackendFailure;
-impl SecretBackendFailure { pub const fn new() -> Self; }
-pub trait SecretBackend: Send + Sync {
-    fn acquire(&self, request: &SecretRequest, names: &[String])
-        -> Result<BTreeMap<String, SecretValue>, SecretBackendFailure>;
-    fn revoke(&self, lease_id: &str) -> Result<(), SecretBackendFailure>;
-}
+pub type SecretProviderLookup = dyn Fn(&str) -> Result<Arc<SecretKeeper>, String> + Send + Sync;
 pub struct SecretBroker;
 impl SecretBroker {
-    pub fn new(backend: impl SecretBackend + 'static) -> Self;    // no ceiling on a lease
+    /// Each secret as catalog.secret(name) defines it, from the provider `providers` finds
+    /// (an instance or a loaded provider); no ceiling on a lease.
+    pub fn new(catalog: Arc<LoadoutCatalog>,
+        providers: impl Fn(&str) -> Result<Arc<SecretKeeper>, String> + Send + Sync + 'static) -> Self;
     pub fn with_max_ttl(self, max_ttl: TimeLimit) -> Self;        // a longer request is InvalidTtl
     pub fn lease(&self, loadout: &Loadout, request: SecretLeaseRequest)
         -> Result<SecretLease, SecretError>;
     /// Some of the loadout's names; an undeclared one is AccessDenied and nothing is acquired.
+    /// A provider that leases is asked for the request's time, any other is read; a failure
+    /// revokes what was leased. Any provider failure is Backend; an empty value InvalidResponse.
     pub fn lease_names(&self, loadout: &Loadout, names: &[String], request: SecretLeaseRequest)
         -> Result<SecretLease, SecretError>;
 }
-/// The Station's own backend: reads each value at lease time from its SecretRef (a file
-/// loses one trailing newline); missing or empty fails; revoke is a no-op.
-pub struct StationSecrets;
-impl StationSecrets {
-    pub fn new(definitions: impl IntoIterator<Item = SecretDefinition>) -> Self;
-    pub fn relative_to(self, dir: &Path) -> Self;   // resolve relative files against dir (the Station's config dir)
-}
-impl SecretBackend for StationSecrets;
 pub struct SecretValue;
 impl SecretValue {
     pub fn new(value: impl Into<String>) -> Self;
@@ -4169,7 +4214,7 @@ impl SecretLease {
     pub fn names(&self) -> Vec<String>;
     pub fn with_secret<T>(&self, name: &str, use_value: impl FnOnce(&str) -> T)
         -> Result<T, SecretError>;
-    pub fn revoke(&self) -> Result<(), SecretError>;
+    pub fn revoke(&self) -> Result<(), SecretError>;   // each provider lease; a failed one is retried next call
 }
 #[non_exhaustive]
 pub enum SecretError { InvalidIdentity, InvalidTtl, Backend, InvalidResponse, AccessDenied, Expired }
@@ -5022,19 +5067,20 @@ recording anything: a JSON array of `{kind, target, status, request_id?, message
 ask).
 Credentials: a Station with a loadout catalog (`loadouts.toml` in the configuration
 directory, or `StationConfig::with_loadouts`) leases the Agent's loadout secrets at every
-Session start and resume, last before the launch (one-hour lease, from
-`with_secret_backend` or `StationSecrets` relative to the configuration directory, which
-logs each env-sourced secret as a weakening at start) and puts each value in the start or
+Session start and resume, last before the launch (one-hour lease, each secret from the provider
+its definition names: `file` relative to the secrets directory by default; at start and on each
+loadout reload the Station logs each env or inline secret as a weakening and each provider or
+secret it refuses) and puts each value in the start or
 resume request's `environment` under its `env`, after removing the loadout's variables an
 earlier Session held. A resume that re-attaches to a runner's live harness issues nothing.
-A backend refusal of an ordinary secret fails the start, and leases acquired by a failed
+A provider refusal of an ordinary secret fails the start, and leases acquired by a failed
 issue are revoked. A `green_ink` secret is leased only while the Mission holds a live
 approval (`ApprovalStore::mission_approvals`) of one of its `kinds` whose target matches one of
 its `targets`, once per approval ever (`ApprovalStore::spend_approval`, so another Station or a
 restart does not lease it again; a Station that loses the race revokes its lease), with the
 approval's remaining time, at most an hour, as the TTL; otherwise its variable is absent. At
 start the Station logs as weakenings a green ink secret without `targets` and one served by
-its own backend (`StationSecrets`), whose values a revocation cannot take back. A start or
+a built-in provider (`file`, `env`, `inline`), whose values a revocation cannot take back. A start or
 resume request's `environment` cannot set `AI6_GREEN_INK_GATE`. Each scheduler pass revokes, at the backend, every lease past its TTL
 and each green ink lease whose approval has expired or been revoked (a
 `credential`/`revoked` timeline event naming the secrets and the approval); an approval the

@@ -201,6 +201,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   told the Station IDs it equals ignoring case and those of Stations on a host of that name.
 - A look at the models runs beside the check-in beat, never on it, so slow handlers no longer make
   a live Station look dark.
+- Secrets come from secret providers, a Guatiao kind (`ai6_secret`): a provider reads a secret by its
+  `key` and the further fields it declares, and may lease, revoke and store. `file`, `env` and
+  `inline` are built in; others load through `[station.plugins]`. `[secret_provider.<name>]` is a new
+  record family, global or per Station: a loaded provider and its settings, named by many secrets, a
+  credential among its settings itself a secret reference. Every secret reference takes one shape,
+  `{ provider = "NAME", key = "KEY", ..fields }` or `{ secret = "NAME" }`, in `ai6.cfg` as well:
+  `{ file = .. }`, `{ env = .. }` and a bare value are refused. `[secret.<name>]` is flat:
+  `provider` (default `file`), `key` (default its name) and the provider's fields beside AI6's keys;
+  `from` is gone. A provider declaring a field AI6 keeps (`provider`, `key`, `secret`, `env`,
+  `green_ink`, `kinds`, `targets`) is refused. `SecretBackend`, `StationSecrets`, `SecretRequest`,
+  `SecretBackendFailure` and `StationConfig::with_secret_backend` are gone: `SecretBroker::new`
+  takes the catalog and a lookup of built providers.
 - A Mission and each of its runs are keyed by a UID, a UUIDv7 in lower-case text minted where the
   brief enters; the readable `<operation>-<n>` is the Mission's **handle**, unique without case and
   never given twice, and a run's is `<handle>.<attempt>`. Every relation (Session records, Cables,

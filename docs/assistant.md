@@ -81,7 +81,8 @@ kind = "harness-login"
 
 [secret.litellm]
 env = "ANTHROPIC_AUTH_TOKEN"
-from = { file = "/etc/ai6/litellm.key" }
+provider = "file"
+key = "/etc/ai6/litellm.key"
 ```
 
 - **A limit moves her to the next route, within the same turn, if the turn did nothing yet.** When a
