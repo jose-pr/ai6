@@ -65,7 +65,7 @@ RUN set -eu; umask 0; \
 
 # deps' pub/ is the pub cache, and its cdn/ is what tool/cdn_files.dart fill --deps reads.
 ARG DEPS_GIT_URL=https://github.com/jose-pr/ai6.git
-ARG DEPS_REF=78c9e56743ed1eb33a257f08b16ae8ff18dbbb85
+ARG DEPS_REF=487c1a1e816dbeddfba14be43bd8ab3e403ae844
 RUN set -eu; umask 0; \
     git init -q /tmp/deps; \
     git -C /tmp/deps fetch -q --depth 1 "$DEPS_GIT_URL" "$DEPS_REF" || { \

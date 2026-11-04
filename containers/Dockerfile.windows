@@ -51,7 +51,7 @@ RUN Invoke-WebRequest -UseBasicParsing \"https://static.rust-lang.org/rustup/arc
 
 # deps' pub/ is the pub cache, and its cdn/ is what tool/cdn_files.dart fill --deps reads.
 ARG DEPS_GIT_URL=https://github.com/jose-pr/ai6.git
-ARG DEPS_REF=78c9e56743ed1eb33a257f08b16ae8ff18dbbb85
+ARG DEPS_REF=487c1a1e816dbeddfba14be43bd8ab3e403ae844
 RUN git init -q C:\deps; `
     git -C C:\deps fetch -q --depth 1 $env:DEPS_GIT_URL $env:DEPS_REF; `
     if ($LASTEXITCODE -ne 0) { throw \"DEPS_REF $env:DEPS_REF is not in $env:DEPS_GIT_URL\" }; `
