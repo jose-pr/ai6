@@ -1,6 +1,6 @@
 //! Who may see and change a memory, asked at every call.
 //!
-//! Every read goes through this module and every one through [`visible`], whether it is a read of
+//! Every read goes through this module and every one through `visible`, whether it is a read of
 //! one entry, a listing, a search or a starting context, so what a caller cannot see is the same
 //! everywhere. An entry the caller may not see answers as an ID that does not exist. A search
 //! filters before it ranks or counts: nothing it answers rests on an entry it hid.
