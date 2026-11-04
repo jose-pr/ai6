@@ -8,3 +8,4 @@ pub mod denied;
 pub mod gate;
 pub mod listing;
 pub mod programs;
+pub mod records;

@@ -108,14 +108,14 @@ impl Directory for People {
     }
 }
 
-/// Operator 007 reads and audits Operation G, manages the roster and may read anyone's memory
-/// (`assistant.memory.admin`); viewer 007 only reads G; admin 007 administers everything;
-/// member 007 holds no rule.
+/// Operator 007 reads and audits Operation G, reads its Sessions' contexts, manages the roster
+/// and may read anyone's memory (`assistant.memory.admin`); viewer 007 only reads G; admin 007
+/// administers everything; member 007 holds no rule.
 const ROLES: &str = r#"
     [role.admin]
     actions = [
         "mission.read", "mission.control", "audit.read", "roster.read", "roster.manage",
-        "assistant.memory.admin",
+        "assistant.memory.admin", "session.context",
     ]
 
     [[rule]]
@@ -129,7 +129,7 @@ const ROLES: &str = r#"
     [role.operator]
     actions = [
         "mission.read", "mission.control", "audit.read", "cable.send", "cable.read",
-        "issue.link", "issue.comment", "issue.update", "issue.create",
+        "issue.link", "issue.comment", "issue.update", "issue.create", "session.context",
     ]
 
     [role.roster-reader]
@@ -482,6 +482,7 @@ async fn report(
         .bearer_auth(STATION_TOKEN)
         .json(&AssistantReport {
             route: None,
+            run: None,
             station_id: station.to_owned(),
             conversation_id: job.conversation_id.clone(),
             job_id: job_id.map(str::to_owned),
@@ -505,6 +506,7 @@ async fn a_conversation_sends_each_job_the_route_its_session_ran_on() {
     let sent = |route: Option<ai6::RouteRef>, session: Option<&str>, kinds: Vec<AssistantEvent>| {
         AssistantReport {
             route,
+            run: None,
             station_id: "hq".to_owned(),
             conversation_id: job.conversation_id.clone(),
             job_id: None,
@@ -6275,3 +6277,4 @@ async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation()
 
 mod privacy;
 mod sharing;
+mod transcripts;

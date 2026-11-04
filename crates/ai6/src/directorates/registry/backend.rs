@@ -24,7 +24,9 @@ pub use super::mission_ids::MissionEntry;
 pub use super::accounts::AccountStore;
 pub use super::agent_records::AgentRecordStore;
 pub use super::approvals::ApprovalStore;
+pub use super::assistant_log::AssistantLogStore;
 pub use super::clearance::ClearanceStore;
+pub use super::contexts::SessionContextStore;
 pub use super::holds::HoldStore;
 pub use super::logbook::LogbookStore;
 pub use super::memories::MemoryStore;
@@ -65,6 +67,7 @@ pub trait RegistryBackend:
     + AuditStore
     + AgentRoleStore
     + ApprovalStore
+    + AssistantLogStore
     + ClearanceStore
     + HoldStore
     + LogbookStore
@@ -72,6 +75,7 @@ pub trait RegistryBackend:
     + MissionIssueStore
     + MissionReviewStore
     + QuarantineStore
+    + SessionContextStore
     + SessionStore
     + SleeperStore
     + SourceStore
@@ -146,6 +150,7 @@ impl<T> RegistryBackend for T where
         + AuditStore
         + AgentRoleStore
         + ApprovalStore
+        + AssistantLogStore
         + ClearanceStore
         + HoldStore
         + LogbookStore
@@ -153,6 +158,7 @@ impl<T> RegistryBackend for T where
         + MissionIssueStore
         + MissionReviewStore
         + QuarantineStore
+        + SessionContextStore
         + SessionStore
         + SleeperStore
         + SourceStore

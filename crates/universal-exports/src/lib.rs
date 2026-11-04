@@ -21,6 +21,7 @@ mod rename_tests;
 mod reviews;
 mod roster;
 mod timeline;
+mod transcripts;
 mod tree;
 
 use core::future::Future;
@@ -1377,6 +1378,9 @@ impl Gateway {
     pub fn router(self) -> Router {
         let max_frame_bytes = self.config.limits.max_frame_bytes;
         self.start_sweeper();
+        if let (Some(assistant), Some(registry)) = (&self.assistant, &self.registry) {
+            assistant.start_log(registry.clone());
+        }
         let own_origin = self
             .pages_config
             .as_ref()
@@ -1708,6 +1712,22 @@ impl Gateway {
             .route("/v1/auth/session", get(access_session))
             .route("/v1/user/profile", get(user_profile))
             .route("/v1/user/audit", get(user_audit))
+            .route(
+                "/v1/user/operations/{operation_id}/sessions/{session_id}/context",
+                get(transcripts::mission_context),
+            )
+            .route(
+                "/v1/user/assistant/conversations",
+                get(transcripts::conversations),
+            )
+            .route(
+                "/v1/user/assistant/conversations/{id}/log",
+                get(transcripts::conversation_log),
+            )
+            .route(
+                "/v1/user/assistant/conversations/{id}/context",
+                get(transcripts::conversation_context),
+            )
             .route("/v1/station/sessions", post(register_session))
             .route(
                 "/v1/station/sessions/{session_id}/lifecycle/{sequence}",

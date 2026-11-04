@@ -213,7 +213,7 @@ pub fn seeded_policy() -> AccessPolicy {
         "cable.read",
         "compartment.read",
     ];
-    const WATCH: [&str; 2] = ["audit.read", "access.read"];
+    const WATCH: [&str; 3] = ["audit.read", "access.read", "session.context"];
     const WORK: [&str; 9] = [
         "mission.create",
         "mission.control",

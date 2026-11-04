@@ -957,8 +957,27 @@ pub struct AssistantReport {
     /// The route that Session runs on, when its Agent has routes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<RouteRef>,
+    /// What the harness ran on for these events, for her conversation log.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<AssistantRun>,
     /// The events, oldest first; at most [`AssistantLimits::events`].
     pub events: Vec<AssistantEvent>,
+}
+
+/// What a conversation's harness ran on: the pool account it held, its model and the tokens
+/// it reported for the events of one report.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantRun {
+    /// The pool account the harness held, when it holds one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<crate::directorates::registry::accounts::AccountRef>,
+    /// The model, as the route or the Agent names it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Tokens the harness reported for these events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
 }
 
 impl AssistantReport {
@@ -1485,6 +1504,7 @@ mod tests {
         limits.event_bytes = Limit::at(5);
         let mut report = AssistantReport {
             route: None,
+            run: None,
             station_id: "s".to_owned(),
             conversation_id: "c".to_owned(),
             job_id: None,

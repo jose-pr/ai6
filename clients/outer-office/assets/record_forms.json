@@ -4148,6 +4148,57 @@
               "title": "Reads a proposal lists",
               "description": "Read tool calls of one turn a proposal lists as what she had read.",
               "default": 16
+            },
+            "log_age": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Keep her conversation log for",
+              "description": "Seconds an entry of her conversation log is kept; `none` keeps every entry.",
+              "default": 7776000.0
+            },
+            "log_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Her conversation log, in size",
+              "description": "Bytes of her conversation log kept, every conversation's together; the oldest entries go first, and `none` keeps every entry.",
+              "default": 1073741824
+            },
+            "log_prune_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Trim her conversation log every",
+              "description": "Seconds between two passes that drop what her conversation log keeps no longer.",
+              "default": 3600.0
             }
           },
           "additionalProperties": false,
@@ -4186,7 +4237,10 @@
             "result_chars": 200000,
             "author_chars": 200,
             "audit_target_bytes": 512,
-            "proposal_reads": 16
+            "proposal_reads": 16,
+            "log_age": 7776000.0,
+            "log_bytes": 1073741824,
+            "log_prune_every": 3600.0
           }
         },
         "pages": {

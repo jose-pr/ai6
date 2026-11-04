@@ -93,7 +93,11 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
     ];
     let mut operator: Vec<&str> = [&read[..], &work[..]].concat();
     operator.sort_unstable();
-    let mut auditor: Vec<&str> = [&read[..], &["access.read", "audit.read"][..]].concat();
+    let mut auditor: Vec<&str> = [
+        &read[..],
+        &["access.read", "audit.read", "session.context"][..],
+    ]
+    .concat();
     auditor.sort_unstable();
     let mut controller: Vec<&str> = [
         &operator[..],
@@ -110,6 +114,7 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
             "mission.review",
             "pool.manage",
             "roster.manage",
+            "session.context",
             "station.configure",
         ][..],
     ]

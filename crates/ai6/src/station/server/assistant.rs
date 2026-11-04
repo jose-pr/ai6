@@ -63,15 +63,17 @@ use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::m::roster::{Agent, RouteRef};
 use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::q::terminal::TerminalBridge;
+use crate::directorates::registry::contexts::ContextOwner;
 use crate::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentStart, AssistantMode, checked_session_id,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, SessionRecordFile, SessionRecordQuery,
+    checked_session_id,
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
-    AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantSharedBase,
-    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT,
-    EVENT_TOOL, page_call_digest,
+    AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantRun,
+    AssistantSharedBase, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED,
+    EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE, EVENT_REJECTED,
+    EVENT_TEXT, EVENT_TOOL, page_call_digest,
 };
 use crate::guatiao::library::Object;
 use crate::station::publisher::gateway_agent;
@@ -422,6 +424,16 @@ pub(super) trait Harness: Send + Sync {
         let _ = handler;
         None
     }
+    /// Where `handler`'s harness keeps its record of the Session `query` names, if it says.
+    fn record(
+        &self,
+        handler: &str,
+        settings: &HandlerSettings,
+        query: SessionRecordQuery,
+    ) -> Option<SessionRecordFile> {
+        let _ = (handler, settings, query);
+        None
+    }
 }
 
 /// The Station's handlers, each on the terminal provider the Station chooses for it.
@@ -517,6 +529,16 @@ impl Harness for StationHarness {
                 .unwrap_or_else(|error| Some(error.to_string())),
             Err(error) => Some(error.to_string()),
         }
+    }
+
+    fn record(
+        &self,
+        handler: &str,
+        settings: &HandlerSettings,
+        query: SessionRecordQuery,
+    ) -> Option<SessionRecordFile> {
+        let handler = self.0.plugins.handler_with(handler, settings).ok()?;
+        handler.session_record(query).ok().flatten()
     }
 }
 
@@ -818,6 +840,7 @@ impl Desk {
             .answer(
                 AssistantReport {
                     route,
+                    run: None,
                     station_id: self.state.station_id.clone(),
                     conversation_id: job.conversation_id.clone(),
                     job_id: Some(job.job_id),
@@ -1223,6 +1246,12 @@ impl Desk {
                 assistant: Some(mode),
                 initial_context,
             });
+        let launched = Launched {
+            harness: self.harness.clone(),
+            handler: handler.clone(),
+            settings: handler_settings.clone(),
+            environment: start.environment.clone(),
+        };
         let harness = self.harness.clone();
         let conversation = job.conversation_id.clone();
         let started = tokio::task::spawn_blocking(move || {
@@ -1288,6 +1317,8 @@ impl Desk {
             session_name: session_key,
             route: on.map(|on| on.route.reference()),
             usage: UsageTracker::default(),
+            unreported_tokens: std::cell::Cell::new(0),
+            model: agent.model.clone(),
             conversation_id: job.conversation_id.clone(),
             station_id: state.station_id.clone(),
             session,
@@ -1308,6 +1339,8 @@ impl Desk {
             tried: failed.to_vec(),
             touched: false,
             moving: None,
+            launched,
+            tape: super::contexts::EventTape::new(state.intake.limits().contexts.context_bytes),
         };
         std::thread::Builder::new()
             .name("ai6-assistant".to_owned())
@@ -1501,6 +1534,7 @@ impl Desk {
         let reporter = Arc::new(move |event: AssistantEvent| {
             outbox.send(AssistantReport {
                 route: None,
+                run: None,
                 station_id: station.clone(),
                 conversation_id: conversation.clone(),
                 job_id: None,
@@ -1855,6 +1889,10 @@ struct Pump {
     route: Option<RouteRef>,
     /// What the running harness has reported so far.
     usage: UsageTracker,
+    /// Tokens reported since the last report to Universal Exports.
+    unreported_tokens: std::cell::Cell<u64>,
+    /// The model the harness runs, as its route or Agent names it.
+    model: Option<String>,
     conversation_id: String,
     station_id: String,
     session: SharedSession,
@@ -1886,6 +1924,18 @@ struct Pump {
     touched: bool,
     /// Set when a limit sends the turn's message to another route.
     moving: Option<relay::Step>,
+    /// How the harness was launched, for its handler to say where it keeps the Session.
+    launched: Launched,
+    /// The events it reported, the context of a harness that keeps no record of its own.
+    tape: super::contexts::EventTape,
+}
+
+/// The handler, its settings and the environment a conversation's harness started with.
+struct Launched {
+    harness: Arc<dyn Harness>,
+    handler: String,
+    settings: HandlerSettings,
+    environment: BTreeMap<String, String>,
 }
 
 /// A fresh start for a conversation whose harness was resumed.
@@ -1956,6 +2006,7 @@ impl Pump {
             match read {
                 Ok(Some(event)) => {
                     heard = Instant::now();
+                    self.tape.record(&event);
                     let limited = self.count(&event);
                     self.touched |= shows_the_person(&event);
                     let prepared = self.notices.len();
@@ -1996,6 +2047,7 @@ impl Pump {
                         // The work is saved before the turn is reported over, so the next
                         // message's turn starts from it.
                         events.extend(self.end_turn(false));
+                        self.file_context(session_id.as_ref());
                         self.touched = false;
                         self.flags.busy.store(false, Ordering::Release);
                         if let Ok(mut last) = self.flags.last_active.lock() {
@@ -2081,6 +2133,8 @@ impl Pump {
         if !saved.is_empty() {
             self.send(session_id.as_ref(), saved);
         }
+        // Before its directory goes: the harness may keep its record there.
+        self.file_context(session_id.as_ref());
         remove_area(&self.area, self.remove_retry);
         // Before it leaves `live`: a message waiting for this harness to go then finds this report.
         // A conversation whose message moves on is not closed.
@@ -2156,6 +2210,8 @@ impl Pump {
         accounts::observe_quota(&self.state, &self.session_name, &event.quota);
         if let Some(reported) = &event.usage {
             let delta = self.usage.observe(reported);
+            self.unreported_tokens
+                .set(self.unreported_tokens.get().saturating_add(delta.tokens()));
             accounts::record_usage(&self.state, &self.session_name, delta.tokens());
         }
         if event.kind != LIMIT_EVENT {
@@ -2205,6 +2261,34 @@ impl Pump {
                  failed too: {error}"
             )),
         }
+    }
+
+    /// Files the context of provider Session `session_id` as it stands: the harness's record
+    /// where its handler names one, else the events this harness reported.
+    fn file_context(&self, session_id: Option<&SessionId>) {
+        let Some(session_id) = session_id else {
+            return;
+        };
+        let launched = &self.launched;
+        let record = launched.harness.record(
+            &launched.handler,
+            &launched.settings,
+            SessionRecordQuery {
+                session_id: session_id.as_str().to_owned(),
+                working_directory: self.area.clone(),
+                environment: launched.environment.clone(),
+            },
+        );
+        super::contexts::file(
+            &self.state,
+            ContextOwner::Conversation {
+                conversation: self.conversation_id.clone(),
+            },
+            session_id.as_str(),
+            &launched.handler,
+            record,
+            &self.tape,
+        );
     }
 
     /// Ends the workspace's turn, and with `closing` the workspace: the events saying what should
@@ -2302,8 +2386,14 @@ impl Pump {
     }
 
     fn send(&self, session_id: Option<&SessionId>, events: Vec<AssistantEvent>) {
+        let run = AssistantRun {
+            account: accounts::held(&self.state, &self.session_name),
+            model: self.model.clone(),
+            tokens: Some(self.unreported_tokens.take()).filter(|tokens| *tokens > 0),
+        };
         self.outbox.send(AssistantReport {
             route: session_id.and(self.route.clone()),
+            run: (run != AssistantRun::default()).then_some(run),
             station_id: self.station_id.clone(),
             conversation_id: self.conversation_id.clone(),
             job_id: None,
@@ -2987,6 +3077,9 @@ mod tests {
 
     use super::super::tests::test_state;
     use super::*;
+    use crate::directorates::registry::contexts::{
+        ContextSource, EVENTS_FORMAT as CONTEXT_EVENTS_FORMAT,
+    };
 
     /// `[assistant.desk]`'s default `idle` and `report_queue`.
     const IDLE: Duration = Duration::from_secs(600);
@@ -3005,6 +3098,8 @@ mod tests {
         interrupts: usize,
         /// A read of [`Script::ReadsLong`] ran out with no output.
         read_ran_out: bool,
+        /// What the desk asked of the harness's record.
+        records: Vec<SessionRecordQuery>,
     }
 
     /// What a scripted harness does with a message.
@@ -3064,6 +3159,8 @@ mod tests {
         resumed: Script,
         no_sandbox: Arc<Mutex<Option<String>>>,
         no_skills: Arc<Mutex<Option<String>>>,
+        /// Where the harness says it keeps its record of a Session; `None`, it keeps none.
+        record: Arc<Mutex<Option<SessionRecordFile>>>,
     }
 
     struct ScriptedSession {
@@ -3284,6 +3381,16 @@ mod tests {
         fn skills(&self, _handler: &str) -> Option<String> {
             self.no_skills.lock().unwrap().clone()
         }
+
+        fn record(
+            &self,
+            _handler: &str,
+            _settings: &HandlerSettings,
+            query: SessionRecordQuery,
+        ) -> Option<SessionRecordFile> {
+            self.asked.lock().unwrap().records.push(query);
+            self.record.lock().unwrap().clone()
+        }
     }
 
     const AGENTS: &str = "[agent.moneypenny]\nhandler = \"mock-assistant\"\nmodel = \"sonnet\"\n\
@@ -3301,6 +3408,8 @@ mod tests {
         no_sandbox: Arc<Mutex<Option<String>>>,
         /// Why the harness cannot keep to her skills; `None`, it can.
         no_skills: Arc<Mutex<Option<String>>>,
+        /// Where the harness keeps its record of a Session; `None`, it keeps none.
+        record: Arc<Mutex<Option<SessionRecordFile>>>,
         _root: tempfile::TempDir,
     }
 
@@ -3390,6 +3499,7 @@ mod tests {
         let elevated = Arc::new(Mutex::new(Some(elevated)));
         let no_sandbox = Arc::new(Mutex::new(None));
         let no_skills = Arc::new(Mutex::new(None));
+        let record = Arc::new(Mutex::new(None));
         let desk = Desk::new(
             state,
             Arc::new(Scripted {
@@ -3399,6 +3509,7 @@ mod tests {
                 resumed,
                 no_sandbox: no_sandbox.clone(),
                 no_skills: no_skills.clone(),
+                record: record.clone(),
             }),
             Arc::new(move |report, answered: Option<Answered>| {
                 sink.lock().unwrap().push(report);
@@ -3422,6 +3533,7 @@ mod tests {
             logged,
             no_sandbox,
             no_skills,
+            record,
             _root: root,
         }
     }
@@ -4207,6 +4319,7 @@ priority = 1
         }));
         let report = |kind: &str| AssistantReport {
             route: None,
+            run: None,
             station_id: "hq".to_owned(),
             conversation_id: "c".to_owned(),
             job_id: None,
@@ -4471,6 +4584,87 @@ secret = "gateway-key"
                 .active
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn a_harness_record_is_filed_as_the_conversation_s_context_after_each_turn() {
+        let fixture = fixture(true, IDLE);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("provider-assistant-1.jsonl");
+        std::fs::write(&path, "{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n").unwrap();
+        *fixture.record.lock().unwrap() = Some(SessionRecordFile {
+            path: path.to_string_lossy().into_owned(),
+            format: "claude-code-jsonl".to_owned(),
+        });
+        fixture
+            .desk
+            .handle(job("c-ctx", "Which Stations are busy?"))
+            .await;
+        until(|| kinds(&fixture, "c-ctx").contains(&EVENT_COMPLETED.to_owned())).await;
+        let registry = fixture.desk.state.intake.clone();
+        let context = registry
+            .session_context("provider-assistant-1")
+            .unwrap()
+            .expect("filed at the turn's end");
+        assert_eq!(context.conversation(), Some("c-ctx"));
+        assert_eq!(context.source, ContextSource::Harness);
+        assert_eq!(context.format, "claude-code-jsonl");
+        assert_eq!(context.handler, "mock-assistant");
+        assert!(context.content.contains("\"assistant\""));
+        assert_eq!(context.cut_from, None);
+        let asked = fixture.asked.lock().unwrap().records[0].clone();
+        assert_eq!(asked.session_id, "provider-assistant-1");
+        assert!(asked.environment.contains_key("CLAUDE_CONFIG_DIR"));
+
+        // A record past the cap keeps its newest lines and says how large it was.
+        let cap = registry.limits().contexts.context_bytes.or_max();
+        let line = format!("{{\"pad\":\"{}\"}}\n", "x".repeat(1_000));
+        let mut long = line.repeat(cap / line.len() + 2);
+        long.push_str("{\"type\":\"last\"}\n");
+        std::fs::write(&path, &long).unwrap();
+        fixture.desk.handle(job("c-ctx", "And now?")).await;
+        until(|| {
+            registry
+                .session_context("provider-assistant-1")
+                .unwrap()
+                .is_some_and(|context| context.cut_from.is_some())
+        })
+        .await;
+        let cut = registry
+            .session_context("provider-assistant-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(cut.cut_from, Some(long.len() as u64));
+        assert!(cut.content.len() <= cap);
+        assert!(cut.content.ends_with("{\"type\":\"last\"}\n"));
+        assert!(cut.content.starts_with("{\"pad\""), "from a line start");
+    }
+
+    #[tokio::test]
+    async fn a_harness_with_no_record_has_its_events_filed_and_said_so() {
+        let fixture = fixture(true, IDLE);
+        fixture
+            .desk
+            .handle(job("c-acp", "Which Stations are busy?"))
+            .await;
+        until(|| kinds(&fixture, "c-acp").contains(&EVENT_COMPLETED.to_owned())).await;
+        let context = fixture
+            .desk
+            .state
+            .intake
+            .session_context("provider-assistant-1")
+            .unwrap()
+            .expect("filed at the turn's end");
+        assert_eq!(context.source, ContextSource::Events);
+        assert_eq!(context.format, CONTEXT_EVENTS_FORMAT);
+        let kinds: Vec<String> = context
+            .content
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<serde_json::Value>(line).unwrap()["kind"].to_string()
+            })
+            .collect();
+        assert!(kinds.contains(&"\"completed\"".to_owned()), "{kinds:?}");
     }
 
     #[tokio::test]
@@ -5017,6 +5211,7 @@ event_bytes = 7
             let (reports, queued) = std::sync::mpsc::sync_channel(4);
             let report = |job: Option<&str>, kind: &str| AssistantReport {
                 route: None,
+                run: None,
                 station_id: "hq".to_owned(),
                 conversation_id: "c-late".to_owned(),
                 job_id: job.map(str::to_owned),
@@ -5166,6 +5361,7 @@ event_bytes = 7
     fn reported(conversation: &str, kinds: &[&str]) -> AssistantReport {
         AssistantReport {
             route: None,
+            run: None,
             station_id: "test".to_owned(),
             conversation_id: conversation.to_owned(),
             job_id: None,

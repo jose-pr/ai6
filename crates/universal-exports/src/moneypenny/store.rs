@@ -5,19 +5,22 @@
 //! later message resumes it. It holds the person's access token while the person uses it:
 //! the tools run with it, so they can do no more than the person could, and stop when the
 //! person's sign-in ends.
+//!
+//! What it holds is bounded; every entry also goes to the durable log ([`super::log`]), with
+//! the turn that ran it, and a conversation the gateway no longer holds is rebuilt from there.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 
-use ai6::{AssistantJob, AssistantSharedBase};
-use serde::Serialize;
+use ai6::{AccountRef, AssistantJob, AssistantSharedBase, AssistantTurn};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
 use super::actions::{Evidence, Proposal};
 
 /// Who said an entry, or what it records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Role {
     /// The person.
@@ -114,6 +117,16 @@ pub(crate) struct Conversation {
     /// harness is cut off from her Cables, and the only reports taken from it are the Cables
     /// it sent meanwhile, for the audit log.
     pub(crate) cut_off: Option<String>,
+    /// Where each entry is kept for good; `None` without a Registry.
+    pub(crate) log: Option<super::log::Sink>,
+    /// The roster Agent that is Moneypenny.
+    pub(crate) agent: Option<String>,
+    /// The pool account and model the harness last reported running on.
+    pub(crate) account: Option<AccountRef>,
+    pub(crate) model: Option<String>,
+    /// While a Station's report is applied: that Station, and the tokens it reported, which
+    /// the first entry it adds carries.
+    pub(crate) reporting: Option<(String, Option<u64>)>,
 }
 
 /// A read tool she called: its name and the identifier arguments it was given, never free
@@ -193,6 +206,79 @@ impl Conversation {
             memory_marks: Vec::new(),
             shared_bases: VecDeque::new(),
             cut_off: None,
+            log: None,
+            agent: None,
+            account: None,
+            model: None,
+            reporting: None,
+        }
+    }
+
+    /// Takes what a Station's `report` says its harness runs on, and has the entries it adds
+    /// carry that Station and its tokens until [`Conversation::reporting`] is cleared.
+    pub(crate) fn hear_run(&mut self, report: &ai6::AssistantReport) {
+        if let Some(run) = &report.run {
+            if run.account.is_some() {
+                self.account.clone_from(&run.account);
+            }
+            if run.model.is_some() {
+                self.model.clone_from(&run.model);
+            }
+        }
+        self.reporting = Some((
+            report.station_id.clone(),
+            report.run.as_ref().and_then(|run| run.tokens),
+        ));
+    }
+
+    /// The turn the harness is on, as far as the gateway knows: the Station reporting now or
+    /// the one running it, its provider Session, route, account and model.
+    fn turn(&mut self) -> AssistantTurn {
+        let (station, tokens) = match &mut self.reporting {
+            Some((station, tokens)) => (Some(station.clone()), tokens.take()),
+            None => (self.station.clone(), None),
+        };
+        let mut turn = AssistantTurn::default();
+        turn.station = station;
+        turn.session.clone_from(&self.session_id);
+        turn.agent.clone_from(&self.agent);
+        turn.route.clone_from(&self.route);
+        turn.account.clone_from(&self.account);
+        turn.model.clone_from(&self.model);
+        turn.tokens = tokens;
+        turn
+    }
+
+    /// Keeps a `kind` entry in the durable log, with the turn when `harness` (it came from her
+    /// harness or her tools). The person's access token and the tool token are taken out of it
+    /// first, wherever they appear.
+    pub(crate) fn record(&mut self, kind: &str, text: &str, data: Option<&Value>, harness: bool) {
+        if self.log.is_none() {
+            return;
+        }
+        let turn = harness.then(|| self.turn());
+        let secrets: Vec<String> = [
+            Some(self.bearer.clone()),
+            self.token.as_ref().map(|token| token.0.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let mut entry = ai6::AssistantLogEntry::new(
+            self.id.as_str(),
+            self.person_id.as_str(),
+            kind,
+            super::log::redact(text, &secrets),
+            self.updated_at.max(super::now()),
+        );
+        if let Some(data) = data {
+            entry = entry.with_data(super::log::redact_value(data, &secrets));
+        }
+        if let Some(turn) = turn {
+            entry = entry.with_turn(turn);
+        }
+        if let Some(log) = &self.log {
+            log.send(entry);
         }
     }
 
@@ -250,6 +336,16 @@ impl Conversation {
     /// Adds an entry, keeping the newest that fit `bounds`, and tells the app.
     pub(crate) fn push(&mut self, entry: Entry, bounds: Bounds) {
         self.updated_at = entry.at;
+        if self.log.is_some() {
+            let kind = serde_json::to_value(entry.role)
+                .ok()
+                .and_then(|kind| kind.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            // The person's own words, and what the gateway says of itself, ran on no turn.
+            let harness = self.reporting.is_some()
+                || !matches!(entry.role, Role::Person | Role::Error | Role::Notice);
+            self.record(&kind, &entry.text, entry.data.as_ref(), harness);
+        }
         let _ = self
             .events
             .send(serde_json::json!({"type": "entry", "entry": &entry}));
@@ -276,6 +372,7 @@ impl Conversation {
             entry.data = Some(shown.clone());
             self.bytes = (self.bytes + entry_bytes(entry)).saturating_sub(before);
         }
+        self.record(super::log::PROPOSAL_STATUS, "", Some(&shown), false);
         let _ = self
             .events
             .send(serde_json::json!({"type": "proposal", "proposal": shown}));

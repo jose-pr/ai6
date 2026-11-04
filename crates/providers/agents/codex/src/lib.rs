@@ -33,10 +33,11 @@ use ai6::directorates::q::terminal::{
 };
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing,
-    clearance_reads_only, clearance_runs_commands,
+    SessionRecordFile, SessionRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::directorates::section_00::listing;
+use ai6::directorates::section_00::records;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
@@ -182,6 +183,26 @@ impl TryFrom<CodexConfig> for CodexHandler {
     }
 }
 
+/// The format of Codex's rollout file.
+pub const RECORD_FORMAT: &str = "codex-rollout-jsonl";
+
+/// Codex's rollout of the thread `query` names, when it is on this host: `sessions/YYYY/MM/DD/
+/// rollout-<time>-<thread>.jsonl` under `CODEX_HOME` (else `~/.codex`).
+fn codex_record(query: &SessionRecordQuery) -> Option<SessionRecordFile> {
+    if !records::file_safe(&query.session_id) {
+        return None;
+    }
+    let root = records::configured_dir(&query.environment, "CODEX_HOME", ".codex")?;
+    let suffix = format!("-{}.jsonl", query.session_id);
+    let path = records::find_file(&root.join("sessions"), 3, &|file| {
+        file.starts_with("rollout-") && file.ends_with(&suffix)
+    })?;
+    Some(SessionRecordFile {
+        path: path.to_string_lossy().into_owned(),
+        format: RECORD_FORMAT.to_owned(),
+    })
+}
+
 impl AgentHandler for CodexHandler {
     /// `codex app-server` speaks JSON-RPC, one message per line, over standard input and output.
     fn stdio(&self) -> Result<ai6::HarnessStdio, ProviderError> {
@@ -190,6 +211,14 @@ impl AgentHandler for CodexHandler {
 
     fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
         Ok(None)
+    }
+
+    /// Codex keeps each thread as a rollout file, one JSON object per line.
+    fn session_record(
+        &self,
+        query: SessionRecordQuery,
+    ) -> Result<Option<SessionRecordFile>, ProviderError> {
+        Ok(codex_record(&query))
     }
 
     /// The app server's `model/list`: the models Codex offers the account behind `environment`
@@ -1951,6 +1980,33 @@ fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn a_threads_rollout_is_found_under_codex_home() {
+        let home = tempfile::tempdir().unwrap();
+        let day = home
+            .path()
+            .join("sessions")
+            .join("2026")
+            .join("11")
+            .join("04");
+        std::fs::create_dir_all(&day).unwrap();
+        let file = day.join("rollout-2026-11-04T10-00-00-0195-thread.jsonl");
+        std::fs::write(&file, "{}\n").unwrap();
+        let query = |thread: &str| SessionRecordQuery {
+            session_id: thread.to_owned(),
+            working_directory: "/work".to_owned(),
+            environment: BTreeMap::from([(
+                "CODEX_HOME".to_owned(),
+                home.path().to_string_lossy().into_owned(),
+            )]),
+        };
+        let found = codex_record(&query("0195-thread")).unwrap();
+        assert_eq!(std::path::PathBuf::from(found.path), file);
+        assert_eq!(found.format, RECORD_FORMAT);
+        assert!(codex_record(&query("other")).is_none());
+        assert!(codex_record(&query("../0195-thread")).is_none());
+    }
 
     #[test]
     fn the_models_codex_lists_are_read_from_model_list_and_hidden_ones_are_left_out() {

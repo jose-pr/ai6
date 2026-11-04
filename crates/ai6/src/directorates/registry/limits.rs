@@ -35,6 +35,10 @@ pub struct RegistryLimits {
     #[schema(title = "Green ink requests and class authorizations")]
     #[map(default)]
     pub approvals: ApprovalLimits,
+    /// `[registry.limits.assistant_log]`: Moneypenny's conversation log.
+    #[schema(title = "Moneypenny's conversation log")]
+    #[map(default)]
+    pub assistant_log: AssistantLogLimits,
     /// `[registry.limits.audit]`: audit records.
     #[schema(title = "Audit records")]
     #[map(default)]
@@ -51,6 +55,10 @@ pub struct RegistryLimits {
     #[schema(title = "Clearance grants")]
     #[map(default)]
     pub clearance: ClearanceLimits,
+    /// `[registry.limits.contexts]`: each Session's harness context.
+    #[schema(title = "Session contexts")]
+    #[map(default)]
+    pub contexts: ContextLimits,
     /// `[registry.limits.files]`: the file Registry's own waits.
     #[schema(title = "The file Registry's own waits")]
     #[map(default)]
@@ -301,6 +309,51 @@ impl Default for ApprovalLimits {
             class_entries: Limit::at(64),
             pattern_bytes: Limit::at(256),
             name_bytes: Limit::at(128),
+        }
+    }
+}
+
+/// `[registry.limits.assistant_log]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct AssistantLogLimits {
+    /// Bytes of one entry of the log; a longer one is kept without its data and with its text
+    /// cut, and says how large it was.
+    #[schema(title = "Largest log entry", format = "bytes")]
+    #[map(default = AssistantLogLimits::default().entry_bytes)]
+    pub entry_bytes: Limit,
+}
+
+impl Default for AssistantLogLimits {
+    fn default() -> Self {
+        Self {
+            entry_bytes: Limit::at(MIB),
+        }
+    }
+}
+
+/// `[registry.limits.contexts]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct ContextLimits {
+    /// Bytes of one Session's context kept; a longer one keeps its newest part and says how
+    /// large it was.
+    #[schema(title = "Largest Session context", format = "bytes")]
+    #[map(default = ContextLimits::default().context_bytes)]
+    pub context_bytes: Limit,
+    /// Session contexts kept; the oldest filed go first.
+    #[schema(title = "Session contexts kept")]
+    #[map(default = ContextLimits::default().records)]
+    pub records: Limit,
+}
+
+impl Default for ContextLimits {
+    fn default() -> Self {
+        Self {
+            context_bytes: Limit::at(8 * MIB),
+            records: Limit::at(2_000),
         }
     }
 }

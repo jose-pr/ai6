@@ -32,6 +32,7 @@ pub(crate) mod actions;
 pub(crate) mod cables;
 mod checks;
 mod guide;
+pub(crate) mod log;
 pub(crate) mod mcp;
 pub(crate) mod memory;
 pub(crate) mod page_tools;
@@ -47,7 +48,7 @@ pub use views::ViewLimits;
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ai6::{
@@ -438,6 +439,8 @@ pub(crate) struct Assistant {
     ready: Notify,
     /// Told when a Station reports shared bases.
     based: Notify,
+    /// Where every conversation's entries are kept, once the gateway has a Registry.
+    log: OnceLock<log::Sink>,
 }
 
 impl fmt::Debug for Assistant {
@@ -471,6 +474,65 @@ impl Assistant {
             desk: Mutex::default(),
             ready: Notify::new(),
             based: Notify::new(),
+            log: OnceLock::new(),
+        }
+    }
+
+    /// Keeps every conversation's entries in `registry` from now on.
+    pub(crate) fn start_log(&self, registry: Arc<dyn ai6::RegistryBackend>) {
+        self.log
+            .get_or_init(|| log::start(registry, &self.config.gateway));
+    }
+
+    /// Takes conversation `requested` back from the log when this gateway does not hold it and
+    /// it is `person_id`'s: after a restart, the person finds it as they left it.
+    async fn restore(&self, gateway: &Gateway, person_id: &str, bearer: &str, requested: &str) {
+        if self.log.get().is_none() || self.desk().store.conversations.contains_key(requested) {
+            return;
+        }
+        let Some(registry) = gateway.registry.clone() else {
+            return;
+        };
+        let wanted = requested.to_owned();
+        let Ok(Ok(rows)) =
+            tokio::task::spawn_blocking(move || registry.assistant_log(&wanted)).await
+        else {
+            return;
+        };
+        if rows.first().is_none_or(|first| first.person != person_id) {
+            return;
+        }
+        let limits = &self.config.gateway;
+        let Some(mut conversation) = log::rebuild(
+            &rows,
+            bearer,
+            self.config.bounds(),
+            usize::try_from(limits.event_buffer).unwrap_or(usize::MAX),
+        ) else {
+            return;
+        };
+        conversation.log = self.log.get().cloned();
+        conversation.agent = Some(self.config.agent_id.clone());
+        let mut desk = self.desk();
+        if desk.store.conversations.contains_key(requested) {
+            return;
+        }
+        desk.store.make_room(
+            person_id,
+            now(),
+            limits.conversation_age.as_secs_f64(),
+            limits.conversations_per_person.or_max(),
+            limits.conversations.or_max(),
+        );
+        desk.store
+            .conversations
+            .insert(requested.to_owned(), conversation);
+    }
+
+    /// Keeps a tool call of conversation `conversation_id`, or its answer, in its log.
+    pub(crate) fn log_tool(&self, conversation_id: &str, kind: &str, tool: &str, data: &Value) {
+        if let Some(conversation) = self.desk().store.conversations.get_mut(conversation_id) {
+            conversation.record(kind, tool, Some(data), true);
         }
     }
 
@@ -510,13 +572,15 @@ impl Assistant {
             limits.conversations.or_max(),
         );
         let id = Uuid::new_v4().to_string();
-        let conversation = Conversation::new(
+        let mut conversation = Conversation::new(
             id.clone(),
             person_id.to_owned(),
             bearer.to_owned(),
             now,
             usize::try_from(limits.event_buffer).unwrap_or(usize::MAX),
         );
+        conversation.log = self.log.get().cloned();
+        conversation.agent = Some(self.config.agent_id.clone());
         let shown = ready(&conversation, &self.config.views, limits);
         let events = conversation.events.subscribe();
         desk.store.conversations.insert(id.clone(), conversation);
@@ -1002,6 +1066,7 @@ impl Assistant {
             if report.job_id.is_none()
                 && conversation.cut_off.as_deref() == Some(report.station_id.as_str())
             {
+                conversation.hear_run(&report);
                 for event in report
                     .events
                     .iter()
@@ -1016,6 +1081,7 @@ impl Assistant {
                         &mut after,
                     );
                 }
+                conversation.reporting = None;
                 break 'locked;
             }
             conversation.heard_at = now();
@@ -1051,6 +1117,7 @@ impl Assistant {
             } else if conversation.station.as_deref() != Some(report.station_id.as_str()) {
                 return Err(StatusCode::FORBIDDEN);
             }
+            conversation.hear_run(&report);
             if let Some(session_id) = report
                 .session_id
                 .filter(|id| ai6::directorates::section_00::assistant::valid_identity(id))
@@ -1079,6 +1146,7 @@ impl Assistant {
                     _ => apply(conversation, event, max_entries),
                 }
             }
+            conversation.reporting = None;
             if let Some(conversation) = desk.store.conversations.get(&report.conversation_id) {
                 let person = conversation.person_id.clone();
                 desk.store
@@ -2311,6 +2379,11 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
         let _ = sender.send(close(1008, "unauthorized")).await;
         return;
     };
+    if let Some(requested) = conversation.as_deref() {
+        assistant
+            .restore(&gateway, &person.id, &token, requested)
+            .await;
+    }
     let (mut conversation_id, shown, mut events) =
         assistant.open(&person.id, &token, conversation.as_deref());
     if sender.send(frame(&shown)).await.is_err() {

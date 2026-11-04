@@ -220,6 +220,13 @@ pub(crate) async fn endpoint(
                 Some(arguments) => arguments.clone(),
             };
             let write = actions::write_tools().iter().find(|tool| tool.name == name);
+            assistant.log_tool(
+                &granted.conversation_id,
+                super::log::TOOL_CALL,
+                name,
+                &json!({"arguments": &input}),
+            );
+            let started = std::time::Instant::now();
             let outcome = if !assistant.count_call(&granted.conversation_id) {
                 tools::Outcome {
                     text: "Too many tool calls this minute; wait, then try again.".to_owned(),
@@ -251,6 +258,16 @@ pub(crate) async fn endpoint(
                 assistant.note_read(&granted.conversation_id, name, tools::identifiers(&input));
                 outcome
             };
+            assistant.log_tool(
+                &granted.conversation_id,
+                super::log::TOOL_RESULT,
+                name,
+                &json!({
+                    "bytes": outcome.text.len(),
+                    "error": outcome.is_error,
+                    "ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                }),
+            );
             answer(
                 &id,
                 json!({

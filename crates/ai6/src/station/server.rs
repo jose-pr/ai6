@@ -9,6 +9,7 @@ mod bona_fides;
 mod cables_mcp;
 #[cfg(feature = "cables-mcp")]
 mod compartments;
+mod contexts;
 #[cfg(feature = "publisher")]
 mod controls;
 mod credentials;
@@ -79,6 +80,7 @@ use crate::directorates::registry::cables::{
     CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay, CableRelayError,
     CableRelease, CableSendRequest, CableTarget, CrossOperation,
 };
+use crate::directorates::registry::contexts::ContextOwner;
 use crate::directorates::registry::mission_ids::new_uid;
 use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionRecord, SessionResult, SessionStatus, SessionUpdate,
@@ -86,7 +88,9 @@ use crate::directorates::registry::sessions::{
 use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
 use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
 use crate::directorates::section_00::agent::READ_CLEARANCE;
-use crate::directorates::section_00::agent::{AgentResume, AgentStart, provider_session_id};
+use crate::directorates::section_00::agent::{
+    AgentResume, AgentStart, SessionRecordQuery, provider_session_id,
+};
 use crate::station::limits::StationLimits;
 use crate::station::plugins;
 #[cfg(feature = "publisher")]
@@ -5992,6 +5996,9 @@ fn spawn_event_pump_with_monitor(
         let mut announced = exposure.exposures().len();
         medical::persist_exposure(&state, &mission_id, &exposure.exposures());
         let mut notes = recovery::Notes::new(&state.intake.limits().sessions);
+        let mut tape = contexts::EventTape::new(state.intake.limits().contexts.context_bytes);
+        let mut last_session: Option<SessionId> = None;
+        let launched = Launched::of(&state, &mission_id);
         loop {
             medical::sync_exposure(&state, &mission_id, &exposure, &mut announced);
             if state.stopping.load(Ordering::Acquire) {
@@ -6025,6 +6032,10 @@ fn spawn_event_pump_with_monitor(
             match result {
                 Ok((Some(event), session_id)) => {
                     monitor.record_activity();
+                    tape.record(&event);
+                    if session_id.is_some() {
+                        last_session.clone_from(&session_id);
+                    }
                     attach_observed_session(&state, &mission_id, &session, session_id);
                     notes.record(&event);
                     notes.write_if_due(&state, &mission_id);
@@ -6256,10 +6267,83 @@ fn spawn_event_pump_with_monitor(
                 break;
             }
         }
+        if let (Some(launched), Some(session_id)) = (launched, last_session) {
+            launched.file_context(&state, &mission_id, session_id.as_str(), &tape);
+        }
     });
     if let Ok(mut event_pumps) = event_pumps.lock() {
         event_pumps.retain(|event_pump| !event_pump.is_finished());
         event_pumps.push(event_pump);
+    }
+}
+
+/// How a Mission's harness was launched, for asking its handler where it keeps the Session.
+struct Launched {
+    handler: String,
+    working_directory: String,
+    environment: BTreeMap<String, String>,
+    /// A runner on another host supervises it: its record is there, not here.
+    remote: bool,
+}
+
+impl Launched {
+    fn of(state: &DaemonState, mission_id: &str) -> Option<Self> {
+        let sessions = state.sessions.lock().ok()?;
+        let operation = sessions.get(mission_id)?;
+        Some(Self {
+            handler: operation.handler_provider.clone(),
+            working_directory: operation.working_directory.clone(),
+            environment: operation.environment.clone(),
+            remote: operation.runner.is_some(),
+        })
+    }
+
+    /// Files the context of `session_id`, which ran Mission `mission_id`: its harness's record,
+    /// asked of the handler built with its defaults, or the events in `tape`.
+    fn file_context(
+        self,
+        state: &DaemonState,
+        mission_id: &str,
+        session_id: &str,
+        tape: &contexts::EventTape,
+    ) {
+        let operation = state.missions.lock().ok().and_then(|missions| {
+            missions
+                .get(mission_id)
+                .and_then(|m| m.operation_id.clone())
+        });
+        let Some(operation) = operation else {
+            return;
+        };
+        let record = if self.remote {
+            None
+        } else {
+            state
+                .plugins
+                .handler(&self.handler, None)
+                .ok()
+                .and_then(|handler| {
+                    handler
+                        .session_record(SessionRecordQuery {
+                            session_id: session_id.to_owned(),
+                            working_directory: self.working_directory,
+                            environment: self.environment,
+                        })
+                        .ok()
+                        .flatten()
+                })
+        };
+        contexts::file(
+            state,
+            ContextOwner::Mission {
+                operation,
+                mission: mission_id.to_owned(),
+            },
+            session_id,
+            &self.handler,
+            record,
+            tape,
+        );
     }
 }
 
@@ -8102,6 +8186,41 @@ queue = 1
             }
         }
         None
+    }
+
+    #[tokio::test]
+    async fn a_finished_sessions_events_are_filed_as_its_context_when_its_harness_keeps_none() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", "[agent.007]\nhandler = \"mock-denied\"\n");
+        start_mission_by_id(&state, "mission-1").await;
+        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        let mission = mission_state(&state, "mission-1");
+        let session = mission.session_ids[0].as_str().to_owned();
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        let context = loop {
+            if let Some(context) = state.intake.session_context(&session).unwrap() {
+                break context;
+            }
+            assert!(std::time::Instant::now() < deadline, "no context was filed");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert_eq!(
+            context.owner,
+            ContextOwner::Mission {
+                operation: mission.operation_id.clone().unwrap(),
+                mission: "mission-1".to_owned(),
+            }
+        );
+        assert_eq!(context.handler, "mock-denied");
+        assert_eq!(
+            context.source,
+            crate::directorates::registry::contexts::ContextSource::Events
+        );
+        assert!(
+            context.content.contains("\"kind\":\"completed\""),
+            "{}",
+            context.content
+        );
     }
 
     #[tokio::test]

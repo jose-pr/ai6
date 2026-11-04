@@ -63,6 +63,9 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// `config:accounts`. `compartment.read` and `compartment.manage` act on `compartment:<id>`;
 /// `compartment.cover` on `operation:<id>` is the Operation's consent to be covered. `memory.write`
 /// changes the memory of `operation:<id>`, or of everyone at `config:memory`.
+/// `session.context` reads what an agent was given and did in a Session: on `operation:<id>` a
+/// Mission's, and with `audit.read` on `config:assistant` another person's conversations with
+/// Moneypenny.
 pub const ACTIONS: &[&str] = &[
     "access.manage",
     "access.read",
@@ -93,6 +96,7 @@ pub const ACTIONS: &[&str] = &[
     "product.read",
     "roster.manage",
     "roster.read",
+    "session.context",
     "session.input",
     "session.read",
     "station.configure",
@@ -125,6 +129,7 @@ pub const OPERATION_ACTIONS: &[&str] = &[
     "pool.manage",
     "pool.read",
     "product.read",
+    "session.context",
     "session.input",
     "session.read",
 ];

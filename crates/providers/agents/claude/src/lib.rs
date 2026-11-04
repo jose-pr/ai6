@@ -17,13 +17,14 @@ use ai6::directorates::q::terminal::{
 };
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing,
-    clearance_reads_only, clearance_runs_commands,
+    SessionRecordFile, SessionRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
 use ai6::directorates::section_00::denied::DenyList;
 use ai6::directorates::section_00::gate::{GATE_PROGRAM_ENV, WEB_GATE_ARGS};
 use ai6::directorates::section_00::listing;
 use ai6::directorates::section_00::programs;
+use ai6::directorates::section_00::records;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
@@ -119,6 +120,23 @@ impl ClaudeSettings {
 /// The `request_id` of the `initialize` request that lists models.
 const MODELS_REQUEST: &str = "ai6-models";
 
+/// The format of Claude Code's Session transcript.
+pub const RECORD_FORMAT: &str = "claude-code-jsonl";
+
+/// Claude Code's transcript of the Session `query` names, when it is on this host.
+fn claude_record(query: &SessionRecordQuery) -> Option<SessionRecordFile> {
+    if !records::file_safe(&query.session_id) {
+        return None;
+    }
+    let root = records::configured_dir(&query.environment, "CLAUDE_CONFIG_DIR", ".claude")?;
+    let name = format!("{}.jsonl", query.session_id);
+    let path = records::find_file(&root.join("projects"), 1, &|file| file == name)?;
+    Some(SessionRecordFile {
+        path: path.to_string_lossy().into_owned(),
+        format: RECORD_FORMAT.to_owned(),
+    })
+}
+
 /// The models in Claude Code's answer to `initialize`; unknown when the answer has none. The
 /// answer's `account` is never read.
 fn models_of(answer: &Value) -> ModelListing {
@@ -198,6 +216,16 @@ impl AgentHandler for ClaudeHandler {
 
     fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
         Ok(None)
+    }
+
+    /// Claude Code keeps each Session as `projects/<directory>/<session>.jsonl` under its
+    /// configuration directory (`CLAUDE_CONFIG_DIR`, else `~/.claude`), one JSON object per
+    /// line.
+    fn session_record(
+        &self,
+        query: SessionRecordQuery,
+    ) -> Result<Option<SessionRecordFile>, ProviderError> {
+        Ok(claude_record(&query))
     }
 
     /// Claude Code's sandbox runs on macOS (Seatbelt, built in) and on Linux and WSL2 with
@@ -2043,6 +2071,30 @@ fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    #[test]
+    fn a_sessions_transcript_is_found_under_its_configuration_directory() {
+        let config = tempfile::tempdir().unwrap();
+        let project = config.path().join("projects").join("-work-repo");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("abc-123.jsonl"), "{}\n").unwrap();
+        let query = |session: &str| SessionRecordQuery {
+            session_id: session.to_owned(),
+            working_directory: "/work/repo".to_owned(),
+            environment: BTreeMap::from([(
+                "CLAUDE_CONFIG_DIR".to_owned(),
+                config.path().to_string_lossy().into_owned(),
+            )]),
+        };
+        let found = claude_record(&query("abc-123")).unwrap();
+        assert_eq!(
+            std::path::PathBuf::from(found.path),
+            project.join("abc-123.jsonl")
+        );
+        assert_eq!(found.format, RECORD_FORMAT);
+        assert!(claude_record(&query("other")).is_none());
+        assert!(claude_record(&query("../abc-123")).is_none());
+    }
 
     /// Claude Code 2.1.316's answer to `initialize`, cut to what the listing reads, with the
     /// `account` it also carries: that is never read.

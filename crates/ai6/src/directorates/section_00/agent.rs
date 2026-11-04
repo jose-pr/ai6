@@ -317,6 +317,30 @@ impl ModelListing {
     }
 }
 
+/// The Session whose harness record [`AgentHandler::session_record`] is asked for: its
+/// provider-issued ID, and the working directory and environment its harness was started with.
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct SessionRecordQuery {
+    /// The provider-issued Session ID.
+    pub session_id: String,
+    /// The directory the harness ran in.
+    pub working_directory: String,
+    /// The environment the harness was started with.
+    pub environment: BTreeMap<String, String>,
+}
+
+/// Where a harness keeps its own record of one Session, on the host it ran on, and its format.
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct SessionRecordFile {
+    /// The file's absolute path.
+    pub path: String,
+    /// What the file holds, as a short name the app knows (`claude-code-jsonl`,
+    /// `codex-rollout-jsonl`, `antigravity-jsonl`).
+    pub format: String,
+}
+
 /// Starts or resumes the configured Agent implementation.
 #[guatiao::kind(name = "ai6_agent_handler")]
 pub trait AgentHandler: Send + Sync {
@@ -400,6 +424,17 @@ pub trait AgentHandler: Send + Sync {
             "this handler has no way to list models",
         ))
     }
+
+    /// Where the harness keeps its own record of the Session `query` names, when it keeps one
+    /// and the file is there; the Station reads it as that Session's context. The default:
+    /// none, and the Station keeps its event stream instead.
+    fn session_record(
+        &self,
+        query: SessionRecordQuery,
+    ) -> Result<Option<SessionRecordFile>, ProviderError> {
+        let _ = query;
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -410,7 +445,7 @@ mod tests {
     // shared kind's, whose header names the same value.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 3986097841);
+        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 1153954143);
         assert_eq!(
             coqui_acp_provider::AgentSessionVtable::FLOOR_HASH,
             1414216972

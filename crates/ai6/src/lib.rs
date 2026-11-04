@@ -172,11 +172,14 @@ pub use directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,
     Revocation, Ruling,
 };
+pub use directorates::registry::assistant_log::{
+    AssistantConversation, AssistantLogEntry, AssistantTurn,
+};
 pub use directorates::registry::backend::{
-    AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore, AuditStore,
-    BriefStore, CableStore, ClearanceStore, Limited, LogbookStore, QuarantineStore,
-    RegistryBackend, SessionStore, SleeperStore, SourceStore, StationStore, TimelineStore,
-    UsageStore, VettingStore,
+    AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore,
+    AssistantLogStore, AuditStore, BriefStore, CableStore, ClearanceStore, Limited, LogbookStore,
+    QuarantineStore, RegistryBackend, SessionContextStore, SessionStore, SleeperStore, SourceStore,
+    StationStore, TimelineStore, UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
     KeepVerified, LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey,
@@ -189,12 +192,15 @@ pub use directorates::registry::cables::{
     CableSendRequest, CableState, CableTarget, MAX_CABLE_FANOUT,
 };
 pub use directorates::registry::clearance::ClearanceGrant;
+pub use directorates::registry::contexts::{
+    ContextOwner, ContextSource, EVENTS_FORMAT as CONTEXT_EVENTS_FORMAT, SessionContext,
+};
 pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, RosterHold};
 pub use directorates::registry::limits::{
-    AccountLimits, AgentLimits, AgentRoleLimits, ApprovalLimits, AuditLimits, BriefLimits,
-    CableLimits, ClearanceLimits, FileLimits, HeldLimits, HoldLimits, LogbookLimits, MemoryLimits,
-    ProposalLimits, QuarantineLimits, RegistryLimits, SessionLimits, SleeperLimits, SourceLimits,
-    StationLimits, TimelineLimits, TokenLimits, UsageLimits,
+    AccountLimits, AgentLimits, AgentRoleLimits, ApprovalLimits, AssistantLogLimits, AuditLimits,
+    BriefLimits, CableLimits, ClearanceLimits, ContextLimits, FileLimits, HeldLimits, HoldLimits,
+    LogbookLimits, MemoryLimits, ProposalLimits, QuarantineLimits, RegistryLimits, SessionLimits,
+    SleeperLimits, SourceLimits, StationLimits, TimelineLimits, TokenLimits, UsageLimits,
 };
 pub use directorates::registry::logbook::{
     HEAD_OF_STATION_ROLE, Severity, StationFinding, StationFindingKind, StationReport,
@@ -232,7 +238,8 @@ pub use directorates::registry::tracker::{
 pub use directorates::registry::vetting::{Clearance, HeldBrief};
 pub use directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, AssistantNetwork, McpServerRef,
-    ModelInfo, ModelListing, READ_CLEARANCE, clearance_reads_only, clearance_runs_commands,
+    ModelInfo, ModelListing, READ_CLEARANCE, SessionRecordFile, SessionRecordQuery,
+    clearance_reads_only, clearance_runs_commands,
 };
 pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_ENV_PREFIX, ASSISTANT_CABLE_MCP_SERVER, ASSISTANT_CABLE_MCP_TOKEN_ENV,
@@ -240,11 +247,11 @@ pub use directorates::section_00::assistant::{
     ASSISTANT_MCP_SERVER, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV,
     ASSISTANT_PUBLISH_PAGE_TOOL, ASSISTANT_SHARED_CHANGE_TOOL, AssistantCable,
     AssistantCableDecision, AssistantCableGrant, AssistantChange, AssistantCommit, AssistantEvent,
-    AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantSharedBase,
-    AssistantWorkspace, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED,
-    EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE, EVENT_REJECTED,
-    EVENT_TEXT, EVENT_TOOL, SCRIPT_ENVIRONMENT, credential_dir_var, host_pattern, interpreter_name,
-    page_call_digest,
+    AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantRun,
+    AssistantSharedBase, AssistantWorkspace, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL,
+    EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
+    EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, SCRIPT_ENVIRONMENT, credential_dir_var,
+    host_pattern, interpreter_name, page_call_digest,
 };
 pub use guatiao;
 #[cfg(feature = "daemon")]

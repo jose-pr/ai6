@@ -36,6 +36,7 @@ mod records;
 mod reviews;
 mod sessions;
 mod stations;
+mod transcripts;
 
 use std::fmt;
 use std::io;

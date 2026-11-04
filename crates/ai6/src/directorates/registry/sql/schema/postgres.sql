@@ -530,3 +530,31 @@ CREATE TABLE IF NOT EXISTS ai6_memory_proposals (
     revision BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ai6_memory_proposals_scope ON ai6_memory_proposals (scope);
+
+-- Moneypenny's conversation log: one row per entry, the entry as JSON; bytes is its size.
+CREATE TABLE IF NOT EXISTS ai6_assistant_log (
+    id TEXT PRIMARY KEY,
+    conversation TEXT NOT NULL,
+    person TEXT NOT NULL,
+    at_micros BIGINT NOT NULL,
+    bytes BIGINT NOT NULL,
+    entry TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai6_assistant_log_conversation ON ai6_assistant_log (conversation, at_micros, id);
+CREATE INDEX IF NOT EXISTS ai6_assistant_log_person ON ai6_assistant_log (person);
+CREATE INDEX IF NOT EXISTS ai6_assistant_log_order ON ai6_assistant_log (at_micros, id);
+
+-- Each provider Session's harness context: the record as JSON, its content as text. conversation is
+-- '' for a Mission's Session, operation '' for one of Moneypenny's.
+CREATE TABLE IF NOT EXISTS ai6_session_contexts (
+    session TEXT PRIMARY KEY,
+    conversation TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    filed_micros BIGINT NOT NULL,
+    record TEXT NOT NULL,
+    content TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai6_session_contexts_conversation ON ai6_session_contexts (conversation);
+CREATE INDEX IF NOT EXISTS ai6_session_contexts_order ON ai6_session_contexts (filed_micros, session);

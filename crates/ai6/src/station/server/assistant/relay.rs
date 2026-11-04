@@ -204,6 +204,7 @@ impl Step {
                 };
                 desk.outbox.send(AssistantReport {
                     route: session_id.as_ref().map(|_| route),
+                    run: None,
                     station_id: desk.state.station_id.clone(),
                     conversation_id: conversation,
                     job_id: None,

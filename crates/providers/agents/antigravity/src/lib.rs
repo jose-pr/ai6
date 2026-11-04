@@ -15,9 +15,11 @@ use ai6::AgentSession;
 use ai6::HarnessStdio;
 use ai6::directorates::q::terminal::{AgentTerminal, STREAM_COLS, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentStart, AssistantMode, clearance_runs_commands,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, SessionRecordFile, SessionRecordQuery,
+    clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV, GATE_PROGRAM_ENV};
+use ai6::directorates::section_00::records;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use serde::Deserialize;
@@ -269,10 +271,40 @@ impl TryFrom<AntigravityConfig> for AntigravityHandler {
     }
 }
 
+/// The format of the Antigravity CLI's conversation transcript.
+pub const RECORD_FORMAT: &str = "antigravity-jsonl";
+
+/// The Antigravity CLI's transcript of the conversation `query` names, when it is on this
+/// host: `~/.gemini/antigravity-cli/brain/<conversation>/transcript.jsonl`, the path its hooks
+/// are given as `transcriptPath` (1.4.12).
+fn antigravity_record(query: &SessionRecordQuery) -> Option<SessionRecordFile> {
+    if !records::file_safe(&query.session_id) {
+        return None;
+    }
+    let path = records::home(&query.environment)?
+        .join(".gemini")
+        .join("antigravity-cli")
+        .join("brain")
+        .join(&query.session_id)
+        .join("transcript.jsonl");
+    path.is_file().then(|| SessionRecordFile {
+        path: path.to_string_lossy().into_owned(),
+        format: RECORD_FORMAT.to_owned(),
+    })
+}
+
 impl AgentHandler for AntigravityHandler {
     /// agy with `--input-format stream-json` reads JSON lines from standard input.
     fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
         Ok(HarnessStdio::Json)
+    }
+
+    /// agy keeps each conversation's transcript under its home directory.
+    fn session_record(
+        &self,
+        query: SessionRecordQuery,
+    ) -> Result<Option<SessionRecordFile>, ProviderError> {
+        Ok(antigravity_record(&query))
     }
 
     /// Each rule of `allowed_tools` no default list holds. A rule the settings deny as well allows
@@ -860,4 +892,38 @@ fn internal(error: impl std::fmt::Display) -> ProviderError {
 
 fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
     ProviderError::new(status, &error.to_string())
+}
+
+#[cfg(test)]
+mod record_tests {
+    use super::*;
+
+    #[test]
+    fn a_conversations_transcript_is_found_under_its_home() {
+        let home = tempfile::tempdir().unwrap();
+        let brain = home
+            .path()
+            .join(".gemini")
+            .join("antigravity-cli")
+            .join("brain")
+            .join("c-1");
+        std::fs::create_dir_all(&brain).unwrap();
+        std::fs::write(brain.join("transcript.jsonl"), "{}\n").unwrap();
+        let query = |conversation: &str| SessionRecordQuery {
+            session_id: conversation.to_owned(),
+            working_directory: "/work".to_owned(),
+            environment: BTreeMap::from([(
+                "HOME".to_owned(),
+                home.path().to_string_lossy().into_owned(),
+            )]),
+        };
+        let found = antigravity_record(&query("c-1")).unwrap();
+        assert_eq!(
+            std::path::PathBuf::from(found.path),
+            brain.join("transcript.jsonl")
+        );
+        assert_eq!(found.format, RECORD_FORMAT);
+        assert!(antigravity_record(&query("c-2")).is_none());
+        assert!(antigravity_record(&query("..")).is_none());
+    }
 }

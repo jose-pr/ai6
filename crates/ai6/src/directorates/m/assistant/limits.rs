@@ -368,6 +368,19 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Reads a proposal lists")]
     #[map(default = AssistantGatewayLimits::default().proposal_reads)]
     pub proposal_reads: Limit,
+    /// Seconds an entry of her conversation log is kept; `none` keeps every entry.
+    #[schema(title = "Keep her conversation log for")]
+    #[map(default = AssistantGatewayLimits::default().log_age)]
+    pub log_age: TimeLimit,
+    /// Bytes of her conversation log kept, every conversation's together; the oldest entries go
+    /// first, and `none` keeps every entry.
+    #[schema(title = "Her conversation log, in size", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().log_bytes)]
+    pub log_bytes: Limit,
+    /// Seconds between two passes that drop what her conversation log keeps no longer.
+    #[schema(title = "Trim her conversation log every")]
+    #[map(default = AssistantGatewayLimits::default().log_prune_every)]
+    pub log_prune_every: Seconds,
 }
 
 impl Default for AssistantGatewayLimits {
@@ -404,6 +417,9 @@ impl Default for AssistantGatewayLimits {
             author_chars: Limit::at(200),
             audit_target_bytes: Limit::at(512),
             proposal_reads: Limit::at(16),
+            log_age: TimeLimit::secs(90 * 24 * 3_600),
+            log_bytes: Limit::at(1024 * MIB),
+            log_prune_every: Seconds::new(3_600),
         }
     }
 }
@@ -639,7 +655,12 @@ const DESK_PACE: &[&str] = &[
     "unlocked_stale",
     "page_upload_timeout",
 ];
-const GATEWAY_PACE: &[&str] = &["token_reuse_margin", "sweep_every", "shared_base_wait"];
+const GATEWAY_PACE: &[&str] = &[
+    "token_reuse_margin",
+    "sweep_every",
+    "shared_base_wait",
+    "log_prune_every",
+];
 
 /// One line per bound of `current` looser than its default, its pace keys left out.
 fn looser<T: ToValue + Default>(
@@ -719,6 +740,9 @@ impl AssistantGatewayLimits {
     pub fn validate(&self) -> Result<(), String> {
         if self.sweep_every.0.is_zero() {
             return Err("assistant.gateway.sweep_every: more than 0".to_owned());
+        }
+        if self.log_prune_every.0.is_zero() {
+            return Err("assistant.gateway.log_prune_every: more than 0".to_owned());
         }
         if self.event_buffer == 0 {
             return Err("assistant.gateway.event_buffer: at least 1".to_owned());
