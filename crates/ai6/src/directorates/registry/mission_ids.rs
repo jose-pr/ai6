@@ -241,7 +241,7 @@ impl MissionEntry {
     pub(super) fn book_name(&self) -> Option<String> {
         let operation = self.operation.as_deref().unwrap_or_default();
         let parts: Vec<&str> = match &self.kind {
-            EntryKind::Person => return None,
+            EntryKind::Person | EntryKind::FollowUp { .. } => return None,
             EntryKind::Proposal { id } => vec!["proposal", operation, id],
             EntryKind::Review { id } => vec!["review", operation, id],
             EntryKind::Sleeper {
@@ -377,6 +377,9 @@ pub(super) fn allot(
     entry: &MissionEntry,
     limits: &BriefLimits,
 ) -> io::Result<MissionHandle> {
+    if let EntryKind::FollowUp { instance, item } = &entry.kind {
+        return follow_up(book, entry.operation.as_deref(), (instance, item), limits);
+    }
     let name = entry.book_name();
     if let Some(name) = &name
         && let Some(entered) = book.entered(name)?
@@ -415,6 +418,38 @@ pub(super) fn allot(
     let mission = MissionHandle::new(new_uid(), handle);
     book.issue(&mission, name.as_deref())?;
     Ok(mission)
+}
+
+/// A new Mission following up `item` of `instance`: the handle the item's Mission goes by now
+/// and the item's next follow-up number, from 2 since the item's own Mission is its first.
+fn follow_up(
+    book: &mut dyn MissionBook,
+    operation: Option<&str>,
+    (instance, item): (&str, &str),
+    limits: &BriefLimits,
+) -> io::Result<MissionHandle> {
+    let operation = operation.unwrap_or_default();
+    let ticket = MissionEntry::source(operation, instance, item, None, None)
+        .book_name()
+        .unwrap_or_default();
+    let base = book.entered(&ticket)?.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("item {item:?} of {instance:?} has no Mission in Operation {operation:?}"),
+        )
+    })?;
+    // `.` is in no Operation's counter, so this one is the item's alone.
+    let counter = format!("follow-up.{}", book_digest(&ticket));
+    let bytes = id_bytes(limits);
+    loop {
+        let next = book.next_number(&counter)?.saturating_add(1);
+        let handle = fit(format!("{}-{next}", base.handle), bytes);
+        if !taken(book, &handle)? {
+            let mission = MissionHandle::new(new_uid(), handle);
+            book.issue(&mission, None)?;
+            return Ok(mission);
+        }
+    }
 }
 
 /// Renames `mission`, which goes by `mission.handle` now, to `handle`. A handle another Mission
@@ -478,7 +513,54 @@ mod tests {
         a_former_handle_is_never_given_again,
         a_renamed_item_keeps_its_new_handle_when_polled_again,
         run_handles_follow_the_current_handle_only_for_new_runs,
+        follow_ups_take_the_items_handle_and_a_number_from_two,
     );
+
+    fn follow_ups_take_the_items_handle_and_a_number_from_two(store: &dyn Store) {
+        let registry = store.handle();
+        registry
+            .ingest_source_item(
+                "G",
+                "github",
+                &source_item("o/r#31", Some("31"), Some("gh")),
+                "hq",
+            )
+            .unwrap();
+        let item = registry.list_new().unwrap()[0].key();
+        let follow_up = |registry: &dyn RegistryBackend| {
+            registry
+                .allot_mission_id(&MissionEntry::follow_up("G", "github", "o/r#31"))
+                .unwrap()
+        };
+        let second = follow_up(registry.as_ref());
+        assert_eq!(second.handle, "G-gh-31-2");
+        assert_ne!(second.mission_id, item);
+        assert_eq!(follow_up(store.handle().as_ref()).handle, "G-gh-31-3");
+        registry.rename_mission(&item, "G-crash").unwrap();
+        assert_eq!(
+            follow_up(registry.as_ref()).handle,
+            "G-crash-4",
+            "the item's handle as it is now"
+        );
+        assert_eq!(
+            registry
+                .allot_mission_id(&MissionEntry::follow_up("G", "github", "o/r#99"))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound,
+            "an item with no Mission has nothing to follow up"
+        );
+        assert_eq!(
+            registry
+                .allot_mission_id(&MissionEntry::follow_up("H", "github", "o/r#31"))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound,
+            "another Operation's item"
+        );
+        assert_eq!(person(registry.as_ref(), Some("G")), "G-1");
+        assert_eq!(registry.resolve_mission("G-gh-31-2").unwrap(), Some(second));
+    }
 
     fn person(registry: &dyn RegistryBackend, operation: Option<&str>) -> String {
         registry

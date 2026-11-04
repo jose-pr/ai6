@@ -973,6 +973,7 @@ fn create_issue(tracker: &dyn Tracker, entry: &OutboxEntry) -> Result<OutboxResu
         comment_id: None,
         url: issue.url,
         created_item: Some(issue.id),
+        created_code: issue.code.map(|code| (code, issue.code_tag)),
         dropped,
         attached_to: issue.parent.filter(|_| wanted_parent.is_some()),
     })
@@ -1144,6 +1145,10 @@ fn after_created(
     item: &str,
     now: f64,
 ) {
+    if let Some(brief) = spec.and_then(|spec| spec.mission.as_ref()) {
+        enter_created_mission(registry, proposal, entry, item, brief, now);
+        return;
+    }
     if proposal.mission_id == NO_MISSION {
         return;
     }
@@ -1191,6 +1196,70 @@ fn after_created(
     }
     if proposal.mark_ready {
         mark_ready(registry, roster, proposal, entry, item, now);
+    }
+}
+
+/// Enters the Mission a person created with the issue `item`: numbered by the issue as its Source
+/// would number it, and linked to it as its source. A Mission already entered for the issue is
+/// left as it is.
+fn enter_created_mission(
+    registry: &dyn RegistryBackend,
+    proposal: &IssueProposal,
+    entry: &OutboxEntry,
+    item: &str,
+    brief: &crate::Brief,
+    now: f64,
+) {
+    let result = entry.result.as_ref();
+    let (code, tag) = result
+        .and_then(|result| result.created_code.clone())
+        .map_or((None, None), |(code, tag)| (Some(code), tag));
+    let at = crate::directorates::registry::mission_ids::MissionEntry::source(
+        &proposal.operation,
+        &entry.tracker,
+        item,
+        code.as_deref(),
+        tag.as_deref(),
+    );
+    let entered = match registry.enter_brief(brief, &at) {
+        Ok(entered) => entered,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return,
+        Err(error) => {
+            eprintln!(
+                "ai6: the Mission created with {}:{item} did not enter: {error}",
+                entry.tracker
+            );
+            return;
+        }
+    };
+    let link = IssueLink {
+        operation: proposal.operation.clone(),
+        mission_id: entered.key(),
+        tracker: entry.tracker.clone(),
+        item: item.to_owned(),
+        url: result.and_then(|result| result.url.clone()),
+        relation: LinkRelation::Source,
+        state: LinkState::Active,
+        linked_by: proposal.proposer.clone(),
+        linked_at: now,
+        status_comment: None,
+        phase: None,
+        snapshot: None,
+    };
+    if let Err(error) = registry.link_issue(&link) {
+        eprintln!("ai6: created issue {} not linked: {error}", link.name());
+    }
+    let record = AuditRecord {
+        id: format!("mission-entered-{}", uuid::Uuid::new_v4().simple()),
+        actor: proposal.proposer.clone(),
+        action: "mission.create.entered".to_owned(),
+        operation: proposal.operation.clone(),
+        resource: None,
+        target: format!("{} {}:{item}", entered.key(), entry.tracker),
+        at: now,
+    };
+    if let Err(error) = registry.record_audit(&record) {
+        eprintln!("ai6: issue audit record was not written: {error}");
     }
 }
 

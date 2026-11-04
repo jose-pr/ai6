@@ -1009,6 +1009,8 @@ fn issue_of(project: &str, issue: &serde_json::Value) -> Option<TrackerIssue> {
         parent: None,
         author_id: item.author,
         priority: None,
+        code: item.code,
+        code_tag: item.code_tag,
     })
 }
 

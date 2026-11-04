@@ -597,6 +597,78 @@ enum MissionsCommand {
         #[arg(long)]
         operation: Option<String>,
     },
+    /// Queue a new Mission (needs mission.create). With `--issue` it follows up a ticket that
+    /// has a Mission and takes that ticket's handle and a follow-up number; with
+    /// `--create-issue` its ticket is created first and it is numbered by that (needs
+    /// issue.create).
+    Create {
+        #[arg(long)]
+        operation: String,
+        #[arg(long)]
+        title: String,
+        /// What the Agent is asked to do.
+        #[arg(long)]
+        prompt: String,
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        /// A Station it may run on; repeat for several.
+        #[arg(long = "station")]
+        stations: Vec<String>,
+        /// The ticket it follows up, as TRACKER:ITEM.
+        #[arg(long, conflicts_with = "create_issue")]
+        issue: Option<String>,
+        /// The tracker instance to create its ticket in.
+        #[arg(long)]
+        create_issue: Option<String>,
+        /// The created ticket's title; the Mission's title when left out.
+        #[arg(long, requires = "create_issue")]
+        issue_title: Option<String>,
+        /// The created ticket's body; the Mission's prompt when left out.
+        #[arg(long, requires = "create_issue")]
+        issue_body: Option<String>,
+    },
+}
+
+/// The body `missions create` sends.
+fn create_body(
+    (title, prompt): (&str, &str),
+    (agent, role): (Option<&str>, Option<&str>),
+    (tags, stations): (&[String], &[String]),
+    issue: Option<&str>,
+    create_issue: Option<&str>,
+    (issue_title, issue_body): (Option<&str>, Option<&str>),
+) -> Result<serde_json::Value, String> {
+    let mut body = serde_json::json!({
+        "title": title, "prompt": prompt, "tags": tags, "stations": stations,
+    });
+    if let Some(agent) = agent {
+        body["agent_id"] = serde_json::json!(agent);
+    }
+    if let Some(role) = role {
+        body["role"] = serde_json::json!(role);
+    }
+    if let Some(issue) = issue {
+        let (tracker, item) = issue
+            .split_once(':')
+            .filter(|(tracker, item)| !tracker.is_empty() && !item.is_empty())
+            .ok_or_else(|| format!("--issue {issue:?} is not TRACKER:ITEM"))?;
+        body["issue"] = serde_json::json!({ "tracker": tracker, "item": item });
+    }
+    if let Some(tracker) = create_issue {
+        let mut create = serde_json::json!({ "tracker": tracker });
+        if let Some(title) = issue_title {
+            create["title"] = serde_json::json!(title);
+        }
+        if let Some(body) = issue_body {
+            create["body"] = serde_json::json!(body);
+        }
+        body["create_issue"] = create;
+    }
+    Ok(body)
 }
 
 #[derive(Debug, Subcommand)]
@@ -1224,6 +1296,50 @@ async fn run() -> Result<(), String> {
                 access::text(&renamed["previous"]),
                 access::text(&renamed["handle"])
             );
+        }
+        Command::Missions {
+            command:
+                Some(MissionsCommand::Create {
+                    operation,
+                    title,
+                    prompt,
+                    agent,
+                    role,
+                    tags,
+                    stations,
+                    issue,
+                    create_issue,
+                    issue_title,
+                    issue_body,
+                }),
+            ..
+        } => {
+            let body = create_body(
+                (&title, &prompt),
+                (agent.as_deref(), role.as_deref()),
+                (&tags, &stations),
+                issue.as_deref(),
+                create_issue.as_deref(),
+                (issue_title.as_deref(), issue_body.as_deref()),
+            )?;
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let mut url = server.clone();
+            url.path_segments_mut()
+                .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+                .extend(["v1", "user", "operations", &operation, "missions"]);
+            let created =
+                access::exchange(&client, &token, Method::POST, url, None, Some(body)).await?;
+            match created.get("handle") {
+                Some(handle) => println!(
+                    "{} ({}) queued",
+                    access::text(handle),
+                    access::text(&created["mission_id"])
+                ),
+                None => println!(
+                    "waiting for its ticket: issue proposal {}",
+                    access::text(&created["proposal"])
+                ),
+            }
         }
         Command::Missions {
             operation,
@@ -3498,6 +3614,51 @@ mod tests {
                 .get(reqwest::header::AUTHORIZATION)
                 .unwrap(),
             "Bearer user-token"
+        );
+    }
+
+    #[test]
+    fn a_mission_create_names_its_ticket_or_the_ticket_to_create() {
+        let none: &[String] = &[];
+        let follow_up = create_body(
+            ("Test it", "Add the test."),
+            (Some("007"), None),
+            (none, none),
+            Some("gh:o/r#31"),
+            None,
+            (None, None),
+        )
+        .unwrap();
+        assert_eq!(
+            follow_up["issue"],
+            serde_json::json!({"tracker": "gh", "item": "o/r#31"})
+        );
+        assert_eq!(follow_up["agent_id"], "007");
+        assert!(follow_up.get("create_issue").is_none());
+        let created = create_body(
+            ("Fix it", "It times out."),
+            (None, None),
+            (none, none),
+            None,
+            Some("jira"),
+            (Some("Login times out"), None),
+        )
+        .unwrap();
+        assert_eq!(
+            created["create_issue"],
+            serde_json::json!({"tracker": "jira", "title": "Login times out"})
+        );
+        assert!(
+            create_body(
+                ("x", "y"),
+                (None, None),
+                (none, none),
+                Some("no-item"),
+                None,
+                (None, None)
+            )
+            .unwrap_err()
+            .contains("TRACKER:ITEM")
         );
     }
 

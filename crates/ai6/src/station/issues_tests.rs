@@ -85,9 +85,18 @@ impl Tracker for Recording {
         }
         let mut calls = self.calls.lock().unwrap();
         calls.created.push(spec.clone());
-        let id = format!("{}{}", self.prefix, 100 + calls.created.len());
+        let number = 100 + calls.created.len();
+        let id = format!("{}{number}", self.prefix);
+        // As the providers give them: GitHub's number with its tag, Jira's key alone.
+        let numbered = self.prefix.ends_with('#');
         Ok(TrackerIssue {
             url: Some(format!("https://tracker.test/{id}")),
+            code: Some(if numbered {
+                number.to_string()
+            } else {
+                id.clone()
+            }),
+            code_tag: numbered.then(|| "gh".to_owned()),
             id,
             title: spec.title,
             labels: spec
@@ -455,6 +464,102 @@ fn a_refused_creation_settles_the_proposal_and_says_why() {
         "{:?}",
         settled.failed
     );
+}
+
+/// A person's Mission that waits, in its creation, for the issue it is created with.
+fn mission_with_issue(tracker: &str) -> ProposedIssue {
+    let mut brief: crate::Brief = serde_json::from_value(serde_json::json!({
+        "title": "Fix the login page", "body": "It times out.", "id": crate::new_uid(),
+        "source": "universal-exports", "operation": "G", "agent": "007",
+    }))
+    .unwrap();
+    brief.provenance = Some(
+        crate::Provenance::new(crate::Origin::Operator, &brief, "universal-exports", 1)
+            .with_principal("sam"),
+    );
+    ProposedIssue {
+        tracker: tracker.to_owned(),
+        title: "Fix the login page".to_owned(),
+        body: "It times out.".to_owned(),
+        mission: Some(brief),
+        ..ProposedIssue::default()
+    }
+}
+
+#[test]
+fn a_mission_created_with_its_issue_enters_numbered_by_it_and_linked_to_it() {
+    let world = World::new("sub_issues");
+    let mut asked = proposal(NO_MISSION, vec![mission_with_issue("gh")], &[]);
+    asked.proposer = "person:sam".to_owned();
+    let id = world.approved(asked.clone(), false);
+    world.drain();
+    let settled = world.registry.issue_proposal(&id).unwrap().unwrap();
+    assert_eq!(settled.created, ["gh:o/r#101"]);
+    let queued = world.registry.list_new().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].shown_handle(), "G-gh-101");
+    assert_eq!(queued[0].title, "Fix the login page");
+    assert_eq!(queued[0].agent.as_deref(), Some("007"));
+    assert_eq!(
+        queued[0]
+            .provenance
+            .as_ref()
+            .map(|provenance| provenance.origin),
+        Some(crate::Origin::Operator),
+        "the person's brief, not the issue's text"
+    );
+    let links = world.registry.issue_links(&queued[0].key()).unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(
+        (
+            links[0].tracker.as_str(),
+            links[0].item.as_str(),
+            links[0].relation
+        ),
+        ("gh", "o/r#101", LinkRelation::Source)
+    );
+    assert!(
+        world
+            .registry
+            .audit_records()
+            .unwrap()
+            .iter()
+            .any(|record| record.action == "mission.create.entered"
+                && record.target.starts_with(&queued[0].key()))
+    );
+    // Polled as an item of its Source, the issue leaves the person's brief as it is.
+    let item = crate::SourceItem {
+        id: "o/r#101".to_owned(),
+        title: "Fix the login page".to_owned(),
+        body: "Something else.".to_owned(),
+        url: None,
+        labels: Vec::new(),
+        author: None,
+        updated: "2026-11-05T00:00:00Z".to_owned(),
+        code: Some("101".to_owned()),
+        code_tag: Some("gh".to_owned()),
+    };
+    assert_eq!(
+        world
+            .registry
+            .ingest_source_item("G", "gh", &item, "station-a")
+            .unwrap(),
+        crate::Ingest::Unchanged
+    );
+    assert_eq!(world.registry.list_new().unwrap()[0].body, "It times out.");
+
+    // A tracker that cannot create says so on the proposal, and no Mission enters.
+    let mut refusing = World::new("sub_issues");
+    refusing.github.refuse_create = true;
+    let id = refusing.approved(asked, false);
+    refusing.drain();
+    let settled = refusing.registry.issue_proposal(&id).unwrap().unwrap();
+    assert!(
+        settled.failed[0].contains("cannot create"),
+        "{:?}",
+        settled.failed
+    );
+    assert!(refusing.registry.list_new().unwrap().is_empty());
 }
 
 #[test]

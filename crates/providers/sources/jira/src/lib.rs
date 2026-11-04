@@ -1266,6 +1266,8 @@ impl Jira {
                 .pointer("/priority/name")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
+            code: item.code,
+            code_tag: item.code_tag,
         })
     }
 }

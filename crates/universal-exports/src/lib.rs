@@ -8,6 +8,8 @@ mod accounts;
 mod agents;
 mod compartments;
 mod controls;
+#[cfg(test)]
+mod follow_up_tests;
 mod green_ink;
 mod held;
 mod issues;
@@ -32,6 +34,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ai6::directorates::registry::backend::*;
+use ai6::directorates::registry::mission_issues::{IssueLink, LinkRelation, LinkState};
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
     Authorizer, Brief, ConfigProvider, Directory, Lookup, MissionHandle, MissionProposal,
@@ -2207,6 +2210,17 @@ async fn create_user_mission(
         authorize_operation_action(&gateway, person.clone(), &operation_id, "mission.review")
             .await?;
     }
+    let reference = |text: &str| {
+        !text.trim().is_empty() && text.len() <= 256 && !text.chars().any(char::is_control)
+    };
+    if (request.issue.is_some() && request.create_issue.is_some())
+        || request
+            .issue
+            .as_ref()
+            .is_some_and(|issue| !reference(&issue.tracker) || !reference(&issue.item))
+    {
+        return Err(ApiError::bad_request());
+    }
 
     let created = utc_timestamp()?;
     let received_at = unix_timestamp()? as i64;
@@ -2236,20 +2250,28 @@ async fn create_user_mission(
         .await
         .map_err(|_| ApiError::internal())??;
     }
-    let book = registry.clone();
-    let entry = operation_id.to_string();
-    let entered = tokio::task::spawn_blocking(move || {
-        book.allot_mission_id(&MissionEntry::person(Some(&entry)))
-    })
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map_err(|_| ApiError::internal())?;
+    let mut data = request
+        .review
+        .as_ref()
+        .map(|review| {
+            BTreeMap::from([(
+                ai6::directorates::m::review::BRIEF_REVIEW_KEY.to_owned(),
+                serde_json::to_value(review).unwrap_or_default(),
+            )])
+        })
+        .unwrap_or_default();
+    if let Some(issue) = &request.issue {
+        data.insert(
+            "follow_up".to_owned(),
+            serde_json::json!({ "tracker": issue.tracker, "item": issue.item }),
+        );
+    }
     let mut brief = Brief {
         title: request.title,
         body: request.prompt,
-        id: entered.mission_id.clone(),
-        mission_id: Some(entered.mission_id),
-        handle: Some(entered.handle.clone()),
+        id: ai6::new_uid(),
+        mission_id: None,
+        handle: None,
         name: None,
         source: "universal-exports".to_owned(),
         operation: Some(operation_id.to_string()),
@@ -2259,20 +2281,34 @@ async fn create_user_mission(
         stations: request.stations,
         priority: 0,
         url: None,
-        data: request
-            .review
-            .as_ref()
-            .map(|review| {
-                BTreeMap::from([(
-                    ai6::directorates::m::review::BRIEF_REVIEW_KEY.to_owned(),
-                    serde_json::to_value(review).unwrap_or_default(),
-                )])
-            })
-            .unwrap_or_default(),
+        data,
         created,
         version: 1,
         provenance: None,
     };
+    if let Some(create) = request.create_issue {
+        return create_with_issue(&gateway, registry, (&person, &operation_id), create, brief)
+            .await;
+    }
+    let book = registry.clone();
+    let entry = match &request.issue {
+        Some(issue) => MissionEntry::follow_up(operation_id.as_str(), &issue.tracker, &issue.item),
+        None => MissionEntry::person(Some(operation_id.as_str())),
+    };
+    let entered = tokio::task::spawn_blocking(move || book.allot_mission_id(&entry))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|error| match (&request.issue, error.kind()) {
+            (Some(issue), std::io::ErrorKind::NotFound) => ApiError::invalid(format!(
+                "item {:?} of {:?} has no Mission in Operation {operation_id}: only an item AI6 \
+                 has taken in can be followed up",
+                issue.item, issue.tracker
+            )),
+            _ => ApiError::internal(),
+        })?;
+    brief.id = entered.mission_id.clone();
+    brief.mission_id = Some(entered.mission_id);
+    brief.handle = Some(entered.handle.clone());
     brief.provenance = Some(
         Provenance::new(Origin::Operator, &brief, GATEWAY_RECEIVER, received_at)
             .with_principal(actor_id.clone()),
@@ -2292,7 +2328,86 @@ async fn create_user_mission(
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
-    tokio::task::spawn_blocking(move || registry.submit_brief(&brief))
+    let followed = request.issue.map(|issue| IssueLink {
+        operation: operation_id.to_string(),
+        mission_id: mission_id.to_string(),
+        tracker: issue.tracker,
+        item: issue.item,
+        url: None,
+        relation: LinkRelation::Related,
+        state: LinkState::Active,
+        linked_by: format!("person:{}", person.id),
+        linked_at: received_at as f64,
+        status_comment: None,
+        phase: None,
+        snapshot: None,
+    });
+    tokio::task::spawn_blocking(move || {
+        registry.submit_brief(&brief)?;
+        if let Some(link) = followed {
+            registry.link_issue(&link)?;
+        }
+        Ok::<_, std::io::Error>(())
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(CreateUserMissionResponse {
+            operation_id: operation_id.to_string(),
+            mission_id: Some(mission_id.to_string()),
+            handle: Some(entered.handle),
+            proposal: None,
+            state: "queued",
+        }),
+    ))
+}
+
+/// The rest of a Mission create that asks for its issue: the issue goes to the Headquarters
+/// Station as an approved creation carrying the brief, and the Mission enters, numbered by the
+/// issue, once it exists. Needs `issue.create` as well.
+async fn create_with_issue(
+    gateway: &Gateway,
+    registry: Arc<dyn RegistryBackend>,
+    (person, operation_id): (&Person, &OperationId),
+    create: NewMissionIssue,
+    mut brief: Brief,
+) -> Result<(StatusCode, Json<CreateUserMissionResponse>), ApiError> {
+    if create.tracker.trim().is_empty() || create.tracker.len() > 256 {
+        return Err(ApiError::bad_request());
+    }
+    authorize_operation_action(gateway, person.clone(), operation_id, "issue.create").await?;
+    let received_at = unix_timestamp()?;
+    brief.provenance = Some(
+        Provenance::new(
+            Origin::Operator,
+            &brief,
+            GATEWAY_RECEIVER,
+            received_at as i64,
+        )
+        .with_principal(person.id.clone()),
+    );
+    let title = create.title.unwrap_or_else(|| brief.title.clone());
+    let body = create.body.unwrap_or_else(|| brief.body.clone());
+    let proposal = issues::create_for_mission(
+        gateway,
+        &registry,
+        (person, operation_id),
+        (&create.tracker, &title, &body),
+        brief,
+    )
+    .await?;
+    let audit = AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor: person.id.clone(),
+        action: "mission.create.requested".to_owned(),
+        operation: operation_id.to_string(),
+        resource: None,
+        target: format!("issue-proposal {proposal}"),
+        at: received_at,
+    };
+    tokio::task::spawn_blocking(move || registry.record_audit(&audit))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
@@ -2300,9 +2415,10 @@ async fn create_user_mission(
         StatusCode::ACCEPTED,
         Json(CreateUserMissionResponse {
             operation_id: operation_id.to_string(),
-            mission_id: mission_id.to_string(),
-            handle: entered.handle,
-            state: "queued",
+            mission_id: None,
+            handle: None,
+            proposal: Some(proposal),
+            state: "awaiting_issue",
         }),
     ))
 }
@@ -4474,15 +4590,52 @@ struct CreateUserMissionRequest {
     /// The review policy per gate, `none` included; naming one needs `mission.review`.
     #[serde(default)]
     review: Option<ai6::ReviewChoice>,
+    /// An item of one of the Operation's Sources, with a Mission of its own, that this Mission
+    /// follows up: it is numbered by the item and linked to it.
+    #[serde(default)]
+    issue: Option<FollowedIssue>,
+    /// An issue to create for this Mission, which then enters numbered by it and linked to it;
+    /// needs `issue.create`.
+    #[serde(default)]
+    create_issue: Option<NewMissionIssue>,
+}
+
+/// The item a Mission follows up.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FollowedIssue {
+    /// The tracker instance, a key under the Operation's `sources`.
+    tracker: String,
+    /// The provider-local item ID.
+    item: String,
+}
+
+/// The issue a Mission is created with.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NewMissionIssue {
+    /// The tracker instance to create it in.
+    tracker: String,
+    /// Its title; the Mission's title when left out.
+    #[serde(default)]
+    title: Option<String>,
+    /// Its body; the Mission's instructions when left out.
+    #[serde(default)]
+    body: Option<String>,
 }
 
 #[derive(Serialize)]
 struct CreateUserMissionResponse {
     operation_id: String,
-    /// The Mission's UID.
-    mission_id: String,
-    /// What it is called.
-    handle: String,
+    /// The Mission's UID; none yet while it waits for the issue it is created with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mission_id: Option<String>,
+    /// What it is called; none yet while it waits for the issue it is created with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handle: Option<String>,
+    /// The approved issue proposal the Headquarters Station creates the issue from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proposal: Option<String>,
     state: &'static str,
 }
 

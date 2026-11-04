@@ -224,6 +224,10 @@ pub struct ProposedIssue {
     /// How many levels below an issue a person made it sits (a child of such an issue is 1).
     #[serde(default)]
     pub depth: u64,
+    /// The brief of a Mission a person created with this issue: once the issue exists, the
+    /// Mission enters numbered by it and linked to it as its source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mission: Option<super::store::Brief>,
 }
 
 /// An Agent's proposal to create issues, which a person approves unless the Operation lets
@@ -324,6 +328,10 @@ pub struct OutboxResult {
     /// The created issue's item ID.
     #[serde(default)]
     pub created_item: Option<String>,
+    /// The created issue's short code and the tag that names its tracker, when the tracker
+    /// gives them ([`TrackerIssue::code`](super::tracker::TrackerIssue::code)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_code: Option<(String, Option<String>)>,
     /// The fields a creation could not carry over, such as a mirror's assignees.
     #[serde(default)]
     pub dropped: Vec<String>,

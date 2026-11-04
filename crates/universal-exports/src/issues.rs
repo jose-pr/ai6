@@ -877,6 +877,7 @@ pub(crate) async fn create(
             parent: request.parent,
             mirror_of: None,
             depth: 0,
+            mission: None,
         }],
         exposure: Vec::new(),
         findings: Vec::new(),
@@ -918,6 +919,95 @@ pub(crate) async fn create(
             answered: false,
         }),
     ))
+}
+
+/// Creates an issue in `tracker` for the Mission `brief`, which `person` asks for with it: an
+/// approved proposal whose one issue carries the brief, so the Headquarters Station enters the
+/// Mission, numbered by the issue and linked to it, once the issue exists. Returns the proposal.
+/// The caller has checked `issue.create` and `mission.create`.
+pub(crate) async fn create_for_mission(
+    gateway: &Gateway,
+    registry: &Arc<dyn RegistryBackend>,
+    (person, operation): (&Person, &OperationId),
+    (tracker, title, body): (&str, &str, &str),
+    brief: ai6::Brief,
+) -> Result<String, ApiError> {
+    if !operation_trackers(gateway, operation)
+        .await
+        .is_none_or(|trackers| trackers.iter().any(|known| known == tracker))
+    {
+        return Err(ApiError::invalid(format!(
+            "Operation {operation} has no tracker {tracker:?}"
+        )));
+    }
+    let policy = policy_of(gateway, operation).await;
+    let title = outbound::check_person(title, policy.max_body_bytes)
+        .map_err(|_| ApiError::bad_request())?;
+    let body = if body.trim().is_empty() {
+        String::new()
+    } else {
+        outbound::check_person(body, policy.max_body_bytes).map_err(|_| ApiError::bad_request())?
+    };
+    let at = unix_timestamp()?;
+    let proposal = IssueProposal {
+        id: String::new(),
+        operation: operation.to_string(),
+        mission_id: NO_MISSION.to_owned(),
+        proposer: format!("person:{}", person.id),
+        specs: vec![ProposedIssue {
+            tracker: tracker.to_owned(),
+            title,
+            body: format!("{body}\n\n---\nCreated through AI6 by {}.", person.name)
+                .trim_start()
+                .to_owned(),
+            mission: Some(brief),
+            ..ProposedIssue::default()
+        }],
+        exposure: Vec::new(),
+        findings: Vec::new(),
+        dropped: Vec::new(),
+        state: ProposalState::Pending,
+        decided_by: None,
+        mark_ready: false,
+        created: Vec::new(),
+        failed: Vec::new(),
+        retry_key: None,
+        told: false,
+        at,
+    };
+    let store = registry.clone();
+    let signer = person.id.clone();
+    let stored = blocking(move || {
+        let stored = store.propose_issues(&proposal)?;
+        store.decide_issue_proposal(&stored.id, true, &signer, false)?;
+        Ok(stored.id)
+    })
+    .await?;
+    record(
+        registry,
+        person,
+        operation,
+        None,
+        "issue.create.queued".to_owned(),
+        format!("{tracker} {stored}"),
+        at,
+    )
+    .await?;
+    Ok(stored)
+}
+
+/// The tracker instances of `operation`, or `None` when this gateway has no roster to say.
+async fn operation_trackers(gateway: &Gateway, operation: &OperationId) -> Option<Vec<String>> {
+    let source = gateway.roster.clone()?;
+    let wanted = operation.to_string();
+    tokio::task::spawn_blocking(move || {
+        let snapshot = source.load("").ok()?;
+        let held = snapshot.roster.operation(&wanted).ok()?;
+        Some(held.sources.keys().cloned().collect())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// `GET /v1/user/operations/{operation_id}/issue-proposals`: what Agents asked to create and how

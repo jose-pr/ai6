@@ -94,6 +94,12 @@ pub struct TrackerIssue {
     pub author_id: Option<String>,
     /// The priority, in the tracker's words, when it has one.
     pub priority: Option<String>,
+    /// The issue's short code, as [`SourceItem::code`](super::sources::SourceItem::code): what
+    /// a Mission it starts is numbered by.
+    pub code: Option<String>,
+    /// What names the tracker for a `code` that does not name it itself, as
+    /// [`SourceItem::code_tag`](super::sources::SourceItem::code_tag).
+    pub code_tag: Option<String>,
 }
 
 /// A request for comments made after a moment on a set of issues.

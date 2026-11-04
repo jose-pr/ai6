@@ -328,9 +328,10 @@ fn fingerprint_of(brief: &Brief) -> Option<&str> {
 
 /// Compares an item's fresh brief with the one already queued for it. An unchanged item is
 /// [`Ingest::Unchanged`]; a changed one keeps the queued brief's creation time, priority,
-/// Agent and role, and is [`Ingest::Updated`].
+/// Agent and role, and is [`Ingest::Updated`]. A person's brief queued for the item (a Mission
+/// created with its issue) is never replaced by the item's text.
 pub(super) fn refresh_queued(brief: &mut Brief, existing: Brief) -> Ingest {
-    if fingerprint_of(&existing) == fingerprint_of(brief) {
+    if fingerprint_of(&existing) == fingerprint_of(brief) || existing.source != brief.source {
         return Ingest::Unchanged;
     }
     brief.created = existing.created;

@@ -688,6 +688,7 @@ impl IssueDesk {
             parent: None,
             mirror_of: Some(link.name()),
             depth: 0,
+            mission: None,
         };
         self.propose_issues(caller, vec![spec], dropped, retry_key, &policy)
     }
@@ -747,6 +748,7 @@ impl IssueDesk {
             parent,
             mirror_of: None,
             depth,
+            mission: None,
         })
     }
 

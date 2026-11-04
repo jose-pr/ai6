@@ -882,6 +882,8 @@ fn issue_of(repo: &str, issue: &serde_json::Value) -> Option<TrackerIssue> {
             .map(|number| format!("{repo}#{number}")),
         author_id: item.author,
         priority: None,
+        code: item.code,
+        code_tag: item.code_tag,
     })
 }
 
