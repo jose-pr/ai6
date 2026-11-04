@@ -1314,6 +1314,22 @@ pub trait BriefStore {
     ///
     /// Returns an error when the Registry cannot be read.
     fn filed_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<FiledBrief>>;
+
+    /// Records that a cancel of the claimed brief `key` was asked for at `at`, as Unix seconds,
+    /// keeping the first time it was asked. `false` when the brief is not claimed. Finishing the
+    /// brief forgets it; a claim that lapses back to the queue keeps it.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an invalid key or time; Registry I/O failures otherwise.
+    fn request_cancel(&self, key: &str, at: f64) -> io::Result<bool>;
+
+    /// The claimed briefs a cancel was asked for, by key, with when it was first asked.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be read.
+    fn cancel_requests(&self) -> io::Result<BTreeMap<String, f64>>;
 }
 
 /// The Mission `brief` names and its handle, for a rename; a brief dropped by hand has none.
@@ -2105,6 +2121,74 @@ impl BriefStore for FileRegistry {
         }
         finish_locked(self, brief, outcome, ok, transcript)?;
         Ok(true)
+    }
+
+    fn request_cancel(&self, key: &str, at: f64) -> io::Result<bool> {
+        validate_registry_key(key)?;
+        if !at.is_finite() || at < 0.0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a cancel time must be Unix seconds",
+            ));
+        }
+        let _registry_lock = self.lock()?;
+        if !self
+            .root
+            .join("claimed")
+            .join(format!("{key}.json"))
+            .is_file()
+        {
+            return Ok(false);
+        }
+        let path = cancel_path(&self.root, key);
+        if read_cancel(&path)?.is_none() {
+            self.write_atomic(&path, at.to_string().as_bytes())?;
+        }
+        Ok(true)
+    }
+
+    fn cancel_requests(&self) -> io::Result<BTreeMap<String, f64>> {
+        let entries = match fs::read_dir(self.root.join("cancels")) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+            Err(error) => return Err(error),
+        };
+        let mut requests = BTreeMap::new();
+        for entry in entries {
+            let path = entry?.path();
+            let Some(key) = path.file_stem().and_then(|stem| stem.to_str()).filter(|_| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            }) else {
+                continue;
+            };
+            if !self
+                .root
+                .join("claimed")
+                .join(format!("{key}.json"))
+                .is_file()
+            {
+                continue;
+            }
+            if let Some(at) = read_cancel(&path)? {
+                requests.insert(key.to_owned(), at);
+            }
+        }
+        Ok(requests)
+    }
+}
+
+/// Where a claimed brief's cancel request is kept.
+fn cancel_path(root: &Path, key: &str) -> PathBuf {
+    root.join("cancels").join(format!("{key}.json"))
+}
+
+/// When a cancel was asked for, or `None` when it was not or the record does not read as a time.
+fn read_cancel(path: &Path) -> io::Result<Option<f64>> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text.trim().parse::<f64>().ok().filter(|at| at.is_finite())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -3333,6 +3417,11 @@ pub(super) fn finish_locked(
             &serde_json::to_vec_pretty(&record).map_err(io::Error::other)?,
         )?;
     }
+    if let Err(error) = fs::remove_file(cancel_path(root, &key))
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        return Err(error);
+    }
     remove_lease(root, &key)
 }
 
@@ -3714,6 +3803,7 @@ mod tests {
         one_station_claims_a_brief,
         a_leased_claim_is_listed_and_renewed_only_by_its_holder,
         finish_requires_the_current_station_and_files_the_outcome,
+        a_cancel_is_kept_from_its_first_request_until_the_brief_finishes,
         a_filed_brief_is_read_in_any_state,
         expired_leases_requeue_or_fail_at_the_attempt_limit,
         an_expired_lease_is_handed_over_once_with_its_claim_and_attempt,
@@ -4260,6 +4350,47 @@ mod tests {
         assert!(registry.filed_briefs("nowhere", 10).unwrap().is_empty());
         assert_eq!(registry.filed_brief("no-such-key").unwrap(), None);
         assert!(registry.filed_brief("../escape").is_err());
+    }
+
+    fn a_cancel_is_kept_from_its_first_request_until_the_brief_finishes(store: &dyn Store) {
+        let registry = store.handle();
+        let queued = brief("cancel-me");
+        registry.submit_brief(&queued).unwrap();
+        let key = queued.key();
+        assert!(
+            !registry.request_cancel(&key, 10.0).unwrap(),
+            "a queued brief has no claim to cancel"
+        );
+        assert!(registry.cancel_requests().unwrap().is_empty());
+        registry
+            .claim_with_lease(Some(&key), "worker", DEFAULT_LEASE, BTreeMap::new())
+            .unwrap()
+            .unwrap();
+        assert!(registry.request_cancel(&key, 10.0).unwrap());
+        assert!(registry.request_cancel(&key, 20.0).unwrap());
+        assert_eq!(
+            registry.cancel_requests().unwrap(),
+            BTreeMap::from([(key.clone(), 10.0)]),
+            "the first request counts"
+        );
+        assert!(
+            registry.request_cancel(&key, f64::NAN).unwrap_err().kind()
+                == io::ErrorKind::InvalidInput
+        );
+        let claimed = registry.read_claimed(&key).unwrap().unwrap();
+        assert!(
+            registry
+                .finish(
+                    &claimed,
+                    &serde_json::json!({"state": "failed"}),
+                    false,
+                    None,
+                    Some("worker")
+                )
+                .unwrap()
+        );
+        assert!(registry.cancel_requests().unwrap().is_empty());
+        assert!(!registry.request_cancel(&key, 30.0).unwrap());
     }
 
     fn finish_requires_the_current_station_and_files_the_outcome(store: &dyn Store) {

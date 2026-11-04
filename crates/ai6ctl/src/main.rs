@@ -607,7 +607,20 @@ enum MissionCommand {
         #[arg(long)]
         operation: String,
     },
-    /// Stop the Mission's live Session, if any, and abandon the Mission.
+    /// Withdraw a Mission no Station has taken yet, queued or held: it is filed as failed with
+    /// who withdrew it and the note. A cancel of such a Mission does the same.
+    Withdraw {
+        /// AI6 Mission ID.
+        mission_id: String,
+        /// Why, for the record.
+        #[arg(long)]
+        note: Option<String>,
+        /// The Operation, when the Mission is not on the visible board.
+        #[arg(long)]
+        operation: Option<String>,
+    },
+    /// Stop the Mission's live Session, if any, and abandon the Mission. One no Station has taken
+    /// yet is withdrawn instead.
     Cancel {
         /// AI6 Mission ID.
         mission_id: String,
@@ -1319,6 +1332,37 @@ async fn run() -> Result<(), String> {
             print_mission_issues(&view);
         }
         Command::Mission {
+            control:
+                Some(MissionCommand::Withdraw {
+                    mission_id,
+                    note,
+                    operation,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let operation = match operation {
+                Some(operation) => operation,
+                None => mission_operation(&client, &server, &token, &mission_id).await?,
+            };
+            let request = operation_request(
+                &client,
+                &server,
+                &token,
+                Method::POST,
+                &[&operation, "missions", &mission_id, "withdraw"],
+            )?
+            .json(&serde_json::json!({ "note": note }));
+            let withdrawn = withdraw_mission(request).await?;
+            println!("MISSION\tSTATE\tREASON");
+            println!(
+                "{}\t{}\t{}",
+                plain(&withdrawn.mission_id),
+                plain(&withdrawn.state),
+                plain(&withdrawn.reason)
+            );
+        }
+        Command::Mission {
             control: Some(command),
             ..
         } => {
@@ -1347,7 +1391,9 @@ async fn run() -> Result<(), String> {
                     "resume",
                     message.map(|message| ("message", message)),
                 ),
-                MissionCommand::Issues { .. } => unreachable!("handled above"),
+                MissionCommand::Issues { .. } | MissionCommand::Withdraw { .. } => {
+                    unreachable!("handled above")
+                }
             };
             let operation = match target.operation {
                 Some(operation) => operation,
@@ -2337,6 +2383,37 @@ async fn send<T: DeserializeOwned>(
         .json()
         .await
         .map_err(|_| format!("Universal Exports returned an invalid {what}"))
+}
+
+/// A Mission withdrawn before any Station took it.
+#[derive(Debug, Deserialize)]
+struct WithdrawnMission {
+    mission_id: String,
+    state: String,
+    reason: String,
+}
+
+/// Sends a withdrawal and reads what was filed, naming what each refusal means.
+async fn withdraw_mission(request: reqwest::RequestBuilder) -> Result<WithdrawnMission, String> {
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+    let status = response.status();
+    if !status.is_success() {
+        let detail = match status {
+            StatusCode::FORBIDDEN => " (mission.control on the Operation is required)",
+            StatusCode::NOT_FOUND => " (the Operation has no such Mission queued or held)",
+            StatusCode::CONFLICT => " (a Station took the Mission, or it ended: cancel it instead)",
+            StatusCode::BAD_REQUEST => " (the note is too long or holds control characters)",
+            _ => "",
+        };
+        return Err(format!("Universal Exports returned HTTP {status}{detail}"));
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "Universal Exports returned an invalid withdrawal".to_owned())
 }
 
 /// The pool board of one Operation, as Universal Exports serves it.

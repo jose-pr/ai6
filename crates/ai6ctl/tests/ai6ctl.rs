@@ -1600,3 +1600,85 @@ async fn a_mission_is_found_by_any_handle_it_had_and_renamed_through_the_gateway
     assert!(said.contains("is taken by another Mission"), "{said}");
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn a_queued_mission_is_withdrawn_with_a_note_and_a_placed_one_is_told_to_cancel() {
+    let (server, shutdown, access_token, registry_dir) = start_gateway().await;
+    let registry = FileRegistry::open(registry_dir.path());
+    let brief = |id: &str| -> ai6::Brief {
+        serde_json::from_value(serde_json::json!({
+            "title": "Never placed", "id": id, "operation": "station-01"
+        }))
+        .unwrap()
+    };
+    let queued = registry
+        .enter_brief(
+            &brief("queued"),
+            &ai6::MissionEntry::person(Some("station-01")),
+        )
+        .unwrap();
+    let withdrawn = ai6ctl(
+        server.clone(),
+        Some(access_token.clone()),
+        &[
+            "mission",
+            "withdraw",
+            &queued.key(),
+            "--operation",
+            "station-01",
+            "--note",
+            "pinned to a Station that is gone",
+        ],
+    )
+    .await;
+    assert!(
+        withdrawn.status.success(),
+        "{}",
+        String::from_utf8_lossy(&withdrawn.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(withdrawn.stdout).unwrap(),
+        format!(
+            "MISSION\tSTATE\tREASON\n{}\twithdrawn\twithdrawn by viewer-007: pinned to a Station \
+             that is gone\n",
+            queued.key()
+        )
+    );
+    let filed = registry.filed_brief(&queued.key()).unwrap().unwrap();
+    assert_eq!(filed.state, "failed");
+
+    let placed = registry
+        .enter_brief(
+            &brief("placed"),
+            &ai6::MissionEntry::person(Some("station-01")),
+        )
+        .unwrap();
+    registry
+        .claim_with_lease(
+            Some(&placed.key()),
+            "station-01",
+            Duration::from_secs(60),
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .unwrap();
+    let refused = ai6ctl(
+        server.clone(),
+        Some(access_token.clone()),
+        &[
+            "mission",
+            "withdraw",
+            &placed.key(),
+            "--operation",
+            "station-01",
+        ],
+    )
+    .await;
+    assert_eq!(refused.status.code(), Some(1));
+    let said = String::from_utf8(refused.stderr).unwrap();
+    assert!(
+        said.contains("409") && said.contains("cancel it instead"),
+        "{said}"
+    );
+    let _ = shutdown.send(());
+}

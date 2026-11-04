@@ -607,7 +607,7 @@ mod tests {
             back_before_handles(&station);
             open_together();
             assert!(table_answers(&station, "ai6_issue_proposals"));
-            assert_eq!(step_names(&station), ["mission_ids.handle"]);
+            assert_eq!(step_names(&station), every_step());
         });
     }
 
@@ -657,6 +657,55 @@ mod tests {
             .collect()
     }
 
+    /// Every step's name, in the order `step_records` lists them.
+    fn every_step() -> Vec<String> {
+        let mut names: Vec<String> = steps::STEPS
+            .iter()
+            .map(|step| step.name.to_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_brief_table_from_before_cancel_requests_gains_the_column_and_keeps_its_rows() {
+        on_each_database(|location| {
+            let old = SqlRegistry::open(location).unwrap();
+            let brief: crate::Brief = serde_json::from_value(serde_json::json!({
+                "title": "Kept", "id": "kept", "source": "manual", "operation": "G",
+                "agent": null, "role": null, "url": null
+            }))
+            .unwrap();
+            old.submit_brief(&brief).unwrap();
+            alter(
+                &old,
+                "ALTER TABLE ai6_briefs DROP COLUMN cancel_requested_at",
+            );
+            alter(
+                &old,
+                "DELETE FROM ai6_schema_steps WHERE name = 'briefs.cancel_requested_at'",
+            );
+
+            let again = SqlRegistry::open(location).unwrap();
+            assert_eq!(step_names(&again), every_step());
+            assert_eq!(again.list_new().unwrap()[0].key(), brief.key());
+            again
+                .claim_with_lease(
+                    Some(&brief.key()),
+                    "station-a",
+                    Duration::from_secs(60),
+                    Default::default(),
+                )
+                .unwrap()
+                .unwrap();
+            assert!(again.request_cancel(&brief.key(), 10.0).unwrap());
+            assert_eq!(
+                again.cancel_requests().unwrap(),
+                std::collections::BTreeMap::from([(brief.key(), 10.0)])
+            );
+        });
+    }
+
     #[test]
     fn a_database_from_before_handles_gains_the_column_once() {
         on_each_database(|location| {
@@ -666,7 +715,7 @@ mod tests {
 
             let first = SqlRegistry::open(location).unwrap();
             let recorded = step_records(&first);
-            assert_eq!(step_names(&first), ["mission_ids.handle"]);
+            assert_eq!(step_names(&first), every_step());
             let mission = first
                 .allot_mission_id(&MissionEntry::person(Some("ops")))
                 .unwrap();
@@ -714,7 +763,7 @@ mod tests {
             );
             let again = SqlRegistry::open(location)
                 .expect("the step's own ALTER would fail on a column that exists");
-            assert_eq!(step_names(&again), ["mission_ids.handle"]);
+            assert_eq!(step_names(&again), every_step());
         });
     }
 

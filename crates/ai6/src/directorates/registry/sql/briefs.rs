@@ -20,8 +20,8 @@ use crate::directorates::registry::store::{
     invalid_data, lost_outcome, newest_first, unix_time, validate_registry_key,
 };
 use crate::directorates::registry::vetting::{
-    Clearance, HeldBrief, VettingStore, already_decided, check_actor, check_limit, merge_clearance,
-    refused_outcome, too_many_held,
+    Clearance, HeldBrief, VettingStore, already_decided, check_actor, check_limit, is_withdrawn,
+    merge_clearance, not_queued, refused_outcome, too_many_held, withdrawn_outcome,
 };
 
 /// The brief record, without its provenance.
@@ -309,7 +309,8 @@ fn finish_in(
         tx.execute(
             "UPDATE ai6_briefs SET state = $2, outcome = $3, \
              transcript = coalesce($4, transcript), revision = $5, \
-             finished_provenance = provenance, provenance = NULL, reported = $6 WHERE key = $1",
+             finished_provenance = provenance, provenance = NULL, reported = $6, \
+             cancel_requested_at = NULL WHERE key = $1",
             &[
                 key.as_str().into(),
                 state.into(),
@@ -329,7 +330,7 @@ fn finish_in(
              transcript = coalesce(excluded.transcript, ai6_briefs.transcript), \
              revision = excluded.revision, \
              finished_provenance = coalesce(ai6_briefs.provenance, excluded.finished_provenance), \
-             provenance = NULL, reported = excluded.reported",
+             provenance = NULL, reported = excluded.reported, cancel_requested_at = NULL",
             &[
                 key.as_str().into(),
                 state.into(),
@@ -986,6 +987,37 @@ impl BriefStore for SqlRegistry {
             Ok(true)
         })
     }
+
+    fn request_cancel(&self, key: &str, at: f64) -> io::Result<bool> {
+        validate_registry_key(key)?;
+        if !at.is_finite() || at < 0.0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a cancel time must be Unix seconds",
+            ));
+        }
+        self.write(|tx, revision| {
+            let changed = tx.execute(
+                "UPDATE ai6_briefs SET cancel_requested_at = coalesce(cancel_requested_at, $2), \
+                 revision = $3 WHERE key = $1 AND state = 'claimed'",
+                &[key.into(), at.into(), revision.into()],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    fn cancel_requests(&self) -> io::Result<BTreeMap<String, f64>> {
+        self.read(|tx| {
+            tx.query(
+                "SELECT key, cancel_requested_at FROM ai6_briefs \
+                 WHERE state = 'claimed' AND cancel_requested_at IS NOT NULL",
+                &[],
+            )?
+            .into_iter()
+            .map(|row| Ok((row.text(0)?, row.real(1)?)))
+            .collect()
+        })
+    }
 }
 
 impl SourceStore for SqlRegistry {
@@ -1319,6 +1351,45 @@ impl VettingStore for SqlRegistry {
                 "new" => Err(not_held()),
                 _ => Err(already_decided()),
             }
+        })
+    }
+
+    fn withdraw_brief(
+        &self,
+        operation: &str,
+        key: &str,
+        by: &str,
+        note: &str,
+        at: f64,
+    ) -> io::Result<Brief> {
+        validate_registry_key(operation)?;
+        validate_registry_key(key)?;
+        check_actor(by, note, &self.limits.held)?;
+        self.write(|tx, revision| {
+            let row = vetted_row(tx, key)?.ok_or_else(not_queued)?;
+            let ours = row.brief.operation.as_deref() == Some(operation);
+            let brief = match row.state.as_str() {
+                "new" if ours => row.brief,
+                "held" => held_by(&row, operation, key)
+                    .ok_or_else(not_queued)?
+                    .brief
+                    .clone(),
+                "failed" if ours && row.outcome.as_ref().is_some_and(is_withdrawn) => {
+                    return Ok(row.brief);
+                }
+                "new" => return Err(not_queued()),
+                _ => return Err(already_decided()),
+            };
+            finish_in(
+                tx,
+                &brief,
+                &withdrawn_outcome(&brief, by, note, at),
+                false,
+                None,
+                revision,
+                &self.limits.briefs,
+            )?;
+            Ok(brief)
         })
     }
 

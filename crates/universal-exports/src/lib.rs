@@ -1552,6 +1552,10 @@ impl Gateway {
                 post(controls::request_control),
             )
             .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/withdraw",
+                post(held::withdraw),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/missions/{mission_id}/rename",
                 post(rename_user_mission),
             )

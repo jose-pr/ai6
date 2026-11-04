@@ -16,8 +16,9 @@ use tokio::task::JoinHandle;
 use ai6_diptel::{ControlAction, MissionControl};
 
 use super::{
-    ApiErrorResponse, DaemonState, ResumeMission, TransitionMission, interrupt_mission,
+    ApiErrorResponse, DaemonState, ResumeMission, TransitionMission, agents, interrupt_mission,
     is_terminal_state, lifecycle_name, medical, resume_mission, session_hold, transition_mission,
+    unix_now,
 };
 use crate::bounds::Limit;
 use crate::directorates::m::issues::OnSecret;
@@ -175,9 +176,11 @@ async fn retry(
             mission.state.as_str()
         ));
     }
-    let agent = agent
-        .map(|key| qualified_agent(state, mission, key))
-        .transpose()?;
+    let agent = match agent {
+        Some(key) => qualified_agent(state, mission, key)?,
+        None => retry_agent(state, mission)?,
+    };
+    let agent = Some(agent);
     let mission_id = mission.mission_id.as_str();
     stop_live_session(state, mission_id).await;
     if let Some(hold) = session_hold(state, mission_id) {
@@ -202,6 +205,48 @@ async fn retry(
         state: retried.state,
         announced: false,
     })
+}
+
+/// The Agent a retry that names none goes to, chosen again from the roster as it is now: the
+/// best posted Agent qualified for the Mission's role and its brief's tags, not quarantined,
+/// held or retired, whose handler this Station can run. The Agent the Mission had keeps it when
+/// it still qualifies and ranks as high.
+fn retry_agent(state: &DaemonState, mission: &Mission) -> Result<String, String> {
+    let operation = mission.operation_id.as_deref();
+    let role = mission.role_id.as_deref();
+    let tags = state
+        .intake
+        .filed_brief(mission.mission_id.as_str())
+        .ok()
+        .flatten()
+        .map(|filed| filed.brief.tags)
+        .unwrap_or_default();
+    let handlers = super::available_handlers(state);
+    let best = agents::select(state, operation, role, &tags, Some(&handlers), &[])
+        .map_err(|error| format!("no Agent can take the retry: {error}"))?;
+    let kept = mission.agent_id.as_deref().filter(|current| {
+        *current != best.id
+            && agents::select(
+                state,
+                operation,
+                role,
+                &tags,
+                Some(&handlers),
+                &others(state, operation, current),
+            )
+            .is_ok_and(|agent| agent.id == *current && agent.priority == best.priority)
+    });
+    Ok(kept.map_or(best.id, str::to_owned))
+}
+
+/// Every Agent of the roster but `kept`, so a selection can only find `kept`.
+fn others(state: &DaemonState, operation: Option<&str>, kept: &str) -> Vec<String> {
+    state
+        .roster
+        .agent_ids()
+        .filter(|id| *id != kept)
+        .filter_map(|id| state.roster.agent(operation, id).ok().map(|agent| agent.id))
+        .collect()
 }
 
 /// The codename of an Agent that may take the Mission: configured for its Operation,
@@ -297,6 +342,140 @@ async fn stop_live_session(state: &DaemonState, mission_id: &str) {
             }
         })
         .await;
+    }
+}
+
+/// The reason a brief settled without its Station is filed with.
+pub(super) const CANCEL_UNCONFIRMED: &str = "cancelled; the Station did not confirm";
+
+/// On the Headquarters Station: files each claimed brief whose cancel was asked for at least
+/// `[registry.limits.briefs] cancel_settle_after` ago as failed, releasing its lease, when its
+/// Station has not finished it. The outcome names the Mission's Session at the time, which tells
+/// the Station holding the Mission which attempt to stop.
+pub(super) fn settle_unconfirmed_cancels(state: &DaemonState) {
+    let Ok(requests) = state.intake.cancel_requests() else {
+        return;
+    };
+    let after = state
+        .intake
+        .limits()
+        .briefs
+        .cancel_settle_after
+        .0
+        .as_secs_f64();
+    let now = unix_now();
+    for (key, asked) in requests {
+        if now - asked < after {
+            continue;
+        }
+        let (Ok(Some(lease)), Ok(Some(brief))) =
+            (state.intake.lease(&key), state.intake.read_claimed(&key))
+        else {
+            continue;
+        };
+        let mission_id = lease
+            .meta()
+            .get("mission_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&key)
+            .to_owned();
+        let session = state
+            .intake
+            .latest_session(&mission_id)
+            .ok()
+            .flatten()
+            .and_then(|record| record.provider_session_id);
+        let outcome = serde_json::json!({
+            "state": "failed",
+            "mission_id": mission_id,
+            "reason": CANCEL_UNCONFIRMED,
+            "station": lease.station(),
+            "session_id": session,
+            "cancel_requested_at": asked,
+        });
+        if state
+            .intake
+            .finish(&brief, &outcome, false, None, Some(lease.station()))
+            .unwrap_or(false)
+        {
+            eprintln!(
+                "ai6: Mission {mission_id:?} settled: cancelled {:.0} s ago and Station {:?} \
+                 did not confirm",
+                now - asked,
+                lease.station()
+            );
+        }
+    }
+}
+
+/// Stops each Mission in this Station's book whose brief Headquarters settled after an
+/// unconfirmed cancel, when it is still on the attempt the settlement names. A Mission retried
+/// since is queued, or on a new Session, and runs on.
+pub(super) async fn stop_settled(state: &DaemonState) {
+    let candidates: Vec<Mission> = state
+        .missions
+        .lock()
+        .map(|missions| {
+            missions
+                .list()
+                .into_iter()
+                .filter(|mission| {
+                    !is_terminal_state(mission.state) && mission.state != MissionState::Queued
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if candidates.is_empty() {
+        return;
+    }
+    let reading = state.clone();
+    let ids: Vec<String> = candidates
+        .iter()
+        .map(|mission| mission.mission_id.to_string())
+        .collect();
+    let settled = tokio::task::spawn_blocking(move || {
+        let station = reading.station_id.as_str();
+        let held: Vec<String> = reading
+            .intake
+            .leases()
+            .map(|leases| {
+                leases
+                    .into_iter()
+                    .filter(|lease| lease.station() == station)
+                    .map(|lease| lease.key().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        ids.into_iter()
+            .filter(|id| !held.contains(id))
+            .filter_map(|id| {
+                let filed = reading.intake.filed_brief(&id).ok().flatten()?;
+                let outcome = filed.outcome?;
+                (filed.state == "failed" && outcome["reason"] == CANCEL_UNCONFIRMED)
+                    .then(|| (id, outcome["session_id"].as_str().map(str::to_owned)))
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
+    for (id, session) in settled {
+        let Some(mission) = candidates
+            .iter()
+            .find(|mission| mission.mission_id.as_str() == id)
+        else {
+            continue;
+        };
+        if mission.session_ids.last().map(|id| id.as_str()) != session.as_deref() {
+            continue;
+        }
+        eprintln!("ai6: Mission {id:?} is stopped: its brief was settled as {CANCEL_UNCONFIRMED}");
+        if let Ok(Applied {
+            state: after,
+            announced: false,
+        }) = cancel(state, mission).await
+        {
+            announce(state, mission, after);
+        }
     }
 }
 

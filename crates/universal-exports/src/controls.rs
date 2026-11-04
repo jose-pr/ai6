@@ -148,6 +148,24 @@ impl ControlBook {
         }
     }
 
+    /// Forgets the oldest finished control; `false` when every control is still open.
+    fn forget_finished(&mut self) -> bool {
+        let finished = self.order.iter().position(|id| {
+            self.entries
+                .get(id)
+                .is_none_or(|entry| !entry.status.is_open())
+        });
+        let Some(index) = finished else {
+            return false;
+        };
+        if let Some(id) = self.order.remove(index)
+            && let Some(old) = self.entries.remove(&id)
+        {
+            self.keys.remove(&old.key);
+        }
+        true
+    }
+
     fn insert(&mut self, entry: Entry) -> Result<ControlStatus, GatewayError> {
         let station = entry.status.station_id.clone();
         if self
@@ -158,18 +176,8 @@ impl ControlBook {
             return Err(GatewayError::Backpressure);
         }
         while !self.limits.controls.allows(self.entries.len() + 1) {
-            let finished = self.order.iter().position(|id| {
-                self.entries
-                    .get(id)
-                    .is_none_or(|entry| !entry.status.is_open())
-            });
-            let Some(index) = finished else {
+            if !self.forget_finished() {
                 return Err(GatewayError::Backpressure);
-            };
-            if let Some(id) = self.order.remove(index)
-                && let Some(old) = self.entries.remove(&id)
-            {
-                self.keys.remove(&old.key);
             }
         }
         let id = entry.status.control_id.clone();
@@ -182,6 +190,16 @@ impl ControlBook {
             .push_back(id.clone());
         self.entries.insert(id, entry);
         Ok(status)
+    }
+
+    /// Keeps a control the gateway settled itself, for status reads and replays; no Station is
+    /// asked.
+    fn settled(&mut self, entry: Entry) {
+        while !self.limits.controls.allows(self.entries.len() + 1) && self.forget_finished() {}
+        let id = entry.status.control_id.clone();
+        self.keys.insert(entry.key.clone(), id.clone());
+        self.order.push_back(id.clone());
+        self.entries.insert(id, entry);
     }
 
     /// Hands the oldest queued control for `station` over and marks it delivered.
@@ -375,6 +393,22 @@ fn control_target(
         }))
 }
 
+/// Records a cancel of the claimed brief whose lease names `mission`; a Mission no lease names
+/// has nothing to settle.
+fn note_cancel(registry: &dyn RegistryBackend, mission: &str, at: f64) -> std::io::Result<()> {
+    let leased = registry.leases()?.into_iter().find(|lease| {
+        lease
+            .meta()
+            .get("mission_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(mission)
+    });
+    if let Some(lease) = leased {
+        registry.request_cancel(lease.key(), at)?;
+    }
+    Ok(())
+}
+
 fn audit_action(action: ControlAction) -> &'static str {
     match action {
         ControlAction::Cancel => "mission.cancel",
@@ -437,6 +471,39 @@ pub(crate) async fn request_control(
         Some(Some(status)) => return Ok((StatusCode::OK, Json(status))),
         Some(None) => return Err(ApiError::from(GatewayError::Conflict)),
         None => {}
+    }
+    // A Mission no Station has taken yet is withdrawn from the queue in its place.
+    if action == ControlAction::Cancel
+        && let crate::held::Withdrawal::Done(withdrawn) =
+            crate::held::withdraw_queued(&gateway, &person, &operation, mission.as_str(), None)
+                .await?
+    {
+        let control_id =
+            ControlId::new(Uuid::new_v4().to_string()).map_err(|_| ApiError::internal())?;
+        let status = ControlStatus {
+            control_id: control_id.to_string(),
+            operation_id: operation.to_string(),
+            mission_id: mission.to_string(),
+            session_id: None,
+            action: action.as_str().to_owned(),
+            agent: None,
+            station_id: String::new(),
+            status: "applied".to_owned(),
+            state: Some("failed".to_owned()),
+            reason: Some(withdrawn.reason),
+            requested_by: person.id.clone(),
+            requested_at: withdrawn.at,
+            finished_at: Some(withdrawn.at),
+        };
+        let entry = Entry {
+            status: status.clone(),
+            control: MissionControl::new(control_id, operation.clone(), mission.clone(), action),
+            asked,
+            key,
+            created: Instant::now(),
+        };
+        gateway.with_controls(|book| book.settled(entry))?;
+        return Ok((StatusCode::ACCEPTED, Json(status)));
     }
     let on_board = {
         let inner = gateway.inner.lock().await;
@@ -509,10 +576,19 @@ pub(crate) async fn request_control(
         target: mission.to_string(),
         at: requested_at,
     };
-    tokio::task::spawn_blocking(move || registry.record_audit(&audit))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|_| ApiError::internal())?;
+    let cancelled = (action == ControlAction::Cancel).then(|| mission.to_string());
+    tokio::task::spawn_blocking(move || {
+        registry.record_audit(&audit)?;
+        // The time a cancel was first asked lets Headquarters settle the brief should its
+        // Station never confirm.
+        if let Some(mission) = cancelled {
+            note_cancel(registry.as_ref(), &mission, requested_at)?;
+        }
+        Ok::<_, std::io::Error>(())
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
     let status = ControlStatus {
         control_id: control_id.to_string(),
         operation_id: operation.to_string(),

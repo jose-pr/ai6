@@ -27,7 +27,8 @@ INSERT INTO ai6_clock (name, revision) VALUES ('registry', 0), ('config', 0)
 
 -- The brief queue: state is new, held, claimed, done or failed. held is the record of a
 -- brief vetting held (its Operation, the vetting and when); clearance lists the finding kinds
--- the brief no longer stops for.
+-- the brief no longer stops for; cancel_requested_at is when a cancel of the claimed brief was
+-- first asked for, as Unix seconds.
 CREATE TABLE IF NOT EXISTS ai6_briefs (
     key TEXT PRIMARY KEY,
     state TEXT NOT NULL,
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS ai6_briefs (
     finished_provenance TEXT,
     held TEXT,
     clearance TEXT,
+    cancel_requested_at DOUBLE PRECISION,
     revision BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ai6_briefs_state ON ai6_briefs (state);

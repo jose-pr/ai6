@@ -52,4 +52,14 @@ pub(super) const STEPS: &[Step] = &[
         #[cfg(feature = "postgres")]
         postgres: "ALTER TABLE ai6_mission_ids ADD COLUMN handle TEXT NOT NULL",
     },
+    // When a cancel of a claimed brief was first asked for; existing rows have none asked.
+    Step {
+        name: "briefs.cancel_requested_at",
+        table: "ai6_briefs",
+        column: "cancel_requested_at",
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_briefs ADD COLUMN cancel_requested_at REAL",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_briefs ADD COLUMN cancel_requested_at DOUBLE PRECISION",
+    },
 ];

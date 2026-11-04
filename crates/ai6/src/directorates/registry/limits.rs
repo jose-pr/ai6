@@ -410,6 +410,11 @@ pub struct BriefLimits {
     #[schema(title = "Longest Mission handle", format = "bytes")]
     #[map(default = BriefLimits::default().handle_bytes)]
     pub handle_bytes: Limit,
+    /// Seconds after a cancel was asked for before the Headquarters Station settles a claimed
+    /// brief its Station has not finished: filed as failed, its lease released.
+    #[schema(title = "Settle an unconfirmed cancel after")]
+    #[map(default = BriefLimits::default().cancel_settle_after)]
+    pub cancel_settle_after: Seconds,
 }
 
 impl Default for BriefLimits {
@@ -419,6 +424,7 @@ impl Default for BriefLimits {
             records: Limit::at(1_000),
             provenance_bytes: Limit::at(16 * KIB),
             handle_bytes: Limit::at(120),
+            cancel_settle_after: Seconds::new(300),
         }
     }
 }

@@ -99,6 +99,34 @@ pub(super) fn refused_outcome(
     })
 }
 
+/// The outcome filed for a brief an operator withdrew before any Station took it.
+pub(super) fn withdrawn_outcome(brief: &Brief, by: &str, note: &str, at: f64) -> serde_json::Value {
+    let reason = if note.trim().is_empty() {
+        format!("withdrawn by {by}")
+    } else {
+        format!("withdrawn by {by}: {}", note.trim())
+    };
+    serde_json::json!({
+        "state": "withdrawn",
+        "mission_id": brief.key(),
+        "reason": reason,
+        "withdrawn_by": by,
+        "withdrawn_at": at,
+    })
+}
+
+/// Whether an outcome is a withdrawal's.
+pub(super) fn is_withdrawn(outcome: &serde_json::Value) -> bool {
+    outcome["state"] == "withdrawn"
+}
+
+pub(super) fn not_queued() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::NotFound,
+        "the Operation has no such brief queued or held",
+    )
+}
+
 pub(super) fn check_actor(by: &str, reason: &str, limits: &HeldLimits) -> io::Result<()> {
     if by.trim().is_empty() || !limits.actor_bytes.allows(by.len()) || by.contains(char::is_control)
     {
@@ -215,6 +243,24 @@ pub trait VettingStore {
         key: &str,
         by: &str,
         reason: &str,
+        at: f64,
+    ) -> io::Result<Brief>;
+
+    /// Withdraws a brief of `operation` that no Station took, queued or held: files it as failed
+    /// with an outcome naming `by` and their `note`. Withdrawing a brief already withdrawn returns
+    /// it again.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the Operation has no such brief queued or held; `AlreadyExists` when it
+    /// was claimed or finished; `InvalidInput` for a bad key or actor, or a note over
+    /// `[registry.limits.held] reason_bytes`; I/O errors otherwise.
+    fn withdraw_brief(
+        &self,
+        operation: &str,
+        key: &str,
+        by: &str,
+        note: &str,
         at: f64,
     ) -> io::Result<Brief>;
 
@@ -455,6 +501,54 @@ impl VettingStore for FileRegistry {
         Ok(held.brief)
     }
 
+    fn withdraw_brief(
+        &self,
+        operation: &str,
+        key: &str,
+        by: &str,
+        note: &str,
+        at: f64,
+    ) -> io::Result<Brief> {
+        validate_registry_key(operation)?;
+        validate_registry_key(key)?;
+        check_actor(by, note, &self.limits.held)?;
+        let _lock = self.lock()?;
+        match self.decided(key) {
+            Some("failed") => {
+                let path = self.root.join("failed");
+                let withdrawn = fs::read(path.join(format!("{key}.outcome.json")))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                    .is_some_and(|outcome| is_withdrawn(&outcome));
+                let brief = read_brief(&path.join(format!("{key}.json")))?
+                    .filter(|brief| withdrawn && brief.operation.as_deref() == Some(operation));
+                return brief.ok_or_else(already_decided);
+            }
+            Some(_) => return Err(already_decided()),
+            None => {}
+        }
+        let brief = match self.held_by(operation, key)? {
+            Some(held) => held.brief,
+            None => read_brief(&self.queued_path(key))?
+                .filter(|brief| brief.operation.as_deref() == Some(operation))
+                .ok_or_else(not_queued)?,
+        };
+        finish_locked(
+            self,
+            &brief,
+            &withdrawn_outcome(&brief, by, note, at),
+            false,
+            None,
+        )?;
+        if let Err(error) = fs::remove_file(self.queued_path(key))
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            return Err(error);
+        }
+        self.remove_held(key)?;
+        Ok(brief)
+    }
+
     fn requeue_held(&self, operation: &str, key: &str) -> io::Result<bool> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
@@ -631,7 +725,89 @@ mod tests {
         a_promotion_clears_the_brief_in_the_same_step,
         a_brief_claimed_or_finished_is_never_released_or_refused,
         a_held_brief_requeued_is_vetted_again_without_a_clearance,
+        a_brief_no_station_took_is_withdrawn_with_who_and_why,
     );
+
+    fn of_g(id: &str) -> Brief {
+        let mut queued = brief(id);
+        queued.operation = Some("G".to_owned());
+        queued
+    }
+
+    fn a_brief_no_station_took_is_withdrawn_with_who_and_why(store: &dyn Store) {
+        let registry = store.handle();
+        let queued = of_g("w-queued");
+        registry.submit_brief(&queued).unwrap();
+        let kind = |result: io::Result<Brief>| result.unwrap_err().kind();
+        assert_eq!(
+            kind(registry.withdraw_brief("L", &queued.key(), "ops", "", 5.0)),
+            io::ErrorKind::NotFound,
+            "another Operation's brief is not found"
+        );
+        let withdrawn = registry
+            .withdraw_brief("G", &queued.key(), "ops", " a duplicate of G-3 ", 5.0)
+            .unwrap();
+        assert_eq!(withdrawn.key(), queued.key());
+        assert!(registry.list_new().unwrap().is_empty());
+        let filed = registry.filed_brief(&queued.key()).unwrap().unwrap();
+        assert_eq!(filed.state, "failed");
+        let outcome = filed.outcome.unwrap();
+        assert_eq!(outcome["state"], "withdrawn");
+        assert_eq!(outcome["reason"], "withdrawn by ops: a duplicate of G-3");
+        assert_eq!(outcome["withdrawn_by"], "ops");
+        assert_eq!(
+            registry
+                .withdraw_brief("G", &queued.key(), "ops", "", 6.0)
+                .unwrap()
+                .key(),
+            queued.key(),
+            "withdrawing again returns it"
+        );
+
+        let held = of_g("w-held");
+        registry.submit_brief(&held).unwrap();
+        registry
+            .hold_brief("G", &held.key(), &duplicate(), 1.0)
+            .unwrap()
+            .unwrap();
+        registry
+            .withdraw_brief("G", &held.key(), "ops", "", 7.0)
+            .unwrap();
+        assert!(registry.held_briefs("G", 10).unwrap().is_empty());
+        let outcome = registry
+            .filed_brief(&held.key())
+            .unwrap()
+            .unwrap()
+            .outcome
+            .unwrap();
+        assert_eq!(outcome["reason"], "withdrawn by ops");
+
+        let claimed = of_g("w-claimed");
+        registry.submit_brief(&claimed).unwrap();
+        registry
+            .claim_with_lease(
+                Some(&claimed.key()),
+                "hq",
+                Duration::from_secs(60),
+                Default::default(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            kind(registry.withdraw_brief("G", &claimed.key(), "ops", "", 8.0)),
+            io::ErrorKind::AlreadyExists,
+            "a placed brief is cancelled, not withdrawn"
+        );
+        assert_eq!(
+            kind(registry.withdraw_brief("G", "manual--nobody", "ops", "", 8.0)),
+            io::ErrorKind::NotFound
+        );
+        let long = "x".repeat(registry.limits().held.reason_bytes.or_max() + 1);
+        assert_eq!(
+            kind(registry.withdraw_brief("G", &claimed.key(), "ops", &long, 8.0)),
+            io::ErrorKind::InvalidInput
+        );
+    }
 
     fn proposal(key: &str) -> crate::directorates::registry::store::MissionProposal {
         use crate::directorates::m::identity::{MissionId, SessionId};

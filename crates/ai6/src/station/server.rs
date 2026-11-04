@@ -1679,6 +1679,10 @@ async fn scheduler_loop(base: DaemonState) {
         let is_headquarters = tokio::task::spawn_blocking(move || schedule_intake_once(&intake))
             .await
             .unwrap_or_default();
+        #[cfg(feature = "publisher")]
+        if check_in {
+            controls::stop_settled(&state).await;
+        }
         if is_headquarters && check_in {
             let promoting = state.clone();
             let _ = tokio::task::spawn_blocking(move || promotion::round(&promoting)).await;
@@ -1749,6 +1753,9 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
     if !is_headquarters {
         return false;
     }
+    // Cancels are asked for through Universal Exports, which a Station reaches by publishing.
+    #[cfg(feature = "publisher")]
+    controls::settle_unconfirmed_cancels(state);
     let Ok(briefs) = state.intake.list_new() else {
         return true;
     };

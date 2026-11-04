@@ -210,6 +210,155 @@ pub(crate) async fn refuse(
     }))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WithdrawRequest {
+    /// Why, for the record.
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// A brief withdrawn before any Station took it.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WithdrawnBrief {
+    /// The Operation.
+    pub operation_id: String,
+    /// The Mission's UID, its brief's key.
+    pub mission_id: String,
+    /// `withdrawn`.
+    pub state: &'static str,
+    /// The reason it was filed with: who withdrew it, and their note.
+    pub reason: String,
+}
+
+/// What a withdrawal filed.
+pub(crate) struct Withdrawn {
+    pub(crate) reason: String,
+    pub(crate) at: f64,
+}
+
+/// What became of a request to withdraw a brief.
+pub(crate) enum Withdrawal {
+    /// It was queued or held, and is filed as failed.
+    Done(Withdrawn),
+    /// The Operation has no such brief queued or held.
+    NotQueued,
+    /// A Station claimed it, or it finished.
+    Decided,
+}
+
+/// Withdraws the Operation's brief `key` when it is queued or held, audited as
+/// `mission.withdraw` and put on the Operation's timeline. The caller has checked
+/// `mission.control`.
+pub(crate) async fn withdraw_queued(
+    gateway: &Gateway,
+    person: &ai6::Person,
+    operation: &OperationId,
+    key: &str,
+    note: Option<String>,
+) -> Result<Withdrawal, ApiError> {
+    let note = note.unwrap_or_default().trim().to_owned();
+    if !gateway
+        .config
+        .unex()
+        .text
+        .held_reason_chars
+        .allows(note.chars().count())
+        || note
+            .chars()
+            .any(|character| character.is_control() && character != '\n')
+    {
+        return Err(ApiError::bad_request());
+    }
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let at = unix_timestamp()?;
+    let (store, operation_key, brief_key, by) = (
+        registry.clone(),
+        operation.to_string(),
+        key.to_owned(),
+        person.id.clone(),
+    );
+    let withdrawn = tokio::task::spawn_blocking(move || {
+        store.withdraw_brief(&operation_key, &brief_key, &by, &note, at)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?;
+    match withdrawn {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Withdrawal::NotQueued);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Ok(Withdrawal::Decided);
+        }
+        Err(error) => return Err(registry_error(error)),
+    }
+    let filed = registry.clone();
+    let brief_key = key.to_owned();
+    let reason = tokio::task::spawn_blocking(move || filed.filed_brief(&brief_key))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(registry_error)?
+        .and_then(|filed| filed.outcome)
+        .and_then(|outcome| outcome["reason"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| format!("withdrawn by {}", person.id));
+    let audit = AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor: person.id.clone(),
+        action: "mission.withdraw".to_owned(),
+        operation: operation.to_string(),
+        resource: None,
+        target: key.to_owned(),
+        at,
+    };
+    let event = TimelineEvent::new("intake", "withdrawn", operation.to_string(), at)
+        .mission(key)
+        .actor(person.id.clone());
+    tokio::task::spawn_blocking(move || {
+        registry.record_audit(&audit)?;
+        let _ = registry.record_event(&event);
+        Ok::<_, std::io::Error>(())
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    Ok(Withdrawal::Done(Withdrawn { reason, at }))
+}
+
+/// `POST /v1/user/operations/{operation_id}/missions/{mission_id}/withdraw`: files a brief no
+/// Station has taken, queued or held, as failed with who withdrew it and their note. Needs
+/// `mission.control`, as a cancel does.
+pub(crate) async fn withdraw(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, mission_id)): Path<(String, String)>,
+    Json(request): Json<WithdrawRequest>,
+) -> Result<Json<WithdrawnBrief>, ApiError> {
+    let key = crate::mission_key(&gateway, &mission_id).await?;
+    valid_key(&key)?;
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    authorize_operation_action(&gateway, person.clone(), &operation, "mission.control").await?;
+    let withdrawn = match withdraw_queued(&gateway, &person, &operation, &key, request.note).await?
+    {
+        Withdrawal::Done(withdrawn) => withdrawn,
+        Withdrawal::NotQueued => return Err(ApiError::not_found()),
+        Withdrawal::Decided => {
+            return Err(ApiError::refused(
+                axum::http::StatusCode::CONFLICT,
+                "a Station took the Mission, or it ended: cancel it instead".to_owned(),
+            ));
+        }
+    };
+    Ok(Json(WithdrawnBrief {
+        operation_id: operation.to_string(),
+        mission_id: key,
+        state: "withdrawn",
+        reason: withdrawn.reason,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use ai6::directorates::registry::backend::*;
@@ -377,6 +526,179 @@ mod tests {
             .collect();
         // Each request the operator made is recorded, the repeated release too.
         assert_eq!(actions, ["released", "released", "refused"]);
+    }
+
+    /// Operator 007 controls Missions in G; viewer 007 only reads them.
+    const CONTROL_ROLES: &str = r#"
+        [role.viewer]
+        actions = ["mission.read"]
+
+        [role.controller]
+        actions = ["mission.read", "mission.control"]
+
+        [[rule]]
+        subject = "person:viewer-007"
+        scope = "operation:G"
+        role = "viewer"
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "operation:G"
+        role = "controller"
+    "#;
+
+    fn queue(served: &Served, id: &str) -> String {
+        let brief: Brief = serde_json::from_value(serde_json::json!({
+            "title": "Impossible work",
+            "id": id,
+            "source": "manual",
+            "operation": "G",
+            "stations": ["nowhere"],
+        }))
+        .unwrap();
+        served.registry.submit_brief(&brief).unwrap();
+        brief.key()
+    }
+
+    #[tokio::test]
+    async fn a_queued_brief_is_withdrawn_with_its_note_and_audited() {
+        let served = served_with(CONTROL_ROLES).await;
+        let key = queue(&served, "w-1");
+        let path = format!("G/missions/{key}/withdraw");
+        let body = serde_json::json!({"note": "it can never place"});
+        let viewer = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::POST,
+            &path,
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(viewer.status(), 403, "withdrawing needs mission.control");
+        let response = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &path,
+            Some(body),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        let response: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(response["state"], "withdrawn");
+        assert_eq!(response["mission_id"], key.as_str());
+        assert_eq!(
+            response["reason"],
+            "withdrawn by operator-007: it can never place"
+        );
+        assert!(served.registry.list_new().unwrap().is_empty());
+        let filed = served.registry.filed_brief(&key).unwrap().unwrap();
+        assert_eq!(filed.state, "failed");
+        assert!(
+            served
+                .registry
+                .audit_records()
+                .unwrap()
+                .iter()
+                .any(|record| {
+                    record.action == "mission.withdraw"
+                        && record.target == key
+                        && record.actor == "operator-007"
+                })
+        );
+        let actions: Vec<String> = served
+            .registry
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .map(|event| event.action)
+            .collect();
+        assert_eq!(actions, ["withdrawn"]);
+
+        let unknown = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            "G/missions/manual--nobody/withdraw",
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(unknown.status(), 404);
+        let placed = queue(&served, "w-2");
+        served
+            .registry
+            .claim_with_lease(
+                Some(&placed),
+                "worker",
+                std::time::Duration::from_secs(60),
+                std::collections::BTreeMap::new(),
+            )
+            .unwrap()
+            .unwrap();
+        let taken = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/missions/{placed}/withdraw"),
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(taken.status(), 409);
+        assert!(taken.text().await.unwrap().contains("cancel it instead"));
+    }
+
+    #[tokio::test]
+    async fn a_cancel_of_a_brief_no_station_took_withdraws_it_and_one_placed_is_recorded() {
+        let served = served_with(CONTROL_ROLES).await;
+        let key = queue(&served, "c-1");
+        let cancel = |idempotency: &str| serde_json::json!({"action": "cancel", "idempotency_key": idempotency});
+        let asked =
+            crate::controls::tests::ask(&served, &served.operator, "G", &key, cancel("c-1")).await;
+        assert_eq!(asked.status(), 202);
+        let status: serde_json::Value = asked.json().await.unwrap();
+        assert_eq!(status["status"], "applied");
+        assert_eq!(status["state"], "failed");
+        assert_eq!(status["reason"], "withdrawn by operator-007");
+        assert_eq!(
+            served.registry.filed_brief(&key).unwrap().unwrap().state,
+            "failed"
+        );
+        assert!(
+            crate::controls::tests::take(&served, "hq").await.is_none(),
+            "no Station is asked"
+        );
+        let replay =
+            crate::controls::tests::ask(&served, &served.operator, "G", &key, cancel("c-1")).await;
+        assert_eq!(
+            replay.status(),
+            200,
+            "the same key returns the same control"
+        );
+
+        // A placed brief: the cancel goes to its Station and the Registry keeps when it was asked.
+        let placed = queue(&served, "c-2");
+        served
+            .registry
+            .claim_with_lease(
+                Some(&placed),
+                "worker",
+                std::time::Duration::from_secs(60),
+                std::collections::BTreeMap::from([
+                    ("mission_id".to_owned(), serde_json::json!(placed)),
+                    ("operation".to_owned(), serde_json::json!("G")),
+                ]),
+            )
+            .unwrap()
+            .unwrap();
+        let asked =
+            crate::controls::tests::ask(&served, &served.operator, "G", &placed, cancel("c-2"))
+                .await;
+        assert_eq!(asked.status(), 202);
+        let status: serde_json::Value = asked.json().await.unwrap();
+        assert_eq!(status["status"], "queued");
+        assert_eq!(status["station_id"], "worker");
+        let requests = served.registry.cancel_requests().unwrap();
+        assert!(requests.contains_key(&placed), "{requests:?}");
     }
 
     #[tokio::test]

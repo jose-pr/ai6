@@ -500,3 +500,236 @@ fn a_look_asks_no_more_handlers_at_once_than_model_probes() {
     assert_eq!(state.models.found().len(), 5);
     assert_eq!(counts(key, |counts| counts.most_listing), 2);
 }
+
+/// A Station whose Headquarters settles an unconfirmed cancel after `settle_after`.
+#[cfg(feature = "publisher")]
+fn settling_state(root: &Path, settle_after: Duration) -> DaemonState {
+    let mut state = empty_book(root, "[agent.007]\nhandler = \"mock-agent\"\n");
+    let mut registry = RegistryLimits::default();
+    registry.briefs.cancel_settle_after = Seconds(settle_after);
+    state.intake = Arc::new(FileRegistry::open(root.join("registry")).with_limits(registry));
+    state
+}
+
+/// What a wedged Mission's brief looks like: its Station renews the lease every pass for as long
+/// as its Mission has not ended, and nothing else ends it. A cancel the Station never confirms is
+/// settled by Headquarters once `cancel_settle_after` has passed, and the Station, finding the
+/// brief settled, stops the Mission.
+#[cfg(feature = "publisher")]
+#[tokio::test]
+async fn a_cancel_its_station_never_confirms_settles_the_brief_after_the_setting() {
+    let root = tempfile::tempdir().unwrap();
+    let state = settling_state(root.path(), Duration::from_secs(300));
+    let brief = named_brief("wedged", "007");
+    let key = brief.key();
+    state.intake.submit_brief(&brief).unwrap();
+    schedule_intake_once(&state);
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition(&key, MissionState::Working)
+        .unwrap();
+    let first = state.intake.lease(&key).unwrap().unwrap().expires();
+    for _ in 0..3 {
+        std::thread::sleep(Duration::from_millis(20));
+        schedule_intake_once(&state);
+    }
+    assert!(
+        state.intake.lease(&key).unwrap().unwrap().expires() >= first,
+        "its Station keeps the lease"
+    );
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "claimed"
+    );
+
+    // Asked a moment ago: not yet.
+    assert!(state.intake.request_cancel(&key, unix_now()).unwrap());
+    schedule_intake_once(&state);
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "claimed"
+    );
+
+    // The first request is the one that counts; one that old is settled.
+    let other = tempfile::tempdir().unwrap();
+    let state = settling_state(other.path(), Duration::from_secs(300));
+    state.intake.submit_brief(&brief).unwrap();
+    schedule_intake_once(&state);
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition(&key, MissionState::Working)
+        .unwrap();
+    assert!(
+        state
+            .intake
+            .request_cancel(&key, unix_now() - 301.0)
+            .unwrap()
+    );
+    assert!(state.intake.request_cancel(&key, unix_now()).unwrap());
+    schedule_intake_once(&state);
+    let filed = state.intake.filed_brief(&key).unwrap().unwrap();
+    assert_eq!(filed.state, "failed");
+    let outcome = filed.outcome.unwrap();
+    assert_eq!(outcome["reason"], controls::CANCEL_UNCONFIRMED);
+    assert_eq!(outcome["station"], "test");
+    assert!(
+        state.intake.lease(&key).unwrap().is_none(),
+        "the lease is released"
+    );
+    assert!(state.intake.cancel_requests().unwrap().is_empty());
+
+    controls::stop_settled(&state).await;
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Abandoned
+    );
+}
+
+#[cfg(feature = "publisher")]
+#[tokio::test]
+async fn a_mission_retried_after_its_settlement_runs_on() {
+    let root = tempfile::tempdir().unwrap();
+    let state = settling_state(root.path(), Duration::ZERO);
+    let brief = named_brief("retried", "007");
+    let key = brief.key();
+    state.intake.submit_brief(&brief).unwrap();
+    schedule_intake_once(&state);
+    assert!(state.intake.request_cancel(&key, unix_now()).unwrap());
+    schedule_intake_once(&state);
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "failed"
+    );
+    // The Mission had a Session the settlement did not name: a later attempt.
+    {
+        let mut missions = state.missions.lock().unwrap();
+        missions.transition(&key, MissionState::Working).unwrap();
+        missions
+            .attach_session(&key, SessionId::try_new("provider-session-later").unwrap())
+            .unwrap();
+    }
+    controls::stop_settled(&state).await;
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Working
+    );
+}
+
+#[cfg(feature = "publisher")]
+const ROLE_AGENTS: &str = "[agent.007]\nhandler = \"mock-agent\"\npriority = 5\n\
+                           roles = [\"case-officer\"]\n\
+                           [agent.008]\nhandler = \"mock-agent\"\nroles = [\"case-officer\"]\n";
+
+/// A failed Mission of Agent 007 in role `case-officer`.
+#[cfg(feature = "publisher")]
+fn failed_case(state: &DaemonState) {
+    let mut missions = state.missions.lock().unwrap();
+    missions
+        .create(
+            MissionId::try_new("mission-case").unwrap(),
+            Some("G".to_owned()),
+            "work the case".to_owned(),
+            Some("007".to_owned()),
+            Some("case-officer".to_owned()),
+        )
+        .unwrap();
+    missions
+        .transition("mission-case", MissionState::Failed)
+        .unwrap();
+}
+
+#[cfg(feature = "publisher")]
+fn retry_case() -> ai6_diptel::MissionControl {
+    ai6_diptel::MissionControl::new(
+        ai6_diptel::ControlId::new("control-retry").unwrap(),
+        ai6_diptel::OperationId::new("G").unwrap(),
+        ai6_diptel::MissionId::new("mission-case").unwrap(),
+        ai6_diptel::ControlAction::Retry,
+    )
+}
+
+#[cfg(feature = "publisher")]
+#[tokio::test]
+async fn a_retry_goes_to_the_agent_the_roster_gives_now() {
+    let root = tempfile::tempdir().unwrap();
+    let mut state = test_state(root.path(), "", ROLE_AGENTS);
+    failed_case(&state);
+    // 007 is stripped of the role and drops to priority 1.
+    fs::write(
+        root.path().join("agents.toml"),
+        ROLE_AGENTS.replace(
+            "priority = 5\nroles = [\"case-officer\"]",
+            "priority = 1\nroles = []",
+        ),
+    )
+    .unwrap();
+    state.roster = Arc::new(Roster::load(root.path()).unwrap());
+
+    let outcome = controls::apply(&state, &retry_case()).await;
+    assert_eq!(outcome.outcome, "applied", "{:?}", outcome.reason);
+    let retried = super::tests::mission_state(&state, "mission-case");
+    assert_eq!(retried.state, MissionState::Queued);
+    assert_eq!(retried.agent_id.as_deref(), Some("008"));
+}
+
+#[cfg(feature = "publisher")]
+#[tokio::test]
+async fn a_retry_keeps_its_agent_while_it_ranks_first_and_names_one_when_asked() {
+    let root = tempfile::tempdir().unwrap();
+    let state = test_state(root.path(), "", ROLE_AGENTS);
+    failed_case(&state);
+    assert_eq!(
+        controls::apply(&state, &retry_case()).await.outcome,
+        "applied"
+    );
+    assert_eq!(
+        super::tests::mission_state(&state, "mission-case")
+            .agent_id
+            .as_deref(),
+        Some("007")
+    );
+
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition("mission-case", MissionState::Failed)
+        .unwrap();
+    let named = retry_case().with_agent("008").unwrap();
+    assert_eq!(controls::apply(&state, &named).await.outcome, "applied");
+    assert_eq!(
+        super::tests::mission_state(&state, "mission-case")
+            .agent_id
+            .as_deref(),
+        Some("008"),
+        "a named Agent is taken as named"
+    );
+}
+
+#[cfg(feature = "publisher")]
+#[tokio::test]
+async fn a_retry_no_agent_can_take_is_refused_with_the_reason() {
+    let root = tempfile::tempdir().unwrap();
+    let mut state = test_state(root.path(), "", ROLE_AGENTS);
+    failed_case(&state);
+    fs::write(
+        root.path().join("agents.toml"),
+        "[agent.007]\nhandler = \"mock-agent\"\n",
+    )
+    .unwrap();
+    state.roster = Arc::new(Roster::load(root.path()).unwrap());
+    let outcome = controls::apply(&state, &retry_case()).await;
+    assert_eq!(outcome.outcome, "rejected");
+    assert!(
+        outcome
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.starts_with("no Agent can take the retry")),
+        "{:?}",
+        outcome.reason
+    );
+}
