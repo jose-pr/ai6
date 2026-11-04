@@ -21,6 +21,7 @@ pub fn ai6_agent_claude::ClaudeHandler::assistant_skills(&self) -> core::result:
 pub fn ai6_agent_claude::ClaudeHandler::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_claude::ClaudeHandler::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -30,5 +31,6 @@ pub fn ai6_agent_claude::ClaudeHandler::try_from(ai6_agent_claude::ClaudeConfig)
 impl guatiao::library::kind::parts::ProviderDecl for ai6_agent_claude::ClaudeHandler
 pub const ai6_agent_claude::ClaudeHandler::KINDS: &'static [&'static str]
 pub fn ai6_agent_claude::ClaudeHandler::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub const ai6_agent_claude::RECORD_FORMAT: &str
 #[no_mangle] pub static ai6_agent_claude::guatiao_declares: [u8; 24]
 #[no_mangle] pub unsafe c fn ai6_agent_claude::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

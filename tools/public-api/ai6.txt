@@ -595,6 +595,9 @@ pub ai6::directorates::m::assistant::AssistantGatewayLimits::conversations_per_p
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::event_buffer: u64
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::hello_timeout: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::live_per_person: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::log_age: ai6::bounds::TimeLimit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::log_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::log_prune_every: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::max_wait: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::memory_context_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::message_bytes: ai6::bounds::Limit
@@ -3723,6 +3726,51 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub mod ai6::directorates::registry::assistant_log
+#[non_exhaustive] pub struct ai6::directorates::registry::assistant_log::AssistantConversation
+pub ai6::directorates::registry::assistant_log::AssistantConversation::bytes: u64
+pub ai6::directorates::registry::assistant_log::AssistantConversation::conversation: alloc::string::String
+pub ai6::directorates::registry::assistant_log::AssistantConversation::entries: u64
+pub ai6::directorates::registry::assistant_log::AssistantConversation::first_at: f64
+pub ai6::directorates::registry::assistant_log::AssistantConversation::last_at: f64
+pub ai6::directorates::registry::assistant_log::AssistantConversation::person: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::assistant_log::AssistantLogEntry
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::at: f64
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::conversation: alloc::string::String
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::cut_from: core::option::Option<u64>
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::data: core::option::Option<serde_json::value::Value>
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::id: alloc::string::String
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::kind: alloc::string::String
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::person: alloc::string::String
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::text: alloc::string::String
+pub ai6::directorates::registry::assistant_log::AssistantLogEntry::turn: core::option::Option<ai6::directorates::registry::assistant_log::AssistantTurn>
+impl ai6::directorates::registry::assistant_log::AssistantLogEntry
+pub fn ai6::directorates::registry::assistant_log::AssistantLogEntry::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+pub fn ai6::directorates::registry::assistant_log::AssistantLogEntry::with_data(self, serde_json::value::Value) -> Self
+pub fn ai6::directorates::registry::assistant_log::AssistantLogEntry::with_turn(self, ai6::directorates::registry::assistant_log::AssistantTurn) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::assistant_log::AssistantTurn
+pub ai6::directorates::registry::assistant_log::AssistantTurn::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
+pub ai6::directorates::registry::assistant_log::AssistantTurn::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assistant_log::AssistantTurn::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assistant_log::AssistantTurn::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
+pub ai6::directorates::registry::assistant_log::AssistantTurn::session: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assistant_log::AssistantTurn::station: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assistant_log::AssistantTurn::tokens: core::option::Option<u64>
+pub trait ai6::directorates::registry::assistant_log::AssistantLogStore
+pub fn ai6::directorates::registry::assistant_log::AssistantLogStore::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::assistant_log::AssistantLogStore::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::assistant_log::AssistantLogStore::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::assistant_log::AssistantLogStore::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 pub mod ai6::directorates::registry::backend
 pub struct ai6::directorates::registry::backend::MissionEntry
 impl ai6::directorates::registry::mission_ids::MissionEntry
@@ -3851,6 +3899,21 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub trait ai6::directorates::registry::backend::AssistantLogStore
+pub fn ai6::directorates::registry::backend::AssistantLogStore::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::backend::AssistantLogStore::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::backend::AssistantLogStore::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::AssistantLogStore::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 pub trait ai6::directorates::registry::backend::AuditStore
 pub fn ai6::directorates::registry::backend::AuditStore::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::backend::AuditStore::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
@@ -4172,8 +4235,20 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::SessionContextStore
+pub fn ai6::directorates::registry::backend::SessionContextStore::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::backend::SessionContextStore::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::SessionContextStore::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::store::FileRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 pub trait ai6::directorates::registry::backend::SessionStore
 pub fn ai6::directorates::registry::backend::SessionStore::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -4686,6 +4761,44 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&se
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub mod ai6::directorates::registry::contexts
+#[non_exhaustive] pub enum ai6::directorates::registry::contexts::ContextOwner
+pub ai6::directorates::registry::contexts::ContextOwner::Conversation
+pub ai6::directorates::registry::contexts::ContextOwner::Conversation::conversation: alloc::string::String
+pub ai6::directorates::registry::contexts::ContextOwner::Mission
+pub ai6::directorates::registry::contexts::ContextOwner::Mission::mission: alloc::string::String
+pub ai6::directorates::registry::contexts::ContextOwner::Mission::operation: alloc::string::String
+#[non_exhaustive] pub enum ai6::directorates::registry::contexts::ContextSource
+pub ai6::directorates::registry::contexts::ContextSource::Events
+pub ai6::directorates::registry::contexts::ContextSource::Harness
+#[non_exhaustive] pub struct ai6::directorates::registry::contexts::SessionContext
+pub ai6::directorates::registry::contexts::SessionContext::content: alloc::string::String
+pub ai6::directorates::registry::contexts::SessionContext::cut_from: core::option::Option<u64>
+pub ai6::directorates::registry::contexts::SessionContext::filed_at: f64
+pub ai6::directorates::registry::contexts::SessionContext::format: alloc::string::String
+pub ai6::directorates::registry::contexts::SessionContext::handler: alloc::string::String
+pub ai6::directorates::registry::contexts::SessionContext::owner: ai6::directorates::registry::contexts::ContextOwner
+pub ai6::directorates::registry::contexts::SessionContext::session: alloc::string::String
+pub ai6::directorates::registry::contexts::SessionContext::source: ai6::directorates::registry::contexts::ContextSource
+pub ai6::directorates::registry::contexts::SessionContext::station: alloc::string::String
+impl ai6::directorates::registry::contexts::SessionContext
+pub fn ai6::directorates::registry::contexts::SessionContext::conversation(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::registry::contexts::SessionContext::cut_to(self, ai6::bounds::Limit) -> Self
+pub fn ai6::directorates::registry::contexts::SessionContext::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::contexts::ContextOwner, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::contexts::ContextSource, f64, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::contexts::SessionContext::operation(&self) -> core::option::Option<&str>
+pub const ai6::directorates::registry::contexts::EVENTS_FORMAT: &str
+pub trait ai6::directorates::registry::contexts::SessionContextStore
+pub fn ai6::directorates::registry::contexts::SessionContextStore::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::contexts::SessionContextStore::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::contexts::SessionContextStore::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::store::FileRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 pub mod ai6::directorates::registry::holds
 #[non_exhaustive] pub struct ai6::directorates::registry::holds::RosterHold
 pub ai6::directorates::registry::holds::RosterHold::agent: alloc::string::String
@@ -4752,6 +4865,10 @@ pub ai6::directorates::registry::limits::ApprovalLimits::record_bytes: ai6::boun
 pub ai6::directorates::registry::limits::ApprovalLimits::signer_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::ApprovalLimits
 pub fn ai6::directorates::registry::limits::ApprovalLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::limits::AssistantLogLimits
+pub ai6::directorates::registry::limits::AssistantLogLimits::entry_bytes: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::limits::AssistantLogLimits
+pub fn ai6::directorates::registry::limits::AssistantLogLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::AuditLimits
 pub ai6::directorates::registry::limits::AuditLimits::record_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::AuditLimits::records: ai6::bounds::Limit
@@ -4779,6 +4896,11 @@ pub ai6::directorates::registry::limits::ClearanceLimits::record_bytes: ai6::bou
 pub ai6::directorates::registry::limits::ClearanceLimits::text_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::ClearanceLimits
 pub fn ai6::directorates::registry::limits::ClearanceLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::limits::ContextLimits
+pub ai6::directorates::registry::limits::ContextLimits::context_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ContextLimits::records: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::limits::ContextLimits
+pub fn ai6::directorates::registry::limits::ContextLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::FileLimits
 pub ai6::directorates::registry::limits::FileLimits::lock_wait: ai6::bounds::TimeLimit
 pub ai6::directorates::registry::limits::FileLimits::rename_retry: ai6::bounds::TimeLimit
@@ -4851,10 +4973,12 @@ pub ai6::directorates::registry::limits::RegistryLimits::accounts: ai6::director
 pub ai6::directorates::registry::limits::RegistryLimits::agent_roles: ai6::directorates::registry::limits::AgentRoleLimits
 pub ai6::directorates::registry::limits::RegistryLimits::agents: ai6::directorates::registry::limits::AgentLimits
 pub ai6::directorates::registry::limits::RegistryLimits::approvals: ai6::directorates::registry::limits::ApprovalLimits
+pub ai6::directorates::registry::limits::RegistryLimits::assistant_log: ai6::directorates::registry::limits::AssistantLogLimits
 pub ai6::directorates::registry::limits::RegistryLimits::audit: ai6::directorates::registry::limits::AuditLimits
 pub ai6::directorates::registry::limits::RegistryLimits::briefs: ai6::directorates::registry::limits::BriefLimits
 pub ai6::directorates::registry::limits::RegistryLimits::cables: ai6::directorates::registry::limits::CableLimits
 pub ai6::directorates::registry::limits::RegistryLimits::clearance: ai6::directorates::registry::limits::ClearanceLimits
+pub ai6::directorates::registry::limits::RegistryLimits::contexts: ai6::directorates::registry::limits::ContextLimits
 pub ai6::directorates::registry::limits::RegistryLimits::files: ai6::directorates::registry::limits::FileLimits
 pub ai6::directorates::registry::limits::RegistryLimits::held: ai6::directorates::registry::limits::HeldLimits
 pub ai6::directorates::registry::limits::RegistryLimits::holds: ai6::directorates::registry::limits::HoldLimits
@@ -5745,6 +5869,11 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
@@ -5754,6 +5883,10 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self,
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -5980,6 +6113,11 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
@@ -5989,6 +6127,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&se
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::store::FileRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::store::FileRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -6747,6 +6889,13 @@ pub ai6::directorates::section_00::agent::ModelListing::unknown_because: core::o
 impl ai6::directorates::section_00::agent::ModelListing
 pub fn ai6::directorates::section_00::agent::ModelListing::of(alloc::vec::Vec<ai6::directorates::section_00::agent::ModelInfo>) -> Self
 pub fn ai6::directorates::section_00::agent::ModelListing::unknown(impl core::convert::Into<alloc::string::String>) -> Self
+pub struct ai6::directorates::section_00::agent::SessionRecordFile
+pub ai6::directorates::section_00::agent::SessionRecordFile::format: alloc::string::String
+pub ai6::directorates::section_00::agent::SessionRecordFile::path: alloc::string::String
+pub struct ai6::directorates::section_00::agent::SessionRecordQuery
+pub ai6::directorates::section_00::agent::SessionRecordQuery::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::section_00::agent::SessionRecordQuery::session_id: alloc::string::String
+pub ai6::directorates::section_00::agent::SessionRecordQuery::working_directory: alloc::string::String
 pub const ai6::directorates::section_00::agent::READ_CLEARANCE: &str
 pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -6755,6 +6904,7 @@ pub fn ai6::directorates::section_00::agent::AgentHandler::clearance_refusal(&se
 pub fn ai6::directorates::section_00::agent::AgentHandler::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -6765,6 +6915,7 @@ pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -6775,6 +6926,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -6868,10 +7020,15 @@ pub ai6::directorates::section_00::assistant::AssistantReport::conversation_id: 
 pub ai6::directorates::section_00::assistant::AssistantReport::events: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantEvent>
 pub ai6::directorates::section_00::assistant::AssistantReport::job_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantReport::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
+pub ai6::directorates::section_00::assistant::AssistantReport::run: core::option::Option<ai6::directorates::section_00::assistant::AssistantRun>
 pub ai6::directorates::section_00::assistant::AssistantReport::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantReport::station_id: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantReport
 pub fn ai6::directorates::section_00::assistant::AssistantReport::cut_texts(&mut self, &ai6::AssistantLimits)
+pub struct ai6::directorates::section_00::assistant::AssistantRun
+pub ai6::directorates::section_00::assistant::AssistantRun::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
+pub ai6::directorates::section_00::assistant::AssistantRun::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantRun::tokens: core::option::Option<u64>
 pub struct ai6::directorates::section_00::assistant::AssistantSharedBase
 pub ai6::directorates::section_00::assistant::AssistantSharedBase::base: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantSharedBase::content: alloc::string::String
@@ -6988,6 +7145,11 @@ pub fn ai6::directorates::section_00::programs::program_dirs(&[&str], &std::path
 pub fn ai6::directorates::section_00::programs::starts_with(&std::path::Path, &std::path::Path) -> bool
 pub fn ai6::directorates::section_00::programs::station_paths(&std::path::Path, &[std::path::PathBuf], &[alloc::string::String]) -> alloc::vec::Vec<std::path::PathBuf>
 pub fn ai6::directorates::section_00::programs::variable(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, &str) -> core::option::Option<alloc::string::String>
+pub mod ai6::directorates::section_00::records
+pub fn ai6::directorates::section_00::records::configured_dir(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, &str, &str) -> core::option::Option<std::path::PathBuf>
+pub fn ai6::directorates::section_00::records::file_safe(&str) -> bool
+pub fn ai6::directorates::section_00::records::find_file(&std::path::Path, usize, &dyn core::ops::function::Fn(&str) -> bool) -> core::option::Option<std::path::PathBuf>
+pub fn ai6::directorates::section_00::records::home(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::option::Option<std::path::PathBuf>
 pub mod ai6::settings
 pub mod ai6::settings::reference
 pub const ai6::settings::reference::DOCS: [&str; 5]
@@ -7618,6 +7780,15 @@ pub fn ai6::directorates::m::config::ConfigScope::of_station(&str) -> Self
 pub fn ai6::directorates::m::config::ConfigScope::parse(&str) -> core::option::Option<Self>
 impl core::fmt::Display for ai6::directorates::m::config::ConfigScope
 pub fn ai6::directorates::m::config::ConfigScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::ContextOwner
+pub ai6::ContextOwner::Conversation
+pub ai6::ContextOwner::Conversation::conversation: alloc::string::String
+pub ai6::ContextOwner::Mission
+pub ai6::ContextOwner::Mission::mission: alloc::string::String
+pub ai6::ContextOwner::Mission::operation: alloc::string::String
+#[non_exhaustive] pub enum ai6::ContextSource
+pub ai6::ContextSource::Events
+pub ai6::ContextSource::Harness
 #[non_exhaustive] pub enum ai6::CoverTarget
 pub ai6::CoverTarget::Mission(alloc::string::String)
 pub ai6::CoverTarget::Operation(alloc::string::String)
@@ -8446,6 +8617,13 @@ pub ai6::AssistantCommit::message: alloc::string::String
 pub ai6::AssistantCommit::repo: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantCommit
 pub fn ai6::directorates::section_00::assistant::AssistantCommit::validate(&self, &ai6::AssistantLimits) -> core::result::Result<(), alloc::string::String>
+#[non_exhaustive] pub struct ai6::AssistantConversation
+pub ai6::AssistantConversation::bytes: u64
+pub ai6::AssistantConversation::conversation: alloc::string::String
+pub ai6::AssistantConversation::entries: u64
+pub ai6::AssistantConversation::first_at: f64
+pub ai6::AssistantConversation::last_at: f64
+pub ai6::AssistantConversation::person: alloc::string::String
 #[non_exhaustive] pub struct ai6::AssistantDeskLimits
 pub ai6::AssistantDeskLimits::call_margin: ai6::bounds::Seconds
 pub ai6::AssistantDeskLimits::clone_bytes: ai6::bounds::Limit
@@ -8495,6 +8673,9 @@ pub ai6::AssistantGatewayLimits::conversations_per_person: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::event_buffer: u64
 pub ai6::AssistantGatewayLimits::hello_timeout: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::live_per_person: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::log_age: ai6::bounds::TimeLimit
+pub ai6::AssistantGatewayLimits::log_bytes: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::log_prune_every: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::max_wait: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::memory_context_bytes: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::message_bytes: ai6::bounds::Limit
@@ -8564,6 +8745,24 @@ pub fn ai6::AssistantLimits::validate(&self) -> core::result::Result<(), alloc::
 pub fn ai6::AssistantLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::AssistantLimits
 pub fn ai6::AssistantLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::AssistantLogEntry
+pub ai6::AssistantLogEntry::at: f64
+pub ai6::AssistantLogEntry::conversation: alloc::string::String
+pub ai6::AssistantLogEntry::cut_from: core::option::Option<u64>
+pub ai6::AssistantLogEntry::data: core::option::Option<serde_json::value::Value>
+pub ai6::AssistantLogEntry::id: alloc::string::String
+pub ai6::AssistantLogEntry::kind: alloc::string::String
+pub ai6::AssistantLogEntry::person: alloc::string::String
+pub ai6::AssistantLogEntry::text: alloc::string::String
+pub ai6::AssistantLogEntry::turn: core::option::Option<ai6::directorates::registry::assistant_log::AssistantTurn>
+impl ai6::directorates::registry::assistant_log::AssistantLogEntry
+pub fn ai6::directorates::registry::assistant_log::AssistantLogEntry::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+pub fn ai6::directorates::registry::assistant_log::AssistantLogEntry::with_data(self, serde_json::value::Value) -> Self
+pub fn ai6::directorates::registry::assistant_log::AssistantLogEntry::with_turn(self, ai6::directorates::registry::assistant_log::AssistantTurn) -> Self
+#[non_exhaustive] pub struct ai6::AssistantLogLimits
+pub ai6::AssistantLogLimits::entry_bytes: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::limits::AssistantLogLimits
+pub fn ai6::directorates::registry::limits::AssistantLogLimits::default() -> Self
 pub struct ai6::AssistantMode
 pub ai6::AssistantMode::context_file: core::option::Option<alloc::string::String>
 pub ai6::AssistantMode::files: alloc::vec::Vec<alloc::string::String>
@@ -8643,10 +8842,15 @@ pub ai6::AssistantReport::conversation_id: alloc::string::String
 pub ai6::AssistantReport::events: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantEvent>
 pub ai6::AssistantReport::job_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantReport::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
+pub ai6::AssistantReport::run: core::option::Option<ai6::directorates::section_00::assistant::AssistantRun>
 pub ai6::AssistantReport::session_id: core::option::Option<alloc::string::String>
 pub ai6::AssistantReport::station_id: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantReport
 pub fn ai6::directorates::section_00::assistant::AssistantReport::cut_texts(&mut self, &ai6::AssistantLimits)
+pub struct ai6::AssistantRun
+pub ai6::AssistantRun::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
+pub ai6::AssistantRun::model: core::option::Option<alloc::string::String>
+pub ai6::AssistantRun::tokens: core::option::Option<u64>
 pub struct ai6::AssistantSettings
 impl ai6::directorates::m::assistant::AssistantSettings
 pub fn ai6::directorates::m::assistant::AssistantSettings::allow_beside_local_missions(&self) -> bool
@@ -8706,6 +8910,14 @@ pub ai6::AssistantSharedBase::group: alloc::string::String
 pub ai6::AssistantSharedBase::path: alloc::string::String
 impl ai6::directorates::section_00::assistant::AssistantSharedBase
 pub fn ai6::directorates::section_00::assistant::AssistantSharedBase::validate(&self) -> core::result::Result<(), alloc::string::String>
+#[non_exhaustive] pub struct ai6::AssistantTurn
+pub ai6::AssistantTurn::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
+pub ai6::AssistantTurn::agent: core::option::Option<alloc::string::String>
+pub ai6::AssistantTurn::model: core::option::Option<alloc::string::String>
+pub ai6::AssistantTurn::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
+pub ai6::AssistantTurn::session: core::option::Option<alloc::string::String>
+pub ai6::AssistantTurn::station: core::option::Option<alloc::string::String>
+pub ai6::AssistantTurn::tokens: core::option::Option<u64>
 #[non_exhaustive] pub struct ai6::AssistantViewLimits
 pub ai6::AssistantViewLimits::blocks: core::option::Option<u64>
 pub ai6::AssistantViewLimits::columns: core::option::Option<u64>
@@ -9213,6 +9425,11 @@ pub fn ai6::directorates::m::config::ConfigSnapshot::new(ai6::directorates::m::c
 pub ai6::ConfigStatus::needs_restart: alloc::vec::Vec<alloc::string::String>
 pub ai6::ConfigStatus::refused: alloc::vec::Vec<alloc::string::String>
 pub ai6::ConfigStatus::revision: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::ContextLimits
+pub ai6::ContextLimits::context_bytes: ai6::bounds::Limit
+pub ai6::ContextLimits::records: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::limits::ContextLimits
+pub fn ai6::directorates::registry::limits::ContextLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::ControlLimits
 pub ai6::ControlLimits::controls: ai6::bounds::Limit
 pub ai6::ControlLimits::idempotency_key_bytes: ai6::bounds::Limit
@@ -9393,6 +9610,11 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
@@ -9402,6 +9624,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&se
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::store::FileRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::store::FileRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -10290,10 +10516,12 @@ pub ai6::RegistryLimits::accounts: ai6::directorates::registry::limits::AccountL
 pub ai6::RegistryLimits::agent_roles: ai6::directorates::registry::limits::AgentRoleLimits
 pub ai6::RegistryLimits::agents: ai6::directorates::registry::limits::AgentLimits
 pub ai6::RegistryLimits::approvals: ai6::directorates::registry::limits::ApprovalLimits
+pub ai6::RegistryLimits::assistant_log: ai6::directorates::registry::limits::AssistantLogLimits
 pub ai6::RegistryLimits::audit: ai6::directorates::registry::limits::AuditLimits
 pub ai6::RegistryLimits::briefs: ai6::directorates::registry::limits::BriefLimits
 pub ai6::RegistryLimits::cables: ai6::directorates::registry::limits::CableLimits
 pub ai6::RegistryLimits::clearance: ai6::directorates::registry::limits::ClearanceLimits
+pub ai6::RegistryLimits::contexts: ai6::directorates::registry::limits::ContextLimits
 pub ai6::RegistryLimits::files: ai6::directorates::registry::limits::FileLimits
 pub ai6::RegistryLimits::held: ai6::directorates::registry::limits::HeldLimits
 pub ai6::RegistryLimits::holds: ai6::directorates::registry::limits::HoldLimits
@@ -10702,6 +10930,21 @@ pub fn ai6::station::server::ServeConfig::with_secrets_dir(self, impl core::conv
 pub fn ai6::station::server::ServeConfig::with_station_config(self, ai6::station::server::StationConfig) -> Self
 pub fn ai6::station::server::ServeConfig::with_station_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
+#[non_exhaustive] pub struct ai6::SessionContext
+pub ai6::SessionContext::content: alloc::string::String
+pub ai6::SessionContext::cut_from: core::option::Option<u64>
+pub ai6::SessionContext::filed_at: f64
+pub ai6::SessionContext::format: alloc::string::String
+pub ai6::SessionContext::handler: alloc::string::String
+pub ai6::SessionContext::owner: ai6::directorates::registry::contexts::ContextOwner
+pub ai6::SessionContext::session: alloc::string::String
+pub ai6::SessionContext::source: ai6::directorates::registry::contexts::ContextSource
+pub ai6::SessionContext::station: alloc::string::String
+impl ai6::directorates::registry::contexts::SessionContext
+pub fn ai6::directorates::registry::contexts::SessionContext::conversation(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::registry::contexts::SessionContext::cut_to(self, ai6::bounds::Limit) -> Self
+pub fn ai6::directorates::registry::contexts::SessionContext::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::contexts::ContextOwner, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::contexts::ContextSource, f64, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::contexts::SessionContext::operation(&self) -> core::option::Option<&str>
 pub struct ai6::SessionEnv(_)
 impl ai6::directorates::q::SessionEnv
 pub fn ai6::directorates::q::SessionEnv::values(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -10786,6 +11029,13 @@ pub ai6::SessionRecord::status: ai6::directorates::registry::sessions::SessionSt
 pub ai6::SessionRecord::theater: core::option::Option<alloc::string::String>
 impl ai6::directorates::registry::sessions::SessionRecord
 pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
+pub struct ai6::SessionRecordFile
+pub ai6::SessionRecordFile::format: alloc::string::String
+pub ai6::SessionRecordFile::path: alloc::string::String
+pub struct ai6::SessionRecordQuery
+pub ai6::SessionRecordQuery::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::SessionRecordQuery::session_id: alloc::string::String
+pub ai6::SessionRecordQuery::working_directory: alloc::string::String
 #[non_exhaustive] pub struct ai6::SessionResult
 pub ai6::SessionResult::denied_tools: u32
 pub ai6::SessionResult::reason: core::option::Option<alloc::string::String>
@@ -10947,6 +11197,11 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
@@ -10956,6 +11211,10 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self,
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -11699,6 +11958,7 @@ pub const ai6::CHIEF_ROLE: &str
 pub const ai6::CLEARANCE_KIND: &str
 pub const ai6::CONFIG_ACCESS: &str
 pub const ai6::CONFIG_ACCOUNTS: &str
+pub const ai6::CONTEXT_EVENTS_FORMAT: &str
 pub const ai6::CREDENTIAL_VARIABLES: &[&str]
 pub const ai6::DEFAULT_00_MAX_FAILURE_RATE: f64
 pub const ai6::DEFAULT_00_MISSIONS: u64
@@ -11839,6 +12099,7 @@ pub fn ai6::AgentHandler::clearance_refusal(&self, alloc::string::String) -> cor
 pub fn ai6::AgentHandler::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -11849,6 +12110,7 @@ pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -11859,6 +12121,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -11943,6 +12206,21 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub trait ai6::AssistantLogStore
+pub fn ai6::AssistantLogStore::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::AssistantLogStore::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::AssistantLogStore::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::AssistantLogStore::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
+impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
+pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 pub trait ai6::AuditStore
 pub fn ai6::AuditStore::audit_records(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::AuditStore::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
@@ -12200,8 +12478,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
 pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
@@ -12244,6 +12522,18 @@ pub fn ai6::SecretBackend::revoke(&self, &str) -> core::result::Result<(), ai6::
 impl ai6::SecretBackend for ai6::StationSecrets
 pub fn ai6::StationSecrets::acquire(&self, &ai6::SecretRequest, &[alloc::string::String]) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::SecretValue>, ai6::SecretBackendFailure>
 pub fn ai6::StationSecrets::revoke(&self, &str) -> core::result::Result<(), ai6::SecretBackendFailure>
+pub trait ai6::SessionContextStore
+pub fn ai6::SessionContextStore::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::SessionContextStore::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::SessionContextStore::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
+impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
+pub fn ai6::directorates::registry::store::FileRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 pub trait ai6::SessionStore
 pub fn ai6::SessionStore::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
