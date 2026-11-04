@@ -1286,7 +1286,7 @@ fn secret_places(
 
 /// What still names the record `key` of `record` at `scope`, in every family at every scope.
 ///
-/// A secret is named only where a record takes a secret's name ([`secret_places`]). For any
+/// A secret is named only where a record takes a secret's name (`secret_places`). For any
 /// other family any whole string or table key equal to its name counts, since a new setting is
 /// found with no list to update: a field that only happens to hold the same text is shown too,
 /// and a person judges.
