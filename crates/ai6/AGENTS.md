@@ -3284,6 +3284,16 @@ pub trait Tracker: Send + Sync {
     fn link(&self, link: TrackerLink) -> Result<(), ProviderError>;
 }
 Plugins::trackers() -> Vec<ProviderInfo>;  Plugins::tracker(provider, config: Option<&Value>) -> Result<Box<dyn Tracker>, PluginBuildError>
+// A live read Universal Exports asks the Headquarters Station for (serde, deny_unknown_fields):
+pub struct SourceRead { pub id, operation: String, pub tracker, item, query: Option<String>,
+    pub comments: u32, pub items: u32 }   // no item: lists what the sources find
+pub struct SourceReadItem { pub tracker, id, title: String, pub state: Option<String>,
+    pub labels, assignees: Vec<String>, pub url: Option<String>, pub updated: String,
+    pub author, body: Option<String> }   // text untrusted
+pub struct SourceReadComment { pub author, role /* ai6|answers|other */, at, body: String }
+impl SourceReadComment { pub fn of(reply: Reply) -> Self; }
+pub struct SourceReadAnswer { pub item: Option<SourceReadItem>, pub comments: Vec<SourceReadComment>,
+    pub items: Vec<SourceReadItem>, pub error: Option<String> }
 ```
 
 `Reply::permitted` is the provider's judgement that the author may answer for the issue (its

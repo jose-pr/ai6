@@ -252,6 +252,116 @@ pub trait Tracker: Send + Sync {
     fn link(&self, link: TrackerLink) -> Result<(), ProviderError>;
 }
 
+/// A live read of an Operation's trackers that Universal Exports asks the Headquarters Station
+/// for, because only it holds tracker tokens: one item with its latest comments, or the items
+/// the Operation's sources find.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SourceRead {
+    /// Universal Exports' identity for the read.
+    pub id: String,
+    /// The Operation whose `sources` are read.
+    pub operation: String,
+    /// The instance (`sources.<name>`); with no `item`, `None` lists every instance's items.
+    #[serde(default)]
+    pub tracker: Option<String>,
+    /// The item to read, as its instance names it (`owner/repo#12`, `AI6-12`); `None` lists.
+    #[serde(default)]
+    pub item: Option<String>,
+    /// Only items whose title holds this text, ignoring case.
+    #[serde(default)]
+    pub query: Option<String>,
+    /// The most comments to answer, the latest.
+    pub comments: u32,
+    /// The most items to list.
+    pub items: u32,
+}
+
+/// One item as a [`SourceRead`] answers it. Its text is untrusted.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SourceReadItem {
+    /// The instance it is in.
+    pub tracker: String,
+    /// Its ID in that instance.
+    pub id: String,
+    /// Its title.
+    pub title: String,
+    /// `open` or `closed`, when the read says.
+    #[serde(default)]
+    pub state: Option<String>,
+    /// Its labels.
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// Its assignees, as the tracker names them.
+    #[serde(default)]
+    pub assignees: Vec<String>,
+    /// A link to it.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// When the tracker last changed it (ISO 8601).
+    #[serde(default)]
+    pub updated: String,
+    /// Who wrote it, when the tracker says.
+    #[serde(default)]
+    pub author: Option<String>,
+    /// Its body, when one item is read.
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+/// One comment as a [`SourceRead`] answers it. Its text is untrusted.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SourceReadComment {
+    /// The author's display name.
+    pub author: String,
+    /// `ai6` (AI6 wrote it), `answers` (someone who may answer for the item: its author, an
+    /// owner, member or collaborator, a reporter or assignee) or `other`.
+    pub role: String,
+    /// When it was made (ISO 8601).
+    pub at: String,
+    /// The comment text.
+    pub body: String,
+}
+
+/// What the Headquarters Station found for a [`SourceRead`], or why it could not read.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SourceReadAnswer {
+    /// The item read, for a read of one.
+    #[serde(default)]
+    pub item: Option<SourceReadItem>,
+    /// Its latest comments, oldest first.
+    #[serde(default)]
+    pub comments: Vec<SourceReadComment>,
+    /// The items listed, for a list.
+    #[serde(default)]
+    pub items: Vec<SourceReadItem>,
+    /// Why nothing was read, in a sentence.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl SourceReadComment {
+    /// The comment `reply` with its author's role.
+    pub fn of(reply: Reply) -> Self {
+        let role = if reply.own {
+            "ai6"
+        } else if reply.permitted {
+            "answers"
+        } else {
+            "other"
+        };
+        Self {
+            author: reply.author,
+            role: role.to_owned(),
+            at: reply.created,
+            body: reply.body,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

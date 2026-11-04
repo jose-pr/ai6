@@ -386,6 +386,26 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Wait for her conversation log at a stop for")]
     #[map(default = AssistantGatewayLimits::default().log_flush_timeout)]
     pub log_flush_timeout: TimeLimit,
+    /// Comments of a tracker item `source_item` reads, the latest.
+    #[schema(title = "Comments read of a tracker item")]
+    #[map(default = AssistantGatewayLimits::default().source_comments)]
+    pub source_comments: Limit,
+    /// Items `source_items` lists.
+    #[schema(title = "Tracker items listed")]
+    #[map(default = AssistantGatewayLimits::default().source_items)]
+    pub source_items: Limit,
+    /// Seconds a live tracker read waits for the Headquarters Station to answer.
+    #[schema(title = "Wait for a live tracker read")]
+    #[map(default = AssistantGatewayLimits::default().source_wait)]
+    pub source_wait: Seconds,
+    /// Live tracker reads waiting for the Headquarters Station at once.
+    #[schema(title = "Live tracker reads waiting")]
+    #[map(default = AssistantGatewayLimits::default().source_reads)]
+    pub source_reads: Limit,
+    /// Bytes of the Headquarters Station's answer to one live tracker read.
+    #[schema(title = "Longest live tracker read answer", format = "bytes")]
+    #[map(default = AssistantGatewayLimits::default().source_answer_bytes)]
+    pub source_answer_bytes: Limit,
 }
 
 impl Default for AssistantGatewayLimits {
@@ -426,6 +446,11 @@ impl Default for AssistantGatewayLimits {
             log_bytes: Limit::at(1024 * MIB),
             log_prune_every: Seconds::new(3_600),
             log_flush_timeout: TimeLimit::secs(10),
+            source_comments: Limit::at(10),
+            source_items: Limit::at(50),
+            source_wait: Seconds::new(30),
+            source_reads: Limit::at(32),
+            source_answer_bytes: Limit::at(MIB),
         }
     }
 }

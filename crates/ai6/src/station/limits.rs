@@ -321,6 +321,14 @@ pub struct SourceLimits {
     #[schema(title = "Settled items read per round")]
     #[map(default = SourceLimits::default().reopen_watch)]
     pub reopen_watch: Limit,
+    /// Seconds one ask for a live tracker read waits at Universal Exports before asking again.
+    #[schema(title = "Wait for a live tracker read")]
+    #[map(default = SourceLimits::default().read_wait)]
+    pub read_wait: Seconds,
+    /// The most bytes of one live tracker read Universal Exports asks for.
+    #[schema(title = "Longest live tracker read asked for", format = "bytes")]
+    #[map(default = SourceLimits::default().read_bytes)]
+    pub read_bytes: Limit,
 }
 
 impl Default for SourceLimits {
@@ -338,6 +346,8 @@ impl Default for SourceLimits {
             replies_read: Limit::at(10),
             reopen_watch_every: Seconds::new(300),
             reopen_watch: Limit::at(20),
+            read_wait: Seconds::new(20),
+            read_bytes: Limit::at(16 * 1024),
         }
     }
 }

@@ -22,6 +22,7 @@ mod pools;
 mod rename_tests;
 mod reviews;
 mod roster;
+mod source_reads;
 mod timeline;
 mod transcripts;
 mod tree;
@@ -524,6 +525,8 @@ pub struct Gateway {
     pages_config: Option<PagesConfig>,
     /// The person each live [`StandIn`] reads as, by the SHA-256 of its bearer.
     stand_ins: Arc<std::sync::Mutex<HashMap<String, String>>>,
+    /// Live tracker reads waiting for the Headquarters Station.
+    source_reads: Arc<source_reads::SourceReads>,
 }
 
 /// A bearer the gateway makes for itself to read, in this process, as a person who proved who
@@ -629,6 +632,7 @@ impl Gateway {
             pages: None,
             pages_config: None,
             stand_ins: Arc::default(),
+            source_reads: Arc::default(),
         }
     }
 
@@ -1497,6 +1501,14 @@ impl Gateway {
                 post(reject_user_mission_proposal),
             )
             .route(
+                "/v1/user/operations/{operation_id}/source-item",
+                get(source_reads::item),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/source-items",
+                get(source_reads::items),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/missions/{mission_id}/issues",
                 get(issues::list).post(issues::link),
             )
@@ -1776,6 +1788,11 @@ impl Gateway {
             .route(
                 "/v1/user/assistant/conversations/{id}/context",
                 get(transcripts::conversation_context),
+            )
+            .route("/v1/station/source-reads/next", get(source_reads::next))
+            .route(
+                "/v1/station/source-reads/{id}/result",
+                post(source_reads::result),
             )
             .route("/v1/station/sessions", post(register_session))
             .route(

@@ -31,6 +31,8 @@ mod recovery;
 mod reload;
 mod review;
 mod routes;
+#[cfg(feature = "publisher")]
+mod source_reads;
 mod standing;
 mod stewardship;
 #[cfg(test)]
@@ -969,6 +971,8 @@ where
     let controls = controls::spawn(&state)?;
     #[cfg(feature = "publisher")]
     let assistant = assistant::spawn(&state)?;
+    #[cfg(feature = "publisher")]
+    source_reads::spawn(&state)?;
     let stopping = state.stopping.clone();
     let served = axum::serve(listener, app)
         .with_graceful_shutdown(async move {

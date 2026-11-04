@@ -26,6 +26,8 @@ pub mod runner;
 pub mod safehouse;
 #[cfg(feature = "daemon")]
 pub mod server;
+#[cfg(feature = "publisher")]
+pub(crate) mod source_reads;
 #[cfg(feature = "daemon")]
 pub(crate) mod sources;
 #[cfg(feature = "daemon")]

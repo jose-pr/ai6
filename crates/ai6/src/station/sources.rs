@@ -34,7 +34,8 @@ use crate::station::plugins::Plugins;
 use guatiao::{FromValue, Schema, ToValue};
 
 /// Constructs the provider for a provider ID and an Operation's settings.
-type SourceBuilder<'a> = dyn Fn(&str, &toml::Table) -> Result<Box<dyn Source>, String> + 'a;
+pub(crate) type SourceBuilder<'a> =
+    dyn Fn(&str, &toml::Table) -> Result<Box<dyn Source>, String> + 'a;
 
 /// The words a Mission's progress is written in on an instance: a label or a workflow
 /// transition per milestone. Unset milestones write nothing.
@@ -305,7 +306,7 @@ pub(crate) fn source_setups(
 }
 
 /// Builds the provider for one Operation's settings through the plugin host.
-fn build_source(
+pub(crate) fn build_source(
     plugins: &Plugins,
     provider: &str,
     settings: &toml::Table,
@@ -320,7 +321,7 @@ fn build_source(
 }
 
 /// Builds the Tracker for one instance's settings through the plugin host.
-fn build_tracker(
+pub(crate) fn build_tracker(
     plugins: &Plugins,
     provider: &str,
     settings: &toml::Table,
