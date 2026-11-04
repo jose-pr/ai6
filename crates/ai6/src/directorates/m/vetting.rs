@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::directorates::registry::bona_fides::{Origin, Provenance, record_digest};
 use crate::directorates::registry::mission_ids::MissionEntry;
+use crate::directorates::registry::sleepers::SLEEPER_BRIEF_SOURCE;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
 use crate::directorates::registry::store::Brief;
 
@@ -528,6 +529,8 @@ pub struct KnownWork {
     pub title: String,
     /// Its source URL, when it has one.
     pub url: Option<String>,
+    /// The Operation and name of the Sleeper that queued it ([`sleeper_of`]).
+    pub sleeper: Option<(String, String)>,
 }
 
 impl KnownWork {
@@ -537,8 +540,25 @@ impl KnownWork {
             reference: reference.into(),
             title: work_title(brief),
             url: brief.url.clone(),
+            sleeper: sleeper_of(brief),
         }
     }
+}
+
+/// The Operation and name of the Sleeper that queued `brief`, as its data names them, when the
+/// Registry kept a Sleeper provenance for it naming the same Sleeper. A brief that only says so
+/// in its data is not one.
+pub fn sleeper_of(brief: &Brief) -> Option<(String, String)> {
+    let provenance = brief.provenance.as_ref()?;
+    if brief.source != SLEEPER_BRIEF_SOURCE || provenance.origin != Origin::Sleeper {
+        return None;
+    }
+    let origin = brief.data.get("sleeper")?;
+    let field = |key: &str| origin.get(key)?.as_str().map(str::to_owned);
+    let (operation, name) = (field("operation")?, field("name")?);
+    (provenance.principal.as_deref() == Some(name.as_str())
+        && brief.operation.as_deref() == Some(operation.as_str()))
+    .then_some((operation, name))
 }
 
 /// What vetting knows about the Operation when it judges one brief.
@@ -951,10 +971,16 @@ fn malformed(brief: &Brief, policy: &VettingPolicy) -> Vec<Finding> {
     findings
 }
 
+/// The first of `work` that `brief` repeats, by URL or title. A Sleeper's windows share its title
+/// and are never duplicates of each other.
 fn duplicate(brief: &Brief, work: &[KnownWork]) -> Option<Finding> {
     let url = brief.url.as_deref().map(normalize_url).unwrap_or_default();
     let title = normalize_text(&work_title(brief));
+    let sleeper = sleeper_of(brief);
     for known in work {
+        if sleeper.is_some() && known.sleeper == sleeper {
+            continue;
+        }
         if !url.is_empty() && known.url.as_deref().map(normalize_url).as_deref() == Some(&url) {
             return Some(
                 Finding::new(FindingKind::Duplicate, "the same URL as other work")
@@ -1592,6 +1618,7 @@ mod tests {
             reference: "mission-1".to_owned(),
             title: "Something else".to_owned(),
             url: Some("https://github.com/org/repo/issues/7/#issuecomment-1".to_owned()),
+            sleeper: None,
         });
         let vetting = vet(&issue("Crash on save", "body"), &policy, &context);
         assert_eq!(vetting.kinds(), BTreeSet::from([FindingKind::Duplicate]));
@@ -1610,6 +1637,63 @@ mod tests {
         assert_eq!(
             vet(&issue("Crash on save", "body"), &off, &context).verdict,
             VettingVerdict::Pass
+        );
+    }
+
+    #[test]
+    fn a_sleepers_windows_are_not_duplicates_of_each_other_but_of_other_work() {
+        use crate::directorates::registry::sleepers::{Sleeper, sleeper_brief};
+        let nightly = Sleeper {
+            schedule: "0 3 * * *".to_owned(),
+            title: "Update dependencies".to_owned(),
+            prompt: "Update the lockfile.".to_owned(),
+            agent: None,
+            role: None,
+            priority: 0,
+            stations: Vec::new(),
+            each_station: false,
+            standing: false,
+            resume: false,
+        };
+        let window = |name: &str, at: i64| {
+            let mut brief = sleeper_brief("G", name, &nightly, at, None);
+            brief.provenance =
+                Some(Provenance::new(Origin::Sleeper, &brief, "hq", 1).with_principal(name));
+            brief
+        };
+        let first = window("deps", 1_792_897_200);
+        let second = window("deps", 1_792_983_600);
+        assert_eq!(
+            sleeper_of(&first),
+            Some(("G".to_owned(), "deps".to_owned()))
+        );
+        let policy = VettingPolicy::default();
+        let mut context = VettingContext::default();
+        context.work.push(KnownWork::of(&first, "G-deps-1"));
+        assert_eq!(
+            vet(&second, &policy, &context).verdict,
+            VettingVerdict::Pass,
+            "the next window of the same Sleeper"
+        );
+        let other = window("audit", 1_792_983_600);
+        assert_eq!(
+            vet(&other, &policy, &context).kinds(),
+            BTreeSet::from([FindingKind::Duplicate]),
+            "another Sleeper with the same title"
+        );
+        let person = operator("Update dependencies", "");
+        assert_eq!(
+            vet(&person, &policy, &context).kinds(),
+            BTreeSet::from([FindingKind::Duplicate])
+        );
+        // Data alone does not make a brief a Sleeper's window.
+        let mut claimed = person.clone();
+        claimed.data = second.data.clone();
+        claimed.source = second.source.clone();
+        assert_eq!(sleeper_of(&claimed), None);
+        assert_eq!(
+            vet(&claimed, &policy, &context).kinds(),
+            BTreeSet::from([FindingKind::Duplicate])
         );
     }
 
@@ -1687,6 +1771,7 @@ mod tests {
             reference: "mission-1".to_owned(),
             title: "Fix saving".to_owned(),
             url: None,
+            sleeper: None,
         }];
         let limits = VettingLimits::default();
         let review = review_brief(

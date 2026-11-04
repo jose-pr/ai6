@@ -1613,6 +1613,62 @@ mod tests {
     }
 
     #[test]
+    fn a_sleepers_next_window_passes_while_the_last_is_open_and_a_persons_copy_is_held() {
+        use crate::directorates::registry::bona_fides::{Origin, Provenance};
+        use crate::directorates::registry::sleepers::{Fire, Sleeper};
+        let dir = tempfile::tempdir().unwrap();
+        let state = headquarters(dir.path(), "");
+        let nightly = Sleeper {
+            schedule: "0 3 * * *".to_owned(),
+            title: "Update dependencies".to_owned(),
+            prompt: "Update the lockfile.".to_owned(),
+            agent: None,
+            role: None,
+            priority: 0,
+            stations: Vec::new(),
+            each_station: false,
+            standing: false,
+            resume: false,
+        };
+        let mut placed = Vec::new();
+        for window in [1_792_897_200, 1_792_983_600] {
+            assert_eq!(
+                state
+                    .intake
+                    .fire_sleeper("G", "deps", &nightly, (window, None), "hq")
+                    .unwrap(),
+                Fire::Queued
+            );
+            assert!(schedule_intake_once(&state));
+            assert!(state.intake.held_briefs("G", 10).unwrap().is_empty());
+            let leases = state.intake.leases().unwrap();
+            assert_eq!(
+                leases.len(),
+                placed.len() + 1,
+                "each window is placed while the one before is still open"
+            );
+            placed = leases;
+        }
+        assert_eq!(intake_actions(&state), ["passed", "passed"]);
+
+        let mut person: Brief = serde_json::from_value(serde_json::json!({
+            "title": "Update dependencies", "id": "asked", "source": "universal-exports",
+            "operation": "G",
+        }))
+        .unwrap();
+        person.provenance = Some(
+            Provenance::new(Origin::Operator, &person, "universal-exports", 1)
+                .with_principal("eve"),
+        );
+        state.intake.submit_brief(&person).unwrap();
+        assert!(schedule_intake_once(&state));
+        let held = state.intake.held_briefs("G", 10).unwrap();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].brief.key(), person.key());
+        assert_eq!(held[0].vetting.findings[0].kind, FindingKind::Duplicate);
+    }
+
+    #[test]
     fn screening_holds_untrusted_text_and_malformed_briefs_are_refused() {
         let dir = tempfile::tempdir().unwrap();
         let state = headquarters(dir.path(), "vetting = { max_brief_bytes = 64 }\n");
