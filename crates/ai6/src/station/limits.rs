@@ -44,6 +44,8 @@ pub struct StationLimits {
     pub approvals: ApprovalLimits,
     /// `[harness]`: a working directory's harness configuration.
     pub harness: HarnessLimits,
+    /// `[overlays]`: reading the overlays loadouts and Operations issue.
+    pub overlays: OverlayLimits,
     /// `[provision]`: probing and provisioning Theaters.
     pub provision: ProvisionLimits,
     /// `[secrets]`: loadout secret leases.
@@ -631,6 +633,99 @@ impl Default for HarnessLimits {
             manifest_bytes: Limit::at(16 * MIB),
             manifest_files: Limit::at(4_096),
         }
+    }
+}
+
+/// `[overlays]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct OverlayLimits {
+    /// Bytes of an overlay's `overlay.cfg`, or of one of its `aos` env files.
+    #[schema(title = "Largest overlay manifest", format = "bytes")]
+    #[map(default = OverlayLimits::default().manifest_bytes)]
+    pub manifest_bytes: Limit,
+    /// Nesting of a manifest's arrays and tables, its top table being the first level.
+    #[schema(title = "Deepest overlay manifest")]
+    #[map(default = OverlayLimits::default().manifest_depth)]
+    pub manifest_depth: Limit,
+    /// Files in one overlay, the excluded names (`.git`, `node_modules`, ...) not counted.
+    #[schema(title = "Files in an overlay")]
+    #[map(default = OverlayLimits::default().files)]
+    pub files: Limit,
+    /// Bytes of one overlay's files together.
+    #[schema(title = "Largest overlay", format = "bytes")]
+    #[map(default = OverlayLimits::default().bytes)]
+    pub bytes: Limit,
+    /// Bytes of one file of an overlay.
+    #[schema(title = "Largest overlay file", format = "bytes")]
+    #[map(default = OverlayLimits::default().file_bytes)]
+    pub file_bytes: Limit,
+    /// Issue an overlay whose `[overlay.<name>]` has no pin, reporting it as `unpinned` each
+    /// time; without this such an overlay is refused. A weakening.
+    #[schema(title = "Issue overlays without a pin")]
+    #[map(default)]
+    pub unpinned: bool,
+}
+
+impl Default for OverlayLimits {
+    fn default() -> Self {
+        Self {
+            manifest_bytes: Limit::at(MIB),
+            manifest_depth: Limit::at(64),
+            files: Limit::at(4_096),
+            bytes: Limit::at(64 * MIB),
+            file_bytes: Limit::at(16 * MIB),
+            unpinned: false,
+        }
+    }
+}
+
+impl OverlayLimits {
+    /// How much of an overlay's tree is read.
+    pub fn tree(&self) -> crate::directorates::q::overlays::TreeLimits {
+        crate::directorates::q::overlays::TreeLimits {
+            files: self.files,
+            bytes: self.bytes,
+            file_bytes: self.file_bytes,
+        }
+    }
+
+    /// How much of a manifest is read.
+    pub fn manifest(&self) -> crate::directorates::q::overlays::ReadLimits {
+        crate::directorates::q::overlays::ReadLimits {
+            bytes: self.manifest_bytes,
+            depth: self.manifest_depth,
+        }
+    }
+
+    /// One line per setting looser than its default: a larger limit, and `unpinned`.
+    pub fn weakenings(&self) -> Vec<String> {
+        let mut lines = crate::bounds::looser(
+            "station.overlays",
+            &serde_json::json!({
+                "manifest_bytes": self.manifest_bytes.get(),
+                "manifest_depth": self.manifest_depth.get(),
+                "files": self.files.get(),
+                "bytes": self.bytes.get(),
+                "file_bytes": self.file_bytes.get(),
+            }),
+            &serde_json::json!({
+                "manifest_bytes": Self::default().manifest_bytes.get(),
+                "manifest_depth": Self::default().manifest_depth.get(),
+                "files": Self::default().files.get(),
+                "bytes": Self::default().bytes.get(),
+                "file_bytes": Self::default().file_bytes.get(),
+            }),
+            &[],
+        );
+        if self.unpinned {
+            lines.push(
+                "station.overlays.unpinned = true: an overlay with no pin is issued, its files                  unchecked"
+                    .to_owned(),
+            );
+        }
+        lines
     }
 }
 

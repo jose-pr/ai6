@@ -1,0 +1,1243 @@
+{
+  "description": "Catalogs and icons, as a store reads them. A 'catalog' case gives the catalog's file 'name' (its extension selects the format), its 'text', and 'base', the source the catalog file came from, against which relative sources resolve; 'expect' gives the 'form' ('minimal' when every entry is a string), the catalog's own informational fields, the 'entries' it lists (each 'source' parsed and made absolute, with 'pin', 'description' and 'about' when present and valid), the entries it 'refused' ([name, class], by name), and the informational fields it 'ignored' (pointers, sorted); or the error that refuses the whole catalog. A 'catalogs' case gives several catalogs, each with the 'label' the consumer gave it, and names to 'choose'; 'expect' gives the listing by identity and label ('shown' is qualified '<label>/<name>' when more than one catalog offers the identity), the 'collisions', and what each requested name picks ('catalog' and 'name', or 'ambiguous' or 'not-found'); or 'invalid-label'. An 'icon' case gives a file 'name', its bytes as 'base64' and optional 'limits'; 'expect' gives the format and dimensions, or the class of the refusal.",
+  "spec": "spec/v0/catalog.md",
+  "cases": [
+    {
+      "id": "minimal-toml",
+      "description": "Today's registry is a catalog in the minimal form; relative sources resolve beside the catalog file.",
+      "catalog": {
+        "name": "registry.toml",
+        "text": "[overlays]\nengineering = \"../engineering\"\npython-review = \"../dependent\"\n",
+        "base": "/srv/overlays/registry/registry.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "engineering": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/engineering",
+              "ref": null,
+              "path": null
+            }
+          },
+          "python-review": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/dependent",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "minimal-json",
+      "description": "The same registry in JSON.",
+      "catalog": {
+        "name": "registry.json",
+        "text": "{\n  \"overlays\": {\n    \"engineering\": \"../engineering\",\n    \"python-review\": \"../dependent\"\n  }\n}\n",
+        "base": "/srv/overlays/registry/registry.json"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "engineering": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/engineering",
+              "ref": null,
+              "path": null
+            }
+          },
+          "python-review": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/dependent",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "minimal-yaml",
+      "description": "The same registry in YAML.",
+      "catalog": {
+        "name": "registry.yaml",
+        "text": "overlays:\n  engineering: ../engineering\n  python-review: ../dependent\n",
+        "base": "/srv/overlays/registry/registry.yaml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "engineering": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/engineering",
+              "ref": null,
+              "path": null
+            }
+          },
+          "python-review": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/dependent",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "minimal-with-catalog-fields",
+      "description": "Catalog-level name, description and homepage keep the minimal form: the form is decided by the entries alone.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "name = \"Team overlays\"\ndescription = \"What the team installs.\"\nhomepage = \"https://example.org/team\"\n\n[overlays]\nengineering = \"../engineering\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "name": "Team overlays",
+        "description": "What the team installs.",
+        "homepage": "https://example.org/team",
+        "entries": {
+          "engineering": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/engineering",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "minimal-empty",
+      "description": "An empty overlays table is a catalog that lists nothing.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "[overlays]\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {},
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "full-example",
+      "description": "The full form: three entries with icons, one pinned.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "# A catalog in the full form: the registry format, with informational fields a store lists and\n# searches before it fetches anything. registry.json, registry.toml and registry.yaml are catalogs\n# in the minimal form. Relative sources and icons resolve beside this file.\nname = \"Example overlays\"\ndescription = \"The overlays of the AOS examples, listed for a store.\"\nhomepage = \"https://example.org/overlays\"\n\n# A string entry is the minimal form, a table the full form; one catalog may mix them.\n[overlays.engineering]\nsource = \"../engineering\"\ndescription = \"Shared engineering practices and review guidance.\"\n\n[overlays.engineering.about]\nsummary = \"Repository-wide engineering practices.\"\nicon = \"icons/engineering.png\"\ntags = [\"engineering\", \"review\"]\n\n[overlays.python-review]\nsource = \"../dependent\"\n\n[overlays.python-review.about]\nsummary = \"Python review guidance, on top of engineering.\"\nicon = \"icons/python-review.png\"\nlicense = \"MIT\"\ntags = [\"python\", \"review\"]\n\n[overlays.release-notes]\nsource = \"../about\"\npin = \"sha256:8280aaf5de7c4f61342f648586d534e481ae095cef223dded70f5b1db5bd84a1\"\n\n[overlays.release-notes.about]\nsummary = \"Release notes and changelogs, written the same way in every repository.\"\nicon = \"icons/release-notes.png\"\nhomepage = \"https://example.org/overlays/release-notes\"\nrepository = \"https://github.com/example/overlays\"\nlicense = \"MIT OR Apache-2.0\"\nauthors = [\"Example Docs Team <docs@example.org>\"]\ntags = [\"documentation\", \"release\", \"changelog\"]\n",
+        "base": "/srv/overlays/registry/catalog.toml"
+      },
+      "expect": {
+        "form": "full",
+        "name": "Example overlays",
+        "description": "The overlays of the AOS examples, listed for a store.",
+        "homepage": "https://example.org/overlays",
+        "entries": {
+          "engineering": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/engineering",
+              "ref": null,
+              "path": null
+            },
+            "description": "Shared engineering practices and review guidance.",
+            "about": {
+              "summary": "Repository-wide engineering practices.",
+              "icon": "icons/engineering.png",
+              "tags": [
+                "engineering",
+                "review"
+              ]
+            }
+          },
+          "python-review": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/dependent",
+              "ref": null,
+              "path": null
+            },
+            "about": {
+              "summary": "Python review guidance, on top of engineering.",
+              "icon": "icons/python-review.png",
+              "license": "MIT",
+              "tags": [
+                "python",
+                "review"
+              ]
+            }
+          },
+          "release-notes": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/about",
+              "ref": null,
+              "path": null
+            },
+            "pin": "sha256:8280aaf5de7c4f61342f648586d534e481ae095cef223dded70f5b1db5bd84a1",
+            "about": {
+              "summary": "Release notes and changelogs, written the same way in every repository.",
+              "icon": "icons/release-notes.png",
+              "homepage": "https://example.org/overlays/release-notes",
+              "repository": "https://github.com/example/overlays",
+              "license": "MIT OR Apache-2.0",
+              "authors": [
+                "Example Docs Team <docs@example.org>"
+              ],
+              "tags": [
+                "documentation",
+                "release",
+                "changelog"
+              ]
+            }
+          }
+        },
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "full-mixed",
+      "description": "One table entry makes the catalog full; string entries stay valid in it.",
+      "catalog": {
+        "name": "catalog.json",
+        "text": "{\"overlays\": {\"engineering\": \"../engineering\", \"docs\": {\"source\": \"../docs\", \"description\": \"Docs.\"}}}\n",
+        "base": "/srv/overlays/catalogs/catalog.json"
+      },
+      "expect": {
+        "form": "full",
+        "entries": {
+          "docs": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/docs",
+              "ref": null,
+              "path": null
+            },
+            "description": "Docs."
+          },
+          "engineering": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/engineering",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "git-base",
+      "description": "A catalog in a Git repository: a relative source is the same repository at the same ref; refs, pins, and what a remote catalog may not name.",
+      "catalog": {
+        "name": "overlays.toml",
+        "text": "[overlays]\nrust = \"../overlays/rust\"\ndocs = \"./docs#guides\"\nwhole = \"..\"\noutside = \"../../outside\"\nlocal-dir = \"/srv/overlays/x\"\nlocal-drive = 'C:\\overlays\\x'\nlocal-git = \"file:///srv/agents.git\"\nlocal-git-path = \"/srv/agents.git\"\nscp = \"git@github.com:example/other.git@v1#net\"\nweb = \"https://example.org/overlays/web\"\n\n[overlays.pinned]\nsource = \"https://github.com/example/tools.git#lint\"\nref = \"4b825dc642cb6eb9a060e54bf8d69288fbee4904\"\npin = \"sha256:ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB\"\n\n[overlays.twice]\nsource = \"https://github.com/example/tools.git@v1#lint\"\nref = \"v2\"\n\n[overlays.relative-ref]\nsource = \"./docs\"\nref = \"v3\"\n\n[overlays.url-ref]\nsource = \"https://example.org/overlays/web\"\nref = \"v1\"\n\n[overlays.ref-slash]\nsource = \"https://github.com/example/tools.git\"\nref = \"release/1.0\"\n",
+        "base": "https://github.com/example/agents.git@v2#catalogs/overlays.toml"
+      },
+      "expect": {
+        "form": "full",
+        "entries": {
+          "docs": {
+            "source": {
+              "kind": "git",
+              "location": "https://github.com/example/agents.git",
+              "ref": "v2",
+              "path": "catalogs/docs/guides"
+            }
+          },
+          "pinned": {
+            "source": {
+              "kind": "git",
+              "location": "https://github.com/example/tools.git",
+              "ref": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+              "path": "lint"
+            },
+            "pin": "sha256:ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB"
+          },
+          "rust": {
+            "source": {
+              "kind": "git",
+              "location": "https://github.com/example/agents.git",
+              "ref": "v2",
+              "path": "overlays/rust"
+            }
+          },
+          "scp": {
+            "source": {
+              "kind": "git",
+              "location": "git@github.com:example/other.git",
+              "ref": "v1",
+              "path": "net"
+            }
+          },
+          "web": {
+            "source": {
+              "kind": "url",
+              "location": "https://example.org/overlays/web",
+              "ref": null,
+              "path": null
+            }
+          },
+          "whole": {
+            "source": {
+              "kind": "git",
+              "location": "https://github.com/example/agents.git",
+              "ref": "v2",
+              "path": null
+            }
+          }
+        },
+        "refused": [
+          [
+            "local-dir",
+            "local-source"
+          ],
+          [
+            "local-drive",
+            "local-source"
+          ],
+          [
+            "local-git",
+            "local-source"
+          ],
+          [
+            "local-git-path",
+            "local-source"
+          ],
+          [
+            "outside",
+            "leaves-repository"
+          ],
+          [
+            "ref-slash",
+            "invalid-entry"
+          ],
+          [
+            "relative-ref",
+            "ref-not-allowed"
+          ],
+          [
+            "twice",
+            "ref-not-allowed"
+          ],
+          [
+            "url-ref",
+            "ref-not-allowed"
+          ]
+        ],
+        "ignored": []
+      }
+    },
+    {
+      "id": "url-base",
+      "description": "A catalog at a URL: a relative source is the URL beside it; a local path is refused.",
+      "catalog": {
+        "name": "overlays.json",
+        "text": "{\"overlays\": {\"rust\": \"./rust\", \"net\": \"../shared/net#x\", \"other\": \"https://example.org/other/y\", \"local\": \"/srv/x\", \"git\": \"https://github.com/example/a.git\", \"up\": \"../../../../z\"}}\n",
+        "base": "https://example.org/catalogs/overlays.json"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "git": {
+            "source": {
+              "kind": "git",
+              "location": "https://github.com/example/a.git",
+              "ref": null,
+              "path": null
+            }
+          },
+          "net": {
+            "source": {
+              "kind": "url",
+              "location": "https://example.org/shared/net",
+              "ref": null,
+              "path": "x"
+            }
+          },
+          "other": {
+            "source": {
+              "kind": "url",
+              "location": "https://example.org/other/y",
+              "ref": null,
+              "path": null
+            }
+          },
+          "rust": {
+            "source": {
+              "kind": "url",
+              "location": "https://example.org/catalogs/rust",
+              "ref": null,
+              "path": null
+            }
+          },
+          "up": {
+            "source": {
+              "kind": "url",
+              "location": "https://example.org/z",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [
+          [
+            "local",
+            "local-source"
+          ]
+        ],
+        "ignored": []
+      }
+    },
+    {
+      "id": "local-base",
+      "description": "A catalog on this machine may name local directories and repositories.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "[overlays]\nsibling = \"../engineering\"\nabsolute = \"/opt/overlays/x\"\nlocal-git = \"file:///srv/agents.git@v1#x\"\nremote = \"https://github.com/example/agents.git#y\"\nhere = \".\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "absolute": {
+            "source": {
+              "kind": "directory",
+              "location": "/opt/overlays/x",
+              "ref": null,
+              "path": null
+            }
+          },
+          "here": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/catalogs",
+              "ref": null,
+              "path": null
+            }
+          },
+          "local-git": {
+            "source": {
+              "kind": "git",
+              "location": "file:///srv/agents.git",
+              "ref": "v1",
+              "path": "x"
+            }
+          },
+          "remote": {
+            "source": {
+              "kind": "git",
+              "location": "https://github.com/example/agents.git",
+              "ref": null,
+              "path": "y"
+            }
+          },
+          "sibling": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/engineering",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "entry-errors",
+      "description": "Entries a store refuses, each alone: the rest of the catalog is listed.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "[overlays]\nnumber = 5\nblank = \"   \"\noption = \"-oProxyCommand=x.git\"\ngood = \"../good\"\n\n[overlays.no-source]\ndescription = \"Nothing to fetch.\"\n\n[overlays.bad-pin]\nsource = \"../x\"\npin = \"sha1:0123456789abcdef0123456789abcdef01234567\"\n\n[overlays.source-list]\nsource = [\"../x\"]\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "full",
+        "entries": {
+          "good": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/good",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [
+          [
+            "bad-pin",
+            "invalid-pin"
+          ],
+          [
+            "blank",
+            "invalid-source"
+          ],
+          [
+            "no-source",
+            "invalid-entry"
+          ],
+          [
+            "number",
+            "invalid-entry"
+          ],
+          [
+            "option",
+            "invalid-source"
+          ],
+          [
+            "source-list",
+            "invalid-entry"
+          ]
+        ],
+        "ignored": []
+      }
+    },
+    {
+      "id": "names",
+      "description": "Entry names are overlay identities: invalid and reserved names are refused, and two that normalize alike are both refused.",
+      "catalog": {
+        "name": "catalog.json",
+        "text": "{\"overlays\": {\"2fast\": \"../a\", \"project\": \"../b\", \"Team_Review\": \"../c\", \"team.review\": \"../d\", \"x/y\": \"../e\", \"Good-One\": \"../f\"}}\n",
+        "base": "/srv/overlays/catalogs/catalog.json"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "Good-One": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/f",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [
+          [
+            "2fast",
+            "invalid-name"
+          ],
+          [
+            "Team_Review",
+            "duplicate-name"
+          ],
+          [
+            "project",
+            "invalid-name"
+          ],
+          [
+            "team.review",
+            "duplicate-name"
+          ],
+          [
+            "x/y",
+            "invalid-name"
+          ]
+        ],
+        "ignored": []
+      }
+    },
+    {
+      "id": "informational-ignored",
+      "description": "An invalid informational field is left out and reported; its entry is still listed.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "name = \"Two\\nlines\"\ndescription = 7\nhomepage = \"http://example.org\"\n\n[overlays.docs]\nsource = \"../docs\"\ndescription = [\"x\"]\n\n[overlays.docs.about]\nsummary = \"Docs\"\nicon = \"icons/docs.svg\"\ntags = [\"Docs\"]\nlicense = \"MIT or Apache-2.0\"\nhomepage = \"https://example.org/docs\"\n\n[overlays.lint]\nsource = \"../lint\"\nabout = \"Lint everything\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "full",
+        "entries": {
+          "docs": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/docs",
+              "ref": null,
+              "path": null
+            },
+            "about": {
+              "summary": "Docs",
+              "homepage": "https://example.org/docs"
+            }
+          },
+          "lint": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/lint",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": [
+          "/description",
+          "/homepage",
+          "/name",
+          "/overlays/docs/about/icon",
+          "/overlays/docs/about/license",
+          "/overlays/docs/about/tags",
+          "/overlays/docs/description",
+          "/overlays/lint/about"
+        ]
+      }
+    },
+    {
+      "id": "unknown-fields",
+      "description": "An unknown top-level key is kept and not acted on; one in about is left out; one in an entry refuses the entry, since a misspelt pin must not install unpinned.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "x_store = \"anything\"\n\n[overlays.a]\nsource = \"../a\"\npinn = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\n[overlays.b]\nsource = \"../b\"\nabout = { summary = \"B\", stars = 5 }\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "full",
+        "entries": {
+          "b": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/b",
+              "ref": null,
+              "path": null
+            },
+            "about": {
+              "summary": "B"
+            }
+          }
+        },
+        "refused": [
+          [
+            "a",
+            "invalid-entry"
+          ]
+        ],
+        "ignored": [
+          "/overlays/b/about/stars"
+        ]
+      }
+    },
+    {
+      "id": "bad-icon",
+      "description": "An icon that is not a PNG or WebP path is left out; the entry stays.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "[overlays.docs]\nsource = \"../docs\"\nabout = { summary = \"Docs\", icon = \"icons/docs.svg\" }\n\n[overlays.lint]\nsource = \"../lint\"\nabout = { icon = \"../icons/lint.png\" }\n\n[overlays.web]\nsource = \"../web\"\nabout = { icon = \"https://example.org/web.png\" }\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "full",
+        "entries": {
+          "docs": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/docs",
+              "ref": null,
+              "path": null
+            },
+            "about": {
+              "summary": "Docs"
+            }
+          },
+          "lint": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/lint",
+              "ref": null,
+              "path": null
+            }
+          },
+          "web": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/web",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": [
+          "/overlays/docs/about/icon",
+          "/overlays/lint/about/icon",
+          "/overlays/web/about/icon"
+        ]
+      }
+    },
+    {
+      "id": "whole-document-mapping",
+      "description": "A document that is the mapping itself, with no overlays table, is not a catalog.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "engineering = \"../engineering\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "error": "not-a-catalog"
+      }
+    },
+    {
+      "id": "overlays-not-a-table",
+      "description": "overlays is a table.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "overlays = [\"../engineering\"]\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "error": "not-a-catalog"
+      }
+    },
+    {
+      "id": "no-overlays",
+      "description": "A catalog has an overlays table.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "name = \"Empty\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "error": "not-a-catalog"
+      }
+    },
+    {
+      "id": "unreadable",
+      "description": "A catalog that cannot be read is refused whole.",
+      "catalog": {
+        "name": "catalog.json",
+        "text": "{\"overlays\": {\n",
+        "base": "/srv/overlays/catalogs/catalog.json"
+      },
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "collision",
+      "description": "A name two catalogs offer is shown once per catalog, qualified by its label, never merged; an unqualified request for it is ambiguous. A refused entry collides with nothing.",
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[overlays]\ndocs-tools = \"../docs-tools\"\nlint = \"../lint\"\nbad = 7\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        },
+        {
+          "name": "overlays.json",
+          "text": "{\"overlays\": {\"Docs_Tools\": {\"source\": \"https://github.com/example/docs-tools.git\", \"about\": {\"summary\": \"Docs tools\"}}, \"rust\": \"./rust\", \"bad\": \"./bad\"}}\n",
+          "base": "https://example.org/catalogs/overlays.json",
+          "label": "public"
+        }
+      ],
+      "choose": [
+        "docs-tools",
+        "team/docs-tools",
+        "public/docs_tools",
+        "Public/DOCS-TOOLS",
+        "rust",
+        "lint",
+        "bad",
+        "missing",
+        "team/rust",
+        "nope/rust",
+        "team/"
+      ],
+      "expect": {
+        "entries": [
+          {
+            "catalog": "public",
+            "name": "bad",
+            "identity": "bad",
+            "shown": "bad"
+          },
+          {
+            "catalog": "public",
+            "name": "Docs_Tools",
+            "identity": "docs-tools",
+            "shown": "public/Docs_Tools"
+          },
+          {
+            "catalog": "team",
+            "name": "docs-tools",
+            "identity": "docs-tools",
+            "shown": "team/docs-tools"
+          },
+          {
+            "catalog": "team",
+            "name": "lint",
+            "identity": "lint",
+            "shown": "lint"
+          },
+          {
+            "catalog": "public",
+            "name": "rust",
+            "identity": "rust",
+            "shown": "rust"
+          }
+        ],
+        "collisions": {
+          "docs-tools": [
+            "public",
+            "team"
+          ]
+        },
+        "chosen": {
+          "docs-tools": {
+            "error": "ambiguous"
+          },
+          "team/docs-tools": {
+            "catalog": "team",
+            "name": "docs-tools"
+          },
+          "public/docs_tools": {
+            "catalog": "public",
+            "name": "Docs_Tools"
+          },
+          "Public/DOCS-TOOLS": {
+            "catalog": "public",
+            "name": "Docs_Tools"
+          },
+          "rust": {
+            "catalog": "public",
+            "name": "rust"
+          },
+          "lint": {
+            "catalog": "team",
+            "name": "lint"
+          },
+          "bad": {
+            "catalog": "public",
+            "name": "bad"
+          },
+          "missing": {
+            "error": "not-found"
+          },
+          "team/rust": {
+            "error": "not-found"
+          },
+          "nope/rust": {
+            "error": "not-found"
+          },
+          "team/": {
+            "error": "not-found"
+          }
+        }
+      }
+    },
+    {
+      "id": "collision-same-source",
+      "description": "Two catalogs listing the same source are still two entries.",
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[overlays]\ndocs-tools = \"../docs-tools\"\nlint = \"../lint\"\nbad = 7\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        },
+        {
+          "name": "catalog.toml",
+          "text": "[overlays]\ndocs-tools = \"../docs-tools\"\nlint = \"../lint\"\nbad = 7\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "mirror"
+        }
+      ],
+      "choose": [
+        "lint",
+        "mirror/lint"
+      ],
+      "expect": {
+        "entries": [
+          {
+            "catalog": "mirror",
+            "name": "docs-tools",
+            "identity": "docs-tools",
+            "shown": "mirror/docs-tools"
+          },
+          {
+            "catalog": "team",
+            "name": "docs-tools",
+            "identity": "docs-tools",
+            "shown": "team/docs-tools"
+          },
+          {
+            "catalog": "mirror",
+            "name": "lint",
+            "identity": "lint",
+            "shown": "mirror/lint"
+          },
+          {
+            "catalog": "team",
+            "name": "lint",
+            "identity": "lint",
+            "shown": "team/lint"
+          }
+        ],
+        "collisions": {
+          "docs-tools": [
+            "mirror",
+            "team"
+          ],
+          "lint": [
+            "mirror",
+            "team"
+          ]
+        },
+        "chosen": {
+          "lint": {
+            "error": "ambiguous"
+          },
+          "mirror/lint": {
+            "catalog": "mirror",
+            "name": "lint"
+          }
+        }
+      }
+    },
+    {
+      "id": "no-collision",
+      "description": "Names no other catalog offers are shown as written.",
+      "catalogs": [
+        {
+          "name": "overlays.json",
+          "text": "{\"overlays\": {\"Docs_Tools\": {\"source\": \"https://github.com/example/docs-tools.git\", \"about\": {\"summary\": \"Docs tools\"}}, \"rust\": \"./rust\", \"bad\": \"./bad\"}}\n",
+          "base": "https://example.org/catalogs/overlays.json",
+          "label": "public"
+        }
+      ],
+      "choose": [
+        "rust",
+        "docs-tools"
+      ],
+      "expect": {
+        "entries": [
+          {
+            "catalog": "public",
+            "name": "bad",
+            "identity": "bad",
+            "shown": "bad"
+          },
+          {
+            "catalog": "public",
+            "name": "Docs_Tools",
+            "identity": "docs-tools",
+            "shown": "Docs_Tools"
+          },
+          {
+            "catalog": "public",
+            "name": "rust",
+            "identity": "rust",
+            "shown": "rust"
+          }
+        ],
+        "collisions": {},
+        "chosen": {
+          "rust": {
+            "catalog": "public",
+            "name": "rust"
+          },
+          "docs-tools": {
+            "catalog": "public",
+            "name": "Docs_Tools"
+          }
+        }
+      }
+    },
+    {
+      "id": "labels-duplicate",
+      "description": "Labels are the consumer's, unique when normalized.",
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[overlays]\ndocs-tools = \"../docs-tools\"\nlint = \"../lint\"\nbad = 7\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        },
+        {
+          "name": "overlays.json",
+          "text": "{\"overlays\": {\"Docs_Tools\": {\"source\": \"https://github.com/example/docs-tools.git\", \"about\": {\"summary\": \"Docs tools\"}}, \"rust\": \"./rust\", \"bad\": \"./bad\"}}\n",
+          "base": "https://example.org/catalogs/overlays.json",
+          "label": "Team"
+        }
+      ],
+      "choose": [],
+      "expect": {
+        "error": "invalid-label"
+      }
+    },
+    {
+      "id": "labels-invalid",
+      "description": "A label is a valid overlay name.",
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[overlays]\ndocs-tools = \"../docs-tools\"\nlint = \"../lint\"\nbad = 7\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "my catalog"
+        }
+      ],
+      "choose": [],
+      "expect": {
+        "error": "invalid-label"
+      }
+    },
+    {
+      "id": "icon-png",
+      "description": "A PNG: its format and dimensions.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAYAAAChS3wfAAAAVElEQVR42u3QMQEAAAQAMGlEkUl7erBjBRZZPZ+FAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQcC9gARmRpUsxG7IBAAAAAElFTkSuQmCC"
+      },
+      "expect": {
+        "format": "png",
+        "width": 64,
+        "height": 48
+      }
+    },
+    {
+      "id": "icon-webp-lossless",
+      "description": "A lossless WebP (VP8L): width and height are read apart.",
+      "icon": {
+        "name": "icon.webp",
+        "base64": "UklGRh4AAABXRUJQVlA4TBEAAAAvF8ADAAdQ0GqVp/+BiOh/AAA="
+      },
+      "expect": {
+        "format": "webp",
+        "width": 24,
+        "height": 16
+      }
+    },
+    {
+      "id": "icon-webp-lossy",
+      "description": "A lossy WebP (VP8).",
+      "icon": {
+        "name": "icon.webp",
+        "base64": "UklGRkAAAABXRUJQVlA4IDQAAAAQAwCdASoYABAAPtFUo0uoJKMhsAgBABoJQBOl0AAUWUAA/tDK9fAFPVH+drYYgoMXAAAA"
+      },
+      "expect": {
+        "format": "webp",
+        "width": 24,
+        "height": 16
+      }
+    },
+    {
+      "id": "icon-webp-extended",
+      "description": "A WebP with an extended header (VP8X): the canvas size.",
+      "icon": {
+        "name": "img/icon.webp",
+        "base64": "UklGRmQAAABXRUJQVlA4WAoAAAAQAAAAFwAADwAAQUxQSAoAAAABB1DAiAhERP8DVlA4IDQAAAAQAwCdASoYABAAPtFUo0uoJKMhsAgBABoJQBOl0AAQNgAA/t4Sfo+uEWRl/Qo2UTAVv7AA"
+      },
+      "expect": {
+        "format": "webp",
+        "width": 24,
+        "height": 16
+      }
+    },
+    {
+      "id": "icon-extension-case",
+      "description": "The extension ignores ASCII case.",
+      "icon": {
+        "name": "ICON.PNG",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR42mNQc6v4TwlmGDVg1IBRA4aLAQD27eMQzhBbwQAAAABJRU5ErkJggg=="
+      },
+      "expect": {
+        "format": "png",
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "id": "icon-svg",
+      "description": "SVG is not an icon format, whatever it holds.",
+      "icon": {
+        "name": "icon.svg",
+        "base64": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCI+PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pjwvc3ZnPgo="
+      },
+      "expect": {
+        "error": "icon-format"
+      }
+    },
+    {
+      "id": "icon-svg-named-png",
+      "description": "Content that is no PNG or WebP is refused, whatever its name says.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCI+PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pjwvc3ZnPgo="
+      },
+      "expect": {
+        "error": "icon-format"
+      }
+    },
+    {
+      "id": "icon-no-extension",
+      "description": "A name without an extension names no format.",
+      "icon": {
+        "name": "icon",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR42mNQc6v4TwlmGDVg1IBRA4aLAQD27eMQzhBbwQAAAABJRU5ErkJggg=="
+      },
+      "expect": {
+        "error": "icon-format"
+      }
+    },
+    {
+      "id": "icon-png-named-webp",
+      "description": "The content must be the format its extension names.",
+      "icon": {
+        "name": "icon.webp",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR42mNQc6v4TwlmGDVg1IBRA4aLAQD27eMQzhBbwQAAAABJRU5ErkJggg=="
+      },
+      "expect": {
+        "error": "icon-mismatch"
+      }
+    },
+    {
+      "id": "icon-webp-named-png",
+      "description": "And the other way round.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "UklGRkAAAABXRUJQVlA4IDQAAAAQAwCdASoYABAAPtFUo0uoJKMhsAgBABoJQBOl0AAUWUAA/tDK9fAFPVH+drYYgoMXAAAA"
+      },
+      "expect": {
+        "error": "icon-mismatch"
+      }
+    },
+    {
+      "id": "icon-too-large",
+      "description": "Over the consumer's size limit.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAYAAAChS3wfAAAAVElEQVR42u3QMQEAAAQAMGlEkUl7erBjBRZZPZ+FAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQcC9gARmRpUsxG7IBAAAAAElFTkSuQmCC",
+        "limits": {
+          "max_bytes": 64
+        }
+      },
+      "expect": {
+        "error": "icon-too-large"
+      }
+    },
+    {
+      "id": "icon-too-wide",
+      "description": "Over the consumer's width limit.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAYAAAChS3wfAAAAVElEQVR42u3QMQEAAAQAMGlEkUl7erBjBRZZPZ+FAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQcC9gARmRpUsxG7IBAAAAAElFTkSuQmCC",
+        "limits": {
+          "max_width": 32
+        }
+      },
+      "expect": {
+        "error": "icon-dimensions"
+      }
+    },
+    {
+      "id": "icon-too-tall",
+      "description": "Over the consumer's height limit.",
+      "icon": {
+        "name": "icon.webp",
+        "base64": "UklGRkAAAABXRUJQVlA4IDQAAAAQAwCdASoYABAAPtFUo0uoJKMhsAgBABoJQBOl0AAUWUAA/tDK9fAFPVH+drYYgoMXAAAA",
+        "limits": {
+          "max_height": 8
+        }
+      },
+      "expect": {
+        "error": "icon-dimensions"
+      }
+    },
+    {
+      "id": "icon-default-dimensions",
+      "description": "A header claiming 4096 x 4096 is refused from the header, before decoding.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAEAAAABAACAYAAADyoyQX"
+      },
+      "expect": {
+        "error": "icon-dimensions"
+      }
+    },
+    {
+      "id": "icon-at-the-limit",
+      "description": "Exactly at the limits is accepted.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAYAAAChS3wfAAAAVElEQVR42u3QMQEAAAQAMGlEkUl7erBjBRZZPZ+FAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQcC9gARmRpUsxG7IBAAAAAElFTkSuQmCC",
+        "limits": {
+          "max_width": 64,
+          "max_height": 48
+        }
+      },
+      "expect": {
+        "format": "png",
+        "width": 64,
+        "height": 48
+      }
+    },
+    {
+      "id": "icon-truncated",
+      "description": "A PNG signature with no header.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "iVBORw0KGgo="
+      },
+      "expect": {
+        "error": "icon-unreadable"
+      }
+    },
+    {
+      "id": "icon-zero-width",
+      "description": "A dimension of zero.",
+      "icon": {
+        "name": "icon.png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAAAAAAAQCAYAAAA4XX6J"
+      },
+      "expect": {
+        "error": "icon-unreadable"
+      }
+    },
+    {
+      "id": "icon-webp-short",
+      "description": "A RIFF size past the end of the file.",
+      "icon": {
+        "name": "icon.webp",
+        "base64": "UklGRkAAAABXRUJQVlA4IDQAAAAQAwCdASoYABAAPtFUo0uoJKMhsA=="
+      },
+      "expect": {
+        "error": "icon-unreadable"
+      }
+    },
+    {
+      "id": "icon-webp-unknown-chunk",
+      "description": "A WebP whose first chunk is none of VP8, VP8L and VP8X.",
+      "icon": {
+        "name": "icon.webp",
+        "base64": "UklGRgwAAABXRUJQQUJDRAAAAAA="
+      },
+      "expect": {
+        "error": "icon-unreadable"
+      }
+    }
+  ]
+}

@@ -336,6 +336,14 @@ CREATE TABLE IF NOT EXISTS ai6_config_mcp (
     PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE IF NOT EXISTS ai6_config_overlay (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
+);
+
 CREATE TABLE IF NOT EXISTS ai6_config_secret (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,

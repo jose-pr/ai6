@@ -1,0 +1,1998 @@
+{
+  "description": "Resolution and composition. 'overlays' maps identity to manifest; 'files' lists an overlay's files, from which the fields a manifest does not write take their defaults (skills, rules, context, paths). A 'files' entry may instead map each path to its text, for the files read as env files. 'expect' gives the visiting order, the composition order and what the active overlays contribute, or the cycle; with 'facts', the environment they build together, or the refusal. 'facts' may give 'packages' (per identity, each runtime's installed packages directory) and 'removed' (overlays being removed); a case that states 'environments' also expects the dependency environments (runtime, environment, overlays in composition order, files, locked), the 'conflicts' (runtime, environment, package, overlays), the overlays 'blocked' by them (not activated, absent from 'active' and the environment), and what each removed overlay 'left' ('rebuilt' or 'deleted').",
+  "spec": "spec/v0/composition.md",
+  "cases": [
+    {
+      "id": "order-priority-name",
+      "description": "Ascending (priority, name, identity); requires does not change the order.",
+      "overlays": {
+        "engineering": {
+          "name": "engineering",
+          "routing": [
+            "- eng"
+          ]
+        },
+        "python": {
+          "requires": [
+            "engineering"
+          ],
+          "routing": [
+            "- py"
+          ],
+          "priority": 300
+        },
+        "team": {
+          "name": "Alpha",
+          "priority": 700,
+          "routing": [
+            "- team"
+          ],
+          "context": [
+            "CONTEXT.md"
+          ]
+        },
+        "zeta": {
+          "name": "",
+          "routing": [
+            "- zeta"
+          ]
+        }
+      },
+      "requested": [
+        "team",
+        "python",
+        "zeta"
+      ],
+      "expect": {
+        "install_order": [
+          "team",
+          "engineering",
+          "python",
+          "zeta"
+        ],
+        "active": [
+          "python",
+          "engineering",
+          "zeta",
+          "team"
+        ],
+        "missing": [],
+        "root_variables": {
+          "python": "PYTHON_OVERLAY_ROOT",
+          "engineering": "ENGINEERING_OVERLAY_ROOT",
+          "zeta": "ZETA_OVERLAY_ROOT",
+          "team": "TEAM_OVERLAY_ROOT"
+        },
+        "routing": [
+          "- py",
+          "- eng",
+          "- zeta",
+          "- team"
+        ],
+        "rules": [],
+        "context": [
+          [
+            "team",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "name-tiebreak-code-points",
+      "description": "Names compare by code point: 'B' (42) sorts before 'a' (61); equal names fall back to identity.",
+      "overlays": {
+        "one": {
+          "name": "a"
+        },
+        "two": {
+          "name": "B"
+        },
+        "three": {
+          "name": "a"
+        }
+      },
+      "requested": [
+        "one",
+        "two",
+        "three"
+      ],
+      "expect": {
+        "install_order": [
+          "one",
+          "two",
+          "three"
+        ],
+        "active": [
+          "two",
+          "one",
+          "three"
+        ],
+        "missing": [],
+        "root_variables": {
+          "two": "TWO_OVERLAY_ROOT",
+          "one": "ONE_OVERLAY_ROOT",
+          "three": "THREE_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "name-scalar-order",
+      "description": "Names compare by Unicode scalar value: U+FFFD before U+1F600, the reverse of UTF-16 code units.",
+      "overlays": {
+        "emoji": {
+          "name": "😀"
+        },
+        "replacement": {
+          "name": "�"
+        }
+      },
+      "requested": [
+        "emoji",
+        "replacement"
+      ],
+      "expect": {
+        "install_order": [
+          "emoji",
+          "replacement"
+        ],
+        "active": [
+          "replacement",
+          "emoji"
+        ],
+        "missing": [],
+        "root_variables": {
+          "replacement": "REPLACEMENT_OVERLAY_ROOT",
+          "emoji": "EMOJI_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "requires-normalized",
+      "description": "Requirements are normalized; each overlay is active once.",
+      "overlays": {
+        "team-review": {
+          "requires": [
+            "Engineering_Base"
+          ]
+        },
+        "engineering-base": {},
+        "other": {
+          "requires": [
+            "team.review"
+          ]
+        }
+      },
+      "requested": [
+        "other",
+        "team-review"
+      ],
+      "expect": {
+        "install_order": [
+          "engineering-base",
+          "team-review",
+          "other"
+        ],
+        "active": [
+          "engineering-base",
+          "other",
+          "team-review"
+        ],
+        "missing": [],
+        "root_variables": {
+          "engineering-base": "ENGINEERING_BASE_OVERLAY_ROOT",
+          "other": "OTHER_OVERLAY_ROOT",
+          "team-review": "TEAM_REVIEW_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "missing",
+      "description": "A requirement no source offers is reported with the overlay that requires it.",
+      "overlays": {
+        "rust": {
+          "requires": [
+            "engineering",
+            "toolchain"
+          ]
+        },
+        "engineering": {}
+      },
+      "requested": [
+        "rust",
+        "absent"
+      ],
+      "expect": {
+        "install_order": [
+          "engineering",
+          "rust"
+        ],
+        "active": [
+          "engineering",
+          "rust"
+        ],
+        "missing": [
+          [
+            "rust",
+            "toolchain"
+          ],
+          [
+            "",
+            "absent"
+          ]
+        ],
+        "root_variables": {
+          "engineering": "ENGINEERING_OVERLAY_ROOT",
+          "rust": "RUST_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "cycle",
+      "description": "A cycle is an error naming the chain.",
+      "overlays": {
+        "a": {
+          "requires": [
+            "b"
+          ]
+        },
+        "b": {
+          "requires": [
+            "c"
+          ]
+        },
+        "c": {
+          "requires": [
+            "a"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "error": "cycle",
+        "chain": [
+          "a",
+          "b",
+          "c",
+          "a"
+        ]
+      }
+    },
+    {
+      "id": "self-cycle",
+      "description": "An overlay that requires itself.",
+      "overlays": {
+        "a": {
+          "requires": [
+            "a"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "error": "cycle",
+        "chain": [
+          "a",
+          "a"
+        ]
+      }
+    },
+    {
+      "id": "skills",
+      "description": "Declared and discovered skills together (an empty list adds nothing), and collisions (names compare without ASCII case) won by the overlay later in order.",
+      "overlays": {
+        "base": {
+          "priority": 100
+        },
+        "docs": {
+          "skills": [
+            "search",
+            "Lint"
+          ],
+          "priority": 600
+        },
+        "extra": {
+          "skills": []
+        }
+      },
+      "requested": [
+        "base",
+        "docs",
+        "extra"
+      ],
+      "files": {
+        "base": [
+          "skills/search/SKILL.md",
+          "skills/lint/SKILL.md",
+          "skills/README.md"
+        ],
+        "docs": [
+          "skills/search/SKILL.md",
+          "skills/Lint/SKILL.md"
+        ],
+        "extra": [
+          "skills/hidden/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "base",
+          "docs",
+          "extra"
+        ],
+        "active": [
+          "base",
+          "extra",
+          "docs"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT",
+          "extra": "EXTRA_OVERLAY_ROOT",
+          "docs": "DOCS_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {
+          "Lint": "docs",
+          "search": "docs",
+          "hidden": "extra"
+        },
+        "skill_collisions": [
+          "lint",
+          "search"
+        ]
+      }
+    },
+    {
+      "id": "defaults-contributions",
+      "description": "Fields not written take their defaults from the files: rules/<name>.md directly in rules/ by path bytes, the root CONTEXT.md, skills/<name>/SKILL.md with a skill name; other names, other cases and excluded files are not conventions.",
+      "overlays": {
+        "base": {
+          "priority": 100
+        },
+        "team": {
+          "priority": 600
+        }
+      },
+      "requested": [
+        "team",
+        "base"
+      ],
+      "files": {
+        "base": [
+          "rules/b.md",
+          "rules/a.md",
+          "rules/README.txt",
+          "rules/notes/x.md",
+          "rules/C.MD",
+          "CONTEXT.md",
+          "kb/CONTEXT.md",
+          "skills/lint/SKILL.md",
+          "skills/.hidden/SKILL.md",
+          "skills/README.md",
+          "skills/fmt/skill.md",
+          "skills/__pycache__/SKILL.md"
+        ],
+        "team": [
+          "context.md",
+          "rules/team.md",
+          "skills/review/SKILL.md",
+          "skills/review/scripts/run.py"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "team",
+          "base"
+        ],
+        "active": [
+          "base",
+          "team"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT",
+          "team": "TEAM_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [
+          [
+            "base",
+            "rules/a.md"
+          ],
+          [
+            "base",
+            "rules/b.md"
+          ],
+          [
+            "team",
+            "rules/team.md"
+          ]
+        ],
+        "context": [
+          [
+            "base",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {
+          "lint": "base",
+          "review": "team"
+        },
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "defaults-declared",
+      "description": "Declared entries add to the defaults, after them; one naming the same file as a default entry replaces it, at its declared place, so nothing repeats.",
+      "overlays": {
+        "base": {
+          "rules": [
+            "kb/always.md",
+            "rules/a.md"
+          ],
+          "context": [
+            "kb/glossary.md",
+            "CONTEXT.md"
+          ],
+          "skills": [
+            "lint"
+          ]
+        }
+      },
+      "requested": [
+        "base"
+      ],
+      "files": {
+        "base": [
+          "rules/a.md",
+          "rules/b.md",
+          "kb/always.md",
+          "CONTEXT.md",
+          "kb/glossary.md",
+          "skills/lint/SKILL.md",
+          "skills/fmt/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "base"
+        ],
+        "active": [
+          "base"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [
+          [
+            "base",
+            "rules/b.md"
+          ],
+          [
+            "base",
+            "kb/always.md"
+          ],
+          [
+            "base",
+            "rules/a.md"
+          ]
+        ],
+        "context": [
+          [
+            "base",
+            "kb/glossary.md"
+          ],
+          [
+            "base",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {
+          "fmt": "base",
+          "lint": "base"
+        },
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "defaults-off",
+      "description": "[defaults] turns a default off; what is declared still applies, so skills = false with a list offers exactly the list.",
+      "overlays": {
+        "base": {
+          "defaults": {
+            "rules": false,
+            "context": false,
+            "skills": false
+          },
+          "skills": [
+            "lint"
+          ],
+          "context": [
+            "kb/glossary.md"
+          ]
+        }
+      },
+      "requested": [
+        "base"
+      ],
+      "files": {
+        "base": [
+          "rules/a.md",
+          "CONTEXT.md",
+          "kb/glossary.md",
+          "skills/lint/SKILL.md",
+          "skills/fmt/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "base"
+        ],
+        "active": [
+          "base"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [
+          [
+            "base",
+            "kb/glossary.md"
+          ]
+        ],
+        "skills": {
+          "lint": "base"
+        },
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "defaults-empty-lists",
+      "description": "An empty list declares nothing: it turns no default off.",
+      "overlays": {
+        "base": {
+          "rules": [],
+          "context": [],
+          "skills": []
+        }
+      },
+      "requested": [
+        "base"
+      ],
+      "files": {
+        "base": [
+          "rules/a.md",
+          "CONTEXT.md",
+          "skills/lint/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "base"
+        ],
+        "active": [
+          "base"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [
+          [
+            "base",
+            "rules/a.md"
+          ]
+        ],
+        "context": [
+          [
+            "base",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {
+          "lint": "base"
+        },
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "env-across-overlays",
+      "description": "Root variables first; then each overlay's env and paths in order: the later overlay wins and its prepends come first.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "MODE": "low",
+            "ONLY_LOW": "1"
+          },
+          "paths": [
+            {
+              "variable": "PATH",
+              "path": "bin"
+            }
+          ]
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "MODE": "high",
+            "LOW_ROOT_SEEN": {
+              "value": "x",
+              "if_unset": true
+            }
+          },
+          "paths": [
+            {
+              "variable": "PATH",
+              "path": "bin"
+            },
+            {
+              "variable": "PATH",
+              "path": "tools",
+              "position": "append"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {
+          "PATH": "/usr/bin:/bin"
+        },
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "PATH": "/ov/high/bin:/ov/low/bin:/usr/bin:/bin:/ov/high/tools",
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "MODE": "high",
+          "ONLY_LOW": "1",
+          "LOW_ROOT_SEEN": "x"
+        }
+      }
+    },
+    {
+      "id": "env-across-overlays-windows",
+      "description": "The same on Windows: ';', backslashes, and names without regard to case.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "MODE": "low"
+          },
+          "paths": [
+            {
+              "variable": "PATH",
+              "path": "bin"
+            }
+          ]
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "mode": "high"
+          },
+          "paths": [
+            {
+              "variable": "Path",
+              "path": "bin"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "low",
+        "high"
+      ],
+      "facts": {
+        "os": "windows",
+        "base_env": {
+          "Path": "C:\\Windows;C:\\Windows\\System32"
+        },
+        "roots": {
+          "low": "C:\\ov\\low",
+          "high": "C:\\ov\\high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "Path": "C:\\ov\\high\\bin;C:\\ov\\low\\bin;C:\\Windows;C:\\Windows\\System32",
+          "LOW_OVERLAY_ROOT": "C:\\ov\\low",
+          "HIGH_OVERLAY_ROOT": "C:\\ov\\high",
+          "MODE": "high"
+        }
+      }
+    },
+    {
+      "id": "default-paths-across-overlays",
+      "description": "Each overlay's bin/ and lib/python/ are prepended in composition order, so the higher priority is found first; declaring another directory keeps them; [defaults] turns them off.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        },
+        "high": {
+          "priority": 900
+        },
+        "manpages": {
+          "priority": 500,
+          "paths": [
+            {
+              "variable": "MANPATH",
+              "path": "man"
+            }
+          ]
+        },
+        "quiet": {
+          "priority": 600,
+          "defaults": {
+            "bin": false,
+            "lib": false
+          }
+        }
+      },
+      "requested": [
+        "high",
+        "low",
+        "manpages",
+        "quiet"
+      ],
+      "files": {
+        "low": [
+          "bin/a",
+          "lib/python/low.py"
+        ],
+        "high": [
+          "bin/b",
+          "lib/python/pkg/__init__.py"
+        ],
+        "manpages": [
+          "bin/c",
+          "lib/plain.py",
+          "man/c.1"
+        ],
+        "quiet": [
+          "bin/d",
+          "lib/python/q.py"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "base_env": {
+          "PATH": "/usr/bin:/bin"
+        },
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high",
+          "manpages": "/ov/manpages",
+          "quiet": "/ov/quiet"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "manpages",
+          "quiet",
+          "high"
+        ],
+        "env": {
+          "PATH": "/ov/high/bin:/ov/manpages/bin:/ov/low/bin:/usr/bin:/bin",
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "MANPAGES_OVERLAY_ROOT": "/ov/manpages",
+          "QUIET_OVERLAY_ROOT": "/ov/quiet",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "PYTHONPATH": "/ov/high/lib/python:/ov/low/lib/python",
+          "MANPATH": "/ov/manpages/man"
+        }
+      }
+    },
+    {
+      "id": "chain-across-overlays",
+      "description": "A later overlay's values see what an earlier one set, in composition order, and every root variable.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "TOOL_BIN": "${TOOL_HOME}/bin",
+            "LOW_ROOT": "${LOW_OVERLAY_ROOT}"
+          }
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "files": {
+        "low": {
+          "env": "TOOL_HOME=${AOS_OVERLAY_ROOT}/tool\nTOOL_CONF=${TOOL_HOME}/conf\n"
+        },
+        "high": {}
+      },
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "TOOL_HOME": "/ov/low/tool",
+          "TOOL_CONF": "/ov/low/tool/conf",
+          "TOOL_BIN": "/ov/low/tool/bin",
+          "LOW_ROOT": "/ov/low"
+        }
+      }
+    },
+    {
+      "id": "chain-paths-to-later-env",
+      "description": "A path addition of an earlier overlay is in the environment a later overlay's env sees.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "SEEN_PATH": "${PATH}"
+          }
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "files": {
+        "low": {
+          "bin/tool": ""
+        },
+        "high": {}
+      },
+      "facts": {
+        "os": "linux",
+        "base_env": {
+          "PATH": "/usr/bin"
+        },
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "PATH": "/ov/low/bin:/usr/bin",
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "SEEN_PATH": "/ov/low/bin:/usr/bin"
+        }
+      }
+    },
+    {
+      "id": "chain-no-forward-across-overlays",
+      "description": "An earlier overlay does not see what a later one sets: the name is undefined, an error.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "A": "${HIGH_ONLY}"
+          }
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "HIGH_ONLY": "x"
+          }
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "error": "undefined-variable",
+          "subject": "A"
+        }
+      }
+    },
+    {
+      "id": "chain-secret-across-overlays",
+      "description": "A later overlay cannot read, by a placeholder, a variable an earlier one took from a secret reference.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "TOKEN": {
+              "secret": "deploy"
+            }
+          }
+        },
+        "high": {
+          "priority": 900
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "files": {
+        "low": {},
+        "high": {
+          "env": "AUTH=Bearer ${TOKEN}\n"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        },
+        "grants": {
+          "secret": [
+            "deploy"
+          ]
+        },
+        "secrets": {
+          "deploy": "s3cret"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "error": "secret-placeholder",
+          "subject": "AUTH"
+        }
+      }
+    },
+    {
+      "id": "deps-shared-two",
+      "description": "Two overlays with no setting share the scope's Python environment, in composition order, installed together; one unhashed file makes it unlocked.",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "requests>=2.31\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "rich==13.9.4 --hash=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "a",
+          "b"
+        ],
+        "environments": [
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "overlays": [
+              "a",
+              "b"
+            ],
+            "files": [
+              [
+                "a",
+                "lib/python/requirements.txt"
+              ],
+              [
+                "b",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": false
+          }
+        ],
+        "conflicts": [],
+        "blocked": [],
+        "left": [],
+        "env": {
+          "A_OVERLAY_ROOT": "/scope/ov/a",
+          "B_OVERLAY_ROOT": "/scope/ov/b",
+          "PYTHONPATH": "/scope/ov/b/lib/python:/scope/envs/python/shared/site-packages:/scope/ov/a/lib/python"
+        }
+      }
+    },
+    {
+      "id": "deps-shared-locked",
+      "description": "Every file in the shared environment a lock: it is locked.",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "requests==2.32.3 --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "rich==13.9.4 --hash=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "a",
+          "b"
+        ],
+        "environments": [
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "overlays": [
+              "a",
+              "b"
+            ],
+            "files": [
+              [
+                "a",
+                "lib/python/requirements.txt"
+              ],
+              [
+                "b",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": true
+          }
+        ],
+        "conflicts": [],
+        "blocked": [],
+        "left": [],
+        "env": {
+          "A_OVERLAY_ROOT": "/scope/ov/a",
+          "B_OVERLAY_ROOT": "/scope/ov/b",
+          "PYTHONPATH": "/scope/ov/b/lib/python:/scope/envs/python/shared/site-packages:/scope/ov/a/lib/python"
+        }
+      }
+    },
+    {
+      "id": "deps-named-group",
+      "description": "Overlays naming one environment share it, apart from the shared one.",
+      "overlays": {
+        "a": {
+          "runtime": {
+            "python": [
+              {
+                "environment": "docs"
+              }
+            ]
+          },
+          "priority": 100
+        },
+        "b": {
+          "runtime": {
+            "python": [
+              {
+                "environment": "docs"
+              }
+            ]
+          },
+          "priority": 110
+        },
+        "c": {
+          "priority": 120
+        }
+      },
+      "requested": [
+        "a",
+        "b",
+        "c"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "rich==13.9.4 --hash=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "markdown>=3.5\n",
+          "lib/python/m.py": ""
+        },
+        "c": {
+          "lib/python/requirements.txt": "requests>=2.31\n",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b",
+          "c": "/scope/ov/c"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/docs/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/docs/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "c": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "a",
+          "b",
+          "c"
+        ],
+        "environments": [
+          {
+            "runtime": "python",
+            "environment": "docs",
+            "overlays": [
+              "a",
+              "b"
+            ],
+            "files": [
+              [
+                "a",
+                "lib/python/requirements.txt"
+              ],
+              [
+                "b",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": false
+          },
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "overlays": [
+              "c"
+            ],
+            "files": [
+              [
+                "c",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": false
+          }
+        ],
+        "conflicts": [],
+        "blocked": [],
+        "left": [],
+        "env": {
+          "A_OVERLAY_ROOT": "/scope/ov/a",
+          "B_OVERLAY_ROOT": "/scope/ov/b",
+          "C_OVERLAY_ROOT": "/scope/ov/c",
+          "PYTHONPATH": "/scope/ov/c/lib/python:/scope/envs/python/shared/site-packages:/scope/ov/b/lib/python:/scope/envs/python/docs/site-packages:/scope/ov/a/lib/python"
+        }
+      }
+    },
+    {
+      "id": "deps-isolated",
+      "description": "An isolated overlay installs alone, so its pins never meet another overlay's.",
+      "overlays": {
+        "a": {
+          "runtime": {
+            "python": [
+              {
+                "environment": "isolated"
+              }
+            ]
+          },
+          "priority": 100
+        },
+        "b": {
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "requests==2.32.3 --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "requests==2.31.0 --hash=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/a/python/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "a",
+          "b"
+        ],
+        "environments": [
+          {
+            "runtime": "python",
+            "environment": "isolated",
+            "overlays": [
+              "a"
+            ],
+            "files": [
+              [
+                "a",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": true
+          },
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "overlays": [
+              "b"
+            ],
+            "files": [
+              [
+                "b",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": true
+          }
+        ],
+        "conflicts": [],
+        "blocked": [],
+        "left": [],
+        "env": {
+          "A_OVERLAY_ROOT": "/scope/ov/a",
+          "B_OVERLAY_ROOT": "/scope/ov/b",
+          "PYTHONPATH": "/scope/ov/b/lib/python:/scope/envs/python/shared/site-packages:/scope/ov/a/lib/python:/scope/envs/a/python/site-packages"
+        }
+      }
+    },
+    {
+      "id": "deps-isolated-two",
+      "description": "Two isolated overlays get two environments, one each, and never conflict.",
+      "overlays": {
+        "a": {
+          "runtime": {
+            "python": [
+              {
+                "environment": "isolated"
+              }
+            ]
+          },
+          "priority": 100
+        },
+        "b": {
+          "runtime": {
+            "python": [
+              {
+                "environment": "isolated"
+              }
+            ]
+          },
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "requests==2.32.3 --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "requests==2.31.0 --hash=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/a/python/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/b/python/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "a",
+          "b"
+        ],
+        "environments": [
+          {
+            "runtime": "python",
+            "environment": "isolated",
+            "overlays": [
+              "a"
+            ],
+            "files": [
+              [
+                "a",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": true
+          },
+          {
+            "runtime": "python",
+            "environment": "isolated",
+            "overlays": [
+              "b"
+            ],
+            "files": [
+              [
+                "b",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": true
+          }
+        ],
+        "conflicts": [],
+        "blocked": [],
+        "left": [],
+        "env": {
+          "A_OVERLAY_ROOT": "/scope/ov/a",
+          "B_OVERLAY_ROOT": "/scope/ov/b",
+          "PYTHONPATH": "/scope/ov/b/lib/python:/scope/envs/b/python/site-packages:/scope/ov/a/lib/python:/scope/envs/a/python/site-packages"
+        }
+      }
+    },
+    {
+      "id": "deps-conflict",
+      "description": "Two overlays pin one package to two versions in the shared environment: both are reported and neither activates; the environment holds the rest.",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "priority": 110
+        },
+        "c": {
+          "priority": 120
+        }
+      },
+      "requested": [
+        "a",
+        "b",
+        "c"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "requests==2.32.3 --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "requests==2.31.0 --hash=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+          "lib/python/m.py": ""
+        },
+        "c": {
+          "lib/python/requirements.txt": "rich==13.9.4 --hash=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b",
+          "c": "/scope/ov/c"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "c": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "c"
+        ],
+        "environments": [
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "overlays": [
+              "c"
+            ],
+            "files": [
+              [
+                "c",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": true
+          }
+        ],
+        "conflicts": [
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "package": "requests",
+            "overlays": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        "blocked": [
+          "a",
+          "b"
+        ],
+        "left": [],
+        "env": {
+          "C_OVERLAY_ROOT": "/scope/ov/c",
+          "PYTHONPATH": "/scope/ov/c/lib/python:/scope/envs/python/shared/site-packages"
+        }
+      }
+    },
+    {
+      "id": "deps-conflict-names-normalized",
+      "description": "Package names are compared normalized (case, '-', '_', '.').",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "Typing_Extensions==4.12.2\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "typing.extensions==4.11.0\n",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [],
+        "environments": [],
+        "conflicts": [
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "package": "typing-extensions",
+            "overlays": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        "blocked": [
+          "a",
+          "b"
+        ],
+        "left": [],
+        "env": {}
+      }
+    },
+    {
+      "id": "deps-node-conflict",
+      "description": "Node.js: one node_modules holds one version of a package; two specs for it conflict.",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "a": {
+          "lib/node/package.json": "{\"dependencies\": {\"marked\": \"^14.1.0\"}}",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/node/package.json": "{\"dependencies\": {\"marked\": \"12.0.2\"}}",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [],
+        "environments": [],
+        "conflicts": [
+          {
+            "runtime": "node",
+            "environment": "shared",
+            "package": "marked",
+            "overlays": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        "blocked": [
+          "a",
+          "b"
+        ],
+        "left": [],
+        "env": {}
+      }
+    },
+    {
+      "id": "deps-node-shared-locks",
+      "description": "Node.js: npm installs one lock, so a shared node_modules of two overlays is unlocked even when both have one.",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "a": {
+          "lib/node/package.json": "{\"dependencies\": {\"marked\": \"^14.1.0\"}}",
+          "lib/node/package-lock.json": "{}",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/node/package.json": "{\"dependencies\": {\"chalk\": \"^5.3.0\"}}",
+          "lib/node/package-lock.json": "{}",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "a",
+          "b"
+        ],
+        "environments": [
+          {
+            "runtime": "node",
+            "environment": "shared",
+            "overlays": [
+              "a",
+              "b"
+            ],
+            "files": [
+              [
+                "a",
+                "lib/node/package.json"
+              ],
+              [
+                "b",
+                "lib/node/package.json"
+              ]
+            ],
+            "locked": false
+          }
+        ],
+        "conflicts": [],
+        "blocked": [],
+        "left": [],
+        "env": {
+          "A_OVERLAY_ROOT": "/scope/ov/a",
+          "B_OVERLAY_ROOT": "/scope/ov/b",
+          "PYTHONPATH": "/scope/ov/b/lib/python:/scope/ov/a/lib/python",
+          "NODE_PATH": "/scope/ov/b/lib/node:/scope/envs/node/shared/node_modules:/scope/ov/a/lib/node"
+        }
+      }
+    },
+    {
+      "id": "deps-remove-shared",
+      "description": "Removing b: the shared Python environment is rebuilt from a's files, and b's isolated Node.js environment is deleted.",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "runtime": {
+            "node": [
+              {
+                "environment": "isolated"
+              }
+            ]
+          },
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "requests>=2.31\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "rich==13.9.4 --hash=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n",
+          "lib/node/package.json": "{\"dependencies\": {}}",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/b/node/node_modules"
+          }
+        },
+        "removed": [
+          "b"
+        ]
+      },
+      "expect": {
+        "active": [
+          "a"
+        ],
+        "environments": [
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "overlays": [
+              "a"
+            ],
+            "files": [
+              [
+                "a",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": false
+          }
+        ],
+        "conflicts": [],
+        "blocked": [],
+        "left": [
+          {
+            "overlay": "b",
+            "runtime": "python",
+            "environment": "shared",
+            "then": "rebuilt"
+          },
+          {
+            "overlay": "b",
+            "runtime": "node",
+            "environment": "isolated",
+            "then": "deleted"
+          }
+        ],
+        "env": {
+          "A_OVERLAY_ROOT": "/scope/ov/a",
+          "PYTHONPATH": "/scope/ov/a/lib/python:/scope/envs/python/shared/site-packages"
+        }
+      }
+    },
+    {
+      "id": "deps-remove-last-named",
+      "description": "Removing the last overlay of a named environment deletes it.",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "runtime": {
+            "python": [
+              {
+                "environment": "docs"
+              }
+            ]
+          },
+          "priority": 110
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "files": {
+        "a": {
+          "lib/python/requirements.txt": "rich==13.9.4 --hash=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n",
+          "lib/python/m.py": ""
+        },
+        "b": {
+          "lib/python/requirements.txt": "requests==2.32.3 --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          "lib/python/m.py": ""
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "roots": {
+          "a": "/scope/ov/a",
+          "b": "/scope/ov/b"
+        },
+        "base_env": {},
+        "packages": {
+          "a": {
+            "python": "/scope/envs/python/shared/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          },
+          "b": {
+            "python": "/scope/envs/python/docs/site-packages",
+            "node": "/scope/envs/node/shared/node_modules"
+          }
+        },
+        "removed": [
+          "b"
+        ]
+      },
+      "expect": {
+        "active": [
+          "a"
+        ],
+        "environments": [
+          {
+            "runtime": "python",
+            "environment": "shared",
+            "overlays": [
+              "a"
+            ],
+            "files": [
+              [
+                "a",
+                "lib/python/requirements.txt"
+              ]
+            ],
+            "locked": true
+          }
+        ],
+        "conflicts": [],
+        "blocked": [],
+        "left": [
+          {
+            "overlay": "b",
+            "runtime": "python",
+            "environment": "docs",
+            "then": "deleted"
+          }
+        ],
+        "env": {
+          "A_OVERLAY_ROOT": "/scope/ov/a",
+          "PYTHONPATH": "/scope/ov/a/lib/python:/scope/envs/python/shared/site-packages"
+        }
+      }
+    }
+  ]
+}

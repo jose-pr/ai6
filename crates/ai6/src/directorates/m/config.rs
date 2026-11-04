@@ -72,6 +72,9 @@ pub enum ConfigRecord {
     Sandbox,
     /// An MCP server loadouts name: the keys of an `[mcp.<name>]` table.
     Mcp,
+    /// An overlay loadouts and Operations issue, its source and pin: the keys of an
+    /// `[overlay.<name>]` table.
+    Overlay,
     /// How a loadout secret reaches a Session, never its value: a `[secret.<name>]` table.
     Secret,
     /// An account pool and its accounts (references to secrets, never values): a
@@ -113,7 +116,7 @@ pub enum ConfigRecord {
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Roster,
         Self::Operation,
         Self::Agent,
@@ -124,6 +127,7 @@ impl ConfigRecord {
         Self::Loadout,
         Self::Sandbox,
         Self::Mcp,
+        Self::Overlay,
         Self::Secret,
         Self::Pool,
         Self::Cables,
@@ -141,8 +145,9 @@ impl ConfigRecord {
     pub const SINGLETON_KEY: &'static str = "settings";
 
     /// The family's name: `operation`, `agent`, `role`, `assistant`, `cover`, `theater`,
-    /// `loadout`, `sandbox`, `mcp`, `secret`, `pool`, `cables`, `plugin`, `station`, `tls`,
-    /// `access`, `unex`, `roster`, `compartment` or `review`. For a family that shares its file, it is also its table there.
+    /// `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `pool`, `cables`, `plugin`, `station`,
+    /// `tls`, `access`, `unex`, `roster`, `compartment` or `review`. For a family that shares its
+    /// file, it is also its table there.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Operation => "operation",
@@ -154,6 +159,7 @@ impl ConfigRecord {
             Self::Loadout => "loadout",
             Self::Sandbox => "sandbox",
             Self::Mcp => "mcp",
+            Self::Overlay => "overlay",
             Self::Secret => "secret",
             Self::Pool => "pool",
             Self::Cables => "cables",
@@ -181,7 +187,12 @@ impl ConfigRecord {
             Self::Agent | Self::Role | Self::Assistant => "agents",
             Self::Cover => "covers",
             Self::Theater => "theaters",
-            Self::Loadout | Self::Sandbox | Self::Mcp | Self::Secret | Self::Pool => "loadouts",
+            Self::Loadout
+            | Self::Sandbox
+            | Self::Mcp
+            | Self::Overlay
+            | Self::Secret
+            | Self::Pool => "loadouts",
             Self::Cables => "cables",
             Self::Plugin => "plugins",
             Self::Station => "station",
@@ -221,6 +232,7 @@ impl ConfigRecord {
                 | Self::Loadout
                 | Self::Sandbox
                 | Self::Mcp
+                | Self::Overlay
                 | Self::Secret
                 | Self::Pool
                 | Self::Cables
@@ -589,6 +601,10 @@ pub struct StationRuntime {
     #[schema(title = "Harness configuration")]
     #[map(default)]
     pub harness: limits::HarnessLimits,
+    /// `[overlays]`: reading the overlays loadouts and Operations issue.
+    #[schema(title = "Overlays")]
+    #[map(default)]
+    pub overlays: limits::OverlayLimits,
     /// `[provision]`: probing and provisioning Theaters.
     #[schema(title = "Probing and provisioning Theaters")]
     #[map(default)]
@@ -703,6 +719,7 @@ impl StationRuntime {
             accounts: self.accounts.clone(),
             approvals: self.approvals.clone(),
             harness: self.harness.clone(),
+            overlays: self.overlays.clone(),
             provision: self.provision.clone(),
             secrets: self.secrets.clone(),
             terminal_output: self.terminal_output.clone(),
@@ -1268,7 +1285,7 @@ pub fn references_to(
 
 /// The families in the order an import stores them, so each refers only to records already
 /// stored: roles before the Agents that hold them, Agents before the Operations that name them.
-pub const IMPORT_ORDER: [ConfigRecord; 21] = [
+pub const IMPORT_ORDER: [ConfigRecord; 22] = [
     ConfigRecord::Roster,
     ConfigRecord::Role,
     ConfigRecord::Cover,
@@ -1279,6 +1296,7 @@ pub const IMPORT_ORDER: [ConfigRecord; 21] = [
     ConfigRecord::Sandbox,
     ConfigRecord::Mcp,
     ConfigRecord::Secret,
+    ConfigRecord::Overlay,
     ConfigRecord::Pool,
     ConfigRecord::Loadout,
     ConfigRecord::Cables,
@@ -1567,6 +1585,7 @@ pub(crate) fn assemble(
         ConfigRecord::Loadout,
         ConfigRecord::Sandbox,
         ConfigRecord::Mcp,
+        ConfigRecord::Overlay,
         ConfigRecord::Secret,
         ConfigRecord::Pool,
     ])?;

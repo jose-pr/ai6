@@ -85,6 +85,11 @@ enum Command {
         #[command(subcommand)]
         command: HarnessCommand,
     },
+    /// Overlays loadouts and Operations issue (`[overlay.NAME]`).
+    Overlay {
+        #[command(subcommand)]
+        command: OverlayCommand,
+    },
 }
 
 /// Where the bootstrap file is.
@@ -166,6 +171,18 @@ enum ConfigCommand {
         dir: PathBuf,
         #[command(flatten)]
         bootstrap: BootstrapArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum OverlayCommand {
+    /// Read an overlay directory as a Station reads it, running nothing: print its files, each
+    /// with its SHA-256, and the `pin` its `[overlay.NAME]` needs, the AOS tree digest. Exits
+    /// non-zero without a pin when its overlay.cfg does not read or validate, or a skill fails
+    /// the SKILL.md checks.
+    Pin {
+        /// The overlay's root directory.
+        dir: PathBuf,
     },
 }
 
@@ -578,6 +595,9 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Overlay {
+            command: OverlayCommand::Pin { dir },
+        } => overlay_pin(&dir),
         Command::Theater { command } => {
             match tokio::task::spawn_blocking(move || theater_command(command)).await {
                 Ok(code) => code,
@@ -1747,6 +1767,47 @@ async fn shutdown_signal() {
     if let Err(error) = tokio::signal::ctrl_c().await {
         eprintln!("ai6: could not install the Ctrl-C handler: {error}");
     }
+}
+
+/// `ai6 overlay pin DIR`.
+fn overlay_pin(dir: &std::path::Path) -> ExitCode {
+    let read = match ai6::directorates::q::overlays::read_overlay(dir, &Default::default()) {
+        Ok(read) => read,
+        Err(error) => {
+            eprintln!("ai6: {}: {error}", dir.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    for (path, digest) in &read.digest.files {
+        println!("# {digest}  {path}");
+    }
+    let mut usable = true;
+    for issue in &read.issues {
+        let blocks = !ai6::directorates::q::overlays::applies(std::slice::from_ref(issue));
+        usable &= !blocks;
+        eprintln!(
+            "ai6: {}: overlay.cfg {}: {}{}",
+            dir.display(),
+            issue.at,
+            issue.code,
+            if blocks {
+                ""
+            } else {
+                " (informational; it still applies)"
+            }
+        );
+    }
+    for (name, check) in &read.skills {
+        if let Err(reason) = check {
+            usable = false;
+            eprintln!("ai6: {}: skill {name}: {reason}", dir.display());
+        }
+    }
+    if !usable {
+        return ExitCode::FAILURE;
+    }
+    println!("pin = \"{}\"", read.digest.digest);
+    ExitCode::SUCCESS
 }
 
 #[cfg(test)]

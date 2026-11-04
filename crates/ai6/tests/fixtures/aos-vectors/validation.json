@@ -1,0 +1,2465 @@
+{
+  "description": "Validating a data model value. 'files', when present, lists the overlay's files and every file a field names must be among them. An invalid case names the pointer of the offending value ('at'); an implementation reports a problem there or inside it. A case whose document writes 'about' also states whether the manifest still 'applies': a problem under /about never stops it.",
+  "spec": "spec/v0/manifest.md#validation",
+  "cases": [
+    {
+      "id": "empty",
+      "description": "No manifest reads as the empty mapping.",
+      "document": {},
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "core",
+      "description": "The core fields.",
+      "document": {
+        "name": "x",
+        "description": "d",
+        "requires": [
+          "engineering",
+          "Team_Review"
+        ],
+        "routing": [
+          "- a → `$X_OVERLAY_ROOT/a.md`"
+        ],
+        "rules": [
+          "rules/a.md"
+        ],
+        "priority": -5
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "name-empty",
+      "description": "An empty name is a string.",
+      "document": {
+        "name": ""
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "unknown-keys",
+      "description": "Unknown top-level keys of any data model type.",
+      "document": {
+        "x_ext": {
+          "a": [
+            1,
+            2.5,
+            true,
+            "s",
+            {
+              "b": []
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "relative-paths",
+      "description": "Dot-names that are not '.' or '..' are fine.",
+      "document": {
+        "rules": [
+          ".hidden/a.md",
+          "a/..b/c.md",
+          "...x",
+          "a b/c d.md",
+          ".github/a.md",
+          "console/a.md",
+          "com10/a.md",
+          "x.pyco"
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "env-forms",
+      "description": "Every env value form.",
+      "document": {
+        "env": {
+          "A": "x",
+          "B": {
+            "value": "y",
+            "if_unset": true
+          },
+          "C": {
+            "path": "conf/c.toml"
+          },
+          "D": {
+            "provider": "env",
+            "key": "D",
+            "optional": true
+          },
+          "E": {
+            "provider": "vault",
+            "key": "k",
+            "version": 2,
+            "strict": true,
+            "mount": "kv"
+          },
+          "F": {
+            "secret": "s",
+            "if_unset": false
+          },
+          "G": ""
+        }
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "env-files",
+      "description": "Env files as paths and mappings.",
+      "document": {
+        "env_files": [
+          "env/a.cfg",
+          {
+            "path": "env/b.env",
+            "format": "dotenv"
+          },
+          {
+            "path": "env/w.cfg",
+            "format": "aos",
+            "os": [
+              "windows"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "paths",
+      "description": "Path additions.",
+      "document": {
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin"
+          },
+          {
+            "variable": "PYTHONPATH",
+            "path": "lib",
+            "position": "append",
+            "os": [
+              "unix"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "env-scripts",
+      "description": "Env scripts.",
+      "document": {
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env/a.py",
+            "args": [
+              "-q"
+            ],
+            "timeout": 0,
+            "os": [
+              "linux"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "setup",
+      "description": "Setup variants, a custom interpreter name included.",
+      "document": {
+        "setup": [
+          {
+            "interpreter": "powershell",
+            "path": "s/a.ps1",
+            "os": [
+              "windows"
+            ]
+          },
+          {
+            "interpreter": "deno",
+            "path": "s/a.ts",
+            "timeout": 10,
+            "network": true
+          }
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "runtime",
+      "description": "Runtime with every key.",
+      "document": {
+        "runtime": {
+          "os": [
+            "linux",
+            "haiku"
+          ],
+          "commands": [
+            "git",
+            {
+              "name": "gh",
+              "os": [
+                "macos"
+              ]
+            }
+          ],
+          "python": [
+            {
+              "version": "3",
+              "requirements": "r.txt"
+            },
+            {
+              "version": "3.11.4",
+              "lock": "l.txt",
+              "lock_digest": "sha256:ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB"
+            }
+          ],
+          "node": [
+            {
+              "version": "20.1"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-context",
+      "description": "Skills and context.",
+      "document": {
+        "skills": [
+          "a",
+          "b.c",
+          "9z"
+        ],
+        "context": [
+          "CONTEXT.md"
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "scripts",
+      "description": "Every script form.",
+      "document": {
+        "scripts": {
+          "a": "bin/a.py",
+          "b": "bin/b.ps1",
+          "c": "x/c.mjs",
+          "d": {
+            "path": "bin/d",
+            "interpreter": "bash",
+            "os": [
+              "unix"
+            ]
+          },
+          "e": false
+        }
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "harness",
+      "description": "Harness hints with a harness's own keys.",
+      "document": {
+        "harness": {
+          "claude-code": {
+            "context": [
+              "kb/c.md"
+            ],
+            "skills": false,
+            "model": "m",
+            "effort": "high",
+            "own": {
+              "x": 1
+            }
+          },
+          "codex": {}
+        }
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "mcp",
+      "description": "Both transports and a skill link.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "node",
+              "args": [
+                "s.js"
+              ],
+              "env": {
+                "A": "x",
+                "B": {
+                  "provider": "env",
+                  "key": "B"
+                }
+              },
+              "env_passthrough": [
+                "C"
+              ],
+              "timeout": 2.5
+            },
+            {
+              "name": "r",
+              "transport": "streamable-http",
+              "url": "https://h.example/x",
+              "headers_env": {
+                "Authorization": "TOKEN"
+              }
+            }
+          ],
+          "skills": [
+            {
+              "name": "k",
+              "server": "s"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "files-present",
+      "description": "Every named file exists.",
+      "document": {
+        "rules": [
+          "rules/a.md"
+        ],
+        "skills": [
+          "k"
+        ],
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "s.sh"
+          }
+        ]
+      },
+      "files": [
+        "rules/a.md",
+        "skills/k/SKILL.md",
+        "s.sh"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "defaults-off",
+      "description": "Every default turned off.",
+      "document": {
+        "defaults": {
+          "bin": false,
+          "lib": false,
+          "env": false,
+          "env_scripts": false,
+          "setup": false,
+          "context": false,
+          "skills": false,
+          "rules": false
+        }
+      },
+      "files": [
+        "bin/tool",
+        "lib/python/m.py",
+        "rules/a.md",
+        "CONTEXT.md",
+        "skills/k/SKILL.md",
+        "env",
+        "env.py",
+        "setup.sh"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "defaults-on",
+      "description": "true is the default, and may be written.",
+      "document": {
+        "defaults": {
+          "bin": true,
+          "skills": true
+        }
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "env-path-bin-off",
+      "description": "env may set PATH when the bin default is off.",
+      "document": {
+        "env": {
+          "PATH": "/opt/bin"
+        },
+        "defaults": {
+          "bin": false
+        }
+      },
+      "files": [
+        "bin/tool",
+        "lib/python/m.py"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "env-path-no-bin",
+      "description": "env may set PATH when no bin/ is present.",
+      "document": {
+        "env": {
+          "PATH": "/opt/bin"
+        }
+      },
+      "files": [
+        "lib/python/m.py",
+        "bin.txt"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "env-pythonpath-bare-lib",
+      "description": "A bare lib/ is no convention: env may set PYTHONPATH.",
+      "document": {
+        "env": {
+          "PYTHONPATH": "/opt/lib"
+        }
+      },
+      "files": [
+        "lib/m.py"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "about-every-field",
+      "description": "Every informational field, its icon among the files.",
+      "document": {
+        "name": "release-notes",
+        "description": "Long text.\nSecond line.",
+        "about": {
+          "summary": "Release notes and changelogs, written the same way everywhere.",
+          "icon": "icon.webp",
+          "homepage": "https://example.org/overlays/release-notes",
+          "repository": "https://github.com/example/overlays",
+          "license": "MIT OR Apache-2.0",
+          "authors": [
+            "Example Docs Team <docs@example.org>",
+            "Ana Pérez"
+          ],
+          "tags": [
+            "documentation",
+            "release",
+            "changelog-2"
+          ]
+        }
+      },
+      "files": [
+        "icon.webp"
+      ],
+      "expect": {
+        "valid": true,
+        "applies": true
+      }
+    },
+    {
+      "id": "about-forms",
+      "description": "A WebP or PNG in any ASCII case, an SPDX expression with WITH, + and LicenseRef-, empty lists.",
+      "document": {
+        "about": {
+          "icon": "img/Icon.PNG",
+          "license": "(GPL-2.0+ WITH Classpath-exception-2.0 OR LicenseRef-team) AND MIT",
+          "authors": [],
+          "tags": []
+        }
+      },
+      "expect": {
+        "valid": true,
+        "applies": true
+      }
+    },
+    {
+      "id": "fixture-about-icon-svg",
+      "description": "tests/fixtures/invalid/about-icon-svg.cfg",
+      "document": {
+        "about": {
+          "icon": "icon.svg"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "fixture-about-license-expression",
+      "description": "tests/fixtures/invalid/about-license-expression.cfg",
+      "document": {
+        "about": {
+          "license": "MIT or Apache-2.0"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
+      }
+    },
+    {
+      "id": "fixture-about-unknown-key",
+      "description": "tests/fixtures/invalid/about-unknown-key.cfg",
+      "document": {
+        "about": {
+          "licence": "MIT"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about",
+        "applies": true
+      }
+    },
+    {
+      "id": "fixture-context-absolute",
+      "description": "tests/fixtures/invalid/context-absolute.cfg",
+      "document": {
+        "context": [
+          "/etc/passwd"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/context/0"
+      }
+    },
+    {
+      "id": "fixture-context-backslash",
+      "description": "tests/fixtures/invalid/context-backslash.cfg",
+      "document": {
+        "context": [
+          "kb\\notes.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/context/0"
+      }
+    },
+    {
+      "id": "fixture-defaults-string",
+      "description": "tests/fixtures/invalid/defaults-string.cfg",
+      "document": {
+        "defaults": {
+          "bin": "no"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/defaults/bin"
+      }
+    },
+    {
+      "id": "fixture-defaults-unknown-key",
+      "description": "tests/fixtures/invalid/defaults-unknown-key.cfg",
+      "document": {
+        "defaults": {
+          "bin": false,
+          "lib_node": false
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/defaults"
+      }
+    },
+    {
+      "id": "fixture-env-bad-name",
+      "description": "tests/fixtures/invalid/env-bad-name.cfg",
+      "document": {
+        "env": {
+          "1BAD": "x"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env"
+      }
+    },
+    {
+      "id": "fixture-env-case-duplicate",
+      "description": "tests/fixtures/invalid/env-case-duplicate.cfg",
+      "document": {
+        "env": {
+          "Path": "a",
+          "PATH": "b"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/PATH"
+      }
+    },
+    {
+      "id": "fixture-env-files-absolute",
+      "description": "tests/fixtures/invalid/env-files-absolute.cfg",
+      "document": {
+        "env_files": [
+          "/etc/environment"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env_files/0"
+      }
+    },
+    {
+      "id": "fixture-env-files-bad-format",
+      "description": "tests/fixtures/invalid/env-files-bad-format.cfg",
+      "document": {
+        "env_files": [
+          {
+            "path": "env/a.ini",
+            "format": "ini"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env_files/0"
+      }
+    },
+    {
+      "id": "fixture-env-number",
+      "description": "tests/fixtures/invalid/env-number.cfg",
+      "document": {
+        "env": {
+          "X": 3
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/X"
+      }
+    },
+    {
+      "id": "fixture-env-optional-literal",
+      "description": "tests/fixtures/invalid/env-optional-literal.cfg",
+      "document": {
+        "env": {
+          "X": {
+            "value": "a",
+            "optional": true
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/X"
+      }
+    },
+    {
+      "id": "fixture-env-path-escape",
+      "description": "tests/fixtures/invalid/env-path-escape.cfg",
+      "document": {
+        "env": {
+          "X": {
+            "path": "../x"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/X"
+      }
+    },
+    {
+      "id": "fixture-env-provider-nested",
+      "description": "tests/fixtures/invalid/env-provider-nested.cfg",
+      "document": {
+        "env": {
+          "X": {
+            "provider": "vault",
+            "key": "a",
+            "opts": {
+              "a": 1
+            }
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/X"
+      }
+    },
+    {
+      "id": "fixture-env-provider-no-key",
+      "description": "tests/fixtures/invalid/env-provider-no-key.cfg",
+      "document": {
+        "env": {
+          "X": {
+            "provider": "env"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/X"
+      }
+    },
+    {
+      "id": "fixture-env-provider-reserved",
+      "description": "tests/fixtures/invalid/env-provider-reserved.cfg",
+      "document": {
+        "env": {
+          "X": {
+            "provider": "env",
+            "key": "A",
+            "secret": "s"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/X"
+      }
+    },
+    {
+      "id": "fixture-env-scripts-negative-timeout",
+      "description": "tests/fixtures/invalid/env-scripts-negative-timeout.cfg",
+      "document": {
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env/a.py",
+            "timeout": -1
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env_scripts/0/timeout"
+      }
+    },
+    {
+      "id": "fixture-env-scripts-no-interpreter",
+      "description": "tests/fixtures/invalid/env-scripts-no-interpreter.cfg",
+      "document": {
+        "env_scripts": [
+          {
+            "path": "env/a.py"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env_scripts/0"
+      }
+    },
+    {
+      "id": "fixture-env-two-sources",
+      "description": "tests/fixtures/invalid/env-two-sources.cfg",
+      "document": {
+        "env": {
+          "X": {
+            "value": "a",
+            "path": "b"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/X"
+      }
+    },
+    {
+      "id": "fixture-harness-bad-id",
+      "description": "tests/fixtures/invalid/harness-bad-id.cfg",
+      "document": {
+        "harness": {
+          "Claude Code": {
+            "skills": false
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/harness"
+      }
+    },
+    {
+      "id": "fixture-harness-skills-string",
+      "description": "tests/fixtures/invalid/harness-skills-string.cfg",
+      "document": {
+        "harness": {
+          "codex": {
+            "skills": "no"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/harness/codex/skills"
+      }
+    },
+    {
+      "id": "fixture-mcp-bad-transport",
+      "description": "tests/fixtures/invalid/mcp-bad-transport.cfg",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "bad",
+              "transport": "carrier-pigeon",
+              "command": "x"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/transport"
+      }
+    },
+    {
+      "id": "fixture-mcp-env-bad-value",
+      "description": "tests/fixtures/invalid/mcp-env-bad-value.cfg",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "a",
+              "transport": "stdio",
+              "command": "x",
+              "env": {
+                "X": {
+                  "file": "a"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/env/X"
+      }
+    },
+    {
+      "id": "fixture-mcp-unknown-server",
+      "description": "tests/fixtures/invalid/mcp-unknown-server.cfg",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "a",
+              "transport": "stdio",
+              "command": "x"
+            }
+          ],
+          "skills": [
+            {
+              "name": "s",
+              "server": "b"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/skills/0/server"
+      }
+    },
+    {
+      "id": "fixture-mcp-url-credentials",
+      "description": "tests/fixtures/invalid/mcp-url-credentials.cfg",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "a",
+              "transport": "streamable-http",
+              "url": "https://user:pw@mcp.example.org/x"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/url"
+      }
+    },
+    {
+      "id": "fixture-paths-bad-position",
+      "description": "tests/fixtures/invalid/paths-bad-position.cfg",
+      "document": {
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin",
+            "position": "middle"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/paths/0"
+      }
+    },
+    {
+      "id": "fixture-paths-env-conflict",
+      "description": "tests/fixtures/invalid/paths-env-conflict.cfg",
+      "document": {
+        "env": {
+          "PATH": "/usr/bin"
+        },
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/paths/0/variable"
+      }
+    },
+    {
+      "id": "fixture-paths-missing-variable",
+      "description": "tests/fixtures/invalid/paths-missing-variable.cfg",
+      "document": {
+        "paths": [
+          {
+            "path": "bin"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/paths/0"
+      }
+    },
+    {
+      "id": "fixture-paths-unknown-key",
+      "description": "tests/fixtures/invalid/paths-unknown-key.cfg",
+      "document": {
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin",
+            "separator": ";"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/paths/0"
+      }
+    },
+    {
+      "id": "fixture-priority-float",
+      "description": "tests/fixtures/invalid/priority-float.cfg",
+      "document": {
+        "priority": 500.0
+      },
+      "expect": {
+        "valid": false,
+        "at": "/priority"
+      }
+    },
+    {
+      "id": "fixture-priority-string",
+      "description": "tests/fixtures/invalid/priority-string.cfg",
+      "document": {
+        "priority": "first"
+      },
+      "expect": {
+        "valid": false,
+        "at": "/priority"
+      }
+    },
+    {
+      "id": "fixture-requires-bad-name",
+      "description": "tests/fixtures/invalid/requires-bad-name.cfg",
+      "document": {
+        "requires": [
+          "../escape"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/requires/0"
+      }
+    },
+    {
+      "id": "fixture-requires-reserved",
+      "description": "tests/fixtures/invalid/requires-reserved.cfg",
+      "document": {
+        "requires": [
+          "project"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/requires/0"
+      }
+    },
+    {
+      "id": "fixture-rules-dotdot",
+      "description": "tests/fixtures/invalid/rules-dotdot.cfg",
+      "document": {
+        "rules": [
+          "../outside.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "fixture-runtime-bad-digest",
+      "description": "tests/fixtures/invalid/runtime-bad-digest.cfg",
+      "document": {
+        "runtime": {
+          "python": [
+            {
+              "lock": "l.txt",
+              "lock_digest": "sha1:abc"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/python/0/lock_digest"
+      }
+    },
+    {
+      "id": "fixture-runtime-bad-environment",
+      "description": "tests/fixtures/invalid/runtime-bad-environment.cfg",
+      "document": {
+        "runtime": {
+          "python": [
+            {
+              "environment": "-shared"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/python/0/environment"
+      }
+    },
+    {
+      "id": "fixture-runtime-bad-version",
+      "description": "tests/fixtures/invalid/runtime-bad-version.cfg",
+      "document": {
+        "runtime": {
+          "python": [
+            {
+              "version": ">=3.9"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/python/0/version"
+      }
+    },
+    {
+      "id": "fixture-runtime-digest-without-lock",
+      "description": "tests/fixtures/invalid/runtime-digest-without-lock.cfg",
+      "document": {
+        "runtime": {
+          "python": [
+            {
+              "lock_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/python/0"
+      }
+    },
+    {
+      "id": "fixture-runtime-lock-and-requirements",
+      "description": "tests/fixtures/invalid/runtime-lock-and-requirements.cfg",
+      "document": {
+        "runtime": {
+          "python": [
+            {
+              "requirements": "r.txt",
+              "lock": "l.txt"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/python/0"
+      }
+    },
+    {
+      "id": "fixture-runtime-node-package-name",
+      "description": "tests/fixtures/invalid/runtime-node-package-name.cfg",
+      "document": {
+        "runtime": {
+          "node": [
+            {
+              "package": "web/packages.json"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/node/0/package"
+      }
+    },
+    {
+      "id": "fixture-runtime-unknown-key",
+      "description": "tests/fixtures/invalid/runtime-unknown-key.cfg",
+      "document": {
+        "runtime": {
+          "ruby": [
+            {
+              "version": "3"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime"
+      }
+    },
+    {
+      "id": "fixture-scripts-exe-name",
+      "description": "tests/fixtures/invalid/scripts-exe-name.cfg",
+      "document": {
+        "scripts": {
+          "tool.exe": "bin/tool.py"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/scripts"
+      }
+    },
+    {
+      "id": "fixture-scripts-map-no-interpreter",
+      "description": "tests/fixtures/invalid/scripts-map-no-interpreter.cfg",
+      "document": {
+        "scripts": {
+          "tool": {
+            "path": "bin/tool"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/scripts/tool"
+      }
+    },
+    {
+      "id": "fixture-scripts-true",
+      "description": "tests/fixtures/invalid/scripts-true.cfg",
+      "document": {
+        "scripts": {
+          "tool": true
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/scripts/tool"
+      }
+    },
+    {
+      "id": "fixture-scripts-unknown-extension",
+      "description": "tests/fixtures/invalid/scripts-unknown-extension.cfg",
+      "document": {
+        "scripts": {
+          "tool": "bin/tool.rb"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/scripts/tool"
+      }
+    },
+    {
+      "id": "fixture-setup-bad-os",
+      "description": "tests/fixtures/invalid/setup-bad-os.cfg",
+      "document": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "setup.sh",
+            "os": [
+              "Windows"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/setup/0/os/0"
+      }
+    },
+    {
+      "id": "fixture-setup-float-timeout",
+      "description": "tests/fixtures/invalid/setup-float-timeout.cfg",
+      "document": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "setup.sh",
+            "timeout": 30.0
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/setup/0/timeout"
+      }
+    },
+    {
+      "id": "fixture-setup-network-string",
+      "description": "tests/fixtures/invalid/setup-network-string.cfg",
+      "document": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "setup.sh",
+            "network": "yes"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/setup/0/network"
+      }
+    },
+    {
+      "id": "fixture-setup-table",
+      "description": "tests/fixtures/invalid/setup-table.cfg",
+      "document": {
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/setup"
+      }
+    },
+    {
+      "id": "fixture-skills-bad-name",
+      "description": "tests/fixtures/invalid/skills-bad-name.cfg",
+      "document": {
+        "skills": [
+          "-x"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "fixture-skills-duplicate",
+      "description": "tests/fixtures/invalid/skills-duplicate.cfg",
+      "document": {
+        "skills": [
+          "a",
+          "a"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills"
+      }
+    },
+    {
+      "id": "fixture-unknown-key-null-json",
+      "description": "tests/fixtures/invalid/unknown-key-null-json.cfg",
+      "document": {
+        "organization_extension": {
+          "a": [
+            1,
+            2.5,
+            true
+          ]
+        },
+        "routing": [
+          7
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/routing/0"
+      }
+    },
+    {
+      "id": "files-missing-rule",
+      "description": "A rules file that does not exist.",
+      "document": {
+        "rules": [
+          "rules/a.md"
+        ]
+      },
+      "files": [],
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "files-missing-skill",
+      "description": "A listed skill without SKILL.md.",
+      "document": {
+        "skills": [
+          "k"
+        ]
+      },
+      "files": [
+        "skills/k/README.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "files-missing-mcp-skill",
+      "description": "An MCP skill link without SKILL.md.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "x"
+            }
+          ],
+          "skills": [
+            {
+              "name": "k",
+              "server": "s"
+            }
+          ]
+        }
+      },
+      "files": [],
+      "expect": {
+        "valid": false,
+        "at": "/mcp/skills/0/name"
+      }
+    },
+    {
+      "id": "files-missing-lock",
+      "description": "A lock file that does not exist.",
+      "document": {
+        "runtime": {
+          "python": [
+            {
+              "lock": "l.txt"
+            }
+          ]
+        }
+      },
+      "files": [],
+      "expect": {
+        "valid": false,
+        "at": "/runtime/python/0/lock"
+      }
+    },
+    {
+      "id": "env-null-like",
+      "description": "An env value must be a string or a mapping.",
+      "document": {
+        "env": {
+          "A": true
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/A"
+      }
+    },
+    {
+      "id": "env-empty-provider-key",
+      "description": "A provider's key is not empty.",
+      "document": {
+        "env": {
+          "A": {
+            "provider": "env",
+            "key": ""
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/A"
+      }
+    },
+    {
+      "id": "env-provider-uppercase",
+      "description": "A provider name is lowercase.",
+      "document": {
+        "env": {
+          "A": {
+            "provider": "Env",
+            "key": "A"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/A"
+      }
+    },
+    {
+      "id": "paths-dot",
+      "description": "A path addition cannot be '.'.",
+      "document": {
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "."
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/paths/0/path"
+      }
+    },
+    {
+      "id": "relative-drive",
+      "description": "A drive prefix is not relative.",
+      "document": {
+        "rules": [
+          "C:/x.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-empty-component",
+      "description": "An empty component.",
+      "document": {
+        "rules": [
+          "a//b.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-trailing-slash",
+      "description": "A trailing slash is an empty component.",
+      "document": {
+        "context": [
+          "kb/"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/context/0"
+      }
+    },
+    {
+      "id": "relative-control",
+      "description": "A control character.",
+      "document": {
+        "rules": [
+          "a\u0001.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "mcp-http-with-command",
+      "description": "An HTTP server takes no command.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "r",
+              "transport": "streamable-http",
+              "url": "https://h.example/x",
+              "command": "x"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0"
+      }
+    },
+    {
+      "id": "mcp-url-fragment",
+      "description": "A URL with a fragment.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "r",
+              "transport": "streamable-http",
+              "url": "https://h.example/x#f"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/url"
+      }
+    },
+    {
+      "id": "mcp-zero-timeout",
+      "description": "An MCP timeout is positive.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "x",
+              "timeout": 0
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/timeout"
+      }
+    },
+    {
+      "id": "mcp-duplicate-server",
+      "description": "Server names are unique.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "x"
+            },
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "y"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/1/name"
+      }
+    },
+    {
+      "id": "runtime-commands-bad",
+      "description": "A command name has no path.",
+      "document": {
+        "runtime": {
+          "commands": [
+            "/usr/bin/git"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/commands/0"
+      }
+    },
+    {
+      "id": "harness-model-empty",
+      "description": "A model hint is not empty.",
+      "document": {
+        "harness": {
+          "codex": {
+            "model": ""
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/harness/codex/model"
+      }
+    },
+    {
+      "id": "top-level-not-null-safe",
+      "description": "Arrays of the wrong type.",
+      "document": {
+        "requires": "engineering"
+      },
+      "expect": {
+        "valid": false,
+        "at": "/requires"
+      }
+    },
+    {
+      "id": "relative-excluded",
+      "description": "A path into an excluded directory.",
+      "document": {
+        "rules": [
+          "node_modules/x.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-excluded-case",
+      "description": "An excluded name in another case.",
+      "document": {
+        "context": [
+          ".GIT/x.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/context/0"
+      }
+    },
+    {
+      "id": "relative-pyc",
+      "description": "A .pyc entry, in any case.",
+      "document": {
+        "scripts": {
+          "x": {
+            "path": "bin/x.PYC",
+            "interpreter": "python"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/scripts/x"
+      }
+    },
+    {
+      "id": "relative-device",
+      "description": "A Windows device name.",
+      "document": {
+        "rules": [
+          "kb/aux.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-trailing-dot",
+      "description": "A component ending in a dot.",
+      "document": {
+        "rules": [
+          "kb./a.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-trailing-space",
+      "description": "A component ending in a space.",
+      "document": {
+        "rules": [
+          "kb /a.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-short-name",
+      "description": "An 8.3 short name.",
+      "document": {
+        "rules": [
+          "KB~1/a.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-question",
+      "description": "A character Windows refuses.",
+      "document": {
+        "rules": [
+          "kb/a?.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-c1",
+      "description": "A C1 control character.",
+      "document": {
+        "rules": [
+          "kb/a.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "relative-bidi",
+      "description": "A bidirectional override.",
+      "document": {
+        "rules": [
+          "kb/a‮.md"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/rules/0"
+      }
+    },
+    {
+      "id": "reserved-root-variable",
+      "description": "An overlay cannot set another overlay's root variable.",
+      "document": {
+        "env": {
+          "ENGINEERING_OVERLAY_ROOT": {
+            "path": "fake"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/ENGINEERING_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "reserved-state-variable",
+      "description": "Nor a state variable, in any case.",
+      "document": {
+        "env": {
+          "x_overlay_state": "y"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/x_overlay_state"
+      }
+    },
+    {
+      "id": "reserved-aos-variable",
+      "description": "Nor an AOS_ variable.",
+      "document": {
+        "env": {
+          "AOS_OVERLAY_ROOT": "y"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/AOS_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "reserved-paths-variable",
+      "description": "Nor through a path addition.",
+      "document": {
+        "paths": [
+          {
+            "variable": "TEAM_OVERLAY_ROOT",
+            "path": "bin"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/paths/0/variable"
+      }
+    },
+    {
+      "id": "reserved-mcp-variable",
+      "description": "Nor in an MCP server's environment.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "x",
+              "env": {
+                "AOS_OVERLAY_STATE": "y"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/env"
+      }
+    },
+    {
+      "id": "file-key-escape",
+      "description": "A file provider's key is a relative path.",
+      "document": {
+        "env": {
+          "A": {
+            "provider": "file",
+            "key": "../id_ed25519"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/A"
+      }
+    },
+    {
+      "id": "env-key-name",
+      "description": "An env provider's key is a variable name.",
+      "document": {
+        "env": {
+          "A": {
+            "provider": "env",
+            "key": "A=B"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/A"
+      }
+    },
+    {
+      "id": "env-value-nul",
+      "description": "A zero byte in a value.",
+      "document": {
+        "env": {
+          "A": "x\u0000y"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/env/A"
+      }
+    },
+    {
+      "id": "args-nul",
+      "description": "A zero byte in an argument.",
+      "document": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "s.sh",
+            "args": [
+              "a\u0000b"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/setup/0/args/0"
+      }
+    },
+    {
+      "id": "timeout-too-large",
+      "description": "A timeout past the signed 32-bit range.",
+      "document": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "s.sh",
+            "timeout": 2147483648
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/setup/0/timeout"
+      }
+    },
+    {
+      "id": "mcp-timeout-tiny",
+      "description": "An MCP timeout below a millisecond.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "x",
+              "timeout": 1e-300
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/timeout"
+      }
+    },
+    {
+      "id": "version-too-long",
+      "description": "A version component of more than nine digits.",
+      "document": {
+        "runtime": {
+          "python": [
+            {
+              "version": "3.9999999999"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/python/0/version"
+      }
+    },
+    {
+      "id": "mcp-url-userinfo",
+      "description": "A URL with user information, checked without a format checker.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "r",
+              "transport": "streamable-http",
+              "url": "https://u:p@h.example/x"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/url"
+      }
+    },
+    {
+      "id": "mcp-command-absolute",
+      "description": "A command with a separator is a relative path under the root.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "/bin/sh",
+              "args": [
+                "-c",
+                "x"
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/command"
+      }
+    },
+    {
+      "id": "mcp-command-escape",
+      "description": "A command cannot leave the root.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "../tools/x"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/command"
+      }
+    },
+    {
+      "id": "mcp-url-no-host",
+      "description": "A URL with no host.",
+      "document": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "r",
+              "transport": "streamable-http",
+              "url": "http:///x"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/mcp/servers/0/url"
+      }
+    },
+    {
+      "id": "env-path-default-bin",
+      "description": "With paths not written, a bin/ puts PATH in the default paths, so env cannot set it, in any case.",
+      "document": {
+        "env": {
+          "Path": "/opt/bin"
+        }
+      },
+      "files": [
+        "bin/tool"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/env/Path"
+      }
+    },
+    {
+      "id": "env-pythonpath-default-lib",
+      "description": "Likewise a lib/python/ and PYTHONPATH.",
+      "document": {
+        "env": {
+          "PYTHONPATH": "/opt/lib"
+        }
+      },
+      "files": [
+        "lib/python/m.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/env/PYTHONPATH"
+      }
+    },
+    {
+      "id": "env-path-declared-paths",
+      "description": "A paths entry for another directory keeps the bin default, so env still cannot set PATH.",
+      "document": {
+        "env": {
+          "PATH": "/opt/bin"
+        },
+        "paths": [
+          {
+            "variable": "MANPATH",
+            "path": "man"
+          }
+        ]
+      },
+      "files": [
+        "bin/tool"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/env/PATH"
+      }
+    },
+    {
+      "id": "defaults-not-table",
+      "description": "defaults is a table of booleans, not one switch.",
+      "document": {
+        "defaults": false
+      },
+      "expect": {
+        "valid": false,
+        "at": "/defaults"
+      }
+    },
+    {
+      "id": "about-icon-missing",
+      "description": "The icon is a file of the overlay.",
+      "document": {
+        "name": "x",
+        "about": {
+          "icon": "icon.png"
+        }
+      },
+      "files": [
+        "kb/a.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-icon-escape",
+      "description": "The icon is a relative path under the root.",
+      "document": {
+        "name": "x",
+        "about": {
+          "icon": "../icon.png"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-icon-gif",
+      "description": "PNG and WebP only.",
+      "document": {
+        "name": "x",
+        "about": {
+          "icon": "icon.gif"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-icon-url",
+      "description": "An icon is never a URL.",
+      "document": {
+        "name": "x",
+        "about": {
+          "icon": "https://example.org/icon.png"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-summary-two-lines",
+      "description": "A summary is one line.",
+      "document": {
+        "name": "x",
+        "about": {
+          "summary": "One\nTwo"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/summary",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-summary-empty",
+      "description": "A summary is not empty.",
+      "document": {
+        "name": "x",
+        "about": {
+          "summary": ""
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/summary",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-summary-bidi",
+      "description": "No bidirectional override in a line.",
+      "document": {
+        "name": "x",
+        "about": {
+          "summary": "safe ‮gnp.exe"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/summary",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-homepage-http",
+      "description": "A link is https.",
+      "document": {
+        "name": "x",
+        "about": {
+          "homepage": "http://example.org/x"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/homepage",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-repository-userinfo",
+      "description": "A link holds no user information.",
+      "document": {
+        "name": "x",
+        "about": {
+          "repository": "https://user:token@example.org/x.git"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/repository",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-repository-git",
+      "description": "A repository link is a page to open, not a Git source.",
+      "document": {
+        "name": "x",
+        "about": {
+          "repository": "git@github.com:example/overlays.git"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/repository",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-license-dangling",
+      "description": "An operator needs both sides.",
+      "document": {
+        "name": "x",
+        "about": {
+          "license": "MIT AND"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-license-unbalanced",
+      "description": "Parentheses balance.",
+      "document": {
+        "name": "x",
+        "about": {
+          "license": "(MIT OR Apache-2.0"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-license-text",
+      "description": "A license is an expression, not prose.",
+      "document": {
+        "name": "x",
+        "about": {
+          "license": "MIT, see LICENSE"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-authors-string",
+      "description": "authors is a list.",
+      "document": {
+        "name": "x",
+        "about": {
+          "authors": "Example Team"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/authors",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-tags-case",
+      "description": "A tag is lowercase letters, digits and single hyphens.",
+      "document": {
+        "name": "x",
+        "about": {
+          "tags": [
+            "Docs"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/tags/0",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-tags-duplicate",
+      "description": "Tags are unique.",
+      "document": {
+        "name": "x",
+        "about": {
+          "tags": [
+            "docs",
+            "docs"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/tags",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-tags-long",
+      "description": "A tag is at most 32 characters.",
+      "document": {
+        "name": "x",
+        "about": {
+          "tags": [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/tags/0",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-keywords",
+      "description": "keywords is not a field: tags are what a store filters and searches.",
+      "document": {
+        "name": "x",
+        "about": {
+          "keywords": [
+            "docs"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-version",
+      "description": "No version field: the source's ref and the tree digest say which overlay it is.",
+      "document": {
+        "name": "x",
+        "about": {
+          "version": "1.2.0"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-not-a-table",
+      "description": "about is a table.",
+      "document": {
+        "about": "Release notes"
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-and-another-problem",
+      "description": "A problem outside about still stops the manifest from applying.",
+      "document": {
+        "priority": "high",
+        "about": {
+          "summary": "One\nTwo"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/priority",
+        "applies": false
+      }
+    }
+  ]
+}

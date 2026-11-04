@@ -1,0 +1,269 @@
+{
+  "description": "Source strings: kind (git, url, directory), location, ref, path; or an error.",
+  "spec": "spec/v0/distribution.md#source-form",
+  "cases": [
+    {
+      "id": "source-00",
+      "source": "./overlays/rust",
+      "expect": {
+        "kind": "directory",
+        "location": "./overlays/rust",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-01",
+      "source": "  ../shared/net  ",
+      "expect": {
+        "kind": "directory",
+        "location": "../shared/net",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-02",
+      "source": "/srv/overlays@v2",
+      "expect": {
+        "kind": "directory",
+        "location": "/srv/overlays@v2",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-03",
+      "source": "C:\\agents\\overlays#rust",
+      "expect": {
+        "kind": "directory",
+        "location": "C:\\agents\\overlays",
+        "ref": null,
+        "path": "rust"
+      }
+    },
+    {
+      "id": "source-04",
+      "source": "https://github.com/example/agents.git",
+      "expect": {
+        "kind": "git",
+        "location": "https://github.com/example/agents.git",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-05",
+      "source": "https://github.com/example/agents.git@v2#overlays/rust",
+      "expect": {
+        "kind": "git",
+        "location": "https://github.com/example/agents.git",
+        "ref": "v2",
+        "path": "overlays/rust"
+      }
+    },
+    {
+      "id": "source-06",
+      "source": "https://github.com/example/agents.git@4b825dc642cb6eb9a060e54bf8d69288fbee4904#/overlays/rust/",
+      "expect": {
+        "kind": "git",
+        "location": "https://github.com/example/agents.git",
+        "ref": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "path": "overlays/rust"
+      }
+    },
+    {
+      "id": "source-07",
+      "source": "git@github.com:example/agents.git",
+      "expect": {
+        "kind": "git",
+        "location": "git@github.com:example/agents.git",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-08",
+      "source": "git@github.com:example/agents.git@main",
+      "expect": {
+        "kind": "git",
+        "location": "git@github.com:example/agents.git",
+        "ref": "main",
+        "path": null
+      }
+    },
+    {
+      "id": "source-09",
+      "source": "ssh://git@host.example/agents@main#x",
+      "expect": {
+        "kind": "git",
+        "location": "ssh://git@host.example/agents",
+        "ref": "main",
+        "path": "x"
+      }
+    },
+    {
+      "id": "source-10",
+      "source": "git://host.example/agents",
+      "expect": {
+        "kind": "git",
+        "location": "git://host.example/agents",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-11",
+      "source": "git+https://example.org/agents@main#rust",
+      "expect": {
+        "kind": "git",
+        "location": "https://example.org/agents",
+        "ref": "main",
+        "path": "rust"
+      }
+    },
+    {
+      "id": "source-12",
+      "source": "git+https://example.org/agents",
+      "expect": {
+        "kind": "git",
+        "location": "https://example.org/agents",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-13",
+      "source": "https://user@host.example/agents.git",
+      "expect": {
+        "kind": "git",
+        "location": "https://user@host.example/agents.git",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-14",
+      "source": "https://example.org/overlays/rust",
+      "expect": {
+        "kind": "url",
+        "location": "https://example.org/overlays/rust",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-15",
+      "source": "https://example.org/registry.json@v1",
+      "expect": {
+        "kind": "url",
+        "location": "https://example.org/registry.json@v1",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-16",
+      "source": "sftp://user@host.example/overlays#rust",
+      "expect": {
+        "kind": "url",
+        "location": "sftp://user@host.example/overlays",
+        "ref": null,
+        "path": "rust"
+      }
+    },
+    {
+      "id": "source-17",
+      "source": "https://github.com/example/agents.git@release/1.0",
+      "expect": {
+        "kind": "url",
+        "location": "https://github.com/example/agents.git@release/1.0",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-18",
+      "source": "https://github.com/example/agents.git@--upload-pack=x",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-19",
+      "source": "-oProxyCommand=x.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-20",
+      "source": "repo.git#",
+      "expect": {
+        "kind": "git",
+        "location": "repo.git",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-21",
+      "source": "https://h.example/a.git#../../..",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-22",
+      "source": "git+ext::sh -c x",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-23",
+      "source": "ssh://-oProxyCommand=x/a.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-24",
+      "source": "git@-oProxyCommand=x:a.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-25",
+      "source": "ftp://h.example/a.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-26",
+      "source": "HTTPS://h.example/a.git@v1",
+      "expect": {
+        "kind": "git",
+        "location": "HTTPS://h.example/a.git",
+        "ref": "v1",
+        "path": null
+      }
+    },
+    {
+      "id": "source-27",
+      "source": "",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-28",
+      "source": "   ",
+      "expect": {
+        "error": "invalid-source"
+      }
+    }
+  ]
+}

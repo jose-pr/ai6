@@ -637,6 +637,9 @@ pub struct Operation {
     /// The account pools its Missions may draw from; `None` (the default) is every pool
     /// whose own `operations` admit the Operation.
     pub pools: Option<Vec<String>>,
+    /// The overlays its Missions' Sessions get after their Agent's loadout's, by
+    /// `[overlay.<name>]` name: it only adds to what the loadout issues.
+    pub overlays: Vec<String>,
     /// Whether a harness may load the settings its working directory carries; `ignore`
     /// unless configured.
     pub harness: HarnessPolicy,
@@ -1852,6 +1855,11 @@ pub(crate) struct OperationDefinition {
     /// this Operation.
     #[schema(title = "Account pools", section = "roster", advanced)]
     pools: Option<Vec<String>>,
+    /// The overlays its Missions' Sessions get after their Agent's loadout's, each an
+    /// `[overlay.<name>]`. They add to what the loadout issues and never take any of it away.
+    #[schema(title = "Overlays", section = "roster", advanced)]
+    #[map(default)]
+    overlays: Vec<String>,
 
     /// The rule its commits follow about naming Agents and models.
     #[schema(
@@ -1985,6 +1993,7 @@ impl Default for OperationDefinition {
             station_labels: BTreeMap::new(),
             placement: PlacementStrategy::default(),
             pools: None,
+            overlays: Vec::new(),
             cover: "covert".to_owned(),
             cover_identity: None,
             on_blown: OnBlown::default(),
@@ -2114,6 +2123,8 @@ impl OperationDefinition {
             .scorecard
             .rules()
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        crate::directorates::q::check_overlay_list(&self.overlays, None)
+            .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         Ok(Operation {
             id,
             parent: self.parent,
@@ -2156,6 +2167,7 @@ impl OperationDefinition {
             sources: self.sources,
             sleepers: self.sleepers,
             pools: self.pools,
+            overlays: self.overlays,
             harness: self.harness,
             promotion,
             scorecard: self.scorecard.resolve(),

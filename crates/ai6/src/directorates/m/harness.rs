@@ -303,9 +303,12 @@ impl ProjectManifest {
         })
     }
 
-    /// Reads the manifest of every regular file under `root`, a directory such as a skill
-    /// (`ai6 assistant pin-skill DIR`), with the same rules and limits as [`read`](Self::read);
-    /// paths are relative to `root`.
+    /// Reads the manifest of every member of the directory `root`, such as a skill or an
+    /// overlay (`ai6 assistant pin-skill DIR`, `ai6 overlay pin DIR`), as the AOS tree digest
+    /// reads a tree: `.git`, `__pycache__`, `node_modules` and the other excluded names, and
+    /// `.pyc` files, are no members; a link, a special file, a name that is no AOS relative path
+    /// and two paths equal under ASCII case are refused. Paths are relative to `root`, and
+    /// [`digest`](Self::digest) is the tree digest.
     ///
     /// # Errors
     ///
@@ -321,22 +324,21 @@ impl ProjectManifest {
     ///
     /// As [`read_tree`](Self::read_tree).
     pub fn read_tree_within(root: &Path, limits: &HarnessLimits) -> Result<Self, String> {
-        let metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
-        if !metadata.is_dir() {
-            return Err("not a directory (a link is never followed)".to_owned());
-        }
-        let mut reader = ManifestReader {
+        let tree = crate::directorates::q::overlays::tree_digest(
             root,
-            limits,
-            files: BTreeMap::new(),
-            contents: Vec::new(),
-            bytes: 0,
-        };
-        for name in sorted_entries(root, "")? {
-            reader.walk(&name)?;
-        }
+            &crate::directorates::q::overlays::TreeLimits {
+                files: limits.manifest_files,
+                bytes: limits.manifest_bytes,
+                file_bytes: limits.manifest_file_bytes,
+            },
+        )
+        .map_err(|error| error.to_string())?;
         Ok(Self {
-            files: reader.files,
+            files: tree
+                .files
+                .into_iter()
+                .map(|(path, digest)| (path, PeerId::from_bytes(*digest.bytes())))
+                .collect(),
         })
     }
 

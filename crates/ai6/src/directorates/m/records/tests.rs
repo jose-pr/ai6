@@ -137,6 +137,7 @@ fn full_example(record: ConfigRecord) -> Value {
             operation["issues"] = issue_policy_example();
             // Set apart: one more key in the literal above passes `json!`'s recursion limit.
             operation["memory_write"] = json!("field");
+            operation["overlays"] = json!(["engineering"]);
             operation["scorecard"] = json!({
                 "window_days": 7,
                 "small_sample": 3,

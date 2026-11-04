@@ -7,6 +7,7 @@ mod secrets;
 
 pub mod ephemeral;
 pub mod outbound;
+pub mod overlays;
 pub mod provision;
 pub mod safehouse;
 pub mod terminal;
@@ -226,12 +227,13 @@ impl SessionEnv {
     }
 }
 
-/// One Agent's named sandbox, MCP servers and secret references.
+/// One Agent's named sandbox, MCP servers, overlays and secret references.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Loadout {
     agent: String,
     sandbox: Option<String>,
     mcp: Vec<String>,
+    overlays: Vec<String>,
     secrets: Vec<String>,
     env: SessionEnv,
 }
@@ -252,6 +254,12 @@ impl Loadout {
         &self.mcp
     }
 
+    /// The overlays it issues, by `[overlay.<name>]` name, in the order declared; a Session
+    /// gets them with its Operation's in composition order ([`overlays::issue_overlays`]).
+    pub fn overlay_names(&self) -> &[String] {
+        &self.overlays
+    }
+
     /// Returns secret reference names, never their values.
     pub fn secret_names(&self) -> &[String] {
         &self.secrets
@@ -269,6 +277,7 @@ impl Loadout {
             agent: format!("pool:{}/{}", pool.id(), account.name()),
             sandbox: None,
             mcp: Vec::new(),
+            overlays: Vec::new(),
             secrets: vec![account.secret_name()?.to_owned()],
             env: SessionEnv::default(),
         })
@@ -281,6 +290,7 @@ impl Loadout {
             agent: format!("route:{agent}"),
             sandbox: None,
             mcp: Vec::new(),
+            overlays: Vec::new(),
             secrets: secrets.to_vec(),
             env: SessionEnv::default(),
         }
@@ -439,12 +449,13 @@ impl SecretDefinition {
     }
 }
 
-/// Validated loadouts, the named policies they reference, and the account pools.
+/// Validated loadouts, the named policies and overlays they reference, and the account pools.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoadoutCatalog {
     loadouts: BTreeMap<String, Loadout>,
     sandboxes: BTreeMap<String, SandboxProfile>,
     servers: BTreeMap<String, McpServer>,
+    overlays: BTreeMap<String, overlays::OverlayRecord>,
     secrets: BTreeMap<String, SecretDefinition>,
     pools: BTreeMap<String, AccountPool>,
 }
@@ -588,6 +599,16 @@ impl LoadoutCatalog {
         self.servers.values()
     }
 
+    /// The `[overlay.<name>]` records by identity (the name normalized).
+    pub fn overlays(&self) -> &BTreeMap<String, overlays::OverlayRecord> {
+        &self.overlays
+    }
+
+    /// The overlay `name` names, compared as an identity.
+    pub fn overlay(&self, name: &str) -> Option<&overlays::OverlayRecord> {
+        self.overlays.get(&overlays::normalize_name(name))
+    }
+
     /// How the secret `name` reaches a Session: its `[secret.<name>]` table, or every default.
     pub fn secret(&self, name: &str) -> SecretDefinition {
         self.secrets
@@ -638,6 +659,8 @@ struct Document {
     sandbox: BTreeMap<String, RawSandbox>,
     #[serde(default)]
     mcp: BTreeMap<String, RawMcpServer>,
+    #[serde(default)]
+    overlay: BTreeMap<String, RawOverlay>,
     #[serde(default)]
     secret: BTreeMap<String, RawSecret>,
     #[serde(default)]
@@ -744,9 +767,63 @@ struct RawLoadout {
     #[serde(default)]
     mcp: Vec<String>,
     #[serde(default)]
+    overlays: Vec<String>,
+    #[serde(default)]
     secrets: Vec<String>,
     #[serde(default)]
     env: SessionEnv,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOverlay {
+    source: Option<String>,
+    path: Option<String>,
+    pin: Option<String>,
+    #[serde(default)]
+    secrets: Vec<String>,
+}
+
+impl RawOverlay {
+    fn into_record(self, name: &str, chars: Limit) -> Result<overlays::OverlayRecord, String> {
+        let key = format!("overlay {name:?}");
+        if !overlays::valid_overlay_name(name) {
+            return Err(format!(
+                "{key}: a name is an ASCII letter, then letters, digits, '_', '.' or '-', ending \
+                 in a letter or digit, and no scope label or device name"
+            ));
+        }
+        let from = match (self.source, self.path) {
+            (Some(source), None) => overlays::OverlayFrom::Source(
+                overlays::Source::parse(&source)
+                    .map_err(|error| format!("{key}.source: {error}"))?,
+            ),
+            (None, Some(path))
+                if !path.trim().is_empty()
+                    && !path.chars().any(char::is_control)
+                    && chars.allows(path.chars().count()) =>
+            {
+                overlays::OverlayFrom::Path(PathBuf::from(path))
+            }
+            (None, Some(_)) => {
+                return Err(format!(
+                    "{key}.path: empty, too long or holding a control character"
+                ));
+            }
+            _ => return Err(format!("{key}: exactly one of source and path")),
+        };
+        let mut record = overlays::OverlayRecord::new(name, from);
+        if let Some(pin) = self.pin {
+            record = record.pinned(
+                overlays::Digest::parse(&pin).map_err(|reason| format!("{key}.pin: {reason}"))?,
+            );
+        }
+        for secret in &self.secrets {
+            validate_name(secret, QErrorKind::Schema, None)
+                .map_err(|_| format!("{key}.secrets: {secret:?} is not a secret name"))?;
+        }
+        Ok(record.with_secrets(self.secrets))
+    }
 }
 
 #[derive(Deserialize)]
@@ -808,9 +885,28 @@ fn parse_document(
             failure
         })?;
 
-    if document.loadout.is_empty() && document.pool.is_empty() && document.secret.is_empty() {
-        return Err(QError::new(QErrorKind::Schema, path)
-            .because("declare at least one [loadout.<agent>], [pool.<id>] or [secret.<name>]"));
+    if document.loadout.is_empty()
+        && document.pool.is_empty()
+        && document.secret.is_empty()
+        && document.overlay.is_empty()
+    {
+        return Err(QError::new(QErrorKind::Schema, path).because(
+            "declare at least one [loadout.<agent>], [pool.<id>], [secret.<name>] or \
+             [overlay.<name>]",
+        ));
+    }
+    let mut overlay_records = BTreeMap::new();
+    for (name, raw) in document.overlay {
+        let record = raw
+            .into_record(&name, chars)
+            .map_err(|reason| QError::new(QErrorKind::Schema, path.clone()).because(reason))?;
+        if let Some(other) = overlay_records.insert(record.identity(), record) {
+            return Err(QError::new(QErrorKind::Schema, path).because(format!(
+                "overlay {name:?} and overlay {:?} are one overlay: names compare in lower case, \
+                 '_' and '.' as '-'",
+                other.name()
+            )));
+        }
     }
     let mut pools = BTreeMap::new();
     for (id, raw) in document.pool {
@@ -830,12 +926,17 @@ fn parse_document(
         if let Some(sandbox) = &raw.sandbox {
             validate_name(sandbox, QErrorKind::Schema, path.clone())?;
         }
+        check_overlay_list(&raw.overlays, Some(&overlay_records)).map_err(|reason| {
+            QError::new(QErrorKind::Schema, path.clone())
+                .because(format!("loadout {name:?}: {reason}"))
+        })?;
         loadouts.insert(
             name.clone(),
             Loadout {
                 agent: name,
                 sandbox: raw.sandbox,
                 mcp: raw.mcp,
+                overlays: raw.overlays,
                 secrets: raw.secrets,
                 env: raw.env,
             },
@@ -939,6 +1040,7 @@ fn parse_document(
         loadouts,
         sandboxes,
         servers,
+        overlays: overlay_records,
         secrets,
         pools,
     };
@@ -951,6 +1053,30 @@ fn parse_document(
             })?;
     }
     Ok(catalog)
+}
+
+/// Why a list of overlays cannot be issued: a name that is no overlay identity, one named
+/// twice (as identities compare), or, with `records`, one no `[overlay.<name>]` defines.
+pub(crate) fn check_overlay_list(
+    names: &[String],
+    records: Option<&BTreeMap<String, overlays::OverlayRecord>>,
+) -> Result<(), String> {
+    let mut seen = std::collections::BTreeSet::new();
+    for name in names {
+        if !overlays::valid_overlay_name(name) {
+            return Err(format!("overlays: {name:?} is no overlay name"));
+        }
+        let identity = overlays::normalize_name(name);
+        if !seen.insert(identity.clone()) {
+            return Err(format!("overlays: {name:?} is named twice"));
+        }
+        if records.is_some_and(|records| !records.contains_key(&identity)) {
+            return Err(format!(
+                "overlays: {name:?} is not defined by an [overlay.<name>]"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Refuses a pool account whose secret is a green ink one: a pool account is handed to every

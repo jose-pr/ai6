@@ -1,0 +1,192 @@
+{
+  "description": "Overlay identities: validity, normalization and the root variable.",
+  "spec": "spec/v0/package.md#names-and-paths",
+  "cases": [
+    {
+      "id": "name-engineering",
+      "name": "engineering",
+      "expect": {
+        "valid": true,
+        "normalized": "engineering",
+        "variable": "ENGINEERING_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-Team_Review",
+      "name": "Team_Review",
+      "expect": {
+        "valid": true,
+        "normalized": "team-review",
+        "variable": "TEAM_REVIEW_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-team.review",
+      "name": "team.review",
+      "expect": {
+        "valid": true,
+        "normalized": "team-review",
+        "variable": "TEAM_REVIEW_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-v1.2",
+      "name": "v1.2",
+      "expect": {
+        "valid": true,
+        "normalized": "v1-2",
+        "variable": "V1_2_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-a",
+      "name": "a",
+      "expect": {
+        "valid": true,
+        "normalized": "a",
+        "variable": "A_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-A9",
+      "name": "A9",
+      "expect": {
+        "valid": true,
+        "normalized": "a9",
+        "variable": "A9_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-rust-2",
+      "name": "rust-2",
+      "expect": {
+        "valid": true,
+        "normalized": "rust-2",
+        "variable": "RUST_2_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-my-overlay",
+      "name": "my-overlay",
+      "expect": {
+        "valid": true,
+        "normalized": "my-overlay",
+        "variable": "MY_OVERLAY_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-2fast",
+      "name": "2fast",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-_private",
+      "name": "_private",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-.hidden",
+      "name": ".hidden",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-trailing.",
+      "name": "trailing.",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-trailing-",
+      "name": "trailing-",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-has space",
+      "name": "has space",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-project",
+      "name": "project",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-Project-Root",
+      "name": "Project-Root",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-con",
+      "name": "con",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-COM1.txt",
+      "name": "COM1.txt",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-lpt9",
+      "name": "lpt9",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-nul.cfg",
+      "name": "nul.cfg",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-console",
+      "name": "console",
+      "expect": {
+        "valid": true,
+        "normalized": "console",
+        "variable": "CONSOLE_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "name-empty",
+      "name": "",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-x/y",
+      "name": "x/y",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name-ünicode",
+      "name": "ünicode",
+      "expect": {
+        "valid": false
+      }
+    }
+  ]
+}

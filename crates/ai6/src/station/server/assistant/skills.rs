@@ -14,8 +14,9 @@ use crate::station::limits::HarnessLimits;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::directorates::m::assistant::{AssistantSettings, SKILLS_PLUGIN, check_skill};
+use crate::directorates::m::assistant::{AssistantSettings, SKILLS_PLUGIN};
 use crate::directorates::m::harness::ProjectManifest;
+use crate::directorates::q::overlays::check_skill;
 use crate::directorates::registry::logbook::{
     Severity, StationFinding, StationFindingKind, StationReport,
 };
@@ -75,8 +76,14 @@ pub(super) fn install(
                     return Err(Skipped::Pin);
                 }
             }
-            check_skill(&target, name, settings.skills_allow_tools(), limits)
-                .map_err(Skipped::Other)
+            check_skill(
+                &target,
+                name,
+                settings.skills_allow_tools(),
+                "assistant.skills_allow_tools",
+                limits.manifest_file_bytes,
+            )
+            .map_err(Skipped::Other)
         });
         match outcome {
             Ok(()) => installed.names.push(name.clone()),

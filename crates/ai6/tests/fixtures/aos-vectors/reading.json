@@ -1,0 +1,2193 @@
+{
+  "description": "Reading documents: format selection, the data model, static reading, limits, the dotenv grammar and substitution. Input is 'text' (UTF-8) or 'base64'; 'format' is 'aos' (overlay.cfg rules), 'dotenv', 'env-script' (an env script's output, whose data maps a variable to a string, or to null to unset it), or 'catalog' (a catalog document, whose file 'name' selects its format by extension). A dotenv case may give 'env' (the environment before the file; absent, empty), 'os' ('windows' compares names without regard to ASCII case; absent, another OS) and 'secret_variables' (the names in 'env' whose value came from a secret reference); its data is what each line sets, substituted against the environment the earlier lines left. 'expect' is the data, or an error class (a list when either class is right); with both 'data' and 'error', either outcome is right.",
+  "spec": "spec/v0/manifest.md#reading-overlaycfg",
+  "cases": [
+    {
+      "id": "toml-default",
+      "description": "No format line: TOML.",
+      "format": "aos",
+      "text": "name = \"x\"\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "empty",
+      "description": "An empty document is the empty mapping.",
+      "format": "aos",
+      "text": "",
+      "expect": {
+        "data": {}
+      }
+    },
+    {
+      "id": "blank",
+      "description": "Only spaces, tabs and line breaks: the empty mapping.",
+      "format": "aos",
+      "text": " \n\t\r\n",
+      "expect": {
+        "data": {}
+      }
+    },
+    {
+      "id": "comment-only",
+      "description": "A TOML comment line is not a format line.",
+      "format": "aos",
+      "text": "# notes\n",
+      "expect": {
+        "data": {}
+      }
+    },
+    {
+      "id": "bom-toml",
+      "description": "One byte-order mark is dropped.",
+      "format": "aos",
+      "text": "﻿name = \"x\"\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "bom-twice",
+      "description": "Only one byte-order mark is dropped; the second reaches the TOML parser.",
+      "format": "aos",
+      "text": "﻿﻿name = \"x\"\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "line-toml",
+      "description": "#!toml names TOML; the line is removed.",
+      "format": "aos",
+      "text": "#!toml\nname = \"x\"\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "line-case",
+      "description": "The name ignores ASCII case.",
+      "format": "aos",
+      "text": "#!TOML\nname = \"x\"\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "line-dots",
+      "description": "Leading dots are dropped.",
+      "format": "aos",
+      "text": "#!.toml\nname = \"x\"\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "line-env",
+      "description": "The last word, after any '/', names the format.",
+      "format": "aos",
+      "text": "#!/usr/bin/env toml\nname = \"x\"\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "line-backslash",
+      "description": "After any '\\' too.",
+      "format": "aos",
+      "text": "#!C:\\tools\\json\n{\"name\": \"x\"}\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "line-crlf",
+      "description": "A CR before the LF is whitespace.",
+      "format": "aos",
+      "text": "#!json\r\n{\"name\": \"x\"}\r\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "line-spaces",
+      "description": "Spaces and tabs around the word.",
+      "format": "aos",
+      "text": "#!  \t yaml  \nname: x\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "line-env-flags",
+      "description": "Only the last word counts.",
+      "format": "aos",
+      "text": "#!/usr/bin/env -S yaml\nname: x\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "bom-then-line",
+      "description": "A byte-order mark before the format line.",
+      "format": "aos",
+      "text": "﻿#!json\n{\"name\": \"x\"}\n",
+      "expect": {
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "line-alone",
+      "description": "A format line and nothing else: the empty mapping.",
+      "format": "aos",
+      "text": "#!json",
+      "expect": {
+        "data": {}
+      }
+    },
+    {
+      "id": "line-empty",
+      "description": "'#!' names nothing.",
+      "format": "aos",
+      "text": "#!\nname = 'x'\n",
+      "expect": {
+        "error": "no-format-named"
+      }
+    },
+    {
+      "id": "line-blank",
+      "description": "'#!' and whitespace names nothing.",
+      "format": "aos",
+      "text": "#!   \t\nname = 'x'\n",
+      "expect": {
+        "error": "no-format-named"
+      }
+    },
+    {
+      "id": "line-unsupported",
+      "description": "A format the reader does not support is refused by name, never guessed.",
+      "format": "aos",
+      "text": "#!ini\nname=x\n",
+      "expect": {
+        "error": "unsupported-format"
+      }
+    },
+    {
+      "id": "line-unsupported-shown",
+      "description": "A word that is not a plain name is not echoed.",
+      "format": "aos",
+      "text": "#!/bin/a$b\nx\n",
+      "expect": {
+        "error": "unsupported-format"
+      }
+    },
+    {
+      "id": "json-without-line",
+      "description": "JSON without a format line is read as TOML, and fails.",
+      "format": "aos",
+      "text": "{\"name\": \"x\"}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "yaml-without-line",
+      "description": "YAML without a format line is read as TOML, and fails.",
+      "format": "aos",
+      "text": "name: x\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "yaml-directive-without-line",
+      "description": "A %YAML directive does not select YAML.",
+      "format": "aos",
+      "text": "%YAML 1.2\n---\nname: x\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "invalid-utf8",
+      "description": "Invalid UTF-8.",
+      "format": "aos",
+      "base64": "bmFtZSA9ICL/Igo=",
+      "expect": {
+        "error": "invalid-utf8"
+      }
+    },
+    {
+      "id": "same-toml",
+      "description": "One manifest in TOML ...",
+      "format": "aos",
+      "text": "name = \"same\"\npriority = 420\nrequires = [\"engineering\"]\n[env]\nMODE = \"read-only\"\n",
+      "expect": {
+        "data": {
+          "name": "same",
+          "priority": 420,
+          "requires": [
+            "engineering"
+          ],
+          "env": {
+            "MODE": "read-only"
+          }
+        }
+      }
+    },
+    {
+      "id": "same-json",
+      "description": "... in JSON ...",
+      "format": "aos",
+      "text": "#!json\n{\"name\": \"same\", \"priority\": 420, \"requires\": [\"engineering\"], \"env\": {\"MODE\": \"read-only\"}}\n",
+      "expect": {
+        "data": {
+          "name": "same",
+          "priority": 420,
+          "requires": [
+            "engineering"
+          ],
+          "env": {
+            "MODE": "read-only"
+          }
+        }
+      }
+    },
+    {
+      "id": "same-yaml",
+      "description": "... and in YAML read the same.",
+      "format": "aos",
+      "text": "#!yaml\nname: same\npriority: 420\nrequires: [engineering]\nenv:\n  MODE: read-only\n",
+      "expect": {
+        "data": {
+          "name": "same",
+          "priority": 420,
+          "requires": [
+            "engineering"
+          ],
+          "env": {
+            "MODE": "read-only"
+          }
+        }
+      }
+    },
+    {
+      "id": "json-int-float",
+      "description": "JSON: 30 is an integer, 30.0 and 3e1 are floats.",
+      "format": "aos",
+      "text": "#!json\n{\"a\": 30, \"b\": 30.0, \"c\": 3e1}\n",
+      "expect": {
+        "data": {
+          "a": 30,
+          "b": 30.0,
+          "c": 30.0
+        }
+      }
+    },
+    {
+      "id": "toml-int-float",
+      "description": "TOML: 30 is an integer, 30.0 a float.",
+      "format": "aos",
+      "text": "a = 30\nb = 30.0\n",
+      "expect": {
+        "data": {
+          "a": 30,
+          "b": 30.0
+        }
+      }
+    },
+    {
+      "id": "json-null",
+      "description": "A null is refused.",
+      "format": "aos",
+      "text": "#!json\n{\"name\": null}\n",
+      "expect": {
+        "error": "null-value"
+      }
+    },
+    {
+      "id": "json-null-unknown-key",
+      "description": "A null is refused in a key AOS does not define too.",
+      "format": "aos",
+      "text": "#!json\n{\"x_extension\": {\"a\": [1, null]}}\n",
+      "expect": {
+        "error": "null-value"
+      }
+    },
+    {
+      "id": "json-duplicate",
+      "description": "A duplicate JSON key is refused.",
+      "format": "aos",
+      "text": "#!json\n{\"name\": \"a\", \"name\": \"b\"}\n",
+      "expect": {
+        "error": "duplicate-key"
+      }
+    },
+    {
+      "id": "json-nan",
+      "description": "NaN is not JSON.",
+      "format": "aos",
+      "text": "#!json\n{\"a\": NaN}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "json-comment",
+      "description": "Comments are not JSON.",
+      "format": "aos",
+      "text": "#!json\n{\"a\": 1 /* no */}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "json-huge-float",
+      "description": "A float that overflows is not finite.",
+      "format": "aos",
+      "text": "#!json\n{\"a\": 1e400}\n",
+      "expect": {
+        "error": "non-finite-float"
+      }
+    },
+    {
+      "id": "json-int-range",
+      "description": "An integer outside signed 64-bit.",
+      "format": "aos",
+      "text": "#!json\n{\"a\": 9223372036854775808}\n",
+      "expect": {
+        "error": "integer-range"
+      }
+    },
+    {
+      "id": "json-int-max",
+      "description": "The largest signed 64-bit integer.",
+      "format": "aos",
+      "text": "#!json\n{\"a\": 9223372036854775807}\n",
+      "expect": {
+        "data": {
+          "a": 9223372036854775807
+        }
+      }
+    },
+    {
+      "id": "json-lone-surrogate",
+      "description": "A lone surrogate escape is not Unicode.",
+      "format": "aos",
+      "text": "#!json\n{\"a\": \"\\ud800\"}\n",
+      "expect": {
+        "error": "invalid-unicode"
+      }
+    },
+    {
+      "id": "json-array-top",
+      "description": "The top level must be a mapping.",
+      "format": "aos",
+      "text": "#!json\n[1, 2]\n",
+      "expect": {
+        "error": "not-a-mapping"
+      }
+    },
+    {
+      "id": "toml-datetime",
+      "description": "A TOML date has no data model type.",
+      "format": "aos",
+      "text": "when = 2026-11-04\n",
+      "expect": {
+        "error": "datetime-value"
+      }
+    },
+    {
+      "id": "toml-inf",
+      "description": "A non-finite TOML float.",
+      "format": "aos",
+      "text": "a = inf\n",
+      "expect": {
+        "error": "non-finite-float"
+      }
+    },
+    {
+      "id": "toml-nan",
+      "description": "TOML nan.",
+      "format": "aos",
+      "text": "a = nan\n",
+      "expect": {
+        "error": "non-finite-float"
+      }
+    },
+    {
+      "id": "toml-int-range",
+      "description": "A TOML integer outside signed 64-bit.",
+      "format": "aos",
+      "text": "a = 9223372036854775808\n",
+      "expect": {
+        "error": [
+          "integer-range",
+          "parse-error"
+        ]
+      }
+    },
+    {
+      "id": "yaml-core-strings",
+      "description": "YAML 1.2 core schema: yes, on, a date and 1_000 are strings.",
+      "format": "aos",
+      "text": "#!yaml\na: yes\nb: on\nc: 2026-11-04\nd: 1_000\ne: 'quoted 1'\n",
+      "expect": {
+        "data": {
+          "a": "yes",
+          "b": "on",
+          "c": "2026-11-04",
+          "d": "1_000",
+          "e": "quoted 1"
+        }
+      }
+    },
+    {
+      "id": "yaml-core-numbers",
+      "description": "Core-schema integers and floats.",
+      "format": "aos",
+      "text": "#!yaml\na: 12\nb: 0o17\nc: 0x1F\nd: -3\ne: 1.5\nf: 2e3\ng: true\nh: False\n",
+      "expect": {
+        "data": {
+          "a": 12,
+          "b": 15,
+          "c": 31,
+          "d": -3,
+          "e": 1.5,
+          "f": 2000.0,
+          "g": true,
+          "h": false
+        }
+      }
+    },
+    {
+      "id": "yaml-null-tilde",
+      "description": "~ is null.",
+      "format": "aos",
+      "text": "#!yaml\na: ~\n",
+      "expect": {
+        "error": "null-value"
+      }
+    },
+    {
+      "id": "yaml-null-empty",
+      "description": "An empty value is null.",
+      "format": "aos",
+      "text": "#!yaml\na:\n",
+      "expect": {
+        "error": "null-value"
+      }
+    },
+    {
+      "id": "yaml-inf",
+      "description": ".inf is not finite.",
+      "format": "aos",
+      "text": "#!yaml\na: .inf\n",
+      "expect": {
+        "error": "non-finite-float"
+      }
+    },
+    {
+      "id": "yaml-tag-include",
+      "description": "A tag is refused, never applied.",
+      "format": "aos",
+      "text": "#!yaml\nenv: !include other.yaml\n",
+      "expect": {
+        "error": "yaml-tag"
+      }
+    },
+    {
+      "id": "yaml-tag-python",
+      "description": "A language tag is refused.",
+      "format": "aos",
+      "text": "#!yaml\na: !!python/object/apply:os.system [\"echo\"]\n",
+      "expect": {
+        "error": "yaml-tag"
+      }
+    },
+    {
+      "id": "yaml-tag-core",
+      "description": "Even a core tag is refused.",
+      "format": "aos",
+      "text": "#!yaml\na: !!str 5\n",
+      "expect": {
+        "error": "yaml-tag"
+      }
+    },
+    {
+      "id": "yaml-anchor",
+      "description": "Anchors and aliases are refused.",
+      "format": "aos",
+      "text": "#!yaml\na: &x [1]\nb: *x\n",
+      "expect": {
+        "error": "yaml-anchor"
+      }
+    },
+    {
+      "id": "yaml-merge-key",
+      "description": "A merge key is refused.",
+      "format": "aos",
+      "text": "#!yaml\nbase: {a: 1}\nc:\n  <<: {a: 1}\n",
+      "expect": {
+        "error": "yaml-merge-key"
+      }
+    },
+    {
+      "id": "yaml-two-documents",
+      "description": "One document only.",
+      "format": "aos",
+      "text": "#!yaml\na: 1\n---\nb: 2\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "yaml-int-key",
+      "description": "Mapping keys are strings.",
+      "format": "aos",
+      "text": "#!yaml\n1: x\n",
+      "expect": {
+        "error": "non-string-key"
+      }
+    },
+    {
+      "id": "yaml-duplicate",
+      "description": "A duplicate key is refused.",
+      "format": "aos",
+      "text": "#!yaml\na: 1\na: 2\n",
+      "expect": {
+        "error": "duplicate-key"
+      }
+    },
+    {
+      "id": "static-toml-variables",
+      "description": "No interpolation: ${HOME} and {{ x }} are characters.",
+      "format": "aos",
+      "text": "routing = [\"${HOME}/x\", \"{{ x }}\", \"%(name)s\", \"<ROOT>\"]\n",
+      "expect": {
+        "data": {
+          "routing": [
+            "${HOME}/x",
+            "{{ x }}",
+            "%(name)s",
+            "<ROOT>"
+          ]
+        }
+      }
+    },
+    {
+      "id": "static-json-ref",
+      "description": "No includes: $ref and include are ordinary keys.",
+      "format": "aos",
+      "text": "#!json\n{\"$ref\": \"other.json\", \"include\": [\"a.cfg\"]}\n",
+      "expect": {
+        "data": {
+          "$ref": "other.json",
+          "include": [
+            "a.cfg"
+          ]
+        }
+      }
+    },
+    {
+      "id": "static-yaml-include-key",
+      "description": "An include key in YAML is data.",
+      "format": "aos",
+      "text": "#!yaml\ninclude: other.yaml\nextends: base\n",
+      "expect": {
+        "data": {
+          "include": "other.yaml",
+          "extends": "base"
+        }
+      }
+    },
+    {
+      "id": "bom-after-line",
+      "description": "A byte-order mark where the parser's text starts is an error, after a format line too.",
+      "format": "aos",
+      "text": "#!json\n﻿{\"name\": \"x\"}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "yaml-directive",
+      "description": "A %YAML or %TAG directive is refused: it switches some parsers to YAML 1.1 rules.",
+      "format": "aos",
+      "text": "#!yaml\n%YAML 1.1\n---\na: yes\n",
+      "expect": {
+        "error": "yaml-directive"
+      }
+    },
+    {
+      "id": "yaml-unicode-line-break",
+      "description": "U+2028, U+2029 and U+0085 are refused in YAML: YAML 1.1 and 1.2 parsers split on them differently.",
+      "format": "aos",
+      "text": "#!yaml\na: one two\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "toml-1-1-inline-newline",
+      "description": "A newline inside an inline table (TOML 1.1): refused, or read with TOML 1.1's meaning.",
+      "format": "aos",
+      "text": "a = { b = 1,\n c = 2 }\n",
+      "expect": {
+        "data": {
+          "a": {
+            "b": 1,
+            "c": 2
+          }
+        },
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "toml-1-1-escape",
+      "description": "The \\e escape (TOML 1.1): refused, or read as ESC.",
+      "format": "aos",
+      "text": "a = \"\\e[0m\"\n",
+      "expect": {
+        "data": {
+          "a": "\u001b[0m"
+        },
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "json-u64",
+      "description": "The type follows the text: an integer too large for signed 64-bit is refused, never read as a float.",
+      "format": "aos",
+      "text": "#!json\n{\"x_extension\": 18446744073709551616}\n",
+      "expect": {
+        "error": "integer-range"
+      }
+    },
+    {
+      "id": "depth-limit",
+      "description": "Depth counts arrays and mappings; the root is 1.",
+      "format": "aos",
+      "text": "a = [[[1]]]\n",
+      "limits": {
+        "max_depth": 3
+      },
+      "expect": {
+        "error": "too-deep"
+      }
+    },
+    {
+      "id": "depth-within",
+      "description": "The same document at a limit of 4.",
+      "format": "aos",
+      "text": "a = [[[1]]]\n",
+      "limits": {
+        "max_depth": 4
+      },
+      "expect": {
+        "data": {
+          "a": [
+            [
+              [
+                1
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "size-limit",
+      "description": "A document over the size limit.",
+      "format": "aos",
+      "text": "name = \"0123456789\"\n",
+      "limits": {
+        "max_bytes": 10
+      },
+      "expect": {
+        "error": "too-large"
+      }
+    },
+    {
+      "id": "dotenv-basic",
+      "description": "Names, export, quotes removed, everything else literal.",
+      "format": "dotenv",
+      "text": "A=1\nexport B = two words \nC=\"quoted # not a comment\"\nD='$HOME\\n'\nE=\n# comment\n   # indented comment\n\n",
+      "expect": {
+        "data": {
+          "A": "1",
+          "B": "two words",
+          "C": "quoted # not a comment",
+          "D": "$HOME\\n",
+          "E": ""
+        }
+      }
+    },
+    {
+      "id": "dotenv-crlf-bom",
+      "description": "A byte-order mark and CRLF line ends.",
+      "format": "dotenv",
+      "text": "﻿A=1\r\nB=2\r\n",
+      "expect": {
+        "data": {
+          "A": "1",
+          "B": "2"
+        }
+      }
+    },
+    {
+      "id": "dotenv-unbalanced",
+      "description": "Quotes are removed only in matching pairs.",
+      "format": "dotenv",
+      "text": "A=\"x'\nB='\nC=\"\"\n",
+      "expect": {
+        "data": {
+          "A": "\"x'",
+          "B": "'",
+          "C": ""
+        }
+      }
+    },
+    {
+      "id": "dotenv-bad-line",
+      "description": "A line that is not NAME=VALUE.",
+      "format": "dotenv",
+      "text": "A=1\nnot a line\n",
+      "expect": {
+        "error": "dotenv-syntax"
+      }
+    },
+    {
+      "id": "dotenv-duplicate",
+      "description": "A name given twice.",
+      "format": "dotenv",
+      "text": "A=1\nA=2\n",
+      "expect": {
+        "error": "duplicate-key"
+      }
+    },
+    {
+      "id": "dotenv-case-duplicate",
+      "description": "Names that differ only in ASCII case are one variable on Windows.",
+      "format": "dotenv",
+      "text": "a=1\nA=2\n",
+      "expect": {
+        "error": "duplicate-key"
+      }
+    },
+    {
+      "id": "dotenv-bad-name",
+      "description": "A name must match [A-Za-z_][A-Za-z0-9_]*.",
+      "format": "dotenv",
+      "text": "1A=1\n",
+      "expect": {
+        "error": "dotenv-syntax"
+      }
+    },
+    {
+      "id": "dotenv-literal-values",
+      "description": "Nothing runs: '=', '#', $(...), backticks and a bare $NAME in a value are characters; spaces and tabs around '=' and the value are removed.",
+      "format": "dotenv",
+      "text": "A = x=y\nB=a #b\nC=$(id -u)\nD=`id`\nE=$HOME/x\nF=\t'padded'\t\nG=it's\n",
+      "expect": {
+        "data": {
+          "A": "x=y",
+          "B": "a #b",
+          "C": "$(id -u)",
+          "D": "`id`",
+          "E": "$HOME/x",
+          "F": "padded",
+          "G": "it's"
+        }
+      }
+    },
+    {
+      "id": "dotenv-outer-quotes-only",
+      "description": "Only the outermost matching pair is removed; inner quotes stay.",
+      "format": "dotenv",
+      "text": "A=\"a\"b\"\nB='\"x\"'\nC=\"\\\"\"\n",
+      "expect": {
+        "data": {
+          "A": "a\"b",
+          "B": "\"x\"",
+          "C": "\\\""
+        }
+      }
+    },
+    {
+      "id": "dotenv-export-name",
+      "description": "'export=1' sets a variable named export.",
+      "format": "dotenv",
+      "text": "export=1\n",
+      "expect": {
+        "data": {
+          "export": "1"
+        }
+      }
+    },
+    {
+      "id": "dotenv-export-alone",
+      "description": "'export' alone is not NAME=VALUE.",
+      "format": "dotenv",
+      "text": "export A\n",
+      "expect": {
+        "error": "dotenv-syntax"
+      }
+    },
+    {
+      "id": "dotenv-no-name",
+      "description": "A line starting with '=' has no name.",
+      "format": "dotenv",
+      "text": "=x\n",
+      "expect": {
+        "error": "dotenv-syntax"
+      }
+    },
+    {
+      "id": "dotenv-quote-one-line",
+      "description": "A quote does not continue onto the next line.",
+      "format": "dotenv",
+      "text": "A=\"one\ntwo\"\n",
+      "expect": {
+        "error": "dotenv-syntax"
+      }
+    },
+    {
+      "id": "subst-braced",
+      "description": "${NAME} is the variable's value, anywhere in a value.",
+      "format": "dotenv",
+      "text": "A=${NAME}\nB=x${NAME}y\nC=${NAME}${NAME}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hello world",
+          "B": "xhello worldy",
+          "C": "hello worldhello world"
+        }
+      }
+    },
+    {
+      "id": "subst-bare-dollar",
+      "description": "Only the braced form is a placeholder: $NAME, a lone $ and $5 are characters.",
+      "format": "dotenv",
+      "text": "A=$NAME\nB=cost $5\nC=$\nD=a$\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "$NAME",
+          "B": "cost $5",
+          "C": "$",
+          "D": "a$"
+        }
+      }
+    },
+    {
+      "id": "subst-escape",
+      "description": "$$ is one $, so $${NAME} is the text ${NAME}.",
+      "format": "dotenv",
+      "text": "A=$$\nB=$${NAME}\nC=$$${NAME}\nD=$$$${NAME}\nE=$$NAME\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "$",
+          "B": "${NAME}",
+          "C": "$hello world",
+          "D": "$${NAME}",
+          "E": "$NAME"
+        }
+      }
+    },
+    {
+      "id": "subst-nothing-runs",
+      "description": "Command substitution and arithmetic are characters.",
+      "format": "dotenv",
+      "text": "A=$(id -u)\nB=`id`\nC=$((1+2))\nD=$(echo ${NAME})\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "$(id -u)",
+          "B": "`id`",
+          "C": "$((1+2))",
+          "D": "$(echo hello world)"
+        }
+      }
+    },
+    {
+      "id": "subst-unknown-expression",
+      "description": "An expression AOS does not define is text: its $ is itself and reading goes on after it.",
+      "format": "dotenv",
+      "text": "A=${NAME:?missing}\nB=${1}\nC=${NAME.x}\nD=${\nE=${NAME\nF=${#}\nG=${NAME }\nH=${#NAME:-x}\nI=${NAME~}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "${NAME:?missing}",
+          "B": "${1}",
+          "C": "${NAME.x}",
+          "D": "${",
+          "E": "${NAME",
+          "F": "${#}",
+          "G": "${NAME }",
+          "H": "${#NAME:-x}",
+          "I": "${NAME~}"
+        }
+      }
+    },
+    {
+      "id": "subst-unknown-then-placeholder",
+      "description": "Reading goes on inside an unknown expression, so a placeholder there is substituted.",
+      "format": "dotenv",
+      "text": "A=${X?${NAME}}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "${X?hello world}"
+        }
+      }
+    },
+    {
+      "id": "subst-undefined",
+      "description": "An undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-length",
+      "description": "The length of an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${#MISSING}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-slice",
+      "description": "A slice of an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING:0:1}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-replace",
+      "description": "A replacement in an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING/a/b}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-trim",
+      "description": "A trim of an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING%x}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-case",
+      "description": "A case change of an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING^^}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-explicit-empty",
+      "description": "${NAME-} and ${NAME:-} give an empty value where the name is unset: the author's way to allow it.",
+      "format": "dotenv",
+      "text": "A=${MISSING-}\nB=${MISSING:-}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "",
+          "B": ""
+        }
+      }
+    },
+    {
+      "id": "subst-defaults",
+      "description": "'-' replaces an unset name; ':-' an unset or empty one; '=' and ':=' read the same and assign nothing.",
+      "format": "dotenv",
+      "text": "A=${MISSING-dflt}\nB=${EMPTY-dflt}\nC=${MISSING:-dflt}\nD=${EMPTY:-dflt}\nE=${NAME:-dflt}\nF=${MISSING=dflt}\nG=${EMPTY:=dflt}\nH=${EMPTY=dflt}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "dflt",
+          "B": "",
+          "C": "dflt",
+          "D": "dflt",
+          "E": "hello world",
+          "F": "dflt",
+          "G": "dflt",
+          "H": ""
+        }
+      }
+    },
+    {
+      "id": "subst-assign-does-not-assign",
+      "description": "${NAME=word} sets nothing: the name is still unset on the next line.",
+      "format": "dotenv",
+      "text": "A=${MISSING=set}\nB=${MISSING-unset}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "set",
+          "B": "unset"
+        }
+      }
+    },
+    {
+      "id": "subst-alternates",
+      "description": "'+' gives the word for a set name; ':+' for a set and non-empty one; otherwise empty.",
+      "format": "dotenv",
+      "text": "A=${NAME+alt}\nB=${EMPTY+alt}\nC=${EMPTY:+alt}\nD=${MISSING+alt}\nE=${NAME:+alt}\nF=${MISSING:+alt}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "alt",
+          "B": "alt",
+          "C": "",
+          "D": "",
+          "E": "alt",
+          "F": ""
+        }
+      }
+    },
+    {
+      "id": "subst-nested",
+      "description": "A default's or alternate's word is substituted itself.",
+      "format": "dotenv",
+      "text": "A=${MISSING:-${NAME}}\nB=${MISSING:-${ALSO_MISSING:-deep}}\nC=${MISSING:-$${NAME}}\nD=${NAME:+[${NAME}]}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hello world",
+          "B": "deep",
+          "C": "${NAME}",
+          "D": "[hello world]"
+        }
+      }
+    },
+    {
+      "id": "subst-word-only-when-used",
+      "description": "A word is substituted only when it is used, so an undefined name in an unused word is no error.",
+      "format": "dotenv",
+      "text": "A=${NAME:-${MISSING}}\nB=${MISSING+${ALSO_MISSING}}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hello world",
+          "B": ""
+        }
+      }
+    },
+    {
+      "id": "subst-word-quotes-kept",
+      "description": "Quotes in a word are characters.",
+      "format": "dotenv",
+      "text": "A=${MISSING:-'quoted'}\nB=${MISSING:-\"q\"}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "'quoted'",
+          "B": "\"q\""
+        }
+      }
+    },
+    {
+      "id": "subst-length",
+      "description": "${#NAME} is the number of Unicode code points, in decimal.",
+      "format": "dotenv",
+      "text": "A=${#NAME}\nB=${#EMPTY}\nC=${#WIDE}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "11",
+          "B": "0",
+          "C": "3"
+        }
+      }
+    },
+    {
+      "id": "subst-slice",
+      "description": "${NAME:offset} and ${NAME:offset:length}; a negative offset needs a space or parentheses, since ':-' is a default; a negative length counts from the end.",
+      "format": "dotenv",
+      "text": "A=${NAME:6}\nB=${NAME:0:5}\nC=${NAME: -5}\nD=${NAME:(-5)}\nE=${NAME:1:-1}\nF=${NAME:20}\nG=${NAME: -20}\nH=${NAME:2:-20}\nI=${NAME:-2}\nJ=${NAME:  -5:2}\nK=${NAME:( -5 ):3}\nL=${NAME:3:0}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "world",
+          "B": "hello",
+          "C": "world",
+          "D": "world",
+          "E": "ello worl",
+          "F": "",
+          "G": "",
+          "H": "",
+          "I": "hello world",
+          "J": "wo",
+          "K": "wor",
+          "L": ""
+        }
+      }
+    },
+    {
+      "id": "subst-slice-not-a-slice",
+      "description": "Not a slice, so text: an empty length, a space inside '- 5', a non-ASCII digit.",
+      "format": "dotenv",
+      "text": "A=${NAME:1:}\nB=${NAME: - 5}\nC=${NAME: ١}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "${NAME:1:}",
+          "B": "${NAME: - 5}",
+          "C": "${NAME: ١}"
+        }
+      }
+    },
+    {
+      "id": "subst-slice-code-points",
+      "description": "Offsets count Unicode code points, not bytes or UTF-16 units.",
+      "format": "dotenv",
+      "text": "A=${WIDE:1}\nB=${WIDE:1:1}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "😀x",
+          "B": "😀"
+        }
+      }
+    },
+    {
+      "id": "subst-replace",
+      "description": "'/' replaces the first match, '//' every match, '/#' a match at the start, '/%' at the end; no text deletes; an empty pattern changes nothing.",
+      "format": "dotenv",
+      "text": "A=${NAME/o/0}\nB=${NAME//o/0}\nC=${NAME/#h/H}\nD=${NAME/%d/D}\nE=${NAME/#o/0}\nF=${NAME//o}\nG=${NAME/}\nH=${PATH//:/ }\nI=${NAME/#/x}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hell0 world",
+          "B": "hell0 w0rld",
+          "C": "Hello world",
+          "D": "hello worlD",
+          "E": "hello world",
+          "F": "hell wrld",
+          "G": "hello world",
+          "H": "/usr/bin /bin",
+          "I": "hello world"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-glob",
+      "description": "Patterns are globs, matched longest first: '*', '?', bracket expressions with ranges and '!' or '^' negation, a ']' first in the brackets, '\\' for the next character.",
+      "format": "dotenv",
+      "text": "A=${NAME/o*/X}\nB=${NAME//l?/L}\nC=${NAME/l*o/_}\nD=${NAME//[a-h]/_}\nE=${NAME//[!a-h ]/_}\nF=${NAME//[^a-h ]/_}\nG=${NAME//[]o]/_}\nH=${NAME//*/x}\nI=${STAR/\\*/x}\nJ=${NAME/\\*/x}\nK=${NAME//[a-c-e]/_}\nL=${NAME//[!-]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hellX",
+          "B": "heLo worL",
+          "C": "he_rld",
+          "D": "__llo worl_",
+          "E": "he___ ____d",
+          "F": "he___ ____d",
+          "G": "hell_ w_rld",
+          "H": "x",
+          "I": "axb",
+          "J": "hello world",
+          "K": "h_llo world",
+          "L": "___________"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-text-literal",
+      "description": "A '/' in the pattern is written '\\/'; the replacement is characters, a backslash or a placeholder included.",
+      "format": "dotenv",
+      "text": "A=${PATH/\\//|}\nB=${NAME/o/\\/}\nC=${NAME/o/${MISSING}}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "|usr/bin:/bin",
+          "B": "hell\\/ world",
+          "C": "hell${MISSING} world"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-empty-value",
+      "description": "On an empty value '/' and '//' replace nothing, while '/#' and '/%' replace the empty match.",
+      "format": "dotenv",
+      "text": "A=${EMPTY/*/x}\nB=${EMPTY//*/x}\nC=${EMPTY/#*/x}\nD=${EMPTY/%*/x}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "",
+          "B": "",
+          "C": "x",
+          "D": "x"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-unclosed-bracket",
+      "description": "A '[' with no ']' after the character that follows it is itself.",
+      "format": "dotenv",
+      "text": "A=${BRACKET/[/_}\nB=${NAME/[/_}\nC=${BRACKET/[]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "a_b",
+          "B": "hello world",
+          "C": "a[b"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-bad-range",
+      "description": "A range whose end is before its start is an error.",
+      "format": "dotenv",
+      "text": "A=${NAME/[z-a]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "invalid-pattern"
+      }
+    },
+    {
+      "id": "subst-replace-empty-bracket",
+      "description": "Brackets holding only the negation mark are an error.",
+      "format": "dotenv",
+      "text": "A=${NAME/[!]x]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "invalid-pattern"
+      }
+    },
+    {
+      "id": "subst-replace-empty-bracket-later",
+      "description": "Also when a later bracket expression follows: '[!]' never joins it.",
+      "format": "dotenv",
+      "text": "A=${NAME/[!]x[y]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "invalid-pattern"
+      }
+    },
+    {
+      "id": "subst-trim",
+      "description": "'#' removes the shortest matching prefix, '##' the longest; '%' the shortest matching suffix, '%%' the longest.",
+      "format": "dotenv",
+      "text": "A=${FILE#*.}\nB=${FILE##*.}\nC=${FILE%.*}\nD=${FILE%%.*}\nE=${FILE#x}\nF=${FILE#}\nG=${FILE#*}\nH=${FILE##*}\nI=${FILE%%[.]*}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "tar.gz",
+          "B": "gz",
+          "C": "archive.tar",
+          "D": "archive",
+          "E": "archive.tar.gz",
+          "F": "archive.tar.gz",
+          "G": "archive.tar.gz",
+          "H": "",
+          "I": "archive"
+        }
+      }
+    },
+    {
+      "id": "subst-case",
+      "description": "'^' upper-cases the first character, '^^' all; ',' and ',,' lower-case; Unicode full case mapping.",
+      "format": "dotenv",
+      "text": "A=${NAME^}\nB=${NAME^^}\nC=${UPPER,}\nD=${UPPER,,}\nE=${SHARP^^}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "Hello world",
+          "B": "HELLO WORLD",
+          "C": "hELLO World",
+          "D": "hello world",
+          "E": "STRASSE"
+        }
+      }
+    },
+    {
+      "id": "subst-quotes",
+      "description": "A value in single quotes is literal; double quotes, or none, are substituted.",
+      "format": "dotenv",
+      "text": "A='${NAME}'\nB=\"${NAME}\"\nC=${NAME}'\nD='$$'\nE=\"$$\"\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "${NAME}",
+          "B": "hello world",
+          "C": "hello world'",
+          "D": "$$",
+          "E": "$"
+        }
+      }
+    },
+    {
+      "id": "subst-chain-lines",
+      "description": "Each line sees the lines before it.",
+      "format": "dotenv",
+      "text": "A=one\nB=${A}-two\nC=${B}-three\n",
+      "env": {},
+      "expect": {
+        "data": {
+          "A": "one",
+          "B": "one-two",
+          "C": "one-two-three"
+        }
+      }
+    },
+    {
+      "id": "subst-self-reference",
+      "description": "A variable refers to its own earlier value.",
+      "format": "dotenv",
+      "text": "MYTOOL_HOME=/opt/mytool\nPATH=${MYTOOL_HOME}/bin:${PATH}\n",
+      "env": {
+        "PATH": "/usr/bin:/bin"
+      },
+      "expect": {
+        "data": {
+          "MYTOOL_HOME": "/opt/mytool",
+          "PATH": "/opt/mytool/bin:/usr/bin:/bin"
+        }
+      }
+    },
+    {
+      "id": "subst-forward-reference",
+      "description": "A variable set on a later line is not set yet: undefined, an error.",
+      "format": "dotenv",
+      "text": "A=${B}\nB=x\n",
+      "env": {},
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-forward-reference-earlier-value",
+      "description": "A later line has not run yet, so the name still has its earlier value.",
+      "format": "dotenv",
+      "text": "A=${B}\nB=new\nC=${B}\n",
+      "env": {
+        "B": "old"
+      },
+      "expect": {
+        "data": {
+          "A": "old",
+          "B": "new",
+          "C": "new"
+        }
+      }
+    },
+    {
+      "id": "subst-no-rescan",
+      "description": "A value is inserted as it is: placeholders in it are not substituted again, so nothing can loop.",
+      "format": "dotenv",
+      "text": "A=${V}\nB=${V:-x}\nSELF=${SELF}${SELF}\n",
+      "env": {
+        "V": "${NAME}",
+        "SELF": "$${SELF}"
+      },
+      "expect": {
+        "data": {
+          "A": "${NAME}",
+          "B": "${NAME}",
+          "SELF": "$${SELF}$${SELF}"
+        }
+      }
+    },
+    {
+      "id": "subst-case-exact",
+      "description": "Off Windows a name matches only in its own case.",
+      "format": "dotenv",
+      "text": "A=${home}\n",
+      "env": {
+        "HOME": "/home/u"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-case-windows",
+      "description": "On Windows a name matches without regard to ASCII case.",
+      "format": "dotenv",
+      "text": "A=${path}\nB=${PATH}\n",
+      "env": {
+        "Path": "C:\\Windows"
+      },
+      "os": "windows",
+      "expect": {
+        "data": {
+          "A": "C:\\Windows",
+          "B": "C:\\Windows"
+        }
+      }
+    },
+    {
+      "id": "subst-secret",
+      "description": "A variable whose value came from a secret reference is never read by a placeholder.",
+      "format": "dotenv",
+      "text": "A=${TOKEN}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "error": "secret-placeholder"
+      }
+    },
+    {
+      "id": "subst-secret-length",
+      "description": "In any form: not its length ...",
+      "format": "dotenv",
+      "text": "A=${#TOKEN}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "error": "secret-placeholder"
+      }
+    },
+    {
+      "id": "subst-secret-alternate",
+      "description": "... nor whether it is set.",
+      "format": "dotenv",
+      "text": "A=${TOKEN:+set}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "error": "secret-placeholder"
+      }
+    },
+    {
+      "id": "subst-secret-unused-word",
+      "description": "A secret named in a word that is not used is not read.",
+      "format": "dotenv",
+      "text": "A=${NAME:-${TOKEN}}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "data": {
+          "A": "hello world"
+        }
+      }
+    },
+    {
+      "id": "subst-secret-replaced",
+      "description": "Once a later line sets the variable, it no longer holds the secret.",
+      "format": "dotenv",
+      "text": "TOKEN=plain\nA=${TOKEN}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "data": {
+          "TOKEN": "plain",
+          "A": "plain"
+        }
+      }
+    },
+    {
+      "id": "env-script-lines",
+      "description": "One JSON object per line, applied in order: blank lines skipped, CRLF accepted, null unsets.",
+      "format": "env-script",
+      "text": "{\"A\": \"1\"}\n\n{\"B\": \"2\", \"A\": \"3\"}\r\n{\"C\": null}\n",
+      "expect": {
+        "data": {
+          "A": "3",
+          "B": "2",
+          "C": null
+        }
+      }
+    },
+    {
+      "id": "env-script-pretty",
+      "description": "The whole output as one object over several lines, as json.dumps(x, indent=2) prints it.",
+      "format": "env-script",
+      "text": "{\n  \"A\": \"1\",\n  \"B\": null\n}\n",
+      "expect": {
+        "data": {
+          "A": "1",
+          "B": null
+        }
+      }
+    },
+    {
+      "id": "env-script-empty",
+      "description": "No output, or only blank lines, sets nothing.",
+      "format": "env-script",
+      "text": "\n \n",
+      "expect": {
+        "data": {}
+      }
+    },
+    {
+      "id": "env-script-pretty-two",
+      "description": "Two pretty-printed objects are neither one object nor one object per line.",
+      "format": "env-script",
+      "text": "{\n  \"A\": \"1\"\n}\n{\n  \"B\": \"2\"\n}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "env-script-not-object",
+      "description": "Each object is a JSON object.",
+      "format": "env-script",
+      "text": "[\"A\"]\n",
+      "expect": {
+        "error": "env-script-output"
+      }
+    },
+    {
+      "id": "env-script-number",
+      "description": "A value is a string or null.",
+      "format": "env-script",
+      "text": "{\"A\": 1}\n",
+      "expect": {
+        "error": "env-script-output"
+      }
+    },
+    {
+      "id": "env-script-reserved",
+      "description": "A reserved variable is refused.",
+      "format": "env-script",
+      "text": "{\"X_OVERLAY_ROOT\": \"/tmp\"}\n",
+      "expect": {
+        "error": "env-script-output"
+      }
+    },
+    {
+      "id": "env-script-duplicate",
+      "description": "A key given twice in one object is refused, pretty-printed too.",
+      "format": "env-script",
+      "text": "{\n  \"A\": \"1\",\n  \"A\": \"2\"\n}\n",
+      "expect": {
+        "error": "duplicate-key"
+      }
+    },
+    {
+      "id": "env-script-text",
+      "description": "Any other output fails.",
+      "format": "env-script",
+      "text": "A=1\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "catalog-json",
+      "description": "'.json' names JSON; no format line is needed.",
+      "format": "catalog",
+      "name": "registry.json",
+      "text": "{\"overlays\": {\"engineering\": \"../engineering\"}}\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-toml",
+      "description": "'.toml' names TOML.",
+      "format": "catalog",
+      "name": "registry.toml",
+      "text": "[overlays]\nengineering = \"../engineering\"\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-yaml",
+      "description": "'.yaml' names YAML, read with the core schema: yes is a string.",
+      "format": "catalog",
+      "name": "registry.yaml",
+      "text": "overlays:\n  engineering: ../engineering\n  yes: ../yes\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering",
+            "yes": "../yes"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-yml-case",
+      "description": "'.YML' names YAML: the extension ignores ASCII case.",
+      "format": "catalog",
+      "name": "CATALOG.YML",
+      "text": "overlays: {engineering: ../engineering}\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-extension-wins",
+      "description": "The extension decides: '#!yaml' in a '.toml' file is a TOML comment.",
+      "format": "catalog",
+      "name": "catalog.toml",
+      "text": "#!yaml\n[overlays]\nengineering = \"../engineering\"\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-json-no-format-line",
+      "description": "In a '.json' file a format line is not removed, and is not JSON.",
+      "format": "catalog",
+      "name": "catalog.json",
+      "text": "#!json\n{\"overlays\": {}}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "catalog-cfg-format-line",
+      "description": "Another extension follows the manifest's rule: a format line names the format.",
+      "format": "catalog",
+      "name": "catalog.cfg",
+      "text": "#!json\n{\"overlays\": {\"engineering\": \"../engineering\"}}\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-no-extension",
+      "description": "No extension: the manifest's rule, TOML by default.",
+      "format": "catalog",
+      "name": "catalog",
+      "text": "[overlays]\nengineering = \"../engineering\"\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-no-guessing",
+      "description": "No extension and JSON content: read as TOML, and fails.",
+      "format": "catalog",
+      "name": "catalog",
+      "text": "{\"overlays\": {}}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "catalog-bom-json",
+      "description": "One byte-order mark is dropped before JSON too.",
+      "format": "catalog",
+      "name": "catalog.json",
+      "text": "﻿{\"overlays\": {}}\n",
+      "expect": {
+        "data": {
+          "overlays": {}
+        }
+      }
+    },
+    {
+      "id": "catalog-json-duplicate",
+      "description": "The data model holds: a duplicate JSON key is refused.",
+      "format": "catalog",
+      "name": "catalog.json",
+      "text": "{\"overlays\": {\"a\": \"x\", \"a\": \"y\"}}\n",
+      "expect": {
+        "error": "duplicate-key"
+      }
+    },
+    {
+      "id": "catalog-yaml-tag",
+      "description": "Static reading holds: a YAML tag is refused.",
+      "format": "catalog",
+      "name": "catalog.yaml",
+      "text": "overlays: !include more.yaml\n",
+      "expect": {
+        "error": "yaml-tag"
+      }
+    },
+    {
+      "id": "catalog-null",
+      "description": "A null is refused, as in a manifest.",
+      "format": "catalog",
+      "name": "catalog.json",
+      "text": "{\"overlays\": {\"a\": null}}\n",
+      "expect": {
+        "error": "null-value"
+      }
+    },
+    {
+      "id": "catalog-size-limit",
+      "description": "A catalog over the consumer's size limit.",
+      "format": "catalog",
+      "name": "catalog.toml",
+      "text": "[overlays]\nengineering = \"../engineering\"\n",
+      "limits": {
+        "max_bytes": 16
+      },
+      "expect": {
+        "error": "too-large"
+      }
+    }
+  ]
+}

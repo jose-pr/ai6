@@ -219,6 +219,17 @@
           "x-section": "roster",
           "x-advanced": true
         },
+        "overlays": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Overlays",
+          "description": "The overlays its Missions' Sessions get after their Agent's loadout's, each an `[overlay.<name>]`. They add to what the loadout issues and never take any of it away.",
+          "x-section": "roster",
+          "x-advanced": true,
+          "default": []
+        },
         "cover": {
           "type": "string",
           "format": "record:covers",

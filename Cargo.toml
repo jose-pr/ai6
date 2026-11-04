@@ -49,6 +49,9 @@ regex = { version = "1", default-features = false, features = ["std", "perf", "u
 toml = "0.9"
 # YAML configuration documents, and the front matter of a skill's SKILL.md.
 serde-saphyr = { version = "2", default-features = false, features = ["deserialize", "serialize"] }
+# The YAML event parser serde-saphyr is built on: an AOS document is read from its events, so
+# that no tag, anchor or merge key is ever applied.
+granit-parser = { version = "2", default-features = false, features = ["std"] }
 tokio = { version = "1", default-features = false, features = ["macros", "net", "rt-multi-thread"] }
 rmcp = { version = "3.7", default-features = false, features = ["macros", "server", "transport-streamable-http-server"] }
 subtle = "2.6"

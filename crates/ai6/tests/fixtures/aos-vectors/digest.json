@@ -1,0 +1,641 @@
+{
+  "description": "Tree digest vectors. Each tree lists entries: a file with 'text' (UTF-8) or 'base64' bytes, a 'dir', a 'symlink' or a 'special' file; 'path' is '/'-separated, or 'path_base64' gives raw name bytes. 'expect' is the digest and its lines, or an error class.",
+  "spec": "spec/v0/integrity.md#tree-digest",
+  "cases": [
+    {
+      "id": "empty",
+      "description": "No members: the digest of no bytes.",
+      "tree": [],
+      "expect": {
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "lines": []
+      }
+    },
+    {
+      "id": "one-file",
+      "description": "A manifest alone.",
+      "tree": [
+        {
+          "path": "overlay.cfg",
+          "text": "name = \"x\"\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:4b9fa93f04f6ab81a7c092024c539ac83cfde254b09c49bdcf09526fee60eb1d",
+        "lines": [
+          "overlay.cfg\u0000sha256:3eb10e9d710d38dc9fe5566f14f7d2cb97ca68a5c6c6b00150b73c69064410cc\n"
+        ]
+      }
+    },
+    {
+      "id": "two-files",
+      "description": "The example in the specification.",
+      "tree": [
+        {
+          "path": "overlay.cfg",
+          "text": "name = \"x\"\n"
+        },
+        {
+          "path": "kb/a.md",
+          "text": "# A\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:18f3ef95d9685618d26260f9fab30178d351475a199a08a6c96dc5f46393679d",
+        "lines": [
+          "kb/a.md\u0000sha256:aa1237b773c38dbddef583c4868aaea7a44c5237ea7923aecca5513764b42d80\n",
+          "overlay.cfg\u0000sha256:3eb10e9d710d38dc9fe5566f14f7d2cb97ca68a5c6c6b00150b73c69064410cc\n"
+        ]
+      }
+    },
+    {
+      "id": "byte-order",
+      "description": "Whole paths sort as bytes: '-' (2D) < '.' (2E) < '/' (2F), and 'Z' (5A) < 'a' (61); sorting component by component would put a/b first.",
+      "tree": [
+        {
+          "path": "a/b",
+          "text": "1\n"
+        },
+        {
+          "path": "a.b",
+          "text": "2\n"
+        },
+        {
+          "path": "a-b",
+          "text": "3\n"
+        },
+        {
+          "path": "Z",
+          "text": "4\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:a4b42db0ad817f9d96120cd734f7d2ecfd73e00ed0a732905080eedc3ca728fd",
+        "lines": [
+          "Z\u0000sha256:7de1555df0c2700329e815b93b32c571c3ea54dc967b89e81ab73b9972b72d1d\n",
+          "a-b\u0000sha256:1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2\n",
+          "a.b\u0000sha256:53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3\n",
+          "a/b\u0000sha256:4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865\n"
+        ]
+      }
+    },
+    {
+      "id": "lf",
+      "description": "LF line endings.",
+      "tree": [
+        {
+          "path": "kb/a.md",
+          "text": "line one\nline two\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:9d82ed93a322f5b15da45b81a6d8246438813e01128b857e8a2e0129164578ed",
+        "lines": [
+          "kb/a.md\u0000sha256:e9024f1a07d29d52ad3aa5e1a18e94db1f3a9fd32b89e39d47c472cd99071e13\n"
+        ]
+      }
+    },
+    {
+      "id": "crlf",
+      "description": "The same text with CRLF: other bytes, another digest.",
+      "tree": [
+        {
+          "path": "kb/a.md",
+          "text": "line one\r\nline two\r\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:98e1dddaa144f59c28bfcb77cb0ce3528e38ff77fc27f4d99903c766365cd155",
+        "lines": [
+          "kb/a.md\u0000sha256:6612d9c94c2da8d2544e1188348fc7baf717ffff1bacde51929a166404a41ffc\n"
+        ]
+      }
+    },
+    {
+      "id": "bom",
+      "description": "A byte-order mark in a file is part of its bytes.",
+      "tree": [
+        {
+          "path": "kb/a.md",
+          "text": "﻿# A\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:4bf7f697f4ab559c020fab6f09fdaff33ea577adbbe868d6c6ed4df66dd58ce0",
+        "lines": [
+          "kb/a.md\u0000sha256:a86738720e88e33757527d851be18e1e5a8475cdcf718ba067de0cb6fcff5b91\n"
+        ]
+      }
+    },
+    {
+      "id": "binary",
+      "description": "Bytes that are not text, zero bytes included.",
+      "tree": [
+        {
+          "path": "bin/blob",
+          "base64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="
+        }
+      ],
+      "expect": {
+        "digest": "sha256:9395319834e73e61609a71557df8e64bd1fc43f4f810556ea9f1234ba3200a52",
+        "lines": [
+          "bin/blob\u0000sha256:40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880\n"
+        ]
+      }
+    },
+    {
+      "id": "excluded",
+      "description": "Excluded names and .pyc entries are not members: the digest equals one-file's.",
+      "tree": [
+        {
+          "path": "overlay.cfg",
+          "text": "name = \"x\"\n"
+        },
+        {
+          "path": ".git/config",
+          "text": "[core]\n"
+        },
+        {
+          "path": ".git/objects/ab/cdef",
+          "text": "x"
+        },
+        {
+          "path": "lib/__pycache__/m.cpython-312.pyc",
+          "text": "x"
+        },
+        {
+          "path": "lib/m.pyc",
+          "text": "x"
+        },
+        {
+          "path": "node_modules/pkg/index.js",
+          "text": "x"
+        },
+        {
+          "path": ".venv",
+          "text": "a file named .venv\n"
+        },
+        {
+          "path": "tools/.tox/log",
+          "text": "x"
+        },
+        {
+          "path": ".hg/store",
+          "text": "x"
+        },
+        {
+          "path": ".svn/entries",
+          "text": "x"
+        },
+        {
+          "path": ".mypy_cache/x",
+          "text": "x"
+        },
+        {
+          "path": ".pytest_cache/x",
+          "text": "x"
+        },
+        {
+          "path": ".ruff_cache/x",
+          "text": "x"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:4b9fa93f04f6ab81a7c092024c539ac83cfde254b09c49bdcf09526fee60eb1d",
+        "lines": [
+          "overlay.cfg\u0000sha256:3eb10e9d710d38dc9fe5566f14f7d2cb97ca68a5c6c6b00150b73c69064410cc\n"
+        ]
+      }
+    },
+    {
+      "id": "not-excluded",
+      "description": "Dot-files and names near an excluded one are members: .github, .gitignore, x.pyco.",
+      "tree": [
+        {
+          "path": "overlay.cfg",
+          "text": "name = \"x\"\n"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "text": "on: push\n"
+        },
+        {
+          "path": ".gitignore",
+          "text": "*.log\n"
+        },
+        {
+          "path": ".gitattributes",
+          "text": "* text=auto eol=lf\n"
+        },
+        {
+          "path": "lib/x.pyco",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:ab9075079508cddfb5d895b320926336ca4a08d5cbb442caaeb9e4008e6f5ec1",
+        "lines": [
+          ".gitattributes\u0000sha256:d60f352d0db1404c70afb4bb8b2ca3fd1c610572aa40720e8a0b7baa7885418c\n",
+          ".github/workflows/ci.yml\u0000sha256:b602f7ad4316adfd9f3e5ca998773702a5db1a1f1599a14516f40101665fb6d2\n",
+          ".gitignore\u0000sha256:318d9a16533732a69cda7bb7b174ee392fdd15be3d72a114cd8f2d51f3eab510\n",
+          "lib/x.pyco\u0000sha256:73cb3858a687a8494ca3323053016282f3dad39d42cf62ca4e79dda2aac7d9ac\n",
+          "overlay.cfg\u0000sha256:3eb10e9d710d38dc9fe5566f14f7d2cb97ca68a5c6c6b00150b73c69064410cc\n"
+        ]
+      }
+    },
+    {
+      "id": "alias-git-case",
+      "description": "An excluded name in another case is refused: on a case-insensitive filesystem it opens .git.",
+      "tree": [
+        {
+          "path": ".GIT/config",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "alias-pyc-case",
+      "description": "A .pyc entry in another case is refused.",
+      "tree": [
+        {
+          "path": "lib/x.PYC",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "alias-node-modules-case",
+      "description": "Node_Modules is node_modules on Windows and macOS.",
+      "tree": [
+        {
+          "path": "Node_Modules/x.js",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "alias-trailing-dot",
+      "description": "Windows drops a trailing dot: .git. is .git.",
+      "tree": [
+        {
+          "path": ".git./config",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "alias-trailing-space",
+      "description": "Windows drops a trailing space.",
+      "tree": [
+        {
+          "path": "kb/a.md ",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "alias-short-name",
+      "description": "An 8.3 short name such as GIT~1.",
+      "tree": [
+        {
+          "path": "GIT~1/config",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "device-name",
+      "description": "A Windows device name, with or without an extension.",
+      "tree": [
+        {
+          "path": "kb/con.md",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "device-name-superscript",
+      "description": "COM and LPT with a superscript digit are devices too.",
+      "tree": [
+        {
+          "path": "lpt¹/a",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "colon-name",
+      "description": "A colon names an alternate data stream on NTFS.",
+      "tree": [
+        {
+          "path": "kb/a.md:stream",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "windows-reserved-character",
+      "description": "Characters Windows refuses in names.",
+      "tree": [
+        {
+          "path": "kb/a?.md",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "control-name",
+      "description": "A control character in a name.",
+      "tree": [
+        {
+          "path": "kb/a\u0001.md",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "c1-control-name",
+      "description": "A C1 control character (U+0085) in a name.",
+      "tree": [
+        {
+          "path": "kb/a.md",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "nul-name",
+      "description": "A zero byte in a name, which only an archive can carry.",
+      "tree": [
+        {
+          "path": "a\u0000sha256:x",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "bidi-name",
+      "description": "A bidirectional override (U+202E) in a name.",
+      "tree": [
+        {
+          "path": "kb/txt.‮exe.md",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "ignorable-name",
+      "description": "A code point HFS+ ignores (U+200D) in a name.",
+      "tree": [
+        {
+          "path": ".g‍it/config",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    },
+    {
+      "id": "case-collision",
+      "description": "Two members equal under ASCII case folding are refused: one file on a case-insensitive filesystem.",
+      "tree": [
+        {
+          "path": "README.md",
+          "text": "a\n"
+        },
+        {
+          "path": "readme.md",
+          "text": "b\n"
+        }
+      ],
+      "expect": {
+        "error": "case-collision"
+      }
+    },
+    {
+      "id": "scalar-order",
+      "description": "Paths sort by Unicode scalar values (UTF-8 bytes): U+FFFD before U+1F600, the reverse of UTF-16 code units.",
+      "tree": [
+        {
+          "path": "😀.md",
+          "text": "1\n"
+        },
+        {
+          "path": "�.md",
+          "text": "2\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:b14d90e17f756443d1e44a29fc6ed1b7d7e9be957371f634c2900ddeaecd7642",
+        "lines": [
+          "�.md\u0000sha256:53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3\n",
+          "😀.md\u0000sha256:4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865\n"
+        ]
+      }
+    },
+    {
+      "id": "empty-dirs",
+      "description": "Directories are not members: the digest equals one-file's.",
+      "tree": [
+        {
+          "path": "overlay.cfg",
+          "text": "name = \"x\"\n"
+        },
+        {
+          "path": "empty",
+          "type": "dir"
+        },
+        {
+          "path": "kb/nested",
+          "type": "dir"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:4b9fa93f04f6ab81a7c092024c539ac83cfde254b09c49bdcf09526fee60eb1d",
+        "lines": [
+          "overlay.cfg\u0000sha256:3eb10e9d710d38dc9fe5566f14f7d2cb97ca68a5c6c6b00150b73c69064410cc\n"
+        ]
+      }
+    },
+    {
+      "id": "unicode-nfc",
+      "description": "A name in NFC: the bytes as stored (c3 a9).",
+      "tree": [
+        {
+          "path": "kb/café.md",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:91a9d178068da7c28163b2863b6ee466a98437847f5ae222538f5e76953fbfc5",
+        "lines": [
+          "kb/café.md\u0000sha256:73cb3858a687a8494ca3323053016282f3dad39d42cf62ca4e79dda2aac7d9ac\n"
+        ]
+      }
+    },
+    {
+      "id": "unicode-nfd",
+      "description": "The same name in NFD (65 cc 81): another path, another digest.",
+      "tree": [
+        {
+          "path": "kb/café.md",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:c12c50cf5cae985d727fffd063df8004a5ce1b06072d4d6605269207638ff7ab",
+        "lines": [
+          "kb/café.md\u0000sha256:73cb3858a687a8494ca3323053016282f3dad39d42cf62ca4e79dda2aac7d9ac\n"
+        ]
+      }
+    },
+    {
+      "id": "symlink",
+      "description": "A link is a refusal.",
+      "tree": [
+        {
+          "path": "overlay.cfg",
+          "text": "name = \"x\"\n"
+        },
+        {
+          "path": "kb/link.md",
+          "type": "symlink",
+          "target": "../overlay.cfg"
+        }
+      ],
+      "expect": {
+        "error": "symlink"
+      }
+    },
+    {
+      "id": "symlink-dir",
+      "description": "A link to a directory is a refusal.",
+      "tree": [
+        {
+          "path": "kb/a.md",
+          "text": "x\n"
+        },
+        {
+          "path": "docs",
+          "type": "symlink",
+          "target": "kb"
+        }
+      ],
+      "expect": {
+        "error": "symlink"
+      }
+    },
+    {
+      "id": "symlink-excluded",
+      "description": "A link inside an excluded directory, or with an excluded name, is not looked at.",
+      "tree": [
+        {
+          "path": "overlay.cfg",
+          "text": "name = \"x\"\n"
+        },
+        {
+          "path": ".git/hooks/link",
+          "type": "symlink",
+          "target": "/etc/passwd"
+        },
+        {
+          "path": "node_modules",
+          "type": "symlink",
+          "target": "/tmp"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:4b9fa93f04f6ab81a7c092024c539ac83cfde254b09c49bdcf09526fee60eb1d",
+        "lines": [
+          "overlay.cfg\u0000sha256:3eb10e9d710d38dc9fe5566f14f7d2cb97ca68a5c6c6b00150b73c69064410cc\n"
+        ]
+      }
+    },
+    {
+      "id": "special",
+      "description": "A device, pipe or socket is a refusal.",
+      "tree": [
+        {
+          "path": "overlay.cfg",
+          "text": "name = \"x\"\n"
+        },
+        {
+          "path": "fifo",
+          "type": "special"
+        }
+      ],
+      "expect": {
+        "error": "special-file"
+      }
+    },
+    {
+      "id": "non-utf8-name",
+      "description": "A name that is not UTF-8 is a refusal.",
+      "tree": [
+        {
+          "path_base64": "a2Iv/y5tZA==",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "non-utf8-name"
+      }
+    },
+    {
+      "id": "backslash-name",
+      "description": "A name with a backslash is a refusal.",
+      "tree": [
+        {
+          "path": "kb\\a.md",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "error": "invalid-name"
+      }
+    }
+  ]
+}
