@@ -7,15 +7,21 @@
 //! the question is over; none is ever part of an answer. The board is rebuilt every
 //! `[accounts] models_every` seconds and reported at check-in under `models`; it only informs a
 //! person, and makes no route or pool.
+//!
+//! A look runs on a thread of its own, never on the check-in beat, and asks up to `[accounts]
+//! model_probes` handlers at once, waiting `model_probe_timeout` for each; a handler that does
+//! not answer in time leaves what the last look found for its account or route.
 
-use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use super::{DaemonState, accounts, credentials};
-use crate::directorates::m::roster::{Agent, RouteRef};
+use crate::bounds::{Limit, TimeLimit};
+use crate::directorates::m::roster::{Agent, AgentRoute, RouteRef};
 use crate::directorates::q::{Account, AccountPool};
 use crate::directorates::section_00::agent::{AgentHandler, ModelListing};
 
@@ -50,6 +56,8 @@ pub struct Found {
 pub(super) struct ModelBoard {
     found: Mutex<Vec<Found>>,
     looked_at: Mutex<Option<f64>>,
+    /// Set while a look runs, so the beat never starts a second one beside it.
+    looking: AtomicBool,
 }
 
 impl ModelBoard {
@@ -83,13 +91,21 @@ impl ModelBoard {
     }
 }
 
-/// Looks again when one is due. Runs on the check-in tick.
-pub(super) fn refresh_if_due(state: &DaemonState) {
+/// Whether a look is due and none is running; `true` marks one running until [`end`].
+pub(super) fn begin(state: &DaemonState) -> bool {
     let now = state.clock.now() as f64;
     let every = state.station.limits().accounts.models_every.0;
-    if state.models.due(now, every) {
-        look(state);
-    }
+    state.models.due(now, every)
+        && state
+            .models
+            .looking
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+}
+
+/// Marks the look [`begin`] started as over.
+pub(super) fn end(state: &DaemonState) {
+    state.models.looking.store(false, Ordering::Release);
 }
 
 /// The variables every harness is started with for a look: where it finds its program and a
@@ -135,14 +151,24 @@ fn ask(
         .unwrap_or_else(|error| ModelListing::unknown(format!("the handler failed: {error}")))
 }
 
+/// One account or route to ask: its source, and the question, asked on a thread of its own.
+type Probe = (String, Box<dyn FnOnce() -> Found + Send>);
+
 /// Looks at every pool account and every route no pool serves, and keeps what it found.
 pub(super) fn look(state: &DaemonState) {
     let now = state.clock.now() as f64;
-    let mut found = Vec::new();
-    if let Some((catalog, broker)) = credentials::listing_broker(state) {
+    let mut probes: Vec<Probe> = Vec::new();
+    if let Some((catalog, _)) = credentials::listing_broker(state) {
         for pool in catalog.pools() {
             for account in pool.accounts() {
-                found.push(of_account(state, &broker, pool, account, now));
+                let (state, pool, account) = (state.clone(), pool.clone(), account.clone());
+                probes.push((
+                    format!("{}/{}", pool.id(), account.name()),
+                    Box::new(move || match credentials::listing_broker(&state) {
+                        Some((_, broker)) => of_account(&state, &broker, &pool, &account, now),
+                        None => unanswered(&pool, &account, now),
+                    }),
+                ));
             }
         }
     }
@@ -157,11 +183,147 @@ pub(super) fn look(state: &DaemonState) {
                 accounts::source_of(state, None, &routed),
                 accounts::Source::Unpooled
             ) {
-                found.push(of_route(state, &agent, &route, now));
+                let (state, agent) = (state.clone(), agent.clone());
+                probes.push((
+                    route_source(&agent, &route),
+                    Box::new(move || of_route(&state, &agent, &route, now)),
+                ));
             }
         }
     }
+    let limits = &state.station.limits().accounts;
+    let before = state.models.found();
+    let found = ask_all(
+        probes,
+        limits.model_probes,
+        limits.model_probe_timeout,
+        &before,
+        now,
+    )
+    .unwrap_or(before);
     state.models.put(found, now);
+}
+
+/// What each probe found, in the order given, with up to `width` asked at once and each waited
+/// for within `timeout`: one that does not answer in time keeps what `before` found for its
+/// source, or is unknown. `None` when `width` asks none.
+fn ask_all(
+    probes: Vec<Probe>,
+    width: Limit,
+    timeout: TimeLimit,
+    before: &[Found],
+    now: f64,
+) -> Option<Vec<Found>> {
+    let count = probes.len();
+    let workers = match width.get() {
+        Some(0) => return None,
+        Some(width) => usize::try_from(width).unwrap_or(usize::MAX).min(count),
+        None => count,
+    };
+    let sources: Vec<String> = probes.iter().map(|(source, _)| source.clone()).collect();
+    let queue = Arc::new(Mutex::new(
+        probes.into_iter().enumerate().collect::<VecDeque<_>>(),
+    ));
+    let (answers, answered) = mpsc::channel::<(usize, Option<Found>)>();
+    for _ in 0..workers {
+        let (queue, answers) = (queue.clone(), answers.clone());
+        let worker = move || {
+            loop {
+                let next = queue.lock().ok().and_then(|mut queue| queue.pop_front());
+                let Some((index, (_, probe))) = next else {
+                    return;
+                };
+                let _ = answers.send((index, within(probe, timeout)));
+            }
+        };
+        if let Err(error) = std::thread::Builder::new()
+            .name("ai6-models".to_owned())
+            .spawn(worker)
+        {
+            eprintln!("ai6: a model listing worker did not start: {error}");
+        }
+    }
+    drop(answers);
+    let mut found: Vec<Option<Found>> = (0..count).map(|_| None).collect();
+    for (index, answer) in answered {
+        found[index] = answer;
+    }
+    Some(
+        found
+            .into_iter()
+            .zip(sources)
+            .map(|(answer, source)| {
+                answer.unwrap_or_else(|| {
+                    let mut kept = before
+                        .iter()
+                        .find(|found| found.source == source)
+                        .cloned()
+                        .unwrap_or_else(|| Found::unknown(source.clone(), now));
+                    if !kept.listing.known {
+                        kept.listing = ModelListing::unknown(format!(
+                            "the handler did not answer within {} s",
+                            timeout.as_secs_f64()
+                        ));
+                    }
+                    kept
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The probe's answer, or `None` when it takes longer than `timeout`; it then runs on, unread.
+fn within(probe: Box<dyn FnOnce() -> Found + Send>, timeout: TimeLimit) -> Option<Found> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("ai6-models-probe".to_owned())
+        .spawn(move || {
+            let _ = sender.send(probe());
+        })
+        .ok()?;
+    match timeout.get() {
+        Some(timeout) => receiver.recv_timeout(timeout).ok(),
+        None => receiver.recv().ok(),
+    }
+}
+
+impl Found {
+    /// A source no answer came for, with nothing found before.
+    fn unknown(source: String, at: f64) -> Self {
+        Self {
+            source,
+            pool: None,
+            account: None,
+            agent: None,
+            route: None,
+            handler: String::new(),
+            listing: ModelListing::unknown("the handler did not answer"),
+            at,
+        }
+    }
+}
+
+/// An account looked at while the Station has no loadouts to lease its credential from.
+fn unanswered(pool: &AccountPool, account: &Account, now: f64) -> Found {
+    Found {
+        source: format!("{}/{}", pool.id(), account.name()),
+        pool: Some(pool.id().to_owned()),
+        account: Some(account.name().to_owned()),
+        agent: None,
+        route: None,
+        handler: pool.handler().to_owned(),
+        listing: ModelListing::unknown("this Station has no loadouts to lease its credential"),
+        at: now,
+    }
+}
+
+fn route_source(agent: &Agent, route: &AgentRoute) -> String {
+    format!(
+        "{}/{}/{}",
+        agent.id,
+        route.handler,
+        route.model.as_deref().unwrap_or("-")
+    )
 }
 
 fn of_account(
@@ -209,12 +371,7 @@ fn of_account(
     }
 }
 
-fn of_route(
-    state: &DaemonState,
-    agent: &Agent,
-    route: &crate::directorates::m::roster::AgentRoute,
-    now: f64,
-) -> Found {
+fn of_route(state: &DaemonState, agent: &Agent, route: &AgentRoute, now: f64) -> Found {
     let reference = route.reference();
     let holder = format!("models-{}-{}", agent.id, route.handler);
     let routed = agent.on_route(route);
@@ -230,12 +387,7 @@ fn of_route(
             Err(reason) => ModelListing::unknown(reason),
         };
     Found {
-        source: format!(
-            "{}/{}/{}",
-            agent.id,
-            route.handler,
-            route.model.as_deref().unwrap_or("-")
-        ),
+        source: route_source(agent, route),
         pool: None,
         account: None,
         agent: Some(agent.id.clone()),

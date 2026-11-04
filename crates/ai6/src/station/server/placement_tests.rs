@@ -8,7 +8,10 @@ use guatiao::{Provider, Status};
 
 use super::tests::{MockSession, test_state};
 use super::*;
+use crate::bounds::{Limit, Seconds, TimeLimit};
 use crate::directorates::q::terminal::AgentTerminal;
+use crate::directorates::registry::limits::RegistryLimits;
+use crate::directorates::registry::store::FileRegistry;
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart, ModelListing};
 
@@ -371,4 +374,129 @@ async fn a_harness_on_the_agents_own_path_starts() {
     super::tests::wait_for_state(&state, &brief.key(), MissionState::Blocked).await;
     assert_eq!(counts(key, |counts| counts.starts), 1);
     state.stopping.store(true, Ordering::Release);
+}
+
+/// A Station whose check-in comes every 100 ms and is dark after a second of silence, with a
+/// route whose handler takes `models_ms` to list its models.
+fn slow_listing_state(root: &Path, key: &str, models_ms: u64) -> DaemonState {
+    let agents = format!(
+        "[agent.009]\n[[agent.009.route]]\nhandler = \"mock-program\"\nmodel = \"slow\"\n\
+         handler_settings = {{ models_ms = {models_ms}, key = \"{key}\" }}\n"
+    );
+    let mut state = test_state(root, "", &agents);
+    state.missions = Arc::new(Mutex::new(MissionStore::default()));
+    let mut limits = StationLimits::default();
+    limits.scheduler.check_in = Seconds(Duration::from_millis(100));
+    limits.scheduler.interval = Seconds(Duration::from_millis(20));
+    limits.accounts.model_probe_timeout = TimeLimit::UNBOUNDED;
+    state.station = state.station.clone().with_limits(limits);
+    let mut registry = RegistryLimits::default();
+    registry.stations.gone_dark_after = Seconds(Duration::from_secs(1));
+    state.intake = Arc::new(FileRegistry::open(root.join("registry")).with_limits(registry));
+    state
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_model_listing_slower_than_going_dark_leaves_the_check_ins_on_time() {
+    let root = tempfile::tempdir().unwrap();
+    let state = slow_listing_state(root.path(), "slow-beat", 3_000);
+    let running = tokio::spawn(scheduler_loop(state.clone()));
+    let started = Instant::now();
+    let mut stalest = 0.0_f64;
+    let mut found = false;
+    while started.elapsed() < Duration::from_secs(10) && !found {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Some(record) = state
+            .intake
+            .stations(Duration::MAX)
+            .unwrap()
+            .into_iter()
+            .find(|record| record.station() == "test")
+        {
+            stalest = stalest.max(unix_now() - record.seen());
+        }
+        found = state
+            .models
+            .found()
+            .iter()
+            .any(|found| found.agent.as_deref() == Some("009"));
+    }
+    state.stopping.store(true, Ordering::Release);
+    let _ = running.await;
+    assert!(found, "the look finished");
+    assert!(
+        started.elapsed() >= Duration::from_secs(3),
+        "the listing took its three seconds"
+    );
+    let dark = state
+        .intake
+        .limits()
+        .stations
+        .gone_dark_after
+        .0
+        .as_secs_f64();
+    assert!(
+        stalest < dark,
+        "the check-in went {stalest:.2} s stale while the models were listed"
+    );
+}
+
+#[test]
+fn a_listing_that_does_not_answer_in_time_keeps_what_was_found_before() {
+    let root = tempfile::tempdir().unwrap();
+    let mut state = slow_listing_state(root.path(), "slow-kept", 400);
+    models::look(&state);
+    let before = state.models.found();
+    assert_eq!(before.len(), 1);
+    assert!(before[0].listing.known);
+
+    let mut limits = state.station.limits().clone();
+    limits.accounts.model_probe_timeout = TimeLimit::at(Duration::from_millis(50));
+    state.station = state.station.clone().with_limits(limits);
+    let asked = std::time::Instant::now();
+    models::look(&state);
+    assert!(
+        asked.elapsed() < Duration::from_millis(400),
+        "it did not wait"
+    );
+    assert_eq!(state.models.found(), before, "the list it had is kept");
+
+    // Nothing found before, and nothing in time: unknown, saying so.
+    let other = tempfile::tempdir().unwrap();
+    let mut fresh = slow_listing_state(other.path(), "slow-unknown", 400);
+    let mut limits = fresh.station.limits().clone();
+    limits.accounts.model_probe_timeout = TimeLimit::at(Duration::from_millis(50));
+    fresh.station = fresh.station.clone().with_limits(limits);
+    models::look(&fresh);
+    let found = fresh.models.found();
+    assert!(!found[0].listing.known);
+    assert!(
+        found[0]
+            .listing
+            .unknown_because
+            .as_deref()
+            .is_some_and(|why| why.contains("did not answer within")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn a_look_asks_no_more_handlers_at_once_than_model_probes() {
+    let root = tempfile::tempdir().unwrap();
+    let key = "probes-at-once";
+    let routes: String = (0..5)
+        .map(|n| {
+            format!(
+                "[[agent.009.route]]\nhandler = \"mock-program\"\nmodel = \"m{n}\"\n\
+                 handler_settings = {{ models_ms = 200, key = \"{key}\" }}\n"
+            )
+        })
+        .collect();
+    let mut state = test_state(root.path(), "", &format!("[agent.009]\n{routes}"));
+    let mut limits = StationLimits::default();
+    limits.accounts.model_probes = Limit::at(2);
+    state.station = state.station.clone().with_limits(limits);
+    models::look(&state);
+    assert_eq!(state.models.found().len(), 5);
+    assert_eq!(counts(key, |counts| counts.most_listing), 2);
 }

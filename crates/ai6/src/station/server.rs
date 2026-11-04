@@ -1651,11 +1651,18 @@ async fn scheduler_loop(base: DaemonState) {
                 recovery::checkpoint_due(&tick);
                 ephemeral::sweep(&tick);
                 agents::enforce_clearances(&tick);
-                models::refresh_if_due(&tick);
             }
             medical::enforce_quarantines(&tick);
         })
         .await;
+        // A look asks harnesses, which may take minutes: it never holds up the beat.
+        if check_in && models::begin(&state) {
+            let looking = state.clone();
+            tokio::task::spawn_blocking(move || {
+                models::look(&looking);
+                models::end(&looking);
+            });
+        }
         #[cfg(feature = "cables-mcp")]
         {
             green_ink::deliver_decisions(&state).await;

@@ -557,6 +557,16 @@ pub struct AccountLimits {
     #[schema(title = "Look at the models every")]
     #[map(default = AccountLimits::default().models_every)]
     pub models_every: Seconds,
+    /// Accounts and routes a look at the models asks at once; `null` asks every one at once, and
+    /// 0 asks none, so a look changes nothing.
+    #[schema(title = "Model listings at once")]
+    #[map(default = AccountLimits::default().model_probes)]
+    pub model_probes: Limit,
+    /// Seconds a look waits for one account's or route's model listing; one that takes longer
+    /// keeps the list it had before, or is unknown.
+    #[schema(title = "Longest model listing")]
+    #[map(default = AccountLimits::default().model_probe_timeout)]
+    pub model_probe_timeout: TimeLimit,
 }
 
 impl Default for AccountLimits {
@@ -568,6 +578,8 @@ impl Default for AccountLimits {
             limit_horizon: Seconds::new(8 * DAY),
             login_timeout: Seconds::new(60),
             models_every: Seconds::new(3_600),
+            model_probes: Limit::at(4),
+            model_probe_timeout: TimeLimit::secs(20),
         }
     }
 }
