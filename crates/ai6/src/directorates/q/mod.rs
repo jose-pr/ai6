@@ -10,6 +10,7 @@ pub mod outbound;
 pub mod overlays;
 pub mod provision;
 pub mod safehouse;
+pub mod secret_kind;
 pub mod terminal;
 pub mod transport;
 
@@ -19,9 +20,9 @@ pub use pools::{
     PoolChoice, PoolStrategy, RouteStanding, choose_pools, choose_route,
 };
 pub use sandbox::{SandboxError, SandboxRequest};
+pub use secret_kind::{SecretFields, SecretKeeper, SecretProvider, SecretSource};
 pub use secrets::{
-    SecretBackend, SecretBackendFailure, SecretBroker, SecretError, SecretLease,
-    SecretLeaseRequest, SecretRequest, SecretValue, StationSecrets,
+    SecretBroker, SecretError, SecretLease, SecretLeaseRequest, SecretProviderLookup, SecretValue,
 };
 
 use std::collections::BTreeMap;
@@ -30,7 +31,6 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use crate::bootstrap::SecretRef;
 use crate::bounds::Limit;
 use crate::directorates::m::config::ConfigLimits;
 use guatiao::{FromValue, Schema, ToValue};
@@ -369,13 +369,13 @@ pub struct SecretDefinition {
     green_ink: bool,
     kinds: Vec<String>,
     targets: Vec<String>,
-    source: SecretRef,
+    source: SecretSource,
 }
 
 impl SecretDefinition {
     /// The definition every key at its default: the Session variable is the name in upper
-    /// case with `-` and `.` as `_`, read on the Station from the file `<name>` in its secrets
-    /// directory.
+    /// case with `-` and `.` as `_`, read on the Station by the `file` provider from the file
+    /// `<name>` in its secrets directory.
     pub fn new(name: impl Into<String>) -> Self {
         let name = name.into();
         let env: String = name
@@ -386,7 +386,7 @@ impl SecretDefinition {
             })
             .collect();
         Self {
-            source: SecretRef::File(PathBuf::from(&name)),
+            source: SecretSource::new("file", &name),
             name,
             env,
             green_ink: false,
@@ -443,9 +443,35 @@ impl SecretDefinition {
         })
     }
 
-    /// Where [`StationSecrets`] reads it.
-    pub fn source(&self) -> &SecretRef {
+    /// Where it is read: a provider or instance, its key there, and that provider's fields.
+    pub fn source(&self) -> &SecretSource {
         &self.source
+    }
+}
+
+/// A configured secret provider: `[secret_provider.<name>]`, a loaded provider and the settings
+/// it is built with, so many secrets share one connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretInstance {
+    name: String,
+    provider: String,
+    settings: SecretFields,
+}
+
+impl SecretInstance {
+    /// The instance's name, which secrets give as their `provider`.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The loaded provider it is built from.
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+
+    /// Its settings, the provider's `config`; a credential among them is a secret reference.
+    pub fn settings(&self) -> &SecretFields {
+        &self.settings
     }
 }
 
@@ -457,10 +483,43 @@ pub struct LoadoutCatalog {
     servers: BTreeMap<String, McpServer>,
     overlays: BTreeMap<String, overlays::OverlayRecord>,
     secrets: BTreeMap<String, SecretDefinition>,
+    instances: BTreeMap<String, SecretInstance>,
     pools: BTreeMap<String, AccountPool>,
+    #[cfg(test)]
+    default_provider: Option<String>,
 }
 
 impl LoadoutCatalog {
+    /// The `[secret_provider.<name>]` instances by name.
+    pub fn secret_providers(&self) -> &BTreeMap<String, SecretInstance> {
+        &self.instances
+    }
+
+    /// The loaded provider a secret's `provider` comes down to: an instance's provider, or the
+    /// name itself.
+    pub fn provider_of<'a>(&'a self, provider: &'a str) -> &'a str {
+        self.instances
+            .get(provider)
+            .map_or(provider, |instance| instance.provider.as_str())
+    }
+
+    /// Every secret that reads with the `file` provider by default reads with `provider`
+    /// instead, and so does a name no table defines: for tests, which hand every secret to one
+    /// fake provider.
+    #[cfg(test)]
+    pub(crate) fn with_default_secret_provider(mut self, provider: &str) -> Self {
+        let names: Vec<String> = self.secrets().iter().map(|d| d.name.clone()).collect();
+        for name in names {
+            let mut definition = self.secret(&name);
+            if definition.source.provider == "file" {
+                definition.source.provider = provider.to_owned();
+            }
+            self.secrets.insert(name, definition);
+        }
+        self.default_provider = Some(provider.to_owned());
+        self
+    }
+
     /// Adds an account pool, replacing one with the same ID; the way in for pools built in
     /// code. Its accounts' secrets are defined as an unnamed `[secret.<name>]` is.
     ///
@@ -611,10 +670,15 @@ impl LoadoutCatalog {
 
     /// How the secret `name` reaches a Session: its `[secret.<name>]` table, or every default.
     pub fn secret(&self, name: &str) -> SecretDefinition {
-        self.secrets
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| SecretDefinition::new(name))
+        self.secrets.get(name).cloned().unwrap_or_else(|| {
+            #[allow(unused_mut)]
+            let mut definition = SecretDefinition::new(name);
+            #[cfg(test)]
+            if let Some(provider) = &self.default_provider {
+                definition.source.provider = provider.clone();
+            }
+            definition
+        })
     }
 
     /// Whether `name` is defined by a `[secret.<name>]` table.
@@ -663,6 +727,8 @@ struct Document {
     overlay: BTreeMap<String, RawOverlay>,
     #[serde(default)]
     secret: BTreeMap<String, RawSecret>,
+    #[serde(default)]
+    secret_provider: BTreeMap<String, RawSecretProvider>,
     #[serde(default)]
     pool: BTreeMap<String, RawPool>,
 }
@@ -740,8 +806,8 @@ impl RawPool {
     }
 }
 
+/// `[secret.<name>]`: AI6's keys, then the provider, its key and that provider's fields, flat.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawSecret {
     env: Option<String>,
     #[serde(default)]
@@ -750,14 +816,18 @@ struct RawSecret {
     kinds: Vec<String>,
     #[serde(default)]
     targets: Vec<String>,
-    from: Option<RawSource>,
+    provider: Option<String>,
+    key: Option<String>,
+    #[serde(flatten)]
+    fields: serde_json::Map<String, serde_json::Value>,
 }
 
+/// `[secret_provider.<name>]`: the provider, then its settings, flat.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-enum RawSource {
-    Env(String),
-    File(String),
+struct RawSecretProvider {
+    provider: String,
+    #[serde(flatten)]
+    settings: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -888,11 +958,12 @@ fn parse_document(
     if document.loadout.is_empty()
         && document.pool.is_empty()
         && document.secret.is_empty()
+        && document.secret_provider.is_empty()
         && document.overlay.is_empty()
     {
         return Err(QError::new(QErrorKind::Schema, path).because(
-            "declare at least one [loadout.<agent>], [pool.<id>], [secret.<name>] or \
-             [overlay.<name>]",
+            "declare at least one [loadout.<agent>], [pool.<id>], [secret.<name>], \
+             [secret_provider.<name>] or [overlay.<name>]",
         ));
     }
     let mut overlay_records = BTreeMap::new();
@@ -981,6 +1052,40 @@ fn parse_document(
         );
     }
 
+    let mut instances = BTreeMap::new();
+    for (name, raw) in document.secret_provider {
+        let refused = |reason: String| {
+            QError::new(QErrorKind::Schema, path.clone())
+                .because(format!("secret_provider {name:?}: {reason}"))
+        };
+        validate_name(&name, QErrorKind::Schema, path.clone())?;
+        if secret_kind::BUILT_IN.contains(&name.as_str()) {
+            return Err(refused(
+                "an instance may not take a built-in provider's name".to_owned(),
+            ));
+        }
+        let settings = SecretFields::new(raw.settings);
+        if let Some(reason) = secret_kind::builtin_settings_check(&raw.provider, &settings) {
+            return Err(refused(reason));
+        }
+        instances.insert(
+            name.clone(),
+            SecretInstance {
+                name,
+                provider: raw.provider,
+                settings,
+            },
+        );
+    }
+    for instance in instances.values() {
+        if instances.contains_key(&instance.provider) || instance.provider.trim().is_empty() {
+            return Err(QError::new(QErrorKind::Schema, path).because(format!(
+                "secret_provider {:?}: `provider` names a loaded provider, not another instance",
+                instance.name
+            )));
+        }
+    }
+
     let mut secrets = BTreeMap::new();
     for (name, raw) in document.secret {
         validate_name(&name, QErrorKind::Schema, path.clone())?;
@@ -991,18 +1096,50 @@ fn parse_document(
         if !crate::directorates::q::transport::kit::is_variable_name(&definition.env) {
             return Err(QError::new(QErrorKind::Schema, path));
         }
-        definition.source = match raw.from {
-            Some(RawSource::Env(variable))
-                if crate::directorates::q::transport::kit::is_variable_name(&variable) =>
-            {
-                SecretRef::Env(variable)
-            }
-            Some(RawSource::File(file)) if !file.trim().is_empty() => {
-                SecretRef::File(PathBuf::from(file))
-            }
-            Some(_) => return Err(QError::new(QErrorKind::Schema, path)),
-            None => definition.source,
+        let refused = |reason: String| {
+            QError::new(QErrorKind::Schema, path.clone())
+                .because(format!("secret {name:?}: {reason}"))
         };
+        if let Some(provider) = raw.provider {
+            if provider.trim().is_empty() {
+                return Err(refused("`provider` is empty".to_owned()));
+            }
+            definition.source.provider = provider;
+        }
+        if let Some(key) = raw.key {
+            definition.source.key = key;
+        }
+        if let Some(reserved) = raw
+            .fields
+            .keys()
+            .find(|field| secret_kind::RESERVED_FIELDS.contains(&field.as_str()))
+        {
+            return Err(refused(format!(
+                "`{reserved}` is not a field of its provider"
+            )));
+        }
+        definition.source.fields = SecretFields::new(raw.fields);
+        let provider = instances
+            .get(&definition.source.provider)
+            .map_or(definition.source.provider.as_str(), |instance| {
+                instance.provider.as_str()
+            });
+        if let Some(reason) = secret_kind::builtin_fields_check(provider, &definition.source.fields)
+        {
+            return Err(refused(reason));
+        }
+        let key = &definition.source.key;
+        match provider {
+            "env" if !crate::directorates::q::transport::kit::is_variable_name(key) => {
+                return Err(refused(
+                    "`key` of an env secret is an environment variable's name".to_owned(),
+                ));
+            }
+            "file" if key.trim().is_empty() => {
+                return Err(refused("`key` of a file secret is its path".to_owned()));
+            }
+            _ => {}
+        }
         validate_names(&raw.kinds, QErrorKind::Schema, path.clone(), chars)?;
         if (!raw.kinds.is_empty() || !raw.targets.is_empty()) && !raw.green_ink {
             return Err(QError::new(QErrorKind::Schema, path));
@@ -1042,7 +1179,10 @@ fn parse_document(
         servers,
         overlays: overlay_records,
         secrets,
+        instances,
         pools,
+        #[cfg(test)]
+        default_provider: None,
     };
     for loadout in catalog.loadouts.values() {
         catalog
@@ -1383,7 +1523,12 @@ secrets = ["forge-token", "release"]
 env = "GH_TOKEN"
 green_ink = true
 kinds = ["release", "push"]
-from = { file = "/etc/ai6/secrets/release" }
+provider = "keys"
+key = "release"
+
+[secret_provider.keys]
+provider = "file"
+dir = "/etc/ai6/secrets"
 "#,
         )
         .unwrap();
@@ -1391,17 +1536,16 @@ from = { file = "/etc/ai6/secrets/release" }
         assert_eq!(forge.env(), "FORGE_TOKEN");
         assert_eq!(
             forge.source(),
-            &crate::bootstrap::SecretRef::File(std::path::PathBuf::from("forge-token"))
-        );
-        assert!(forge.source().weakening().is_none());
-        assert!(
-            crate::bootstrap::SecretRef::Env("X".to_owned())
-                .weakening()
-                .unwrap()
-                .contains("inherit")
+            &crate::directorates::q::SecretSource::new("file", "forge-token")
         );
         assert!(!forge.green_ink() && forge.kinds().is_empty());
         let release = catalog.secret("release");
+        assert_eq!(
+            release.source(),
+            &crate::directorates::q::SecretSource::new("keys", "release")
+        );
+        assert_eq!(catalog.provider_of("keys"), "file");
+        assert_eq!(catalog.provider_of("file"), "file");
         assert_eq!(release.env(), "GH_TOKEN");
         assert!(release.green_ink());
         assert_eq!(release.kinds(), ["release", "push"]);
@@ -1416,9 +1560,19 @@ from = { file = "/etc/ai6/secrets/release" }
         for bad in [
             "[loadout.007]\n[secret.x]\nenv = \"not a name\"\n",
             "[loadout.007]\n[secret.x]\nkinds = [\"push\"]\n",
-            "[loadout.007]\n[secret.x]\nfrom = { env = \"\" }\n",
-            "[loadout.007]\n[secret.x]\nfrom = { vault = \"x\" }\n",
+            "[loadout.007]\n[secret.x]\nprovider = \"env\"\nkey = \"\"\n",
+            "[loadout.007]\n[secret.x]\nprovider = \"env\"\nkey = \"1x\"\n",
+            "[loadout.007]\n[secret.x]\nfrom = { file = \"x\" }\n",
             "[loadout.007]\n[secret.x]\nvalue = \"inline\"\n",
+            "[loadout.007]\n[secret.x]\nprovider = \"inline\"\n",
+            "[loadout.007]\n[secret.x]\nprovider = \"inline\"\nvalue = \"v\"\nother = 1\n",
+            "[loadout.007]\n[secret.x]\nprovider = \"\"\n",
+            "[loadout.007]\n[secret.x]\nsecret = \"y\"\n",
+            "[secret_provider.file]\nprovider = \"file\"\n",
+            "[secret_provider.a]\nprovider = \"b\"\n[secret_provider.b]\nprovider = \"file\"\n",
+            "[secret_provider.a]\nprovider = \"file\"\nroot = \"/x\"\n",
+            "[secret_provider.a]\nprovider = \"env\"\ndir = \"/x\"\n",
+            "[secret_provider.a]\nprovider = \"file\"\n[secret.x]\nprovider = \"a\"\nmount = 1\n",
             "[loadout.007]\n[secret.x]\ntargets = [\"origin:*\"]\n",
             "[loadout.007]\n[secret.x]\ngreen_ink = true\ntargets = [\"refs/[\"]\n",
         ] {

@@ -1,56 +1,15 @@
-//! Mission-scoped leases for secret references declared by an Agent loadout.
+//! Mission-scoped leases for secret references declared by an Agent loadout, each read or leased
+//! from the [`SecretProvider`](super::secret_kind::SecretProvider) its definition names.
 
-use super::Loadout;
+use super::secret_kind::SecretKeeper;
+use super::{Loadout, LoadoutCatalog};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use uuid::Uuid;
 use zeroize::Zeroize;
 
 use crate::bounds::TimeLimit;
-
-/// A short-lived request to a configured secret backend.
-#[derive(Clone)]
-pub struct SecretRequest {
-    lease_id: String,
-    station: String,
-    mission_id: String,
-    ttl: Duration,
-}
-
-impl SecretRequest {
-    /// Returns the opaque identifier used to acquire and revoke this lease.
-    pub fn lease_id(&self) -> &str {
-        &self.lease_id
-    }
-
-    /// Returns the Station requesting this lease.
-    pub fn station(&self) -> &str {
-        &self.station
-    }
-
-    /// Returns the Mission that owns this lease.
-    pub fn mission_id(&self) -> &str {
-        &self.mission_id
-    }
-
-    /// Returns the requested lease lifetime.
-    pub const fn ttl(&self) -> Duration {
-        self.ttl
-    }
-}
-
-impl fmt::Debug for SecretRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SecretRequest")
-            .field("lease_id", &self.lease_id)
-            .field("station", &self.station)
-            .field("mission_id", &self.mission_id)
-            .field("ttl", &self.ttl)
-            .finish()
-    }
-}
 
 /// A validated Station and Mission scope for one bounded lease.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,7 +59,7 @@ impl SecretLeaseRequest {
 pub struct SecretValue(String);
 
 impl SecretValue {
-    /// Wraps a secret value returned by a trusted backend.
+    /// Wraps a secret value returned by a trusted provider.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -123,44 +82,6 @@ impl Drop for SecretValue {
     }
 }
 
-/// A secret retrieval backend failure without provider details.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SecretBackendFailure;
-
-impl SecretBackendFailure {
-    /// Creates an opaque failure for a backend implementation.
-    pub const fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for SecretBackendFailure {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl fmt::Display for SecretBackendFailure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("secret backend request failed")
-    }
-}
-
-impl std::error::Error for SecretBackendFailure {}
-
-/// Supplies named values for a scoped lease and revokes that lease by ID.
-pub trait SecretBackend: Send + Sync {
-    /// Returns exactly the requested names or a backend failure.
-    fn acquire(
-        &self,
-        request: &SecretRequest,
-        names: &[String],
-    ) -> Result<BTreeMap<String, SecretValue>, SecretBackendFailure>;
-
-    /// Revokes a lease; implementations must enforce a bounded backend timeout.
-    fn revoke(&self, lease_id: &str) -> Result<(), SecretBackendFailure>;
-}
-
 /// A rejected, expired or failed secret lease operation.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,9 +90,9 @@ pub enum SecretError {
     InvalidIdentity,
     /// Requested lifetime is zero or exceeds the broker's configured maximum.
     InvalidTtl,
-    /// The backend failed; its diagnostic is withheld.
+    /// The provider failed; its diagnostic is withheld.
     Backend,
-    /// The backend returned values that do not match the requested names.
+    /// The provider answered something that is not a secret's value.
     InvalidResponse,
     /// The reference is not declared by the Agent loadout.
     AccessDenied,
@@ -194,17 +115,28 @@ impl fmt::Display for SecretError {
 
 impl std::error::Error for SecretError {}
 
-/// Resolves only an Agent's declared references into bounded in-memory leases.
+/// Finds the provider a secret names: an instance by its name, or a loaded provider with its
+/// default settings. Its error is the host's own text, which never holds a value.
+pub type SecretProviderLookup = dyn Fn(&str) -> Result<Arc<SecretKeeper>, String> + Send + Sync;
+
+/// Resolves only an Agent's declared references into bounded in-memory leases, each from the
+/// provider its definition names.
 pub struct SecretBroker {
-    backend: Arc<dyn SecretBackend>,
+    catalog: Arc<LoadoutCatalog>,
+    providers: Arc<SecretProviderLookup>,
     max_ttl: TimeLimit,
 }
 
 impl SecretBroker {
-    /// Creates a broker that leases for as long as a request asks.
-    pub fn new(backend: impl SecretBackend + 'static) -> Self {
+    /// A broker reading each secret as `catalog` defines it ([`LoadoutCatalog::secret`]), from
+    /// the provider `providers` finds, leasing for as long as a request asks.
+    pub fn new(
+        catalog: Arc<LoadoutCatalog>,
+        providers: impl Fn(&str) -> Result<Arc<SecretKeeper>, String> + Send + Sync + 'static,
+    ) -> Self {
         Self {
-            backend: Arc::new(backend),
+            catalog,
+            providers: Arc::new(providers),
             max_ttl: TimeLimit::UNBOUNDED,
         }
     }
@@ -216,7 +148,7 @@ impl SecretBroker {
         self
     }
 
-    /// Acquires the loadout's named values from the backend.
+    /// Acquires the loadout's named values from their providers.
     pub fn lease(
         &self,
         loadout: &Loadout,
@@ -226,7 +158,9 @@ impl SecretBroker {
     }
 
     /// Acquires some of the loadout's named values; a name the loadout does not declare is
-    /// [`SecretError::AccessDenied`] and nothing is acquired.
+    /// [`SecretError::AccessDenied`] and nothing is acquired. A provider that leases is asked
+    /// for a lease of the request's time, and any other is read; whatever was leased is revoked
+    /// when one fails.
     pub fn lease_names(
         &self,
         loadout: &Loadout,
@@ -237,116 +171,77 @@ impl SecretBroker {
             return Err(SecretError::AccessDenied);
         }
         validate_ttl(request.ttl, self.max_ttl)?;
-        let lease_id = Uuid::new_v4().simple().to_string();
-        let backend_request = SecretRequest {
-            lease_id,
-            station: request.station,
-            mission_id: request.mission_id,
-            ttl: request.ttl,
-        };
-        let names: Vec<String> = names
-            .iter()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .cloned()
-            .collect();
-        let values = if names.is_empty() {
-            BTreeMap::new()
-        } else {
-            match self.backend.acquire(&backend_request, &names) {
-                Ok(values) => values,
-                Err(_) => {
-                    let _ = self.backend.revoke(backend_request.lease_id());
-                    return Err(SecretError::Backend);
+        let names: BTreeSet<&String> = names.iter().collect();
+        let mut values = BTreeMap::new();
+        let mut leased = Vec::new();
+        for name in names {
+            match self.acquire(name, &request) {
+                Ok((value, lease)) => {
+                    values.insert(name.clone(), value);
+                    leased.extend(lease);
+                }
+                Err(error) => {
+                    drop(values);
+                    revoke_all(&mut leased);
+                    return Err(error);
                 }
             }
-        };
-        let expected: BTreeSet<_> = names.iter().collect();
-        let actual: BTreeSet<_> = values.keys().collect();
-        if expected != actual {
-            drop(values);
-            let _ = self.backend.revoke(backend_request.lease_id());
-            return Err(SecretError::InvalidResponse);
         }
         Ok(SecretLease {
-            backend: Arc::clone(&self.backend),
-            request: backend_request,
+            station: request.station,
+            mission_id: request.mission_id,
             values: Mutex::new(LeaseState {
                 values,
                 revoked: false,
                 expires_at: Instant::now() + request.ttl,
             }),
-            backend_lease: !names.is_empty(),
-            backend_revoked: Mutex::new(false),
+            leased: Mutex::new(leased),
         })
     }
-}
 
-/// The Station's own secret backend: each value is read, when it is leased, from the
-/// Station's environment or a file on the Station, as its [`SecretDefinition`] says. Nothing
-/// is cached, and revoking has nothing to undo.
-///
-/// [`SecretDefinition`]: super::SecretDefinition
-#[derive(Debug, Clone, Default)]
-pub struct StationSecrets {
-    sources: BTreeMap<String, crate::bootstrap::SecretRef>,
-}
-
-impl StationSecrets {
-    /// Reads each definition's secret from its source; a relative file is relative to the
-    /// process's working directory until [`StationSecrets::relative_to`] says otherwise.
-    pub fn new(definitions: impl IntoIterator<Item = super::SecretDefinition>) -> Self {
-        Self {
-            sources: definitions
-                .into_iter()
-                .map(|definition| (definition.name().to_owned(), definition.source().clone()))
-                .collect(),
-        }
-    }
-
-    /// Resolves relative files against `dir`, the Station's secrets directory.
-    #[must_use]
-    pub fn relative_to(mut self, dir: &std::path::Path) -> Self {
-        for source in self.sources.values_mut() {
-            if let crate::bootstrap::SecretRef::File(path) = source
-                && path.is_relative()
-            {
-                *path = dir.join(&*path);
-            }
-        }
-        self
-    }
-}
-
-impl SecretBackend for StationSecrets {
+    /// One secret's value, and the provider lease it came with, if any.
     fn acquire(
         &self,
-        _request: &SecretRequest,
-        names: &[String],
-    ) -> Result<BTreeMap<String, SecretValue>, SecretBackendFailure> {
-        let mut values = BTreeMap::new();
-        for name in names {
-            let mut value = match self.sources.get(name) {
-                Some(crate::bootstrap::SecretRef::Env(variable)) => std::env::var(variable).ok(),
-                Some(crate::bootstrap::SecretRef::File(path)) => std::fs::read_to_string(path).ok(),
-                Some(crate::bootstrap::SecretRef::Inline(value)) => Some(value.to_string()),
-                None => None,
-            }
-            .filter(|value| !value.is_empty())
-            .ok_or(SecretBackendFailure)?;
-            if value.ends_with('\n') {
-                value.pop();
-                if value.ends_with('\r') {
-                    value.pop();
-                }
-            }
-            values.insert(name.clone(), SecretValue::new(value));
+        name: &str,
+        request: &SecretLeaseRequest,
+    ) -> Result<(SecretValue, Option<ProviderLease>), SecretError> {
+        let definition = self.catalog.secret(name);
+        let source = definition.source();
+        let keeper = (self.providers)(&source.provider).map_err(|_| SecretError::Backend)?;
+        keeper
+            .check_fields(&source.fields)
+            .map_err(|_| SecretError::Backend)?;
+        let leased = keeper
+            .lease(
+                &source.key,
+                &source.fields,
+                request.ttl.as_secs_f64(),
+                &request.station,
+                &request.mission_id,
+            )
+            .map_err(|_| SecretError::Backend)?;
+        let (value, lease) = match leased {
+            Some(leased) => (
+                leased.value,
+                Some(ProviderLease {
+                    keeper: keeper.clone(),
+                    id: leased.lease,
+                }),
+            ),
+            None => (
+                keeper
+                    .read(&source.key, &source.fields)
+                    .map_err(|_| SecretError::Backend)?
+                    .value,
+                None,
+            ),
+        };
+        if value.expose().is_empty() {
+            let mut lease = lease.into_iter().collect();
+            revoke_all(&mut lease);
+            return Err(SecretError::InvalidResponse);
         }
-        Ok(values)
-    }
-
-    fn revoke(&self, _lease_id: &str) -> Result<(), SecretBackendFailure> {
-        Ok(())
+        Ok((SecretValue::new(value.expose().as_str()), lease))
     }
 }
 
@@ -358,6 +253,18 @@ impl fmt::Debug for SecretBroker {
     }
 }
 
+/// A lease a provider issued, revoked at that provider.
+struct ProviderLease {
+    keeper: Arc<SecretKeeper>,
+    id: String,
+}
+
+/// Revokes each of `leases` at its provider, keeping those that failed for another try.
+fn revoke_all(leases: &mut Vec<ProviderLease>) -> bool {
+    leases.retain(|lease| lease.keeper.revoke(&lease.id).is_err());
+    leases.is_empty()
+}
+
 struct LeaseState {
     values: BTreeMap<String, SecretValue>,
     revoked: bool,
@@ -366,22 +273,22 @@ struct LeaseState {
 
 /// Active Mission-scoped secret references held only in process memory.
 pub struct SecretLease {
-    backend: Arc<dyn SecretBackend>,
-    request: SecretRequest,
+    station: String,
+    mission_id: String,
     values: Mutex<LeaseState>,
-    backend_lease: bool,
-    backend_revoked: Mutex<bool>,
+    /// What the providers leased and have not yet revoked.
+    leased: Mutex<Vec<ProviderLease>>,
 }
 
 impl SecretLease {
     /// Returns the Station that owns the lease.
     pub fn station(&self) -> &str {
-        self.request.station()
+        &self.station
     }
 
     /// Returns the Mission ID that owns the lease.
     pub fn mission_id(&self) -> &str {
-        self.request.mission_id()
+        &self.mission_id
     }
 
     /// Returns the monotonic expiry deadline for this process.
@@ -423,7 +330,7 @@ impl SecretLease {
         Ok(value.with_exposed(use_value))
     }
 
-    /// Clears local values and requests backend revocation; safe to retry after failure.
+    /// Clears local values and revokes each provider lease; safe to retry after failure.
     pub fn revoke(&self) -> Result<(), SecretError> {
         let mut state = self.lock_state();
         state.revoked = true;
@@ -433,21 +340,15 @@ impl SecretLease {
     }
 
     fn revoke_backend(&self) -> Result<(), SecretError> {
-        if !self.backend_lease {
-            return Ok(());
-        }
-        let mut revoked = self
-            .backend_revoked
+        let mut leased = self
+            .leased
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if *revoked {
-            return Ok(());
+        if revoke_all(&mut leased) {
+            Ok(())
+        } else {
+            Err(SecretError::Backend)
         }
-        self.backend
-            .revoke(self.request.lease_id())
-            .map_err(|_| SecretError::Backend)?;
-        *revoked = true;
-        Ok(())
     }
 
     fn lock_state(&self) -> std::sync::MutexGuard<'_, LeaseState> {
@@ -486,226 +387,4 @@ fn validate_ttl(value: Duration, maximum: TimeLimit) -> Result<(), SecretError> 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        SecretBackend, SecretBackendFailure, SecretBroker, SecretError, SecretLeaseRequest,
-        SecretRequest, SecretValue,
-    };
-    use crate::directorates::q::LoadoutCatalog;
-    use std::collections::BTreeMap;
-    use std::str::FromStr;
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
-
-    const TEST_TTL: Duration = Duration::from_secs(300);
-
-    #[derive(Default)]
-    struct BackendState {
-        revoked: Vec<String>,
-        fail_acquire: bool,
-        fail_revoke: bool,
-        invalid_response: bool,
-    }
-
-    #[derive(Clone, Default)]
-    struct Backend(Arc<Mutex<BackendState>>);
-
-    impl SecretBackend for Backend {
-        fn acquire(
-            &self,
-            request: &SecretRequest,
-            names: &[String],
-        ) -> Result<BTreeMap<String, SecretValue>, SecretBackendFailure> {
-            if self.0.lock().expect("test backend lock").fail_acquire {
-                return Err(SecretBackendFailure::new());
-            }
-            assert!(!request.lease_id().is_empty());
-            assert_eq!(request.station(), "station-a");
-            assert_eq!(request.mission_id(), "mission-1");
-            assert_eq!(request.ttl(), TEST_TTL);
-            let invalid = self.0.lock().expect("test backend lock").invalid_response;
-            let selected = if invalid { "undeclared" } else { &names[0] };
-            Ok(BTreeMap::from([(
-                selected.to_owned(),
-                SecretValue::new("TOP-SECRET"),
-            )]))
-        }
-
-        fn revoke(&self, lease_id: &str) -> Result<(), SecretBackendFailure> {
-            let mut state = self.0.lock().expect("test backend lock");
-            if state.fail_revoke {
-                return Err(SecretBackendFailure::new());
-            }
-            state.revoked.push(lease_id.to_owned());
-            Ok(())
-        }
-    }
-
-    fn loadout() -> crate::directorates::q::Loadout {
-        LoadoutCatalog::from_str("[loadout.007]\nsecrets = ['token']")
-            .expect("valid test loadout")
-            .for_agent("007")
-            .expect("test Agent")
-            .clone()
-    }
-
-    fn request() -> SecretLeaseRequest {
-        SecretLeaseRequest::with_ttl("station-a", "mission-1", TEST_TTL)
-            .expect("valid lease request")
-    }
-
-    #[test]
-    fn secret_values_are_scoped_and_debug_redacts_material() {
-        let backend = Backend::default();
-        let lease = SecretBroker::new(backend.clone())
-            .lease(&loadout(), request())
-            .expect("backend grants the declared secret");
-        assert!(lease.is_active());
-        assert_eq!(lease.names(), ["token"]);
-        assert_eq!(
-            lease.with_secret("token", str::to_owned).unwrap(),
-            "TOP-SECRET"
-        );
-        assert_eq!(
-            lease.with_secret("other", str::to_owned),
-            Err(SecretError::AccessDenied)
-        );
-        assert!(!format!("{lease:?}").contains("TOP-SECRET"));
-        assert!(!format!("{:?}", SecretValue::new("TOP-SECRET")).contains("TOP-SECRET"));
-        lease.revoke().unwrap();
-        lease.revoke().unwrap();
-        assert!(lease.names().is_empty());
-        assert_eq!(backend.0.lock().unwrap().revoked.len(), 1);
-    }
-
-    #[test]
-    fn backend_response_must_match_requested_references() {
-        let backend = Backend::default();
-        backend.0.lock().unwrap().invalid_response = true;
-        assert_eq!(
-            SecretBroker::new(backend.clone())
-                .lease(&loadout(), request())
-                .err(),
-            Some(SecretError::InvalidResponse)
-        );
-        assert_eq!(backend.0.lock().unwrap().revoked.len(), 1);
-    }
-
-    #[test]
-    fn failed_backend_acquisition_attempts_revocation_and_hides_details() {
-        let backend = Backend::default();
-        backend.0.lock().unwrap().fail_acquire = true;
-        let error = SecretBroker::new(backend.clone())
-            .lease(&loadout(), request())
-            .unwrap_err();
-        assert_eq!(error, SecretError::Backend);
-        assert!(!error.to_string().contains("TOP-SECRET"));
-        assert_eq!(backend.0.lock().unwrap().revoked.len(), 1);
-    }
-
-    #[test]
-    fn expired_lease_clears_values_and_revokes_backend() {
-        let backend = Backend::default();
-        let lease = SecretBroker::new(backend.clone())
-            .lease(&loadout(), request())
-            .unwrap();
-        assert!(lease.is_active());
-        lease.values.lock().unwrap().expires_at = std::time::Instant::now()
-            .checked_sub(Duration::from_secs(1))
-            .unwrap();
-        assert_eq!(
-            lease.with_secret("token", str::to_owned),
-            Err(SecretError::Expired)
-        );
-        assert!(lease.names().is_empty());
-        assert_eq!(backend.0.lock().unwrap().revoked.len(), 1);
-    }
-
-    #[test]
-    fn invalid_lifetimes_and_backend_revocation_fail_closed() {
-        assert_eq!(
-            SecretLeaseRequest::with_ttl("station-a", "mission-1", Duration::ZERO).err(),
-            Some(SecretError::InvalidTtl)
-        );
-        let backend = Backend::default();
-        let lease = SecretBroker::new(backend.clone())
-            .lease(&loadout(), request())
-            .unwrap();
-        backend.0.lock().unwrap().fail_revoke = true;
-        assert_eq!(lease.revoke(), Err(SecretError::Backend));
-        assert!(lease.names().is_empty());
-        backend.0.lock().unwrap().fail_revoke = false;
-        lease.revoke().unwrap();
-        assert_eq!(backend.0.lock().unwrap().revoked.len(), 1);
-    }
-
-    #[test]
-    fn empty_loadout_does_not_create_backend_lease() {
-        let empty = LoadoutCatalog::from_str("[loadout.007]")
-            .unwrap()
-            .for_agent("007")
-            .unwrap()
-            .clone();
-        let backend = Backend::default();
-        let lease = SecretBroker::new(backend.clone())
-            .lease(&empty, request())
-            .unwrap();
-        lease.revoke().unwrap();
-        assert!(backend.0.lock().unwrap().revoked.is_empty());
-    }
-
-    #[test]
-    fn a_lease_of_some_names_takes_only_declared_ones() {
-        let catalog = LoadoutCatalog::from_str("[loadout.007]\nsecrets = ['token', 'other']")
-            .expect("valid test loadout");
-        let loadout = catalog.for_agent("007").unwrap();
-        let broker = SecretBroker::new(Backend::default());
-        let lease = broker
-            .lease_names(loadout, &["token".to_owned()], request())
-            .unwrap();
-        assert_eq!(lease.names(), ["token"]);
-        assert_eq!(
-            broker
-                .lease_names(loadout, &["undeclared".to_owned()], request())
-                .err(),
-            Some(SecretError::AccessDenied)
-        );
-    }
-
-    #[test]
-    fn the_station_backend_reads_files_without_their_last_newline_and_refuses_what_is_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("token");
-        std::fs::write(&file, "from-a-file\n").unwrap();
-        let catalog = LoadoutCatalog::from_str(&format!(
-            "[loadout.007]\nsecrets = ['token', 'missing']\n[secret.token]\nfrom = {{ file = {:?} }}\n\
-             [secret.missing]\nfrom = {{ file = {:?} }}\n",
-            file.to_string_lossy(),
-            dir.path().join("absent").to_string_lossy()
-        ))
-        .unwrap();
-        let backend = super::StationSecrets::new(catalog.secrets());
-        let request = SecretRequest {
-            lease_id: "l".to_owned(),
-            station: "s".to_owned(),
-            mission_id: "m".to_owned(),
-            ttl: TEST_TTL,
-        };
-        let values = backend.acquire(&request, &["token".to_owned()]).unwrap();
-        assert_eq!(values["token"].with_exposed(str::to_owned), "from-a-file");
-        assert!(backend.acquire(&request, &["missing".to_owned()]).is_err());
-        assert!(
-            backend
-                .acquire(&request, &["undeclared".to_owned()])
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn secret_lease_types_are_send_and_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<SecretBroker>();
-        assert_send_sync::<super::SecretLease>();
-        assert_send_sync::<SecretValue>();
-    }
-}
+mod tests;

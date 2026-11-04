@@ -323,18 +323,6 @@ impl StationConfig {
         self
     }
 
-    /// Leases loadout secrets from `backend` instead of the Station's own
-    /// ([`StationSecrets`](crate::directorates::q::StationSecrets), which reads each from the
-    /// Station's environment or a file, as its `[secret.<name>]` says).
-    #[must_use]
-    pub fn with_secret_backend(
-        mut self,
-        backend: impl crate::directorates::q::SecretBackend + 'static,
-    ) -> Self {
-        self.credentials = self.credentials.with_backend(Arc::new(backend));
-        self
-    }
-
     /// Samples the CPUs, load and memory of each Theater other than the Station's own host
     /// every `every` instead of [`DEFAULT_RESOURCES_EVERY`]. Zero stops these samples; the
     /// full requirements probe still takes one every 300 seconds.
@@ -907,6 +895,9 @@ where
             .with_provider_configs(provider_configs),
     );
     plugins::log_scan(plugins.scan_summary());
+    for refused in config.station.credentials.check_providers(&plugins) {
+        eprintln!("ai6: {refused}");
+    }
     let transports = Arc::new(
         Transports::build(&config.station.theaters, &plugins)
             .with_resources_every(config.station.resources_every)
@@ -11408,16 +11399,13 @@ queue = 1
             "",
             "[agent.007]\nhandler = \"mock-recorder\"\n",
         );
-        state.station = state
-            .station
-            .clone()
-            .with_loadouts(
-                "[loadout.007]\nsecrets = [\"forge-token\"]\n\
+        state.station = state.station.clone().with_loadouts(
+            "[loadout.007]\nsecrets = [\"forge-token\"]\n\
                  env = { PATH = \"/opt/tools/bin\" }\n"
-                    .parse()
-                    .unwrap(),
-            )
-            .with_secret_backend(FakeSecrets::default());
+                .parse::<crate::directorates::q::LoadoutCatalog>()
+                .unwrap()
+                .with_default_secret_provider("fake-secrets"),
+        );
         let item = crate::SourceItem {
             id: "owner/repo#2".to_owned(),
             title: "Fix the build".to_owned(),
@@ -12542,41 +12530,7 @@ queue = 1
         state.stopping.store(true, Ordering::Release);
     }
 
-    /// A secret backend that hands out fake values and remembers what it revoked.
-    #[derive(Clone, Default)]
-    struct FakeSecrets {
-        revoked: Arc<Mutex<Vec<String>>>,
-    }
-
-    impl crate::directorates::q::SecretBackend for FakeSecrets {
-        fn acquire(
-            &self,
-            _request: &crate::directorates::q::SecretRequest,
-            names: &[String],
-        ) -> Result<
-            BTreeMap<String, crate::directorates::q::SecretValue>,
-            crate::directorates::q::SecretBackendFailure,
-        > {
-            Ok(names
-                .iter()
-                .map(|name| {
-                    let value = format!("fake-{name}-0451");
-                    (
-                        name.clone(),
-                        crate::directorates::q::SecretValue::new(value),
-                    )
-                })
-                .collect())
-        }
-
-        fn revoke(
-            &self,
-            lease_id: &str,
-        ) -> Result<(), crate::directorates::q::SecretBackendFailure> {
-            self.revoked.lock().unwrap().push(lease_id.to_owned());
-            Ok(())
-        }
-    }
+    use crate::directorates::q::secret_kind::testing::revoked_for;
 
     /// Every regular file under `root` whose bytes contain `needle`. A FIFO is skipped: opening
     /// one to read waits for a writer.
@@ -12611,8 +12565,9 @@ queue = 1
     fn credential_loadouts() -> crate::directorates::q::LoadoutCatalog {
         "[loadout.007]\nsecrets = [\"forge-token\", \"release-token\"]\n\n\
          [secret.release-token]\nenv = \"RELEASE_TOKEN\"\ngreen_ink = true\nkinds = [\"release\"]\n"
-            .parse()
+            .parse::<crate::directorates::q::LoadoutCatalog>()
             .unwrap()
+            .with_default_secret_provider("fake-secrets")
     }
 
     #[cfg(feature = "cables-mcp")]
@@ -12635,12 +12590,7 @@ queue = 1
                 None,
             )
             .unwrap();
-        let secrets = FakeSecrets::default();
-        state.station = state
-            .station
-            .clone()
-            .with_loadouts(credential_loadouts())
-            .with_secret_backend(secrets.clone());
+        state.station = state.station.clone().with_loadouts(credential_loadouts());
         let recorded = |starts: bool| {
             if starts {
                 RECORDED_STARTS
@@ -12779,11 +12729,11 @@ queue = 1
         assert!(!recorded(false).contains_key("RELEASE_TOKEN"));
 
         // Ending the Mission revokes what is still leased.
-        let before = secrets.revoked.lock().unwrap().len();
+        let before = revoked_for(&mission_id);
         finalize_mission_resources(&state, &mission_id, true, false)
             .await
             .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
-        assert_eq!(secrets.revoked.lock().unwrap().len(), before + 1);
+        assert_eq!(revoked_for(&mission_id), before + 1);
         assert!(state.station.credentials.issued_for(&mission_id).is_empty());
         for place in [root.path(), theater_root.path()] {
             assert!(files_holding(place, "fake-release-token").is_empty());
@@ -12811,12 +12761,7 @@ queue = 1
                 None,
             )
             .unwrap();
-        let secrets = FakeSecrets::default();
-        state.station = state
-            .station
-            .clone()
-            .with_loadouts(credential_loadouts())
-            .with_secret_backend(secrets.clone());
+        state.station = state.station.clone().with_loadouts(credential_loadouts());
         let _ = start_mission(
             State(state.clone()),
             axum::extract::Path(mission_id.clone()),
@@ -12870,10 +12815,10 @@ queue = 1
                 "{lapse}"
             );
 
-            let before = secrets.revoked.lock().unwrap().len();
+            let before = revoked_for(&mission_id);
             credentials::revoke_lapsed(&state);
             assert_eq!(
-                secrets.revoked.lock().unwrap().len(),
+                revoked_for(&mission_id),
                 before,
                 "a live approval keeps its credential"
             );
@@ -12888,7 +12833,7 @@ queue = 1
             }
             credentials::revoke_lapsed(&state);
             assert_eq!(
-                secrets.revoked.lock().unwrap().len(),
+                revoked_for(&mission_id),
                 before + 1,
                 "the {lapse} approval's lease is revoked at the backend"
             );
@@ -12936,15 +12881,11 @@ queue = 1
             "[loadout.007]\nsecrets = [\"release-token\"]\n\n\
              [secret.release-token]\nenv = \"RELEASE_TOKEN\"\ngreen_ink = true\n\
              kinds = [\"release\"]\ntargets = [\"tag v1.*\"]\n"
-                .parse()
+                .parse::<crate::directorates::q::LoadoutCatalog>()
                 .unwrap()
+                .with_default_secret_provider("fake-secrets")
         };
-        let secrets = FakeSecrets::default();
-        state.station = state
-            .station
-            .clone()
-            .with_loadouts(catalog())
-            .with_secret_backend(secrets.clone());
+        state.station = state.station.clone().with_loadouts(catalog());
         let _ = start_mission(
             State(state.clone()),
             axum::extract::Path(mission_id.clone()),
@@ -13015,9 +12956,7 @@ queue = 1
         assert!(resume(state.clone()).await);
 
         // A restarted Station holds nothing in memory; the Registry remembers the use.
-        state.station.credentials = credentials::CredentialDesk::default()
-            .with_catalog(catalog())
-            .with_backend(Arc::new(secrets.clone()));
+        state.station.credentials = credentials::CredentialDesk::default().with_catalog(catalog());
         assert!(
             !resume(state.clone()).await,
             "the same approval does not lease it again after a restart"
@@ -13049,8 +12988,7 @@ queue = 1
                 .parse()
                 .unwrap();
         let vault = credentials::CredentialDesk::default()
-            .with_catalog(tight)
-            .with_backend(Arc::new(FakeSecrets::default()));
+            .with_catalog(tight.with_default_secret_provider("fake-secrets"));
         assert!(vault.weakenings().is_empty());
     }
 
@@ -13857,11 +13795,7 @@ queue = 1
         .with_harness("mock-lines")
         .with_workdir(work.to_string_lossy().into_owned());
         let (mut state, _link, _forwards) = shell_station(root.path(), theater, "mock-lines", None);
-        state.station = state
-            .station
-            .clone()
-            .with_loadouts(credential_loadouts())
-            .with_secret_backend(FakeSecrets::default());
+        state.station = state.station.clone().with_loadouts(credential_loadouts());
         // The harness says how long its credential is, never what it is.
         let script = "echo \"forge ${#FORGE_TOKEN}\"; echo \"release ${RELEASE_TOKEN:-absent}\"; \
                       sleep 0.2";

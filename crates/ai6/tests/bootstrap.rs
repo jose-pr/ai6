@@ -94,7 +94,7 @@ fn relative_paths_are_beside_the_file_and_defaults_follow_it() {
     let path = write(
         dir.path(),
         "ai6.cfg",
-        "[provider]\npassword = { file = \"db-password\" }\n\
+        "[provider]\npassword = { provider = \"file\", key = \"db-password\" }\n\
          [station]\nstate_dir = \"state\"\n[station.plugins]\npaths = [\"plugins\"]\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
@@ -120,7 +120,9 @@ fn relative_paths_are_beside_the_file_and_defaults_follow_it() {
     );
     assert_eq!(
         located.value.provider.password,
-        Some(SecretRef::File(dir.path().join("db-password")))
+        Some(SecretRef::file(
+            dir.path().join("db-password").to_string_lossy()
+        ))
     );
     assert!(located.weakenings().is_empty());
 }
@@ -131,17 +133,14 @@ fn a_sql_provider_is_the_registry_unless_one_is_named() {
     let path = write(
         dir.path(),
         "ai6.cfg",
-        "[provider]\nlocation = \"postgres://db.example/ai6\"\npassword = { env = \"PGPASS\" }\n",
+        "[provider]\nlocation = \"postgres://db.example/ai6\"\npassword = { provider = \"env\", key = \"PGPASS\" }\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
     assert_eq!(
         located.registry_location().unwrap(),
         "postgres://db.example/ai6"
     );
-    assert_eq!(
-        located.registry_password(),
-        Some(&SecretRef::Env("PGPASS".to_owned()))
-    );
+    assert_eq!(located.registry_password(), Some(&SecretRef::env("PGPASS")));
     assert_eq!(located.value.registry.headquarters_lease().as_secs(), 60);
 }
 
@@ -151,8 +150,8 @@ fn an_inline_or_environment_secret_is_reported_as_a_weakening() {
     let path = write(
         dir.path(),
         "ai6.cfg",
-        "[provider]\nlocation = \"sqlite:ai6.db\"\npassword = \"hunter2\"\n\
-         [unex]\nurl = \"https://unex.example\"\nstation_token = { env = \"UNEX_TOKEN\" }\n",
+        "[provider]\nlocation = \"sqlite:ai6.db\"\npassword = { provider = \"inline\", value = \"hunter2\" }\n\
+         [unex]\nurl = \"https://unex.example\"\nstation_token = { provider = \"env\", key = \"UNEX_TOKEN\" }\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
     let weakenings = located.weakenings();
@@ -387,7 +386,8 @@ fn a_station_with_a_bad_ca_file_does_not_start() {
     write(dir.path(), "empty.pem", "");
     for unex in [
         "url = \"https://unex.example\"\nca_file = \"empty.pem\"\n",
-        "url = \"https://unex.example\"\nca_file = \"missing.pem\"\nstation_token = \"t\"\n",
+        "url = \"https://unex.example\"\nca_file = \"missing.pem\"\n\
+         station_token = { provider = \"inline\", value = \"t\" }\n",
     ] {
         let path = write(dir.path(), "ai6.cfg", &format!("[unex]\n{unex}"));
         let output = ai6()
@@ -486,12 +486,74 @@ fn free_port() -> u16 {
 #[test]
 fn a_station_starts_from_the_one_file_every_program_shares() {
     let dir = tempfile::tempdir().unwrap();
-    let port = free_port();
+    let config = one_file(dir.path(), "http://127.0.0.1:9", free_port(), free_port());
+    starts(dir.path(), &config, &[]);
+}
+
+/// The Station token through each built-in secret provider: a Station that cannot read it does not
+/// start.
+#[test]
+fn a_station_starts_with_its_token_from_each_built_in_provider() {
+    let token = "t".repeat(48);
+    for (provider, reference, variable) in [
+        (
+            "file",
+            r#"{ provider = "file", key = "station-token" }"#.to_owned(),
+            None,
+        ),
+        (
+            "env",
+            r#"{ provider = "env", key = "AI6_TEST_STATION_TOKEN" }"#.to_owned(),
+            Some(("AI6_TEST_STATION_TOKEN", token.as_str())),
+        ),
+        (
+            "inline",
+            format!(r#"{{ provider = "inline", value = "{token}" }}"#),
+            None,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let config = one_file(dir.path(), "http://127.0.0.1:9", free_port(), free_port());
+        let text = std::fs::read_to_string(&config).unwrap().replace(
+            r#"station_token = { provider = "file", key = "station-token" }"#,
+            &format!("station_token = {reference}"),
+        );
+        std::fs::write(&config, text).unwrap();
+        let said = starts(dir.path(), &config, variable.as_slice());
+        assert!(!said.contains(&token), "{provider}: {said}");
+        if provider != "file" {
+            assert!(
+                said.contains("weaken") || said.contains("inherit") || said.contains("inline"),
+                "{provider} is reported as a weakening: {said}"
+            );
+        }
+    }
+    // A token the provider cannot read stops the Station, naming where it looked.
+    let dir = tempfile::tempdir().unwrap();
+    let config = one_file(dir.path(), "http://127.0.0.1:9", free_port(), free_port());
+    std::fs::remove_file(dir.path().join("station-token")).unwrap();
+    let (code, said) = stopped(ai6().args(["serve", "--config"]).arg(&config));
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("station-token"), "{said}");
+}
+
+/// Starts a Station from `config` in `dir` with `env` set, waits until it listens, stops it, and
+/// answers what it said.
+fn starts(dir: &Path, config: &Path, env: &[(&str, &str)]) -> String {
+    let text = std::fs::read_to_string(config).unwrap();
+    let port: u16 = text
+        .lines()
+        .skip_while(|line| *line != "[station]")
+        .find_map(|line| line.strip_prefix("listen = \"127.0.0.1:"))
+        .and_then(|rest| rest.trim_end_matches('"').parse().ok())
+        .unwrap();
+    let mut command = ai6();
+    command.args(["serve", "--config"]).arg(config);
+    for (name, value) in env {
+        command.env(name, value);
+    }
     // Publishing to the closed port goes on in the background and does not stop the Station.
-    let config = one_file(dir.path(), "http://127.0.0.1:9", free_port(), port);
-    let mut station = ai6()
-        .args(["serve", "--config"])
-        .arg(&config)
+    let mut station = command
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -507,19 +569,17 @@ fn a_station_starts_from_the_one_file_every_program_shares() {
     }
     let _ = station.kill();
     let output = station.wait_with_output().unwrap();
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(listening, "the Station listens on [station] listen: {said}");
     assert!(
-        listening,
-        "the Station listens on [station] listen: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        dir.path().join("station-state").is_dir(),
+        dir.join("station-state").is_dir(),
         "its state is under [station] state_dir"
     );
     assert!(
-        !dir.path().join("unex-state").exists(),
+        !dir.join("unex-state").exists(),
         "the gateway's directory is not the Station's"
     );
+    said
 }
 
 /// What a program said as it stopped: its exit code and standard error. A program that goes on
@@ -583,15 +643,21 @@ fn a_secret_in_a_refused_document_appears_in_no_message_in_any_format() {
     for (name, text) in [
         (
             "toml.cfg",
-            format!("[provider]\npassword = \"{PLANTED}\"\nunknown = 1\n"),
+            format!(
+                "[provider]\npassword = {{ provider = \"inline\", value = \"{PLANTED}\" }}\nunknown = 1\n"
+            ),
         ),
         (
             "json.json",
-            format!(r#"{{"provider": {{"password": "{PLANTED}", "unknown": 1}}}}"#),
+            format!(
+                r#"{{"provider": {{"password": {{"provider": "inline", "value": "{PLANTED}"}}, "unknown": 1}}}}"#
+            ),
         ),
         (
             "yaml.yaml",
-            format!("provider:\n  password: {PLANTED}\n  unknown: 1\n"),
+            format!(
+                "provider:\n  password:\n    provider: inline\n    value: {PLANTED}\n  unknown: 1\n"
+            ),
         ),
         ("toml2.cfg", format!("[unex]\nlisten = \"{PLANTED}\"\n")),
         (
@@ -643,12 +709,14 @@ fn the_token_is_one_key_for_both_sides_of_the_station_channel() {
     let path = write(
         dir.path(),
         "ai6.cfg",
-        "[unex]\nurl = \"https://unex.example\"\nstation_token = { file = \"station-token\" }\n",
+        "[unex]\nurl = \"https://unex.example\"\nstation_token = { provider = \"file\", key = \"station-token\" }\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
     assert_eq!(
         located.value.unex.station_token,
-        Some(SecretRef::File(dir.path().join("station-token"))),
+        Some(SecretRef::file(
+            dir.path().join("station-token").to_string_lossy()
+        )),
         "relative to the file, whichever program reads it"
     );
 }
@@ -694,8 +762,8 @@ fn config_public_holds_only_the_allow_list_and_names_what_it_left_out() {
         dir.path(),
         "ai6.cfg",
         &format!(
-            "[provider]\npassword = \"{PLANTED}\"\n[unex]\nurl = \"https://ai6.example\"\n\
-             station_token = \"{PLANTED}\"\nca_file = \"{PLANTED}.pem\"\n\
+            "[provider]\npassword = {{ provider = \"inline\", value = \"{PLANTED}\" }}\n[unex]\nurl = \"https://ai6.example\"\n\
+             station_token = {{ provider = \"inline\", value = \"{PLANTED}\" }}\nca_file = \"{PLANTED}.pem\"\n\
              [station]\nid = \"{PLANTED}\"\n[oo.appearance]\ntheme = \"dusk\"\n\
              [oo.chat]\nwidth = 480\nnote = \"{PLANTED}\"\n"
         ),

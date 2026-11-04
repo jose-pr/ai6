@@ -199,6 +199,13 @@ pub(super) fn poll(state: &DaemonState) -> bool {
         for weakening in current.station.credentials.weakenings() {
             eprintln!("ai6: {weakening}");
         }
+        for refused in current
+            .station
+            .credentials
+            .check_providers(&current.plugins)
+        {
+            eprintln!("ai6: {refused}");
+        }
     }
     accounts::declare(&current);
     publish_station_check_in(&current);

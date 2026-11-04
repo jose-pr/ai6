@@ -77,6 +77,9 @@ pub enum ConfigRecord {
     Overlay,
     /// How a loadout secret reaches a Session, never its value: a `[secret.<name>]` table.
     Secret,
+    /// A configured secret provider, its settings shared by the secrets that name it: a
+    /// `[secret_provider.<name>]` table.
+    SecretProvider,
     /// An account pool and its accounts (references to secrets, never values): a
     /// `[pool.<id>]` table.
     Pool,
@@ -116,7 +119,7 @@ pub enum ConfigRecord {
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Roster,
         Self::Operation,
         Self::Agent,
@@ -128,6 +131,7 @@ impl ConfigRecord {
         Self::Sandbox,
         Self::Mcp,
         Self::Overlay,
+        Self::SecretProvider,
         Self::Secret,
         Self::Pool,
         Self::Cables,
@@ -145,7 +149,8 @@ impl ConfigRecord {
     pub const SINGLETON_KEY: &'static str = "settings";
 
     /// The family's name: `operation`, `agent`, `role`, `assistant`, `cover`, `theater`,
-    /// `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `pool`, `cables`, `plugin`, `station`,
+    /// `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider`, `pool`, `cables`,
+    /// `plugin`, `station`,
     /// `tls`, `access`, `unex`, `roster`, `compartment` or `review`. For a family that shares its
     /// file, it is also its table there.
     pub const fn name(self) -> &'static str {
@@ -161,6 +166,7 @@ impl ConfigRecord {
             Self::Mcp => "mcp",
             Self::Overlay => "overlay",
             Self::Secret => "secret",
+            Self::SecretProvider => "secret_provider",
             Self::Pool => "pool",
             Self::Cables => "cables",
             Self::Plugin => "plugin",
@@ -192,6 +198,7 @@ impl ConfigRecord {
             | Self::Mcp
             | Self::Overlay
             | Self::Secret
+            | Self::SecretProvider
             | Self::Pool => "loadouts",
             Self::Cables => "cables",
             Self::Plugin => "plugins",
@@ -234,6 +241,7 @@ impl ConfigRecord {
                 | Self::Mcp
                 | Self::Overlay
                 | Self::Secret
+                | Self::SecretProvider
                 | Self::Pool
                 | Self::Cables
                 | Self::Plugin
@@ -398,8 +406,8 @@ impl ConfigRevision {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, guatiao::ToValue)]
 pub struct ConfigLimits {
-    /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool`
-    /// records together).
+    /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`,
+    /// `secret_provider` and `pool` records together).
     pub loadout_bytes: Limit,
     /// Characters of one text value in a loadout document.
     pub loadout_value_chars: Limit,
@@ -1200,18 +1208,25 @@ impl fmt::Display for ConfigReference {
 /// Settings whose value names a program or a model, which a record of the same name is not.
 const NOT_RECORD_NAMES: [&str; 4] = ["handler", "provider", "model", "effort"];
 
-/// Every place in `value` that holds `key` as a whole string or as a table's key.
-fn places_naming(value: &serde_json::Value, key: &str, path: &str, found: &mut Vec<String>) {
+/// Every place in `value` that holds `key` as a whole string or as a table's key, but a field in
+/// `skip`.
+fn places_naming(
+    value: &serde_json::Value,
+    key: &str,
+    path: &str,
+    skip: &[&str],
+    found: &mut Vec<String>,
+) {
     match value {
         serde_json::Value::String(text) if text == key => {
             let field = path.rsplit('.').next().unwrap_or(path);
-            if !NOT_RECORD_NAMES.contains(&field) {
+            if !skip.contains(&field) {
                 found.push(path.to_owned());
             }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                places_naming(item, key, path, found);
+                places_naming(item, key, path, skip, found);
             }
         }
         serde_json::Value::Object(table) => {
@@ -1224,7 +1239,7 @@ fn places_naming(value: &serde_json::Value, key: &str, path: &str, found: &mut V
                 if field == key {
                     found.push(deeper.clone());
                 }
-                places_naming(inner, key, &deeper, found);
+                places_naming(inner, key, &deeper, skip, found);
             }
         }
         _ => {}
@@ -1325,7 +1340,13 @@ pub fn references_to(
                 if record == ConfigRecord::Secret {
                     secret_places(family, &definition, key, "", &mut places);
                 } else {
-                    places_naming(&definition, key, "", &mut places);
+                    // A secret, or an instance's credential, names an instance as its `provider`.
+                    let skip: &[&str] = if record == ConfigRecord::SecretProvider {
+                        &[]
+                    } else {
+                        &NOT_RECORD_NAMES
+                    };
+                    places_naming(&definition, key, "", skip, &mut places);
                 }
                 places.dedup();
                 references.extend(places.into_iter().map(|path| ConfigReference {
@@ -1345,7 +1366,7 @@ pub fn references_to(
 
 /// The families in the order an import stores them, so each refers only to records already
 /// stored: roles before the Agents that hold them, Agents before the Operations that name them.
-pub const IMPORT_ORDER: [ConfigRecord; 22] = [
+pub const IMPORT_ORDER: [ConfigRecord; 23] = [
     ConfigRecord::Roster,
     ConfigRecord::Role,
     ConfigRecord::Cover,
@@ -1355,6 +1376,7 @@ pub const IMPORT_ORDER: [ConfigRecord; 22] = [
     ConfigRecord::Theater,
     ConfigRecord::Sandbox,
     ConfigRecord::Mcp,
+    ConfigRecord::SecretProvider,
     ConfigRecord::Secret,
     ConfigRecord::Overlay,
     ConfigRecord::Pool,
@@ -1647,6 +1669,7 @@ pub(crate) fn assemble(
         ConfigRecord::Mcp,
         ConfigRecord::Overlay,
         ConfigRecord::Secret,
+        ConfigRecord::SecretProvider,
         ConfigRecord::Pool,
     ])?;
     let loadouts = if loadouts.trim().is_empty() {

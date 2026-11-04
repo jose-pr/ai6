@@ -147,12 +147,12 @@ mod tests {
             r#"
 [provider]
 location = "postgres://user:{PLANTED}@db/ai6"
-password = "{PLANTED}"
+password = {{ provider = "inline", value = "{PLANTED}" }}
 poll = 5
 
 [registry]
 location = "postgres://user:{PLANTED}@db/registry"
-password = {{ file = "{PLANTED}" }}
+password = {{ provider = "file", key = "{PLANTED}" }}
 headquarters_lease = 60
 
 [registry.limits.sessions]
@@ -161,10 +161,10 @@ records = 100000
 [unex]
 url = "http://{PLANTED}.internal:7082"
 ca_file = "{PLANTED}.pem"
-station_token = "{PLANTED}"
+station_token = {{ provider = "inline", value = "{PLANTED}" }}
 listen = "127.0.0.1:7082"
 public_origin = "https://ai6.example"
-proxy_secret = "{PLANTED}"
+proxy_secret = {{ provider = "inline", value = "{PLANTED}" }}
 proxy_secret_min_bytes = 32
 state_dir = "/{PLANTED}"
 

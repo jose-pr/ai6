@@ -37,6 +37,7 @@ use zeroize::Zeroizing;
 use crate::bounds::Limit;
 use crate::bounds::Seconds;
 use crate::directorates::m::config::ConfigLimits;
+use crate::directorates::q::secret_kind::{self, SecretFields, SecretSource};
 use crate::directorates::registry::bona_fides::{KeepVerified, PluginProfile};
 use crate::directorates::registry::limits::RegistryLimits;
 
@@ -106,166 +107,231 @@ impl From<BootstrapError> for io::Error {
     }
 }
 
-/// Where a secret's value is read, so a file names a secret without holding it.
+/// A reference to a secret, never the secret: the one shape every setting that holds a secret
+/// takes.
 ///
-/// Written as `{ file = "PATH" }`, `{ env = "NAME" }` or a bare string, the value itself. A
-/// file is the default and the strongest form; an environment variable is inherited by every
-/// process the reader starts, and an inline value sits in a file people copy and commit, so
-/// both are reported as weakenings ([`SecretRef::weakening`]).
+/// Written `{ provider = "NAME", key = "KEY", ..fields }`: a provider (a loaded one, or an
+/// instance, `[secret_provider.<name>]`), the secret's key there and whatever further fields that
+/// provider declares, flat beside them. Or `{ secret = "NAME" }`: a `[secret.<name>]` of the
+/// configuration provider, where something reads it after the configuration provider is reached.
+///
+/// `file`, `env` and `inline` are built in, so a bootstrap file reads them before anything
+/// loads: `{ provider = "file", key = "PATH" }`, `{ provider = "env", key = "NAME" }`,
+/// `{ provider = "inline", value = "…" }`. A file is the strongest; an environment variable is
+/// inherited by every process the reader starts, and an inline value sits in a file people copy
+/// and commit, so both are reported as weakenings ([`SecretRef::weakening`]).
 #[non_exhaustive]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretRef {
-    /// A file; one trailing newline is dropped. Relative to the directory the reader resolves
-    /// it against.
-    File(PathBuf),
-    /// An environment variable of the reading process.
-    Env(String),
-    /// The value itself.
-    Inline(Zeroizing<String>),
-}
-
-impl fmt::Debug for SecretRef {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::File(path) => formatter.debug_tuple("File").field(path).finish(),
-            Self::Env(name) => formatter.debug_tuple("Env").field(name).finish(),
-            Self::Inline(_) => formatter.write_str("Inline(***)"),
-        }
-    }
+    /// A provider, its key and its fields.
+    Provider(SecretSource),
+    /// A `[secret.<name>]`, by name.
+    Named(String),
 }
 
 impl SecretRef {
+    /// The secret `key` of the built-in `file` provider.
+    pub fn file(key: impl Into<String>) -> Self {
+        Self::Provider(SecretSource::new("file", key))
+    }
+
+    /// The environment variable `name`, through the built-in `env` provider.
+    pub fn env(name: impl Into<String>) -> Self {
+        Self::Provider(SecretSource::new("env", name))
+    }
+
     /// Why this reference is weaker than a file, if it is.
     pub fn weakening(&self) -> Option<String> {
         match self {
-            Self::File(_) => None,
-            Self::Env(variable) => Some(format!(
-                "read from the environment variable {variable}, which every process started \
-                 from this one inherits"
-            )),
-            Self::Inline(_) => Some(
-                "written inline in a configuration file, where it is copied and committed with \
-                 the file; name a file instead"
-                    .to_owned(),
-            ),
+            Self::Provider(source) => match source.provider.as_str() {
+                "env" => Some(format!(
+                    "read from the environment variable {}, which every process started from \
+                     this one inherits",
+                    source.key
+                )),
+                "inline" => Some(
+                    "written inline in a configuration file, where it is copied and committed \
+                     with the file; name a file instead"
+                        .to_owned(),
+                ),
+                _ => None,
+            },
+            Self::Named(_) => None,
         }
     }
 
-    /// A file reference resolved against `dir` when it is relative; other forms unchanged.
+    /// A `file` reference resolved against `dir` when its key is relative; other forms unchanged.
     #[must_use]
     pub fn relative_to(self, dir: &Path) -> Self {
         match self {
-            Self::File(path) if path.is_relative() => Self::File(dir.join(path)),
+            Self::Provider(mut source)
+                if source.provider == "file" && Path::new(&source.key).is_relative() =>
+            {
+                source.key = dir.join(&source.key).to_string_lossy().into_owned();
+                Self::Provider(source)
+            }
             other => other,
         }
     }
 
-    /// The value. A file's one trailing newline (`\n` or `\r\n`) is dropped.
+    /// The value, read by a built-in provider. A file's one trailing newline (`\n` or `\r\n`) is
+    /// dropped.
     ///
     /// # Errors
     ///
-    /// `NotFound` for a file or variable that does not exist, `InvalidData` for an empty
-    /// value or one that is not UTF-8. The message names the file or variable, never the
-    /// value.
+    /// `NotFound` for a file or variable that does not exist, `InvalidData` for an empty value
+    /// or one that is not UTF-8, `Unsupported` for another provider or a `[secret.<name>]`,
+    /// which nothing reads before the configuration provider is reached. The message names the
+    /// file, variable or provider, never the value.
     pub fn read(&self) -> io::Result<Zeroizing<String>> {
-        let mut value = match self {
-            Self::File(path) => Zeroizing::new(std::fs::read_to_string(path).map_err(|error| {
-                io::Error::new(error.kind(), format!("{}: {error}", path.display()))
-            })?),
-            Self::Env(variable) => match std::env::var(variable) {
-                Ok(value) => Zeroizing::new(value),
-                Err(std::env::VarError::NotPresent) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("the environment variable {variable} is not set"),
-                    ));
-                }
-                Err(std::env::VarError::NotUnicode(_)) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("the environment variable {variable} is not UTF-8"),
-                    ));
-                }
-            },
-            Self::Inline(value) => value.clone(),
-        };
-        if matches!(self, Self::File(_)) && value.ends_with('\n') {
-            value.pop();
-            if value.ends_with('\r') {
-                value.pop();
+        let source = match self {
+            Self::Provider(source) => source,
+            Self::Named(name) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    format!(
+                        "the secret {name:?} is a [secret.<name>] of the configuration provider, \
+                         which is not read yet; name its provider here"
+                    ),
+                ));
             }
+        };
+        if let Some(refused) = secret_kind::builtin_fields_check(&source.provider, &source.fields) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, refused));
         }
-        if value.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("{} is empty", self.describe()),
-            ));
-        }
-        Ok(value)
+        let read = match source.provider.as_str() {
+            "file" => secret_kind::read_file(None, &source.key),
+            "env" => secret_kind::read_env(&source.key),
+            "inline" => secret_kind::read_inline(&source.fields),
+            other => Err((
+                io::ErrorKind::Unsupported,
+                format!(
+                    "the secret provider {other:?} is not built in (file, env, inline), and this \
+                     secret is read before any other loads"
+                ),
+            )),
+        };
+        read.map_err(|(kind, message)| io::Error::new(kind, message))
     }
 
-    /// Where the value comes from, for messages: the file or variable, never the value.
+    /// Where the value comes from, for messages: the file, variable or provider, never the value.
     pub fn describe(&self) -> String {
         match self {
-            Self::File(path) => format!("the secret file {}", path.display()),
-            Self::Env(variable) => format!("the environment variable {variable}"),
-            Self::Inline(_) => "the inline secret".to_owned(),
+            Self::Provider(source) => match source.provider.as_str() {
+                "file" => format!("the secret file {}", source.key),
+                "env" => format!("the environment variable {}", source.key),
+                "inline" => "the inline secret".to_owned(),
+                other => format!("the secret {:?} of provider {other:?}", source.key),
+            },
+            Self::Named(name) => format!("the secret {name:?}"),
         }
     }
 }
 
-/// How a file names a secret kept in a file.
+/// How a file names a secret held by a provider.
 #[derive(ToValue, FromValue, Schema)]
-#[map(deny_unknown_fields)]
-struct SecretInFile {
-    /// Its path, relative to the bootstrap file.
-    #[schema(title = "File")]
-    file: PathBuf,
+struct SecretAtProvider {
+    /// A loaded provider (`file`, `env` and `inline` are built in) or a `[secret_provider.<name>]`.
+    #[schema(title = "Provider")]
+    provider: String,
+    /// The secret at the provider: a path for `file`, relative to the file that names it; a
+    /// variable for `env`. Default: none, for a provider such as `inline` that needs none.
+    #[schema(title = "Key")]
+    key: Option<String>,
 }
 
-/// How a file names a secret kept in an environment variable.
+/// How a file names a `[secret.<name>]`.
 #[derive(ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
-struct SecretInVariable {
-    /// The variable's name.
-    #[schema(title = "Environment variable")]
-    env: String,
+struct SecretByName {
+    /// The `[secret.<name>]` it reads.
+    #[schema(title = "Secret")]
+    secret: String,
 }
+
+const SECRET_WRITTEN: &str = "a secret: { provider = \"NAME\", key = \"KEY\" } with that \
+                              provider's fields beside them, or { secret = \"NAME\" }";
 
 impl ToValue for SecretRef {
-    /// A file or a variable as a file names it. An inline secret is refused: nothing written
-    /// from a [`Bootstrap`] holds a value.
+    /// The reference as a file names it. An inline secret is refused: nothing written from a
+    /// [`Bootstrap`] holds a value.
     fn to_value_in(&self, alloc: Alloc) -> Result<Value, ValueError> {
         match self {
-            Self::File(file) => SecretInFile { file: file.clone() }.to_value_in(alloc),
-            Self::Env(env) => SecretInVariable { env: env.clone() }.to_value_in(alloc),
-            Self::Inline(_) => Err(ValueError::Unrepresentable),
+            Self::Named(name) => SecretByName {
+                secret: name.clone(),
+            }
+            .to_value_in(alloc),
+            Self::Provider(source) if source.provider == "inline" => {
+                Err(ValueError::Unrepresentable)
+            }
+            Self::Provider(source) => {
+                let mut map = source
+                    .fields
+                    .to_map_in(alloc)
+                    .map_err(|_| ValueError::Unrepresentable)?;
+                map.try_set("provider", source.provider.to_value_in(alloc)?)?;
+                if !source.key.is_empty() {
+                    map.try_set("key", source.key.to_value_in(alloc)?)?;
+                }
+                Ok(map.into())
+            }
         }
     }
 }
 
 impl FromValue for SecretRef {
     fn from_value(value: &Value) -> Result<Self, MapError> {
-        const WRITTEN: &str = "a secret: one non-empty { file = \"PATH\" }, one \
-                               { env = \"NAME\" } or the value itself";
-        if let Ok(text) = <&str>::try_from(value) {
-            return if text.is_empty() {
-                Err(MapError::bad_value(WRITTEN))
+        let refused = || MapError::bad_value(SECRET_WRITTEN);
+        let map = <&guatiao::Map>::try_from(value).map_err(|_| refused())?;
+        if map.contains_key("secret") {
+            let SecretByName { secret } = SecretByName::from_value(value).map_err(|_| refused())?;
+            return if secret.trim().is_empty() {
+                Err(refused())
             } else {
-                Ok(Self::Inline(Zeroizing::new(text.to_owned())))
+                Ok(Self::Named(secret))
             };
         }
-        if let Ok(SecretInFile { file }) = SecretInFile::from_value(value)
-            && !file.as_os_str().is_empty()
-        {
-            return Ok(Self::File(file));
+        let text = |key: &str| -> Result<Option<String>, MapError> {
+            match map.get(key) {
+                None => Ok(None),
+                Some(field) => <&str>::try_from(field)
+                    .map(|text| Some(text.to_owned()))
+                    .map_err(|_| refused()),
+            }
+        };
+        let provider = text("provider")?
+            .filter(|provider| !provider.trim().is_empty())
+            .ok_or_else(refused)?;
+        let key = text("key")?.unwrap_or_default();
+        let mut fields = serde_json::Map::new();
+        for entry in map.iter() {
+            let name = entry.key();
+            if name == "provider" || name == "key" {
+                continue;
+            }
+            if secret_kind::RESERVED_FIELDS.contains(&name) {
+                return Err(refused());
+            }
+            let field = serde_json::to_value(guatiao_serde::Serializable::from(entry.value()))
+                .map_err(|_| refused())?;
+            fields.insert(name.to_owned(), field);
         }
-        if let Ok(SecretInVariable { env }) = SecretInVariable::from_value(value)
-            && is_variable_name(&env)
+        let source = SecretSource {
+            provider,
+            key,
+            fields: SecretFields::new(fields),
+        };
+        let builtin_key_ok = match source.provider.as_str() {
+            "file" => !source.key.trim().is_empty(),
+            "env" => is_variable_name(&source.key),
+            _ => true,
+        };
+        if !builtin_key_ok
+            || secret_kind::builtin_fields_check(&source.provider, &source.fields).is_some()
         {
-            return Ok(Self::Env(env));
+            return Err(refused());
         }
-        Err(MapError::bad_value(WRITTEN))
+        Ok(Self::Provider(source))
     }
 }
 
@@ -273,11 +339,7 @@ impl Schema for SecretRef {
     fn kind(alloc: Alloc) -> KindBuilder {
         KindBuilder::union_in(
             alloc,
-            vec![
-                SecretInFile::kind(alloc),
-                SecretInVariable::kind(alloc),
-                KindBuilder::string_in(alloc),
-            ],
+            vec![SecretAtProvider::kind(alloc), SecretByName::kind(alloc)],
         )
     }
 }
@@ -305,8 +367,8 @@ pub struct ProviderSettings {
     /// Seconds between checks for changes; 0 turns reloading off. Default: 5.
     #[schema(title = "Between checks for changes")]
     pub poll: Option<Seconds>,
-    /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `secret` and `pool` records
-    /// together).
+    /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`,
+    /// `secret_provider` and `pool` records together).
     #[schema(title = "Loadout document", format = "bytes")]
     #[map(default = ConfigLimits::default().loadout_bytes)]
     pub loadout_bytes: Limit,
@@ -972,6 +1034,22 @@ impl Bootstrap {
         unex.state_dir = unex.state_dir.take().map(|state| beside(dir, &state));
         unex.pages.dir = unex.pages.dir.take().map(|pages| beside(dir, &pages));
         unex.plugins.resolve(dir);
+        for (what, secret) in [
+            ("[provider] password", &value.provider.password),
+            ("[registry] password", &value.registry.password),
+            ("[unex] station_token", &value.unex.station_token),
+            ("[unex] proxy_secret", &value.unex.proxy_secret),
+        ] {
+            if let Some(SecretRef::Named(_)) = secret {
+                return Err(BootstrapError::invalid(
+                    path,
+                    format!(
+                        "{what} names a [secret.<name>], which is read only from the \
+                         configuration provider; name its provider here"
+                    ),
+                ));
+            }
+        }
         Ok(value)
     }
 }
@@ -1164,14 +1242,18 @@ mod tests {
         let secret = |text: &str| from_toml::<Holder>(text).map(|holder| holder.s);
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("token"), "s3cret\r\n").unwrap();
-        let file = secret("s = { file = \"token\" }")
+        let file = secret("s = { provider = \"file\", key = \"token\" }")
             .unwrap()
             .relative_to(dir.path());
         assert_eq!(file.read().unwrap().as_str(), "s3cret");
         assert_eq!(file.weakening(), None);
+        assert_eq!(
+            SecretRef::from_value(&file.to_value().unwrap()).unwrap(),
+            file
+        );
 
-        let inline = secret("s = \"hunter2\"").unwrap();
-        assert_eq!(format!("{inline:?}"), "Inline(***)");
+        let inline = secret("s = { provider = \"inline\", value = \"hunter2\" }").unwrap();
+        assert!(!format!("{inline:?}").contains("hunter2"));
         assert!(inline.weakening().unwrap().contains("inline"));
         assert_eq!(inline.read().unwrap().as_str(), "hunter2");
         assert!(
@@ -1179,7 +1261,8 @@ mod tests {
             "an inline secret is never written out"
         );
 
-        let env = secret("s = { env = \"AI6_TEST_NO_SUCH_VARIABLE\" }").unwrap();
+        let env =
+            secret("s = { provider = \"env\", key = \"AI6_TEST_NO_SUCH_VARIABLE\" }").unwrap();
         assert!(
             env.weakening()
                 .unwrap()
@@ -1187,10 +1270,26 @@ mod tests {
         );
         assert_eq!(env.read().unwrap_err().kind(), io::ErrorKind::NotFound);
 
+        let named = secret("s = { secret = \"db\" }").unwrap();
+        assert_eq!(named, SecretRef::Named("db".to_owned()));
+        assert_eq!(named.read().unwrap_err().kind(), io::ErrorKind::Unsupported);
+        let elsewhere =
+            secret("s = { provider = \"vault\", key = \"db\", mount = \"m\" }").unwrap();
+        assert_eq!(
+            elsewhere.read().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+
         for refused in [
-            "s = { file = \"hunter2\", env = \"B\" }",
-            "s = { env = \"1hunter2\" }",
-            "s = \"\"",
+            "s = { provider = \"file\", key = \"hunter2\", env = \"B\" }",
+            "s = { provider = \"file\", key = \"x\", value = \"hunter2\" }",
+            "s = { provider = \"env\", key = \"1hunter2\" }",
+            "s = { provider = \"inline\", value = \"\" }",
+            "s = { provider = \"inline\", value = \"hunter2\", other = 1 }",
+            "s = { secret = \"hunter2\", key = \"k\" }",
+            "s = { key = \"hunter2\" }",
+            "s = { file = \"hunter2\" }",
+            "s = \"hunter2\"",
             "s = {}",
             "s = 12345",
         ] {

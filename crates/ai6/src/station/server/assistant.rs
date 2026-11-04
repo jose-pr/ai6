@@ -3897,37 +3897,6 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
         }
     }
 
-    /// Hands out `fake-<name>-0451` for each secret.
-    struct FakeSecrets;
-
-    impl crate::directorates::q::SecretBackend for FakeSecrets {
-        fn acquire(
-            &self,
-            _request: &crate::directorates::q::SecretRequest,
-            names: &[String],
-        ) -> Result<
-            BTreeMap<String, crate::directorates::q::SecretValue>,
-            crate::directorates::q::SecretBackendFailure,
-        > {
-            Ok(names
-                .iter()
-                .map(|name| {
-                    (
-                        name.clone(),
-                        crate::directorates::q::SecretValue::new(format!("fake-{name}-0451")),
-                    )
-                })
-                .collect())
-        }
-
-        fn revoke(
-            &self,
-            _lease_id: &str,
-        ) -> Result<(), crate::directorates::q::SecretBackendFailure> {
-            Ok(())
-        }
-    }
-
     struct RoutedFixture {
         desk: Arc<Desk>,
         harness: RoutedHarness,
@@ -3950,11 +3919,12 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
     fn routed_fixture(agents: &str, loadouts: &str, handlers: &[&str]) -> RoutedFixture {
         let root = tempfile::tempdir().unwrap();
         let mut state = test_state(root.path(), "", agents);
-        state.station = state
-            .station
-            .clone()
-            .with_loadouts(loadouts.parse().unwrap())
-            .with_secret_backend(FakeSecrets);
+        state.station = state.station.clone().with_loadouts(
+            loadouts
+                .parse::<crate::directorates::q::LoadoutCatalog>()
+                .unwrap()
+                .with_default_secret_provider("fake-secrets"),
+        );
         let harness = RoutedHarness::default();
         *harness.handlers.lock().unwrap() = handlers.iter().map(|h| (*h).to_owned()).collect();
         let reports = Arc::new(Mutex::new(Vec::new()));

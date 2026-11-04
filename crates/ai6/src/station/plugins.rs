@@ -29,6 +29,7 @@ use crate::directorates::registry::bona_fides::{
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
 use crate::directorates::q::ephemeral::TheaterProvider;
 use crate::directorates::q::safehouse::SafeHouseProvider;
+use crate::directorates::q::secret_kind::SecretProvider;
 use crate::directorates::q::terminal::{
     HarnessStdio, Terminal, TerminalOffer, TerminalRefusal, choose_terminal,
 };
@@ -249,7 +250,8 @@ impl fmt::Display for PluginBuildError {
 
 impl core::error::Error for PluginBuildError {}
 
-/// The process-lifetime host for loaded AgentHandler, Terminal, Transport, SafeHouseProvider and Source libraries.
+/// The process-lifetime host for loaded AgentHandler, Terminal, Transport, SafeHouseProvider,
+/// Source and secret provider libraries, and the built-in secret providers.
 pub struct Plugins {
     registry: ManuallyDrop<Registry>,
     summary: PluginScanSummary,
@@ -273,6 +275,7 @@ impl Plugins {
     /// each profile loads and from where. A directory is not searched recursively.
     pub fn scan_with(paths: &[PathBuf], policy: &PluginPolicy) -> Self {
         let mut registry = Registry::new("ai6", env!("CARGO_PKG_VERSION"));
+        register_builtins(&mut registry);
         let mut summary = PluginScanSummary {
             profile: policy.profile.as_str().to_owned(),
             weakened: policy.pins.weakenings(),
@@ -370,7 +373,8 @@ impl Plugins {
     }
 
     #[cfg(test)]
-    pub(crate) fn from_registry(registry: Registry) -> Self {
+    pub(crate) fn from_registry(mut registry: Registry) -> Self {
+        register_builtins(&mut registry);
         Self {
             registry: ManuallyDrop::new(registry),
             summary: PluginScanSummary::default(),
@@ -411,6 +415,34 @@ impl Plugins {
         config: Option<&Value>,
     ) -> Result<Box<dyn TheaterProvider>, PluginBuildError> {
         self.build::<dyn TheaterProvider>(provider, config)
+    }
+
+    /// Returns the secret providers, the built-in `file`, `env` and `inline` among them, and
+    /// their reported availability.
+    pub fn secret_providers(&self) -> Vec<ProviderInfo> {
+        providers(&self.registry, <dyn SecretProvider>::NAME)
+    }
+
+    /// Constructs a secret provider from its ID and optional Guatiao config.
+    pub fn secret_provider(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+    ) -> Result<Box<dyn SecretProvider>, PluginBuildError> {
+        self.build::<dyn SecretProvider>(provider, config)
+    }
+
+    /// Whether a provider of any kind has the ID `id`.
+    pub fn has_provider(&self, id: &str) -> bool {
+        self.registry.providers_of(id).next().is_some()
+    }
+
+    /// The JSON Schema of provider `id`'s configuration, as its library describes it.
+    pub fn config_schema(&self, id: &str) -> Option<serde_json::Value> {
+        self.registry
+            .providers_of(id)
+            .find_map(|provider| provider.config_schema())
+            .and_then(|schema| serde_json::to_value(guatiao_serde::Serializable::from(schema)).ok())
     }
 
     /// Returns the Source providers and their reported availability.
@@ -680,6 +712,24 @@ pub fn log_scan(summary: &PluginScanSummary) {
     }
 }
 
+/// Registers the secret providers every program has, before any library is scanned, so a
+/// library offering one of their IDs does not take it.
+fn register_builtins(registry: &mut Registry) {
+    if let Err(error) = registry.register_local(
+        "ai6-secrets",
+        crate::directorates::q::secret_kind::builtin::library,
+    ) {
+        eprintln!("ai6: the built-in secret providers did not register: {error}");
+    }
+    #[cfg(test)]
+    registry
+        .register_local(
+            "ai6-fake-secrets",
+            crate::directorates::q::secret_kind::testing::library,
+        )
+        .expect("the fake secret provider registers");
+}
+
 /// The filter a scan applies to what a library declares: one of AI6's own kinds.
 fn declares_ai6_kind(declared: &Declared) -> Result<(), String> {
     if declared.kinds().any(|kind| {
@@ -693,6 +743,7 @@ fn declares_ai6_kind(declared: &Declared) -> Result<(), String> {
                     | "ai6_theater_provider"
                     | "ai6_source"
                     | "ai6_tracker"
+                    | "ai6_secret"
             )
     }) {
         Ok(())

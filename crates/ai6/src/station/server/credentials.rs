@@ -1,5 +1,5 @@
 //! Q's credentials for a Session: the Agent's loadout secrets, leased per Session from the
-//! Station's secret backend and handed to the harness in its environment only.
+//! secret provider each names and handed to the harness in its environment only.
 //!
 //! Nothing is written anywhere: a value lives in the Station's memory and the harness's
 //! environment. Leases are revoked when the Session's Mission ends or its Session stops on
@@ -14,13 +14,15 @@ use std::time::Duration;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::roster::Agent;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
+use crate::directorates::q::secret_kind::{BUILT_IN, SecretFields, SecretKeeper};
 use crate::directorates::q::{
-    CREDENTIAL_VARIABLES, Loadout, LoadoutCatalog, SecretBackend, SecretBroker, SecretDefinition,
-    SecretLease, SecretLeaseRequest, StationSecrets,
+    CREDENTIAL_VARIABLES, Loadout, LoadoutCatalog, SecretBroker, SecretDefinition, SecretLease,
+    SecretLeaseRequest,
 };
 use crate::directorates::registry::approvals::{Approval, ApprovalStatus};
 use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::timeline::TimelineEvent;
+use crate::station::plugins::{PluginBuildError, Plugins};
 
 use super::DaemonState;
 use super::accounts::Holder;
@@ -29,13 +31,22 @@ use super::routes::OnRoute;
 /// The timeline kind of a credential event.
 const TIMELINE_KIND: &str = "credential";
 
-/// The Station's loadouts and secret backend, and the leases it has issued, by Mission.
+/// One built secret provider, with what it was built from.
+struct Built {
+    provider: String,
+    settings: SecretFields,
+    keeper: Arc<SecretKeeper>,
+}
+
+/// The Station's loadouts and the secret providers it built for them, and the leases it has
+/// issued, by Mission.
 #[derive(Clone, Default)]
 pub(crate) struct CredentialDesk {
     catalog: Option<Arc<LoadoutCatalog>>,
-    backend: Option<Arc<dyn SecretBackend>>,
-    /// Where the Station's own backend finds relative secret files: its secrets directory.
+    /// Where the `file` provider finds relative secret files: the Station's secrets directory.
     secrets_dir: Option<std::path::PathBuf>,
+    /// One built provider per instance, or per provider used with its defaults.
+    built: Arc<Mutex<BTreeMap<String, Built>>>,
     issued: Arc<Mutex<BTreeMap<String, Vec<Issued>>>>,
     /// Pool account logins and the accounts Sessions hold.
     pub(super) accounts: super::accounts::AccountDesk,
@@ -53,13 +64,9 @@ impl PartialEq for CredentialDesk {
     fn eq(&self, other: &Self) -> bool {
         self.catalog == other.catalog
             && self.secrets_dir == other.secrets_dir
+            && Arc::ptr_eq(&self.built, &other.built)
             && Arc::ptr_eq(&self.issued, &other.issued)
             && self.accounts == other.accounts
-            && match (&self.backend, &other.backend) {
-                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            }
     }
 }
 
@@ -68,11 +75,6 @@ impl Eq for CredentialDesk {}
 impl CredentialDesk {
     pub(crate) fn with_catalog(mut self, catalog: LoadoutCatalog) -> Self {
         self.catalog = Some(Arc::new(catalog));
-        self
-    }
-
-    pub(crate) fn with_backend(mut self, backend: Arc<dyn SecretBackend>) -> Self {
-        self.backend = Some(backend);
         self
     }
 
@@ -122,43 +124,101 @@ impl CredentialDesk {
     }
 
     /// The ways these secrets are looser than they could be: a source every local harness
-    /// inherits, a green ink secret any target unlocks, and a green ink secret served from
-    /// the Station's own files or environment, where revoking a lease cannot take a value back.
+    /// inherits or a value written in the configuration, a file outside the Station's secrets
+    /// directory, a green ink secret any target unlocks, and a green ink secret served by a
+    /// built-in provider, whose value revoking a lease cannot take back.
     pub(crate) fn weakenings(&self) -> Vec<String> {
         let Some(catalog) = &self.catalog else {
             return Vec::new();
         };
-        let own_backend = self.backend.is_none();
         let mut weakened = Vec::new();
+        for (name, instance) in catalog.secret_providers() {
+            if instance.provider() == "file"
+                && let Some(dir) = instance.settings().get("dir").and_then(|d| d.as_str())
+                && self
+                    .secrets_dir
+                    .as_deref()
+                    .is_none_or(|own| std::path::Path::new(dir) != own)
+            {
+                weakened.push(format!(
+                    "secret provider {name:?} reads files from {dir}, outside the Station's \
+                     secrets directory"
+                ));
+            }
+        }
         for definition in catalog.secrets() {
             let name = definition.name();
-            if own_backend && let Some(weakening) = definition.source().weakening() {
+            let source = definition.source();
+            let provider = catalog.provider_of(&source.provider);
+            let reference = crate::bootstrap::SecretRef::Provider(
+                crate::directorates::q::SecretSource::new(provider, source.key.clone()),
+            );
+            if let Some(weakening) = reference.weakening() {
                 weakened.push(format!("secret {name:?} is weakened: {weakening}"));
             }
-            if own_backend
-                && let crate::bootstrap::SecretRef::File(path) = definition.source()
-                && (path.is_absolute()
-                    || path
+            let key = std::path::Path::new(&source.key);
+            if provider == "file"
+                && (key.is_absolute()
+                    || key
                         .components()
                         .any(|part| matches!(part, std::path::Component::ParentDir)))
             {
                 weakened.push(format!(
                     "secret {name:?} is read from {}, outside the Station's secrets directory",
-                    path.display()
+                    source.key
                 ));
             }
             if let Some(weakening) = definition.green_ink_weakening() {
                 weakened.push(weakening);
             }
-            if own_backend && definition.green_ink() {
+            if definition.green_ink() && BUILT_IN.contains(&provider) {
                 weakened.push(format!(
-                    "green ink secret {name:?} is served from the Station's own files or \
-                     environment, so revoking its lease cannot take the value back; use a \
-                     backend that issues credentials of its own"
+                    "green ink secret {name:?} is served from the Station's own files, \
+                     environment or configuration, so revoking its lease cannot take the value \
+                     back; use a provider that issues credentials of its own"
                 ));
             }
         }
         weakened
+    }
+
+    /// Builds each secret provider the catalog names, or keeps the one already built, and says
+    /// why each it cannot build is refused. Nothing a provider said is repeated.
+    pub(crate) fn check_providers(&self, plugins: &Arc<Plugins>) -> Vec<String> {
+        let Some(catalog) = &self.catalog else {
+            return Vec::new();
+        };
+        let names: BTreeSet<String> = catalog
+            .secret_providers()
+            .keys()
+            .cloned()
+            .chain(
+                catalog
+                    .secrets()
+                    .into_iter()
+                    .map(|definition| definition.source().provider.clone()),
+            )
+            .collect();
+        let finder = self.finder(plugins.clone(), catalog.clone());
+        let mut refused = Vec::new();
+        for name in names {
+            match finder.keeper(&name, &mut Vec::new()) {
+                Ok(keeper) => {
+                    for definition in catalog.secrets() {
+                        if definition.source().provider == name
+                            && let Err(reason) = keeper.check_fields(&definition.source().fields)
+                        {
+                            refused.push(format!(
+                                "secret {:?} is refused: {reason}",
+                                definition.name()
+                            ));
+                        }
+                    }
+                }
+                Err(reason) => refused.push(format!("secret provider {name:?}: {reason}")),
+            }
+        }
+        refused
     }
 
     /// The names of the secrets leased to `mission_id`'s Session now.
@@ -174,35 +234,196 @@ impl CredentialDesk {
             .collect()
     }
 
-    /// The backend leases come from: the one set in code, else the Station's own, leasing
-    /// for at most `max_ttl`.
-    fn broker(&self, catalog: &LoadoutCatalog, max_ttl: crate::bounds::TimeLimit) -> SecretBroker {
-        let backend: Arc<dyn SecretBackend> = match (&self.backend, &self.secrets_dir) {
-            (Some(backend), _) => backend.clone(),
-            (None, Some(dir)) => Arc::new(StationSecrets::new(catalog.secrets()).relative_to(dir)),
-            (None, None) => Arc::new(StationSecrets::new(catalog.secrets())),
-        };
-        SecretBroker::new(Shared(backend)).with_max_ttl(max_ttl)
+    fn finder(&self, plugins: Arc<Plugins>, catalog: Arc<LoadoutCatalog>) -> Finder {
+        Finder {
+            plugins,
+            catalog,
+            secrets_dir: self.secrets_dir.clone(),
+            built: self.built.clone(),
+        }
+    }
+
+    /// A broker over the catalog's secrets and the providers they name, leasing for at most
+    /// `max_ttl`.
+    fn broker(
+        &self,
+        plugins: &Arc<Plugins>,
+        catalog: &Arc<LoadoutCatalog>,
+        max_ttl: crate::bounds::TimeLimit,
+    ) -> SecretBroker {
+        let finder = self.finder(plugins.clone(), catalog.clone());
+        SecretBroker::new(catalog.clone(), move |name| {
+            finder.keeper(name, &mut Vec::new())
+        })
+        .with_max_ttl(max_ttl)
     }
 }
 
-/// A shared backend handed to a broker that wants one of its own.
-struct Shared(Arc<dyn SecretBackend>);
+/// Finds and builds the provider a secret names.
+struct Finder {
+    plugins: Arc<Plugins>,
+    catalog: Arc<LoadoutCatalog>,
+    secrets_dir: Option<std::path::PathBuf>,
+    built: Arc<Mutex<BTreeMap<String, Built>>>,
+}
 
-impl SecretBackend for Shared {
-    fn acquire(
-        &self,
-        request: &crate::directorates::q::SecretRequest,
-        names: &[String],
-    ) -> Result<
-        BTreeMap<String, crate::directorates::q::SecretValue>,
-        crate::directorates::q::SecretBackendFailure,
-    > {
-        self.0.acquire(request, names)
+impl Finder {
+    /// The provider `name` names: its instance, or the loaded provider of that ID with its
+    /// default settings (the `file` provider's directory is the Station's secrets directory).
+    /// `within` holds the instances whose settings are being read, so one whose credential
+    /// leads back to itself is refused. Its error is the Station's own text, never a provider's.
+    fn keeper(&self, name: &str, within: &mut Vec<String>) -> Result<Arc<SecretKeeper>, String> {
+        let instance = self.catalog.secret_providers().get(name);
+        let (provider, settings) = match instance {
+            Some(instance) => {
+                if self.plugins.has_provider(name) {
+                    return Err(format!(
+                        "instance {name:?} takes the ID of a loaded provider; rename it"
+                    ));
+                }
+                (instance.provider().to_owned(), instance.settings().clone())
+            }
+            None => {
+                let mut settings = serde_json::Map::new();
+                if name == "file"
+                    && let Some(dir) = &self.secrets_dir
+                {
+                    settings.insert(
+                        "dir".to_owned(),
+                        serde_json::Value::String(dir.to_string_lossy().into_owned()),
+                    );
+                }
+                (name.to_owned(), SecretFields::new(settings))
+            }
+        };
+        if let Some(built) = self
+            .built
+            .lock()
+            .map_err(|_| "the secret provider lock was poisoned".to_owned())?
+            .get(name)
+            .filter(|built| built.provider == provider && built.settings == settings)
+        {
+            return Ok(built.keeper.clone());
+        }
+        if within.iter().any(|seen| seen == name) {
+            within.push(name.to_owned());
+            return Err(format!(
+                "its credential leads back to itself: {}",
+                within.join(" -> ")
+            ));
+        }
+        within.push(name.to_owned());
+        let config = self.config(&provider, &settings, within)?;
+        within.pop();
+        let built = if instance.is_none() && name != "file" {
+            self.plugins.secret_provider(&provider, None)
+        } else {
+            self.plugins.secret_provider(&provider, Some(&config))
+        }
+        .map_err(|error| built_error(&provider, &error))?;
+        let keeper = Arc::new(SecretKeeper::new(built)?);
+        self.built
+            .lock()
+            .map_err(|_| "the secret provider lock was poisoned".to_owned())?
+            .insert(
+                name.to_owned(),
+                Built {
+                    provider,
+                    settings,
+                    keeper: keeper.clone(),
+                },
+            );
+        Ok(keeper)
     }
 
-    fn revoke(&self, lease_id: &str) -> Result<(), crate::directorates::q::SecretBackendFailure> {
-        self.0.revoke(lease_id)
+    /// `settings` as `provider`'s configuration, each field its schema marks sensitive read
+    /// through the secret reference it holds.
+    fn config(
+        &self,
+        provider: &str,
+        settings: &SecretFields,
+        within: &mut Vec<String>,
+    ) -> Result<guatiao::Value, String> {
+        let mut settings = settings.as_json().clone();
+        if let Some(schema) = self.plugins.config_schema(provider) {
+            self.resolve(&schema, &mut settings, within)?;
+        }
+        let value = SecretFields::new(settings)
+            .to_map_in(guatiao::Alloc::wiping())
+            .map_err(|_| format!("the settings of {provider:?} cannot be handed to it"))?;
+        Ok(value.into())
+    }
+
+    /// Replaces each value in `settings` that `schema` marks `x-sensitive` with what its secret
+    /// reference reads, at any depth of `properties`.
+    fn resolve(
+        &self,
+        schema: &serde_json::Value,
+        settings: &mut serde_json::Map<String, serde_json::Value>,
+        within: &mut Vec<String>,
+    ) -> Result<(), String> {
+        let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) else {
+            return Ok(());
+        };
+        for (field, property) in properties {
+            let Some(value) = settings.get_mut(field) else {
+                continue;
+            };
+            if property
+                .get("x-sensitive")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
+                let reference: crate::bootstrap::SecretRef =
+                    crate::directorates::m::records::from_json(value).map_err(|_| {
+                        format!("its setting `{field}` is a credential: a secret reference")
+                    })?;
+                let read = self.read(&reference, within)?;
+                *value = serde_json::Value::String(read.as_str().to_owned());
+            } else if let Some(inner) = value.as_object_mut() {
+                self.resolve(property, inner, within)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// What `reference` reads, for an instance's own credential.
+    fn read(
+        &self,
+        reference: &crate::bootstrap::SecretRef,
+        within: &mut Vec<String>,
+    ) -> Result<zeroize::Zeroizing<String>, String> {
+        let source = match reference {
+            crate::bootstrap::SecretRef::Provider(source) => source.clone(),
+            crate::bootstrap::SecretRef::Named(name) => self.catalog.secret(name).source().clone(),
+        };
+        let keeper = self.keeper(&source.provider, within)?;
+        keeper.check_fields(&source.fields)?;
+        keeper
+            .read(&source.key, &source.fields)
+            .map(|read| zeroize::Zeroizing::new(read.value.expose().clone()))
+            .map_err(|_| {
+                format!(
+                    "its credential could not be read from {:?}; the provider's reason is withheld",
+                    source.provider
+                )
+            })
+    }
+}
+
+/// Why a provider could not be built, without the provider's own words where they could quote
+/// a credential it was given.
+fn built_error(provider: &str, error: &PluginBuildError) -> String {
+    match error {
+        PluginBuildError::InvalidConfiguration { .. } => format!(
+            "provider {provider:?} refused its settings; its reason is withheld, since it may \
+             quote a credential"
+        ),
+        PluginBuildError::Refused { .. } => format!(
+            "provider {provider:?} could not be built; its reason is withheld, since it may \
+             quote a credential"
+        ),
+        other => other.to_string(),
     }
 }
 
@@ -299,7 +520,11 @@ fn issue_for(
     let Some(catalog) = &desk.catalog else {
         return Ok(());
     };
-    let broker = desk.broker(catalog, state.station.limits().secrets.max_lease_ttl);
+    let broker = desk.broker(
+        &state.plugins,
+        catalog,
+        state.station.limits().secrets.max_lease_ttl,
+    );
     // A pooled Agent's loadout may not set a provider credential variable.
     let reserved = super::accounts::credential_variables(state, catalog, holder.operation, agent);
     let mut leases = Leases::default();
@@ -342,10 +567,14 @@ fn issue_for(
 /// The catalog and a broker over it, for a look at the models accounts and routes may use.
 pub(super) fn listing_broker(state: &DaemonState) -> Option<(&LoadoutCatalog, SecretBroker)> {
     let desk = &state.station.credentials;
-    let catalog = desk.catalog()?;
+    let catalog = desk.catalog.as_ref()?;
     Some((
         catalog,
-        desk.broker(catalog, state.station.limits().secrets.max_lease_ttl),
+        desk.broker(
+            &state.plugins,
+            catalog,
+            state.station.limits().secrets.max_lease_ttl,
+        ),
     ))
 }
 
@@ -810,3 +1039,6 @@ fn record(
         eprintln!("ai6: credential lease was not recorded on the timeline: {error}");
     }
 }
+
+#[cfg(test)]
+mod tests;

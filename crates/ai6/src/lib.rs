@@ -156,9 +156,9 @@ pub use directorates::q::{
 };
 pub use directorates::q::{
     Loadout, LoadoutCatalog, McpServer, QError, QErrorKind, SandboxError, SandboxProfile,
-    SandboxRequest, SecretBackend, SecretBackendFailure, SecretBroker, SecretDefinition,
-    SecretError, SecretLease, SecretLeaseRequest, SecretRequest, SecretValue, SessionEnv,
-    StationSecrets, claude_mcp_config,
+    SandboxRequest, SecretBroker, SecretDefinition, SecretError, SecretFields, SecretInstance,
+    SecretKeeper, SecretLease, SecretLeaseRequest, SecretProvider, SecretSource, SecretValue,
+    SessionEnv, claude_mcp_config,
 };
 pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,

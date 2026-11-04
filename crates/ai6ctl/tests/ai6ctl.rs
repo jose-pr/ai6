@@ -1127,7 +1127,10 @@ async fn the_origin_comes_from_the_flag_then_unex_url_then_ai6_cfg() {
     let config = dir.path().join("ai6.cfg");
     std::fs::write(
         &config,
-        format!("[unex]\nurl = \"{url}\"\nstation_token = \"never-read\"\n"),
+        format!(
+            "[unex]\nurl = \"{url}\"\n\
+             station_token = {{ provider = \"inline\", value = \"never-read\" }}\n"
+        ),
     )
     .unwrap();
     let health = |extra: Vec<String>, unex_url: Option<String>| {

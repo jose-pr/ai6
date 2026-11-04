@@ -363,6 +363,14 @@ CREATE TABLE IF NOT EXISTS ai6_config_secret (
     PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE IF NOT EXISTS ai6_config_secret_provider (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (scope, key)
+);
+
 CREATE TABLE IF NOT EXISTS ai6_config_pool (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,

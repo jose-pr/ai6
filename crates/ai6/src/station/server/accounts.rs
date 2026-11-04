@@ -1344,7 +1344,6 @@ mod tests {
     use super::*;
     use crate::directorates::m::identity::MissionId;
     use crate::directorates::m::mission::MissionState;
-    use crate::directorates::q::{SecretBackend, SecretBackendFailure, SecretRequest, SecretValue};
     use crate::directorates::registry::sessions::SessionStatus;
     use crate::directorates::registry::timeline::TimelineEvent;
 
@@ -1356,26 +1355,6 @@ mod tests {
     };
 
     const START: i64 = POOLED_RESET - 3_600;
-
-    /// Hands out `fake-<name>-0451` for each secret.
-    struct FakeSecrets;
-
-    impl SecretBackend for FakeSecrets {
-        fn acquire(
-            &self,
-            _request: &SecretRequest,
-            names: &[String],
-        ) -> Result<BTreeMap<String, SecretValue>, SecretBackendFailure> {
-            Ok(names
-                .iter()
-                .map(|name| (name.clone(), SecretValue::new(format!("fake-{name}-0451"))))
-                .collect())
-        }
-
-        fn revoke(&self, _lease_id: &str) -> Result<(), SecretBackendFailure> {
-            Ok(())
-        }
-    }
 
     /// The homes a fake `codex login` logged in to, and what it does while it logs in.
     #[derive(Default)]
@@ -1427,8 +1406,12 @@ mod tests {
         state.station = state
             .station
             .clone()
-            .with_loadouts(loadouts.parse().unwrap())
-            .with_secret_backend(FakeSecrets)
+            .with_loadouts(
+                loadouts
+                    .parse::<crate::directorates::q::LoadoutCatalog>()
+                    .unwrap()
+                    .with_default_secret_provider("fake-secrets"),
+            )
             .with_account_login(FakeLogin(logins.clone()))
             .with_account_homes(root.join("homes"));
         for id in ["mission-1", "mission-2"] {
@@ -1587,8 +1570,12 @@ priority = 2
         state.station = state
             .station
             .clone()
-            .with_loadouts(loadouts.parse().unwrap())
-            .with_secret_backend(FakeSecrets)
+            .with_loadouts(
+                loadouts
+                    .parse::<crate::directorates::q::LoadoutCatalog>()
+                    .unwrap()
+                    .with_default_secret_provider("fake-secrets"),
+            )
             .with_account_homes(root.join("homes"));
         for id in ["mission-1", "mission-2"] {
             abandon(&state, id);
@@ -2115,7 +2102,7 @@ model = "unknown"
 pool = "nowhere"
 "#;
         let loadouts = format!(
-            "{ROUTE_POOLS}[secret.signed]\nenv = \"X\"\nfrom = {{ env = \"X\" }}\ngreen_ink = true\nkinds = [\"push\"]\n"
+            "{ROUTE_POOLS}[secret.signed]\nenv = \"X\"\nprovider = \"env\"\nkey = \"X\"\ngreen_ink = true\nkinds = [\"push\"]\n"
         );
         let (state, _now) = routed_state(root.path(), "", agents, &loadouts);
         let agent = state.roster.agent(Some("G"), "007").unwrap();

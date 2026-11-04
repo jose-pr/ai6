@@ -44,7 +44,7 @@ fn a_missing_station_token_fails_without_echoing_a_value() {
     let config = dir.path().join("ai6.cfg");
     std::fs::write(
         &config,
-        "[unex]\npublic_origin = \"https://localhost\"\nstate_dir = \"state\"\nstation_token = { file = \"token\" }\n",
+        "[unex]\npublic_origin = \"https://localhost\"\nstate_dir = \"state\"\nstation_token = { provider = \"file\", key = \"token\" }\n",
     )
     .unwrap();
     let run = || {
@@ -64,7 +64,7 @@ fn a_missing_station_token_fails_without_echoing_a_value() {
 
     std::fs::write(
         &config,
-        "[unex]\npublic_origin = \"https://localhost\"\nstation_token = \"inline-secret-value\"\nport = 1\n",
+        "[unex]\npublic_origin = \"https://localhost\"\nstation_token = { provider = \"inline\", value = \"inline-secret-value\" }\nport = 1\n",
     )
     .unwrap();
     let (code, error) = run();
@@ -102,7 +102,7 @@ fn ai6_cfg_and_the_provider_alone_start_the_gateway_on_the_listener_it_names() {
         dir.path().join("ai6.cfg"),
         format!(
             "[unex]\nlisten = \"127.0.0.1:{port}\"\npublic_origin = \"https://localhost\"\n\
-             state_dir = \"state\"\nstation_token = {{ file = \"token\" }}\n"
+             state_dir = \"state\"\nstation_token = {{ provider = \"file\", key = \"token\" }}\n"
         ),
     )
     .unwrap();
@@ -255,7 +255,10 @@ fn the_gateway_names_each_key_it_needs_and_the_file_does_not_hold() {
             "public_origin",
         ),
         (
-            text.replace("station_token = { file = \"station-token\" }\n", ""),
+            text.replace(
+                "station_token = { provider = \"file\", key = \"station-token\" }\n",
+                "",
+            ),
             "station_token",
         ),
     ] {
