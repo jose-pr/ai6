@@ -27,6 +27,7 @@ import 'assistant/demo_conversation.dart';
 import 'assistant/memory_page.dart';
 import 'assistant/navigation_card.dart';
 import 'assistant/pages.dart';
+import 'assistant/transcripts.dart';
 import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
@@ -190,7 +191,8 @@ class AppearancePreferences {
   }
 }
 
-class MissionBoard extends ChangeNotifier implements PageActions {
+class MissionBoard extends ChangeNotifier
+    implements PageActions, TranscriptReads {
   MissionBoard({
     required this.apiOrigin,
     this.demo = false,
@@ -1183,6 +1185,63 @@ class MissionBoard extends ChangeNotifier implements PageActions {
         'The gateway refused the page change.',
       );
     }
+  }
+
+  /// A JSON object from `GET path`; a refusal carries [what] was refused.
+  Future<Map<String, Object?>> _readObject(String path, String what) async {
+    if (demo) throw StateError('$what is unavailable in preview.');
+    final response = await _userRequest('GET', path);
+    if (response.statusCode != 200) {
+      throw GatewayRefused(response.statusCode, 'The gateway refused $what.');
+    }
+    return (jsonDecode(response.body) as Map<String, dynamic>)
+        .cast<String, Object?>();
+  }
+
+  @override
+  Future<Map<String, Object?>> sessionContext(
+    String operation,
+    String session,
+  ) => _readObject(
+    '/v1/user/operations/${Uri.encodeComponent(operation)}/sessions/'
+        '${Uri.encodeComponent(session)}/context',
+    "the Session's context",
+  );
+
+  @override
+  Future<Map<String, Object?>> conversationLog(
+    String conversation,
+  ) => _readObject(
+    '/v1/user/assistant/conversations/${Uri.encodeComponent(conversation)}/log',
+    "the conversation's log",
+  );
+
+  @override
+  Future<Map<String, Object?>> conversationContext(
+    String conversation,
+  ) => _readObject(
+    '/v1/user/assistant/conversations/${Uri.encodeComponent(conversation)}/context',
+    "the conversation's context",
+  );
+
+  @override
+  Future<List<Map<String, Object?>>> conversations({
+    String? person,
+    bool everyone = false,
+  }) async {
+    final query = everyone
+        ? '?everyone=true'
+        : person == null
+        ? ''
+        : '?person=${Uri.encodeQueryComponent(person)}';
+    final listed = await _readObject(
+      '/v1/user/assistant/conversations$query',
+      'the list of conversations',
+    );
+    return [
+      for (final conversation in listed['conversations'] as List<dynamic>)
+        (conversation as Map<String, dynamic>).cast<String, Object?>(),
+    ];
   }
 
   /// The person's own pages, then those shared with them (`GET /v1/user/pages`).
@@ -4318,6 +4377,7 @@ class _AccessGateState extends State<_AccessGate> {
       settings: widget.chatSettings,
       proposalWait: board.limits.controls.confirming,
       pageActions: board.demo ? null : board,
+      transcripts: board.demo ? null : board,
       openWindow: widget.desktopWindows
           ? (context, chat, onClosed) =>
                 _openChatWindow(context, chat, onClosed, board)

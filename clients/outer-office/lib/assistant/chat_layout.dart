@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
 import 'pages.dart' show PageActions;
+import 'transcripts.dart' show TranscriptReads;
 import '../shell/app_window.dart';
 import '../shell/oo_shell.dart';
 import 'assistant_controller.dart';
@@ -178,6 +179,7 @@ class MoneypennyChat extends ChangeNotifier {
     this.label,
     this.proposalWait = ControlSettings.defaultConfirming,
     this.pageActions,
+    this.transcripts,
   }) : _width = settings.width {
     controller.addListener(_heard);
   }
@@ -194,6 +196,9 @@ class MoneypennyChat extends ChangeNotifier {
 
   /// What the page cards ask of Universal Exports; none where there are no pages (the demo).
   final PageActions? pageActions;
+
+  /// Reads the conversation's log and its harnesses' contexts; none in the demo.
+  final TranscriptReads? transcripts;
 
   final AssistantController controller;
   final ChatPreferences? preferences;

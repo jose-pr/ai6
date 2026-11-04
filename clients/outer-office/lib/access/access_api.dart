@@ -26,6 +26,7 @@ const operationActions = [
   'mission.read',
   'pool.manage',
   'pool.read',
+  'session.context',
   'session.input',
   'session.read',
 ];

@@ -24,7 +24,14 @@ const _areas = <(String, Map<String, String>)>[
       'mission.control': 'cancel, retry, resume, interrupt',
     },
   ),
-  ('Sessions', {'session.read': 'watch', 'session.input': 'type into'}),
+  (
+    'Sessions',
+    {
+      'session.read': 'watch',
+      'session.input': 'type into',
+      'session.context': 'read the context of',
+    },
+  ),
   (
     'Linked issues',
     {

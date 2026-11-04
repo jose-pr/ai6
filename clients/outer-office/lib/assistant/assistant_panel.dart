@@ -15,6 +15,7 @@ import 'assistant_view.dart';
 import 'entry_kind.dart';
 import 'export.dart' as exporting;
 import 'pages.dart';
+import 'transcripts.dart';
 import 'navigation_card.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
@@ -39,6 +40,7 @@ class AssistantPanel extends StatefulWidget {
     this.label,
     this.proposalWait = ControlSettings.defaultConfirming,
     this.pageActions,
+    this.transcripts,
     this.saveText = exporting.saveText,
     super.key,
   });
@@ -83,6 +85,9 @@ class AssistantPanel extends StatefulWidget {
   /// What the cards of pages she published ask of Universal Exports; without it a page card
   /// shows her title only.
   final PageActions? pageActions;
+
+  /// Reads the conversation's log and contexts; without it the menu does not offer them.
+  final TranscriptReads? transcripts;
 
   /// Where an export goes: a download in a browser, the Downloads folder on a desktop.
   final Future<String?> Function(String name, String text) saveText;
@@ -292,6 +297,40 @@ class _AssistantPanelState extends State<AssistantPanel> {
                           title: Text('Export conversation'),
                         ),
                       ),
+                      if ((widget.transcripts, controller.conversationId) case (
+                        final reads?,
+                        final conversation?,
+                      ))
+                        PopupMenuItem(
+                          onTap: () => unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => ConversationLogPage(
+                                  reads: reads,
+                                  conversation: conversation,
+                                ),
+                              ),
+                            ),
+                          ),
+                          child: const ListTile(
+                            leading: Icon(Icons.receipt_long_outlined),
+                            title: Text('Conversation log'),
+                          ),
+                        ),
+                      if (widget.transcripts case final reads?)
+                        PopupMenuItem(
+                          onTap: () => unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => ConversationsPage(reads: reads),
+                              ),
+                            ),
+                          ),
+                          child: const ListTile(
+                            leading: Icon(Icons.forum_outlined),
+                            title: Text('Logged conversations'),
+                          ),
+                        ),
                       if (widget.onMemory case final onMemory?)
                         PopupMenuItem(
                           onTap: onMemory,

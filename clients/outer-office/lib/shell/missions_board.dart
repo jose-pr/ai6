@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../assistant/pages.dart' show launchPage;
+import '../assistant/transcripts.dart' show SessionContextPanel;
 import '../controls/mission_actions.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
@@ -841,17 +842,52 @@ class _SessionDetailContent extends StatelessWidget {
               'Mission ${board.handleOf(current.operationId, current.missionId)} · '
               '${current.state ?? 'awaiting lifecycle'}',
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
             Expanded(
-              child: board.demo
-                  ? const _SessionPreviewPanel(
-                      message: 'Demo Sessions are sample data. No terminal connection is available.',
-                    )
-                  : board.accessToken == null
-                  ? const _SessionPreviewPanel(
-                      message: 'Sign in to Universal Exports to attach to this Session.',
-                    )
-                  : _LiveSessionTerminal(session: current, board: board),
+              child: DefaultTabController(
+                length: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const TabBar(
+                      tabs: [
+                        Tab(text: 'Terminal'),
+                        Tab(text: 'Context'),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          board.demo
+                              ? const _SessionPreviewPanel(
+                                  message: 'Demo Sessions are sample data. No terminal connection is available.',
+                                )
+                              : board.accessToken == null
+                              ? const _SessionPreviewPanel(
+                                  message: 'Sign in to Universal Exports to attach to this Session.',
+                                )
+                              : _LiveSessionTerminal(
+                                  session: current,
+                                  board: board,
+                                ),
+                          board.demo || board.accessToken == null
+                              ? const _SessionPreviewPanel(
+                                  message:
+                                      "A Session's context is read from Universal Exports "
+                                      'once you are signed in.',
+                                )
+                              : SessionContextPanel(
+                                  reads: board,
+                                  operation: current.operationId,
+                                  session: current.sessionId,
+                                ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
