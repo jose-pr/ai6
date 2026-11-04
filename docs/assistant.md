@@ -659,8 +659,9 @@ skills = ["report-writer"]
 ```
 
 `ai6 assistant pin-skill DIR` prints every file of the skill directory with its SHA-256 and
-the `pin`: the digest of one line per file, path and digest. Change any byte, add or remove a
-file, and the pin does not match. Everyone is given every catalog skill; a group's table,
+the `pin`: the digest of one line per file, path and digest, the same tree digest an
+[overlay](agents.md#overlays)'s pin is, so `.git`, `node_modules` and the other names AOS excludes
+are not part of it. Change any byte, add or remove a file, and the pin does not match. Everyone is given every catalog skill; a group's table,
 and a person's, may leave some out, never add one, and a person in several groups keeps only
 what all of their tables keep. These are the same tables that narrow [her scripts and the
 web](#her-scripts-and-the-web): one table may set `skills` beside `interpreters` or `network`.

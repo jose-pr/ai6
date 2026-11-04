@@ -926,6 +926,103 @@ Pools page in Outer Office (`roster.read`) show them by pool and account.
 - A discovered model is an offer: it makes no route, and no Agent uses it until a person or an
   approved proposal writes the route. No credential is ever part of an answer.
 
+## Overlays
+
+An overlay is a directory of what an Agent works with: rules, context, skills, knowledge files,
+programs and environment. A loadout issues overlays to its Agent, and an Operation adds its own,
+since which standards apply belongs to the project. The format is the
+[Agent Overlay Spec](https://boriken-dev.github.io/agent-overlay-spec/) (AOS), edition
+`0.1.0-draft`: a tree with an optional `overlay.cfg` manifest.
+
+Today a Station reads, validates, pins and resolves overlays; it does not yet deliver them into a
+Session. What follows is what those records mean and what is checked.
+
+```toml
+# loadouts.toml
+[overlay.engineering]
+source = "https://github.com/example/agents.git@4b825dc642cb6eb9a060e54bf8d69288fbee4904#overlays/engineering"
+pin = "sha256:5d0c..."                     # what `ai6 overlay pin DIR` prints
+secrets = ["agents-deploy-key"]            # [secret.<name>] names a private source is fetched with
+
+[overlay.rust]
+path = "/srv/overlays/rust"                # a directory on the Station
+pin = "sha256:9a41..."
+
+[loadout.007]
+overlays = ["engineering"]
+
+# operations.toml
+[operation.G]
+overlays = ["rust"]
+```
+
+- **`[overlay.<name>]`** names exactly one of `source`, in AOS's
+  `[git+]<location>[@<ref>][#<path>]` form, or `path`, and the `pin` its files must have. The
+  name is the overlay's identity, compared in lower case with `_` and `.` as `-`: `Team_Review`
+  and `team-review` are one overlay, and two records naming it are refused. `default`,
+  `overlay`, `system`, `user`, `project`, `project-root` and Windows device names are refused.
+- **`overlays`** on a loadout and on an Operation name records by identity, each once. A
+  loadout's must name records its document defines.
+- **Order.** A Session gets the loadout's list, then the Operation's. Each overlay's `requires`
+  is resolved first and each overlay is issued once; they then contribute in AOS composition
+  order, ascending `(priority, name, identity)`, so the overlay with the higher `priority` wins
+  a conflict. An Operation's list only adds: no name takes away what the loadout issues.
+- **Refusals.** A name that is no overlay name or that no record defines, a `requires` no record
+  offers, and a cycle (`a -> b -> a`) each refuse the Session, naming the overlay: a Session is
+  never given part of what it was meant to have.
+- **The pin** is the AOS tree digest: one line per file, `path NUL sha256:<hex> LF`, sorted by
+  path bytes, hashed with SHA-256, over the bytes as published. `.git`, `node_modules`,
+  `__pycache__`, the other excluded names and `.pyc` files are not part of it; a link, a
+  special file, a name a platform would alias and two paths equal under ASCII case make the
+  tree unreadable. A changed, added or renamed file changes it. A mismatch refuses and nothing
+  overrides it: to accept other bytes, change the pin. An overlay with no pin is refused unless
+  the `station` record's `[overlays] unpinned = true`, a weakening reported as `unpinned` for
+  each such overlay every time it is issued.
+- **`ai6 overlay pin DIR`** reads an overlay as a Station does, running nothing: it prints each
+  file with its SHA-256 and the `pin`. It exits non-zero, printing no pin, when `overlay.cfg`
+  does not read or validate against the files, or a skill fails the `SKILL.md` checks. Problems
+  under `about`, which is informational, are printed and do not stop it. `ai6 assistant
+  pin-skill` computes the same digest.
+
+### What an overlay holds
+
+Files in conventional places take effect without a manifest, each turned off by a `[defaults]`
+key set to `false`:
+
+| Key | Default |
+| --- | --- |
+| `bin` | `bin/` prepended to `PATH` |
+| `lib` | `lib/python/` prepended to `PYTHONPATH`, `lib/node/` to `NODE_PATH`; a bare `lib/` means nothing |
+| `env` | the root file `env`, read as dotenv: literal text with `${NAME}` substitution, never run |
+| `env_scripts` | one root `env.<ext>`: `.py`, `.js`, `.mjs`, `.cjs`, `.ps1` on Windows, `.bash`, `.sh` elsewhere, the first present whose interpreter is found |
+| `setup` | one root `setup.<ext>`, chosen the same way, taken to need the network |
+| `deps` | `lib/python/requirements.txt` and `lib/node/package.json` |
+| `context` | the root `CONTEXT.md` |
+| `skills` | every `skills/<name>/SKILL.md` |
+| `rules` | every `rules/<name>.md` directly in `rules/` |
+
+What a manifest declares adds to these, and an entry naming a default's file or directory
+replaces that default. Every skill an overlay offers passes the checks Moneypenny's catalog
+applies to `SKILL.md`: front matter naming the skill with a description, and no key that grants
+tools or injected command.
+
+- **Weakenings.** A default env script or setup that runs, a setup with the network, a
+  dependency file installed (`deps-network`) or not locked (`unlocked-dependencies`), a secret
+  read, a sensitive variable set and the others AOS lists are computed for each overlay, with the
+  overlay and the variable or path, never a value.
+- **Secrets** reach an overlay only by reference (`{ secret = "name" }` or
+  `{ provider = "env", key = "VAR" }` in `env` or an `aos` env file, never in dotenv), and only
+  when granted to that overlay; a placeholder never reads a secret.
+Nothing an overlay holds runs yet. When a Station installs and runs it, these are its rules:
+
+- **Dependencies** go into an environment of each overlay's own, keyed by its digest, whatever
+  `environment` the overlay chooses, so a pin covers exactly the packages its Sessions get. AOS
+  allows a consumer this policy, and it is not a weakening, since it shares less. A
+  requirements file whose requirements are only partly hashed is refused.
+- **Setup** runs in its phases: `install` for an overlay with no record on a Theater, `sync` for a
+  digest other than the recorded one, nothing for the recorded one. The record is kept per
+  Theater. A failed sync of the recorded digest keeps it active.
+
 ## Commands
 
 Run `ai6 serve --help` to configure a Station and `ai6ctl --help` for the operator

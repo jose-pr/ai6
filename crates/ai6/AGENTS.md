@@ -404,6 +404,10 @@ pub struct StationLimits { /* one field per table, and */ pub providers: BTreeMa
 impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero queues/pages/attempts, a non-table provider
 ```
 
+`OverlayLimits` (`[overlays]`: `manifest_bytes` 1 MiB, `manifest_depth` 64, `files` 4096,
+`bytes` 64 MiB, `file_bytes` 16 MiB, `unpinned` false) has `tree() -> TreeLimits`,
+`manifest() -> ReadLimits` and `weakenings()` (looser limits, and `unpinned = true`).
+
 A Station hands `&StationLimits` (or one table) to whatever does the work; there is no
 global. Free functions that bounded with a constant take the table or the value:
 `reattach_delay(failures, &RecoveryLimits)`, `parked_until(.., grace_secs)`,
@@ -664,6 +668,7 @@ pub struct Operation {
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
     pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
+    pub overlays: Vec<String>,                    // [overlay.<name>] names its Sessions get after the loadout's; each once
     pub harness: HarnessPolicy,                   // [operation.ID.harness]; ignore unless configured
     pub promotion: PromotionPolicy,               // [operation.ID.promotion]; see Promotion below
     pub scorecard: ScorecardPolicy,               // [operation.ID.scorecard]; see Scorecard below
@@ -896,9 +901,9 @@ pub const DEFAULT_INTERPRETER: &str = "python3";
 pub struct SharedRepo;  // SharedRepo::new(repo).writable(bool); repo(), write()
 pub struct SkillEntry;  // SkillEntry::new(path).pinned(PeerId); path(), pin() -> Option<PeerId>
 pub const SKILLS_PLUGIN: &str = "ai6";             // Claude Code calls each installed skill `ai6:<name>`
-pub const SKILL_INERT_KEYS: [&str; 12];            // front matter keys that load without skills_allow_tools
 pub fn skill_name(name: &str) -> bool;             // 1-64 of a-z, 0-9, -, starting with a letter or digit
-pub fn check_skill(dir: &Path, name: &str, allow_tools: bool, limits: &HarnessLimits) -> Result<(), String>;
+// SKILL_INERT_KEYS and check_skill are in ai6::directorates::q::overlays: every SKILL.md AI6
+// delivers, hers or an overlay's, passes the one check.
 #[non_exhaustive] pub enum RepoKind { Local, Remote }
 impl RepoKind {
     pub fn of(repo: &str) -> Result<Self, String>;
@@ -931,8 +936,10 @@ The skills catalog: `validate` refuses a name `skill_name` refuses, a `path` tha
 absolute (`Roster::load` first makes `agents.toml`'s relative paths absolute under the
 configuration directory; a SQL roster or a builder must give absolute ones), a skill without
 a `pin` unless `skills_unpinned`, a skill `check_skill` refuses, and a group or person table
-naming a skill the catalog lacks. `check_skill` reads `<dir>/SKILL.md` (a regular file of at
-most `limits.manifest_file_bytes`, never through a link; the settings check uses the defaults): front matter between two `---` lines
+naming a skill the catalog lacks. `check_skill(dir, name, allow_tools, tools_setting, file_bytes)`
+(`directorates::q::overlays`) reads `<dir>/SKILL.md` (a regular file of at most `file_bytes`,
+`[harness] manifest_file_bytes` here, never through a link; the settings check uses the
+defaults; a refusal names `tools_setting`, `assistant.skills_allow_tools` here): front matter between two `---` lines
 must parse as a YAML mapping (`serde-saphyr`; duplicate keys refused, merge keys expanded) with
 `name` equal to the catalog's name and a non-empty `description`; unless `allow_tools`, it
 may hold only `SKILL_INERT_KEYS` and no injected command (any `` !` ``, or a fence of three or
@@ -1015,15 +1022,18 @@ impl HarnessPolicy {
 impl ProjectManifest {
     pub fn read(root: &Path) -> Result<Self, String>;      // within HarnessLimits::default()
     pub fn read_within(root: &Path, limits: &HarnessLimits) -> Result<Self, String>;
-    pub fn read_tree(root: &Path) -> Result<Self, String>; // every regular file under a directory
+    pub fn read_tree(root: &Path) -> Result<Self, String>; // a directory as the AOS tree digest reads it
     pub fn read_tree_within(root: &Path, limits: &HarnessLimits) -> Result<Self, String>;
     pub fn digest(&self) -> PeerId;  pub fn digest_with(&self, algorithm: coqui_peer::Digest) -> PeerId;
 }
 ```
 
-`read_tree` reads a whole directory (a skill: `ai6 assistant pin-skill DIR`) with the same
-rules and limits, paths relative to it; `root` itself must be a directory reached without a
-link.
+`read_tree` reads a whole directory (a skill: `ai6 assistant pin-skill DIR`) through
+`directorates::q::overlays::tree_digest` within the same limits, so `digest()` is the AOS tree
+digest an overlay's pin is: excluded names (`.git`, `node_modules`, `__pycache__`, ...) and
+`.pyc` files are no members, and a link, special file, name that is no AOS relative path or two
+paths equal under ASCII case is an error. Paths are relative to it; `root` itself must be a
+directory reached without a link.
 
 The manifest is every regular file under `PROJECT_DIRECTORIES`, each of `PROJECT_FILES`, and
 every file inside the working directory that a `command` or `args` value names (JSON and
@@ -1154,7 +1164,7 @@ pub struct ConfigRevision;   // opaque; new(u64), get()
 #[non_exhaustive] #[derive(Clone, Default)]   // the non-roster families, for one Station
 pub struct Settings {
     pub theaters: Theaters,
-    pub loadouts: LoadoutCatalog,            // loadout, sandbox, mcp, secret, pool records
+    pub loadouts: LoadoutCatalog,            // loadout, sandbox, mcp, overlay, secret, pool records
     pub cables: CableConfig,                 // default denies every action
     pub pins: Option<PinSet>,                // plugin records; None when there are none
     pub station: StationRuntime,             // station record
@@ -1232,14 +1242,15 @@ pub trait ConfigProvider: Send + Sync {
     /// Global and each Station scope that holds records (default: Global).
     fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError>;
 }
-pub const IMPORT_ORDER: [ConfigRecord; 19];   // each family after those it refers to
+pub const IMPORT_ORDER: [ConfigRecord; 22];   // each family after those it refers to
 pub fn family_document(record: ConfigRecord, records) -> Result<String, RosterError>;   // TOML
 pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, RosterError>;
 #[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater, Loadout, Sandbox,
-    Mcp, Secret, Pool, Cables, Plugin, Station, Tls, Access, Unex, Roster }
+    Mcp, Overlay, Secret, Pool, Cables, Plugin, Station, Tls, Access, OperationAccess, Unex,
+    Roster, Compartment, Review }
 impl ConfigRecord {
-    pub const ALL: [Self; 19];                  // Roster first
+    pub const ALL: [Self; 22];                  // Roster first
     pub const SINGLETON_KEY: &'static str;      // "settings": a singleton family's one record
     pub const fn name(self) -> &'static str;    // "operation", "agent", ... "unex", "roster"
     pub fn from_name(name: &str) -> Option<Self>;
@@ -1303,7 +1314,7 @@ Station scope, or a singleton under another key, is `Invalid`.
 from `stations/<id>/` beside them. Each top-level table of a file names a family that file
 holds: `operations` (`[operation.<id>]`), `agents` (`[agent.<codename>]`, `[role.<id>]`,
 `[assistant]`), `covers` (`[cover.<name>]`), `theaters` (`[theater.<id>]`), `loadouts`
-(`[loadout.*]`, `[sandbox.*]`, `[mcp.*]`, `[secret.*]`, `[pool.*]`); `plugins` is `[[library]]`
+(`[loadout.*]`, `[sandbox.*]`, `[mcp.*]`, `[overlay.*]`, `[secret.*]`, `[pool.*]`); `plugins` is `[[library]]`
 entries keyed by `file`; `cables`, `station`, `tls`, `access` and `unex` are each one record,
 the whole file; `operation_access` (`[operation_access.<id>]`) is one record per Operation. Anything else is `Invalid`, naming the table, and two files for one family
 are `Invalid`, naming both. `ai6.cfg` is never a family file; no family has its stem. A
@@ -3884,6 +3895,7 @@ impl Loadout {
     pub fn agent(&self) -> &str;
     pub fn sandbox_name(&self) -> Option<&str>;
     pub fn mcp_names(&self) -> &[String];
+    pub fn overlay_names(&self) -> &[String];   // [overlay.<name>] names, as declared
     pub fn secret_names(&self) -> &[String];
     pub fn env(&self) -> &SessionEnv;   // [loadout.X] env: non-secret values a Session is given, which exposure does not strip
     /// Declares only the account's secret (agent "pool:<id>/<name>"), so a broker leases it
@@ -3962,6 +3974,8 @@ impl LoadoutCatalog {
     pub fn loadouts(&self) -> impl Iterator<Item = &Loadout>;
     pub fn sandboxes(&self) -> impl Iterator<Item = &SandboxProfile>;
     pub fn mcp_servers(&self) -> impl Iterator<Item = &McpServer>;
+    pub fn overlays(&self) -> &BTreeMap<String, OverlayRecord>;   // by identity
+    pub fn overlay(&self, name: &str) -> Option<&OverlayRecord>;  // name compared as an identity
     pub fn secret(&self, name: &str) -> SecretDefinition;   // its [secret.<name>], or every default
     pub fn secrets(&self) -> Vec<SecretDefinition>;         // every name a loadout, table or pool account names
 }
@@ -3984,13 +3998,94 @@ Loadouts use strict `[loadout.<agent>]`, `[sandbox.<name>]`, `[mcp.<name>]`,
 `[secret.<name>]` (`env`, `green_ink`, `kinds` and `targets` (globs, only with `green_ink`), `from = { env = "…" }
 | { file = "…" }`; never a value) and `[pool.<id>]` (`handler`, `operations`, `strategy`,
 `login_command`, accounts `[pool.<id>.account.<name>]` with `kind`, `secret`, `dir`, `env`,
-`priority`, `max_concurrent`, `labels`) TOML tables; a document needs a loadout or a pool. Parsing is bounded to one MiB, denies unknown
+`priority`, `max_concurrent`, `labels`) and `[overlay.<name>]` (exactly one of `source`, an
+AOS source string, and `path`; `pin`, a `sha256:` digest; `secrets`, names) TOML tables; a
+loadout's `overlays` names records of the same document, each identity once. A document needs a
+loadout, a pool, a secret or an overlay. Parsing is bounded to one MiB, denies unknown
 fields and invalid or duplicate names, and validates references before returning a catalog.
 Errors distinguish I/O, size, encoding, TOML syntax and schema failures; diagnostics expose
 source positions but never document contents. The catalog is inert: it does not expand
 environment variables, resolve paths, launch MCP servers or create sandboxes. A Station
 loads `loadouts.toml` from its configuration directory (or `StationConfig::with_loadouts`)
 and applies only the secrets: see "Credentials" under the Station daemon.
+
+## Overlays (`ai6::directorates::q::overlays`)
+
+Overlays in the Agent Overlay Spec's format (AOS `0.1.0-draft`, vectors at commit `061b8f5`
+in `tests/fixtures/aos-vectors/`): reading, validating, digesting, resolving and composing,
+and the environment, setup and dependencies an overlay asks for, as pure functions. Nothing
+here runs a script, installs a package, starts a server, reads the network or delivers an
+overlay to a Session. The Store class (catalogs, icons) is not implemented.
+
+```rust
+pub const MANIFEST: &str = "overlay.cfg";
+#[non_exhaustive] pub enum OverlayFrom { Source(Source), Path(PathBuf) }
+pub struct OverlayRecord;   // [overlay.<name>]
+impl OverlayRecord {
+    pub fn new(name, from: OverlayFrom) -> Self; pub fn pinned(self, Digest) -> Self; pub fn with_secrets(self, Vec<String>) -> Self;
+    pub fn name(&self) -> &str; pub fn identity(&self) -> String; pub fn from(&self) -> &OverlayFrom;
+    pub fn pin(&self) -> Option<Digest>; pub fn secrets(&self) -> &[String];
+}
+pub struct ReadOverlay { pub digest: TreeDigest, pub manifest: Document, pub issues: Vec<Issue>,
+    pub skills: Vec<(String, Result<(), String>)> }   // tree(), usable()
+pub fn read_overlay(root: &Path, limits: &OverlayLimits) -> Result<ReadOverlay, String>;   // `ai6 overlay pin DIR`
+#[non_exhaustive] pub enum OverlayList { Loadout, Operation }
+#[non_exhaustive] pub enum OverlayRefusal { InvalidName { list, name }, Unknown { list, name },
+    Missing { by, name }, Cycle(Vec<String>), Unpinned(String) }   // Display, Error
+pub struct IssuedOverlay { pub identity: String, pub record: OverlayRecord, pub manifest: Document }
+pub struct IssuedOverlays { pub install_order: Vec<String>, pub overlays: Vec<IssuedOverlay>, pub weakenings: Vec<Weakening> }
+pub fn issue_overlays(loadout: &[String], operation: &[String],
+    records: &BTreeMap<String, OverlayRecord>, manifests: &BTreeMap<String, Document>,
+    allow_unpinned: bool) -> Result<IssuedOverlays, OverlayRefusal>;
+
+// AOS
+pub type Document = serde_json::Map<String, serde_json::Value>;   // the data model
+pub struct ReadLimits { pub bytes: Limit /* 1 MiB */, pub depth: Limit /* 64 */ }
+pub struct ReadError;   // class() (AOS error class), line(); Display names no document text
+pub fn read_document(data: &[u8], limits: &ReadLimits) -> Result<Document, ReadError>;
+pub fn parse_dotenv(data: &[u8]) -> Result<Vec<DotenvLine>, ReadError>;
+pub fn read_dotenv(data: &[u8], env: &mut Environment) -> Result<Vec<(String, String)>, ReadError>;
+pub fn read_env_script_output(data: &[u8]) -> Result<ScriptOutput, ReadError>;
+pub fn substitute(text: &str, lookup: &Lookup<'_>) -> Result<String, SubstitutionError>;
+pub fn valid_overlay_name(&str) -> bool; pub fn normalize_name(&str) -> String;
+pub fn root_variable(identity: &str) -> String; pub fn state_variable(identity: &str) -> String;
+pub fn valid_relative_path(&str) -> bool; pub fn is_reserved_variable(&str) -> bool;
+pub fn is_sensitive_variable(&str) -> bool; pub fn os_matches(Option<&[String]>, &str) -> bool; pub fn current_os() -> &'static str;
+pub struct Source { pub kind: SourceKind, pub location, pub reference: Option<String>, pub path: Option<String> }   // parse(), shown()
+pub struct Digest;   // sha256: and 64 hex; of(bytes), parse(text), bytes(), Display lowercase
+pub struct TreeLimits { pub files: Limit, pub bytes: Limit, pub file_bytes: Limit }
+pub struct TreeDigest { pub digest: Digest, pub files: BTreeMap<String, Digest> }   // lines()
+pub fn tree_digest(root: &Path, limits: &TreeLimits) -> Result<TreeDigest, DigestError>;
+pub fn digest_entries(entries) -> Result<TreeDigest, DigestError>;   // abstract (components, TreeEntry)
+pub struct OverlayTree;   // from_paths, from_texts; paths(), contains(), text()
+pub fn validate(manifest: &Document, tree: Option<&OverlayTree>) -> Vec<Issue>;   // Issue { at, code }
+pub fn applies(issues: &[Issue]) -> bool;   // only problems under /about
+pub fn resolve(..) -> Result<Resolution, Cycle>; pub fn composition_order(..) -> Vec<String>;
+pub fn compose(overlays, requested, trees) -> Result<Composition, Cycle>;
+pub fn environments(overlays, active, trees, os, removed) -> Result<Environments, String>;
+pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Refusal>;
+pub fn composed_environment(active: &[(&Document, Facts)], base: Environment, &mut Vec<Weakening>) -> Result<Environment, Refusal>;
+pub fn setup_phase(Change, recorded: Option<&str>, digest: Option<&str>) -> Option<Phase>;
+pub fn preparation(Change, Option<&SetupRecord>, digest, setup, dependencies, fails) -> Preparation;
+pub fn check_skill(dir: &Path, name: &str, allow_tools: bool, tools_setting: &str, file_bytes: Limit) -> Result<(), String>;
+pub const SKILL_INERT_KEYS: [&str; 12];
+```
+
+`read_document` drops one byte-order mark, takes the format from a `#!` first line (its last
+word, after the last `/` or `\`, leading dots dropped, ASCII lowercased) or else TOML, and
+parses through `anycfg` with codecs of its own over guatiao's `Value`: TOML refuses a date,
+JSON a duplicate key, a lone surrogate, `NaN` and comments, YAML (from `granit-parser`
+events) any tag, anchor, alias, merge key, directive, second document and U+0085/U+2028/U+2029,
+typing plain scalars by the 1.2 core schema. The value is checked against the data model:
+no null, finite floats, signed 64-bit integers, `30.0` kept a float, within `depth`. Every
+error carries an AOS class (`parse-error`, `duplicate-key`, `yaml-tag`, `too-deep`, ...).
+
+`issue_overlays` refuses a name that is no overlay name or no record's (`InvalidName`,
+`Unknown`, naming the list), resolves `requires` over the records whose manifests are given
+(a cycle or a missing requirement refuses), orders by `(priority, name, identity)`, and
+refuses an overlay without a pin unless `allow_unpinned`, which reports `unpinned` for it.
+
+`Environment`'s `Debug` lists names only, and `Facts`' omits grants, secrets and files.
 
 Secret references can be leased through `SecretBroker`:
 
