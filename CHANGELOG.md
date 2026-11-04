@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   status, and for what her harness did the Station, provider Session, Agent, route, pool account,
   model and tokens that ran it. Secrets never reach it: tool tokens are no part of an entry, and
   the person's access token and her tool token are redacted wherever they appear. It keeps 90 days
-  and 1 GiB (`[assistant.gateway] log_age`, `log_bytes`, `log_prune_every`;
+  and 1 GiB (`[assistant.gateway] log_age`, `log_bytes`, `log_prune_every`, and
+  `log_flush_timeout`, how long a stopping gateway waits for what is queued;
   `[registry.limits.assistant_log] entry_bytes`). A conversation outlives a gateway restart: it is
   rebuilt from the log and resumes its provider Session. `GET /v1/user/assistant/conversations`,
   `.../{id}/log` and `.../{id}/context` read them; another person's needs `audit.read` and
@@ -404,6 +405,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `universal-exports` stops gracefully at SIGTERM on unix, as a service manager stops it, not
+  only at Ctrl-C.
 - The `acp` handler's default `limit_phrases` name the Grok CLI's out-of-credits words (`spending-limit`,
   `run out of credits`, `402 Payment Required`), and the ACP client now keeps the reason Grok puts in an
   object `data`, so such a turn stops as limited and its route is passed over.

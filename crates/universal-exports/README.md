@@ -123,7 +123,7 @@ record; authorization still comes from the access policy.
 | `ControlStatus` | One operator control (cancel, retry, resume, interrupt) and what the Station did with it. |
 | `TimelinePage`, `TimelineItem` | One page of an Operation's correlated, metadata-only activity timeline. |
 | `Gateway::router` | Axum routes for the Station channel, attach token exchange and WebSocket sessions. |
-| `Gateway::serve_loopback(port, shutdown)` | Loopback listener with caller-owned graceful shutdown. |
+| `Gateway::serve_loopback(port, shutdown)` | Loopback listener with caller-owned graceful shutdown; then flushes Moneypenny's conversation log. |
 
 ### HTTP routes
 
@@ -279,8 +279,9 @@ weakening. The `unex` record's keys are listed in [Configuration](https://jose-p
 
 ## Exit status
 
-`universal-exports` returns `0` after graceful shutdown, `1` when configuration or
-listener startup fails, and `2` for invalid command-line arguments.
+`universal-exports` stops gracefully at Ctrl-C and, on unix, at SIGTERM (a service manager's
+stop), and returns `0` after graceful shutdown, `1` when configuration or listener startup fails,
+and `2` for invalid command-line arguments.
 
 ## Development
 

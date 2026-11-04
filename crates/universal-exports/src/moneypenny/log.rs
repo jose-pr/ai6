@@ -6,13 +6,17 @@
 //! (`tool_call`) and the size and status of its answer (`tool_result`), and each change of a
 //! proposal's status (`proposal_status`). The person's access token and her tool token never
 //! reach it: they are not part of an entry, and are taken out of any text that carries them.
+//!
+//! When the gateway stops, it waits up to `log_flush_timeout` for the writer to keep what is
+//! still queued ([`Sink::flush`]).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use ai6::directorates::registry::backend::*;
-use ai6::{AssistantGatewayLimits, AssistantLogEntry};
+use ai6::{AssistantGatewayLimits, AssistantLogEntry, TimeLimit};
 use serde_json::Value;
 
 use super::store::{Bounds, Conversation, Entry, Role};
@@ -27,9 +31,20 @@ pub(crate) const PROPOSAL_STATUS: &str = "proposal_status";
 /// What a secret is replaced with.
 const REDACTED: &str = "[redacted]";
 
+/// What the writer is sent: an entry to keep, or a request to answer once everything sent
+/// before it is kept.
+enum Message {
+    Entry(Box<AssistantLogEntry>),
+    Flush(mpsc::SyncSender<()>),
+}
+
 /// Where a conversation's entries go to be kept.
 #[derive(Clone)]
-pub(crate) struct Sink(mpsc::Sender<AssistantLogEntry>);
+pub(crate) struct Sink {
+    sender: mpsc::Sender<Message>,
+    /// Entries sent and not yet kept, or given up.
+    queued: Arc<AtomicUsize>,
+}
 
 impl std::fmt::Debug for Sink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,14 +55,34 @@ impl std::fmt::Debug for Sink {
 impl Sink {
     /// Queues `entry` for the writer; one the writer can no longer take is dropped.
     pub(crate) fn send(&self, entry: AssistantLogEntry) {
-        let _ = self.0.send(entry);
+        self.queued.fetch_add(1, Ordering::AcqRel);
+        if self.sender.send(Message::Entry(Box::new(entry))).is_err() {
+            self.queued.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
+    /// Waits, up to `timeout`, until the writer has kept every entry sent before this call.
+    /// `Err` holds how many were still queued when it gave up, or when the writer was gone.
+    pub(crate) fn flush(&self, timeout: TimeLimit) -> Result<(), usize> {
+        let (answer, answered) = mpsc::sync_channel(1);
+        let left = || self.queued.load(Ordering::Acquire);
+        if self.sender.send(Message::Flush(answer)).is_err() {
+            return Err(left());
+        }
+        let waited = match timeout.get() {
+            Some(timeout) => answered.recv_timeout(timeout).is_ok(),
+            None => answered.recv().is_ok(),
+        };
+        if waited { Ok(()) } else { Err(left()) }
     }
 }
 
 /// Starts the writer: it keeps each entry in `registry` in the order it was sent, and every
 /// `log_prune_every` drops what `limits` keeps no longer. It stops when every [`Sink`] is gone.
 pub(crate) fn start(registry: Arc<dyn RegistryBackend>, limits: &AssistantGatewayLimits) -> Sink {
-    let (sender, receiver) = mpsc::channel::<AssistantLogEntry>();
+    let (sender, receiver) = mpsc::channel::<Message>();
+    let queued = Arc::new(AtomicUsize::new(0));
+    let kept = queued.clone();
     let (age, bytes, every) = (limits.log_age, limits.log_bytes, limits.log_prune_every.0);
     let spawned = std::thread::Builder::new()
         .name("moneypenny-log".to_owned())
@@ -62,7 +97,7 @@ pub(crate) fn start(registry: Arc<dyn RegistryBackend>, limits: &AssistantGatewa
                     pruned = Some(Instant::now());
                 }
                 match receiver.recv_timeout(every.max(Duration::from_millis(1))) {
-                    Ok(entry) => {
+                    Ok(Message::Entry(entry)) => {
                         if let Err(error) = registry.log_assistant_entry(&entry) {
                             eprintln!(
                                 "universal-exports: an entry of Moneypenny's conversation {} was \
@@ -70,6 +105,10 @@ pub(crate) fn start(registry: Arc<dyn RegistryBackend>, limits: &AssistantGatewa
                                 entry.conversation
                             );
                         }
+                        kept.fetch_sub(1, Ordering::AcqRel);
+                    }
+                    Ok(Message::Flush(answer)) => {
+                        let _ = answer.try_send(());
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -79,7 +118,7 @@ pub(crate) fn start(registry: Arc<dyn RegistryBackend>, limits: &AssistantGatewa
     if let Err(error) = spawned {
         eprintln!("universal-exports: Moneypenny's log writer did not start: {error}");
     }
-    Sink(sender)
+    Sink { sender, queued }
 }
 
 /// `text` with each of `secrets` (at least 16 bytes long, so that no short word is taken for
@@ -185,6 +224,41 @@ pub(crate) fn rebuild(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_flush_returns_once_every_queued_entry_is_kept() {
+        let directory = tempfile::tempdir().unwrap();
+        let registry = Arc::new(ai6::FileRegistry::open(directory.path()));
+        let sink = start(registry.clone(), &AssistantGatewayLimits::default());
+        for index in 0..200 {
+            sink.send(row(
+                "person",
+                &format!("message {index}"),
+                1.0 + f64::from(index),
+            ));
+        }
+        assert_eq!(sink.flush(TimeLimit::UNBOUNDED), Ok(()));
+        let kept = registry.assistant_log("c-1").unwrap();
+        assert_eq!(kept.len(), 200);
+        assert_eq!(kept[199].text, "message 199");
+        assert_eq!(sink.queued.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn a_flush_to_a_writer_that_is_gone_says_what_was_left() {
+        let (sender, receiver) = mpsc::channel();
+        drop(receiver);
+        let sink = Sink {
+            sender,
+            queued: Arc::new(AtomicUsize::new(0)),
+        };
+        sink.send(row("person", "lost", 1.0));
+        assert_eq!(
+            sink.flush(TimeLimit::secs(1)),
+            Err(0),
+            "a refused send is not queued"
+        );
+    }
 
     #[test]
     fn a_secret_is_taken_out_wherever_it_appears_and_short_words_are_left() {

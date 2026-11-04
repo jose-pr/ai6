@@ -469,7 +469,7 @@ its answer (`tool_result`) and each change of a proposal (`proposal_status`); an
 harness or tools carries the `AssistantTurn` that ran it, the report's `AssistantRun` giving the
 pool account, model and tokens. The person's access token and her tool token are replaced with
 `[redacted]` wherever they appear. The log is trimmed every `log_prune_every` (1 hour) to
-`log_age` (90 days) and `log_bytes` (1 GiB). A conversation asked for in a hello that the
+`log_age` (90 days) and `log_bytes` (1 GiB), and flushed when `serve_loopback` stops. A conversation asked for in a hello that the
 gateway does not hold is rebuilt from the log when it is that person's, with the Station,
 provider Session and route of its last turn; a proposal that was waiting shows as expired.
 
@@ -859,7 +859,9 @@ with the last sequence it processed.
 ## HTTP routes and transport
 
 `Gateway::router()` returns the Axum router. `Gateway::serve_loopback(port,
-shutdown)` binds to `127.0.0.1` until the caller's graceful-shutdown future resolves.
+shutdown)` binds to `127.0.0.1` until the caller's graceful-shutdown future resolves, then waits
+up to `[assistant.gateway] log_flush_timeout` (10 s; `none` for all of it) for Moneypenny's
+conversation log to keep what is queued, logging how many entries were left when it gives up.
 The browser-facing HTTPS reverse proxy must connect to that listener, remove any
 client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 
@@ -1083,8 +1085,9 @@ the actions `mission.status`, `product.read` and `compartment.cover`; `global_ac
 tools and Cables follow the person's widened grants with no change of their own: no `compartment:`
 audience, and her Cables stay per Operation.
 
-`universal-exports` returns `0` after graceful shutdown, `1` when configuration or
-listener startup fails, and `2` for invalid arguments. The operator command-line client is
+`universal-exports` stops gracefully at Ctrl-C and, on unix, at SIGTERM, and returns `0` after
+graceful shutdown, `1` when configuration or listener startup fails, and `2` for invalid
+arguments. The operator command-line client is
 the separate `ai6ctl` crate.
 
 ## Bootstrap file

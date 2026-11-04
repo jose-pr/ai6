@@ -21,6 +21,26 @@ async fn logged(
     panic!("the log of {conversation} never held what was asked")
 }
 
+#[tokio::test]
+async fn a_flush_with_no_log_started_returns_at_once() {
+    let assistant = super::super::Assistant::new(AssistantConfig::default());
+    tokio::time::timeout(Duration::from_secs(5), assistant.flush_log())
+        .await
+        .expect("nothing to wait for");
+}
+
+#[tokio::test]
+async fn a_stopping_gateway_keeps_what_her_log_still_queued() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, ready) = open(&served, &served.operator).await;
+    let conversation = ready["conversation"].as_str().unwrap().to_owned();
+    say(&mut app, "Keep this.", None).await;
+    take(&served, "hq").await;
+    served.assistant.flush_log().await;
+    let kept = served.registry.assistant_log(&conversation).unwrap();
+    assert_eq!(kept[0].text, "Keep this.", "kept before the flush returned");
+}
+
 /// A second gateway on the same Registry: the first one, restarted.
 async fn restarted(served: &Served) -> (String, tokio::task::JoinHandle<()>) {
     let gateway = Gateway::with_access(

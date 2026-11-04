@@ -1379,6 +1379,7 @@ report; `unlocked_stale` when the desk starts.
 | `log_age` | 7,776,000 (90 days) | **Keep her conversation log for.** Seconds an entry of her conversation log is kept; `none` keeps every entry. |
 | `log_bytes` | 1 GiB | **Her conversation log, in size.** Bytes of her conversation log kept, every conversation's together; the oldest entries go first, and `none` keeps every entry. |
 | `log_prune_every` | 3,600 | **Trim her conversation log every.** Seconds between two passes that drop what her conversation log keeps no longer. |
+| `log_flush_timeout` | 10 | **Wait for her conversation log at a stop for.** Seconds a stopping gateway waits for her conversation log to keep what is still queued; `none` waits for all of it. |
 <!-- schema:record.assistant.gateway:end -->
 
 `[assistant.pages]`: the pages she publishes and how they are served, read at each use, so a

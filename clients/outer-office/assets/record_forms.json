@@ -4199,6 +4199,28 @@
               "title": "Trim her conversation log every",
               "description": "Seconds between two passes that drop what her conversation log keeps no longer.",
               "default": 3600.0
+            },
+            "log_flush_timeout": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Wait for her conversation log at a stop for",
+              "description": "Seconds a stopping gateway waits for her conversation log to keep what is still queued; `none` waits for all of it.",
+              "default": 10.0
             }
           },
           "additionalProperties": false,
@@ -4240,7 +4262,8 @@
             "proposal_reads": 16,
             "log_age": 7776000.0,
             "log_bytes": 1073741824,
-            "log_prune_every": 3600.0
+            "log_prune_every": 3600.0,
+            "log_flush_timeout": 10.0
           }
         },
         "pages": {

@@ -1768,19 +1768,25 @@ impl Gateway {
     }
 
     /// Serves the gateway on loopback so browsers reach it only through the
-    /// configured HTTPS reverse proxy.
+    /// configured HTTPS reverse proxy. Once `shutdown` resolves and the open requests end, it
+    /// waits up to `[assistant.gateway] log_flush_timeout` for Moneypenny's conversation log.
     pub async fn serve_loopback<F>(self, port: u16, shutdown: F) -> Result<(), std::io::Error>
     where
         F: Future<Output = ()> + Send + 'static,
     {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-        axum::serve(
+        let assistant = self.assistant.clone();
+        let served = axum::serve(
             listener,
             self.router()
                 .into_make_service_with_connect_info::<SocketAddr>(),
         )
         .with_graceful_shutdown(shutdown)
-        .await
+        .await;
+        if let Some(assistant) = assistant {
+            assistant.flush_log().await;
+        }
+        served
     }
 }
 

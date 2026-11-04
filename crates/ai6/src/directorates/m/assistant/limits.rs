@@ -381,6 +381,11 @@ pub struct AssistantGatewayLimits {
     #[schema(title = "Trim her conversation log every")]
     #[map(default = AssistantGatewayLimits::default().log_prune_every)]
     pub log_prune_every: Seconds,
+    /// Seconds a stopping gateway waits for her conversation log to keep what is still queued;
+    /// `none` waits for all of it.
+    #[schema(title = "Wait for her conversation log at a stop for")]
+    #[map(default = AssistantGatewayLimits::default().log_flush_timeout)]
+    pub log_flush_timeout: TimeLimit,
 }
 
 impl Default for AssistantGatewayLimits {
@@ -420,6 +425,7 @@ impl Default for AssistantGatewayLimits {
             log_age: TimeLimit::secs(90 * 24 * 3_600),
             log_bytes: Limit::at(1024 * MIB),
             log_prune_every: Seconds::new(3_600),
+            log_flush_timeout: TimeLimit::secs(10),
         }
     }
 }
@@ -660,6 +666,7 @@ const GATEWAY_PACE: &[&str] = &[
     "sweep_every",
     "shared_base_wait",
     "log_prune_every",
+    "log_flush_timeout",
 ];
 
 /// One line per bound of `current` looser than its default, its pace keys left out.

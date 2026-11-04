@@ -1048,7 +1048,9 @@ appears in text or arguments it is replaced with `[redacted]`. A writer of its o
 entries in order, so a conversation never waits on the Registry. It keeps 90 days and 1 GiB in
 all (`[assistant.gateway] log_age`, `log_bytes`; `none` keeps everything), trimmed every hour
 (`log_prune_every`); an entry past `[registry.limits.assistant_log] entry_bytes` (1 MiB) is kept
-without its data, its text cut, and says how large it was.
+without its data, its text cut, and says how large it was. A stopping gateway (Ctrl-C, or SIGTERM
+on unix) waits up to 10 seconds (`log_flush_timeout`; `none` waits for all of it) for what is
+still queued, and logs how many entries were left if it gives up.
 
 A conversation the gateway no longer holds is rebuilt from the log when its person opens it:
 what the app shows, within the usual bounds, and the Station, provider Session and route of its

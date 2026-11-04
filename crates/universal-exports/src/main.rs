@@ -704,7 +704,31 @@ fn encode_provider_value(value: &impl ToValue) -> Result<Value, String> {
         .map_err(|_| "provider configuration could not be represented".to_owned())
 }
 
+/// Resolves at Ctrl-C, or on unix at SIGTERM, which a service manager stops the gateway with.
 async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    interrupted = tokio::signal::ctrl_c() => {
+                        if let Err(error) = interrupted {
+                            eprintln!(
+                                "universal-exports: could not install the Ctrl-C handler: {error}"
+                            );
+                            terminate.recv().await;
+                        }
+                    }
+                    _ = terminate.recv() => {}
+                }
+                return;
+            }
+            Err(error) => {
+                eprintln!("universal-exports: could not install the SIGTERM handler: {error}");
+            }
+        }
+    }
     if let Err(error) = tokio::signal::ctrl_c().await {
         eprintln!("universal-exports: could not install the Ctrl-C handler: {error}");
     }

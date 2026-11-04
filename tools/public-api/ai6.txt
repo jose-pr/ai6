@@ -597,6 +597,7 @@ pub ai6::directorates::m::assistant::AssistantGatewayLimits::hello_timeout: ai6:
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::live_per_person: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::log_age: ai6::bounds::TimeLimit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::log_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::log_flush_timeout: ai6::bounds::TimeLimit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::log_prune_every: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::max_wait: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::memory_context_bytes: ai6::bounds::Limit
@@ -8675,6 +8676,7 @@ pub ai6::AssistantGatewayLimits::hello_timeout: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::live_per_person: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::log_age: ai6::bounds::TimeLimit
 pub ai6::AssistantGatewayLimits::log_bytes: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::log_flush_timeout: ai6::bounds::TimeLimit
 pub ai6::AssistantGatewayLimits::log_prune_every: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::max_wait: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::memory_context_bytes: ai6::bounds::Limit

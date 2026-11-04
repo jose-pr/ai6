@@ -529,6 +529,25 @@ impl Assistant {
             .insert(requested.to_owned(), conversation);
     }
 
+    /// Waits up to `[assistant.gateway] log_flush_timeout` for the conversation log to keep what
+    /// is still queued; at once when no log was started. What is left is logged.
+    pub(crate) async fn flush_log(&self) {
+        let Some(sink) = self.log.get().cloned() else {
+            return;
+        };
+        let timeout = self.config.gateway.log_flush_timeout;
+        let flushed = tokio::task::spawn_blocking(move || sink.flush(timeout)).await;
+        match flushed {
+            Ok(Ok(())) => {}
+            Ok(Err(left)) => eprintln!(
+                "universal-exports: Moneypenny's log was stopped with {left} entries not kept"
+            ),
+            Err(error) => {
+                eprintln!("universal-exports: Moneypenny's log was not flushed: {error}");
+            }
+        }
+    }
+
     /// Keeps a tool call of conversation `conversation_id`, or its answer, in its log.
     pub(crate) fn log_tool(&self, conversation_id: &str, kind: &str, tool: &str, data: &Value) {
         if let Some(conversation) = self.desk().store.conversations.get_mut(conversation_id) {
