@@ -18,6 +18,7 @@ impl core::default::Default for ai6_agent_antigravity::AntigravityConfig
 pub fn ai6_agent_antigravity::AntigravityConfig::default() -> Self
 pub struct ai6_agent_antigravity::AntigravityHandler
 impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_antigravity::AntigravityHandler
+pub fn ai6_agent_antigravity::AntigravityHandler::program(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_antigravity::AntigravityHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_antigravity::AntigravityHandler::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_antigravity::AntigravityHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
