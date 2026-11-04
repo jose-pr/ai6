@@ -309,6 +309,31 @@ output stays on the Session's own stream. Pages hold at most 200 items and follo
 `cursor`; activity arriving meanwhile goes on top without shifting older pages. The
 Registry keeps the newest 10,000 activity events.
 
+## Session context
+
+When a Mission's Session ends, the Station files what the agent was given and did, as its
+harness kept it, in the Registry: the Session's **context**. It asks the Session's handler where
+its harness keeps the Session (`AgentHandler::session_record`) and reads that file: Claude Code's
+transcript (`claude-code-jsonl`, `projects/*/<session>.jsonl` under `CLAUDE_CONFIG_DIR` or
+`~/.claude`), Codex's rollout (`codex-rollout-jsonl`, `sessions/*/*/*/rollout-*-<thread>.jsonl`
+under `CODEX_HOME` or `~/.codex`), or the Antigravity CLI's transcript (`antigravity-jsonl`,
+`~/.gemini/antigravity-cli/brain/<conversation>/transcript.jsonl`). A handler that names none, such
+as `acp`, a file that cannot be read, and a harness a runner supervises on another host get the
+events the Station saw instead (`ai6-events-jsonl`, one `{at, kind, text, tools, usage, data}` per
+line), and the record says so (`source`: `harness` or `events`). Moneypenny's Sessions are filed
+the same way after each of her turns and when her harness closes.
+
+A context keeps its newest 8 MiB, from a line start, and records how large it was (`cut_from`);
+the Registry keeps 2,000 of them, the oldest filed going first (`[registry.limits.contexts]`
+`context_bytes`, `records`). One is filed again in place of the last for the same Session.
+
+`GET /v1/user/operations/{operation_id}/sessions/{session_id}/context` answers `{session, owner,
+station, handler, format, source, filed_at, cut_from?, bytes, content}` with `session.context` on
+the Operation, and each read is audited (`session.context.read`, resource `mission:<uid>`). A
+Session of another Operation, or with no context, answers `404`. Outer Office shows it in the
+Context tab of a Session's page: the turns, each tool call and its result folded, and
+**Download** for the file as kept.
+
 ## File-backed intake
 
 The Registry defaults to `registry` in the Station's state directory and can be named

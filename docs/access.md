@@ -49,8 +49,12 @@ are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.
 `memory.write`, `mission.control`, `mission.create`, `mission.read`,
 `mission.control`, `mission.create`, `mission.read`, `mission.review`,
 `pool.manage`, `pool.read`,
-`roster.manage`, `roster.read`, `session.input`, `session.read`, `station.configure` and
-`station.read`. `roster.read` and `roster.manage` at `config:roster` list and edit the
+`roster.manage`, `roster.read`, `session.context`, `session.input`, `session.read`,
+`station.configure` and `station.read`. `session.context` reads what an agent was given and did
+in a Session ([Session context](missions.md#session-context)): on an Operation its Missions'
+Sessions, and with `audit.read` on `config:assistant` another person's conversations with
+Moneypenny ([her conversation log](assistant.md#her-conversation-log)); seeing a Session
+(`session.read`, `mission.read`) does not grant it. `roster.read` and `roster.manage` at `config:roster` list and edit the
 roster's Operations, Agents, roles and covers ([Changing the configuration of running
 Stations](operations.md#changing-the-configuration-of-running-stations)); `audit.read` there
 shows those edits and the refused ones. `pool.read` shows the [account pools](agents.md#account-pools) an Operation
@@ -205,9 +209,9 @@ The policy has four built-in role names and two places to write more.
 | Role | What it holds | Written |
 | --- | --- | --- |
 | `chief` | every action, including any added later; not stored and not editable | only through the chief list (`chief = [...]` in the `access` record, `[unex.access] chief` in `ai6.cfg`) |
-| `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `mission.review`, `access.manage`, `account.manage`, `audit.read` and `access.read` | seeded; ordinary data you may edit or delete |
+| `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `mission.review`, `access.manage`, `account.manage`, `audit.read`, `access.read` and `session.context` | seeded; ordinary data you may edit or delete |
 | `operator` | the read actions (`mission.read`, `session.read`, `agent.read`, `roster.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `session.input`, `cable.send`, `approval.decide`, `issue.link`, `issue.comment`, `issue.update`, `issue.create` | seeded |
-| `auditor` | the read actions, `audit.read` and `access.read` | seeded |
+| `auditor` | the read actions, `audit.read`, `access.read` and `session.context` | seeded |
 
 The first start of Universal Exports with user access and no `access` record writes the last
 three (audited `access.seeded`); a record that exists, even without roles, is never seeded

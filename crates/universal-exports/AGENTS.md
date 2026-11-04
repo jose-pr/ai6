@@ -462,6 +462,17 @@ pub struct ViewLimits {   // Default: the value in each comment
 impl Gateway { pub fn with_assistant(self, config: AssistantConfig) -> Self; }
 ```
 
+With a Registry, every entry of every conversation also goes to her conversation log
+(`ai6::AssistantLogStore`), written in order by a thread of its own that the router starts:
+what the app shows, each tool call with its arguments (`tool_call`), the size, status and time of
+its answer (`tool_result`) and each change of a proposal (`proposal_status`); an entry from her
+harness or tools carries the `AssistantTurn` that ran it, the report's `AssistantRun` giving the
+pool account, model and tokens. The person's access token and her tool token are replaced with
+`[redacted]` wherever they appear. The log is trimmed every `log_prune_every` (1 hour) to
+`log_age` (90 days) and `log_bytes` (1 GiB). A conversation asked for in a hello that the
+gateway does not hold is rebuilt from the log when it is that person's, with the Station,
+provider Session and route of its last turn; a proposal that was waiting shows as expired.
+
 The command reads `[assistant.limits]`, `[assistant.gateway]`, `[assistant.views]` and the
 `cables` record at start. Defaults: 20 conversations a person and 2,000 in all (oldest idle one
 dropped first), each kept until untouched for 7 days with its newest 500 entries and at most
@@ -932,6 +943,10 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized","message"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"earlier","busy","view_limits":{…}}` (the newest 100 entries within 512 KiB; `earlier` counts those left out); a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"route"?:ROUTE}` (an app route in its JSON form, `{"page":"missions","operation_id":"G",…}`) (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}`, `{"type":"submit","view":ID,"values":{…}}` and `{"type":"interrupt"}` (answered `{"type":"interrupt","stopping":bool}`; see Moneypenny, the assistant); the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal"\|"view"\|"navigation"\|"notice","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/user/assistant/memory[?person=ID][&q=TEXT]` | User bearer. `{"person","entries","total"}`, with no content: newest change first, or with `q` best first and at most `search_results`. Another person's needs `assistant.memory.admin` (`403`), audited `memory.read`. |
+| `GET /v1/user/assistant/conversations[?person=ID\|?everyone=true]` | User bearer. `{"conversations":[{conversation,person,first_at,last_at,entries,bytes}]}` from her conversation log, newest first: the person's own, or another's or everyone's with `audit.read` and `session.context` on `config:assistant` (`403`), audited `assistant.log.list`. |
+| `GET /v1/user/assistant/conversations/{id}/log` | User bearer. `{"conversation","person","entries"}`, each an `ai6::AssistantLogEntry` (with its `turn`). Another person's needs both actions above, audited `assistant.log.read` (resource `config:assistant`, target `<person> <id>`) before it is read; without them `404`, as for one not logged. |
+| `GET /v1/user/assistant/conversations/{id}/context` | User bearer. `{"conversation","person","contexts"}`, each as the Session context route gives it; another person's as for `/log`, audited `assistant.context.read`. |
+| `GET /v1/user/operations/{operation_id}/sessions/{session_id}/context` | User bearer and `session.context` on the Operation (`403`). `{session,owner,station,handler,format,source,filed_at,cut_from?,bytes,content}`; audited `session.context.read` (resource `mission:<uid>`, target the Session); `404` for a Session of another Operation or with no context. |
 | `POST /v1/user/assistant/memory` | User bearer. Body `{"name"?, "summary", "content"}`; `201` with the entry's header. `400` out of bounds, `409` when the memory is full. |
 | `GET /v1/user/assistant/memory/{id}[?person=ID]` | User bearer. The entry with `content`; `404` for an ID that is not this person's, the same whoever's it is. |
 | `PUT /v1/user/assistant/memory/{id}` | User bearer, own memory only. Body `{"name"?, "summary", "content", "revision"}`; the header. `409` with `revision` when it has moved on. |

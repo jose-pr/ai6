@@ -1016,7 +1016,9 @@ means something. Her links and page cards open app pages the same way
 ([Pages she points to](#pages-she-points-to)). Her answers, the tools she used, her
 views and her proposals (with **Confirm** and **Cancel**) appear in the chat.
 Conversations are kept per person (20 each, for a week) in Universal Exports' memory;
-reopening one shows what was said. One message is answered at a time.
+reopening one shows what was said, and with a Registry a conversation the gateway no longer holds
+(after a restart) is read back from [her conversation log](#her-conversation-log). One message is
+answered at a time.
 
 While she answers, **Stop** takes the place of Send. It sends `{"type":"interrupt"}` on the
 socket, which only ever reaches the person's own conversation. A message no Station has
@@ -1028,6 +1030,50 @@ expects (a stream-json interrupt request for Claude Code, `turn/interrupt` for C
 conversation then shows "You stopped Moneypenny's answer.", her harness stays up for the next
 message, and she is told with that message that she was stopped. Stop with nothing being
 answered does nothing.
+
+## Her conversation log
+
+With a Registry, Universal Exports keeps every entry of every conversation for good, as it
+arrives: what the person wrote, her text, the tools she named, her views, proposals (and each
+change of their status), navigation and page cards, notices and errors. Beside them the log keeps
+what the app never shows: each tool call she made, with its arguments (`tool_call`), and the size,
+status and time of its answer (`tool_result`). Each entry that came from her harness or her tools
+names the turn that ran it: the Station, the provider Session, the Agent, the route (with its
+pool), the pool account the harness held, the model, and the tokens the harness reported. A
+failed turn that leaves nothing in either service's journal is in the log, with where it ran.
+
+Text is kept as it was sent, since that is what an audit needs. Secrets do not reach the log:
+the person's access token and her tool token are no part of an entry, and wherever either
+appears in text or arguments it is replaced with `[redacted]`. A writer of its own stores
+entries in order, so a conversation never waits on the Registry. It keeps 90 days and 1 GiB in
+all (`[assistant.gateway] log_age`, `log_bytes`; `none` keeps everything), trimmed every hour
+(`log_prune_every`); an entry past `[registry.limits.assistant_log] entry_bytes` (1 MiB) is kept
+without its data, its text cut, and says how large it was.
+
+A conversation the gateway no longer holds is rebuilt from the log when its person opens it:
+what the app shows, within the usual bounds, and the Station, provider Session and route of its
+last turn, so the next message resumes there. A proposal that was still waiting shows as expired.
+
+Each Session of hers also has its [context](missions.md#session-context): her harness's own
+record of the Session, filed by the Station after each turn and when the harness closes.
+
+- `GET /v1/user/assistant/conversations` lists the person's own conversations in the log
+  (`{"conversations": [{conversation, person, first_at, last_at, entries, bytes}]}`, newest
+  first); `?person=ID` lists another person's and `?everyone=true` everyone's.
+- `GET /v1/user/assistant/conversations/{id}/log` answers `{conversation, person, entries}`.
+- `GET /v1/user/assistant/conversations/{id}/context` answers `{conversation, person, contexts}`,
+  each context as [the Session context route](missions.md#session-context) gives it.
+
+A person reads their own freely. Another person's needs `audit.read` and `session.context` on
+`config:assistant`, and each read is audited before anything is read (`assistant.log.list`,
+`assistant.log.read`, `assistant.context.read`, resource `config:assistant`, target the person
+and the conversation). Without them another person's conversation answers `404`, as one that is
+not there does.
+
+In the app, her menu's **Conversation log** shows the conversation open in the chat as the log
+keeps it, each entry with the turn that ran it and each tool call folded, and its Context tab
+shows her harnesses' contexts. **Logged conversations** lists the person's own, or another
+person's or everyone's for someone who holds both actions.
 
 ## Settings
 
@@ -1044,6 +1090,8 @@ answered does nothing.
 | Conversations of one person with a running harness or an answer pending | 2 (the least recently used idle harness is closed to make room) | `[assistant.gateway] live_per_person` |
 | How long an answer may go without word from its Station | 10 minutes, then it is given up | `[assistant.gateway] answer_deadline` |
 | Conversations' size | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `[assistant.gateway]` `conversation_bytes`, `person_bytes`, `ready_entries` |
+| Her conversation log | 90 days and 1 GiB in all, trimmed every hour; 1 MiB an entry | `[assistant.gateway]` `log_age`, `log_bytes`, `log_prune_every`; `[registry.limits.assistant_log] entry_bytes` |
+| Her Sessions' contexts | 8 MiB each, its newest part kept; 2,000 kept | `[registry.limits.contexts]` `context_bytes`, `records` |
 | Her memory | 256 KiB an entry, 1,024 entries and 8 MiB a person, 8 prior versions, 50 entries a search | `[registry.limits.memories]` ([Configuration](configuration.md#limits)) |
 | Her memory's summaries in a new harness | 8 KiB, and no more than the job's context leaves | `[assistant.gateway] memory_context_bytes` |
 | Assistant Sessions on one Station | 4 running or starting; closed after 10 idle minutes | `[assistant.desk]` `live`, `idle` |

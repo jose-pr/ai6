@@ -272,6 +272,15 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | `name_bytes` | 128 | **Longest name in a class authorization.** Bytes of each Agent or role a class authorization names. |
 <!-- schema:registry.limits.approvals:end -->
 
+`[registry.limits.assistant_log]`: Moneypenny's conversation log. How long it is kept, and how
+much, is `[assistant.gateway] log_age` and `log_bytes` ([Moneypenny](assistant.md#her-conversation-log)).
+
+<!-- schema:registry.limits.assistant_log:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `entry_bytes` | 1 MiB | **Largest log entry.** Bytes of one entry of the log; a longer one is kept without its data and with its text cut, and says how large it was. |
+<!-- schema:registry.limits.assistant_log:end -->
+
 `[registry.limits.audit]`
 
 <!-- schema:registry.limits.audit:begin -->
@@ -318,6 +327,15 @@ it.
 | `grants` | 10,000 | Clearance grants. |
 | `text_bytes` | 512 | **Longest signer, approval, model or reason.** Bytes of a grant's signer, approval, model and reason. |
 <!-- schema:registry.limits.clearance:end -->
+
+`[registry.limits.contexts]`: each Session's harness context.
+
+<!-- schema:registry.limits.contexts:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `context_bytes` | 8 MiB | **Largest Session context.** Bytes of one Session's context kept; a longer one keeps its newest part and says how large it was. |
+| `records` | 2,000 | **Session contexts kept.** Session contexts kept; the oldest filed go first. |
+<!-- schema:registry.limits.contexts:end -->
 
 `[registry.limits.files]`: how long the file Registry waits. The SQL Registry ignores it.
 
@@ -1358,6 +1376,9 @@ report; `unlocked_stale` when the desk starts.
 | `author_chars` | 200 | **Longest name and email on her commits.** Characters of a person's name and email on her commits. |
 | `audit_target_bytes` | 512 | **Longest audit record target.** Bytes of an audit record's target. |
 | `proposal_reads` | 16 | **Reads a proposal lists.** Read tool calls of one turn a proposal lists as what she had read. |
+| `log_age` | 7,776,000 (90 days) | **Keep her conversation log for.** Seconds an entry of her conversation log is kept; `none` keeps every entry. |
+| `log_bytes` | 1 GiB | **Her conversation log, in size.** Bytes of her conversation log kept, every conversation's together; the oldest entries go first, and `none` keeps every entry. |
+| `log_prune_every` | 3,600 | **Trim her conversation log every.** Seconds between two passes that drop what her conversation log keeps no longer. |
 <!-- schema:record.assistant.gateway:end -->
 
 `[assistant.pages]`: the pages she publishes and how they are served, read at each use, so a

@@ -277,6 +277,11 @@ disagreed, absent }>` for an Agent's scorecard; `update_mission_review(store, (m
 cut }`, the kind method `SafeHouseSession::diff(bytes)` (unsupported by default; `git` gives the working
 tree against the base and untracked names) and `SafeHouse::diff(Limit)`.
 
+The `AgentHandler` kind method `session_record(SessionRecordQuery { session_id, working_directory,
+environment }) -> Result<Option<SessionRecordFile { path, format }>, ProviderError>` (default: none)
+names where the harness keeps its own record of a Session on this host: `claude` (`claude-code-jsonl`),
+`codex` (`codex-rollout-jsonl`) and `antigravity` (`antigravity-jsonl`) answer when the file is there.
+
 The plan gate: `ai6::READ_CLEARANCE` (`"read"`, set only by AI6) and `clearance_reads_only(&str)`; the
 `AgentHandler` kind method `read_only_refusal() -> Result<Option<String>, ProviderError>` (default:
 refuses; `claude` and `codex` hold a Session to reading and take up the Mission's tools on a resume of
@@ -1837,9 +1842,11 @@ pub trait AgentRoleStore;    // the per-Operation Agent-role overlay (store.rs)
 pub trait AgentRecordStore;  // Agent track records (agent_records.rs)
 pub trait ClearanceStore;    // clearance grants per Agent and Operation (clearance.rs)
 pub trait ApprovalStore;     // green ink and class authorisations (approvals.rs)
+pub trait AssistantLogStore; // Moneypenny's conversation log (assistant_log.rs)
 pub trait LogbookStore;      // each Station's Head of Station reports (logbook.rs)
 pub trait QuarantineStore;   // quarantines and incidents (quarantine.rs)
 pub trait SessionStore;      // Session records and fenced leases (sessions.rs)
+pub trait SessionContextStore; // each Session's harness context (contexts.rs)
 pub trait SleeperStore;      // Sleeper authorizations and fired windows (sleepers.rs)
 pub trait SourceStore;       // Source cursors, ingested items, reports owed (sources.rs)
 pub trait TimelineStore;     // the activity timeline (timeline.rs)
@@ -1848,8 +1855,9 @@ pub trait AccountStore;      // pool account claims, quota and daily tokens (acc
 pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
 pub trait Limited { fn limits(&self) -> &RegistryLimits; }   // the bounds it was opened with
 pub trait RegistryBackend: Limited + AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
-    + AuditStore + AgentRoleStore + ApprovalStore + ClearanceStore + LogbookStore + QuarantineStore + SessionStore
-    + SleeperStore + SourceStore + TimelineStore + UsageStore + VettingStore + Send + Sync {}
+    + AuditStore + AgentRoleStore + ApprovalStore + AssistantLogStore + ClearanceStore + LogbookStore
+    + QuarantineStore + SessionContextStore + SessionStore + SleeperStore + SourceStore + TimelineStore
+    + UsageStore + VettingStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` / `postgresql://…` → SqlRegistry;
@@ -1867,8 +1875,9 @@ pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn Reg
 // ToValue, FromValue, Schema, deny_unknown_fields, Default = the documented defaults
 // (docs/configuration.md "Limits"). Counts and sizes are Limit, ages TimeLimit, days u32.
 pub struct RegistryLimits { pub accounts: AccountLimits, pub agents: AgentLimits, pub agent_roles: AgentRoleLimits,
-    pub approvals: ApprovalLimits, pub audit: AuditLimits, pub briefs: BriefLimits, pub cables: CableLimits,
-    pub clearance: ClearanceLimits, pub files: FileLimits, pub held: HeldLimits, pub logbook: LogbookLimits,
+    pub approvals: ApprovalLimits, pub assistant_log: AssistantLogLimits, pub audit: AuditLimits,
+    pub briefs: BriefLimits, pub cables: CableLimits, pub clearance: ClearanceLimits,
+    pub contexts: ContextLimits, pub files: FileLimits, pub held: HeldLimits, pub logbook: LogbookLimits,
     pub proposals: ProposalLimits, pub quarantine: QuarantineLimits, pub sessions: SessionLimits,
     pub sleepers: SleeperLimits, pub sources: SourceLimits, pub stations: StationLimits,
     pub timeline: TimelineLimits, pub tokens: TokenLimits, pub usage: UsageLimits }
@@ -3463,6 +3472,62 @@ LogbookStore::file_station_report(report: &StationReport) -> io::Result<()>   //
 LogbookStore::logbook(station: &str) -> io::Result<Vec<StationReport>>         // oldest first; empty when none
 ```
 
+## Moneypenny's conversation log (`ai6::directorates::registry::assistant_log`, also at the crate root)
+
+One record per entry of a conversation, kept by Universal Exports; its retention is the gateway's
+(`[assistant.gateway] log_age`, `log_bytes`). An entry past `[registry.limits.assistant_log]
+entry_bytes` (1 MiB) is kept without its data, its text cut to half the bound, with `cut_from`.
+Files `assistant-log/<conversation>/<micros>-<id>.json`; SQL table `ai6_assistant_log` (`id`,
+`conversation`, `person`, `at_micros`, `bytes`, `entry` JSON, `revision`), made at the next open.
+
+```rust
+#[non_exhaustive] pub struct AssistantTurn { pub station: Option<String>, pub session: Option<String>,
+    pub agent: Option<String>, pub route: Option<RouteRef>, pub account: Option<AccountRef>,
+    pub model: Option<String>, pub tokens: Option<u64> }               // Default
+#[non_exhaustive] pub struct AssistantLogEntry { pub id: String /* UUIDv7 */, pub conversation: String,
+    pub person: String, pub at: f64, pub kind: String /* [a-z_], at most 32 */, pub text: String,
+    pub data: Option<Value>, pub turn: Option<AssistantTurn>, pub cut_from: Option<u64> }
+impl AssistantLogEntry { pub fn new(conversation, person, kind, text, at: f64) -> Self;
+    pub fn with_data(self, Value) -> Self; pub fn with_turn(self, AssistantTurn) -> Self; }
+#[non_exhaustive] pub struct AssistantConversation { pub conversation: String, pub person: String,
+    pub first_at: f64, pub last_at: f64, pub entries: u64, pub bytes: u64 }
+AssistantLogStore::log_assistant_entry(&AssistantLogEntry) -> io::Result<()>     // InvalidInput: bad ID, identity, time or kind
+AssistantLogStore::assistant_log(conversation: &str) -> io::Result<Vec<AssistantLogEntry>>  // oldest first
+AssistantLogStore::assistant_conversations(person: Option<&str>) -> io::Result<Vec<AssistantConversation>> // newest first
+AssistantLogStore::prune_assistant_log(before: Option<f64>, bytes: Limit) -> io::Result<u64> // by age, then the oldest past `bytes`
+```
+
+## Session contexts (`ai6::directorates::registry::contexts`, also at the crate root)
+
+What a Session's harness kept of it, one record per provider Session, replaced each time it is
+filed. `[registry.limits.contexts]`: `context_bytes` (8 MiB; the newest part is kept, from a line
+start, with `cut_from` the size it had) and `records` (2,000; the oldest filed go). Files
+`contexts/<session>.json` (the record) and `.log` (its content); SQL table `ai6_session_contexts`
+(`session` key, `conversation` and `operation`, each `''` when it is not one, `filed_micros`,
+`record` JSON, `content` text, `revision`), made at the next open.
+
+```rust
+pub const EVENTS_FORMAT: &str = "ai6-events-jsonl";   // the root's CONTEXT_EVENTS_FORMAT
+#[non_exhaustive] pub enum ContextOwner { Mission { operation: String, mission: String /* UID */ },
+    Conversation { conversation: String } }            // JSON tagged by "kind"
+#[non_exhaustive] pub enum ContextSource { Harness, Events }   // "harness", "events"
+#[non_exhaustive] pub struct SessionContext { pub session: String, pub owner: ContextOwner,
+    pub station: String, pub handler: String, pub format: String, pub source: ContextSource,
+    pub filed_at: f64, pub cut_from: Option<u64>, pub content: String /* not in its JSON */ }
+impl SessionContext { pub fn new(session, owner, station, handler, format, source, filed_at, content) -> Self;
+    pub fn cut_to(self, Limit) -> Self; pub fn conversation(&self) -> Option<&str>;
+    pub fn operation(&self) -> Option<&str>; }
+SessionContextStore::file_session_context(&SessionContext) -> io::Result<()>   // InvalidInput without its parts
+SessionContextStore::session_context(session: &str) -> io::Result<Option<SessionContext>>
+SessionContextStore::conversation_contexts(conversation: &str) -> io::Result<Vec<SessionContext>> // oldest filed first
+```
+
+The Station files a Mission Session's context when its event pump ends, and Moneypenny's after
+each turn and when her harness closes: the file the handler's `session_record` names, else the
+events it saw (`EVENTS_FORMAT`, one `{at, kind, text, tools, usage?, data?}` per line). A harness a
+runner supervises on another host always gets its events. Helpers for a handler:
+`ai6::directorates::section_00::records::{home, configured_dir, file_safe, find_file}`.
+
 ## Vetting (`ai6::directorates::m::vetting`, `ai6::directorates::registry::vetting`)
 
 M's checks on a brief before it is placed. `vet` is pure; the Headquarters holder runs it on
@@ -4439,7 +4504,10 @@ impl AssistantCable { pub fn request_digest(&self) -> String; } // SHA-256 hex o
 pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
     pub job_id: Option<String>, pub session_id: Option<String>,
     pub route: Option<RouteRef> /* default, omitted when None: the route that Session runs on */,
+    pub run: Option<AssistantRun> /* default, omitted when None */,
     pub events: Vec<AssistantEvent> }
+pub struct AssistantRun { pub account: Option<AccountRef>, pub model: Option<String>,
+    pub tokens: Option<u64> }   // what the harness ran on for these events; Default
 impl AssistantReport { pub fn cut_texts(&mut self, limits: &AssistantLimits); } // each text to
     // event_bytes, on a char boundary; the desk cuts every report it sends
 pub struct AssistantEvent { pub kind: String, pub text: Option<String>, pub tools: Vec<String>,

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Moneypenny's conversation log: with a Registry, Universal Exports keeps every entry of every
+  conversation as it arrives, with her tool calls and their arguments, each answer's size and
+  status, and for what her harness did the Station, provider Session, Agent, route, pool account,
+  model and tokens that ran it. Secrets never reach it: tool tokens are no part of an entry, and
+  the person's access token and her tool token are redacted wherever they appear. It keeps 90 days
+  and 1 GiB (`[assistant.gateway] log_age`, `log_bytes`, `log_prune_every`;
+  `[registry.limits.assistant_log] entry_bytes`). A conversation outlives a gateway restart: it is
+  rebuilt from the log and resumes its provider Session. `GET /v1/user/assistant/conversations`,
+  `.../{id}/log` and `.../{id}/context` read them; another person's needs `audit.read` and
+  `session.context` on `config:assistant` and is audited.
+- Session context: at a Mission Session's end, and after each of Moneypenny's turns, the Station
+  files the harness's own record of the Session (Claude Code's transcript, Codex's rollout, the
+  Antigravity CLI's transcript) through the handler's new `session_record` answer, or the events
+  it saw for a harness with none, said so in the record; 8 MiB each, the newest part kept
+  (`[registry.limits.contexts]`). `GET /v1/user/operations/{op}/sessions/{id}/context` serves it
+  with the new action `session.context`, seeded on `controller` and `auditor`, and audited.
+- Outer Office: a Context tab on a Session's page; her menu's Conversation log and Logged
+  conversations.
+
 - The `acp` handler lists an agent's models before any Session, from what the agent offers through
   `coqui-acp`'s `describe`, bounded by the new `describe_*` settings (64 options, 1024 values, 64
   modes, 500 sessions, 10 pages, 4096 bytes of text; any value). `text_flush_bytes` (64 KiB) and
