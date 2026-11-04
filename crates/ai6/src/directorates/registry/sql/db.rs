@@ -21,6 +21,7 @@ use std::time::Duration;
 use super::SqlOptions;
 #[cfg(feature = "postgres")]
 use super::postgres::{self, block_on};
+use super::steps::{STEPS, Step};
 
 /// The schema version this build writes; a newer database is refused.
 const SCHEMA_VERSION: i64 = 1;
@@ -231,6 +232,8 @@ impl<'a> Location<'a> {
 pub(super) struct Statement {
     /// The table or index it makes; `None` for the one that fills the clock.
     pub(super) creates: Option<String>,
+    /// For a table, the columns it is made with, in lower case; `None` for anything else.
+    pub(super) columns: Option<Vec<String>>,
     text: String,
 }
 
@@ -252,24 +255,75 @@ pub(super) fn statements(schema: &str) -> io::Result<Vec<Statement>> {
         .map(str::trim)
         .filter(|statement| !statement.is_empty())
         .map(|text| {
-            let creates = [
-                "CREATE TABLE IF NOT EXISTS ",
-                "CREATE VIRTUAL TABLE IF NOT EXISTS ",
-                "CREATE INDEX IF NOT EXISTS ",
+            let made = [
+                ("CREATE TABLE IF NOT EXISTS ", true),
+                ("CREATE VIRTUAL TABLE IF NOT EXISTS ", true),
+                ("CREATE INDEX IF NOT EXISTS ", false),
             ]
             .into_iter()
-            .find_map(|head| text.strip_prefix(head))
-            .and_then(|rest| rest.split_whitespace().next())
-            .map(str::to_owned);
-            if creates.is_none() && !text.starts_with("INSERT INTO ai6_clock ") {
-                return Err(invalid(format!("not a repeatable statement: {text}")));
-            }
+            .find_map(|(head, table)| Some((text.strip_prefix(head)?, table)))
+            .and_then(|(rest, table)| Some((rest.split_whitespace().next()?, table)));
+            let (creates, columns) = match made {
+                Some((name, true)) => (Some(name.to_owned()), Some(made_columns(text)?)),
+                Some((name, false)) => (Some(name.to_owned()), None),
+                None if text.starts_with("INSERT INTO ai6_clock ") => (None, None),
+                None => return Err(invalid(format!("not a repeatable statement: {text}"))),
+            };
             Ok(Statement {
                 creates,
+                columns,
                 text: text.to_owned(),
             })
         })
         .collect()
+}
+
+/// The columns a `CREATE TABLE` names, in lower case: each element of its column list but table
+/// constraints and, of a virtual table, `key=value` options.
+fn made_columns(text: &str) -> io::Result<Vec<String>> {
+    let unreadable = || invalid(format!("no column list in: {text}"));
+    let open = text.find('(').ok_or_else(unreadable)?;
+    let mut elements = Vec::new();
+    let (mut depth, mut quoted, mut from, mut closed) = (0usize, false, open + 1, false);
+    for (at, character) in text.char_indices().filter(|(at, _)| *at > open) {
+        match character {
+            '\'' => quoted = !quoted,
+            _ if quoted => {}
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            ')' => {
+                elements.push(&text[from..at]);
+                closed = true;
+                break;
+            }
+            ',' if depth == 0 => {
+                elements.push(&text[from..at]);
+                from = at + 1;
+            }
+            _ => {}
+        }
+    }
+    if !closed {
+        return Err(unreadable());
+    }
+    let mut columns = Vec::new();
+    for element in elements {
+        let first = element.split_whitespace().next().ok_or_else(unreadable)?;
+        let constraint = [
+            "PRIMARY",
+            "UNIQUE",
+            "FOREIGN",
+            "CHECK",
+            "CONSTRAINT",
+            "EXCLUDE",
+        ]
+        .iter()
+        .any(|word| first.eq_ignore_ascii_case(word));
+        if !constraint && !first.contains('=') {
+            columns.push(first.trim_matches('"').to_ascii_lowercase());
+        }
+    }
+    Ok(columns)
 }
 
 /// The tables and indexes of the schema statements create in, as `CREATE ... IF NOT EXISTS`
@@ -294,11 +348,20 @@ pub(super) fn schema_objects(tx: &mut Tx<'_>) -> io::Result<BTreeSet<String>> {
 impl Database {
     /// Opens the database at `location` and brings its schema up to date.
     pub(crate) fn open(location: Location<'_>, options: &SqlOptions) -> io::Result<Self> {
+        Self::open_with_steps(location, options, STEPS)
+    }
+
+    /// [`open`](Self::open), bringing tables up to date with `steps` in place of [`STEPS`].
+    pub(super) fn open_with_steps(
+        location: Location<'_>,
+        options: &SqlOptions,
+        steps: &[Step],
+    ) -> io::Result<Self> {
         let database = match location {
             Location::Sqlite(path) => Self::open_sqlite(path, options.busy_timeout())?,
             Location::Postgres(url) => Self::open_postgres(url, options)?,
         };
-        database.migrate()?;
+        database.migrate(steps)?;
         Ok(database)
     }
 
@@ -432,7 +495,9 @@ impl Database {
         }
     }
 
-    fn migrate(&self) -> io::Result<()> {
+    /// Makes the tables the database lacks, runs the steps it has not recorded, makes the
+    /// indexes it lacks, and refuses a table without a column this build needs.
+    fn migrate(&self, steps: &[Step]) -> io::Result<()> {
         let dialect = self.dialect();
         let schema = match dialect {
             #[cfg(feature = "sqlite")]
@@ -441,16 +506,10 @@ impl Database {
             Dialect::Postgres => POSTGRES_SCHEMA,
         };
         let statements = statements(schema)?;
-        self.transaction(Mode::Migrate, |tx, _| {
-            // Two Stations opening a database that lacks something make it once: SQLite's
-            // IMMEDIATE transaction and this lock make the second wait for the first.
-            #[cfg(feature = "postgres")]
-            if dialect == Dialect::Postgres {
-                tx.execute(
-                    "SELECT pg_advisory_xact_lock($1, hashtext(current_schema()))",
-                    &[Value::Int(MIGRATION_LOCK)],
-                )?;
-            }
+        // Tables come before the steps and indexes after them, since an index may name a column
+        // a step adds.
+        let recorded = self.transaction(Mode::Migrate, |tx, _| {
+            migration_lock(tx)?;
             let present = schema_objects(tx)?;
             // A newer ai6's database is refused before anything is made in it.
             let current = if present.contains("ai6_schema") {
@@ -459,29 +518,7 @@ impl Database {
                 0
             };
             check_schema(current)?;
-            // Asked first: PostgreSQL ends the transaction at a refused statement. Nothing runs
-            // when nothing is missing, since `IF NOT EXISTS` needs the rights of a `CREATE` even
-            // then, and a role without them may run a database someone else keeps up to date.
-            let missing: Vec<&Statement> = statements
-                .iter()
-                .filter(|s| {
-                    s.creates
-                        .as_ref()
-                        .is_some_and(|name| !present.contains(name))
-                })
-                .collect();
-            if !missing.is_empty() {
-                let at = where_we_are(tx)?;
-                for statement in &missing {
-                    tx.batch(&statement.text).map_err(|failure| {
-                        if failure.kind() == io::ErrorKind::PermissionDenied {
-                            refused_to_create(&at, &missing, &failure)
-                        } else {
-                            failure
-                        }
-                    })?;
-                }
-            }
+            make_missing(tx, &statements, &present, |s| s.columns.is_some())?;
             let rows = tx
                 .query_opt("SELECT count(*) FROM ai6_clock", &[])?
                 .ok_or_else(|| invalid("the clock could not be counted"))?
@@ -497,9 +534,178 @@ impl Database {
                     &[Value::Int(SCHEMA_VERSION)],
                 )?;
             }
-            Ok(())
+            recorded_steps(tx)
+        })?;
+        for step in steps.iter().filter(|step| !recorded.contains(step.name)) {
+            self.transaction(Mode::Migrate, |tx, _| apply_step(tx, dialect, step))?;
+        }
+        self.transaction(Mode::Migrate, |tx, _| {
+            migration_lock(tx)?;
+            let present = schema_objects(tx)?;
+            make_missing(tx, &statements, &present, |s| s.columns.is_none())?;
+            check_columns(tx, &statements, dialect)
         })
     }
+}
+
+/// Two Stations opening a database that lacks something make it once: SQLite's IMMEDIATE
+/// transaction and this lock make the second wait for the first.
+fn migration_lock(tx: &mut Tx<'_>) -> io::Result<()> {
+    #[cfg(feature = "postgres")]
+    if matches!(tx.inner, TxInner::Postgres(_)) {
+        tx.execute(
+            "SELECT pg_advisory_xact_lock($1, hashtext(current_schema()))",
+            &[Value::Int(MIGRATION_LOCK)],
+        )?;
+    }
+    #[cfg(not(feature = "postgres"))]
+    let _ = tx;
+    Ok(())
+}
+
+/// Runs the statements `which` picks that make something `present` lacks. Nothing runs when
+/// nothing is missing, since `IF NOT EXISTS` needs the rights of a `CREATE` even then, and a
+/// role without them may run a database someone else keeps up to date.
+fn make_missing(
+    tx: &mut Tx<'_>,
+    statements: &[Statement],
+    present: &BTreeSet<String>,
+    which: impl Fn(&Statement) -> bool,
+) -> io::Result<()> {
+    // Asked first: PostgreSQL ends the transaction at a refused statement. A refusal names
+    // everything missing, tables and indexes, so one start as a role that may makes it all.
+    let missing: Vec<&Statement> = statements
+        .iter()
+        .filter(|s| {
+            s.creates
+                .as_ref()
+                .is_some_and(|name| !present.contains(name))
+        })
+        .collect();
+    if !missing.iter().any(|s| which(s)) {
+        return Ok(());
+    }
+    let at = where_we_are(tx)?;
+    for statement in missing.iter().filter(|s| which(s)) {
+        tx.batch(&statement.text).map_err(|failure| {
+            if failure.kind() == io::ErrorKind::PermissionDenied {
+                refused_to_create(&at, &missing, &failure)
+            } else {
+                failure
+            }
+        })?;
+    }
+    Ok(())
+}
+
+/// The names of the steps `ai6_schema_steps` records.
+fn recorded_steps(tx: &mut Tx<'_>) -> io::Result<BTreeSet<String>> {
+    tx.query("SELECT name FROM ai6_schema_steps", &[])?
+        .into_iter()
+        .map(|row| row.text(0))
+        .collect()
+}
+
+/// Runs `step` unless another Station has, or the table has its column already, and records it,
+/// stamped with the database's clock.
+fn apply_step(tx: &mut Tx<'_>, dialect: Dialect, step: &Step) -> io::Result<()> {
+    migration_lock(tx)?;
+    if recorded_steps(tx)?.contains(step.name) {
+        return Ok(());
+    }
+    let has_column = table_columns(tx)?
+        .get(step.table)
+        .is_some_and(|columns| columns.contains(step.column));
+    if !has_column {
+        let (role, schema) = where_we_are(tx)?;
+        tx.batch(step.statements(dialect)).map_err(|failure| {
+            let what = format!(
+                "schema step {} (column {} of table {})",
+                step.name, step.column, step.table
+            );
+            if failure.kind() == io::ErrorKind::PermissionDenied {
+                io::Error::new(
+                    failure.kind(),
+                    format!(
+                        "{what} is not done and role {role} may not alter that table in schema \
+                         {schema}: start this ai6 once as a role that may ({failure})"
+                    ),
+                )
+            } else {
+                io::Error::new(failure.kind(), format!("{what} failed: {failure}"))
+            }
+        })?;
+    }
+    let micros = (tx.now()? * 1_000_000.0).round() as i64;
+    tx.execute(
+        "INSERT INTO ai6_schema_steps (name, applied_micros) VALUES ($1, $2)",
+        &[step.name.into(), Value::Int(micros)],
+    )?;
+    Ok(())
+}
+
+/// Each table's columns as the database's catalog has them, in lower case; reading them needs
+/// no right on the tables.
+fn table_columns(
+    tx: &mut Tx<'_>,
+) -> io::Result<std::collections::BTreeMap<String, BTreeSet<String>>> {
+    let sql = match &tx.inner {
+        #[cfg(feature = "sqlite")]
+        TxInner::Sqlite(_) => {
+            // Hidden 1 is a virtual table's own hidden column, which no statement names.
+            "SELECT m.name, c.name FROM sqlite_master m, pragma_table_xinfo(m.name) c \
+             WHERE m.type = 'table' AND c.hidden <> 1"
+        }
+        #[cfg(feature = "postgres")]
+        TxInner::Postgres(_) => {
+            "SELECT c.relname::text, a.attname::text FROM pg_catalog.pg_attribute a \
+             JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p') \
+             AND a.attnum > 0 AND NOT a.attisdropped"
+        }
+    };
+    let mut tables = std::collections::BTreeMap::<String, BTreeSet<String>>::new();
+    for row in tx.query(sql, &[])? {
+        tables
+            .entry(row.text(0)?)
+            .or_default()
+            .insert(row.text(1)?.to_ascii_lowercase());
+    }
+    Ok(tables)
+}
+
+/// Refuses a database whose tables lack a column the schema makes them with. A column this
+/// build does not know is left alone, as an earlier build opening a later one's database finds.
+fn check_columns(tx: &mut Tx<'_>, statements: &[Statement], dialect: Dialect) -> io::Result<()> {
+    let tables = table_columns(tx)?;
+    let mut lacking = Vec::new();
+    for statement in statements {
+        let (Some(table), Some(columns)) = (&statement.creates, &statement.columns) else {
+            continue;
+        };
+        let have = tables.get(table);
+        for column in columns {
+            if !have.is_some_and(|have| have.contains(column)) {
+                lacking.push(format!("table {table} lacks column {column}"));
+            }
+        }
+    }
+    if lacking.is_empty() {
+        return Ok(());
+    }
+    let file = match dialect {
+        #[cfg(feature = "sqlite")]
+        Dialect::Sqlite => "sqlite.sql",
+        #[cfg(feature = "postgres")]
+        Dialect::Postgres => "postgres.sql",
+    };
+    Err(invalid(format!(
+        "this database does not have what this ai6 needs, and no schema step left to run adds it: \
+         {}; put each column back as crates/ai6/src/directorates/registry/sql/schema/{file} \
+         makes it",
+        lacking.join(", ")
+    )))
 }
 
 #[derive(Debug, Clone, Copy)]

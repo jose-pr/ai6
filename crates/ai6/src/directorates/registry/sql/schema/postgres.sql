@@ -5,9 +5,18 @@
 -- it: the value of its clock row in ai6_clock, which each write transaction advances first.
 --
 -- Opening a database runs the statements for what it lacks, so each one can be run again: a new
--- table or index goes here and needs no script, and the version stays. What moves data does.
+-- table or index goes here and needs no script, and the version stays. A new column goes in its
+-- table here and as a step in ../steps.rs, which adds it to a table that exists. What moves data
+-- needs a script.
 
 CREATE TABLE IF NOT EXISTS ai6_schema (version BIGINT NOT NULL);
+
+-- Each step of ../steps.rs this database has, and when it was recorded, in microseconds of the
+-- database's clock.
+CREATE TABLE IF NOT EXISTS ai6_schema_steps (
+    name TEXT PRIMARY KEY,
+    applied_micros BIGINT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS ai6_clock (
     name TEXT PRIMARY KEY,

@@ -36,6 +36,7 @@ mod records;
 mod reviews;
 mod sessions;
 mod stations;
+mod steps;
 mod transcripts;
 
 use std::fmt;
@@ -603,8 +604,184 @@ mod tests {
             open_together();
             let station = SqlRegistry::open(location).unwrap();
             lose_a_table_and_an_index(&station);
+            back_before_handles(&station);
             open_together();
             assert!(table_answers(&station, "ai6_issue_proposals"));
+            assert_eq!(step_names(&station), ["mission_ids.handle"]);
+        });
+    }
+
+    /// Puts the handle book back as the schema made it before handles, with no step recorded.
+    fn back_before_handles(registry: &SqlRegistry) {
+        registry
+            .db
+            .write(Clock::Registry, |tx, _| {
+                tx.execute("DROP TABLE ai6_mission_ids", &[])?;
+                tx.execute(
+                    "CREATE TABLE ai6_mission_ids (folded TEXT PRIMARY KEY, \
+                     mission_id TEXT NOT NULL, entry TEXT UNIQUE, revision BIGINT NOT NULL)",
+                    &[],
+                )?;
+                tx.execute("DELETE FROM ai6_schema_steps", &[])
+            })
+            .unwrap();
+    }
+
+    fn alter(registry: &SqlRegistry, sql: &str) {
+        registry
+            .db
+            .write(Clock::Registry, |tx, _| tx.execute(sql, &[]))
+            .unwrap();
+    }
+
+    /// The recorded steps, by name, with when each was recorded.
+    fn step_records(registry: &SqlRegistry) -> Vec<(String, i64)> {
+        registry
+            .db
+            .read(|tx| {
+                tx.query(
+                    "SELECT name, applied_micros FROM ai6_schema_steps ORDER BY name",
+                    &[],
+                )?
+                .into_iter()
+                .map(|row| Ok((row.text(0)?, row.int(1)?)))
+                .collect::<io::Result<Vec<_>>>()
+            })
+            .unwrap()
+    }
+
+    fn step_names(registry: &SqlRegistry) -> Vec<String> {
+        step_records(registry)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    #[test]
+    fn a_database_from_before_handles_gains_the_column_once() {
+        on_each_database(|location| {
+            let old = SqlRegistry::open(location).unwrap();
+            back_before_handles(&old);
+            alter(&old, "DROP TABLE ai6_schema_steps");
+
+            let first = SqlRegistry::open(location).unwrap();
+            let recorded = step_records(&first);
+            assert_eq!(step_names(&first), ["mission_ids.handle"]);
+            let mission = first
+                .allot_mission_id(&MissionEntry::person(Some("ops")))
+                .unwrap();
+            assert_eq!(
+                first.resolve_mission(&mission.handle).unwrap(),
+                Some(mission)
+            );
+
+            let second = SqlRegistry::open(location).unwrap();
+            assert_eq!(step_records(&second), recorded, "recorded once");
+        });
+    }
+
+    #[test]
+    fn missions_kept_before_handles_stop_the_step_by_name() {
+        on_each_database(|location| {
+            let old = SqlRegistry::open(location).unwrap();
+            back_before_handles(&old);
+            old.db
+                .write(Clock::Registry, |tx, revision| {
+                    tx.execute(
+                        "INSERT INTO ai6_mission_ids (folded, mission_id, entry, revision) \
+                         VALUES ('ops-1', 'ops-1', NULL, $1)",
+                        &[Value::Int(revision)],
+                    )
+                })
+                .unwrap();
+            let refused = SqlRegistry::open(location).unwrap_err();
+            assert!(
+                refused.to_string().contains("mission_ids.handle"),
+                "{refused}"
+            );
+            assert!(step_records(&old).is_empty(), "nothing is recorded");
+        });
+    }
+
+    #[test]
+    fn a_column_added_by_hand_records_its_step_without_running_it() {
+        on_each_database(|location| {
+            let old = SqlRegistry::open(location).unwrap();
+            back_before_handles(&old);
+            alter(
+                &old,
+                "ALTER TABLE ai6_mission_ids ADD COLUMN handle TEXT NOT NULL",
+            );
+            let again = SqlRegistry::open(location)
+                .expect("the step's own ALTER would fail on a column that exists");
+            assert_eq!(step_names(&again), ["mission_ids.handle"]);
+        });
+    }
+
+    #[test]
+    fn a_column_dropped_by_hand_is_refused_by_name_and_an_extra_one_is_not() {
+        on_each_database(|location| {
+            let station = SqlRegistry::open(location).unwrap();
+            alter(
+                &station,
+                "ALTER TABLE ai6_stations ADD COLUMN added_later TEXT",
+            );
+            let again = SqlRegistry::open(location).expect("an extra column opens");
+            again.check_in("station-a", Default::default()).unwrap();
+
+            alter(&station, "ALTER TABLE ai6_mission_ids DROP COLUMN handle");
+            let refused = SqlRegistry::open(location).unwrap_err();
+            assert_eq!(refused.kind(), io::ErrorKind::InvalidData, "{refused}");
+            assert!(
+                refused
+                    .to_string()
+                    .contains("table ai6_mission_ids lacks column handle"),
+                "{refused}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_step_runs_once_however_often_the_database_is_opened() {
+        // Counts its runs on the roster's clock row.
+        const COUNTED: steps::Step = steps::Step {
+            name: "test.counted",
+            table: "ai6_stations",
+            column: "counted",
+            #[cfg(feature = "sqlite")]
+            sqlite: "ALTER TABLE ai6_stations ADD COLUMN counted TEXT; \
+                     UPDATE ai6_clock SET revision = revision + 1 WHERE name = 'config'",
+            #[cfg(feature = "postgres")]
+            postgres: "ALTER TABLE ai6_stations ADD COLUMN counted TEXT; \
+                       UPDATE ai6_clock SET revision = revision + 1 WHERE name = 'config'",
+        };
+        on_each_database(|location| {
+            let open = || {
+                Database::open_with_steps(
+                    Location::parse(location).unwrap(),
+                    &SqlOptions::default(),
+                    &[COUNTED],
+                )
+                .unwrap()
+            };
+            let runs = |db: &Database| {
+                db.read(|tx| {
+                    tx.query_opt("SELECT revision FROM ai6_clock WHERE name = 'config'", &[])?
+                        .ok_or_else(|| io::Error::other("no clock row"))?
+                        .int(0)
+                })
+                .unwrap()
+            };
+            let first = open();
+            assert_eq!(runs(&first), 1);
+            // Without its column, an unrecorded step would run again.
+            first
+                .write(Clock::Registry, |tx, _| {
+                    tx.execute("ALTER TABLE ai6_stations DROP COLUMN counted", &[])
+                })
+                .unwrap();
+            let second = open();
+            assert_eq!(runs(&second), 1, "the step ran once");
         });
     }
 
@@ -694,6 +871,43 @@ mod tests {
         assert!(table_answers(&again, "ai6_issue_proposals"));
         role.grant();
         SqlRegistry::open(&role.location()).unwrap();
+
+        // A step alters a table, which only its owner may: the role is told which step.
+        back_before_handles(&owner);
+        role.grant();
+        let refused = SqlRegistry::open(&role.location()).unwrap_err();
+        assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied, "{refused}");
+        let said = refused.to_string();
+        assert!(
+            said.contains("mission_ids.handle"),
+            "names the step: {said}"
+        );
+        assert!(said.contains(&role.name), "names the role: {said}");
+        SqlRegistry::open(&store.location()).unwrap();
+        SqlRegistry::open(&role.location()).unwrap();
+    }
+
+    #[test]
+    fn every_step_adds_a_column_both_schemas_make() {
+        let names: std::collections::BTreeSet<_> = steps::STEPS.iter().map(|s| s.name).collect();
+        assert_eq!(names.len(), steps::STEPS.len(), "each name once");
+        for schema in [
+            include_str!("sql/schema/postgres.sql"),
+            include_str!("sql/schema/sqlite.sql"),
+        ] {
+            let statements = db::statements(schema).unwrap();
+            for step in steps::STEPS {
+                let made = statements
+                    .iter()
+                    .find(|s| s.creates.as_deref() == Some(step.table))
+                    .and_then(|s| s.columns.as_ref());
+                assert!(
+                    made.is_some_and(|columns| columns.iter().any(|c| c == step.column)),
+                    "{} names a column its table is made with",
+                    step.name
+                );
+            }
+        }
     }
 
     #[test]
@@ -717,7 +931,42 @@ mod tests {
             let seeds = statements.iter().filter(|s| s.creates.is_none()).count();
             assert_eq!(seeds, 1, "one statement fills the clock");
             assert_eq!(statements[0].creates.as_deref(), Some("ai6_schema"));
+            let columns = |table: &str| {
+                statements
+                    .iter()
+                    .find(|s| s.creates.as_deref() == Some(table))
+                    .and_then(|s| s.columns.clone())
+                    .unwrap()
+            };
+            assert_eq!(
+                columns("ai6_mission_proposals"),
+                [
+                    "operation",
+                    "id",
+                    "state",
+                    "proposal",
+                    "created_at",
+                    "revision"
+                ],
+                "table constraints are not columns"
+            );
+            assert!(
+                statements
+                    .iter()
+                    .filter(|s| s.creates.as_deref() == Some("ai6_timeline_order"))
+                    .all(|s| s.columns.is_none()),
+                "an index has no columns of its own"
+            );
         }
+        assert_eq!(
+            db::statements(include_str!("sql/schema/sqlite.sql"))
+                .unwrap()
+                .iter()
+                .find(|s| s.creates.as_deref() == Some("ai6_memories_search"))
+                .and_then(|s| s.columns.clone())
+                .unwrap(),
+            ["id", "words"]
+        );
     }
 
     use db::Value;
