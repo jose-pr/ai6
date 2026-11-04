@@ -79,6 +79,14 @@ pub struct AssistantLimits {
     #[schema(title = "All the files read for a page", format = "bytes")]
     #[map(default = AssistantLimits::default().page_bytes)]
     pub page_bytes: Limit,
+    /// Images one message carries.
+    #[schema(title = "Images in one message")]
+    #[map(default = AssistantLimits::default().images)]
+    pub images: Limit,
+    /// Bytes of one image a message carries.
+    #[schema(title = "Largest image in a message", format = "bytes")]
+    #[map(default = AssistantLimits::default().image_bytes)]
+    pub image_bytes: Limit,
 }
 
 impl Default for AssistantLimits {
@@ -98,6 +106,8 @@ impl Default for AssistantLimits {
             page_file_bytes: Limit::at(8 * MIB),
             page_files: Limit::at(200),
             page_bytes: Limit::at(16 * MIB),
+            images: Limit::at(4),
+            image_bytes: Limit::at(5 * MIB),
         }
     }
 }

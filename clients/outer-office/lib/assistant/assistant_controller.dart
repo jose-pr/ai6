@@ -8,6 +8,7 @@ import '../routes/oo_route.dart';
 import '../routes/socket_uri.dart';
 import '../settings/oo_config.dart' show ChatSettings;
 import 'assistant_view.dart' show ViewLimits;
+import 'images.dart' show OutgoingImage;
 
 /// A text channel to Universal Exports' Moneypenny socket; tests give a fake one.
 abstract interface class AssistantChannel {
@@ -358,13 +359,20 @@ class AssistantController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sends a message, with the [route] of the page the person is on.
-  void say(String text, {OoRoute? route}) {
+  /// Sends a message, with the [route] of the page the person is on and the [images] they
+  /// added to it.
+  void say(
+    String text, {
+    OoRoute? route,
+    List<OutgoingImage> images = const [],
+  }) {
     if (text.trim().isEmpty) return;
     _send({
       'type': 'message',
       'text': text,
       if (route != null) 'route': route.toJson(),
+      if (images.isNotEmpty)
+        'images': [for (final image in images) image.toJson()],
     });
   }
 

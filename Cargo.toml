@@ -43,6 +43,8 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 schemars = { version = "1", default-features = false }
 # SHA-256 keeps Cable quota keys compatible with I Branch's shared Registry format.
 sha2 = { version = "0.11.1", default-features = false }
+# Images in Moneypenny's messages travel as base64.
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 # Keyed digests of the page cookie and of a page's view tokens.
 hmac = { version = "0.13.0", default-features = false }
 lru = { version = "0.12.5", default-features = false }

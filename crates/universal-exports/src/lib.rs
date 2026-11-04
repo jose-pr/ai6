@@ -527,6 +527,8 @@ pub struct Gateway {
     stand_ins: Arc<std::sync::Mutex<HashMap<String, String>>>,
     /// Live tracker reads waiting for the Headquarters Station.
     source_reads: Arc<source_reads::SourceReads>,
+    /// The images people send Moneypenny, kept beside the pages.
+    images: Option<Arc<moneypenny::images::ImageStore>>,
 }
 
 /// A bearer the gateway makes for itself to read, in this process, as a person who proved who
@@ -633,6 +635,7 @@ impl Gateway {
             pages_config: None,
             stand_ins: Arc::default(),
             source_reads: Arc::default(),
+            images: None,
         }
     }
 
@@ -757,6 +760,9 @@ impl Gateway {
         }
         let store = moneypenny::pages::PageStore::open(config.dir.clone())
             .map_err(|_| GatewayError::InvalidConfiguration)?;
+        let images = moneypenny::images::ImageStore::open(config.dir.join(".images"))
+            .map_err(|_| GatewayError::InvalidConfiguration)?;
+        self.images = Some(Arc::new(images));
         self.pages = Some(Arc::new(store));
         self.pages_config = Some(config);
         Ok(self)
@@ -1731,6 +1737,14 @@ impl Gateway {
             )
             .route("/v1/user/attach-grants", post(issue_user_attach_token))
             .route("/v1/user/moneypenny", get(moneypenny::socket))
+            .route(
+                "/v1/user/moneypenny/images/{sha256}",
+                get(moneypenny::user_image),
+            )
+            .route(
+                "/v1/station/assistant/images/{sha256}",
+                get(moneypenny::station_image),
+            )
             .route("/v1/moneypenny/mcp", post(moneypenny::mcp::endpoint))
             .route("/v1/user/memories", get(memories::list).post(memories::add))
             .route("/v1/user/memories/proposals", get(memories::proposals))

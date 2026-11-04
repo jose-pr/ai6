@@ -32,6 +32,7 @@ pub(crate) mod actions;
 pub(crate) mod cables;
 mod checks;
 mod guide;
+pub(crate) mod images;
 pub(crate) mod log;
 pub(crate) mod mcp;
 pub(crate) mod memory;
@@ -60,7 +61,7 @@ use ai6::{
 };
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
@@ -283,6 +284,7 @@ fn control_job(
         skills: Vec::new(),
         // A control starts no harness, so it carries no reach, skills or groups.
         groups: None,
+        images: Vec::new(),
     }
 }
 
@@ -615,6 +617,7 @@ impl Assistant {
         person_id: &str,
         text: &str,
         route: Option<&Value>,
+        images: &[images::AppImage],
     ) -> Result<(), (&'static str, String)> {
         // A job carries the message whole or not at all: the smaller bound applies.
         let most = match (
@@ -641,23 +644,64 @@ impl Assistant {
                 "Sign in again to talk to Moneypenny.".to_owned(),
             )
         })?;
+        let kept = self.keep_images(gateway, person_id, images)?;
         let message = match route.and_then(|route| page_line(route, self.config.route_limits())) {
             Some(line) => format!("{line}\n\n{text}"),
             None => text.to_owned(),
         };
-        self.queue(gateway, conversation_id, person_id, &message, Some(text))
-            .await
+        self.queue(
+            gateway,
+            conversation_id,
+            person_id,
+            &message,
+            Some((text, kept.as_slice())),
+        )
+        .await
+    }
+
+    /// Checks the images of a message against `[assistant.limits]` and keeps them for
+    /// `person_id`; why not, in words for the person.
+    fn keep_images(
+        &self,
+        gateway: &Gateway,
+        person_id: &str,
+        images: &[images::AppImage],
+    ) -> Result<Vec<images::KeptImage>, (&'static str, String)> {
+        if images.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limits = &self.config.limits;
+        if !limits.images.allows(images.len()) {
+            return Err((
+                "bad_request",
+                format!("A message carries at most {} images.", limits.images),
+            ));
+        }
+        let store = gateway
+            .images
+            .clone()
+            .ok_or(("unavailable", "This gateway keeps no images.".to_owned()))?;
+        images
+            .iter()
+            .map(|image| {
+                let bytes = images::check(image, limits.image_bytes)
+                    .map_err(|reason| ("bad_request", format!("Not sent: {reason}.")))?;
+                store
+                    .put(person_id, &image.media_type, &bytes)
+                    .map_err(|_| ("unavailable", "The image could not be kept.".to_owned()))
+            })
+            .collect()
     }
 
     /// Queues `message` for a Station, after any notes for Moneypenny the app left since her
-    /// last message; `shown` is the person's entry, when the person wrote it.
+    /// last message; `shown` is the person's entry and its images, when the person wrote it.
     async fn queue(
         &self,
         gateway: &Gateway,
         conversation_id: &str,
         person_id: &str,
         message: &str,
-        shown: Option<&str>,
+        shown: Option<(&str, &[images::KeptImage])>,
     ) -> Result<(), (&'static str, String)> {
         let now = now();
         // The workspace is the person's, as their own sign-in names them.
@@ -799,16 +843,26 @@ impl Assistant {
                 skills,
                 // The person's directory groups, so the Station applies its per-group narrowing.
                 groups: Some(person.groups.clone()),
+                images: shown
+                    .map(|(_, images)| images)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|image| ai6::AssistantImage {
+                        sha256: image.sha256.clone(),
+                        media_type: image.media_type.clone(),
+                        bytes: image.bytes,
+                    })
+                    .collect(),
             };
             // A new turn: proposals made from here rest on what she reads from here.
             conversation.turn_reads.clear();
-            if let Some(text) = shown {
+            if let Some((text, kept)) = shown {
                 conversation.push(
                     Entry {
                         role: Role::Person,
                         text: text.to_owned(),
                         at: now,
-                        data: None,
+                        data: (!kept.is_empty()).then(|| images::KeptImage::data(kept)),
                     },
                     self.config.bounds(),
                 );
@@ -2333,6 +2387,8 @@ enum FromApp {
         text: String,
         #[serde(default)]
         route: Option<Value>,
+        #[serde(default)]
+        images: Vec<images::AppImage>,
     },
     New {},
     Confirm {
@@ -2363,7 +2419,18 @@ pub(crate) async fn socket(State(gateway): State<Gateway>, upgrade: WebSocketUpg
     if gateway.assistant.is_none() {
         return ApiError::unavailable().into_response();
     }
-    let most = gateway_limits(&gateway).socket_message_bytes.or_max();
+    // A message frame carries its images as base64, four characters for three bytes.
+    let images = gateway.assistant.as_ref().map_or(0, |assistant| {
+        let limits = &assistant.config.limits;
+        limits
+            .images
+            .or_max()
+            .saturating_mul(limits.image_bytes.or_max().div_ceil(3).saturating_mul(4))
+    });
+    let most = gateway_limits(&gateway)
+        .socket_message_bytes
+        .or_max()
+        .saturating_add(images);
     upgrade
         .max_message_size(most)
         .on_upgrade(move |socket| converse(socket, gateway))
@@ -2415,9 +2482,9 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
             incoming = receiver.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
                     match serde_json::from_str::<FromApp>(&text) {
-                        Ok(FromApp::Message { text, route }) => {
+                        Ok(FromApp::Message { text, route, images }) => {
                             if let Err((code, message)) = assistant
-                                .message(&gateway, &conversation_id, &person.id, &text, route.as_ref())
+                                .message(&gateway, &conversation_id, &person.id, &text, route.as_ref(), &images)
                                 .await
                                 && sender.send(frame(&problem(code, &message))).await.is_err()
                             {
@@ -2594,6 +2661,81 @@ pub(crate) async fn cable_standing(
             .await
     };
     Ok(Json(json!({"send": send, "read": read})))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ImageQuery {
+    station: String,
+    conversation: String,
+}
+
+/// An image as a response: its own format, nothing to run, kept nowhere on the way.
+fn image_response(media_type: &'static str, bytes: Vec<u8>) -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, media_type),
+            (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (axum::http::header::CACHE_CONTROL, "no-store, private"),
+            (
+                axum::http::header::CONTENT_SECURITY_POLICY,
+                "sandbox; default-src 'none'",
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+/// `GET /v1/station/assistant/images/{sha256}?station=&conversation=`: an image the person of a
+/// conversation the Station runs, or took a job of, sent; `404` for one this gateway does not
+/// keep for them, `403` for a conversation another Station runs.
+pub(crate) async fn station_image(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(sha256): Path<String>,
+    Query(query): Query<ImageQuery>,
+) -> Result<Response, ApiError> {
+    gateway.authenticate_station(bearer(&headers)?)?;
+    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    // The Station reads a message's images before its harness accepts the message, so the one
+    // that took the job may read them as well as the one that runs the conversation.
+    let person = {
+        let desk = assistant.desk();
+        let conversation = desk
+            .store
+            .conversations
+            .get(&query.conversation)
+            .ok_or_else(ApiError::not_found)?;
+        let taken_by = conversation
+            .pending
+            .as_ref()
+            .and_then(|pending| pending.station.as_deref());
+        if conversation.station.as_deref() != Some(query.station.as_str())
+            && taken_by != Some(query.station.as_str())
+        {
+            return Err(ApiError::forbidden());
+        }
+        conversation.person_id.clone()
+    };
+    let store = gateway.images.clone().ok_or_else(ApiError::not_found)?;
+    let (media_type, bytes) = store
+        .get(&person, &sha256)
+        .ok_or_else(ApiError::not_found)?;
+    Ok(image_response(media_type, bytes))
+}
+
+/// `GET /v1/user/moneypenny/images/{sha256}`: an image the person sent her; `404` for any other.
+pub(crate) async fn user_image(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(sha256): Path<String>,
+) -> Result<Response, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let store = gateway.images.clone().ok_or_else(ApiError::not_found)?;
+    let (media_type, bytes) = store
+        .get(&person.id, &sha256)
+        .ok_or_else(ApiError::not_found)?;
+    Ok(image_response(media_type, bytes))
 }
 
 /// `POST /v1/station/assistant/reports`: what a Station's assistant harness did. `204`;

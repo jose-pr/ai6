@@ -771,6 +771,14 @@ pub(crate) async fn sweep_once(gateway: &Gateway) -> usize {
         |settings| settings.pages().stage_ttl.0,
     );
     let gone = store.sweep(now(), stage);
+    // An image goes when her conversation log forgets the message that named it.
+    if let (Some(images), Some(age)) = (
+        &gateway.images,
+        super::gateway_limits(gateway).log_age.get(),
+    ) {
+        let images = images.clone();
+        let _ = tokio::task::spawn_blocking(move || images.sweep(age)).await;
+    }
     for page in &gone {
         let person = ai6::Person {
             id: page.person_id.clone(),

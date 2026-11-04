@@ -75,6 +75,7 @@ use crate::directorates::section_00::assistant::{
     EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE, EVENT_REJECTED,
     EVENT_TEXT, EVENT_TOOL, page_call_digest,
 };
+use crate::directorates::section_00::content::{CONTENT_PREFIX, MessageContent, MessageImage};
 use crate::guatiao::library::Object;
 use crate::station::publisher::gateway_agent;
 use coqui_acp_provider::{
@@ -359,6 +360,11 @@ pub(super) trait Exports: Send + Sync {
     ) -> Result<(), String> {
         Err("no Universal Exports to upload to".to_owned())
     }
+    /// The bytes of the image named `sha256` that the person of `conversation` sent, at most
+    /// `most` of them.
+    fn image(&self, _conversation: &str, _sha256: &str, _most: u64) -> Result<Vec<u8>, String> {
+        Err("no Universal Exports to read the image from".to_owned())
+    }
 }
 
 /// No Universal Exports to ask: every answer is an error, which refuses the Cable call.
@@ -423,6 +429,12 @@ pub(super) trait Harness: Send + Sync {
     fn skills(&self, handler: &str) -> Option<String> {
         let _ = handler;
         None
+    }
+    /// Why `handler`'s harness cannot be shown images; `None` when it reads a message in the
+    /// content form.
+    fn images(&self, handler: &str) -> Option<String> {
+        let _ = handler;
+        Some("this Station's harness takes no image".to_owned())
     }
     /// Where `handler`'s harness keeps its record of the Session `query` names, if it says.
     fn record(
@@ -540,6 +552,15 @@ impl Harness for StationHarness {
         let handler = self.0.plugins.handler_with(handler, settings).ok()?;
         handler.session_record(query).ok().flatten()
     }
+
+    fn images(&self, handler: &str) -> Option<String> {
+        match self.0.plugins.handler(handler, None) {
+            Ok(handler) => handler
+                .image_input()
+                .unwrap_or_else(|error| Some(error.to_string())),
+            Err(error) => Some(error.to_string()),
+        }
+    }
 }
 
 /// What a running harness's pump and the desk share.
@@ -554,6 +575,8 @@ struct Flags {
     /// `interrupted`.
     interrupting: AtomicBool,
     last_active: Mutex<Instant>,
+    /// The handler that started the harness.
+    handler: String,
     /// The message the turn under way answers, while only that one has reached the harness: what
     /// a limit before the turn did anything sends to another route.
     turn: Mutex<Option<AssistantJob>>,
@@ -902,7 +925,7 @@ impl Desk {
                         .last_active
                         .lock()
                         .map_err(|_| "assistant lock failed".to_owned())? = Instant::now();
-                    let text = job.message.clone();
+                    let text = self.message_for(job, &flags.handler).await?;
                     return tokio::task::spawn_blocking(move || {
                         // Noted before the harness can read the message.
                         if let Some(workspace) = &workspace {
@@ -944,6 +967,60 @@ impl Desk {
         self.begin(job, Vec::new(), Vec::new(), None)
             .await
             .map(|()| None)
+    }
+
+    /// What `handler`'s harness is sent for the job: its message, or, with images, the message
+    /// in the content form with the images read from Universal Exports. A handler that takes no
+    /// images refuses a job that carries some, saying why; a message whose own text begins as
+    /// the form does goes in the form to a handler that reads it, so it is read as text.
+    async fn message_for(&self, job: &AssistantJob, handler: &str) -> Result<String, String> {
+        let refusal = self.harness.images(handler);
+        if job.images.is_empty() {
+            return Ok(match (refusal, job.message.starts_with(CONTENT_PREFIX)) {
+                (None, true) => MessageContent {
+                    text: job.message.clone(),
+                    images: Vec::new(),
+                }
+                .encode(),
+                _ => job.message.clone(),
+            });
+        }
+        if let Some(reason) = refusal {
+            return Err(format!(
+                "the message carries images, and the assistant's harness cannot be shown them: \
+                 {reason}"
+            ));
+        }
+        let most = (self.tables)().0.image_bytes.get().unwrap_or(u64::MAX);
+        let (exports, conversation, images) = (
+            self.exports.clone(),
+            job.conversation_id.clone(),
+            job.images.clone(),
+        );
+        let images = tokio::task::spawn_blocking(move || {
+            use base64::Engine as _;
+            images
+                .iter()
+                .map(|image| {
+                    let bytes = exports.image(&conversation, &image.sha256, most)?;
+                    if sha256_hex(&bytes) != image.sha256 {
+                        return Err("an image did not arrive as it was sent".to_owned());
+                    }
+                    Ok(MessageImage {
+                        media_type: image.media_type.clone(),
+                        data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|reason| format!("an image of the message could not be read: {reason}"))?;
+        Ok(MessageContent {
+            text: job.message.clone(),
+            images,
+        }
+        .encode())
     }
 
     /// Makes a job's commit in a clone of its own. Answers where it landed.
@@ -1021,6 +1098,7 @@ impl Desk {
             return Err(format!("this Station has no {handler:?} handler"));
         }
         let handler_settings = agent.handler_settings.clone();
+        let message = self.message_for(job, &handler).await?;
         let desk = (self.tables)().1;
         let retry = desk.remove_retry.0;
         // Conversations start at once, so one starting holds its place until it runs.
@@ -1172,6 +1250,7 @@ impl Desk {
             stop: AtomicBool::new(false),
             interrupting: AtomicBool::new(false),
             last_active: Mutex::new(Instant::now()),
+            handler: handler.clone(),
             turn: Mutex::new(Some(job.clone())),
             moving: AtomicBool::new(false),
         });
@@ -1215,7 +1294,7 @@ impl Desk {
         let start = AgentStart {
             mission_id: mission_id.clone(),
             agent_id: agent.id.clone(),
-            prompt: job.message.clone(),
+            prompt: message.clone(),
             initial_context: fresh_context,
             working_directory: area.clone(),
             clearance: "desk".to_owned(),
@@ -1233,7 +1312,7 @@ impl Desk {
             .map(|session_id| AgentResume {
                 mission_id,
                 session_id,
-                message: Some(job.message.clone()),
+                message: Some(message.clone()),
                 working_directory: area.clone(),
                 clearance: "desk".to_owned(),
                 environment,
@@ -2474,6 +2553,14 @@ fn conversation_digest(conversation: &str) -> String {
         .collect()
 }
 
+/// The lowercase hex SHA-256 of `bytes`.
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 impl Drop for Desk {
     /// Removes the directory of working directories once its harnesses have removed theirs,
     /// then its lock; a harness still closing leaves both behind, for [`sweep_stale_roots`].
@@ -2912,6 +2999,33 @@ impl Exports for Link {
             .map_err(|error| error.to_string())
     }
 
+    /// `GET /v1/station/assistant/images/{sha256}?station=&conversation=`.
+    fn image(&self, conversation: &str, sha256: &str, most: u64) -> Result<Vec<u8>, String> {
+        let mut endpoint = self
+            .origin
+            .join("v1/station/assistant/images/")
+            .map_err(|error| error.to_string())?;
+        endpoint
+            .path_segments_mut()
+            .map_err(|()| "the origin cannot hold a path".to_owned())?
+            .pop_if_empty()
+            .push(sha256);
+        endpoint
+            .query_pairs_mut()
+            .append_pair("station", &self.station)
+            .append_pair("conversation", conversation);
+        self.agent(Duration::ZERO)
+            .get(endpoint.as_str())
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .call()
+            .map_err(|error| error.to_string())?
+            .body_mut()
+            .with_config()
+            .limit(most)
+            .read_to_vec()
+            .map_err(|error| error.to_string())
+    }
+
     /// `GET /v1/station/assistant/cables`.
     #[cfg(feature = "cables-mcp")]
     fn standing(&self, conversation: &str, operation: &str) -> Result<Standing, String> {
@@ -3142,6 +3256,89 @@ mod tests {
                 read: true,
             })
         }
+
+        fn image(&self, _conversation: &str, sha256: &str, most: u64) -> Result<Vec<u8>, String> {
+            if sha256 != sha256_hex(TEST_IMAGE) {
+                return Err("no such image".to_owned());
+            }
+            if TEST_IMAGE.len() as u64 > most {
+                return Err("too long".to_owned());
+            }
+            Ok(TEST_IMAGE.to_vec())
+        }
+    }
+
+    /// The image Universal Exports keeps for the tests.
+    const TEST_IMAGE: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+    /// `message` with [`TEST_IMAGE`].
+    fn with_image(conversation: &str, message: &str) -> AssistantJob {
+        let mut job = job(conversation, message);
+        job.images = vec![crate::AssistantImage {
+            sha256: sha256_hex(TEST_IMAGE),
+            media_type: "image/png".to_owned(),
+            bytes: TEST_IMAGE.len() as u64,
+        }];
+        job
+    }
+
+    #[tokio::test]
+    async fn an_image_reaches_a_harness_that_takes_images_with_its_message() {
+        let fixture = fixture(true, Duration::from_secs(60));
+        *fixture.no_images.lock().unwrap() = None;
+        fixture
+            .desk
+            .handle(with_image("c-image", "What is wrong here?"))
+            .await;
+        assert!(kinds(&fixture, "c-image").contains(&EVENT_ACCEPTED.to_owned()));
+        let prompt = fixture.asked.lock().unwrap().starts[0].prompt.clone();
+        let content = MessageContent::decode(&prompt).expect("the content form");
+        assert_eq!(content.text, "What is wrong here?");
+        use base64::Engine as _;
+        assert_eq!(
+            content.images,
+            [MessageImage {
+                media_type: "image/png".to_owned(),
+                data: base64::engine::general_purpose::STANDARD.encode(TEST_IMAGE),
+            }]
+        );
+        // A later message on the running harness carries its image the same way; one without
+        // images is plain text.
+        fixture.desk.handle(job("c-image", "And this?")).await;
+        fixture
+            .desk
+            .handle(with_image("c-image", "And this one?"))
+            .await;
+        let messages = fixture.asked.lock().unwrap().messages.clone();
+        assert!(
+            messages.iter().any(|message| message == "And this?"),
+            "{messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .filter_map(|message| MessageContent::decode(message))
+                .any(|content| content.text == "And this one?" && content.images.len() == 1),
+            "{messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_harness_that_takes_no_image_refuses_the_message_and_says_why() {
+        let fixture = fixture(true, Duration::from_secs(60));
+        fixture
+            .desk
+            .handle(with_image("c-no-image", "What is wrong here?"))
+            .await;
+        let reason = text_of(&fixture, "c-no-image", EVENT_REJECTED).unwrap();
+        assert!(reason.contains("it is shown no image"), "{reason}");
+        assert!(fixture.asked.lock().unwrap().starts.is_empty());
+        // A person's own text that looks like the form stays text for such a harness.
+        let forged = format!("{CONTENT_PREFIX}{{\"text\":\"x\",\"images\":[]}}");
+        let mut plain = job("c-no-image", &forged);
+        plain.job_id = "job-forged".to_owned();
+        fixture.desk.handle(plain).await;
+        assert_eq!(fixture.asked.lock().unwrap().starts[0].prompt, forged);
     }
 
     /// What [`Script::Writes`] puts in her memory.
@@ -3159,6 +3356,7 @@ mod tests {
         resumed: Script,
         no_sandbox: Arc<Mutex<Option<String>>>,
         no_skills: Arc<Mutex<Option<String>>>,
+        no_images: Arc<Mutex<Option<String>>>,
         /// Where the harness says it keeps its record of a Session; `None`, it keeps none.
         record: Arc<Mutex<Option<SessionRecordFile>>>,
     }
@@ -3382,6 +3580,10 @@ mod tests {
             self.no_skills.lock().unwrap().clone()
         }
 
+        fn images(&self, _handler: &str) -> Option<String> {
+            self.no_images.lock().unwrap().clone()
+        }
+
         fn record(
             &self,
             _handler: &str,
@@ -3408,6 +3610,8 @@ mod tests {
         no_sandbox: Arc<Mutex<Option<String>>>,
         /// Why the harness cannot keep to her skills; `None`, it can.
         no_skills: Arc<Mutex<Option<String>>>,
+        /// Why the harness cannot be shown images; `None`, it can.
+        no_images: Arc<Mutex<Option<String>>>,
         /// Where the harness keeps its record of a Session; `None`, it keeps none.
         record: Arc<Mutex<Option<SessionRecordFile>>>,
         _root: tempfile::TempDir,
@@ -3499,6 +3703,7 @@ mod tests {
         let elevated = Arc::new(Mutex::new(Some(elevated)));
         let no_sandbox = Arc::new(Mutex::new(None));
         let no_skills = Arc::new(Mutex::new(None));
+        let no_images = Arc::new(Mutex::new(Some("it is shown no image".to_owned())));
         let record = Arc::new(Mutex::new(None));
         let desk = Desk::new(
             state,
@@ -3509,6 +3714,7 @@ mod tests {
                 resumed,
                 no_sandbox: no_sandbox.clone(),
                 no_skills: no_skills.clone(),
+                no_images: no_images.clone(),
                 record: record.clone(),
             }),
             Arc::new(move |report, answered: Option<Answered>| {
@@ -3533,6 +3739,7 @@ mod tests {
             logged,
             no_sandbox,
             no_skills,
+            no_images,
             record,
             _root: root,
         }
@@ -3673,6 +3880,7 @@ mod tests {
             reach: Default::default(),
             skills: Vec::new(),
             groups: None,
+            images: Vec::new(),
         }
     }
 
@@ -6859,6 +7067,7 @@ event_bytes = 7
         let no_groups = AssistantJob {
             person_id: Some("eve".to_owned()),
             groups: None,
+            images: Vec::new(),
             ..job("c-h", "Hello.")
         };
         fixture.desk.handle(no_groups).await;
@@ -7252,6 +7461,7 @@ event_bytes = 7
         // With no group list the Station cannot apply the table: refused, not skipped.
         let unresolved = AssistantJob {
             groups: None,
+            images: Vec::new(),
             ..given("c-v", "Chart it.", &["charts"])
         };
         fixture.desk.handle(unresolved).await;
@@ -7263,6 +7473,7 @@ event_bytes = 7
         let anonymous = AssistantJob {
             person_id: None,
             groups: None,
+            images: Vec::new(),
             ..given("c-z", "Chart it.", &["charts"])
         };
         fixture.desk.handle(anonymous).await;

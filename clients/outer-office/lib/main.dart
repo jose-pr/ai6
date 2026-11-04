@@ -24,6 +24,7 @@ import 'assistant/chat_layout.dart';
 import 'assistant/chat_region.dart';
 import 'assistant/chat_window.dart';
 import 'assistant/demo_conversation.dart';
+import 'assistant/images.dart' show platformImageInput;
 import 'assistant/memory_page.dart';
 import 'assistant/navigation_card.dart';
 import 'assistant/pages.dart';
@@ -1215,6 +1216,16 @@ class MissionBoard extends ChangeNotifier
     '/v1/user/assistant/conversations/${Uri.encodeComponent(conversation)}/log',
     "the conversation's log",
   );
+
+  /// An image of the person's conversations with Moneypenny, by its digest
+  /// (`GET /v1/user/moneypenny/images/{sha256}`); `null` once it is no longer kept.
+  Future<Uint8List?> conversationImage(String sha256) async {
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/moneypenny/images/${Uri.encodeComponent(sha256)}',
+    );
+    return response.statusCode == 200 ? response.bodyBytes : null;
+  }
 
   @override
   Future<Map<String, Object?>> conversationContext(
@@ -4378,6 +4389,8 @@ class _AccessGateState extends State<_AccessGate> {
       proposalWait: board.limits.controls.confirming,
       pageActions: board.demo ? null : board,
       transcripts: board.demo ? null : board,
+      imageInput: board.demo ? null : platformImageInput(),
+      imageLoader: board.demo ? null : board.conversationImage,
       openWindow: widget.desktopWindows
           ? (context, chat, onClosed) =>
                 _openChatWindow(context, chat, onClosed, board)

@@ -688,6 +688,51 @@ pub struct AssistantJob {
     /// Requires `person_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<String>>,
+    /// The images the person sent with `message`, at most [`AssistantLimits::images`]; the
+    /// Station reads each from Universal Exports and gives them to a harness that takes images,
+    /// and refuses the job for one that does not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<AssistantImage>,
+}
+
+/// An image of a person's message, kept by Universal Exports and named by its SHA-256.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantImage {
+    /// The lowercase hex SHA-256 of its bytes.
+    pub sha256: String,
+    /// One of [`IMAGE_MEDIA_TYPES`](super::content::IMAGE_MEDIA_TYPES).
+    pub media_type: String,
+    /// Its size, at most [`AssistantLimits::image_bytes`].
+    pub bytes: u64,
+}
+
+impl AssistantImage {
+    /// Checks the image's digest, format and size.
+    ///
+    /// # Errors
+    ///
+    /// A message naming what is wrong.
+    pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String> {
+        if self.sha256.len() != 64
+            || !self
+                .sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err("an image is named by its lowercase hex SHA-256".to_owned());
+        }
+        if !super::content::IMAGE_MEDIA_TYPES.contains(&self.media_type.as_str()) {
+            return Err(format!("{} is not an image format", self.media_type));
+        }
+        if !limits
+            .image_bytes
+            .allows(usize::try_from(self.bytes).unwrap_or(usize::MAX))
+        {
+            return Err(format!("an image is at most {} bytes", limits.image_bytes));
+        }
+        Ok(())
+    }
 }
 
 /// What a person may do with Cables in one Operation, through the assistant.
@@ -844,6 +889,17 @@ impl AssistantJob {
                 "skills are more than {}, repeated or not skill names",
                 limits.skills
             ));
+        }
+        if !limits.images.allows(self.images.len()) {
+            return Err(format!(
+                "a message carries at most {} images",
+                limits.images
+            ));
+        }
+        for image in &self.images {
+            image
+                .validate(limits)
+                .map_err(|reason| format!("images: {reason}"))?;
         }
         if let Some(workspace) = &self.workspace {
             workspace
@@ -1118,6 +1174,7 @@ mod tests {
             reach: AssistantReach::default(),
             skills: Vec::new(),
             groups: None,
+            images: Vec::new(),
         }
     }
 

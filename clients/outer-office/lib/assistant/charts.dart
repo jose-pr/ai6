@@ -10,6 +10,7 @@ import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 import 'assistant_view.dart';
 import 'graph_layout.dart';
+import 'images.dart' show ImageViewer;
 
 // fl_chart builds on Flutter's own Material library, not the app's, so every
 // colour and text style it draws with is passed from OoTokens here.
@@ -925,6 +926,15 @@ class SvgView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
+    Widget drawing(Color text) => SvgPicture.string(
+      block.svg,
+      theme: SvgTheme(currentColor: text),
+      semanticsLabel: block.title,
+      errorBuilder: (context, error, stack) => Text(
+        'This drawing could not be drawn.',
+        style: TextStyle(color: tokens.muted),
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 6,
@@ -933,21 +943,25 @@ class SvgView extends StatelessWidget {
           revealInvisible(block.title),
           style: Theme.of(context).textTheme.titleSmall,
         ),
-        Container(
-          constraints: const BoxConstraints(maxHeight: 480),
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: tokens.surface,
-            border: Border.all(color: tokens.border),
+        Semantics(
+          button: true,
+          label: '${block.title}, enlarge',
+          child: InkWell(
             borderRadius: BorderRadius.circular(8),
-          ),
-          child: SvgPicture.string(
-            block.svg,
-            theme: SvgTheme(currentColor: tokens.text),
-            semanticsLabel: block.title,
-            errorBuilder: (context, error, stack) => Text(
-              'This drawing could not be drawn.',
-              style: TextStyle(color: tokens.muted),
+            onTap: () => ImageViewer.showWidget(
+              context,
+              ColoredBox(color: tokens.surface, child: drawing(tokens.text)),
+              label: block.title,
+            ),
+            child: Container(
+              constraints: const BoxConstraints(maxHeight: 480),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: tokens.surface,
+                border: Border.all(color: tokens.border),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: drawing(tokens.text),
             ),
           ),
         ),

@@ -442,6 +442,13 @@ pub trait AgentHandler: Send + Sync {
     fn program(&self) -> Result<Option<String>, ProviderError> {
         Ok(None)
     }
+
+    /// Why the harness cannot be shown images, in a sentence; `None` when it reads a message in
+    /// the [content form](super::content), and gives its images to the model with the text. The
+    /// default: it cannot.
+    fn image_input(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some("this handler gives its harness no image".to_owned()))
+    }
 }
 
 #[cfg(test)]
@@ -452,7 +459,7 @@ mod tests {
     // shared kind's, whose header names the same value.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 1055802156);
+        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 2369958161);
         assert_eq!(
             coqui_acp_provider::AgentSessionVtable::FLOOR_HASH,
             1414216972

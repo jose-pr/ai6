@@ -365,7 +365,9 @@ the desk's own per-conversation configuration directory holds no such file anywa
 `assistant_scripts` answers why the sandbox cannot run: native Windows, another platform than
 macOS or Linux, or `bwrap` or `socat` missing from the environment's `PATH` (else the
 Station's). WSL1 passes that check and is stopped by `failIfUnavailable`. `assistant_skills`
-answers `None`: only the `--plugin-dir` plugin's skills load. Inferred, not
+answers `None`: only the `--plugin-dir` plugin's skills load. `image_input` answers `None`: a
+prompt or message in AI6's content form (`ai6::MessageContent`) is sent as one stream-json user
+message whose content is a base64 `image` block per image, then the text. Inferred, not
 measured: that a Linux host without `bwrap` makes Claude Code exit at start, as the settings
 reference says; the macOS read roots and relay (macOS uses Seatbelt and was not available to
 measure).

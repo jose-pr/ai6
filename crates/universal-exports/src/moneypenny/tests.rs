@@ -6363,6 +6363,7 @@ async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation()
     finish(&served, &mut app, &job).await;
 }
 
+mod images;
 mod opening;
 mod privacy;
 mod sharing;

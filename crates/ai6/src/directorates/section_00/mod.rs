@@ -4,6 +4,7 @@
 pub mod acp;
 pub mod agent;
 pub mod assistant;
+pub mod content;
 pub mod denied;
 pub mod gate;
 pub mod listing;

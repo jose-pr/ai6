@@ -222,6 +222,11 @@ impl AgentHandler for ClaudeHandler {
         Ok(Some(self.config.executable.clone()))
     }
 
+    /// stream-json's user message takes base64 `image` blocks beside its text.
+    fn image_input(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
     /// Claude Code keeps each Session as `projects/<directory>/<session>.jsonl` under its
     /// configuration directory (`CLAUDE_CONFIG_DIR`, else `~/.claude`), one JSON object per
     /// line.
@@ -1600,7 +1605,7 @@ impl ClaudeSession {
     }
 
     fn send(&self, text: &str) -> Result<(), ProviderError> {
-        self.write_line(&ClaudeInput::user(text))
+        self.write_line(&user_input(text))
     }
 
     fn read_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
@@ -1757,37 +1762,28 @@ impl ai6::AgentSession for ClaudeSession {
     }
 }
 
-#[derive(Serialize)]
-struct ClaudeInput<'a> {
-    r#type: &'static str,
-    message: ClaudeMessage<'a>,
-}
-
-#[derive(Serialize)]
-struct ClaudeMessage<'a> {
-    role: &'static str,
-    content: [ClaudeText<'a>; 1],
-}
-
-#[derive(Serialize)]
-struct ClaudeText<'a> {
-    r#type: &'static str,
-    text: &'a str,
-}
-
-impl<'a> ClaudeInput<'a> {
-    fn user(text: &'a str) -> Self {
-        Self {
-            r#type: "user",
-            message: ClaudeMessage {
-                role: "user",
-                content: [ClaudeText {
-                    r#type: "text",
-                    text,
-                }],
-            },
-        }
-    }
+/// A user message in stream-json's shape: its text, after the images a message in AI6's
+/// content form carries, each as a base64 `image` block.
+fn user_input(text: &str) -> Value {
+    let content: Vec<Value> = match ai6::MessageContent::decode(text) {
+        Some(content) => content
+            .images
+            .iter()
+            .map(|image| {
+                json!({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image.media_type,
+                        "data": image.data,
+                    },
+                })
+            })
+            .chain([json!({"type": "text", "text": content.text})])
+            .collect(),
+        None => vec![json!({"type": "text", "text": text})],
+    };
+    json!({"type": "user", "message": {"role": "user", "content": content}})
 }
 
 fn spawn(
@@ -3058,8 +3054,41 @@ mod tests {
     }
 
     #[test]
+    fn a_message_with_images_reaches_claude_as_image_blocks_before_its_text() {
+        let message = ai6::MessageContent {
+            text: "What is wrong here?".to_owned(),
+            images: vec![ai6::MessageImage {
+                media_type: "image/png".to_owned(),
+                data: "iVBORw0KGgo=".to_owned(),
+            }],
+        }
+        .encode();
+        assert_eq!(
+            user_input(&message),
+            serde_json::json!({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64",
+                            "media_type": "image/png", "data": "iVBORw0KGgo="}},
+                        {"type": "text", "text": "What is wrong here?"}
+                    ]
+                }
+            })
+        );
+        assert_eq!(
+            ClaudeHandler::try_from(ClaudeConfig::default())
+                .unwrap()
+                .image_input()
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn input_fixture_keeps_the_provider_stream_json_message_shape() {
-        let encoded = serde_json::to_value(ClaudeInput::user("continue the Mission")).unwrap();
+        let encoded = user_input("continue the Mission");
         assert_eq!(
             encoded,
             serde_json::json!({

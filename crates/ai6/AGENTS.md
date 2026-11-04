@@ -296,6 +296,13 @@ the same Session). A Mission under a `plan` policy starts and is sent back at `r
 tool `submit_plan`, kept in `Mission.plan` until it is put up; it does not start on a handler that
 refuses, nor in remote-hands mode, and waits with the reason in `Mission.waiting`.
 
+`AgentHandler::image_input() -> Result<Option<String>, ProviderError>` (default: "this handler
+gives its harness no image"; `claude` takes them, as stream-json image blocks): `None` when the
+handler reads a message in the content form (`MessageContent`). The assistant desk refuses a job
+with images on a handler that says why not, and sends a message whose own text begins with
+`CONTENT_PREFIX` in the form to one that reads it, so it stays text. Adding it moved the kind's floor
+hash (pinned in a test).
+
 The crate root re-exports these, `decide` as `decide_review`, `applicable` as `applicable_review`,
 `next_step` as `review_next_step`, `out_of_budget` as `review_out_of_budget`, `Decision` as
 `ReviewDecision` and `Step` as `ReviewStep`. `RosterBuilder::review(name, policy)` adds a policy and
@@ -827,6 +834,7 @@ pub struct AssistantPageLimits { pub max_file_bytes, max_page_bytes, max_page_fi
 #[non_exhaustive] pub enum PageNetwork { Open, Own, None }   // serde lowercase; as_str(), tighter(other)
 impl AssistantSettings { pub fn pages(&self) -> &AssistantPageLimits;
                          pub fn with_pages(self, pages: AssistantPageLimits) -> Self; }
+// AssistantLimits also images (4) and image_bytes (5 MiB): what one message carries.
 // AssistantLimits also page_file_bytes (8 MiB), page_files (200), page_bytes (16 MiB): what a
 // Station reads of a page. AssistantPageFile { path, bytes, sha256 } is the manifest
 // entry of an upload; page_call_digest(path) -> String matches an upload to its publish_page call;
@@ -4678,7 +4686,18 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
                                        so the Station re-caps reach and skills by its per-group
                                        tables and takes only those groups' shared repositories;
                                        requires person_id; None makes a group-narrowing roster
-                                       refuse and gives no group's repository */ }
+                                       refuse and gives no group's repository */,
+    pub images: Vec<AssistantImage> /* default, omitted when empty: at most
+                                       AssistantLimits::images, each named by digest; the Station
+                                       reads the bytes from Universal Exports */ }
+pub struct AssistantImage { pub sha256: String /* lowercase hex */, pub media_type: String,
+    pub bytes: u64 }   // validate(&AssistantLimits): IMAGE_MEDIA_TYPES, at most image_bytes
+// section_00::content: a message with images, as the text an AgentSession is sent:
+pub const CONTENT_PREFIX: &str = "\u{0}ai6-content\n";   // then the JSON of MessageContent
+pub const IMAGE_MEDIA_TYPES: [&str; 4];   // image/png, image/jpeg, image/webp, image/gif
+pub struct MessageContent { pub text: String, pub images: Vec<MessageImage> }
+impl MessageContent { pub fn encode(&self) -> String; pub fn decode(message: &str) -> Option<Self>; }
+pub struct MessageImage { pub media_type: String, pub data: String /* base64 */ }
                                                      // Debug redacts the token
 impl AssistantJob { pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
 #[derive(Default)] // serde: every key default, unknown keys refused

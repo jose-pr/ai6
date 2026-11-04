@@ -13,6 +13,7 @@ import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_view.dart';
 import 'entry_kind.dart';
+import 'images.dart';
 import 'export.dart' as exporting;
 import 'pages.dart';
 import 'transcripts.dart';
@@ -42,6 +43,8 @@ class AssistantPanel extends StatefulWidget {
     this.pageActions,
     this.transcripts,
     this.saveText = exporting.saveText,
+    this.imageInput,
+    this.imageLoader,
     super.key,
   });
 
@@ -92,6 +95,14 @@ class AssistantPanel extends StatefulWidget {
   /// Where an export goes: a download in a browser, the Downloads folder on a desktop.
   final Future<String?> Function(String name, String text) saveText;
 
+  /// Where the person pastes and picks images to send; without it, or one that offers
+  /// neither, the composer takes none.
+  final ImageInput? imageInput;
+
+  /// Reads the images of the conversation, the person's and hers; without it they show as
+  /// their names.
+  final ImageLoader? imageLoader;
+
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
 }
@@ -102,18 +113,34 @@ class _AssistantPanelState extends State<AssistantPanel> {
   TextEditingController get _message =>
       widget.message ?? (_ownMessage ??= TextEditingController());
 
+  /// Images added to the message being written.
+  List<OutgoingImage> _images = const [];
+  StreamSubscription<OutgoingImage>? _pasting;
+
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_showReveal);
     widget.controller.open();
+    _pasting = widget.imageInput?.pasted.listen(_add);
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_showReveal);
+    unawaited(_pasting?.cancel());
     _ownMessage?.dispose();
     super.dispose();
+  }
+
+  void _add(OutgoingImage image) {
+    if (mounted) setState(() => _images = [..._images, image]);
+  }
+
+  Future<void> _pick() async {
+    for (final image in await widget.imageInput?.pick() ?? const []) {
+      _add(image);
+    }
   }
 
   /// Saves the conversation the app holds as Markdown and says where it went.
@@ -189,8 +216,9 @@ class _AssistantPanelState extends State<AssistantPanel> {
         !widget.controller.connected) {
       return;
     }
-    widget.controller.say(text, route: widget.route);
+    widget.controller.say(text, route: widget.route, images: _images);
     _message.clear();
+    setState(() => _images = const []);
   }
 
   /// Enter sends; with Shift it is left to the field, which starts a new line.
@@ -405,6 +433,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
                       onOpen: widget.onOpen,
                       proposalWait: widget.proposalWait,
                       pageActions: widget.pageActions,
+                      imageLoader: widget.imageLoader,
                     )) {
                       // Views are tables and charts: they take the whole width.
                       final view when entry.role == 'view' => view,
@@ -468,11 +497,39 @@ class _AssistantPanelState extends State<AssistantPanel> {
                 ],
               ),
             ),
+          if (_images.isNotEmpty)
+            _column(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final (index, image) in _images.indexed)
+                      ImageThumbnail(
+                        key: ValueKey('composer-image-$index'),
+                        image: MemoryImage(image.bytes),
+                        label: 'Image ${index + 1}',
+                        size: 64,
+                        onRemove: () => setState(
+                          () => _images = [..._images]..removeAt(index),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           _column(
             Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
+                  if (widget.imageInput?.canPick ?? false)
+                    IconButton(
+                      tooltip: 'Add an image',
+                      onPressed: controller.connected ? _pick : null,
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                    ),
                   Expanded(
                     child: Focus(
                       canRequestFocus: false,
@@ -523,6 +580,7 @@ class _EntryView extends StatelessWidget {
     required this.proposalWait,
     this.pageActions,
     this.onOpen,
+    this.imageLoader,
   });
 
   final PageActions? pageActions;
@@ -530,6 +588,7 @@ class _EntryView extends StatelessWidget {
   final AssistantEntry entry;
   final AssistantController controller;
   final void Function(String link)? onOpen;
+  final ImageLoader? imageLoader;
 
   @override
   Widget build(BuildContext context) {
@@ -551,7 +610,33 @@ class _EntryView extends StatelessWidget {
               bottomRight: Radius.circular(14),
             ),
           ),
-          child: Text(revealInvisible(entry.text)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            spacing: 8,
+            children: [
+              if (_imagesOf(entry) case final images when images.isNotEmpty)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final (index, sha256) in images.indexed)
+                      switch (imageLoader) {
+                        final loader? => StoredImage(
+                          sha256: sha256,
+                          loader: loader,
+                          label: 'Your image ${index + 1}',
+                        ),
+                        null => Chip(
+                          avatar: const Icon(Icons.image_outlined, size: 16),
+                          label: Text('Image ${index + 1}'),
+                        ),
+                      },
+                  ],
+                ),
+              Text(revealInvisible(entry.text)),
+            ],
+          ),
         ),
       ),
       'moneypenny' => Row(
@@ -968,3 +1053,10 @@ class _ProposalCardState extends State<ProposalCard> {
     );
   }
 }
+
+/// The digests of the images a person's message carried, as its entry's `data.images` lists
+/// them.
+List<String> _imagesOf(AssistantEntry entry) => [
+  for (final image in entry.data?['images'] as List? ?? const [])
+    if (image case {'sha256': final String sha256}) sha256,
+];
