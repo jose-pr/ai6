@@ -99,6 +99,10 @@ pub struct Mission {
     /// Agent or the terminal is what is waiting. Cleared by the next state change.
     #[serde(default)]
     pub blocked_reason: Option<String>,
+    /// Why AI6 failed the Mission without its Agent: a harness that cannot be started. Cleared by
+    /// the next state change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
     /// Untrusted input the Mission itself came from (`brief:source`, or the exposure of the
     /// Session that proposed it); every Session of the Mission starts exposed by it.
     #[serde(default)]
@@ -256,6 +260,7 @@ impl MissionStore {
             revision: 1,
             parked_until: None,
             blocked_reason: None,
+            failure: None,
             review_naming: None,
             plan: None,
             denied_tools: Vec::new(),
@@ -357,6 +362,7 @@ impl MissionStore {
         mission.state = state;
         mission.parked_until = None;
         mission.blocked_reason = None;
+        mission.failure = None;
         mission.waiting = None;
         if state == MissionState::Working {
             mission.denied_tools.clear();
@@ -511,6 +517,30 @@ impl MissionStore {
         Ok(updated)
     }
 
+    /// Fails a queued Mission whose harness cannot be started, recording why. Failing it again
+    /// replaces the reason.
+    pub fn fail_for(&mut self, mission_id: &str, reason: &str) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.state != MissionState::Failed
+            && !valid_transition(mission.state, MissionState::Failed)
+        {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Failed,
+            });
+        }
+        mission.state = MissionState::Failed;
+        mission.parked_until = None;
+        mission.blocked_reason = None;
+        mission.waiting = None;
+        mission.failure = Some(reason.to_owned());
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
     /// Quarantines an active Mission: its work stops and only an operator moves it on.
     ///
     /// Quarantining again is harmless. Finished Missions are left alone.
@@ -646,6 +676,7 @@ impl MissionStore {
         mission.state = MissionState::Queued;
         mission.parked_until = None;
         mission.blocked_reason = None;
+        mission.failure = None;
         if agent_id.is_some() {
             mission.agent_id = agent_id;
         }

@@ -124,6 +124,40 @@ pub fn find_program(program: &str, environment: &BTreeMap<String, String>) -> Op
     })
 }
 
+/// Where a process started with no `PATH` looks for a bare name on Unix: the C library's default
+/// search path, which `execvp` uses then. Windows looks nowhere.
+const NO_PATH_SEARCH: &str = if cfg!(windows) { "" } else { "/bin:/usr/bin" };
+
+/// Why `agent`'s harness `program` cannot be started with `environment` and nothing else, or
+/// `None` when it can be found: a path must be a file; a bare name must be on the environment's
+/// own `PATH`, never the Station's, and with none only where a process given no `PATH` looks.
+pub fn missing_program(
+    agent: &str,
+    program: &str,
+    environment: &BTreeMap<String, String>,
+) -> Option<String> {
+    let given = Path::new(program);
+    if given.components().count() > 1 || given.is_absolute() {
+        return (!given.is_file())
+            .then(|| format!("Agent {agent:?}'s harness {program:?} is not a file"));
+    }
+    match variable(environment, "PATH") {
+        Some(_) => find_program(program, environment)
+            .is_none()
+            .then(|| format!("Agent {agent:?}'s harness {program:?} is not on its PATH")),
+        None => {
+            let mut searched = environment.clone();
+            searched.insert("PATH".to_owned(), NO_PATH_SEARCH.to_owned());
+            (NO_PATH_SEARCH.is_empty() || find_program(program, &searched).is_none()).then(|| {
+                format!(
+                    "Agent {agent:?} has no PATH in its environment (no `[loadout.{agent}] env`), \
+                     so its harness {program:?} cannot be found"
+                )
+            })
+        }
+    }
+}
+
 /// Where a Station on Unix may keep its configuration and secrets inside what `:minimal` or an
 /// interpreter's install directory (`/usr`) re-opens.
 pub const STATION_CONFIG_ROOTS: [&str; 3] = ["/etc/ai6", "/usr/local/etc", "/usr/etc"];
@@ -195,6 +229,42 @@ pub fn denied_station_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_harness_is_found_only_on_the_path_its_environment_gives() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = if cfg!(windows) {
+            "ai6-harness.exe"
+        } else {
+            "ai6-harness"
+        };
+        std::fs::write(dir.path().join(file), "").unwrap();
+        let with_path =
+            BTreeMap::from([("PATH".to_owned(), dir.path().to_string_lossy().into_owned())]);
+        assert_eq!(missing_program("007", "ai6-harness", &with_path), None);
+        let elsewhere = BTreeMap::from([(
+            "PATH".to_owned(),
+            std::env::temp_dir().display().to_string(),
+        )]);
+        assert_eq!(
+            missing_program("007", "ai6-harness", &elsewhere).as_deref(),
+            Some("Agent \"007\"'s harness \"ai6-harness\" is not on its PATH")
+        );
+        // The Station's own PATH is never searched in its place.
+        assert_eq!(
+            missing_program("007", "ai6-harness-nowhere", &BTreeMap::new()).as_deref(),
+            Some(
+                "Agent \"007\" has no PATH in its environment (no `[loadout.007] env`), so its \
+                 harness \"ai6-harness-nowhere\" cannot be found"
+            )
+        );
+        let full = dir.path().join(file).to_string_lossy().into_owned();
+        assert_eq!(missing_program("007", &full, &BTreeMap::new()), None);
+        assert!(
+            missing_program("007", &format!("{full}-gone"), &BTreeMap::new())
+                .is_some_and(|reason| reason.ends_with("is not a file"))
+        );
+    }
 
     #[test]
     fn a_program_in_bin_is_installed_in_the_directory_above() {

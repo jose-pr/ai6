@@ -525,6 +525,14 @@ impl AgentHandler for AcpHandler {
         Ok(HarnessStdio::Json)
     }
 
+    /// The `command` of its settings; without settings there is none to name.
+    fn program(&self) -> Result<Option<String>, ProviderError> {
+        Ok(self
+            .settings
+            .as_ref()
+            .map(|settings| settings.command.clone()))
+    }
+
     /// What the agent's model option offers, asked before any Session; an agent that does not
     /// say is unknown, with its reason.
     fn models(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, ProviderError> {

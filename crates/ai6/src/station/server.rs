@@ -3484,7 +3484,7 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
     }
     vetting::review_ended(state, lease, &mission);
     review::reviewer_ended(state, lease, &mission);
-    let outcome = serde_json::json!({
+    let mut outcome = serde_json::json!({
         "state": format!("{:?}", mission.state).to_lowercase(),
         "mission_id": mission.mission_id.as_str(),
         "session_ids": mission.session_ids,
@@ -3492,6 +3492,9 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
         "branch": mission.safe_house.as_ref().map(|safe_house| safe_house.branch.clone()),
         "denied_tools": mission.denied_tools,
     });
+    if let Some(reason) = &mission.failure {
+        outcome["reason"] = serde_json::json!(reason);
+    }
     finish_intake_claim(state, lease, &outcome, mission.state == MissionState::Done)
 }
 
@@ -3592,6 +3595,14 @@ async fn schedule_queued_once(state: &DaemonState) {
                 }
             }
             Err(ApiErrorResponse(StatusCode::TOO_MANY_REQUESTS, _)) => break,
+            // Trying again finds the same: the Mission fails, and its brief with it.
+            Err(ApiErrorResponse(StatusCode::UNPROCESSABLE_ENTITY, Json(error))) => {
+                eprintln!(
+                    "ai6: Mission {mission_id:?} cannot start, and fails: {}",
+                    error.error
+                );
+                fail_unstartable(state, &mission_id, &error.error).await;
+            }
             Err(ApiErrorResponse(_, Json(error))) => {
                 eprintln!(
                     "ai6: Mission {mission_id:?} did not start and will be tried again: {}",
@@ -3606,6 +3617,25 @@ async fn schedule_queued_once(state: &DaemonState) {
             }
         }
     }
+}
+
+/// Fails a queued Mission whose harness cannot be started, with the reason; its brief is filed
+/// failed with it on the next intake pass.
+async fn fail_unstartable(state: &DaemonState, mission_id: &str, reason: &str) {
+    let failed = state
+        .missions
+        .lock()
+        .is_ok_and(|mut missions| missions.fail_for(mission_id, reason).is_ok());
+    if !failed {
+        return;
+    }
+    if let Ok(mut retries) = state.retry_after.lock() {
+        retries.remove(mission_id);
+    }
+    sync_session_record(state, mission_id);
+    publish_lifecycle(state, mission_id, MissionState::Failed);
+    // The failed start already finished the safe house it made.
+    let _ = finalize_mission_resources(state, mission_id, false, true).await;
 }
 
 struct AgentOperation {
@@ -4264,6 +4294,12 @@ async fn start_mission(
                 .map_err(provider_error)?,
         ),
     };
+    // A harness this Station starts on its own host is looked for before it is started; one on
+    // another host is that host's to find. A handler that cannot name its program is not looked.
+    let program = match &handler {
+        Some(handler) if !wrapped => handler.program().ok().flatten(),
+        _ => None,
+    };
     // A runner chooses the terminal itself and reports it once the harness starts; the
     // detached wrapper gives the harness no terminal.
     let terminal_provider = match &handler {
@@ -4418,6 +4454,16 @@ async fn start_mission(
         {
             initial_context.push(briefing);
         }
+    }
+    if let Some(refusal) = program.as_deref().and_then(|program| {
+        crate::directorates::section_00::programs::missing_program(&agent.id, program, &environment)
+    }) {
+        let ApiErrorResponse(_, Json(error)) =
+            start_failure(&state, &mission_id, refusal, area.safe_house.clone()).await;
+        return Err(ApiErrorResponse(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(error),
+        ));
     }
     let exposure = medical::open_gate(&state, &mission);
     // Earlier rounds' reports quote other Missions' text: a round that reads them is exposed.
@@ -8718,7 +8764,8 @@ queue = 1
             super::ephemeral::testing::MockDir,
             super::vetting::testing::MockVerdictHandler,
             super::review::testing::MockAuthorHandler,
-            super::review::testing::MockReviewerHandler
+            super::review::testing::MockReviewerHandler,
+            super::placement_tests::MockProgramHandler
         ]
     );
 
@@ -9646,6 +9693,7 @@ queue = 1
                 "mock-limit",
                 "mock-lines",
                 "mock-pooled",
+                "mock-program",
                 "mock-recorder",
                 "mock-reviewer",
                 "mock-spend",

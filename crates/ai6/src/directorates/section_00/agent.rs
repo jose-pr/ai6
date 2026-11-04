@@ -435,6 +435,13 @@ pub trait AgentHandler: Send + Sync {
         let _ = query;
         Ok(None)
     }
+
+    /// The program the harness is started as, a name looked up on the Session's `PATH` or a
+    /// path, so a Station can say a harness cannot be found before it asks a terminal to start
+    /// it. The default: `None`, and the Station does not look.
+    fn program(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -445,7 +452,7 @@ mod tests {
     // shared kind's, whose header names the same value.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 1153954143);
+        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 1055802156);
         assert_eq!(
             coqui_acp_provider::AgentSessionVtable::FLOOR_HASH,
             1414216972

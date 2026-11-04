@@ -213,6 +213,10 @@ impl AgentHandler for CodexHandler {
         Ok(None)
     }
 
+    fn program(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(self.config.executable.clone()))
+    }
+
     /// Codex keeps each thread as a rollout file, one JSON object per line.
     fn session_record(
         &self,

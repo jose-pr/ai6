@@ -3,9 +3,117 @@
 
 use std::path::Path;
 
-use super::tests::test_state;
+use guatiao::library::{Object, ProviderError};
+use guatiao::{Provider, Status};
+
+use super::tests::{MockSession, test_state};
 use super::*;
+use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::registry::timeline::TimelineEvent;
+use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart, ModelListing};
+
+/// What a [`MockProgramHandler`] is built with: an Agent's or route's `handler_settings`.
+#[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema, Debug, Clone, Default)]
+#[map(crate = crate::guatiao)]
+pub(super) struct MockProgramConfig {
+    #[map(default = String::new())]
+    settings_toml: String,
+}
+
+/// A handler whose settings name its program (`program`), how long its model listing takes
+/// (`models_ms`) and a key its counts are kept under (`key`).
+#[derive(Provider)]
+#[provider(
+    AgentHandler,
+    id = "mock-program",
+    name = "Mock Program",
+    crate = crate::guatiao,
+    config = MockProgramConfig
+)]
+pub(super) struct MockProgramHandler {
+    program: Option<String>,
+    models_ms: u64,
+    key: String,
+}
+
+impl TryFrom<MockProgramConfig> for MockProgramHandler {
+    type Error = ProviderError;
+
+    fn try_from(config: MockProgramConfig) -> Result<Self, ProviderError> {
+        let table: toml::Table = toml::from_str(&config.settings_toml).map_err(|error| {
+            ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &error.to_string())
+        })?;
+        Ok(Self {
+            program: table
+                .get("program")
+                .and_then(toml::Value::as_str)
+                .map(str::to_owned),
+            models_ms: table
+                .get("models_ms")
+                .and_then(toml::Value::as_integer)
+                .map_or(0, |ms| ms.unsigned_abs()),
+            key: table
+                .get("key")
+                .and_then(toml::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        })
+    }
+}
+
+/// Starts and model listings a [`MockProgramHandler`] saw, by its settings' `key`.
+#[derive(Default)]
+struct Counts {
+    starts: usize,
+    listing: usize,
+    most_listing: usize,
+}
+
+static COUNTS: Mutex<BTreeMap<String, Counts>> = Mutex::new(BTreeMap::new());
+
+fn counts<T>(key: &str, read: impl FnOnce(&mut Counts) -> T) -> T {
+    read(COUNTS.lock().unwrap().entry(key.to_owned()).or_default())
+}
+
+impl AgentHandler for MockProgramHandler {
+    fn start(
+        &self,
+        request: AgentStart,
+        _terminal: Object<dyn AgentTerminal>,
+    ) -> Result<Object<dyn AgentSession>, ProviderError> {
+        counts(&self.key, |counts| counts.starts += 1);
+        let session = SessionId::try_new(format!("provider-session-{}", request.mission_id))
+            .map_err(|error| {
+                ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
+            })?;
+        Ok(MockSession::new(session, "blocked").into_object())
+    }
+
+    fn resume(
+        &self,
+        request: AgentResume,
+        _terminal: Object<dyn AgentTerminal>,
+    ) -> Result<Object<dyn AgentSession>, ProviderError> {
+        Ok(MockSession::new(request.session_id, "completed").into_object())
+    }
+
+    fn program(&self) -> Result<Option<String>, ProviderError> {
+        Ok(self.program.clone())
+    }
+
+    fn models(
+        &self,
+        _environment: BTreeMap<String, String>,
+    ) -> Result<ModelListing, ProviderError> {
+        counts(&self.key, |counts| {
+            counts.listing += 1;
+            counts.most_listing = counts.most_listing.max(counts.listing);
+        });
+        std::thread::sleep(Duration::from_millis(self.models_ms));
+        counts(&self.key, |counts| counts.listing -= 1);
+        Ok(ModelListing::of(Vec::new()))
+    }
+}
 
 /// A brief of Operation G with nothing named but the Stations it is pinned to.
 pub(super) fn pinned_brief(id: &str, stations: &[&str]) -> Brief {
@@ -173,4 +281,94 @@ fn an_account_hold_is_noted_again_when_its_reason_changes() {
     accounts::note_unplaced(&state, "p", "G", "Station \"a\": silent for 12 seconds");
     accounts::note_unplaced(&state, "p", "G", "Station \"b\": silent for 12 seconds");
     assert_eq!(waits_for(&state, "p").len(), 2);
+}
+
+/// Agent 007 on the mock program handler, with `settings` as its `handler_settings` and
+/// nothing else: no loadout, no `env`.
+fn program_agent(settings: &str) -> String {
+    format!("[agent.007]\nhandler = \"mock-program\"\n[agent.007.handler_settings]\n{settings}\n")
+}
+
+/// A Station whose book holds no Mission yet.
+fn empty_book(root: &Path, agents: &str) -> DaemonState {
+    let mut state = test_state(root, "", agents);
+    state.missions = Arc::new(Mutex::new(MissionStore::default()));
+    publish_station_check_in(&state);
+    state
+}
+
+fn named_brief(id: &str, agent: &str) -> Brief {
+    let mut brief = pinned_brief(id, &[]);
+    brief.agent = Some(agent.to_owned());
+    brief
+}
+
+#[tokio::test]
+async fn an_agent_with_no_path_fails_its_brief_after_one_attempt_and_says_why() {
+    let root = tempfile::tempdir().unwrap();
+    let key = "no-loadout";
+    let state = empty_book(
+        root.path(),
+        &program_agent(&format!(
+            "program = \"ai6-test-harness-nowhere\"\nkey = \"{key}\""
+        )),
+    );
+    let brief = named_brief("harness-missing", "007");
+    state.intake.submit_brief(&brief).unwrap();
+
+    schedule_intake_once(&state);
+    schedule_queued_once(&state).await;
+    let mission = super::tests::mission_state(&state, &brief.key());
+    assert_eq!(mission.state, MissionState::Failed);
+    let reason = mission.failure.clone().unwrap();
+    assert_eq!(
+        reason,
+        "Agent \"007\" has no PATH in its environment (no `[loadout.007] env`), so its harness \
+         \"ai6-test-harness-nowhere\" cannot be found"
+    );
+    assert!(
+        !state.retry_after.lock().unwrap().contains_key(&brief.key()),
+        "it is not tried again"
+    );
+    schedule_queued_once(&state).await;
+    assert_eq!(
+        counts(key, |counts| counts.starts),
+        0,
+        "no harness was started"
+    );
+
+    schedule_intake_once(&state);
+    let filed = state.intake.filed_brief(&brief.key()).unwrap().unwrap();
+    assert_eq!(filed.state, "failed");
+    assert_eq!(filed.attempts, 1);
+    let outcome = filed.outcome.unwrap();
+    assert_eq!(outcome["state"], "failed");
+    assert_eq!(outcome["reason"], reason.as_str());
+}
+
+#[tokio::test]
+async fn a_harness_on_the_agents_own_path_starts() {
+    let root = tempfile::tempdir().unwrap();
+    let bin = root.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let file = if cfg!(windows) {
+        "ai6-test-harness.exe"
+    } else {
+        "ai6-test-harness"
+    };
+    fs::write(bin.join(file), "").unwrap();
+    let key = "on-path";
+    let agents = format!(
+        "[agent.007]\nhandler = \"mock-program\"\nenv = {{ PATH = {:?} }}\n\
+         [agent.007.handler_settings]\nprogram = \"ai6-test-harness\"\nkey = \"{key}\"\n",
+        bin.to_string_lossy()
+    );
+    let state = empty_book(root.path(), &agents);
+    let brief = named_brief("harness-found", "007");
+    state.intake.submit_brief(&brief).unwrap();
+    schedule_intake_once(&state);
+    schedule_queued_once(&state).await;
+    super::tests::wait_for_state(&state, &brief.key(), MissionState::Blocked).await;
+    assert_eq!(counts(key, |counts| counts.starts), 1);
+    state.stopping.store(true, Ordering::Release);
 }

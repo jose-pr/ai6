@@ -299,6 +299,10 @@ impl AgentHandler for AntigravityHandler {
         Ok(HarnessStdio::Json)
     }
 
+    fn program(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(self.config.executable.clone()))
+    }
+
     /// agy keeps each conversation's transcript under its home directory.
     fn session_record(
         &self,

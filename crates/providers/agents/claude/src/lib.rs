@@ -218,6 +218,10 @@ impl AgentHandler for ClaudeHandler {
         Ok(None)
     }
 
+    fn program(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(self.config.executable.clone()))
+    }
+
     /// Claude Code keeps each Session as `projects/<directory>/<session>.jsonl` under its
     /// configuration directory (`CLAUDE_CONFIG_DIR`, else `~/.claude`), one JSON object per
     /// line.
