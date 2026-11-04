@@ -17,10 +17,10 @@ use crate::directorates::registry::quarantine::{
     Quarantine, QuarantineStore, add_incident, quarantine_report, validate_quarantine,
 };
 use crate::directorates::registry::sleepers::{
-    Fire, Sleeper, SleeperAuthorization, SleeperStore, fired_brief, round_entry,
+    Fire, Sleeper, SleeperAuthorization, SleeperStore, fire_round,
 };
 use crate::directorates::registry::store::{
-    AccessTokenStore, AgentRoleStore, AuditRecord, AuditStore, BriefStore, CableStore, cable_error,
+    AccessTokenStore, AgentRoleStore, AuditRecord, AuditStore, CableStore, cable_error,
     cable_sent_event, check_quota_buckets, extended_token, invalid_data, quota_allows,
     quota_balances, revoked_token, sign_in_stands, unix_time, validate_access_token_record,
     validate_cable_id, validate_registry_key, validate_station_id, validate_token_digest,
@@ -840,12 +840,7 @@ impl SleeperStore for SqlRegistry {
         round: (i64, Option<&str>),
         received_by: &str,
     ) -> io::Result<Fire> {
-        let brief = fired_brief(operation, name, sleeper, round, received_by);
-        match self.enter_brief(&brief, &round_entry(operation, name, round)) {
-            Ok(_) => Ok(Fire::Queued),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
-            Err(error) => Err(error),
-        }
+        fire_round(self, (operation, name, sleeper), round, received_by)
     }
 }
 

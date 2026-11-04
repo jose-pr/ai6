@@ -20,7 +20,7 @@ use crate::directorates::registry::backend::*;
 use crate::directorates::registry::mission_issues::{
     IssueLink, IssueSnapshot, LinkRelation, LinkState,
 };
-use crate::directorates::registry::sleepers::{Fire, Sleeper};
+use crate::directorates::registry::sleepers::{Fire, Sleeper, window_label};
 use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
@@ -1009,7 +1009,25 @@ pub(crate) fn fire_due_sleepers(
                             ),
                         }
                     }
-                    Ok(Fire::AlreadyFired) => {}
+                    Ok(Fire::InFlight) => {
+                        // Named once per window; only the latest window is remembered.
+                        let prefix = format!(
+                            "skipped/{}/{name}/{}/",
+                            operation.id,
+                            round.as_deref().unwrap_or_default()
+                        );
+                        let skipped = format!("{prefix}{}", window_label(window));
+                        warned.retain(|seen| !seen.starts_with(&prefix) || *seen == skipped);
+                        if warned.insert(skipped) {
+                            eprintln!(
+                                "ai6: sleeper {name} of Operation {} skipped window {}: its \
+                                 standing Mission's last attempt is still in flight",
+                                operation.id,
+                                window_label(window)
+                            );
+                        }
+                    }
+                    Ok(_) => {}
                     Err(error) => {
                         eprintln!("ai6: sleeper {name} of Operation {}: {error}", operation.id);
                     }

@@ -126,6 +126,14 @@ enum EntryKind {
         window: String,
         station: Option<String>,
     },
+    Standing {
+        name: String,
+        station: Option<String>,
+    },
+    FollowUp {
+        instance: String,
+        item: String,
+    },
     Source {
         instance: String,
         item: String,
@@ -175,6 +183,31 @@ impl MissionEntry {
         )
     }
 
+    /// A standing Sleeper's one Mission, per Station when it holds a round on each:
+    /// `<operation>-<sleeper>-<n>`, the same one for every window, each window an attempt of it.
+    pub fn standing(operation: &str, name: &str, station: Option<&str>) -> Self {
+        Self::of(
+            Some(operation),
+            EntryKind::Standing {
+                name: name.to_owned(),
+                station: station.map(str::to_owned),
+            },
+        )
+    }
+
+    /// Follow-up work on an item of a Source instance that already has a Mission: the item's
+    /// Mission's handle now and a follow-up number from 2, `<operation>-<tag>-<code>-<k>`. Each
+    /// entry is a new Mission; allotting one for an item with no Mission is refused.
+    pub fn follow_up(operation: &str, instance: &str, item: &str) -> Self {
+        Self::of(
+            Some(operation),
+            EntryKind::FollowUp {
+                instance: instance.to_owned(),
+                item: item.to_owned(),
+            },
+        )
+    }
+
     /// An item of a Source instance: `<operation>-<tag>-<code>`, or `<operation>-<code>` for a
     /// code that names its own project, or `<operation>-<instance>-<item>` when the provider
     /// gives no code. `tag` and `code` count only the first time the item is seen: the item
@@ -219,6 +252,10 @@ impl MissionEntry {
                 Some(station) => vec!["sleeper", operation, name, window, station],
                 None => vec!["sleeper", operation, name, window],
             },
+            EntryKind::Standing { name, station } => match station {
+                Some(station) => vec!["standing", operation, name, station],
+                None => vec!["standing", operation, name],
+            },
             EntryKind::Source { instance, item, .. } => vec!["source", operation, instance, item],
         };
         Some(parts.join(&SEPARATOR.to_string()))
@@ -242,10 +279,13 @@ impl MissionEntry {
         let label = self.label();
         let number = number.unwrap_or_default();
         match &self.kind {
-            EntryKind::Person | EntryKind::Proposal { .. } | EntryKind::Review { .. } => {
-                format!("{label}-{number}")
+            EntryKind::Person
+            | EntryKind::Proposal { .. }
+            | EntryKind::Review { .. }
+            | EntryKind::FollowUp { .. } => format!("{label}-{number}"),
+            EntryKind::Sleeper { name, .. } | EntryKind::Standing { name, .. } => {
+                format!("{label}-{}-{number}", part(name))
             }
-            EntryKind::Sleeper { name, .. } => format!("{label}-{}-{number}", part(name)),
             EntryKind::Source {
                 instance,
                 item,

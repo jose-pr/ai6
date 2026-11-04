@@ -553,6 +553,7 @@ mod tests {
             closed_at: matches!(state, "done" | "failed" | "blown" | "abandoned")
                 .then_some(1_100.0),
             result: Some(SessionResult::new(state).with_reason(reason.map(str::to_owned))),
+            window: None,
         }
     }
 

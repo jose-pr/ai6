@@ -31,6 +31,7 @@ mod recovery;
 mod reload;
 mod review;
 mod routes;
+mod standing;
 mod stewardship;
 #[cfg(test)]
 mod stream_tests;
@@ -4693,6 +4694,17 @@ async fn start_mission(
         .await;
         (project.load, project.mcp)
     };
+    // A standing Sleeper's window may take up the provider Session its last attempt left.
+    let window_run = standing::of(&state, mission_id.as_str());
+    let resume_from = window_run.as_ref().and_then(|run| {
+        standing::resume_from(
+            &state,
+            (mission.operation_id.as_deref(), mission_id.as_str()),
+            run,
+            earlier.as_ref(),
+            &handler_provider,
+        )
+    });
     let start_request = AgentStart {
         mission_id: mission.mission_id,
         agent_id: agent.id,
@@ -4708,6 +4720,10 @@ async fn start_mission(
         project_mcp,
         answer_only: review,
         assistant: None,
+    };
+    let launch = match resume_from {
+        Some(session_id) => Launch::Resume(standing::resume_request(start_request, session_id)),
+        None => Launch::Start(start_request),
     };
     let attachment = runner_key.clone().map(|key| RunnerAttachment {
         key,
@@ -4749,8 +4765,15 @@ async fn start_mission(
             let terminal_handle =
                 TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
             tokio::task::spawn_blocking(move || {
-                crate::station::acp::start(handler, terminal_handle, start_request)
-                    .map_err(|error| error.to_string())
+                match launch {
+                    Launch::Start(request) => {
+                        crate::station::acp::start(handler, terminal_handle, request)
+                    }
+                    Launch::Resume(request) => {
+                        crate::station::acp::resume(handler, terminal_handle, request)
+                    }
+                }
+                .map_err(|error| error.to_string())
             })
             .await
         }
@@ -4777,8 +4800,7 @@ async fn start_mission(
                 if let Some(stale) = stale_runner_session {
                     let _ = link.close_session(&stale);
                 }
-                let (report, started) =
-                    link.launch(&key, &handler, Launch::Start(start_request))?;
+                let (report, started) = link.launch(&key, &handler, launch)?;
                 record_runner_session(&worker_state, &worker_mission, &report);
                 Ok(runner_session(
                     link,
@@ -4881,6 +4903,9 @@ async fn start_mission(
             .with_theater(theater_id.as_str())
             .with_attempt(attempt, predecessor)
             .with_exposure(exposure.exposures());
+    if let Some(run) = &window_run {
+        new_session = new_session.with_window(run.window.as_str());
+    }
     if let Some(account) = accounts::held(&state, &mission_id) {
         new_session = new_session.with_account(account);
     }
@@ -4933,10 +4958,12 @@ async fn start_mission(
         (|| {
             missions.set_hold(&mission_id, hold.clone())?;
             let working = missions.transition(&mission_id, MissionState::Working)?;
-            let working = if let Some(session_id) = session_id.clone() {
-                missions.attach_session(&mission_id, session_id)?
-            } else {
-                working
+            // A resumed provider Session is one the Mission already has.
+            let working = match session_id.clone() {
+                Some(session_id) if !working.session_ids.contains(&session_id) => {
+                    missions.attach_session(&mission_id, session_id)?
+                }
+                _ => working,
             };
             if let Some(safe_house) = area.safe_house.as_ref().filter(|house| house.is_isolated()) {
                 missions.set_safe_house(&mission_id, safe_house.active_report())
@@ -8805,7 +8832,8 @@ queue = 1
             super::vetting::testing::MockVerdictHandler,
             super::review::testing::MockAuthorHandler,
             super::review::testing::MockReviewerHandler,
-            super::placement_tests::MockProgramHandler
+            super::placement_tests::MockProgramHandler,
+            super::standing::testing::MockStandingHandler
         ]
     );
 
@@ -9737,6 +9765,7 @@ queue = 1
                 "mock-recorder",
                 "mock-reviewer",
                 "mock-spend",
+                "mock-standing",
                 "mock-stream",
                 "mock-verdict",
             ])

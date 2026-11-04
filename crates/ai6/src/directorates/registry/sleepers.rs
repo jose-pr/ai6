@@ -19,7 +19,8 @@ use super::limits::SleeperLimits;
 use super::logbook::station_key;
 use super::mission_ids::MissionEntry;
 use super::store::{
-    Brief, FileRegistry, hex_digest, invalid_data, safe_component, unix_time, validate_station_id,
+    Brief, FileRegistry, Reentry, hex_digest, invalid_data, safe_component, unix_time,
+    validate_station_id,
 };
 use super::timeline::{TimelineEvent, record_event_locked};
 use crate::directorates::registry::backend::*;
@@ -80,6 +81,25 @@ pub struct Sleeper {
     #[schema(title = "A brief for each Station")]
     #[map(default)]
     pub each_station: bool,
+    /// One standing Mission for the Sleeper (one per Station with `each_station`), each window
+    /// a new attempt of it, instead of a Mission per window. A window that comes while an
+    /// attempt is in flight is skipped.
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schema(title = "One standing Mission")]
+    #[map(default)]
+    pub standing: bool,
+    /// Each window's attempt resumes the last attempt's provider Session when its handler can,
+    /// else starts a new one. Needs `standing`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schema(title = "Resume the last attempt's Session")]
+    #[map(default)]
+    pub resume: bool,
+}
+
+/// Leaves an unset flag out of a definition, so its fingerprint, and the approval that names
+/// it, stay as they were before the flag existed.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Sleeper {
@@ -88,12 +108,15 @@ impl Sleeper {
     ///
     /// # Errors
     ///
-    /// Returns a message for a bad cron expression, an empty title or a `stations` entry
-    /// that is not a Station ID.
+    /// Returns a message for a bad cron expression, an empty title, a `stations` entry that is
+    /// not a Station ID, or `resume` without `standing`.
     pub fn validate(&self) -> Result<(), String> {
         Cron::parse(&self.schedule).map_err(|e| format!("schedule: {e}"))?;
         if self.title.trim().is_empty() {
             return Err("title must not be empty".to_owned());
+        }
+        if self.resume && !self.standing {
+            return Err("resume needs standing = true".to_owned());
         }
         if let Some(station) = self
             .stations
@@ -153,6 +176,9 @@ pub enum Fire {
     Queued,
     /// The window's brief already exists, queued, running or finished.
     AlreadyFired,
+    /// A standing Sleeper's attempt of an earlier window is still queued, held or running, so
+    /// this window is skipped.
+    InFlight,
 }
 
 /// A parsed five-field cron expression, evaluated in UTC.
@@ -342,6 +368,12 @@ pub fn sleeper_brief(
         id.push('.');
         id.push_str(&station_key(station));
     }
+    if sleeper.standing {
+        origin["standing"] = serde_json::json!(true);
+    }
+    if sleeper.resume {
+        origin["resume"] = serde_json::json!(true);
+    }
     data.insert("sleeper".to_owned(), origin);
     Brief {
         title: sleeper.title.clone(),
@@ -431,13 +463,55 @@ pub trait SleeperStore {
     ) -> io::Result<Fire>;
 }
 
-/// Where one round of a sleeper enters.
+/// Where one round of a sleeper enters: the window's own Mission, or for a standing Sleeper the
+/// one Mission all its windows are attempts of.
 pub(super) fn round_entry(
     operation: &str,
     name: &str,
+    sleeper: &Sleeper,
     (window, station): (i64, Option<&str>),
 ) -> MissionEntry {
-    MissionEntry::sleeper(operation, name, &window_label(window), station)
+    if sleeper.standing {
+        MissionEntry::standing(operation, name, station)
+    } else {
+        MissionEntry::sleeper(operation, name, &window_label(window), station)
+    }
+}
+
+/// The window a Sleeper's brief was queued for.
+pub fn window_of(brief: &Brief) -> Option<&str> {
+    brief.data.get("sleeper")?.get("window")?.as_str()
+}
+
+/// Queues one round of a sleeper in `registry`, as [`SleeperStore::fire_sleeper`] says.
+pub(super) fn fire_round<R: BriefStore + ?Sized>(
+    registry: &R,
+    (operation, name, sleeper): (&str, &str, &Sleeper),
+    round: (i64, Option<&str>),
+    received_by: &str,
+) -> io::Result<Fire> {
+    let brief = fired_brief(operation, name, sleeper, round, received_by);
+    let entry = round_entry(operation, name, sleeper, round);
+    let enter = || match registry.enter_brief(&brief, &entry) {
+        Ok(_) => Ok(Fire::Queued),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
+        Err(error) => Err(error),
+    };
+    if !sleeper.standing {
+        return enter();
+    }
+    let label = window_label(round.0);
+    let this_window = |filed: &Brief| window_of(filed) == Some(label.as_str());
+    match registry.reenter_brief(&brief, &entry, &|filed| !this_window(filed))? {
+        Reentry::Queued(_) => Ok(Fire::Queued),
+        Reentry::Unchanged(filed)
+            if this_window(&filed.brief) || matches!(filed.state.as_str(), "done" | "failed") =>
+        {
+            Ok(Fire::AlreadyFired)
+        }
+        Reentry::Unchanged(_) => Ok(Fire::InFlight),
+        _ => enter(),
+    }
 }
 
 /// The brief a sleeper queues for one window and round, with its provenance.
@@ -524,12 +598,7 @@ impl SleeperStore for FileRegistry {
         round: (i64, Option<&str>),
         received_by: &str,
     ) -> io::Result<Fire> {
-        let brief = fired_brief(operation, name, sleeper, round, received_by);
-        match self.enter_brief(&brief, &round_entry(operation, name, round)) {
-            Ok(_) => Ok(Fire::Queued),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
-            Err(error) => Err(error),
-        }
+        fire_round(self, (operation, name, sleeper), round, received_by)
     }
 }
 
@@ -542,10 +611,124 @@ pub(super) mod tests {
         a_window_fires_once_however_many_stations_evaluate_it,
         approval_covers_one_exact_definition,
         each_station_s_round_is_its_own_brief_narrowed_to_it,
+        a_standing_sleeper_s_windows_are_attempts_of_one_mission,
     );
 
     /// 2026-10-25T10:00:00Z
     const NOW: i64 = 1_792_922_400;
+
+    fn a_standing_sleeper_s_windows_are_attempts_of_one_mission(store: &dyn Store) {
+        let headquarters = store.handle();
+        let takeover = store.handle();
+        let standing = Sleeper {
+            standing: true,
+            ..nightly()
+        };
+        let window = |day: i64| at("2026-10-25") + 3 * 3600 + day * 86_400;
+        let fire = |registry: &dyn RegistryBackend, at: i64, station: Option<&str>| {
+            registry
+                .fire_sleeper("G", "deps", &standing, (at, station), "hq")
+                .unwrap()
+        };
+        assert_eq!(fire(headquarters.as_ref(), window(0), None), Fire::Queued);
+        assert_eq!(fire(takeover.as_ref(), window(0), None), Fire::AlreadyFired);
+        assert_eq!(
+            fire(takeover.as_ref(), window(1), None),
+            Fire::InFlight,
+            "the next window comes while the first attempt is queued"
+        );
+        let first = headquarters.list_new().unwrap().remove(0);
+        assert_eq!(first.shown_handle(), "G-deps-1");
+        assert_eq!(window_of(&first), Some(window_label(window(0)).as_str()));
+        let key = first.key();
+
+        for attempt in 1..=3 {
+            let lease = headquarters
+                .claim_with_lease(None, "hq", crate::DEFAULT_LEASE, BTreeMap::new())
+                .unwrap()
+                .unwrap();
+            assert_eq!((lease.key(), lease.attempt()), (key.as_str(), attempt));
+            let claimed = headquarters.read_claimed(&key).unwrap().unwrap();
+            assert_eq!(
+                window_of(&claimed),
+                Some(window_label(window(i64::from(attempt) - 1)).as_str())
+            );
+            assert_eq!(claimed.provenance.as_ref().unwrap().origin, Origin::Sleeper);
+            assert_eq!(
+                fire(takeover.as_ref(), window(i64::from(attempt) - 1), None),
+                Fire::AlreadyFired
+            );
+            headquarters
+                .finish(
+                    &claimed,
+                    &serde_json::json!({"state": "done"}),
+                    true,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                fire(takeover.as_ref(), window(i64::from(attempt) - 1), None),
+                Fire::AlreadyFired,
+                "a finished window does not fire again"
+            );
+            if attempt < 3 {
+                assert_eq!(
+                    fire(takeover.as_ref(), window(i64::from(attempt)), None),
+                    Fire::Queued
+                );
+                let queued = headquarters.list_new().unwrap();
+                assert_eq!(queued.len(), 1);
+                assert_eq!(
+                    (queued[0].key(), queued[0].shown_handle()),
+                    (key.clone(), "G-deps-1".to_owned())
+                );
+            }
+        }
+        // Rounds on each Station are a standing Mission each.
+        for station in ["station-a", "station-b"] {
+            assert_eq!(
+                fire(headquarters.as_ref(), window(5), Some(station)),
+                Fire::Queued
+            );
+        }
+        let mut rounds: Vec<String> = headquarters
+            .list_new()
+            .unwrap()
+            .iter()
+            .map(Brief::shown_handle)
+            .collect();
+        rounds.sort();
+        assert_eq!(rounds, ["G-deps-2", "G-deps-3"]);
+    }
+
+    #[test]
+    fn standing_and_resume_leave_an_existing_approval_standing_unless_set() {
+        let plain = nightly();
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(
+            !json.contains("standing") && !json.contains("resume"),
+            "an existing definition fingerprints as it did: {json}"
+        );
+        let standing = Sleeper {
+            standing: true,
+            ..nightly()
+        };
+        assert_ne!(standing.fingerprint(), plain.fingerprint());
+        let resume = Sleeper {
+            resume: true,
+            ..nightly()
+        };
+        assert!(resume.validate().unwrap_err().contains("standing"));
+        let both = Sleeper {
+            resume: true,
+            ..standing
+        };
+        assert!(both.validate().is_ok());
+        let brief = sleeper_brief("G", "deps", &both, NOW, None);
+        assert_eq!(brief.data["sleeper"]["standing"], true);
+        assert_eq!(brief.data["sleeper"]["resume"], true);
+    }
 
     fn at(day: &str) -> i64 {
         // Midnight of an ISO date, through the same calendar code the schedule uses.
@@ -648,6 +831,8 @@ pub(super) mod tests {
             priority: 1,
             stations: Vec::new(),
             each_station: false,
+            standing: false,
+            resume: false,
         }
     }
 

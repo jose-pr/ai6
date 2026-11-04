@@ -207,6 +207,9 @@ pub struct SessionRecord {
     /// How its Mission stood when the holder last wrote it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<SessionResult>,
+    /// The window (`20261025T0300Z`) a standing Sleeper's run answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
 }
 
 /// How a Mission stood at its Session's last write: what a scorecard judges the attempt by.
@@ -276,6 +279,7 @@ pub struct NewSession {
     exposure: Vec<Exposure>,
     launch: Option<SessionLaunch>,
     account: Option<AccountRef>,
+    window: Option<String>,
 }
 
 impl NewSession {
@@ -298,7 +302,14 @@ impl NewSession {
             exposure: Vec::new(),
             launch: None,
             account: None,
+            window: None,
         }
+    }
+
+    /// Records the standing Sleeper's window the run answers.
+    pub fn with_window(mut self, window: impl Into<String>) -> Self {
+        self.window = Some(window.into());
+        self
     }
 
     /// Names the run by the Mission's handle now: the record's handle is
@@ -649,6 +660,7 @@ pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> Ses
         opened_at: Some(now),
         closed_at: None,
         result: None,
+        window: new.window,
     }
 }
 
