@@ -137,7 +137,7 @@ pub fn ai6::bootstrap::oo::OoTerminal::default() -> Self
 pub mod ai6::bootstrap::public
 #[non_exhaustive] pub enum ai6::bootstrap::public::PublicError
 pub ai6::bootstrap::public::PublicError::Format(ai6::bootstrap::format::FormatError)
-pub ai6::bootstrap::public::PublicError::NotAnOrigin
+pub ai6::bootstrap::public::PublicError::NotAnOrigin(&'static str)
 impl core::error::Error for ai6::bootstrap::public::PublicError
 impl core::fmt::Display for ai6::bootstrap::public::PublicError
 pub fn ai6::bootstrap::public::PublicError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
