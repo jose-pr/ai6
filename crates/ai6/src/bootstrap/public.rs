@@ -2,7 +2,7 @@
 //!
 //! A page can fetch only what is served, and a host's file names files and addresses that are not
 //! the public's business. So this is an allow list, and a new key is private until it is named
-//! here: `[unex] url`, and of `[oo]` its tables' numbers and booleans and the text settings
+//! here: the gateway's address, and of `[oo]` its tables' numbers and booleans and the text settings
 //! `PUBLIC_TEXT` names. Every other value a person writes under `[oo]` is left out, so a secret
 //! filed there by mistake goes no further.
 
@@ -20,8 +20,9 @@ const PUBLIC_TEXT: [(&str, &str); 2] = [("appearance", "theme"), ("assets", "cdn
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublicError {
-    /// `[unex] url` holds more than an origin, which may be a credential.
-    NotAnOrigin,
+    /// The `[unex]` key named, `public_origin` or `url`, holds more than an origin, which may be a
+    /// credential.
+    NotAnOrigin(&'static str),
     /// The document could not be written.
     Format(FormatError),
 }
@@ -29,9 +30,10 @@ pub enum PublicError {
 impl fmt::Display for PublicError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotAnOrigin => formatter.write_str(
-                "[unex] url holds a credential, a query or a fragment, which a public file must \
-                 not; name the origin alone",
+            Self::NotAnOrigin(key) => write!(
+                formatter,
+                "[unex] {key} holds a credential, a query or a fragment, which a public file must \
+                 not; name the origin alone"
             ),
             Self::Format(error) => error.fmt(formatter),
         }
@@ -87,16 +89,23 @@ fn public_table(
     kept
 }
 
-/// Writes the public file of `bootstrap`.
+/// Writes the public file of `bootstrap`. Its `[unex] url` is the host's `[unex] public_origin`,
+/// the address browsers reach the gateway at, else the host's `[unex] url`.
 ///
 /// # Errors
 ///
-/// [`PublicError::NotAnOrigin`] for a `[unex] url` that holds a credential, a query or a fragment.
+/// [`PublicError::NotAnOrigin`] when the address it would write holds a credential, a query or a
+/// fragment.
 pub fn public_file(bootstrap: &Bootstrap) -> Result<PublicFile, PublicError> {
     let mut document = Map::new();
-    if let Some(url) = &bootstrap.unex.url {
+    let address = match (&bootstrap.unex.public_origin, &bootstrap.unex.url) {
+        (Some(origin), _) => Some(("public_origin", origin)),
+        (None, Some(url)) => Some(("url", url)),
+        (None, None) => None,
+    };
+    if let Some((key, url)) = address {
         if !is_plain_origin(url) {
-            return Err(PublicError::NotAnOrigin);
+            return Err(PublicError::NotAnOrigin(key));
         }
         let mut unex = Map::new();
         unex.insert("url".to_owned(), Value::String(url.clone()));
@@ -150,11 +159,11 @@ headquarters_lease = 60
 records = 100000
 
 [unex]
-url = "https://ai6.example"
+url = "http://{PLANTED}.internal:7082"
 ca_file = "{PLANTED}.pem"
 station_token = "{PLANTED}"
 listen = "127.0.0.1:7082"
-public_origin = "https://{PLANTED}.example"
+public_origin = "https://ai6.example"
 proxy_secret = "{PLANTED}"
 proxy_secret_min_bytes = 32
 state_dir = "/{PLANTED}"
@@ -291,11 +300,33 @@ reason_chars = 512
             format!("https://ai6.example/?token={PLANTED}"),
             format!("https://ai6.example/#{PLANTED}"),
         ] {
-            let refused =
-                public_file(&bootstrap(&format!("[unex]\nurl = \"{url}\"\n"))).unwrap_err();
-            assert_eq!(refused, PublicError::NotAnOrigin);
-            assert!(!format!("{refused} {refused:?}").contains(PLANTED));
+            for key in ["url", "public_origin"] {
+                let refused =
+                    public_file(&bootstrap(&format!("[unex]\n{key} = \"{url}\"\n"))).unwrap_err();
+                assert_eq!(refused, PublicError::NotAnOrigin(key));
+                assert!(!format!("{refused} {refused:?}").contains(PLANTED));
+            }
         }
+    }
+
+    #[test]
+    fn the_page_reaches_the_gateway_at_its_public_origin_not_the_host_s_own_address() {
+        let public = public_file(&bootstrap(
+            "[unex]\nurl = \"http://127.0.0.1:7082\"\npublic_origin = \"https://ai6.example\"\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            bootstrap(&public.text).unex.url.as_deref(),
+            Some("https://ai6.example")
+        );
+        assert!(!public.text.contains("127.0.0.1"), "{}", public.text);
+
+        // With no public origin, the host's address is the one there is.
+        let public = public_file(&bootstrap("[unex]\nurl = \"https://ai6.example\"\n")).unwrap();
+        assert_eq!(
+            bootstrap(&public.text).unex.url.as_deref(),
+            Some("https://ai6.example")
+        );
     }
 
     #[test]

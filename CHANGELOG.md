@@ -416,6 +416,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `ai6 config public` writes `[unex] public_origin`, where browsers reach the gateway, as the
+  page's `[unex] url` when the host's file has one, and its `[unex] url` only otherwise: that is
+  often a loopback address, which broke the page for every browser.
 - `universal-exports` stops gracefully at SIGTERM on unix, as a service manager stops it, not
   only at Ctrl-C.
 - The `acp` handler's default `limit_phrases` name the Grok CLI's out-of-credits words (`spending-limit`,

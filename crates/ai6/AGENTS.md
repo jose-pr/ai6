@@ -5637,10 +5637,11 @@ that table, so a provider with a configuration of its own declares it too.
   configuration provider and the Registry the bootstrap file names, like the Station.
 - `ai6 config path [--config PATH]` prints the bootstrap file in use, or `none (defaults)`.
 - `ai6 config public [--output PATH] [--config PATH]` writes the public `ai6.cfg` a web page reads
-  (`bootstrap::public`): an allow list of `[unex] url` and, of `[oo]`, its tables' numbers and booleans
+  (`bootstrap::public`): an allow list of the gateway's address, written as `[unex] url` (the host's
+  `[unex] public_origin`, else its `[unex] url`) and, of `[oo]`, its tables' numbers and booleans
   and the words `[oo.appearance] theme` and `[oo.assets] cdn`. Other text under `[oo]` is left out and
-  named on standard error; a `url` holding `@`, `?` or `#` and this host's own file as the output are
-  refused.
+  named on standard error; an address holding `@`, `?` or `#` (`PublicError::NotAnOrigin(key)`,
+  naming `public_origin` or `url`) and this host's own file as the output are refused.
 - `ai6 quarantine list|add <AGENT> <REASON> [--operation ID | --all]|release <AGENT> (--operation ID | --all)`:
   stop an Agent, or lift that, through the Registry; a Station applies the change within a
   scheduler tick.

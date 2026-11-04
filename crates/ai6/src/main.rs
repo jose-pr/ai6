@@ -156,8 +156,9 @@ enum ConfigCommand {
         #[command(flatten)]
         bootstrap: BootstrapArg,
     },
-    /// Write the public ai6.cfg a web page reads beside index.html, from this host's file: its
-    /// [unex] url and what the page needs of [oo], and nothing else.
+    /// Write the public ai6.cfg a web page reads beside index.html, from this host's file: the
+    /// gateway's address ([unex] public_origin, else url) and what the page needs of [oo], and
+    /// nothing else.
     Public {
         /// Where to write it (default: standard output); this host's own file is refused.
         #[arg(long, value_name = "PATH")]

@@ -527,10 +527,13 @@ On the web a page can fetch only what is served, so what sits beside `index.html
 ai6 config public --config /etc/ai6/ai6.cfg --output /opt/ai6/web/ai6.cfg
 ```
 
-It keeps an allow list, so a new key is private until someone says otherwise: `[unex] url`, and of
-`[oo]` its tables' numbers and booleans and the two words `[oo.appearance] theme` and `[oo.assets]
-cdn`. Any other text under `[oo]` is left out and named on standard error. A `url` holding a
-credential, a query or a fragment is refused. Without `--output` it prints to standard output; the
+It keeps an allow list, so a new key is private until someone says otherwise: the gateway's address,
+and of `[oo]` its tables' numbers and booleans and the two words `[oo.appearance] theme` and
+`[oo.assets] cdn`. The address is written as the page's `[unex] url`: the host's `[unex]
+public_origin`, where browsers reach the gateway, else its `[unex] url`, since a host's own
+`url` is often a loopback address no browser can use. Any other text under `[oo]` is left out and
+named on standard error. An address holding a credential, a query or a fragment is refused, naming
+its key. Without `--output` it prints to standard output; the
 host's file itself is refused as an output. A web build never bundles a host's file: copy the
 public one beside `index.html` after the build, and a missing one means the defaults.
 

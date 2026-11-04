@@ -367,7 +367,8 @@ cdn = "fonts"
 ```
 
 That file is `ai6 config public --config /etc/ai6/ai6.cfg --output /srv/web/ai6.cfg`, written beside
-the deployed build: it holds `[unex] url` and what the page needs of `[oo]`, from an allow list. A web
+the deployed build: it holds `[unex] url`, the host's `[unex] public_origin` when it has one, and
+what the page needs of `[oo]`, from an allow list. A web
 build never bundles a host's own `ai6.cfg`, and `test/oo_config_test.dart` fails if `web/` holds one.
 
 `test/no_cdn_test.dart` fails if the page or the bootstrap names a CDN host, if the

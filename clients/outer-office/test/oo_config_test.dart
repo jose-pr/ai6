@@ -580,7 +580,11 @@ void main() {
       final config = OoConfig.parse(
         File('test/fixtures/public_ai6.cfg').readAsStringSync(),
       );
-      expect(config.unexUrl, Uri.parse('http://127.0.0.1:7082'));
+      expect(
+        config.unexUrl,
+        Uri.parse('https://ai6.example'),
+        reason: 'the page reaches the gateway at its public origin',
+      );
       expect(config.theme, 'night-ops');
       expect(
         config.caFile,
