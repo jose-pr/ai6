@@ -1505,7 +1505,10 @@ hold a credential.
 - While another record names this one it refuses and lists them, with where in each the name is. Any
   whole string or table key equal to the name counts (`handler`, `provider`, `model` and `effort`
   name something else), so a field that only happens to hold the same text is listed too, and a
-  person judges. `--force` removes it anyway and says what still names it. The provider's own checks
+  person judges. A secret, often named like a setting (`path`, `token`), is named only where a
+  record takes a secret's name: a `secrets` list (a loadout's, a route's), a `secret` value (a pool
+  account's), and a pool account of its name that reads a secret and names none. `--force` removes
+  it anyway and says what still names it. The provider's own checks
   still apply: the removal is refused if the configuration it leaves is not acceptable, such as an
   Agent another `extends`.
 - Each removal and refusal is an audit record in the Registry, `roster.remove` or `roster.refused`

@@ -5597,8 +5597,11 @@ that table, so a provider with a configuration of its own declares it too.
   (`config::export`, owner-only on Unix). `ai6 config rm FAMILY KEY [--scope station:ID] [--force]`
   removes one record through `ConfigProvider::remove_on_host`: `config::references_to` reads every
   family at every scope first (a read error removes nothing) and refuses, listing them, what another
-  record still names unless `--force`; audited `roster.remove`/`roster.refused`, `cli:<user>`, before
-  the removal. `--force` is reported; the provider's own checks still apply.
+  record still names unless `--force` (a secret only through a `secrets` list entry, a `secret`
+  value or a pool account of its name that reads a secret and names none; any other record through
+  any equal string or table key, `handler`, `provider`, `model` and `effort` values aside); audited
+  `roster.remove`/`roster.refused`, `cli:<user>`, before the removal. `--force` is reported; the
+  provider's own checks still apply.
 - `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH] [--plugin-profile P] [--keep-verified N|none] [--terminal ID] [--settings PATH] [--detach]`:
   run the field runner on this host until Ctrl-C or SIGTERM (provider libraries checked as
   the Station's, verified copies under its state directory); `--detach` starts it in the

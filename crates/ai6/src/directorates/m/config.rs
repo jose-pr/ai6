@@ -1231,9 +1231,65 @@ fn places_naming(value: &serde_json::Value, key: &str, path: &str, found: &mut V
     }
 }
 
-/// What still names the record `key` of `record` at `scope`, in every family at every scope. Any
-/// whole string or table key equal to its name counts, since a new setting is found with no list
-/// to update: a field that only happens to hold the same text is shown too, and a person judges.
+/// Every place in `value`, a record of `family`, that names the loadout secret `key`: an entry of
+/// a `secrets` list (a loadout's, a route's), a `secret` value (a pool account's), and a pool account
+/// of that name with no `secret` whose kind reads one, since it reads the secret of its own name.
+/// Secrets are often named like settings (`path`, `token`), so nothing else counts.
+fn secret_places(
+    family: ConfigRecord,
+    value: &serde_json::Value,
+    key: &str,
+    path: &str,
+    found: &mut Vec<String>,
+) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                secret_places(family, item, key, path, found);
+            }
+        }
+        serde_json::Value::Object(table) => {
+            for (field, inner) in table {
+                let deeper = if path.is_empty() {
+                    field.clone()
+                } else {
+                    format!("{path}.{field}")
+                };
+                let names = match (field.as_str(), inner) {
+                    ("secrets", serde_json::Value::Array(names)) => {
+                        names.iter().any(|name| name == key)
+                    }
+                    ("secret", serde_json::Value::String(name)) => name == key,
+                    _ => false,
+                };
+                if names {
+                    found.push(deeper.clone());
+                }
+                secret_places(family, inner, key, &deeper, found);
+            }
+        }
+        _ => {}
+    }
+    if family == ConfigRecord::Pool
+        && path.is_empty()
+        && let Some(account) = value.get("account").and_then(|accounts| accounts.get(key))
+        && account.get("secret").is_none()
+        && account
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .and_then(crate::directorates::q::AccountKind::parse)
+            .is_some_and(crate::directorates::q::AccountKind::reads_secret)
+    {
+        found.push(format!("account.{key}"));
+    }
+}
+
+/// What still names the record `key` of `record` at `scope`, in every family at every scope.
+///
+/// A secret is named only where a record takes a secret's name ([`secret_places`]). For any
+/// other family any whole string or table key equal to its name counts, since a new setting is
+/// found with no list to update: a field that only happens to hold the same text is shown too,
+/// and a person judges.
 ///
 /// # Errors
 ///
@@ -1266,7 +1322,11 @@ pub fn references_to(
                 {
                     places.push(String::new());
                 }
-                places_naming(&definition, key, "", &mut places);
+                if record == ConfigRecord::Secret {
+                    secret_places(family, &definition, key, "", &mut places);
+                } else {
+                    places_naming(&definition, key, "", &mut places);
+                }
                 places.dedup();
                 references.extend(places.into_iter().map(|path| ConfigReference {
                     record: family,

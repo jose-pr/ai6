@@ -665,6 +665,61 @@ mod tests {
     }
 
     #[test]
+    fn a_secret_is_named_only_where_a_record_takes_a_secret_s_name() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = FileProvider::new(root.path());
+        write(
+            root.path(),
+            "operations.toml",
+            "[operation.G]\npath = \".\"\ndescription = \"token\"\n",
+        );
+        write(
+            root.path(),
+            "agents.toml",
+            "[agent.007]\nroles = []\n[[agent.007.route]]\nhandler = \"claude\"\n\
+             secrets = [\"llm\"]\n[agent.007.env]\ntoken = \"1\"\n",
+        );
+        write(
+            root.path(),
+            "loadouts.toml",
+            "[loadout.007]\nsecrets = [\"forge\"]\n\
+             [pool.team]\nhandler = \"claude\"\n\
+             [pool.team.account.alice]\nkind = \"anthropic-api-key\"\nsecret = \"shared\"\n\
+             [pool.team.account.path]\nkind = \"anthropic-api-key\"\nsecret = \"shared\"\n\
+             [pool.login]\nhandler = \"claude\"\n\
+             [pool.login.account.token]\nkind = \"harness-login\"\n\
+             [secret.forge]\nenv = \"GH_TOKEN\"\n[secret.llm]\nenv = \"LLM_KEY\"\n\
+             [secret.shared]\nenv = \"SHARED_KEY\"\n[secret.path]\nenv = \"PATH_KEY\"\n\
+             [secret.token]\nenv = \"TOKEN_KEY\"\n",
+        );
+        let global = ConfigScope::Global;
+        let named = |key: &str| -> Vec<String> {
+            super::super::references_to(&provider, ConfigRecord::Secret, &global, key)
+                .unwrap()
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        };
+        assert_eq!(named("forge"), ["loadout 007 (global): secrets"]);
+        assert_eq!(named("llm"), ["agent 007 (global): route.secrets"]);
+        assert_eq!(
+            named("shared"),
+            [
+                "pool team (global): account.alice.secret",
+                "pool team (global): account.path.secret"
+            ]
+        );
+        assert!(
+            named("path").is_empty(),
+            "an Operation's `path` and an account that reads another secret name nothing"
+        );
+        assert!(
+            named("token").is_empty(),
+            "a field, a value and an account that reads no secret are not references"
+        );
+    }
+
+    #[test]
     fn a_table_s_neighbours_and_their_comments_stay_when_it_goes() {
         let text = "# top\n[agent.a]\nx = 1\n\n# about b\n[agent.b]\ny = 2\n[agent.b.env]\nZ = \"1\"\n\
                     # about c\n[agent.c]\nz = 3\n";

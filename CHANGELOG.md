@@ -416,6 +416,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `ai6 config rm secret NAME` counts only real references to a secret: a `secrets` list entry, a
+  `secret` value and a pool account of its name that reads one. A secret named like a setting, such
+  as `path`, is no longer refused because every Operation has a `path`.
 - `ai6 config public` writes `[unex] public_origin`, where browsers reach the gateway, as the
   page's `[unex] url` when the host's file has one, and its `[unex] url` only otherwise: that is
   often a loopback address, which broke the page for every browser.

@@ -8,17 +8,17 @@ use ai6::directorates::registry::backend::open as open_registry;
 
 const POSTGRES_URL_ENV: &str = "AI6_TEST_POSTGRES_URL";
 
-/// A roster where `forge` is named by a loadout and a pool account, `007` by another Agent and
-/// its loadout, and `spare` and `unused` by nothing.
+/// A roster where `forge` is named by a loadout, `007` by another Agent and its loadout, and
+/// `spare`, `unused` and the secret `path` by nothing, though the Operation has a `path`.
 const AGENTS: &str = "# who works here\n\
     [agent.007]\nhandler = \"mock-agent\"\nroles = [\"case-officer\"]\n\n\
     # the backup\n[agent.008]\nextends = \"007\"\n\n\
     # kept for later\n[agent.spare]\nhandler = \"mock-agent\"\n\n\
     [role.case-officer]\npurpose = \"Runs it.\"\npolicy = \"Report.\"\n\n\
     [role.unused]\npurpose = \"Nothing.\"\npolicy = \"Nothing.\"\n";
-const OPERATIONS: &str = "[operation.G]\nroster = [\"007\", \"008\"]\n";
-const LOADOUTS: &str =
-    "[loadout.007]\nsecrets = [\"forge\"]\n\n[secret.forge]\nenv = \"GH_TOKEN\"\n";
+const OPERATIONS: &str = "[operation.G]\nroster = [\"007\", \"008\"]\npath = \".\"\n";
+const LOADOUTS: &str = "[loadout.007]\nsecrets = [\"forge\"]\n\n[secret.forge]\nenv = \"GH_TOKEN\"\n\n\
+     [secret.path]\nenv = \"DEPLOY_KEY\"\n";
 
 fn ai6() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ai6"));
@@ -128,6 +128,12 @@ fn removes_what_nothing_names_and_refuses_the_rest(deployment: &Deployment) {
             .any(|(action, target)| action == "roster.remove" && target.contains("agent spare")),
         "{audited:?}"
     );
+
+    // A secret is named only where a record takes a secret: an Operation's `path` is not one.
+    let removed = deployment.config(&["rm", "secret", "path"]);
+    assert!(removed.status.success(), "{}", said(&removed));
+    assert!(!deployment.has("secret", "path"));
+    assert!(deployment.has("operation", "G"));
 
     // Named: refused, listing what names it, and nothing goes.
     let refused = deployment.config(&["rm", "secret", "forge"]);
