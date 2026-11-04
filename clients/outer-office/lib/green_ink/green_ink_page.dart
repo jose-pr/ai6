@@ -399,7 +399,7 @@ class _GreenInkPageState extends State<GreenInkPage> {
                                     ),
                                   ),
                                   (
-                                    'Mission ${request.missionId}',
+                                    'Mission ${widget.board.handleOf(request.operationId, request.missionId)}',
                                     OoLinkTo.mission(
                                       request.operationId,
                                       request.missionId,

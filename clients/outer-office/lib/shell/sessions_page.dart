@@ -125,7 +125,11 @@ class SessionsPage extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
         child: Text('Session $selectedId is not on this board.'),
       ),
-      final found => _SessionFacts(session: found.first, onOpen: onOpen),
+      final found => _SessionFacts(
+        session: found.first,
+        handle: board.handleOf(found.first.operationId, found.first.missionId),
+        onOpen: onOpen,
+      ),
     };
     final Widget table;
     if (sessions.isEmpty) {
@@ -134,7 +138,12 @@ class SessionsPage extends StatelessWidget {
         child: Center(child: Text('No Sessions match these filters.')),
       );
     } else if (width < OoBreakpoints.phone) {
-      table = _SessionList(sessions: sessions, onOpen: onOpen);
+      table = _SessionList(
+        sessions: sessions,
+        handleOf: (session) =>
+            board.handleOf(session.operationId, session.missionId),
+        onOpen: onOpen,
+      );
     } else {
       final sort = route['sort'];
       table = Padding(
@@ -186,12 +195,17 @@ class SessionsPage extends StatelessWidget {
                       ),
                       DataCell(
                         OoLink(
-                          session.missionId,
+                          board.handleOf(
+                            session.operationId,
+                            session.missionId,
+                          ),
                           route: OoLinkTo.mission(
                             session.operationId,
                             session.missionId,
                           ),
-                          semanticLabel: 'Open Mission ${session.missionId}',
+                          semanticLabel:
+                              'Open Mission '
+                              '${board.handleOf(session.operationId, session.missionId)}',
                         ),
                       ),
                       DataCell(
@@ -265,9 +279,16 @@ class SessionsPage extends StatelessWidget {
 
 /// The facts of the Session a route selects; opening it is the person's own click.
 class _SessionFacts extends StatelessWidget {
-  const _SessionFacts({required this.session, required this.onOpen});
+  const _SessionFacts({
+    required this.session,
+    required this.handle,
+    required this.onOpen,
+  });
 
   final SessionSummary session;
+
+  /// What its Mission is called.
+  final String handle;
   final ValueChanged<SessionSummary> onOpen;
 
   @override
@@ -288,7 +309,7 @@ class _SessionFacts extends StatelessWidget {
                   OoLinkTo.operation(session.operationId),
                 ),
                 (
-                  'Mission ${session.missionId}',
+                  'Mission $handle',
                   OoLinkTo.mission(session.operationId, session.missionId),
                 ),
               ]),
@@ -316,9 +337,16 @@ class _SessionFacts extends StatelessWidget {
 /// The Sessions as rows, like the design reference's phone lists: an icon tile, the
 /// Session, its Operation and Mission, and its state beside a dot of its colour.
 class _SessionList extends StatelessWidget {
-  const _SessionList({required this.sessions, required this.onOpen});
+  const _SessionList({
+    required this.sessions,
+    required this.handleOf,
+    required this.onOpen,
+  });
 
   final List<SessionSummary> sessions;
+
+  /// What a Session's Mission is called.
+  final String Function(SessionSummary session) handleOf;
   final ValueChanged<SessionSummary> onOpen;
 
   @override
@@ -358,7 +386,7 @@ class _SessionList extends StatelessWidget {
                             OoLinkTo.operation(session.operationId),
                           ),
                           (
-                            'Mission ${session.missionId}',
+                            'Mission ${handleOf(session)}',
                             OoLinkTo.mission(
                               session.operationId,
                               session.missionId,

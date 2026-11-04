@@ -7,6 +7,7 @@ import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
 import '../theme/oo_icon.dart';
+import 'mission_rename.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
 import 'oo_link.dart';
@@ -75,10 +76,15 @@ class MissionDetail extends StatelessWidget {
                 child: Semantics(
                   header: true,
                   child: Text(
-                    '$operationId › ${mission.missionId}',
+                    '$operationId › ${board.handleOf(operationId, mission.missionId)}',
                     style: text.titleLarge,
                   ),
                 ),
+              ),
+              RenameMissionButton(
+                board: board,
+                operationId: operationId,
+                missionId: mission.missionId,
               ),
               MissionActionsMenu(
                 board: board,

@@ -326,7 +326,7 @@ class _RowTile extends StatelessWidget {
                       final opened = [
                         for (final attempt in standing.attempts[name]!)
                           (
-                            attempt.missionId,
+                            board.handleOf(operation, attempt.missionId),
                             OoLinks.opener(
                               context,
                               OoLinkTo.mission(operation, attempt.missionId),

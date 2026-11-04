@@ -37,7 +37,8 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
             : mission.operationId != operation) {
       return false;
     }
-    if (route['mission_id'] case final id? when mission.missionId != id) {
+    if (route['mission_id'] case final id?
+        when !board.names(mission.operationId, mission.missionId, id)) {
       return false;
     }
     if (route['station_id'] case final station?
@@ -53,12 +54,12 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
       final haystack = [
         mission.operationId,
         mission.missionId,
+        board.handleOf(mission.operationId, mission.missionId),
         for (final session in mission.sessions) session.sessionId,
         for (final attempt in board.attempts(
           mission.operationId,
           mission.missionId,
-        ))
-          ?attempt.runId,
+        )) ...[?attempt.runId, ?attempt.handle],
         ?brief?.name,
         ?brief?.prompt,
       ];
@@ -327,7 +328,7 @@ class MissionCard extends StatelessWidget {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: OoLink(
-                    'Mission ${mission.missionId}',
+                    'Mission ${board.handleOf(mission.operationId, mission.missionId)}',
                     route: OoLinkTo.mission(
                       mission.operationId,
                       mission.missionId,
@@ -571,7 +572,7 @@ class MissionBriefPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text('Mission ${brief.missionId}')),
+    appBar: AppBar(title: Text('Mission ${brief.handle ?? brief.missionId}')),
     body: ListView(
       padding: const EdgeInsets.all(24),
       children: [
@@ -837,7 +838,8 @@ class _SessionDetailContent extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Mission ${current.missionId} · ${current.state ?? 'awaiting lifecycle'}',
+              'Mission ${board.handleOf(current.operationId, current.missionId)} · '
+              '${current.state ?? 'awaiting lifecycle'}',
             ),
             const SizedBox(height: 24),
             Expanded(

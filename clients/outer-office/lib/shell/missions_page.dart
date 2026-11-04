@@ -50,6 +50,20 @@ class MissionsPage extends StatefulWidget {
 class _MissionsPageState extends State<MissionsPage> {
   SessionSummary? _selectedWebSession;
 
+  /// The route's Mission IDs the gateway was asked about because no Mission on the board goes
+  /// by them, each with what it answered: a handle a Mission had before a rename still opens it.
+  final _asked = <String, String?>{};
+
+  /// Asks the gateway which Mission [id] names, then opens it by its UID.
+  Future<void> _lookUp(String id) async {
+    final found = await board.findMission(route['operation_id'], id);
+    if (!mounted) return;
+    setState(() => _asked[id] = found);
+    if (found != null && found != id && route['mission_id'] == id) {
+      widget.onRoute(route.withField('mission_id', found));
+    }
+  }
+
   /// The Missions the route's compartment covers, as (Operation, Mission), once read.
   Set<(String, String)>? _inCompartment;
 
@@ -144,6 +158,13 @@ class _MissionsPageState extends State<MissionsPage> {
         ? null
         : routeMissions(board, route).firstOrNull;
     final queue = _queue(context, listRoute, showSessionPane, selected);
+    if (missionId != null &&
+        selected == null &&
+        !_asked.containsKey(missionId)) {
+      _asked[missionId] = null;
+      unawaited(_lookUp(missionId));
+      return EmptyFilter(text: 'Looking for Mission $missionId…');
+    }
     if (missionId != null && selected == null) {
       return EmptyFilter(
         text:

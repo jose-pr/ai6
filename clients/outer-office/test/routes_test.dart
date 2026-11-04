@@ -141,7 +141,15 @@ void main() {
             ..missionBriefs = [
               for (final mission in missions)
                 ?MissionBriefSummary.fromMissionJson(mission),
-            ];
+            ]
+            ..missionHandles = {
+              for (final mission in missions)
+                if (mission['handle'] case final String handle)
+                  (
+                    mission['operation_id'] as String,
+                    mission['mission_id'] as String,
+                  ): handle,
+            };
       addTearDown(board.dispose);
       final order = [for (final mission in missions) mission['mission_id']];
       for (final raw in shared['cases']! as List) {

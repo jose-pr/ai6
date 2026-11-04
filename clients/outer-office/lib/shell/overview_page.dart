@@ -764,7 +764,8 @@ class _Upcoming extends StatelessWidget {
           kind: 'Queued Mission',
           at: queuedAt(mission),
           color: tokens.accent,
-          title: 'Mission ${mission.missionId}',
+          title:
+              'Mission ${board.handleOf(mission.operationId, mission.missionId)}',
           route: OoLinkTo.mission(mission.operationId, mission.missionId),
           detail: [
             ?board.missionBrief(mission.operationId, mission.missionId)?.name,

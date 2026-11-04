@@ -83,7 +83,8 @@ List<OoAttention> attentionItems(MissionBoard board, OoTokens tokens) {
               color: tokens.warning,
               text:
                   'Session ${session.sessionId} of Mission '
-                  '${session.missionId} waits for green ink',
+                  '${board.handleOf(session.operationId, session.missionId)} waits for '
+                  'green ink',
               route: _route(OoPage.greenInk, {
                 'operation_id': session.operationId,
               }),
@@ -94,7 +95,7 @@ List<OoAttention> attentionItems(MissionBoard board, OoTokens tokens) {
               color: tokens.warning,
               text:
                   'Session ${session.sessionId} of Mission '
-                  '${session.missionId} is blocked'
+                  '${board.handleOf(session.operationId, session.missionId)} is blocked'
                   '${session.reason == null ? '' : ': ${reasonWords(session.reason!)}'}',
               route: _route(OoPage.missions, {
                 'operation_id': session.operationId,
@@ -358,7 +359,7 @@ class _OoSearchState extends State<OoSearch> {
     for (final mission in groupMissions(widget.board.sessions))
       (
         OoIconName.missions,
-        'Mission ${mission.missionId}',
+        'Mission ${widget.board.handleOf(mission.operationId, mission.missionId)}',
         [
           ?widget.board
               .missionBrief(mission.operationId, mission.missionId)
@@ -375,7 +376,8 @@ class _OoSearchState extends State<OoSearch> {
       (
         OoIconName.sessions,
         'Session ${session.sessionId}',
-        'Mission ${session.missionId} · ${session.state ?? 'working'}',
+        'Mission ${widget.board.handleOf(session.operationId, session.missionId)} · '
+            '${session.state ?? 'working'}',
         _route(OoPage.sessions, {
           'operation_id': session.operationId,
           'session_id': session.sessionId,

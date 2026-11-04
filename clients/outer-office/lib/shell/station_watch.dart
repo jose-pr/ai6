@@ -362,7 +362,8 @@ class _SessionsHere extends StatelessWidget {
                     .withField('mission_id', mission.missionId),
               ),
               child: Text(
-                '${mission.operationId} › ${mission.missionId}'
+                '${mission.operationId} › '
+                '${board.handleOf(mission.operationId, mission.missionId)}'
                 '${session == null ? '' : ' · ${session.sessionId}'}',
               ),
             ),

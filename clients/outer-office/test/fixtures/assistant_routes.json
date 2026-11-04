@@ -121,6 +121,7 @@
       {
         "operation_id": "G",
         "mission_id": "m-retried",
+        "handle": "G-7",
         "sessions": [
           {
             "operation_id": "G",
@@ -355,6 +356,25 @@
       }
     ],
     "cases": [
+      {
+        "route": {
+          "page": "missions",
+          "operation_id": "G",
+          "mission_id": "g-7"
+        },
+        "shows": [
+          "m-retried"
+        ]
+      },
+      {
+        "route": {
+          "page": "missions",
+          "text": "G-7"
+        },
+        "shows": [
+          "m-retried"
+        ]
+      },
       {
         "route": {
           "page": "missions"

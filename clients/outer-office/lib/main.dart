@@ -408,6 +408,9 @@ class MissionBoard extends ChangeNotifier implements PageActions {
 
   /// Every attempt at each Mission, by (Operation, Mission), first first.
   Map<(String, String), List<MissionAttemptSummary>> missionAttempts = const {};
+
+  /// What each Mission is called now, by (Operation, Mission UID).
+  Map<(String, String), String> missionHandles = const {};
   List<AuditEntrySummary> auditEntries = const [];
 
   /// The briefs vetting holds, in the Operations whose held briefs this account may review.
@@ -2498,6 +2501,12 @@ class MissionBoard extends ChangeNotifier implements PageActions {
                   ),
               ],
           };
+          missionHandles = {
+            for (final item in missions.cast<Map<String, dynamic>>())
+              if (item['handle'] case final String handle)
+                (item['operation_id'] as String, item['mission_id'] as String):
+                    handle,
+          };
         });
       }
       if (reads.contains(BoardRead.stations)) {
@@ -2588,6 +2597,7 @@ class MissionBoard extends ChangeNotifier implements PageActions {
     sessions = const [];
     missionBriefs = const [];
     missionAttempts = const {};
+    missionHandles = const {};
     auditEntries = const [];
     heldBriefs = const [];
     missionProposals = const [];
@@ -2610,6 +2620,75 @@ class MissionBoard extends ChangeNotifier implements PageActions {
 
   List<MissionAttemptSummary> attempts(String operationId, String missionId) =>
       missionAttempts[(operationId, missionId)] ?? const [];
+
+  /// What a Mission is called: its handle, else its ID. Routes and links keep the ID.
+  String handleOf(String operationId, String missionId) =>
+      missionHandles[(operationId, missionId)] ?? missionId;
+
+  /// Whether [id] names the Mission [missionId]: its UID, or its handle compared without case.
+  bool names(String operationId, String missionId, String id) =>
+      id == missionId ||
+      handleOf(operationId, missionId).toLowerCase() == id.toLowerCase();
+
+  /// The UID of the Mission [id] names, in [operationId] when one is given: its UID, or any
+  /// handle it had, as Universal Exports looks it up; `null` when it names none this person
+  /// may read.
+  Future<String?> findMission(String? operationId, String id) async {
+    if (demo || accessToken == null) return null;
+    final response = await _core(
+      '/v1/missions?mission=${Uri.encodeQueryComponent(id)}'
+      '${operationId == null ? '' : '&operation=${Uri.encodeQueryComponent(operationId)}'}',
+    );
+    if (response?.statusCode != 200) return null;
+    final found = (jsonDecode(response!.body) as List<dynamic>)
+        .cast<Map<String, dynamic>>();
+    if (found.length != 1) return null;
+    final mission = found.single;
+    if (mission['handle'] case final String handle) {
+      missionHandles = {
+        ...missionHandles,
+        (mission['operation_id'] as String, mission['mission_id'] as String):
+            handle,
+      };
+    }
+    return mission['mission_id'] as String;
+  }
+
+  /// Gives a Mission the handle [handle]; its UID, and every route to it, stays. A refusal is
+  /// a [GatewayRefused] in Universal Exports' own words.
+  Future<String> renameMission({
+    required String operationId,
+    required String missionId,
+    required String handle,
+  }) async {
+    if (demo) throw StateError('Renaming a Mission is unavailable in preview.');
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/missions/${Uri.encodeComponent(missionId)}/rename',
+      body: {'handle': handle},
+    );
+    if (response.statusCode != 200) {
+      String? words;
+      try {
+        words =
+            (jsonDecode(response.body) as Map<String, dynamic>)['error']
+                as String?;
+      } on Object {
+        words = null;
+      }
+      throw GatewayRefused(
+        response.statusCode,
+        words ??
+            'The gateway refused the rename (HTTP ${response.statusCode}).',
+      );
+    }
+    final renamed = jsonDecode(response.body) as Map<String, dynamic>;
+    final now = renamed['handle'] as String;
+    missionHandles = {...missionHandles, (operationId, missionId): now};
+    notifyListeners();
+    return now;
+  }
 
   /// The latest attempt at a Mission, whose Session sets its state; `null` before one is
   /// recorded.
@@ -3882,6 +3961,7 @@ class MissionBriefSummary {
   const MissionBriefSummary({
     required this.operationId,
     required this.missionId,
+    this.handle,
     required this.prompt,
     this.name,
     required this.agentId,
@@ -3900,6 +3980,9 @@ class MissionBriefSummary {
 
   final String operationId;
   final String missionId;
+
+  /// What the Mission was called when the board was read.
+  final String? handle;
   final String prompt;
 
   /// What to show beside the Mission ID: a person's title, or an issue's title. An issue's is
@@ -3936,6 +4019,7 @@ class MissionBriefSummary {
     return MissionBriefSummary(
       operationId: json['operation_id'] as String,
       missionId: json['mission_id'] as String,
+      handle: json['handle'] as String?,
       prompt: brief['prompt'] as String,
       name: brief['name'] as String?,
       agentId: brief['agent_id'] as String?,
@@ -4016,6 +4100,7 @@ class MissionAttemptSummary {
     required this.station,
     required this.status,
     this.runId,
+    this.handle,
     this.theater,
     this.lost,
     this.checkpointBranch,
@@ -4024,8 +4109,11 @@ class MissionAttemptSummary {
 
   final int attempt;
 
-  /// AI6's ID for this run, `<mission>.<attempt>`, apart from the provider's Session ID.
+  /// AI6's ID for this run, its UID, apart from the provider's Session ID.
   final String? runId;
+
+  /// The run's handle, `<mission handle>.<attempt>`, as the Mission was called when it opened.
+  final String? handle;
   final String station;
   final String? theater;
 
@@ -4055,6 +4143,7 @@ class MissionAttemptSummary {
       MissionAttemptSummary(
         attempt: json['attempt'] as int,
         runId: json['session_id'] as String?,
+        handle: json['handle'] as String?,
         station: json['station'] as String,
         status: json['status'] as String,
         theater: json['theater'] as String?,
