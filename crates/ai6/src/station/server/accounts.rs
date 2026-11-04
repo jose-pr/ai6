@@ -1109,17 +1109,42 @@ pub(super) fn note_waiting(
     operation_id: &str,
     reason: Option<&str>,
 ) {
+    match reason {
+        Some(reason) => note(state, key, operation_id, reason, reason),
+        None => {
+            lock(&state.station.credentials.accounts.waiting).remove(key);
+        }
+    }
+}
+
+/// Records, as [`note_waiting`] does, why placement found nothing for the brief `key`. Reasons
+/// that differ only in their figures (seconds silent, Missions held) are one reason, so a
+/// brief is noted again only when what rules each place out changes.
+pub(super) fn note_unplaced(state: &DaemonState, key: &str, operation_id: &str, reason: &str) {
+    let figures_aside: String = reason
+        .chars()
+        .map(|character| {
+            if character.is_ascii_digit() {
+                '#'
+            } else {
+                character
+            }
+        })
+        .collect();
+    note(state, key, operation_id, reason, &figures_aside);
+}
+
+/// Logs and records `reason` once for `key`, until `seen` (what tells one reason from another)
+/// changes. The timeline keeps as much of it as `[registry.limits.timeline] text_bytes` allows.
+fn note(state: &DaemonState, key: &str, operation_id: &str, reason: &str, seen: &str) {
     let mut waiting = lock(&state.station.credentials.accounts.waiting);
-    let Some(reason) = reason else {
-        waiting.remove(key);
-        return;
-    };
-    if waiting.get(key).map(String::as_str) == Some(reason) {
+    if waiting.get(key).map(String::as_str) == Some(seen) {
         return;
     }
-    waiting.insert(key.to_owned(), reason.to_owned());
+    waiting.insert(key.to_owned(), seen.to_owned());
     drop(waiting);
     eprintln!("ai6: brief {key:?} waits: {reason}");
+    let kept = cut(reason, state.intake.limits().timeline.text_bytes.or_max());
     record(
         state,
         TimelineEvent::new(
@@ -1129,8 +1154,21 @@ pub(super) fn note_waiting(
             state.clock.now() as f64,
         )
         .detail("brief", key)
-        .detail("reason", reason),
+        .detail("reason", kept),
     );
+}
+
+/// `text` within `bytes`, cut at a character and marked with an ellipsis when it was longer.
+fn cut(text: &str, bytes: usize) -> String {
+    if text.len() <= bytes {
+        return text.to_owned();
+    }
+    let room = bytes.saturating_sub('…'.len_utf8());
+    let end = (0..=room)
+        .rev()
+        .find(|end| text.is_char_boundary(*end))
+        .unwrap_or_default();
+    format!("{}…", &text[..end])
 }
 
 fn record(state: &DaemonState, event: TimelineEvent) {

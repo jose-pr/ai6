@@ -2207,6 +2207,31 @@ async fn create_user_mission(
     let created = utc_timestamp()?;
     let received_at = unix_timestamp()? as i64;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    if !request.stations.is_empty() {
+        let (lookup, named, operation) = (
+            registry.clone(),
+            request.stations.clone(),
+            operation_id.to_string(),
+        );
+        tokio::task::spawn_blocking(move || {
+            let records = lookup
+                .stations(Duration::MAX)
+                .map_err(|_| ApiError::internal())?;
+            let headquarters = lookup.headquarters().map_err(|_| ApiError::internal())?;
+            let policy = published_policy(
+                &records,
+                headquarters.as_ref().map(|lease| lease.station()),
+                &operation,
+            )
+            .map(|(_, policy)| policy);
+            match station_pin_refusal(&named, &records, policy.as_ref(), &operation) {
+                Some(refusal) => Err(ApiError::invalid(refusal)),
+                None => Ok(()),
+            }
+        })
+        .await
+        .map_err(|_| ApiError::internal())??;
+    }
     let book = registry.clone();
     let entry = operation_id.to_string();
     let entered = tokio::task::spawn_blocking(move || {
@@ -2285,6 +2310,76 @@ fn valid_station_list(stations: &[String]) -> bool {
         })
 }
 
+/// Why a Mission may not be pinned to `named`, if it may not: one names no Station that ever
+/// checked in, or one the Operation's own `stations` leaves out. Pins match Station IDs exactly,
+/// so an unknown one is told the IDs it equals ignoring case, and those of Stations on a host of
+/// that name.
+fn station_pin_refusal(
+    named: &[String],
+    records: &[ai6::StationRecord],
+    policy: Option<&ai6::OperationPolicy>,
+    operation: &str,
+) -> Option<String> {
+    for station in named {
+        if !records.iter().any(|record| record.station() == station) {
+            let near: Vec<&str> = records
+                .iter()
+                .filter(|record| {
+                    record.station().eq_ignore_ascii_case(station)
+                        || record
+                            .info()
+                            .get("host")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|host| host.eq_ignore_ascii_case(station))
+                })
+                .map(ai6::StationRecord::station)
+                .collect();
+            let hint = if near.is_empty() {
+                String::new()
+            } else {
+                format!("; Stations it may mean: {}", near.join(", "))
+            };
+            return Some(format!(
+                "no Station {station:?} has checked in (a pin is an exact Station ID){hint}"
+            ));
+        }
+        if let Some(policy) = policy
+            && !policy.stations.is_empty()
+            && !policy.stations.contains(station)
+        {
+            return Some(format!(
+                "Operation {operation:?} does not run on Station {station:?}: its stations are [{}]",
+                policy.stations.join(", ")
+            ));
+        }
+    }
+    None
+}
+
+/// The Operation's placement policy as a Station published it at check-in: the Headquarters
+/// Station's copy when it publishes one, else the first Station's that does.
+fn published_policy<'a>(
+    records: &'a [ai6::StationRecord],
+    headquarters: Option<&str>,
+    operation: &str,
+) -> Option<(&'a ai6::StationRecord, ai6::OperationPolicy)> {
+    let published = |record: &ai6::StationRecord| {
+        record
+            .info()
+            .get("operation_policies")
+            .and_then(|policies| policies.get(operation))
+            .and_then(|policy| serde_json::from_value::<ai6::OperationPolicy>(policy.clone()).ok())
+    };
+    headquarters
+        .and_then(|station| records.iter().find(|record| record.station() == station))
+        .and_then(|record| published(record).map(|policy| (record, policy)))
+        .or_else(|| {
+            records
+                .iter()
+                .find_map(|record| published(record).map(|policy| (record, policy)))
+        })
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlacementPreviewQuery {
@@ -2346,26 +2441,12 @@ async fn placement_preview(
             .map_err(|_| ApiError::internal())?;
         let headquarters = registry.headquarters().map_err(|_| ApiError::internal())?;
         let leases = registry.leases().map_err(|_| ApiError::internal())?;
-        let published = |record: &ai6::StationRecord| {
-            record
-                .info()
-                .get("operation_policies")
-                .and_then(|policies| policies.get(&operation))
-                .and_then(|policy| {
-                    serde_json::from_value::<ai6::OperationPolicy>(policy.clone()).ok()
-                })
-        };
-        let preferred = headquarters
-            .as_ref()
-            .and_then(|lease| records.iter().find(|r| r.station() == lease.station()))
-            .and_then(|record| published(record).map(|policy| (record, policy)));
-        let (source, policy) = preferred
-            .or_else(|| {
-                records
-                    .iter()
-                    .find_map(|record| published(record).map(|policy| (record, policy)))
-            })
-            .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
+        let (source, policy) = published_policy(
+            &records,
+            headquarters.as_ref().map(|lease| lease.station()),
+            &operation,
+        )
+        .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| ApiError::internal())?
@@ -5134,15 +5215,29 @@ fn ended_cookie() -> Result<HeaderValue, ApiError> {
 
 struct ApiError {
     status: StatusCode,
-    message: &'static str,
+    message: std::borrow::Cow<'static, str>,
     retry_after_seconds: Option<u64>,
 }
 
 impl ApiError {
+    /// A 400 that says what was wrong with the request.
+    fn invalid(message: String) -> Self {
+        Self::refused(StatusCode::BAD_REQUEST, message)
+    }
+
+    /// A refusal with `status` that says why.
+    fn refused(status: StatusCode, message: String) -> Self {
+        Self {
+            status,
+            message: std::borrow::Cow::Owned(message),
+            retry_after_seconds: None,
+        }
+    }
+
     fn payload_too_large() -> Self {
         Self {
             status: StatusCode::PAYLOAD_TOO_LARGE,
-            message: "request body is too large",
+            message: std::borrow::Cow::Borrowed("request body is too large"),
             retry_after_seconds: None,
         }
     }
@@ -5150,7 +5245,7 @@ impl ApiError {
     fn not_found() -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
-            message: "resource is not available",
+            message: std::borrow::Cow::Borrowed("resource is not available"),
             retry_after_seconds: None,
         }
     }
@@ -5158,7 +5253,7 @@ impl ApiError {
     fn bad_request() -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
-            message: "request is invalid",
+            message: std::borrow::Cow::Borrowed("request is invalid"),
             retry_after_seconds: None,
         }
     }
@@ -5166,7 +5261,7 @@ impl ApiError {
     fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
-            message: "authentication is required",
+            message: std::borrow::Cow::Borrowed("authentication is required"),
             retry_after_seconds: None,
         }
     }
@@ -5174,7 +5269,7 @@ impl ApiError {
     fn forbidden() -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
-            message: "request is not authorized",
+            message: std::borrow::Cow::Borrowed("request is not authorized"),
             retry_after_seconds: None,
         }
     }
@@ -5182,7 +5277,7 @@ impl ApiError {
     fn internal() -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "gateway operation failed",
+            message: std::borrow::Cow::Borrowed("gateway operation failed"),
             retry_after_seconds: None,
         }
     }
@@ -5190,7 +5285,7 @@ impl ApiError {
     fn unavailable() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
-            message: "user access providers are unavailable",
+            message: std::borrow::Cow::Borrowed("user access providers are unavailable"),
             retry_after_seconds: None,
         }
     }
@@ -5198,7 +5293,7 @@ impl ApiError {
     fn too_many_attempts(wait: Duration) -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
-            message: "too many login attempts; try again later",
+            message: std::borrow::Cow::Borrowed("too many login attempts; try again later"),
             retry_after_seconds: Some(wait.as_secs().max(1)),
         }
     }
@@ -5220,7 +5315,7 @@ impl From<GatewayError> for ApiError {
         };
         Self {
             status,
-            message: "gateway request was refused",
+            message: std::borrow::Cow::Borrowed("gateway request was refused"),
             retry_after_seconds: None,
         }
     }

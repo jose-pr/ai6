@@ -646,7 +646,7 @@ pub(crate) async fn report_station_control(
 fn no_station() -> ApiError {
     ApiError {
         status: StatusCode::SERVICE_UNAVAILABLE,
-        message: "no Station can take the control now",
+        message: std::borrow::Cow::Borrowed("no Station can take the control now"),
         retry_after_seconds: Some(15),
     }
 }
@@ -1138,6 +1138,67 @@ pub(crate) mod tests {
                 Some("operator-007")
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_mission_pinned_to_no_station_its_operation_may_use_is_refused_by_name() {
+        let roles = ROLES.replace(
+            "\"mission.control\"",
+            "\"mission.control\", \"mission.create\"",
+        );
+        let served = served_with(&roles).await;
+        served
+            .registry
+            .check_in(
+                "host-1a2b3c4d",
+                BTreeMap::from([
+                    ("host".to_owned(), serde_json::json!("host")),
+                    (
+                        "operation_policies".to_owned(),
+                        serde_json::json!({"G": {
+                            "operation": "G", "stations": ["host-1a2b3c4d", "worker"]
+                        }}),
+                    ),
+                ]),
+            )
+            .unwrap();
+        let create = |stations: serde_json::Value| {
+            reqwest::Client::new()
+                .post(format!("{}/v1/user/operations/G/missions", served.base))
+                .bearer_auth(&served.operator)
+                .json(&serde_json::json!({
+                    "title": "Pinned", "prompt": "Work here.", "stations": stations
+                }))
+                .send()
+        };
+        for (stations, says) in [
+            (
+                serde_json::json!(["HOST"]),
+                "no Station \"HOST\" has checked in (a pin is an exact Station ID); \
+                 Stations it may mean: host-1a2b3c4d",
+            ),
+            (
+                serde_json::json!(["Host-1A2B3C4D"]),
+                "Stations it may mean: host-1a2b3c4d",
+            ),
+            (
+                serde_json::json!(["worker", "hq"]),
+                "Operation \"G\" does not run on Station \"hq\": its stations are \
+                 [host-1a2b3c4d, worker]",
+            ),
+        ] {
+            let refused = create(stations.clone()).await.unwrap();
+            assert_eq!(refused.status(), StatusCode::BAD_REQUEST, "{stations}");
+            let body = refused.text().await.unwrap();
+            assert!(body.contains(says), "{stations}: {body}");
+        }
+        assert!(served.registry.list_new().unwrap().is_empty());
+        let placed = create(serde_json::json!(["host-1a2b3c4d"])).await.unwrap();
+        assert_eq!(placed.status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            served.registry.list_new().unwrap()[0].stations,
+            ["host-1a2b3c4d"]
+        );
     }
 
     #[tokio::test]

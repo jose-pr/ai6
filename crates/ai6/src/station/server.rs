@@ -24,6 +24,8 @@ mod medical;
 #[cfg(feature = "cables-mcp")]
 mod memories;
 mod models;
+#[cfg(test)]
+mod placement_tests;
 mod promotion;
 mod recovery;
 mod reload;
@@ -1779,19 +1781,22 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
                 continue;
             }
         };
-        let Some(PlacementChoice {
+        let PlacementChoice {
             station: execution_station,
             agent: agent_id,
             ..
-        }) = place_brief(
+        } = match place_brief(
             state,
             &brief,
             &operation_id,
             (named_agent.as_deref(), role_id.as_deref()),
             &leases,
-        )
-        else {
-            continue;
+        ) {
+            Ok(choice) => choice,
+            Err(reason) => {
+                accounts::note_unplaced(state, &brief.key(), &operation_id, &reason);
+                continue;
+            }
         };
         let waits = accounts::intake_hold(state, &operation_id, &agent_id);
         accounts::note_waiting(state, &brief.key(), &operation_id, waits.as_deref());
@@ -3039,20 +3044,46 @@ fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &s
 /// published: its capacity and running Sessions, handlers, Theaters and resources. `agent` is
 /// the Agent the brief names; without one, each Station is offered the posted Agents its own
 /// handlers can run, quarantined and retired ones left out. The best choice whose Agent and Operation
-/// still have room is taken; `None` leaves the brief queued.
+/// still have room is taken; an error, why nothing can take it, leaves the brief queued.
 fn place_brief(
     state: &DaemonState,
     brief: &Brief,
     operation_id: &str,
     (agent, role): (Option<&str>, Option<&str>),
     leases: &[Lease],
-) -> Option<PlacementChoice> {
-    let mut policy = OperationPolicy::from_roster(&state.roster, operation_id).ok()?;
+) -> Result<PlacementChoice, String> {
+    let request = PlacementRequest {
+        stations: brief.stations.clone(),
+        agent: agent.map(str::to_owned),
+        role: role.map(str::to_owned),
+        // A named Agent is taken as named; tags choose among the posted ones.
+        tags: if agent.is_some() {
+            Vec::new()
+        } else {
+            brief.tags.clone()
+        },
+        deciding_station: Some(state.station_id.clone()),
+    };
+    place_request(state, operation_id, request, leases)
+}
+
+/// [`place_brief`] for any request: the best choice with room, or why there is none.
+fn place_request(
+    state: &DaemonState,
+    operation_id: &str,
+    request: PlacementRequest,
+    leases: &[Lease],
+) -> Result<PlacementChoice, String> {
+    let mut policy = OperationPolicy::from_roster(&state.roster, operation_id)
+        .map_err(|error| error.to_string())?;
     let mut unavailable = medical::quarantined_agents(state, Some(operation_id));
     unavailable.extend(agents::retired_agents(state, operation_id));
     let posted = &mut policy.agents;
     posted.retain(|agent| !unavailable.contains(&agent.id));
-    let records = state.intake.stations(Duration::MAX).ok()?;
+    let records = state
+        .intake
+        .stations(Duration::MAX)
+        .map_err(|error| format!("the Registry's Stations could not be read: {error}"))?;
     let now = unix_now();
     let stations: Vec<StationFacts> = records
         .iter()
@@ -3069,22 +3100,79 @@ fn place_brief(
             )
         })
         .collect();
-    let request = PlacementRequest {
-        stations: brief.stations.clone(),
-        agent: agent.map(str::to_owned),
-        role: role.map(str::to_owned),
-        // A named Agent is taken as named; tags choose among the posted ones.
-        tags: if agent.is_some() {
-            Vec::new()
-        } else {
-            brief.tags.clone()
-        },
-        deciding_station: Some(state.station_id.clone()),
-    };
-    placement::place(&policy, &request, &stations)
+    let placed = placement::place(&policy, &request, &stations);
+    if let Some(choice) = placed
         .choices
-        .into_iter()
+        .iter()
         .find(|choice| has_assignment_capacity(state, operation_id, &choice.agent))
+    {
+        return Ok(choice.clone());
+    }
+    Err(unplaced_reason(&placed, &request, &stations))
+}
+
+/// Why placement found nothing that can take a request, one clause per thing it ruled out. A
+/// request that names Stations is told only about those, and about each it names that never
+/// checked in: a Station ID matches exactly.
+fn unplaced_reason(
+    placed: &placement::Placement,
+    request: &PlacementRequest,
+    stations: &[StationFacts],
+) -> String {
+    if !placed.choices.is_empty() {
+        let mut agents: Vec<&str> = placed
+            .choices
+            .iter()
+            .map(|choice| choice.agent.as_str())
+            .collect();
+        agents.dedup();
+        return format!(
+            "every place that fits is taken: the Operation or Agent ({}) is at its max_concurrent",
+            agents.join(", ")
+        );
+    }
+    let pinned = |station: &str| {
+        request.stations.is_empty() || request.stations.iter().any(|named| named == station)
+    };
+    let mut clauses: Vec<String> = request
+        .stations
+        .iter()
+        .filter(|named| !stations.iter().any(|facts| &facts.station == *named))
+        .map(|named| format!("Station {named:?} has never checked in"))
+        .collect();
+    for rejection in &placed.rejections {
+        if rejection
+            .station
+            .as_deref()
+            .is_some_and(|station| !pinned(station))
+        {
+            continue;
+        }
+        let named: Vec<String> = [
+            rejection
+                .station
+                .as_ref()
+                .map(|id| format!("Station {id:?}")),
+            rejection
+                .theater
+                .as_ref()
+                .map(|id| format!("Theater {id:?}")),
+            rejection.agent.as_ref().map(|id| format!("Agent {id:?}")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let clause = format!("{}: {}", named.join(", "), rejection.reason);
+        if !clauses.contains(&clause) {
+            clauses.push(clause);
+        }
+    }
+    if clauses.is_empty() {
+        return "nothing was offered: no Station has checked in, or no Agent is posted to the \
+                Operation"
+            .to_owned();
+    }
+    format!("no place can take it: {}", clauses.join("; "))
 }
 
 pub(crate) fn mission_id_for_brief(brief: &Brief) -> Result<MissionId, String> {
