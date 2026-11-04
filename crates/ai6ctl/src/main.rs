@@ -144,7 +144,7 @@ enum Command {
     /// Show one Mission and its provider Sessions, or cancel, retry or resume it.
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Mission {
-        /// AI6 Mission ID.
+        /// The Mission: its UID, or any handle it had.
         #[arg(required = true)]
         mission_id: Option<String>,
         /// Select an Operation when the Mission ID is not unique in the visible board.
@@ -583,8 +583,19 @@ enum IssueProposalsCommand {
 enum MissionsCommand {
     /// Show what a Mission produced: its outcome, CX report and refs.
     Products {
-        /// AI6 Mission ID.
+        /// The Mission: its UID, or any handle it had.
         mission_id: String,
+    },
+    /// Give a Mission another handle (needs mission.control). Its UID, and everything kept by
+    /// it, stays; the old handle still names it.
+    Rename {
+        /// The Mission: its UID, or any handle it had.
+        mission_id: String,
+        /// The new handle: ASCII letters, digits, '_' and '-'.
+        handle: String,
+        /// The Operation, when the Mission is not on the visible board.
+        #[arg(long)]
+        operation: Option<String>,
     },
 }
 
@@ -741,6 +752,9 @@ struct BoardSession {
 struct BoardMission {
     operation_id: String,
     mission_id: String,
+    /// What the Mission is called now.
+    #[serde(default)]
+    handle: Option<String>,
     sessions: Vec<BoardSession>,
     #[serde(default)]
     brief: Option<BoardBrief>,
@@ -767,6 +781,9 @@ struct BoardProvenance {
 #[derive(Debug, Deserialize)]
 struct BoardAttempt {
     session_id: String,
+    /// The run's handle, `<mission handle>.<attempt>`.
+    #[serde(default)]
+    handle: Option<String>,
     status: String,
     #[serde(default)]
     route: Option<BoardRoute>,
@@ -817,6 +834,11 @@ impl BoardAttempt {
 }
 
 impl BoardMission {
+    /// What the Mission is called: its handle, else its ID.
+    fn shown(&self) -> String {
+        plain(self.handle.as_deref().unwrap_or(&self.mission_id))
+    }
+
     /// The name beside the ID, `-` before a Station published one. Untrusted text, as data.
     fn name_column(&self) -> String {
         self.brief
@@ -1156,6 +1178,41 @@ async fn run() -> Result<(), String> {
             compartments::products(&client, &server, &token, &mission_id).await?;
         }
         Command::Missions {
+            command:
+                Some(MissionsCommand::Rename {
+                    mission_id,
+                    handle,
+                    operation,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let operation = match operation {
+                Some(operation) => operation,
+                None => mission_operation(&client, &server, &token, &mission_id).await?,
+            };
+            let mut url = server.clone();
+            url.path_segments_mut()
+                .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+                .extend(["v1", "user", "operations", &operation, "missions"])
+                .extend([mission_id.as_str(), "rename"]);
+            let renamed = access::exchange(
+                &client,
+                &token,
+                Method::POST,
+                url,
+                None,
+                Some(serde_json::json!({ "handle": handle })),
+            )
+            .await?;
+            println!(
+                "{}: {} is now {}",
+                access::text(&renamed["mission_id"]),
+                access::text(&renamed["previous"]),
+                access::text(&renamed["handle"])
+            );
+        }
+        Command::Missions {
             operation,
             subtree,
             compartment,
@@ -1346,14 +1403,13 @@ async fn run() -> Result<(), String> {
         } => {
             let mission_id = mission_id.ok_or_else(|| "a Mission ID is required".to_owned())?;
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let matches = missions(&client, &server, &token, None)
+            let matches = named_missions(&client, &server, &token, &mission_id)
                 .await?
                 .into_iter()
                 .filter(|mission| {
-                    mission.mission_id == mission_id
-                        && operation
-                            .as_ref()
-                            .is_none_or(|value| &mission.operation_id == value)
+                    operation
+                        .as_ref()
+                        .is_none_or(|value| &mission.operation_id == value)
                 })
                 .collect::<Vec<_>>();
             match matches.as_slice() {
@@ -1373,13 +1429,23 @@ async fn run() -> Result<(), String> {
         } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let sessions = board(&client, &server, &token).await?;
+            let mission = match mission {
+                Some(mission) => Some(
+                    named_missions(&client, &server, &token, &mission)
+                        .await?
+                        .into_iter()
+                        .map(|found| found.mission_id)
+                        .collect::<Vec<_>>(),
+                ),
+                None => None,
+            };
             let selected = sessions.into_iter().filter(|session| {
                 operation
                     .as_ref()
                     .is_none_or(|value| &session.operation_id == value)
                     && mission
                         .as_ref()
-                        .is_none_or(|value| &session.mission_id == value)
+                        .is_none_or(|ids| ids.contains(&session.mission_id))
                     && state
                         .as_ref()
                         .is_none_or(|value| session.state.as_ref() == Some(value))
@@ -1550,6 +1616,24 @@ async fn missions(
         .json()
         .await
         .map_err(|_| "Universal Exports returned an invalid Mission list".to_owned())
+}
+
+/// The visible Missions `mission` names: its UID, or any handle it had, which the gateway
+/// looks up.
+async fn named_missions(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    mission: &str,
+) -> Result<Vec<BoardMission>, String> {
+    let mut url = endpoint(server, "/v1/missions");
+    url.query_pairs_mut().append_pair("mission", mission);
+    send(
+        client.get(url).bearer_auth(access_token),
+        "a signed-in user",
+        "Mission list",
+    )
+    .await
 }
 
 async fn stations(
@@ -2763,10 +2847,9 @@ async fn mission_operation(
     access_token: &str,
     mission_id: &str,
 ) -> Result<String, String> {
-    let mut operations = missions(client, server, access_token, None)
+    let mut operations = named_missions(client, server, access_token, mission_id)
         .await?
         .into_iter()
-        .filter(|mission| mission.mission_id == mission_id)
         .map(|mission| mission.operation_id)
         .collect::<Vec<_>>();
     operations.dedup();
@@ -3099,26 +3182,28 @@ fn print_effective(effective: &EffectiveOperation) {
 }
 
 fn print_missions(missions: impl IntoIterator<Item = BoardMission>) {
-    println!("STATION\tMISSION\tSESSIONS\tNAME");
+    println!("STATION\tMISSION\tSESSIONS\tNAME\tUID");
     for mission in missions {
         println!(
-            "{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}",
             plain(&mission.operation_id),
-            plain(&mission.mission_id),
+            mission.shown(),
             mission.sessions.len(),
-            mission.name_column()
+            mission.name_column(),
+            plain(&mission.mission_id)
         );
     }
 }
 
 fn print_mission(mission: &BoardMission) {
-    println!("STATION\tMISSION\tSESSIONS\tNAME");
+    println!("STATION\tMISSION\tSESSIONS\tNAME\tUID");
     println!(
-        "{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}",
         plain(&mission.operation_id),
-        plain(&mission.mission_id),
+        mission.shown(),
         mission.sessions.len(),
-        mission.name_column()
+        mission.name_column(),
+        plain(&mission.mission_id)
     );
     if let Some(url) = mission.item_url() {
         println!("ITEM\t{}", plain(url));
@@ -3128,7 +3213,7 @@ fn print_mission(mission: &BoardMission) {
         for run in &mission.attempts {
             println!(
                 "{}\t{}\t{}",
-                plain(&run.session_id),
+                plain(run.handle.as_deref().unwrap_or(&run.session_id)),
                 plain(&run.status),
                 run.route_column()
             );

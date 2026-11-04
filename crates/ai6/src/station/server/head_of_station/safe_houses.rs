@@ -94,7 +94,10 @@ pub(super) fn reopen(state: &DaemonState, mission: &Mission) -> Result<SafeHouse
     open_safe_house(
         &state.plugins,
         operation,
-        &mission.mission_id,
+        mission
+            .handle
+            .as_deref()
+            .unwrap_or(mission.mission_id.as_str()),
         &mission.prompt,
         None,
         true,

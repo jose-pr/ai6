@@ -63,8 +63,12 @@ impl MissionState {
 /// A Mission as stored and returned by the daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mission {
-    /// AI6-owned identifier for the unit of work.
+    /// AI6-owned identifier for the unit of work: the Mission's UID when it came from the
+    /// Registry.
     pub mission_id: MissionId,
+    /// The Mission's handle as this Station last learned it; the Registry holds the current one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
     /// What to show beside the ID: a person's title, or an issue's title as data. It is no
     /// part of what the Agent is told.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -239,6 +243,7 @@ impl MissionStore {
         }
         let mission = Mission {
             mission_id,
+            handle: None,
             name: None,
             operation_id,
             prompt,
@@ -455,6 +460,18 @@ impl MissionStore {
             return Ok(());
         }
         mission.provenance = Some(provenance);
+        mission.revision += 1;
+        self.commit(next)
+    }
+
+    /// Records the Mission's handle, replacing the one recorded.
+    pub fn record_handle(&mut self, mission_id: &str, handle: String) -> Result<(), MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.handle.as_deref() == Some(handle.as_str()) {
+            return Ok(());
+        }
+        mission.handle = Some(handle);
         mission.revision += 1;
         self.commit(next)
     }

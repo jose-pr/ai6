@@ -2245,6 +2245,7 @@ impl CableTools {
             body: args.body,
             id: "agent-proposal".to_owned(),
             mission_id: None,
+            handle: None,
             name: None,
             source: "ai6-agent-proposal".to_owned(),
             operation: Some(target.clone()),

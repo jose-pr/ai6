@@ -1318,7 +1318,10 @@ async fn operations_prints_the_tree_shows_an_effective_policy_and_missions_take_
     );
     assert_eq!(
         subtree,
-        ["STATION\tMISSION\tSESSIONS\tNAME", "SOUTH\tm-south\t1\t-"]
+        [
+            "STATION\tMISSION\tSESSIONS\tNAME\tUID",
+            "SOUTH\tm-south\t1\t-\tm-south"
+        ]
     );
     let own = lines(
         &ai6ctl(
@@ -1328,7 +1331,7 @@ async fn operations_prints_the_tree_shows_an_effective_policy_and_missions_take_
         )
         .await,
     );
-    assert_eq!(own, ["STATION\tMISSION\tSESSIONS\tNAME"]);
+    assert_eq!(own, ["STATION\tMISSION\tSESSIONS\tNAME\tUID"]);
     let _ = shutdown.send(());
 }
 
@@ -1506,4 +1509,94 @@ async fn ai6ctl_starts_from_the_one_file_every_program_shares_and_refuses_a_key_
         assert!(!said.contains("pl4nted"), "{said}");
     }
     let _ = stop.send(());
+}
+
+#[tokio::test]
+async fn a_mission_is_found_by_any_handle_it_had_and_renamed_through_the_gateway() {
+    let (server, shutdown, access_token, registry_dir) = start_gateway().await;
+    let registry = FileRegistry::open(registry_dir.path());
+    let brief: ai6::Brief = serde_json::from_value(serde_json::json!({
+        "title": "Fix it", "id": "fix", "operation": "station-01"
+    }))
+    .unwrap();
+    let entered = registry
+        .enter_brief(&brief, &ai6::MissionEntry::person(Some("station-01")))
+        .unwrap();
+    let uid = entered.key();
+    assert_eq!(entered.handle.as_deref(), Some("station-01-1"));
+    let registered = reqwest::Client::new()
+        .post(format!("{server}/v1/station/sessions"))
+        .bearer_auth("exports-test-credential-with-more-than-32-bytes")
+        .json(&serde_json::json!({
+            "operation_id": "station-01", "mission_id": uid, "session_id": "provider-session-8"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(registered.status().is_success());
+
+    let renamed = ai6ctl(
+        server.clone(),
+        Some(access_token.clone()),
+        &["missions", "rename", "station-01-1", "station-01-fix"],
+    )
+    .await;
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(renamed.stdout).unwrap().trim(),
+        format!("{uid}: station-01-1 is now station-01-fix")
+    );
+
+    for id in ["station-01-1", "STATION-01-FIX", uid.as_str()] {
+        let shown = ai6ctl(server.clone(), Some(access_token.clone()), &["mission", id]).await;
+        assert!(
+            shown.status.success(),
+            "{id}: {}",
+            String::from_utf8_lossy(&shown.stderr)
+        );
+        let shown = String::from_utf8(shown.stdout).unwrap();
+        assert!(
+            shown.contains("STATION\tMISSION\tSESSIONS\tNAME\tUID"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains(&format!("station-01\tstation-01-fix\t1\t-\t{uid}")),
+            "{id}: {shown}"
+        );
+    }
+    let sessions = ai6ctl(
+        server.clone(),
+        Some(access_token.clone()),
+        &["sessions", "--mission", "station-01-1"],
+    )
+    .await;
+    let sessions = String::from_utf8(sessions.stdout).unwrap();
+    assert!(sessions.contains("provider-session-8"), "{sessions}");
+    assert!(!sessions.contains("provider-session-007"), "{sessions}");
+
+    let other = registry
+        .enter_brief(&brief, &ai6::MissionEntry::person(Some("station-01")))
+        .unwrap();
+    let refused = ai6ctl(
+        server.clone(),
+        Some(access_token.clone()),
+        &[
+            "missions",
+            "rename",
+            &other.key(),
+            "station-01-1",
+            "--operation",
+            "station-01",
+        ],
+    )
+    .await;
+    assert_eq!(refused.status.code(), Some(1));
+    let said = String::from_utf8(refused.stderr).unwrap();
+    assert!(said.contains("409"), "{said}");
+    assert!(said.contains("is taken by another Mission"), "{said}");
+    let _ = shutdown.send(());
 }

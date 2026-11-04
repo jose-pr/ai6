@@ -21,11 +21,12 @@ use crate::controls::ControlStatus;
 use crate::{ApiError, Gateway, authorize_operation_action, bearer, resolve_user, unix_timestamp};
 
 /// Audit actions whose target is a Mission ID.
-const MISSION_AUDITS: [&str; 5] = [
+const MISSION_AUDITS: [&str; 6] = [
     "mission.create.requested",
     "mission.cancel",
     "mission.retry",
     "mission.resume",
+    "mission.rename",
     "session.interrupt",
 ];
 
@@ -46,8 +47,10 @@ pub struct TimelineItem {
     pub operation_id: String,
     /// The Station involved, when known.
     pub station_id: Option<String>,
-    /// The Mission involved, when there is one.
+    /// The Mission involved, when there is one: its UID.
     pub mission_id: Option<String>,
+    /// What that Mission is called now.
+    pub handle: Option<String>,
     /// The provider Session involved, when there is one.
     pub session_id: Option<String>,
     /// Who acted: a person ID or an Agent codename.
@@ -102,6 +105,7 @@ fn from_event(event: TimelineEvent, chars: usize) -> TimelineItem {
         operation_id: clean(&event.operation, chars),
         station_id: clean_option(event.station.as_deref(), chars),
         mission_id: clean_option(event.mission.as_deref(), chars),
+        handle: None,
         session_id: clean_option(event.session.as_deref(), chars),
         actor: clean_option(event.actor.as_deref(), chars),
         target: None,
@@ -130,6 +134,7 @@ fn from_audit(record: &AuditRecord, operation: &str, chars: usize) -> TimelineIt
         mission_id: MISSION_AUDITS
             .contains(&record.action.as_str())
             .then(|| clean(&record.target, chars)),
+        handle: None,
         session_id: None,
         actor: clean_option(Some(&record.actor), chars),
         target: clean_option(Some(&record.target), chars),
@@ -178,8 +183,11 @@ pub(crate) async fn operation_timeline(
         .mission
         .map(MissionId::new)
         .transpose()
-        .map_err(|_| ApiError::bad_request())?
-        .map(|mission| mission.to_string());
+        .map_err(|_| ApiError::bad_request())?;
+    let mission = match mission {
+        Some(mission) => Some(crate::mission_key(&gateway, mission.as_str()).await?),
+        None => None,
+    };
     let cursor = query
         .cursor
         .as_deref()
@@ -260,6 +268,21 @@ pub(crate) async fn operation_timeline(
         }
         let next_cursor = (items.len() > limit).then(|| cursor_of(&items[limit - 1]));
         items.truncate(limit);
+        let mut handles = BTreeMap::new();
+        for item in &mut items {
+            if let Some(mission) = &item.mission_id {
+                item.handle = handles
+                    .entry(mission.clone())
+                    .or_insert_with(|| {
+                        registry
+                            .resolve_mission(mission)
+                            .ok()
+                            .flatten()
+                            .map(|found| found.handle)
+                    })
+                    .clone();
+            }
+        }
         Ok::<_, ApiError>(TimelinePage {
             operation_id: operation,
             items,

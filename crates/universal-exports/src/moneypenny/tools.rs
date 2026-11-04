@@ -398,7 +398,13 @@ static READ_TOOLS: &[Tool] = &[
                       issues it is linked to with what it posted. Needs mission.read.",
         schema: || {
             object(
-                &[operation(), ("mission_id", text("The Mission."))],
+                &[
+                    operation(),
+                    (
+                        "mission_id",
+                        text("The Mission: its UID or any handle it had."),
+                    ),
+                ],
                 &["operation_id", "mission_id"],
             )
         },
@@ -609,7 +615,10 @@ static READ_TOOLS: &[Tool] = &[
             object(
                 &[
                     operation(),
-                    ("mission_id", text("Only this Mission.")),
+                    (
+                        "mission_id",
+                        text("Only this Mission: its UID or any handle."),
+                    ),
                     ("limit", limit("How many items; at most 200.")),
                     (
                         "cursor",

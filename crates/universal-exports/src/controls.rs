@@ -395,6 +395,7 @@ pub(crate) async fn request_control(
     Path((operation_id, mission_id)): Path<(String, String)>,
     Json(request): Json<ControlRequest>,
 ) -> Result<(StatusCode, Json<ControlStatus>), ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
     let mission = MissionId::new(mission_id).map_err(|_| ApiError::bad_request())?;
@@ -546,6 +547,7 @@ pub(crate) async fn control_status(
     headers: HeaderMap,
     Path((operation_id, mission_id, control_id)): Path<(String, String, String)>,
 ) -> Result<Json<ControlStatus>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
     authorize_operation_action(&gateway, person, &operation, "mission.read").await?;
@@ -1119,7 +1121,8 @@ pub(crate) mod tests {
             let created = request.await.unwrap().unwrap();
             assert_eq!(created.status(), StatusCode::ACCEPTED);
             let created: serde_json::Value = created.json().await.unwrap();
-            assert!(ids.insert(created["mission_id"].as_str().unwrap().to_owned()));
+            assert!(ai6::is_uid(created["mission_id"].as_str().unwrap()));
+            assert!(ids.insert(created["handle"].as_str().unwrap().to_owned()));
         }
         server.abort();
         let expected: std::collections::BTreeSet<_> =
@@ -1128,7 +1131,7 @@ pub(crate) mod tests {
         let queued = served.registry.list_new().unwrap();
         assert_eq!(queued.len(), 20);
         for brief in queued {
-            assert!(expected.contains(&brief.key()));
+            assert!(expected.contains(&brief.shown_handle()));
             assert_eq!(brief.source, "universal-exports");
             assert_eq!(
                 brief.provenance.unwrap().principal.as_deref(),
@@ -1145,6 +1148,7 @@ pub(crate) mod tests {
             body: "Not placed yet.".to_owned(),
             id: "mission-new".to_owned(),
             mission_id: None,
+            handle: None,
             name: None,
             source: "universal-exports".to_owned(),
             operation: Some("G".to_owned()),
@@ -1223,13 +1227,15 @@ pub(crate) mod tests {
         let served = served().await;
         // Off the board, so only the Registry knows them: one of Operation L, one whose
         // Operation nothing names, and one claimed by G and by L.
-        for (record, mission, operation) in [
-            ("record-x", "mission-x", Some("L")),
-            ("record-y", "mission-y", None),
-            ("record-z1", "mission-z", Some("G")),
-            ("record-z2", "mission-z", Some("L")),
+        for (record, mission, operation, attempt) in [
+            ("record-x", "mission-x", Some("L"), 1),
+            ("record-y", "mission-y", None, 1),
+            ("record-z1", "mission-z", Some("G"), 1),
+            ("record-z2", "mission-z", Some("L"), 2),
         ] {
-            let mut new = NewSession::new(record, mission, "worker").with_provider_session("p-1");
+            let mut new = NewSession::new(record, mission, "worker")
+                .with_provider_session("p-1")
+                .with_attempt(attempt, None);
             if let Some(operation) = operation {
                 new = new.with_operation(operation);
             }

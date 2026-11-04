@@ -16,6 +16,8 @@ mod memories;
 mod models;
 mod moneypenny;
 mod pools;
+#[cfg(test)]
+mod rename_tests;
 mod reviews;
 mod roster;
 mod timeline;
@@ -31,8 +33,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ai6::directorates::registry::backend::*;
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
-    Authorizer, Brief, ConfigProvider, Directory, Lookup, MissionProposal, MissionUsage, Origin,
-    Person, Provenance, Quarantine, StationSettings, TimeLimit, Verdict,
+    Authorizer, Brief, ConfigProvider, Directory, Lookup, MissionHandle, MissionProposal,
+    MissionUsage, Origin, Person, Provenance, Quarantine, StationSettings, TimeLimit,
+    TimelineEvent, Verdict,
 };
 
 /// How a brief's provenance names the gateway as the place it was accepted.
@@ -888,6 +891,11 @@ impl Gateway {
                         .ok()
                         .flatten();
                     mission.attempts = attempts.remove(&mission.mission_id).unwrap_or_default();
+                    if let Ok(Some(found)) = registry.resolve_mission(&mission.mission_id)
+                        && found.mission_id == mission.mission_id
+                    {
+                        mission.handle = found.handle;
+                    }
                 }
                 missions
             })
@@ -1540,6 +1548,10 @@ impl Gateway {
                 post(controls::request_control),
             )
             .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/rename",
+                post(rename_user_mission),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}",
                 get(controls::control_status),
             )
@@ -1982,6 +1994,8 @@ struct MissionsQuery {
     subtree: bool,
     /// What one compartment covers, of what the person may read.
     compartment: Option<String>,
+    /// One Mission: its UID or any handle it had.
+    mission: Option<String>,
 }
 
 async fn missions(
@@ -1990,6 +2004,10 @@ async fn missions(
     Query(query): Query<MissionsQuery>,
 ) -> Result<Json<Vec<BoardMission>>, ApiError> {
     let mut sessions = authorized_board_sessions(&gateway, &headers).await?;
+    if let Some(mission) = &query.mission {
+        let uid = mission_key(&gateway, mission).await?;
+        sessions.retain(|session| session.mission_id == uid);
+    }
     if let Some(operation) = &query.operation {
         let tree = if query.subtree {
             operation_tree(&gateway).await?
@@ -2042,7 +2060,8 @@ async fn mission_detail(
     Path((operation_id, mission_id)): Path<(String, String)>,
 ) -> Result<Json<BoardMission>, ApiError> {
     let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::not_found())?;
-    let mission_id = MissionId::new(mission_id).map_err(|_| ApiError::not_found())?;
+    let named = named_mission(&gateway, &mission_id).await?;
+    let mission_id = MissionId::new(named.mission_id).map_err(|_| ApiError::not_found())?;
     let visible = authorized_board_sessions(&gateway, &headers).await?;
     let sessions = visible
         .into_iter()
@@ -2055,6 +2074,7 @@ async fn mission_detail(
         .into_iter()
         .next()
         .ok_or_else(ApiError::not_found)?;
+    mission.handle = named.handle;
     mission.brief = gateway
         .inner
         .lock()
@@ -2172,8 +2192,9 @@ async fn create_user_mission(
     let mut brief = Brief {
         title: request.title,
         body: request.prompt,
-        id: entered.clone(),
-        mission_id: Some(entered),
+        id: entered.mission_id.clone(),
+        mission_id: Some(entered.mission_id),
+        handle: Some(entered.handle.clone()),
         name: None,
         source: "universal-exports".to_owned(),
         operation: Some(operation_id.to_string()),
@@ -2225,6 +2246,7 @@ async fn create_user_mission(
         Json(CreateUserMissionResponse {
             operation_id: operation_id.to_string(),
             mission_id: mission_id.to_string(),
+            handle: entered.handle,
             state: "queued",
         }),
     ))
@@ -2418,6 +2440,7 @@ async fn approve_user_mission_proposal(
             operation_id: operation_id.to_string(),
             proposal_id,
             mission_id: Some(mission_id.to_string()),
+            handle: Some(brief.shown_handle()),
             state: "queued",
         }),
     ))
@@ -2454,6 +2477,7 @@ async fn reject_user_mission_proposal(
         operation_id: operation_id.to_string(),
         proposal_id,
         mission_id: None,
+        handle: None,
         state: "rejected",
     }))
 }
@@ -2570,6 +2594,7 @@ fn group_missions(sessions: Vec<BoardSession>) -> Vec<BoardMission> {
         .into_iter()
         .map(|((operation_id, mission_id), sessions)| BoardMission {
             operation_id,
+            handle: mission_id.clone(),
             mission_id,
             sessions,
             brief: None,
@@ -2577,6 +2602,98 @@ fn group_missions(sessions: Vec<BoardSession>) -> Vec<BoardMission> {
             attempts: Vec::new(),
         })
         .collect()
+}
+
+/// The Mission a route names by `id`: its UID, the key of a brief dropped by hand, or any
+/// handle it was ever given, compared without case, with the handle it goes by now. An ID the
+/// Registry does not know, a Mission started on a Station rather than from the queue, is taken
+/// as it is.
+pub(crate) async fn named_mission(gateway: &Gateway, id: &str) -> Result<MissionHandle, ApiError> {
+    let Some(registry) = gateway.registry.clone() else {
+        return Ok(MissionHandle::new(id, id));
+    };
+    let wanted = id.to_owned();
+    let found = tokio::task::spawn_blocking(move || registry.resolve_mission(&wanted))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+    Ok(found.unwrap_or_else(|| MissionHandle::new(id, id)))
+}
+
+/// The UID of the Mission a route names by `id`, as [`named_mission`] finds it.
+pub(crate) async fn mission_key(gateway: &Gateway, id: &str) -> Result<String, ApiError> {
+    Ok(named_mission(gateway, id).await?.mission_id)
+}
+
+/// `POST /v1/user/operations/{operation_id}/missions/{mission_id}/rename`: gives the Mission
+/// the handle `{"handle": …}`, under `mission.control`. Its UID, and everything keyed by it,
+/// stays; the old handle still names it. A refusal is `{"error": TEXT}`.
+async fn rename_user_mission(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, mission_id)): Path<(String, String)>,
+    Json(request): Json<RenameMissionRequest>,
+) -> Result<Json<RenamedMission>, memories::Refused> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    authorize_operation_action(&gateway, person.clone(), &operation_id, "mission.control").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let named = named_mission(&gateway, &mission_id).await?;
+    let (store, uid, operation, handle) = (
+        registry.clone(),
+        named.mission_id.clone(),
+        operation_id.to_string(),
+        request.handle,
+    );
+    let renamed = tokio::task::spawn_blocking(move || {
+        let filed = store.filed_brief(&uid)?;
+        if filed.is_none_or(|filed| filed.brief.operation.as_deref() != Some(operation.as_str())) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "the Operation has no such Mission",
+            ));
+        }
+        store.rename_mission(&uid, &handle)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|error| {
+        let status = match error.kind() {
+            std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
+            std::io::ErrorKind::InvalidInput => StatusCode::BAD_REQUEST,
+            std::io::ErrorKind::AlreadyExists => StatusCode::CONFLICT,
+            _ => return memories::Refused::from(ApiError::internal()),
+        };
+        memories::refused(status, error.to_string())
+    })?;
+    let at = unix_timestamp()?;
+    let audit = AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor: person.id.clone(),
+        action: "mission.rename".to_owned(),
+        operation: operation_id.to_string(),
+        resource: Some(format!("mission:{}", renamed.mission_id)),
+        target: renamed.mission_id.clone(),
+        at,
+    };
+    let event = TimelineEvent::new("control", "rename.done", operation_id.to_string(), at)
+        .mission(renamed.mission_id.clone())
+        .actor(person.id)
+        .detail("handle", renamed.handle.clone())
+        .detail("previous", named.handle.clone());
+    tokio::task::spawn_blocking(move || {
+        registry.record_audit(&audit)?;
+        registry.record_event(&event)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    Ok(Json(RenamedMission {
+        operation_id: operation_id.to_string(),
+        mission_id: renamed.mission_id,
+        handle: renamed.handle,
+        previous: named.handle,
+    }))
 }
 
 async fn health() -> StatusCode {
@@ -4251,7 +4368,10 @@ struct CreateUserMissionRequest {
 #[derive(Serialize)]
 struct CreateUserMissionResponse {
     operation_id: String,
+    /// The Mission's UID.
     mission_id: String,
+    /// What it is called.
+    handle: String,
     state: &'static str,
 }
 
@@ -4260,7 +4380,25 @@ struct MissionProposalDecisionResponse {
     operation_id: String,
     proposal_id: String,
     mission_id: Option<String>,
+    handle: Option<String>,
     state: &'static str,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenameMissionRequest {
+    handle: String,
+}
+
+#[derive(Serialize)]
+struct RenamedMission {
+    operation_id: String,
+    /// The Mission's UID, which the rename leaves as it is.
+    mission_id: String,
+    /// What it is called now.
+    handle: String,
+    /// What it was called; it still names the Mission.
+    previous: String,
 }
 
 #[derive(Deserialize)]
@@ -4317,8 +4455,10 @@ pub struct BoardSession {
 pub struct BoardMission {
     /// Project that owns the Mission.
     pub operation_id: String,
-    /// AI6 Mission ID.
+    /// AI6 Mission ID: the Mission's UID when it came from the Registry.
     pub mission_id: String,
+    /// What the Mission is called now; its ID when the Registry names it no other way.
+    pub handle: String,
     /// Provider Sessions registered for this Mission.
     pub sessions: Vec<BoardSession>,
     /// Exact Mission brief and sanitized launch manifest published by AI6, when known.
@@ -4337,8 +4477,11 @@ pub struct BoardMission {
 pub struct MissionAttempt {
     /// Which try at the Mission this is, starting at 1.
     pub attempt: u32,
-    /// AI6's Session ID.
+    /// AI6's Session ID: the run's UID.
     pub session_id: String,
+    /// The run's handle, `<mission handle>.<attempt>`, as the Mission was called when it
+    /// opened.
+    pub handle: Option<String>,
     /// The provider's Session ID, once issued.
     pub provider_session_id: Option<String>,
     /// The AI6 Session ID of the attempt this one replaced.
@@ -4372,6 +4515,7 @@ impl MissionAttempt {
             account: record.account.clone(),
             attempt: record.attempt,
             session_id: record.session_id.clone(),
+            handle: record.handle.clone(),
             provider_session_id: record.provider_session_id.clone(),
             predecessor: record.predecessor.clone(),
             station: record.station.clone(),
@@ -7484,6 +7628,7 @@ mod tests {
                     body: "Review this delegated work.".to_owned(),
                     id: "proposal".to_owned(),
                     mission_id: None,
+                    handle: None,
                     name: None,
                     source: "agent".to_owned(),
                     operation: None,
@@ -8444,13 +8589,15 @@ mod tests {
             mission_detail["attempts"],
             serde_json::json!([
                 {
-                    "attempt": 1, "session_id": "attempt-1", "provider_session_id": null,
+                    "attempt": 1, "session_id": "attempt-1", "handle": null,
+                    "provider_session_id": null,
                     "predecessor": null, "station": "hq", "theater": "local",
                     "status": "lost", "lost": "Station \"hq\" went dark",
                     "checkpoint_branch": null, "route": null, "account": null
                 },
                 {
-                    "attempt": 2, "session_id": "attempt-2", "provider_session_id": "session-g",
+                    "attempt": 2, "session_id": "attempt-2", "handle": null,
+                    "provider_session_id": "session-g",
                     "predecessor": "attempt-1", "station": "worker", "theater": "local",
                     "status": "active", "lost": null, "checkpoint_branch": null,
                     "route": {"handler": "claude", "model": "gemini-free", "pool": "gateway"},
@@ -8499,6 +8646,7 @@ mod tests {
             .open_session(
                 ai6::NewSession::new("record-g", "mission-g", "worker")
                     .with_provider_session("session-g")
+                    .with_attempt(3, None)
                     .with_exposure(vec![ai6::Exposure {
                         source: "tool:WebFetch".to_owned(),
                         at: 1_790_000_000.0,

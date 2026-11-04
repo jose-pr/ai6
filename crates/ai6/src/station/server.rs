@@ -79,7 +79,7 @@ use crate::directorates::registry::cables::{
     CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay, CableRelayError,
     CableRelease, CableSendRequest, CableTarget, CrossOperation,
 };
-use crate::directorates::registry::mission_ids::run_id;
+use crate::directorates::registry::mission_ids::new_uid;
 use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionRecord, SessionResult, SessionStatus, SessionUpdate,
 };
@@ -1981,13 +1981,10 @@ fn acquire_session_hold(
         Ok(record) => record,
         Err(SessionError::NotFound) => {
             let attempt = existing.as_ref().map_or(1, |hold| hold.attempt);
-            let mut new_session = NewSession::new(
-                run_record_id(state, mission_id, attempt),
-                mission_id,
-                state.station_id.as_str(),
-            )
-            .with_provider_session(provider_session.as_str())
-            .with_attempt(attempt, None);
+            let mut new_session = NewSession::new(new_uid(), mission_id, state.station_id.as_str())
+                .with_handle(current_handle(state, mission_id))
+                .with_provider_session(provider_session.as_str())
+                .with_attempt(attempt, None);
             if let Some(operation) = &mission.operation_id {
                 new_session = new_session.with_operation(operation.as_str());
             }
@@ -2014,13 +2011,20 @@ fn acquire_session_hold(
     Ok(hold)
 }
 
-/// A run's Session record ID, `<mission>.<attempt>`.
-fn run_record_id(state: &DaemonState, mission_id: &str, attempt: u32) -> String {
-    run_id(
-        mission_id,
-        attempt,
-        state.intake.limits().sessions.id_bytes.or_max(),
-    )
+/// What the Mission is called now: its handle in the Registry, else the one this Station
+/// recorded, else its ID. A branch, a run's handle or a tracker comment takes it when written.
+fn current_handle(state: &DaemonState, mission_id: &str) -> String {
+    if let Ok(Some(found)) = state.intake.resolve_mission(mission_id)
+        && found.mission_id == mission_id
+    {
+        return found.handle;
+    }
+    state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).and_then(|m| m.handle.clone()))
+        .unwrap_or_else(|| mission_id.to_owned())
 }
 
 /// Opens a run's Session record, as the next attempt when this one already has a record: one
@@ -2029,9 +2033,7 @@ fn open_run(state: &DaemonState, mut run: NewSession) -> Result<SessionRecord, S
     loop {
         match state.intake.open_session(run.clone(), DEFAULT_LEASE) {
             Err(SessionError::Exists) => {
-                run = run
-                    .next_attempt(state.intake.limits().sessions.id_bytes.or_max())
-                    .ok_or(SessionError::Exists)?;
+                run = run.next_attempt().ok_or(SessionError::Exists)?;
             }
             opened => return opened,
         }
@@ -3283,6 +3285,11 @@ fn create_intake_mission(
             brief.display_name(state.intake.limits().sources.name_bytes.or_max()),
         )
         .map_err(|error| format!("could not record the Mission's name: {error:?}"))?;
+    if let Some(handle) = &brief.handle {
+        missions
+            .record_handle(mission_id.as_str(), handle.clone())
+            .map_err(|error| format!("could not record the Mission's handle: {error:?}"))?;
+    }
     missions
         .expose(
             mission_id.as_str(),
@@ -3840,7 +3847,10 @@ fn resolve_working_area(
     let safe_house = open_safe_house(
         plugins,
         operation,
-        &mission.mission_id,
+        mission
+            .handle
+            .as_deref()
+            .unwrap_or(mission.mission_id.as_str()),
         &mission.prompt,
         state_root,
         isolate,
@@ -3856,13 +3866,14 @@ fn resolve_working_area(
 }
 
 /// Opens an Operation's safe house through its provider; `None` when it has no provider.
-/// `reopen` re-attaches to a safe house an earlier run left behind on this Station;
-/// `checkpoint` starts from the work a lost attempt saved elsewhere.
+/// `name`, the Mission's handle when it opens, names its branch and directory. `reopen`
+/// re-attaches to a safe house an earlier run left behind on this Station; `checkpoint` starts
+/// from the work a lost attempt saved elsewhere.
 #[allow(clippy::too_many_arguments)]
 fn open_safe_house(
     plugins: &plugins::Plugins,
     operation: &roster::Operation,
-    mission_id: &MissionId,
+    name: &str,
     title: &str,
     state_root: Option<&Path>,
     isolate: bool,
@@ -3887,7 +3898,7 @@ fn open_safe_house(
         .map_err(|error| error.to_string())?;
     let spec = SafeHouseSpec {
         operation_id: operation.id.clone(),
-        mission_id: mission_id.as_str().to_owned(),
+        mission_id: name.to_owned(),
         title: title.to_owned(),
         source: source.to_string_lossy().into_owned(),
         base: operation.workspace.base.clone(),
@@ -4686,14 +4697,12 @@ async fn start_mission(
                 .map(|record| (record.attempt, record.session_id.clone()))
         })
         .map_or((1, None), |(attempt, id)| (attempt + 1, Some(id)));
-    let mut new_session = NewSession::new(
-        run_record_id(&state, mission_id.as_str(), attempt),
-        mission_id.as_str(),
-        state.station_id.as_str(),
-    )
-    .with_theater(theater_id.as_str())
-    .with_attempt(attempt, predecessor)
-    .with_exposure(exposure.exposures());
+    let mut new_session =
+        NewSession::new(new_uid(), mission_id.as_str(), state.station_id.as_str())
+            .with_handle(current_handle(&state, mission_id.as_str()))
+            .with_theater(theater_id.as_str())
+            .with_attempt(attempt, predecessor)
+            .with_exposure(exposure.exposures());
     if let Some(account) = accounts::held(&state, &mission_id) {
         new_session = new_session.with_account(account);
     }
@@ -7195,14 +7204,17 @@ async fn reopen_left_safe_house(
     };
     let configured = configured.map_err(configuration_error)?.clone();
     let plugins = state.plugins.clone();
-    let mission_id = mission.mission_id.clone();
+    let name = mission
+        .handle
+        .clone()
+        .unwrap_or_else(|| mission.mission_id.to_string());
     let title = mission.prompt.clone();
     let state_dir = state.station.state_dir().map_err(runtime_error)?;
     tokio::task::spawn_blocking(move || {
         open_safe_house(
             &plugins,
             &configured,
-            &mission_id,
+            &name,
             &title,
             Some(&state_dir),
             isolate,
@@ -7241,7 +7253,10 @@ async fn finish_left_safe_house(state: &DaemonState, mission_id: &str) {
         open_safe_house(
             &plugins,
             &configured,
-            &mission.mission_id,
+            mission
+                .handle
+                .as_deref()
+                .unwrap_or(mission.mission_id.as_str()),
             &mission.prompt,
             state_dir.as_deref(),
             true,
@@ -11073,20 +11088,19 @@ queue = 1
             .unwrap();
         start_mission_by_id(&state, "mission-t").await;
         let hold = session_hold(&state, "mission-t").unwrap();
-        assert_eq!(hold.id, "mission-t.2");
+        assert_eq!(hold.attempt, 2);
+        assert!(crate::is_uid(&hold.id), "{}", hold.id);
         let record = state.intake.session(&hold.id).unwrap().unwrap();
         assert_eq!(record.predecessor.as_deref(), Some("mission-t.1"));
+        assert_eq!(record.handle.as_deref(), Some("mission-t.2"));
 
         let opened = open_run(
             &state,
-            NewSession::new("mission-t.2", "mission-t", "here").with_attempt(2, None),
+            NewSession::new(crate::new_uid(), "mission-t", "here").with_attempt(2, None),
         )
         .unwrap();
-        assert_eq!(
-            opened.session_id, "mission-t.3",
-            "two records never share an ID"
-        );
-        assert_eq!(opened.attempt, 3);
+        assert_eq!(opened.attempt, 3, "a Mission has one record per attempt");
+        assert_ne!(opened.session_id, hold.id);
         state.stopping.store(true, Ordering::Release);
     }
 
@@ -11293,11 +11307,17 @@ queue = 1
         start_mission_by_id(&state, "mission-s").await;
         assert_eq!(exposure_sources(&state, "mission-s"), ["brief:source"]);
         let hold = session_hold(&state, "mission-s").unwrap();
-        assert_eq!(
-            hold.id, "mission-s.1",
-            "a run is the Mission and its attempt"
+        assert!(
+            crate::is_uid(&hold.id),
+            "a run has a UID of its own: {}",
+            hold.id
         );
         let record = state.intake.session(&hold.id).unwrap().unwrap();
+        assert_eq!(
+            record.handle.as_deref(),
+            Some("mission-s.1"),
+            "a run's handle is the Mission's and its attempt"
+        );
         assert_eq!(record.exposure.len(), 1);
 
         // An operator-created Mission is not exposed by being started.
@@ -11370,6 +11390,7 @@ queue = 1
             body: String::new(),
             id: "agent-proposal".to_owned(),
             mission_id: None,
+            handle: None,
             name: None,
             source: "ai6-agent-proposal".to_owned(),
             operation: Some("G".to_owned()),
@@ -11403,6 +11424,7 @@ queue = 1
             body: String::new(),
             id: "brief-q".to_owned(),
             mission_id: None,
+            handle: None,
             name: None,
             source: "manual".to_owned(),
             operation: Some("G".to_owned()),

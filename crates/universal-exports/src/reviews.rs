@@ -181,6 +181,7 @@ pub(crate) async fn list(
     headers: HeaderMap,
     Path((operation_id, mission_id)): Path<(String, String)>,
 ) -> Result<Json<Vec<ReviewView>>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let (_, operation, registry) =
         authorized(&gateway, &headers, operation_id, "mission.read").await?;
     let operation = operation.to_string();
@@ -205,6 +206,7 @@ pub(crate) async fn overrule(
     Path((operation_id, mission_id, gate)): Path<(String, String, String)>,
     Json(request): Json<OverruleRequest>,
 ) -> Result<Json<ReviewView>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let gate = match gate.as_str() {
         "plan" => ReviewGate::Plan,
         "output" => ReviewGate::Output,

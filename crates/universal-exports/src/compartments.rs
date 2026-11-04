@@ -604,6 +604,7 @@ pub(crate) async fn put_cover(
     let Some(target) = CoverTarget::parse(&resource) else {
         return Ok(bad_request("a cover is operation:ID or mission:ID"));
     };
+    let target = by_uid(&gateway, target).await?;
     authorize_resource_action(&gateway, person.clone(), scope(&id), "compartment.manage").await?;
     let tokio_gateway = gateway.clone();
     let lookup = target.clone();
@@ -638,6 +639,14 @@ pub(crate) async fn put_cover(
     .await
 }
 
+/// A Mission cover as the Registry keeps Missions, by UID, though it was named by a handle.
+async fn by_uid(gateway: &Gateway, target: CoverTarget) -> Result<CoverTarget, ApiError> {
+    Ok(match target {
+        CoverTarget::Mission(id) => CoverTarget::Mission(crate::mission_key(gateway, &id).await?),
+        other => other,
+    })
+}
+
 /// `DELETE .../covers/{resource}`: needs `compartment.manage` on it or `compartment.cover` on the
 /// Operation, which may always withdraw.
 pub(crate) async fn remove_cover(
@@ -649,6 +658,7 @@ pub(crate) async fn remove_cover(
     let Some(target) = CoverTarget::parse(&resource) else {
         return Ok(bad_request("a cover is operation:ID or mission:ID"));
     };
+    let target = by_uid(&gateway, target).await?;
     if authorize_resource_action(&gateway, person.clone(), scope(&id), "compartment.manage")
         .await
         .is_err()
@@ -760,6 +770,7 @@ pub(crate) async fn mission_products(
     headers: HeaderMap,
     Path(mission): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    let mission = crate::mission_key(&gateway, &mission).await?;
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let policy = gateway.access.clone().ok_or_else(ApiError::unavailable)?;

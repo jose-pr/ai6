@@ -1058,7 +1058,8 @@ impl IssueDesk {
             .roster
             .cover(&operation.cover)
             .map_or(Disclosure::Hidden, |cover| cover.disclosure());
-        with_footer(text, disclosure, &caller.mission, &caller.agent)
+        let shown = super::current_handle(&self.state, &caller.mission);
+        with_footer(text, disclosure, &shown, &caller.agent)
     }
 
     /// The secret values the Station holds for the Mission: the Session's own environment (its

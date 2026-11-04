@@ -1313,7 +1313,9 @@ mod tests {
         schedule_queued_once(&a).await;
         wait_for_state(&a, &mission_id, MissionState::Blocked).await;
         let first = session_hold(&a, &mission_id).unwrap();
-        assert_eq!(first.id, format!("{mission_id}.1"));
+        assert_eq!(first.attempt, 1);
+        let handle = |id: &str| a.intake.session(id).unwrap().unwrap().handle;
+        assert_eq!(handle(&first.id), Some(format!("{mission_id}.1")));
 
         // What the Session did and where its work is saved reach the shared record.
         until("station-a's notes", || {
@@ -1360,7 +1362,8 @@ mod tests {
         schedule_queued_once(&b).await;
         wait_for_state(&b, &mission_id, MissionState::Blocked).await;
         let second = session_hold(&b, &mission_id).unwrap();
-        assert_eq!(second.id, format!("{mission_id}.2"));
+        assert_eq!(second.attempt, 2);
+        assert_eq!(handle(&second.id), Some(format!("{mission_id}.2")));
         let record = b.intake.session(&second.id).unwrap().unwrap();
         assert_eq!(
             (record.attempt, record.predecessor.as_deref()),

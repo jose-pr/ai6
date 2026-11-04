@@ -151,6 +151,7 @@ pub(crate) async fn release(
     headers: HeaderMap,
     Path((operation_id, key)): Path<(String, String)>,
 ) -> Result<Json<HeldBriefDecision>, ApiError> {
+    let key = crate::mission_key(&gateway, &key).await?;
     valid_key(&key)?;
     let (person, operation, registry) = authorized(&gateway, &headers, operation_id).await?;
     let now = unix_timestamp()?;
@@ -176,6 +177,7 @@ pub(crate) async fn refuse(
     Path((operation_id, key)): Path<(String, String)>,
     Json(request): Json<RefuseRequest>,
 ) -> Result<Json<HeldBriefDecision>, ApiError> {
+    let key = crate::mission_key(&gateway, &key).await?;
     valid_key(&key)?;
     let reason = request.reason.unwrap_or_default().trim().to_owned();
     if !gateway

@@ -386,6 +386,7 @@ pub(crate) async fn list(
     headers: HeaderMap,
     Path((operation_id, mission_id)): Path<(String, String)>,
 ) -> Result<Json<MissionIssues>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let (_, operation, registry) =
         authorized(&gateway, &headers, operation_id, "mission.read").await?;
     known_mission(&gateway, &registry, &operation, &mission_id).await?;
@@ -482,6 +483,7 @@ pub(crate) async fn link(
     Path((operation_id, mission_id)): Path<(String, String)>,
     Json(request): Json<LinkRequest>,
 ) -> Result<Json<IssueWrite>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let (tracker, item) = split_reference(&request.issue)?;
     let relation = request.relation.unwrap_or(LinkRelation::Related);
     if relation == LinkRelation::Source {
@@ -557,6 +559,7 @@ pub(crate) async fn unlink(
     headers: HeaderMap,
     Path((operation_id, mission_id, reference)): Path<(String, String, String)>,
 ) -> Result<Json<IssueWrite>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "issue.link").await?;
     let held = held_link(&registry, &operation, &mission_id, &reference).await?;
@@ -589,6 +592,7 @@ pub(crate) async fn accept(
     headers: HeaderMap,
     Path((operation_id, mission_id, reference)): Path<(String, String, String)>,
 ) -> Result<Json<IssueWrite>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "issue.link").await?;
     let mut held = held_link(&registry, &operation, &mission_id, &reference).await?;
@@ -668,6 +672,7 @@ pub(crate) async fn comment(
     Path((operation_id, mission_id, reference)): Path<(String, String, String)>,
     Json(request): Json<CommentRequest>,
 ) -> Result<Json<IssueWrite>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "issue.comment").await?;
     let held = held_link(&registry, &operation, &mission_id, &reference).await?;
@@ -747,6 +752,7 @@ pub(crate) async fn update(
     Path((operation_id, mission_id, reference)): Path<(String, String, String)>,
     Json(request): Json<UpdateRequest>,
 ) -> Result<Json<IssueWrite>, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "issue.update").await?;
     let held = held_link(&registry, &operation, &mission_id, &reference).await?;

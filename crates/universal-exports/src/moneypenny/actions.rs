@@ -630,7 +630,10 @@ static WRITE_TOOLS: &[WriteTool] = &[
             object(
                 &[
                     operation(),
-                    ("mission_id", text("The Mission.")),
+                    (
+                        "mission_id",
+                        text("The Mission: its UID or any handle it had."),
+                    ),
                     ("issue", text("The linked issue, as TRACKER:ITEM.")),
                     ("body", text("The exact text to post.")),
                 ],
@@ -726,7 +729,10 @@ static WRITE_TOOLS: &[WriteTool] = &[
             object(
                 &[
                     operation(),
-                    ("mission_id", text("The Mission.")),
+                    (
+                        "mission_id",
+                        text("The Mission: its UID or any handle it had."),
+                    ),
                     ("issue", text("The issue, as TRACKER:ITEM.")),
                     (
                         "decision",
@@ -841,7 +847,10 @@ static WRITE_TOOLS: &[WriteTool] = &[
             object(
                 &[
                     operation(),
-                    ("mission_id", text("The Mission.")),
+                    (
+                        "mission_id",
+                        text("The Mission: its UID or any handle it had."),
+                    ),
                     ("issue", text("The linked issue, as TRACKER:ITEM.")),
                     ("add_labels", strings("Labels to add.")),
                     ("remove_labels", strings("Labels to remove.")),
@@ -944,7 +953,10 @@ static WRITE_TOOLS: &[WriteTool] = &[
             object(
                 &[
                     operation(),
-                    ("mission_id", text("The Mission.")),
+                    (
+                        "mission_id",
+                        text("The Mission: its UID or any handle it had."),
+                    ),
                     (
                         "action",
                         json!({"type": "string",

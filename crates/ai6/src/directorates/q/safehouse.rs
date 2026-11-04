@@ -25,7 +25,8 @@ use guatiao::{FromValue, Schema, ToValue, Value};
 pub struct SafeHouseSpec {
     /// The Operation codename.
     pub operation_id: String,
-    /// The Mission ID.
+    /// What the Mission is called when the safe house opens, its handle: it fills a branch
+    /// template's `{id}` and names the directory.
     pub mission_id: String,
     /// The Mission brief, used to name the branch or directory.
     pub title: String,

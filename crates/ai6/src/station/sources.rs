@@ -324,7 +324,7 @@ pub(crate) fn poll_source(
 pub(crate) struct CxReport {
     /// The item ID the Mission came from.
     pub item_id: String,
-    /// The AI6 Mission ID.
+    /// The Mission's UID.
     pub mission_id: String,
     /// `done`, `failed` or another terminal Mission state.
     pub outcome: String,
@@ -439,6 +439,10 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
         .unwrap_or_else(|| if finished.ok { "done" } else { "failed" }.to_owned());
     // A brief that was never placed ended without a Mission.
     let mission_id = outcome_text("mission_id").filter(|id| !id.is_empty());
+    // The tracker reads the handle the Mission has when the report is written.
+    let shown = mission_id
+        .as_ref()
+        .map(|id| finished.brief.handle.clone().unwrap_or_else(|| id.clone()));
     let branch = outcome_text("branch");
     let item_id = finished
         .brief
@@ -468,12 +472,12 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
                 }
                 .to_owned(),
             );
-            if let Some(mission_id) = &mission_id {
-                lines.push(format!("Mission: `{mission_id}`"));
+            if let Some(shown) = &shown {
+                lines.push(format!("Mission: `{shown}`"));
             }
         }
-        _ => lines.push(match &mission_id {
-            Some(mission_id) => format!("AI6 Mission `{mission_id}` ended: {outcome}."),
+        _ => lines.push(match &shown {
+            Some(shown) => format!("AI6 Mission `{shown}` ended: {outcome}."),
             None => "AI6 could not start a Mission for this item.".to_owned(),
         }),
     }
@@ -970,6 +974,15 @@ mod tests {
     use crate::directorates::registry::store::FileRegistry;
     use crate::{TrackerPost, TrackerUpdate};
 
+    /// The UID of the Mission `handle` names.
+    fn uid(registry: &dyn RegistryBackend, handle: &str) -> String {
+        registry
+            .resolve_mission(handle)
+            .unwrap()
+            .unwrap()
+            .mission_id
+    }
+
     /// Every comment the fake tracker was asked to post, as (item, body).
     static POSTED: Mutex<Vec<(String, String, Option<String>)>> = Mutex::new(Vec::new());
     /// Comments the fake tracker lists as written by AI6's own identity, for the failover check.
@@ -1168,12 +1181,15 @@ mod tests {
         );
 
         // One item starts running; a further poll leaves it alone and queues no copy.
-        let running = registry.claim_new(Some("G-fake-1")).unwrap().unwrap();
+        let running = registry
+            .claim_new(Some(&uid(&registry, "G-fake-1")))
+            .unwrap()
+            .unwrap();
         desk.due.lock().unwrap().clear();
         desk.run(&plugins, &roster, &registry);
         let queued = registry.list_new().unwrap();
         assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].key(), "G-fake-2");
+        assert_eq!(queued[0].shown_handle(), "G-fake-2");
         assert!(registry.read_claimed(&running.key()).unwrap().is_some());
     }
 
@@ -1212,6 +1228,7 @@ mod tests {
                     None,
                 ))
                 .unwrap()
+                .map(|uid| registry.resolve_mission(&uid).unwrap().unwrap().handle)
                 .unwrap()
         };
         assert_eq!(
@@ -1403,7 +1420,7 @@ mod tests {
             1,
             "the intake = false instance is never polled"
         );
-        assert_eq!(queued[0].key(), "G-board-1");
+        assert_eq!(queued[0].shown_handle(), "G-board-1");
         assert!(registry.source_cursor("G", "mirror").unwrap().is_none());
         let (_dir, roster) = roster_with("covert", "{ board = { provider = 3 } }");
         assert!(
@@ -1759,7 +1776,9 @@ mod tests {
         let registry = FileRegistry::open(state.path());
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
-        let links = registry.issue_links("G-fake-lk-1").unwrap();
+        let links = registry
+            .issue_links(&uid(&registry, "G-fake-lk-1"))
+            .unwrap();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].relation, LinkRelation::Source);
         assert_eq!(
@@ -1769,7 +1788,7 @@ mod tests {
         assert_eq!(links[0].linked_by, "m");
         // A person's unlink holds: the next poll does not link it again.
         registry
-            .unlink_issue("G-fake-lk-1", "fake", "lk-1")
+            .unlink_issue(&uid(&registry, "G-fake-lk-1"), "fake", "lk-1")
             .unwrap();
         pass(&desk, &plugins, &roster, &registry);
         assert!(registry.active_issue_links().unwrap().is_empty());
@@ -1794,7 +1813,7 @@ mod tests {
                 .body
                 .clone()
         };
-        let named = status("G-fake-br-1", Some("agent/br-1"));
+        let named = status(&uid(&registry, "G-fake-br-1"), Some("agent/br-1"));
         assert!(
             named.ends_with(
                 "
@@ -1802,7 +1821,7 @@ Branch: `agent/br-1`"
             ),
             "{named}"
         );
-        let none = status("G-fake-br-2", None);
+        let none = status(&uid(&registry, "G-fake-br-2"), None);
         assert!(!none.contains("Branch"), "{none}");
     }
 
@@ -1818,7 +1837,7 @@ Branch: `agent/br-1`"
         registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
-        let mission = "G-fake-st-1";
+        let mission = &uid(&registry, "G-fake-st-1");
 
         for phase in ["working", "waiting", "working"] {
             assert_eq!(
@@ -1870,7 +1889,7 @@ Branch: `agent/br-1`"
         registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
-        let mission = "G-fake-sp-1";
+        let mission = &uid(&registry, "G-fake-sp-1");
         crate::station::issues::queue_status(&registry, &roster, mission, "working", None, 1.0);
         pass(&desk, &plugins, &roster, &registry);
         crate::station::issues::queue_status(&registry, &roster, mission, "paused", None, 2.0);
@@ -1985,7 +2004,7 @@ Branch: `agent/br-1`"
         registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
         let desk = SourceDesk::new("station-a", SourceLimits::default());
         desk.run(&plugins, &roster, &registry);
-        let mission = "G-fake-fo-2";
+        let mission = &uid(&registry, "G-fake-fo-2");
         let mut comment =
             OutboxEntry::new("G", mission, "fake", "fo-2", OutboxKind::Comment, "m", 1.0);
         comment.body = "A question.".to_owned();
@@ -2021,7 +2040,7 @@ Branch: `agent/br-1`"
         desk.run(&plugins, &roster, &registry);
         let mut entry = OutboxEntry::new(
             "G",
-            "G-fake-hq-1",
+            uid(&registry, "G-fake-hq-1"),
             "fake",
             "hq-1",
             OutboxKind::Comment,
@@ -2165,7 +2184,7 @@ Branch: `agent/br-1`"
             poll_replies(&registry, &roster, &build, "station-a", 5.0),
             1
         );
-        let mission = "G-fake-rp-1";
+        let mission = &uid(&registry, "G-fake-rp-1");
         let stored = registry.issue_replies(mission).unwrap();
         let ids: Vec<&str> = stored.iter().map(|reply| reply.id.as_str()).collect();
         assert_eq!(ids, ["r1", "r2"], "the token's own comment is skipped");

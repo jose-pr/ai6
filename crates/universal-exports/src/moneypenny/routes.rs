@@ -331,9 +331,10 @@ impl Route {
     /// test. A state filter looks at the Mission's state: that of its latest Session, the one
     /// with the highest `updated_at`, none counting as oldest and the first of equals winning
     /// (a Session without a state is working). It is never `sequence`, a cursor within one
-    /// provider Session: a long first attempt would outrank the newer retry after it. Station,
-    /// Agent and text look at any of its Sessions, the text also at the Operation, the Mission
-    /// and the brief's prompt, without regard to case. Any other page shows none.
+    /// provider Session: a long first attempt would outrank the newer retry after it. A
+    /// Mission ID is its UID or its handle, the handle without regard to case. Station, Agent
+    /// and text look at any of its Sessions, the text also at the Operation, the Mission, its
+    /// handle and the brief's prompt, without regard to case. Any other page shows none.
     pub(crate) fn shows_mission(&self, mission: &Value) -> bool {
         if self.page != Page::Missions {
             return false;
@@ -369,6 +370,7 @@ impl Route {
             [
                 &mission["operation_id"],
                 &mission["mission_id"],
+                &mission["handle"],
                 &mission["brief"]["prompt"],
             ]
             .into_iter()
@@ -376,8 +378,14 @@ impl Route {
             .filter_map(Value::as_str)
             .any(|item| item.to_lowercase().contains(&wanted))
         });
+        let named = self.text("mission_id").is_none_or(|wanted| {
+            mission["mission_id"] == wanted
+                || mission["handle"]
+                    .as_str()
+                    .is_some_and(|handle| handle.eq_ignore_ascii_case(wanted))
+        });
         equals("operation_id", &mission["operation_id"])
-            && equals("mission_id", &mission["mission_id"])
+            && named
             && any_session("station_id", "station_id")
             && any_session("agent", "agent")
             && text
