@@ -144,6 +144,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A Mission and each of its runs are keyed by a UID, a UUIDv7 in lower-case text minted where the
+  brief enters; the readable `<operation>-<n>` is the Mission's **handle**, unique without case and
+  never given twice, and a run's is `<handle>.<attempt>`. Every relation (Session records, Cables,
+  reviews, linked issues, green ink, memories, audit, timeline, controls) and every Registry file
+  and row is kept by the UID. A handle can be renamed by whoever holds `mission.control`: `POST
+  /v1/user/operations/{op}/missions/{id}/rename`, `ai6ctl missions rename` and the Rename action on
+  Outer Office's Mission detail; the old handle stays reserved and still names the Mission, and the
+  rename is audited (`mission.rename`) and on the timeline. Routes, `ai6ctl` and Moneypenny's tools
+  take a UID or any handle a Mission had, and answers carry `mission_id` and `handle`;
+  `GET /v1/missions?mission=` finds one. A branch, a tracker comment and a report take the handle
+  the Mission has when written. `[registry.limits.briefs] mission_id_bytes` is now `handle_bytes`.
+  The Registry's stored layout changed (the `mission-ids/` records, `ai6_mission_ids.handle`, the
+  `handle` of a brief and of a Session record), and a Registry from before needs its Missions given
+  UIDs; a Mission has one Session record per attempt.
 - AI6 builds on Guatiao 266baf9c, coqui-acp ee19118 and coqui-access add863cf, one Guatiao revision for
   every kind and plugin; no kind's floor hash moved, so plugins built against it load as before once
   rebuilt together. coqui-acp's bridge proves a new identity by Noise.

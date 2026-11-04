@@ -2021,7 +2021,7 @@ impl Provenance {
     pub fn registry_drop(brief: &Brief, station: impl Into<String>, at: i64) -> Self;
     pub fn matches(&self, brief: &Brief) -> bool;   // digest still equals the record's
 }
-pub fn record_digest(brief: &Brief) -> String;  // "sha256:HEX" of the canonical JSON record without provenance
+pub fn record_digest(brief: &Brief) -> String;  // "sha256:HEX" of the canonical JSON record without provenance, mission_id or handle
 // Brief gains `pub provenance: Option<Provenance>` (serde default, omitted when None).
 ```
 
@@ -2106,8 +2106,10 @@ timeline_events(operation: &str) -> io::Result<Vec<TimelineEvent>>
 station_settings(station: &str) -> io::Result<Option<StationSettings>>
 set_station_settings(station: &str, settings: &StationSettings) -> io::Result<()>
 submit_brief(brief: &Brief) -> io::Result<()>
-allot_mission_id(entry: &MissionEntry) -> io::Result<String>
-entered_mission_id(entry: &MissionEntry) -> io::Result<Option<String>>
+allot_mission_id(entry: &MissionEntry) -> io::Result<MissionHandle>
+entered_mission_id(entry: &MissionEntry) -> io::Result<Option<String>>  // the UID
+resolve_mission(id: &str) -> io::Result<Option<MissionHandle>>  // UID, dropped key or any handle ever given, without case
+rename_mission(mission_id: &str, handle: &str) -> io::Result<MissionHandle>  // NotFound / InvalidInput / AlreadyExists
 enter_brief(brief: &Brief, entry: &MissionEntry) -> io::Result<Brief>  // AlreadyExists when the entry's brief is in any state
 claim_with_lease(key: Option<&str>, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>
 lease(key: &str) -> io::Result<Option<Lease>>
@@ -2120,15 +2122,26 @@ hand_over(lease: &Lease, station: &str, duration: Duration, meta: BTreeMap<Strin
 finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<&[u8]>, station: Option<&str>) -> io::Result<bool>
 ```
 
-A Mission ID is chosen once, where a brief enters, by the rule in `registry::mission_ids`, and
-kept in `Brief::mission_id`; `Brief::key()` is that ID, or `{source}--{id}` for a brief that has
-none (one dropped into the queue by hand). `Brief::id` stays what the brief is called where it
-came from. `Brief::name` is what to show beside the ID when the title is not (an issue's title);
-`Brief::display_name(bytes)` gives it, or the title, on one line. A Mission keeps it as
-`Mission::name` and a published brief as `name`; it is never part of `Brief::prompt`.
+A Mission's ID is a UID (UUIDv7, lower-case text) minted where a brief enters and kept in
+`Brief::mission_id`; `Brief::key()` is that UID, or `{source}--{id}` for a brief that has none
+(one dropped into the queue by hand). Every relation uses the UID. What people see is
+`Brief::handle`, given by the rule in `registry::mission_ids` and changed only by
+`rename_mission`; `Brief::shown_handle()` is it or the key, and `Brief::mission_handle()` both.
+No brief digest (provenance, clearance, review) covers the Mission ID or the handle, so a rename
+or a new key leaves them valid.
+`Brief::id` stays what the brief is called where it came from. `Brief::name` is what to show
+beside the handle when the title is not (an issue's title); `Brief::display_name(bytes)` gives
+it, or the title, on one line. A Mission keeps it as `Mission::name` (and the handle as
+`Mission::handle`, as the Station last learned it) and a published brief as `name`; it is never
+part of `Brief::prompt`.
 
 ```rust
-pub struct MissionEntry;  // where a brief enters; all of these are the only way an ID is made
+pub struct MissionHandle { pub mission_id: String, pub handle: String }  // UID and current handle
+pub fn new_uid() -> String;                        // UUIDv7, lower-case
+pub fn is_uid(text: &str) -> bool;                 // hyphenated lower-case UUID text
+pub fn valid_handle(handle: &str) -> bool;         // [A-Za-z0-9_-], no '-' at either end, <= 240, not a UID
+pub fn run_handle(mission_handle: &str, attempt: u32) -> String;  // `<handle>.<attempt>`
+pub struct MissionEntry;  // where a brief enters; all of these are the only way a handle is made
 impl MissionEntry {
     pub fn person(operation: Option<&str>) -> Self;              // <operation>-<n>; `mission` with none
     pub fn proposal(operation: &str, proposal_id: &str) -> Self; // <operation>-<n>, once per proposal
@@ -2139,13 +2152,20 @@ impl MissionEntry {
 }
 ```
 
-`allot_mission_id` returns the ID an entry was given, or issues one: atomically per Operation
-across processes (the file Registry's lock; the SQL Registry's write transaction), numbers never
-reused, however a brief later moves or is deleted. A person's entry is new each time; every other
-entry keeps its ID. Only ASCII letters, digits, `_` and `-` stay in an ID. No two IDs differ only
-by case, and a number or a code whose ID is taken is skipped or takes a short hash. A brief's
-`mission_id` must read as a Registry key or the brief is invalid. Stored under `mission-ids/` (file:
-`counters/`, `issued/`, `entries/`), `ai6_mission_counters` and `ai6_mission_ids` (SQL).
+`allot_mission_id` returns the Mission an entry names, with its current handle, or mints a UID
+and gives a handle: atomically per Operation across processes (the file Registry's lock; the SQL
+Registry's write transaction), numbers never reused, however a brief later moves or is deleted. A
+person's entry is new each time; every other entry keeps its Mission. Only ASCII letters, digits,
+`_` and `-` stay in a handle. No two handles differ only by case, none is given twice, a number
+or a code whose handle is taken is skipped or takes a short hash, and none reads as a UID. A
+brief's `mission_id` must be a UID, and its `handle` needs one and the handle character set, or
+the brief is invalid. `rename_mission(uid, handle)` refuses a malformed handle
+(`[registry.limits.briefs] handle_bytes`), one another Mission was ever given, and a brief with
+no handle; it rewrites the handle on every copy of the brief (each state, the held record) and
+keeps the old one in the book naming the Mission. Stored under `mission-ids/` (file: `counters/`,
+`issued/<folded handle>.json` = `{mission_id, handle, entry?}`, `entries/<digest>.json` the same
+for the entry's current handle), `ai6_mission_counters` and `ai6_mission_ids` (SQL: `folded`,
+`handle`, `mission_id`, `entry` on the current handle's row, `revision`).
 
 `enter_brief` allots and queues in one step, which is how every entry point in AI6 but the
 gateway's queues a brief (the gateway allots first, to audit the ID before it writes).
@@ -2329,8 +2349,9 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self;
     pub fn with_clearance(self, Option<String>) -> Self; }
 #[non_exhaustive] pub struct SessionRecord {
-    pub session_id: String,                  // AI6's ID, `<mission>.<attempt>` (not the provider's)
-    pub mission_id: String,
+    pub session_id: String,                  // AI6's ID, the run's UID (not the provider's)
+    pub mission_id: String,                  // the Mission's UID
+    pub handle: Option<String>,              // `<mission handle>.<attempt>` when it opened; a rename leaves it
     pub operation: Option<String>,           // the Mission's Operation, as the opening Station knew it
     pub provider_session_id: Option<String>,
     pub station: String,                     // the lease holder
@@ -2358,8 +2379,8 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
 impl SessionResult { pub const HANDED_OFF: &'static str; pub fn new(state) -> Self;
     pub fn with_reason(self, Option<String>) -> Self; pub fn with_denied_tools(self, usize) -> Self }
 impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }   // false once closed
-pub fn run_id(mission_id: &str, attempt: u32, bytes: usize) -> String;  // `<mission>.<attempt>` within bytes
-pub struct NewSession   // NewSession::new(session_id, mission_id, station); next_attempt(id_bytes) -> Option<Self>
+pub struct NewSession   // NewSession::new(session_id, mission_id, station); next_attempt() -> Option<Self>
+                        //   (a new UID, the next attempt) .with_handle(mission_handle) .attempt()
                         //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
                         //   .with_operation(id)
                         //   .with_exposure(Vec<Exposure>) .with_launch(SessionLaunch) .with_account(AccountRef)
@@ -2370,7 +2391,7 @@ pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStat
 #[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, HeldBy(String), Stale, Io(io::Error) }
 
 pub trait SessionStore {
-    fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>
+    fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>  // Exists: the ID, or the Mission's attempt, has a record
     fn session(&self, id: &str) -> io::Result<Option<SessionRecord>>
     fn sessions(&self) -> io::Result<Vec<SessionRecord>>          // stable ID order
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>  // every Session of the Mission, earliest first

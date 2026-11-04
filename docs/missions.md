@@ -13,15 +13,18 @@ source ─► brief ─► Registry ─► AI6 Station ─► AgentHandler ─�
 
 ## Mission and Session identities
 
-A **Mission ID** identifies one unit of work and may group multiple agent Sessions. A
-**Session ID** comes from the provider and remains stable when AI6 resumes that same
-agent operation. A tracker's code is the tracker's: AI6 owns the Mission ID and may quote
-the code in it, and the link to the issue stays apart from it.
+A **Mission ID** identifies one unit of work and may group multiple agent Sessions. It is a
+**UID**, a UUIDv7 in lower-case text (`019a1b2c-3d4e-7f00-8123-456789abcdef`), minted where the
+brief enters the Registry. It is the Registry's key, and every relation uses it: Session
+records, Cables, reviews, linked issues, green ink, memories, audit records, the timeline,
+controls and routes. It never changes. A **Session ID** comes from the provider and remains
+stable when AI6 resumes that same agent operation.
 
-AI6 chooses the Mission ID once, where the brief enters, so a person can recognise a Mission
-from it:
+What people see is the Mission's **handle**, which AI6 gives where the brief enters, so a person
+can recognise a Mission from it. A tracker's code is the tracker's: the handle may quote it, and
+the link to the issue stays apart from it.
 
-| Where it came from | Mission ID | Example |
+| Where it came from | Handle | Example |
 | --- | --- | --- |
 | A person, `ai6ctl`, Moneypenny, an Agent's proposal, a review | `<operation>-<n>` | `ai6-42` |
 | A Jira Source | `<operation>-<item key>` | `ai6-AI6-64` |
@@ -34,27 +37,54 @@ from it:
   count Missions in the order they entered and are never reused, even when a brief is
   deleted. A brief with no Operation uses `mission` in its place. A review and a proposal take
   their number when they enter the queue; a proposal has none while it waits.
-- The ID stays through a retry, a return to the queue, a resume and a Station restart, on
-  every Station. A re-polled item or a repeated approval finds the ID it already has, and an
-  item keeps its ID if the Operation adds a second instance of its provider later.
-- Nothing reads a code or a number back out of an ID: it is opaque. Only ASCII letters, digits,
-  `_` and `-` stay in it, so a code with odd characters is made safe rather than refused, and
-  the ID is valid as a file name, a Git branch and a URL part. Past `[registry.limits.briefs]
-  mission_id_bytes` it keeps its start and adds a short hash. Two IDs never differ only by
-  case, and when one is already taken (Operation `ai6-gh`'s Mission 63 and Operation `ai6`'s
-  GitHub item 63) a number is skipped or a short hash is added.
-- A brief dropped into the Registry's queue by hand goes through none of this: its ID is
-  `<source>--<id>` from its own fields.
+- The Mission stays the same through a retry, a return to the queue, a resume and a Station
+  restart, on every Station. A re-polled item or a repeated approval finds the Mission it
+  already names, and an item keeps its Mission if the Operation adds a second instance of its
+  provider later.
+- Nothing reads a code or a number back out of a handle. Only ASCII letters, digits, `_` and `-`
+  stay in it, so a code with odd characters is made safe rather than refused, and the handle is
+  valid as a Git branch and a URL part. Past `[registry.limits.briefs] handle_bytes` it keeps
+  its start and adds a short hash. A handle is unique across the Registry, compared without
+  case, and never given twice: when one is already taken (Operation `ai6-gh`'s Mission 63 and
+  Operation `ai6`'s GitHub item 63) a number is skipped or a short hash is added. No handle
+  reads as a UID.
+- A brief dropped into the Registry's queue by hand goes through none of this: its key is
+  `<source>--<id>` from its own fields, and it goes by that.
 
-A **run** is one Session record of a Mission, and its ID is `<mission>.<attempt>`: `ai6-42.1`,
-`ai6-42.2`. It stays through a resume, and the provider's Session ID stays apart from it, shown
-as it always was.
+A handle can be **renamed** by whoever holds `mission.control` on the Operation, to any handle no
+other Mission was ever given, in the same character set:
 
-A **name** sits beside the ID and is no part of it: a person's title, or an issue's title on one
-line and cut to `[registry.limits.sources] name_bytes`. Whoever can open an issue writes that
+```bash
+curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions/ai6-42/rename" \
+  -H "authorization: Bearer $UNEX_ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"handle":"ai6-flaky-watchdog"}'
+```
+
+The answer is `{"operation_id", "mission_id", "handle", "previous"}`; a refusal is
+`{"error": TEXT}` with `400` (a malformed handle), `409` (a handle another Mission had) or `404`.
+A rename changes nothing kept by the UID, and the old handle stays reserved and still names the
+Mission, so old links and tracker comments keep working; the Mission can take a former handle of
+its own back. It is audited as `mission.rename` and shows on the timeline as a `control`
+`rename.done` with the old and new handles. `ai6ctl missions rename MISSION HANDLE` and the
+Rename action on Outer Office's Mission detail do the same.
+
+Every route and `ai6ctl` command that names a Mission takes its UID or any handle it had,
+compared without case, and answers with its UID (`mission_id`) and its current `handle`;
+`GET /v1/missions?mission=ID` finds one. What leaves AI6 takes the handle the Mission has when it
+is written: the branch of its safe house, a tracker comment, a report. A rename does not rewrite
+them.
+
+A **run** is one Session record of a Mission. It has a UID of its own, and a handle
+`<mission handle>.<attempt>` from the handle the Mission had when the run opened: `ai6-42.1`,
+`ai6-42.2`. A Mission has one record per attempt. The run keeps its handle through a resume and
+a rename, and the provider's Session ID stays apart from it, shown as it always was.
+
+A **name** sits beside the handle and is no part of it: a person's title, or an issue's title on
+one line and cut to `[registry.limits.sources] name_bytes`. Whoever can open an issue writes that
 title, so it is data: it reaches a prompt only inside the fence with the rest of the issue's text,
 and Outer Office and `ai6ctl` show it as plain text. Outer Office and `ai6ctl mission` also link
-to the issue, and search matches the ID, the run and the name.
+to the issue, and search matches the ID, the handle, the run and the name.
 
 ```json
 {
@@ -67,7 +97,7 @@ to the issue, and search matches the ID, the run and the name.
 ## Queue a Mission through Universal Exports
 
 An authorized user needs `mission.create` for the target Operation. The gateway returns
-the queued Mission ID without echoing the prompt:
+the queued Mission's UID and handle without echoing the prompt:
 
 ```bash
 curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions" \
@@ -306,9 +336,10 @@ brief record (in a directory Registry, `provenance/KEY.json`; in a database, a c
 | `registry_drop` | nobody | | the Station that took the brief |
 
 Each also carries `received_by`, `received_at` (Unix seconds) and `digest`, the
-`sha256:HEX` of the whole brief record as stored (canonical JSON without the provenance): a
-brief changed in any way after it was accepted, its Operation, assignment, Stations, link,
-data or text, loses its provenance. When a brief finishes, its provenance is spent: it moves
+`sha256:HEX` of the brief record as stored (canonical JSON without the provenance, and
+without the Mission ID and handle the Registry gives it): a brief changed in any other way after
+it was accepted, its Operation, assignment, Stations, link, data or text, loses its provenance;
+a rename does not. When a brief finishes, its provenance is spent: it moves
 beside the outcome (`STATE/KEY.provenance`, or the `finished_provenance` column), where only
 the CX report reads it, so the same record queued again is a `registry_drop`. A brief found in the queue with none, written there by hand or
 by an integration that did not go through AI6, is accepted as `registry_drop`: its Sessions
@@ -331,7 +362,7 @@ tradecraft word is *extraction*).
 ### Session records and fencing
 
 Besides the Station's own `missions.json`, every Session has a record in the shared
-Registry (`sessions/`). It holds AI6's Session ID, the run's `<mission>.<attempt>` (distinct from the provider's), the
+Registry (`sessions/`). It holds AI6's Session ID, the run's UID and its handle `<mission handle>.<attempt>` (distinct from the provider's), the
 provider Session ID, the Station that supervises it, its Theater, the attempt number and the
 ID of the Session it replaced, its exposure to untrusted input, its status (`active`,
 `parked`, `ended` or `lost`), how its harness was launched (handler, terminal, working

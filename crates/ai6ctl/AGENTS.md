@@ -86,10 +86,18 @@ origin leaves the public roots alone.
 - `ai6ctl pools clear-limit <POOL> <ACCOUNT> --operation <OPERATION_ID>` posts
   `.../pools/{pool}/{account}/clear-limit` and prints `pool/account: limit cleared`; 403 names
   `pool.manage`, 404 an account not declared for the Operation.
-- `ai6ctl missions [--operation <ID> [--subtree]]` lists visible Missions, Session counts and
-  the name beside each ID (`-` before a Station published one; an issue's title, as data);
-  `--operation` asks the gateway for that Operation's (`GET /v1/missions?operation=`), and
-  `--subtree` also for every Operation under it (`&subtree=true`).
+- `ai6ctl missions [--operation <ID> [--subtree]]` lists visible Missions as `STATION MISSION
+  SESSIONS NAME UID`: `MISSION` the handle (the ID when the gateway gives none), `NAME` the name
+  beside it (`-` before a Station published one; an issue's title, as data) and `UID` the
+  Mission's ID; `--operation` asks the gateway for that Operation's (`GET
+  /v1/missions?operation=`), and `--subtree` also for every Operation under it
+  (`&subtree=true`).
+- Wherever a command takes a Mission (`<MISSION_ID>`, `<MISSION>`, `--mission`), it takes its UID
+  or any handle it had, compared without case; the gateway looks it up (`GET
+  /v1/missions?mission=`), so a handle from before a rename still finds it.
+- `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
+  `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the
+  gateway's words and exits `1`. The Operation is looked up when not given.
 - `ai6ctl operations` reads `GET /v1/user/profile` and prints `OPERATION\tACTIONS`, each
   Operation indented two spaces under its `parent` (the nearest one the person may read; a
   hidden ancestor is never named), roots and siblings in ID order.
@@ -110,10 +118,11 @@ origin leaves the public roots alone.
 - `ai6ctl accounts [list]`, `create NAME [--groups g,h]`, `disable NAME`, `enable NAME`, `groups
   NAME g,h` and `reset-password NAME` use `/v1/user/accounts`; a generated password is printed
   once as `password\t…`, to stdout only. Accounts are never deleted through the API.
-- `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission and its provider
-  Sessions (`SESSION STATE REASON SEQUENCE EXPOSURE`; `REASON` is the lifecycle reason the
-  Station published, such as `permission-denied`, or `-`); `--operation` disambiguates a Mission
-  ID used by several Operations.
+- `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission (the `missions` row), its
+  runs (`RUN STATUS ROUTE`, `RUN` the run's handle, else its UID) and its provider Sessions
+  (`SESSION STATE REASON SEQUENCE EXPOSURE`; `REASON` is the lifecycle reason the Station
+  published, such as `permission-denied`, or `-`); `--operation` disambiguates a Mission ID
+  used by several Operations.
 - `ai6ctl sessions [--operation <ID>] [--mission <ID>] [--state <STATE>]` filters the
   authorized `GET /v1/board` response.
 - `ai6ctl session <SESSION_ID>` prints one provider Session.

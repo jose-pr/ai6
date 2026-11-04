@@ -73,3 +73,9 @@ From this directory, run `dart format --output=none --set-exit-if-changed lib te
 `lib/issues/linked_issues.dart` holds a Mission's Linked issues section and the issue proposals panel.
 Issue text is other people's: show it through `revealInvisible`. An action a person lacks is shown
 disabled with what it needs, not hidden. `reasonWords` words a blocked reason everywhere it is shown.
+
+A Mission is shown by its handle (`MissionBoard.handleOf`) and routed and linked by its UID, the
+`mission_id` the gateway sends. A route's `mission_id` may be a handle, current or former: the
+board matches the current one without case, and the Missions page asks `GET
+/v1/missions?mission=` for any other and moves the route to the UID. Renaming is
+`lib/shell/mission_rename.dart`.

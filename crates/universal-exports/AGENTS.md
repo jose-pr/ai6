@@ -156,7 +156,8 @@ pub struct BoardSession {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardMission {
     pub operation_id: String,
-    pub mission_id: String,
+    pub mission_id: String,            // the Mission's UID when it came from the Registry
+    pub handle: String,                // what it is called now; its ID when the Registry names it no other way
     pub sessions: Vec<BoardSession>,
     pub brief: Option<LaunchManifest>,
     pub usage: Option<MissionUsage>,   // tokens and cost from the Registry ledger
@@ -167,7 +168,8 @@ pub struct BoardMission {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MissionAttempt {
     pub attempt: u32,
-    pub session_id: String,                  // AI6's Session ID, `<mission>.<attempt>`
+    pub session_id: String,                  // AI6's Session ID, the run's UID
+    pub handle: Option<String>,              // the run's `<mission handle>.<attempt>` when it opened
     pub provider_session_id: Option<String>,
     pub predecessor: Option<String>,         // AI6 ID of the attempt it replaced
     pub station: String, pub theater: Option<String>,
@@ -389,7 +391,8 @@ pub struct TimelineItem {
     pub action: String,                // state, "<action>.<outcome>", "sent", "authorized", "revoked" or audit action
     pub operation_id: String,
     pub station_id: Option<String>,
-    pub mission_id: Option<String>,
+    pub mission_id: Option<String>,    // the Mission's UID
+    pub handle: Option<String>,        // what that Mission is called now
     pub session_id: Option<String>,
     pub actor: Option<String>,         // person ID or Agent codename
     pub target: Option<String>,        // an audit record's target
@@ -855,7 +858,9 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/board` | Requires a user bearer and returns Sessions for Operations allowed by `mission.read`, each with the `station_id` of its Registry record and the `agent` of its Mission's brief (`null` when unknown). |
 | `GET /v1/stations` | Requires a user bearer; returns visible Station health, hosted Operations and current Headquarters Station. |
 | `GET /v1/user/operations/{operation_id}/placement-preview` | Requires `mission.read` at the Operation; returns the eligible (Station, Theater, Agent) choices, best first, and a reason for each rejection. Optional `agent`, `role`, `stations`, `tags` query parameters narrow it. |
-| `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. `?operation=P` keeps P's Missions; with `&subtree=true`, those of P and of every Operation under it. |
+| `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. `?operation=P` keeps P's Missions; with `&subtree=true`, those of P and of every Operation under it. `?mission=ID` keeps the one Mission `ID` names. |
+| Any route with `{mission_id}` (and `held-briefs/{key}`, `missions/{id}/products`, the timeline's `?mission=`) | Takes the Mission's UID, the key of a brief dropped by hand, or any handle it was ever given, compared without case (`ai6::BriefStore::resolve_mission`); an ID the Registry does not know is taken as it is. Answers carry `mission_id` (the UID) and `handle` (the current one). |
+| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/rename` | Requires `mission.control`; body `{"handle"}`. Returns `{operation_id, mission_id, handle, previous}`; a refusal is `{"error": TEXT}` with `400` (malformed), `409` (a handle another Mission had) or `404` (no such Mission in the Operation). Audited `mission.rename` (resource `mission:UID`, target the UID), timeline kind `control` action `rename.done` with details `handle` and `previous`. |
 | `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Session and UTC day) once a provider has reported any, and its `attempts` from the shared Session records. `GET /v1/missions` carries `attempts` too. |
 | `GET /v1/auth/methods` | No token. `{"methods": [...]}`: `password` when the Authenticator takes a name and a secret (it says so in `describe`, or says nothing), `proxy` with a proxy identity header. Names no account. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret, `expires_at`, `expires_in` (seconds left, for a client that does not trust its clock) and `ends_at`. `ttl_seconds` is optional, default `[gateway] access_token_ttl`, at most `access_token_max_ttl`. A request with `Origin` (checked) also gets `Set-Cookie: ai6_session=…; Path=/v1/auth; HttpOnly; Secure; SameSite=Strict; Max-Age=…`, ending `session_max` after signing in, unless `[gateway] session_cookie` is `false`, `session_max` is `0` or the body says `"session_cookie": false`. |
