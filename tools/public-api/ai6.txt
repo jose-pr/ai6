@@ -1504,6 +1504,7 @@ pub ai6::directorates::m::mission::Mission::blocked_reason: core::option::Option
 pub ai6::directorates::m::mission::Mission::cover: core::option::Option<ai6::directorates::m::cover::CoverReport>
 pub ai6::directorates::m::mission::Mission::denied_tools: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::exposure: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::handle: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::m::mission::Mission::name: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::operation_id: core::option::Option<alloc::string::String>
@@ -1532,6 +1533,7 @@ pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsR
 pub fn ai6::directorates::m::mission::MissionStore::park(&mut self, &str, i64) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::quarantine(&mut self, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::reassign(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::record_handle(&mut self, &str, alloc::string::String) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_name(&mut self, &str, alloc::string::String) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_provenance(&mut self, &str, ai6::directorates::registry::bona_fides::Provenance) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_review_naming(&mut self, &str, ai6::directorates::m::review::BriefNaming) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
@@ -3862,7 +3864,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) ->
 pub fn ai6::directorates::registry::store::FileRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::backend::BriefStore
-pub fn ai6::directorates::registry::backend::BriefStore::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::backend::BriefStore::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::backend::BriefStore::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::backend::BriefStore::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::backend::BriefStore::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -3880,12 +3882,14 @@ pub fn ai6::directorates::registry::backend::BriefStore::promote_mission_proposa
 pub fn ai6::directorates::registry::backend::BriefStore::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::backend::BriefStore::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::backend::BriefStore::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::backend::BriefStore::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::backend::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::BriefStore::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::backend::BriefStore::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::backend::BriefStore::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::BriefStore::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -3903,12 +3907,14 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -3926,7 +3932,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::store::FileRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
@@ -4751,7 +4759,7 @@ pub ai6::directorates::registry::limits::AuditLimits::results: ai6::bounds::Limi
 impl core::default::Default for ai6::directorates::registry::limits::AuditLimits
 pub fn ai6::directorates::registry::limits::AuditLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::BriefLimits
-pub ai6::directorates::registry::limits::BriefLimits::mission_id_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::BriefLimits::handle_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::BriefLimits::provenance_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::BriefLimits::record_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::BriefLimits::records: ai6::bounds::Limit
@@ -5087,7 +5095,15 @@ pub fn ai6::directorates::registry::mission_ids::MissionEntry::proposal(&str, &s
 pub fn ai6::directorates::registry::mission_ids::MissionEntry::review(&str, &str) -> Self
 pub fn ai6::directorates::registry::mission_ids::MissionEntry::sleeper(&str, &str, &str, core::option::Option<&str>) -> Self
 pub fn ai6::directorates::registry::mission_ids::MissionEntry::source(&str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> Self
-pub fn ai6::directorates::registry::mission_ids::run_id(&str, u32, usize) -> alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::mission_ids::MissionHandle
+pub ai6::directorates::registry::mission_ids::MissionHandle::handle: alloc::string::String
+pub ai6::directorates::registry::mission_ids::MissionHandle::mission_id: alloc::string::String
+impl ai6::directorates::registry::mission_ids::MissionHandle
+pub fn ai6::directorates::registry::mission_ids::MissionHandle::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::mission_ids::is_uid(&str) -> bool
+pub fn ai6::directorates::registry::mission_ids::new_uid() -> alloc::string::String
+pub fn ai6::directorates::registry::mission_ids::run_handle(&str, u32) -> alloc::string::String
+pub fn ai6::directorates::registry::mission_ids::valid_handle(&str) -> bool
 pub mod ai6::directorates::registry::mission_issues
 pub enum ai6::directorates::registry::mission_issues::LinkRelation
 pub ai6::directorates::registry::mission_issues::LinkRelation::Child
@@ -5474,11 +5490,13 @@ impl ai6::directorates::registry::sessions::SessionStatus
 pub fn ai6::directorates::registry::sessions::SessionStatus::is_closed(self) -> bool
 pub struct ai6::directorates::registry::sessions::NewSession
 impl ai6::directorates::registry::sessions::NewSession
+pub fn ai6::directorates::registry::sessions::NewSession::attempt(&self) -> u32
 pub fn ai6::directorates::registry::sessions::NewSession::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn ai6::directorates::registry::sessions::NewSession::next_attempt(self, usize) -> core::option::Option<Self>
+pub fn ai6::directorates::registry::sessions::NewSession::next_attempt(self) -> core::option::Option<Self>
 pub fn ai6::directorates::registry::sessions::NewSession::with_account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_attempt(self, u32, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_handle(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -5510,6 +5528,7 @@ pub ai6::directorates::registry::sessions::SessionRecord::checkpointed_at: core:
 pub ai6::directorates::registry::sessions::SessionRecord::closed_at: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
 pub ai6::directorates::registry::sessions::SessionRecord::fence: u64
+pub ai6::directorates::registry::sessions::SessionRecord::handle: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::launch: core::option::Option<ai6::directorates::registry::sessions::SessionLaunch>
 pub ai6::directorates::registry::sessions::SessionRecord::lease_expires: f64
 pub ai6::directorates::registry::sessions::SessionRecord::lost: core::option::Option<alloc::string::String>
@@ -5833,7 +5852,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::audit_records(&self) -> co
 pub fn ai6::directorates::registry::sql::SqlRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -5851,7 +5870,9 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
@@ -5905,6 +5926,7 @@ pub ai6::directorates::registry::store::Brief::agent: core::option::Option<alloc
 pub ai6::directorates::registry::store::Brief::body: alloc::string::String
 pub ai6::directorates::registry::store::Brief::created: alloc::string::String
 pub ai6::directorates::registry::store::Brief::data: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub ai6::directorates::registry::store::Brief::handle: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::store::Brief::id: alloc::string::String
 pub ai6::directorates::registry::store::Brief::mission_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::store::Brief::name: core::option::Option<alloc::string::String>
@@ -5921,7 +5943,9 @@ pub ai6::directorates::registry::store::Brief::version: u32
 impl ai6::directorates::registry::store::Brief
 pub fn ai6::directorates::registry::store::Brief::display_name(&self, usize) -> alloc::string::String
 pub fn ai6::directorates::registry::store::Brief::key(&self) -> alloc::string::String
+pub fn ai6::directorates::registry::store::Brief::mission_handle(&self) -> ai6::directorates::registry::mission_ids::MissionHandle
 pub fn ai6::directorates::registry::store::Brief::prompt(&self) -> alloc::string::String
+pub fn ai6::directorates::registry::store::Brief::shown_handle(&self) -> alloc::string::String
 pub struct ai6::directorates::registry::store::FileRegistry
 impl ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::open(impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -6063,7 +6087,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) ->
 pub fn ai6::directorates::registry::store::FileRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -6081,7 +6105,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::store::FileRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
@@ -6207,7 +6233,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) ->
 pub fn ai6::directorates::registry::store::FileRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::store::BriefStore
-pub fn ai6::directorates::registry::store::BriefStore::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::store::BriefStore::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::BriefStore::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::BriefStore::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::BriefStore::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -6225,12 +6251,14 @@ pub fn ai6::directorates::registry::store::BriefStore::promote_mission_proposal(
 pub fn ai6::directorates::registry::store::BriefStore::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::BriefStore::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::BriefStore::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::store::BriefStore::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::BriefStore::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::store::BriefStore::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::BriefStore::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::BriefStore::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -6248,12 +6276,14 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -6271,7 +6301,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::store::FileRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
@@ -8735,6 +8767,7 @@ pub ai6::Brief::agent: core::option::Option<alloc::string::String>
 pub ai6::Brief::body: alloc::string::String
 pub ai6::Brief::created: alloc::string::String
 pub ai6::Brief::data: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub ai6::Brief::handle: core::option::Option<alloc::string::String>
 pub ai6::Brief::id: alloc::string::String
 pub ai6::Brief::mission_id: core::option::Option<alloc::string::String>
 pub ai6::Brief::name: core::option::Option<alloc::string::String>
@@ -8751,9 +8784,11 @@ pub ai6::Brief::version: u32
 impl ai6::directorates::registry::store::Brief
 pub fn ai6::directorates::registry::store::Brief::display_name(&self, usize) -> alloc::string::String
 pub fn ai6::directorates::registry::store::Brief::key(&self) -> alloc::string::String
+pub fn ai6::directorates::registry::store::Brief::mission_handle(&self) -> ai6::directorates::registry::mission_ids::MissionHandle
 pub fn ai6::directorates::registry::store::Brief::prompt(&self) -> alloc::string::String
+pub fn ai6::directorates::registry::store::Brief::shown_handle(&self) -> alloc::string::String
 #[non_exhaustive] pub struct ai6::BriefLimits
-pub ai6::BriefLimits::mission_id_bytes: ai6::bounds::Limit
+pub ai6::BriefLimits::handle_bytes: ai6::bounds::Limit
 pub ai6::BriefLimits::provenance_bytes: ai6::bounds::Limit
 pub ai6::BriefLimits::record_bytes: ai6::bounds::Limit
 pub ai6::BriefLimits::records: ai6::bounds::Limit
@@ -9465,7 +9500,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) ->
 pub fn ai6::directorates::registry::store::FileRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -9483,7 +9518,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::store::FileRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
@@ -9824,6 +9861,11 @@ pub fn ai6::directorates::registry::mission_ids::MissionEntry::proposal(&str, &s
 pub fn ai6::directorates::registry::mission_ids::MissionEntry::review(&str, &str) -> Self
 pub fn ai6::directorates::registry::mission_ids::MissionEntry::sleeper(&str, &str, &str, core::option::Option<&str>) -> Self
 pub fn ai6::directorates::registry::mission_ids::MissionEntry::source(&str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> Self
+#[non_exhaustive] pub struct ai6::MissionHandle
+pub ai6::MissionHandle::handle: alloc::string::String
+pub ai6::MissionHandle::mission_id: alloc::string::String
+impl ai6::directorates::registry::mission_ids::MissionHandle
+pub fn ai6::directorates::registry::mission_ids::MissionHandle::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::MissionId(_)
 impl ai6::directorates::m::identity::MissionId
 pub fn ai6::directorates::m::identity::MissionId::as_str(&self) -> &str
@@ -9885,11 +9927,13 @@ pub ai6::ModelTenure::tally: ai6::directorates::registry::agent_records::AgentTa
 pub ai6::ModelTenure::to: core::option::Option<f64>
 pub struct ai6::NewSession
 impl ai6::directorates::registry::sessions::NewSession
+pub fn ai6::directorates::registry::sessions::NewSession::attempt(&self) -> u32
 pub fn ai6::directorates::registry::sessions::NewSession::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn ai6::directorates::registry::sessions::NewSession::next_attempt(self, usize) -> core::option::Option<Self>
+pub fn ai6::directorates::registry::sessions::NewSession::next_attempt(self) -> core::option::Option<Self>
 pub fn ai6::directorates::registry::sessions::NewSession::with_account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_attempt(self, u32, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
+pub fn ai6::directorates::registry::sessions::NewSession::with_handle(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::NewSession::with_provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -10724,6 +10768,7 @@ pub ai6::SessionRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::SessionRecord::closed_at: core::option::Option<f64>
 pub ai6::SessionRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
 pub ai6::SessionRecord::fence: u64
+pub ai6::SessionRecord::handle: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::launch: core::option::Option<ai6::directorates::registry::sessions::SessionLaunch>
 pub ai6::SessionRecord::lease_expires: f64
 pub ai6::SessionRecord::lost: core::option::Option<alloc::string::String>
@@ -11009,7 +11054,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::audit_records(&self) -> co
 pub fn ai6::directorates::registry::sql::SqlRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -11027,7 +11072,9 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
@@ -11909,7 +11956,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::audit_records(&self) ->
 pub fn ai6::directorates::registry::store::FileRegistry::list_audit(&self, usize) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::store::AuditRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_audit(&self, &ai6::directorates::registry::store::AuditRecord) -> core::io::error::Result<()>
 pub trait ai6::BriefStore
-pub fn ai6::BriefStore::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::BriefStore::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::BriefStore::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::BriefStore::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::BriefStore::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -11927,12 +11974,14 @@ pub fn ai6::BriefStore::promote_mission_proposal(&self, &str, &str, &str) -> cor
 pub fn ai6::BriefStore::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::BriefStore::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::BriefStore::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::BriefStore::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::BriefStore::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::BriefStore::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::BriefStore::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::BriefStore::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::sql::SqlRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -11950,12 +11999,14 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::BriefStore for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<alloc::string::String>
+pub fn ai6::directorates::registry::store::FileRegistry::allot_mission_id(&self, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_new(&self, core::option::Option<&str>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_with_lease(&self, core::option::Option<&str>, &str, core::time::Duration, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Lease>>
 pub fn ai6::directorates::registry::store::FileRegistry::enter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
@@ -11973,7 +12024,9 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
+pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::resolve_mission(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_ids::MissionHandle>>
 pub fn ai6::directorates::registry::store::FileRegistry::set_proposal_vetting(&self, &str, &str, &ai6::directorates::m::vetting::Vetting) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai6::directorates::registry::store::Brief) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
@@ -12487,6 +12540,7 @@ pub fn ai6::interpreter_name(&str) -> bool
 pub fn ai6::is_head_of_station_role(&str) -> bool
 pub fn ai6::is_review(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::is_sha256_pin(&str) -> bool
+pub fn ai6::is_uid(&str) -> bool
 pub fn ai6::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
 pub fn ai6::is_untrusted(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::judge(&ai6::directorates::registry::sessions::SessionRecord) -> ai6::directorates::m::scorecard::Judgment
@@ -12495,6 +12549,7 @@ pub fn ai6::load_access(impl core::convert::AsRef<std::path::Path>, ai6::bounds:
 pub fn ai6::load_policy(impl core::convert::AsRef<std::path::Path>, ai6::bounds::Limit) -> core::result::Result<ai6::AccessPolicy, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::micro_usd(f64) -> u64
 pub fn ai6::models_of(&ai6::directorates::m::roster::Agent) -> alloc::collections::btree::set::BTreeSet<alloc::string::String>
+pub fn ai6::new_uid() -> alloc::string::String
 pub fn ai6::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities, &ai6::station::limits::ProvisionLimits) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>
@@ -12510,7 +12565,7 @@ pub fn ai6::review_target(&ai6::directorates::registry::store::Brief) -> core::o
 pub fn ai6::role_authorizer() -> coqui_roles::RoleAuthorizerBuilder
 pub fn ai6::roles_left_empty(&[ai6::directorates::m::placement::AgentFacts], &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>, &[alloc::string::String], &[ai6::directorates::registry::holds::RosterHold]) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::route_name(&ai6::directorates::m::roster::RouteRef) -> alloc::string::String
-pub fn ai6::run_id(&str, u32, usize) -> alloc::string::String
+pub fn ai6::run_handle(&str, u32) -> alloc::string::String
 pub fn ai6::scorecard_from<R>(&R, &str, &ai6::directorates::m::scorecard::ScorecardPolicy, f64) -> core::io::error::Result<ai6::directorates::m::scorecard::Scorecard> where R: ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::usage::UsageStore + ?core::marker::Sized
 pub fn ai6::seeded_policy() -> ai6::AccessPolicy
 pub async fn ai6::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
@@ -12526,6 +12581,7 @@ pub fn ai6::source_brief(&str, &str, &ai6::directorates::registry::sources::Sour
 pub fn ai6::tool_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::unsupported(&str) -> guatiao::library::kind::ProviderError
 pub fn ai6::utc_day(i64) -> alloc::string::String
+pub fn ai6::valid_handle(&str) -> bool
 pub fn ai6::validate_operation_access(&str, &ai6::OperationAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::vet(&ai6::directorates::registry::store::Brief, &ai6::directorates::m::vetting::VettingPolicy, &ai6::directorates::m::vetting::VettingContext) -> ai6::directorates::m::vetting::Vetting
 pub fn ai6::work_title(&ai6::directorates::registry::store::Brief) -> alloc::string::String

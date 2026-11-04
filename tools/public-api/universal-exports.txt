@@ -93,6 +93,7 @@ pub universal_exports::BoardClaim::station_id: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::BoardMission
 pub universal_exports::BoardMission::attempts: alloc::vec::Vec<universal_exports::MissionAttempt>
 pub universal_exports::BoardMission::brief: core::option::Option<universal_exports::LaunchManifest>
+pub universal_exports::BoardMission::handle: alloc::string::String
 pub universal_exports::BoardMission::mission_id: alloc::string::String
 pub universal_exports::BoardMission::operation_id: alloc::string::String
 pub universal_exports::BoardMission::sessions: alloc::vec::Vec<universal_exports::BoardSession>
@@ -317,6 +318,7 @@ pub fn universal_exports::LoginLimits::default() -> Self
 pub universal_exports::MissionAttempt::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
 pub universal_exports::MissionAttempt::attempt: u32
 pub universal_exports::MissionAttempt::checkpoint_branch: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::handle: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::lost: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::predecessor: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::provider_session_id: core::option::Option<alloc::string::String>
@@ -376,6 +378,7 @@ pub universal_exports::TimelineItem::action: alloc::string::String
 pub universal_exports::TimelineItem::actor: core::option::Option<alloc::string::String>
 pub universal_exports::TimelineItem::at: f64
 pub universal_exports::TimelineItem::detail: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub universal_exports::TimelineItem::handle: core::option::Option<alloc::string::String>
 pub universal_exports::TimelineItem::id: alloc::string::String
 pub universal_exports::TimelineItem::kind: alloc::string::String
 pub universal_exports::TimelineItem::mission_id: core::option::Option<alloc::string::String>
