@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A brief no Station has taken, queued or held, can be withdrawn: `POST
+  /v1/user/operations/{op}/missions/{id}/withdraw` with an optional `note`, under
+  `mission.control`, files it as failed with who withdrew it and the note, audited as
+  `mission.withdraw` and put on the timeline (`intake`, `withdrawn`). `ai6ctl mission withdraw`
+  does the same, and a `cancel` of such a Mission withdraws it in place of asking a Station.
+- A cancel a Station never confirms settles: Universal Exports records when a cancel of a claimed
+  brief was first asked for (a new `ai6_briefs.cancel_requested_at` column, added to an existing
+  database by the schema step `briefs.cancel_requested_at`), and once that is older than
+  `[registry.limits.briefs] cancel_settle_after` (300 s) the Headquarters Station files the brief
+  as failed, "cancelled; the Station did not confirm", and releases its lease. The Station holding
+  the Mission, finding the brief settled while it is still on the attempt the settlement names,
+  stops it.
+- `AgentHandler::program` names the program a harness is started as; the Claude, Codex,
+  Antigravity CLI and `acp` handlers answer it. The new slot changes the handler kind's floor
+  hash: a handler library built before it is refused until it is built again.
+- `[accounts] model_probes` (4) and `model_probe_timeout` (20 s): how many accounts and routes a
+  look at the models asks at once, and how long each is waited for.
+
 - Moneypenny's conversation log: with a Registry, Universal Exports keeps every entry of every
   conversation as it arrives, with her tool calls and their arguments, each answer's size and
   status, and for what her harness did the Station, provider Session, Agent, route, pool account,
@@ -174,6 +192,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `mission retry` without an Agent chooses one again from the roster as it is now: the best Agent
+  qualified for the Mission's role and its brief's tags, not quarantined, held or retired, whose
+  handler the Station can run; the Agent it had keeps it while it ranks as high. A named Agent is
+  still taken as named, and a retry no Agent can take is rejected with the reason.
+- A Mission created through Universal Exports with `stations` naming a Station that never checked
+  in, or one its Operation's `stations` leaves out, is refused `400`, naming it; an unknown pin is
+  told the Station IDs it equals ignoring case and those of Stations on a host of that name.
+- A look at the models runs beside the check-in beat, never on it, so slow handlers no longer make
+  a live Station look dark.
 - A Mission and each of its runs are keyed by a UID, a UUIDv7 in lower-case text minted where the
   brief enters; the readable `<operation>-<n>` is the Mission's **handle**, unique without case and
   never given twice, and a run's is `<handle>.<attempt>`. Every relation (Session records, Cables,
@@ -428,6 +455,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `ai6 config public` writes `[unex] public_origin`, where browsers reach the gateway, as the
   page's `[unex] url` when the host's file has one, and its `[unex] url` only otherwise: that is
   often a loopback address, which broke the page for every browser.
+- A brief placement finds no place for now says why: the Station logs it and puts it on the
+  Operation's timeline (`account`, `waiting`, with the brief and the reason) once per brief and
+  reason, naming each Station, Theater and Agent ruled out. A brief pinned to Stations hears only
+  about those, and about each pin that never checked in; a pinned brief was passed over in
+  silence before.
+- A harness its Agent's environment cannot find (no `PATH`, as with no `[loadout.<agent>] env`, or
+  not on it) fails the Mission at its first start with that reason, which its brief's outcome
+  carries, instead of retrying forever behind `cannot start "claude"`. The `Mission` record gains
+  `failure`, the reason AI6 failed it without its Agent.
 - `universal-exports` stops gracefully at SIGTERM on unix, as a service manager stops it, not
   only at Ctrl-C.
 - The `acp` handler's default `limit_phrases` name the Grok CLI's out-of-credits words (`spending-limit`,

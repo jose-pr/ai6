@@ -110,6 +110,23 @@ Outer Office's Operations view offers the same action. The AI6 daemon claims the
 from the shared file-backed Registry, then resolves the Agent role, Operation
 cover, Station capacity and provider handler before it starts a Session.
 
+`"stations": ["ID", ...]` pins the Mission to those Stations. A pin is an exact Station ID (`[station]
+id`, or the `HOST-xxxxxxxx` a Station gives itself), so one that names no Station that ever checked in,
+or one the Operation's own `stations` leaves out, is refused `400` with the reason; an unknown pin is
+told the IDs it equals ignoring case and those of Stations on a host of that name.
+
+A brief placement finds no place for stays queued, and the Headquarters Station says why once per
+brief and reason, in its log and on the Operation's timeline (`account`, `waiting`, with `brief` and
+`reason`): each Station, Theater and Agent ruled out, with its reason. A pinned brief is told only
+about the Stations it names, and about each that never checked in. Reasons that differ only in their
+figures (seconds silent, Missions held) are one reason.
+
+A Mission whose harness its Agent's environment cannot find fails at its first start instead of
+being tried again: the Station looks the handler's program (`AgentHandler::program`) up on that
+environment's own `PATH`, never its own, and fails the Mission with "Agent X has no PATH in its
+environment (no `[loadout.X] env`)" or "... is not on its PATH"; the brief is filed failed with
+that reason.
+
 ## Cancel, retry, resume and interrupt
 
 An operator with `mission.control` on the Operation can act on a Mission without reaching
@@ -117,8 +134,8 @@ its Station:
 
 | Action | Accepted when the Mission is | Effect |
 | --- | --- | --- |
-| `cancel` | queued, working, blocked, stalled, parked or quarantined | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. |
-| `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined); it continues in the same safe house. |
+| `cancel` | queued, working, blocked, stalled, parked or quarantined | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below). |
+| `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined), else for the Agent the roster gives it now; it continues in the same safe house. |
 | `resume` | parked, blocked or stalled | The Mission resumes now on its provider Session, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
 | `interrupt` | working | The Session's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
 
@@ -149,6 +166,39 @@ is `expired`. Repeating a request with the same `idempotency_key` returns the fi
 `ai6ctl mission cancel|retry|resume` and `ai6ctl session interrupt` do the same and wait for
 the outcome; Outer Office offers them in each Mission card's menu, with the reason any action
 is unavailable. Closing a Session view never sends a control.
+
+A retry that names no Agent chooses one again from the roster as it is now, as placement would:
+the best posted Agent qualified for the Mission's role and its brief's tags, not quarantined, held
+or retired, whose handler the Station can run. The Agent the Mission had keeps it while it still
+qualifies and ranks as high; a retry no Agent can take is rejected with the reason.
+
+### Withdraw a queued Mission
+
+A Mission no Station has taken, its brief queued or held, has nothing to cancel on a Station. An
+operator with `mission.control` withdraws it:
+
+```bash
+curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions/G-12/withdraw" \
+  -H "authorization: Bearer $UNEX_ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"note":"pinned to a Station that was retired"}'
+```
+
+The brief is filed as failed with the outcome `withdrawn` and the reason "withdrawn by PERSON:
+NOTE"; a Source still gets its report. The withdrawal is audited (`mission.withdraw`) and put on the
+Operation's timeline (`intake`, `withdrawn`). A Mission a Station has taken answers `409`, and one
+the Operation has no such brief for `404`. `ai6ctl mission withdraw ID [--note TEXT]` does the same,
+and a `cancel` of such a Mission withdraws it with no note and answers `applied`, state `failed`.
+
+### A cancel the Station never confirms
+
+Universal Exports records when a cancel of a claimed brief was first asked for. When the Station
+holding it has not finished the brief `[registry.limits.briefs] cancel_settle_after` (300 s) later,
+because its Session is wedged, the control never reached it, or it went to another Station, the
+Headquarters Station files the brief as failed, "cancelled; the Station did not confirm", with the
+Station and the Mission's Session at the time, and releases its lease. The Station holding the
+Mission, finding at its next check-in that its brief was settled so while it is still on that
+Session, stops the Mission; one retried since runs on.
 
 ## Green ink
 

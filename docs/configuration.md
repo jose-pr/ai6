@@ -300,6 +300,7 @@ much, is `[assistant.gateway] log_age` and `log_bytes` ([Moneypenny](assistant.m
 | `records` | 1,000 | Queued briefs. |
 | `provenance_bytes` | 16 KiB | **Longest brief provenance.** Bytes of a brief's provenance. |
 | `handle_bytes` | 120 | **Longest Mission handle.** Bytes of a Mission's handle: a longer one AI6 gives keeps its start and adds a short hash, and a rename to a longer one is refused. It names a Git branch, so it stays under 240 bytes whatever this says. |
+| `cancel_settle_after` | 300 | **Settle an unconfirmed cancel after.** Seconds after a cancel was asked for before the Headquarters Station settles a claimed brief its Station has not finished: filed as failed, its lease released. |
 <!-- schema:registry.limits.briefs:end -->
 
 `[registry.limits.cables]`
@@ -1106,6 +1107,8 @@ provider applied before it was a key; the provider's API header lists them with 
 | `limit_horizon` | 691,200 (8 days) | **Longest a limited account stays out.** The longest a limited account is kept out, in seconds, whatever reset time its provider reports. |
 | `login_timeout` | 60 | **Longest account login.** Seconds a pool account's login command may take. |
 | `models_every` | 3,600 | **Look at the models every.** Seconds between this Station's looks at the models each account and route may use; 0 never looks on its own. |
+| `model_probes` | 4 | **Model listings at once.** Accounts and routes a look at the models asks at once; `null` asks every one at once, and 0 asks none, so a look changes nothing. |
+| `model_probe_timeout` | 20 | **Longest model listing.** Seconds a look waits for one account's or route's model listing; one that takes longer keeps the list it had before, or is unknown. |
 <!-- schema:record.station.accounts:end -->
 
 `[approvals]`: green ink steps.

@@ -320,7 +320,8 @@ scripts also finds its server missing; one with scripts is offered exactly
 and passes when it has `files`. A server whose name collides with one of the user's is merged with it: with a stdio
 server of that name Codex refuses its configuration and the check fails.
 
-`stdio()` answers `HarnessStdio::Json`, so the Station starts the app server in a terminal
+`program()` answers `executable`, which the Station looks up on the Session's own `PATH` before it
+starts it. `stdio()` answers `HarnessStdio::Json`, so the Station starts the app server in a terminal
 provider without a terminal (`pipe`), where its stream arrives as written, and refuses one
 that gives it a terminal.
 

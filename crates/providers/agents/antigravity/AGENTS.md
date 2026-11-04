@@ -56,7 +56,8 @@ tool; otherwise `… its field Sessions …`.
 
 ## How a launch is made
 
-`stdio()` answers `HarnessStdio::Json`. Start and resume run, in the working directory:
+`stdio()` answers `HarnessStdio::Json`, and `program()` its `executable`, which the Station looks up
+on the Session's own `PATH` before it starts it. Start and resume run, in the working directory:
 
 ```text
 agy --input-format stream-json --output-format stream-json --print-timeout=0s

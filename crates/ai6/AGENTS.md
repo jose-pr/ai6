@@ -282,6 +282,13 @@ environment }) -> Result<Option<SessionRecordFile { path, format }>, ProviderErr
 names where the harness keeps its own record of a Session on this host: `claude` (`claude-code-jsonl`),
 `codex` (`codex-rollout-jsonl`) and `antigravity` (`antigravity-jsonl`) answer when the file is there.
 
+The `AgentHandler` kind method `program() -> Result<Option<String>, ProviderError>` (default: `None`)
+names the program the harness is started as, a bare name or a path: `claude`, `codex` and
+`antigravity` answer their `executable`, `acp` its `command`. Before a Station starts a harness on its
+own host it looks the program up with `section_00::programs::missing_program` on the Session's own
+environment; a refusal fails the Mission at once (`Mission.failure`), and its brief with that reason.
+A handler that answers `None` or an error is not looked up.
+
 The plan gate: `ai6::READ_CLEARANCE` (`"read"`, set only by AI6) and `clearance_reads_only(&str)`; the
 `AgentHandler` kind method `read_only_refusal() -> Result<Option<String>, ProviderError>` (default:
 refuses; `claude` and `codex` hold a Session to reading and take up the Mission's tools on a resume of
@@ -1845,6 +1852,10 @@ every type that implements each family (a blanket impl: nothing to write for it)
 ```rust
 pub trait BriefStore;        // proposals, queued briefs, claims, leases, outcomes (store.rs);
                              // filed_brief(key), filed_briefs(operation, limit) -> FiledBrief { brief, state, attempts, outcome }
+                             // request_cancel(key, at) -> io::Result<bool>: keeps the first time a cancel of the
+                             //   claimed brief was asked (false: not claimed); finishing forgets it, a lapse back to
+                             //   the queue keeps it. cancel_requests() -> io::Result<BTreeMap<key, at>>: claimed ones.
+                             //   File: cancels/KEY.json; SQL: ai6_briefs.cancel_requested_at (step briefs.cancel_requested_at)
 pub trait StationStore;      // check-ins, Station settings, Headquarters election (store.rs)
 pub trait AccessTokenStore;  // Universal Exports access tokens (store.rs)
 pub trait CableStore;        // Cables, their delivery state and send quotas (store.rs)
@@ -3677,6 +3688,9 @@ VettingStore::held_briefs(operation, limit /* 1..=results */) -> io::Result<Vec<
 VettingStore::release_held(operation, key, by, at) -> io::Result<Brief>   // again: same brief; AlreadyExists once claimed/finished
 VettingStore::refuse_held(operation, key, by, reason /* ≤ reason_bytes */, at) -> io::Result<Brief>  // idem
 VettingStore::requeue_held(operation, key) -> io::Result<bool>          // back to new/ with no clearance
+VettingStore::withdraw_brief(operation, key, by, note /* ≤ reason_bytes */, at) -> io::Result<Brief>
+                                         // a queued or held brief of `operation` filed as failed;
+                                         // again: same brief; NotFound: none queued/held; AlreadyExists: claimed/finished
 VettingStore::clearance(key) -> io::Result<Option<Clearance>>
 VettingStore::clear_brief(key, digest, kinds: &[FindingKind], by, at) -> io::Result<Option<Clearance>>
                                          // NotFound unless queued; None when its content is no longer `digest`
@@ -3693,6 +3707,15 @@ clearance is kept apart from the brief's own JSON and dropped when the brief fin
 `refuse_held` files it as failed with outcome `{"state": "refused", "mission_id": KEY,
 "reason", "refused_by", "refused_at", "vetting"}`, so a Source still gets its CX report. The
 file Registry writes `held/` before it removes `new/`, and settles a brief found in both.
+`withdraw_brief` files a queued or held brief as failed with outcome `{"state": "withdrawn",
+"mission_id": KEY, "reason": "withdrawn by BY[: NOTE]", "withdrawn_by", "withdrawn_at"}`.
+
+The Headquarters Station files a claimed brief whose cancel was first asked for at least
+`[registry.limits.briefs] cancel_settle_after` (`BriefLimits::cancel_settle_after: Seconds`, 300)
+ago as failed with `{"state": "failed", "mission_id", "reason": "cancelled; the Station did not
+confirm", "station", "session_id", "cancel_requested_at"}`, through `finish` with the lease's
+Station; the Station holding the Mission stops it at check-in while its last Session is still
+`session_id`.
 
 ## Agent Client Protocol wire (`ai6::directorates::section_00::acp`, feature `acp`)
 
@@ -4327,7 +4350,10 @@ harness that speaks JSON lines with exactly `environment`, kills it afterwards a
 closure reads (`Harness::send`, `Harness::next_where`); no credential of `environment` is ever part
 of a listing. The Station asks it for each pool account (the account's credential leased as for a
 Session, no claim made, the lease revoked after) and for each route no pool serves (its env and
-secrets), every `[accounts] models_every` seconds (3600; 0 never on its own), keeps the answers
+secrets), every `[accounts] models_every` seconds (3600; 0 never on its own), on a thread of its
+own beside the check-in beat, asking `[accounts] model_probes` (`Limit`, 4; 0 none) at once and
+waiting `model_probe_timeout` (`TimeLimit`, 20 s) for each; one that takes longer keeps the last
+answer for its source, or is unknown. It keeps the answers
 (`station::server::models::ModelBoard`) and reports them at check-in under `models` (`Found
 { source, pool, account, agent, route, handler, listing, at }`). Universal Exports serves them at
 `GET /v1/user/models` (`roster.read`), `ai6ctl models` prints them, and the Pools page shows them.
@@ -4446,6 +4472,10 @@ pub fn program_dirs(programs: &[&str], cwd: &Path, environment: &BTreeMap<String
                        // and any dir that is/holds HOME, cwd, cwd's parent or a credential dir
 pub fn install_dir(path: &Path) -> PathBuf;   // its dir, or the one above when that is `bin`
 pub fn find_program(program: &str, environment: &BTreeMap<String, String>) -> Option<PathBuf>;
+pub fn missing_program(agent: &str, program: &str, environment: &BTreeMap<String, String>)
+    -> Option<String>; // why the harness cannot be found with `environment` alone: a path that is no
+                       // file, a name not on its PATH, or no PATH (on Unix then only /bin:/usr/bin,
+                       // where execvp looks); never the Station's own PATH
 pub fn canonical(path: &Path) -> PathBuf;     // links followed, no `\\?\`; as given on failure
 pub fn path_text(path: &Path) -> String;
 pub fn starts_with(path: &Path, base: &Path) -> bool;   // case ignored on Windows
@@ -4757,7 +4787,10 @@ quarantined: `MissionStore::quarantine(id)` moves a `Working`, `Blocked`, `Stall
 `Parked` Mission there (repeating it is a no-op), it leaves only through `requeue_for`
 (back to `Queued`, for the next Agent) or `Abandoned`, and `reassign(id, agent)` gives a
 queued Mission another Agent. `block_for(id, reason)` blocks an active Mission and records
-`Mission.blocked_reason` (`"budget"`; cleared by the next state change);
+`Mission.blocked_reason` (`"budget"`; cleared by the next state change); `fail_for(id, reason)`
+fails a queued Mission whose harness cannot be started and records `Mission.failure`
+(`Option<String>`, serde default, cleared by the next state change or a retry), which its brief's
+outcome carries as `reason`;
 `note_denied_tools(id, tools)` records `Mission.denied_tools` (`Vec<String>`, serde default empty,
 cleared by a transition to `Working`); `expose(id, sources)`
 records `Mission.exposure`, the untrusted input the Mission itself came from;

@@ -32,7 +32,8 @@ pub struct AcpSettings {
     pub describe_text_bytes: usize,             // 4096: identifier and text bytes
     pub describe_pages: usize,                  // 10: session list pages (coqui_acp DescribeLimits; any value)
 }
-pub struct AcpHandler;                           // AgentHandler provider id "acp"; stdio() = Json (pipe)
+pub struct AcpHandler;                           // AgentHandler provider id "acp"; stdio() = Json (pipe);
+                                                 // program() = the settings' `command`, None without settings
 ```
 
 - `TryFrom<AcpConfig>`: empty settings build a handler whose `start` fails naming

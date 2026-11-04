@@ -913,7 +913,11 @@ Each Station asks its handlers, through the optional call `AgentHandler::models`
 account behind an environment may use, with **no model turn**: for each pool account (its credential
 leased as a Session's is, no account claimed, the lease revoked as soon as the answer is in) and for
 each route no pool serves (its `env` and `secrets`). It looks again every `[accounts] models_every`
-seconds (3600; 0 never on its own) and reports the answers at check-in. `ai6ctl models` and the
+seconds (3600; 0 never on its own) and reports the answers at check-in. A look runs on its own
+thread, never on the check-in beat, so slow handlers cannot make the Station look dark; it asks
+`[accounts] model_probes` handlers at once (4; `null` all at once, 0 none) and waits
+`model_probe_timeout` seconds for each (20; `null` as long as it takes). One that takes longer keeps
+what the last look found for its account or route, or is unknown and says so. `ai6ctl models` and the
 Pools page in Outer Office (`roster.read`) show them by pool and account.
 
 - **Claude Code** answers an `initialize` control request with the models its login can pick. The

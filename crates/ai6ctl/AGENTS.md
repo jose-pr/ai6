@@ -170,9 +170,15 @@ Each control needs `mission.control` on the Mission's Operation. It posts
 control's status route every `--poll-interval` (0.5 s) until the Station reports or `--wait` runs out.
 
 - `ai6ctl mission cancel <MISSION_ID>` stops the live Session, if any, and abandons the
-  Mission.
+  Mission; one no Station has taken yet is withdrawn, and the control comes back `applied`.
 - `ai6ctl mission retry <MISSION_ID> [--agent <CODENAME>]` queues a stalled or finished
-  Mission again as a new attempt, for `--agent` when given.
+  Mission again as a new attempt, for `--agent` when given, else for the Agent the roster gives
+  it now.
+- `ai6ctl mission withdraw <MISSION_ID> [--note <TEXT>] [--operation <ID>]` posts
+  `POST /v1/user/operations/{operation}/missions/{mission}/withdraw` and prints
+  `MISSION STATE REASON`: a Mission whose brief is queued or held is filed as failed with who
+  withdrew it and the note. HTTP 404 (none queued or held) and 409 (a Station took it; cancel it
+  instead) fail the command with that said.
 - `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
   stalled Mission now, sending `--message` to the Agent.
 - `ai6ctl session interrupt <SESSION_ID>` stops the Session's current turn; it finds the
