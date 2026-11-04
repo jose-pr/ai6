@@ -14,12 +14,12 @@ dependencies:
   guatiao:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
+      ref: 266baf9c9e0c4e03bedf8a830d8e434279f83b94
       path: bindings/dart/guatiao
   guatiao_intake:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
+      ref: 266baf9c9e0c4e03bedf8a830d8e434279f83b94
       path: bindings/dart/guatiao_intake
   http: ^1.6.0
   material_ui: ^1.1.0
@@ -38,7 +38,7 @@ dependency_overrides:
   guatiao:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: a67fd4be0aa319795614ac6fe12d35d856ec3d8b
+      ref: 266baf9c9e0c4e03bedf8a830d8e434279f83b94
       path: bindings/dart/guatiao
 
 dev_dependencies:
