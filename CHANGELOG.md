@@ -37,6 +37,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   as its source. `ai6ctl missions create` takes `--issue TRACKER:ITEM` or `--create-issue
   TRACKER`. `TrackerIssue` carries the issue's `code` and `code_tag`, so a tracker library built
   before them gives none and its created issues are numbered by item ID.
+- A Mission's outcome can be checked. The Agent's final message is kept for each Session (a new
+  `ai6_final_reports` table; `[registry.limits.sessions] final_report_bytes`, 64 KiB, a cut marked),
+  is in the filed outcome as `final_report` and in a Mission's detail. `POST
+  /v1/user/operations/{op}/missions/{id}/verdict` and `ai6ctl missions verdict`, under the new action
+  `mission.verify` (seeded on `controller` and `auditor`; a deployed policy must add it), record
+  `confirmed`, `disputed` or `failed-verification` on the latest attempt: audited as `mission.verdict`, on
+  the timeline, shown on the board. A disputed or failed one counts as `disputed` on the scorecard, a
+  failure of that Agent.
+- A role's `require_approval_before_done` (default false) holds a Session that ends done with no green ink
+  request decided in that attempt: the Mission is `held` (a new Mission and DipTel state) with the reason
+  `no approval was decided`, until a verdict makes it `done` or `failed`.
+- Green ink requests that expire undecided stay listed: `GET .../green-ink/expired`, `ai6ctl green-ink
+  list --expired` and an Expired tab, within `[text] green_ink_expired_window` (30 days) and
+  `[registry.limits.approvals] expired_listed` (200). `POST .../green-ink/{id}/rearm` and `ai6ctl
+  green-ink rearm` open one again under `approval.decide`, audited as `green_ink.rearmed`; its Mission
+  waits for it again.
+- A revoke of an approval keeps its reason: `revoked.note`, from the route's optional `{"reason"}` and
+  `ai6ctl green-ink revoke --reason`.
+- A green ink request can carry `links`, `{label, url}` over `https` (`[registry.limits.approvals]
+  links`, `link_label_bytes`, `link_url_bytes`). The page renders reasons as Markdown and links Jira keys,
+  issue numbers, commit SHAs and branch names to the Operation's Sources, from `GET
+  .../green-ink/sources`.
 - A brief no Station has taken, queued or held, can be withdrawn: `POST
   /v1/user/operations/{op}/missions/{id}/withdraw` with an optional `note`, under
   `mission.control`, files it as failed with who withdrew it and the note, audited as

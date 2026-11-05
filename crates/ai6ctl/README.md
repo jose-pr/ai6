@@ -72,10 +72,12 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `mission retry <MISSION_ID> [--agent <CODENAME>]` | Queues a stalled or finished Mission again as a new attempt |
 | `mission resume <MISSION_ID> [--message <TEXT>]` | Resumes a parked, blocked or stalled Mission now |
 | `session interrupt <SESSION_ID>` | Stops the Session's current turn; its Mission waits, blocked |
-| `green-ink list --operation <ID>` | The steps Agents wait to take with green ink (`approval.decide`) |
+| `green-ink list --operation <ID> [--expired]` | The steps Agents wait to take with green ink (`approval.decide`), or those that expired undecided |
+| `green-ink rearm <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Opens an expired, undecided step again |
+| `missions verdict <MISSION> <confirmed\|disputed\|failed-verification> [--note <TEXT>] [--operation <ID>]` | Says what you found when you checked a Mission's outcome (`mission.verify`) |
 | `green-ink approve <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Signs a waiting step as you, for an hour unless chosen |
 | `green-ink reject <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Refuses a waiting step; the Agent is told the reason |
-| `green-ink revoke <REQUEST_ID> --operation <ID>` | Withdraws an approval before it expires |
+| `green-ink revoke <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Withdraws an approval before it expires |
 | `class-authorizations list\|revoke [<ID>] --operation <ID>` | Standing approvals of a kind of step (`approval.class`) |
 | `mission issues <MISSION> --operation <ID>` | The issues a Mission is linked to and what it posted, without their text (`mission.read`) |
 | `issues link\|unlink\|accept\|comment\|update <TRACKER:ITEM> --mission <ID> --operation <ID>` | Link, unlink or accept an issue (`issue.link`), comment (`issue.comment`), change labels, state or assignees (`issue.update`) |

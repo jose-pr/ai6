@@ -70,7 +70,7 @@ pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.man
                               // approval.decide, assistant.memory.admin, audit.read,
                               // cable.read, cable.send, compartment.cover, compartment.manage,
                               // compartment.read, mission.control, mission.create, mission.read, mission.review,
-                              // mission.status, pool.manage, pool.read, product.read, roster.manage,
+                              // mission.status, mission.verify, pool.manage, pool.read, product.read, roster.manage,
                               // roster.read, session.input, session.read,
                               // station.configure, station.read; cable.* on operation:<id>
                               // bound Moneypenny's Cables for the person;
@@ -647,9 +647,11 @@ pub struct AgentRole {
     pub id: String,
     pub purpose: String,
     pub policy: String,
+    pub require_approval_before_done: bool,       // a done with no green ink decided in that attempt is held
 }
 impl AgentRole {
     pub fn new(id: impl Into<String>, purpose: impl Into<String>, policy: impl Into<String>) -> Self;
+    pub fn requiring_approval_before_done(self, bool) -> Self;
     pub fn validate(&self) -> Result<(), RosterError>;
 }
 #[non_exhaustive]
@@ -2429,6 +2431,7 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub closed_at: Option<f64>,              // set when it becomes Ended or Lost
     pub result: Option<SessionResult>,       // how its Mission stood at the holder's last write
     pub window: Option<String>,              // the standing Sleeper's window the run answers
+    pub verdict: Option<MissionVerdict>,     // what a person found; needs no lease, the latest stands
 }
 #[non_exhaustive] pub struct SessionResult { pub state: String /* the Mission state: working, blocked,
     stalled, done, failed, blown, abandoned, parked, quarantined */, pub reason: Option<String>
@@ -2436,7 +2439,14 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
        SessionResult::HANDED_OFF */, pub denied_tools: u32 }
 impl SessionResult { pub const HANDED_OFF: &'static str; pub fn new(state) -> Self;
     pub fn with_reason(self, Option<String>) -> Self; pub fn with_denied_tools(self, usize) -> Self }
-impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool }   // false once closed
+impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool;   // false once closed
+    pub fn takes_verdict(&self) -> Result<(), SessionError> }   // Unsettled unless it ended done or held
+#[non_exhaustive] pub enum OutcomeVerdict { Confirmed, Disputed, FailedVerification }   // serde kebab-case;
+    // ALL, as_str(), from_name(), is_fault() (the last two)
+#[non_exhaustive] pub struct MissionVerdict { pub verdict: OutcomeVerdict, pub note: Option<String>,
+    pub by: String, pub at: f64 }   // new(verdict, by, at, note); note within verdict_note_bytes (4 KiB)
+#[non_exhaustive] pub struct FinalReport { pub session_id: String, pub mission_id: String, pub text: String,
+    pub at: f64 }   // new(session_id, mission_id, text, at, limit): a longer text is cut, the cut marked
 pub struct NewSession   // NewSession::new(session_id, mission_id, station); next_attempt() -> Option<Self>
                         //   (a new UID, the next attempt) .with_handle(mission_handle) .attempt()
                         //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
@@ -2447,7 +2457,8 @@ pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStat
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
                           //   .launch(SessionLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
                           //   .account(AccountRef) .result(SessionResult) (closing the status sets closed_at)
-#[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, HeldBy(String), Stale, Io(io::Error) }
+#[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, Unsettled(String), HeldBy(String), Stale,
+    Io(io::Error) }
 
 pub trait SessionStore {
     fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>  // Exists: the ID, or the Mission's attempt, has a record
@@ -2459,6 +2470,10 @@ pub trait SessionStore {
     fn update_session(&self, id: &str, station: &str, fence: u64, update: SessionUpdate) -> Result<SessionRecord, SessionError>
     fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError>
     fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>  // highest attempt
+    fn record_verdict(&self, operation, mission_id, &MissionVerdict) -> Result<SessionRecord, SessionError>
+        // on the latest attempt; NotFound, or Unsettled when it has not ended done or held
+    fn file_final_report(&self, &FinalReport) -> io::Result<()>   // replaces the Session's; SQL: ai6_final_reports
+    fn final_report(&self, session_id) -> io::Result<Option<FinalReport>>
 }
 ```
 
@@ -2551,16 +2566,16 @@ skips the named Agents; the Station passes the quarantined ones.
 
 How each Agent, route and model has done in an Operation over a window, computed on demand from
 the Session records and the usage ledger; nothing is stored. `judge(&SessionRecord)` gives each
-attempt one `Judgment` by whose doing the outcome was; only `done`, `failed`, `blown` and `stalled`
-are judged, and a limit, a lost Station, a hand-off, a person's stop or wait and a spending limit
-are listed but never held against the Agent. An attempt with no Session record (a failed checkout, a
+attempt one `Judgment` by whose doing the outcome was; only `done`, `failed`, `blown`, `stalled` and
+`disputed` (a person's verdict, whatever the state) are judged, and a limit, a lost Station, a
+hand-off, a person's stop or wait and a spending limit are listed but never held against the Agent. An attempt with no Session record (a failed checkout, a
 brief with no Agent) is not an attempt.
 
 ```rust
-#[non_exhaustive] pub enum Judgment { Done, Failed, Blown, Stalled, WaitingOnPerson, BudgetStop,
+#[non_exhaustive] pub enum Judgment { Done, Failed, Blown, Stalled, Disputed, WaitingOnPerson, BudgetStop,
     Parked, Lost, HandedOff, Withdrawn, Running, Unrecorded }   // serde snake_case
-impl Judgment { pub const ALL: [Self; 12]; pub fn as_str(self) -> &'static str;
-    pub fn is_judged(self) -> bool; pub fn is_fault(self) -> bool /* failed, blown, stalled */ }
+impl Judgment { pub const ALL: [Self; 13]; pub fn as_str(self) -> &'static str;
+    pub fn is_judged(self) -> bool; pub fn is_fault(self) -> bool /* failed, blown, stalled, disputed */ }
 pub fn judge(record: &SessionRecord) -> Judgment;
 pub const DEFAULT_WINDOW_DAYS: u64 /* 30 */; pub const DEFAULT_SMALL_SAMPLE: u64 /* 5 */;
 pub struct ScorecardDefinition;   // [operation.ID.scorecard]: window_days (0 = every attempt), small_sample
@@ -3044,7 +3059,14 @@ pub const EXPIRY_SIGNER: &str;   // "expiry"
 #[non_exhaustive] pub struct ApprovalRequest { pub id: String /* green-ink-<sha256> */, pub operation: String,
     pub mission: MissionId, pub session: SessionId, pub agent: String, pub scope: ActionScope,
     pub reason: String /* 1 to reason_bytes (2048), newlines allowed; never audited */, pub requested_at: f64, pub expires_at: f64,
-    pub proposed_role: Option<String> /* serde default: the role a Mission proposal asks for */ }
+    pub proposed_role: Option<String> /* serde default: the role a Mission proposal asks for */,
+    pub rearmed: Option<Rearming> /* who last re-opened it after it expired */,
+    pub links: Vec<ApprovalLink> /* serde default: what it is about, at most `links` (8) */ }
+impl ApprovalRequest { pub fn with_links(self, Vec<ApprovalLink>) -> Self; }
+#[non_exhaustive] pub struct ApprovalLink { pub label: String, pub url: String }   // new(label, url);
+    // https with a host and no credentials, whitespace, control characters or backslashes
+#[non_exhaustive] pub struct Rearming { pub by: String, pub at: f64, pub note: Option<String>,
+    pub told_at: Option<f64> /* when the Mission's Station took it up */ }   // new(by, at, note)
 impl ApprovalRequest {
     pub fn try_new(operation, mission, session, agent, scope, reason, idempotency_key: &str,
         limits: &ApprovalLimits) -> io::Result<Self>;   // key and reason within limits
@@ -3052,7 +3074,7 @@ impl ApprovalRequest {
     pub fn proposing_role(self, Option<String>) -> Self;
 }
 #[non_exhaustive] pub enum Decision { Approved, Rejected, Expired }   // serde snake_case; as_str()
-pub struct Revocation { pub by: String, pub at: f64 }
+pub struct Revocation { pub by: String, pub at: f64, pub note: Option<String> }   // new(by, at, note)
 #[non_exhaustive] pub struct Approval { pub request: ApprovalRequest, pub decision: Decision,
     pub signer: String /* person, "class:ID" or "expiry" */, pub at: f64, pub expires_at: Option<f64>,
     pub note: Option<String>, pub revoked: Option<Revocation>, pub notified_at: Option<f64>,
@@ -3084,7 +3106,12 @@ pub trait ApprovalStore {
     fn mission_approvals(&self, operation, mission, now: f64) -> io::Result<Vec<ApprovalStatus>>;
     fn live_approval(&self, operation, mission, scope: &ActionScope, now: f64) -> io::Result<Option<Approval>>;   // one that covers scope
     fn decide_approval(&self, operation, id, ruling: &Ruling) -> io::Result<Approval>;
-    fn revoke_approval(&self, operation, id, by, at: f64) -> io::Result<Approval>;
+    fn revoke_approval(&self, operation, id, revocation: &Revocation) -> io::Result<Approval>;
+    fn expired_approvals(&self, operation, since: f64, now: f64) -> io::Result<Vec<Approval>>;
+        // expired undecided at since or later, the newest first, at most expired_listed (200)
+    fn rearm_approval(&self, operation, id, rearming: &Rearming, expires_at: f64) -> io::Result<ApprovalRequest>;
+        // only an expired, undecided request; AlreadyExists otherwise
+    fn mark_rearming_told(&self, operation, id, at: f64) -> io::Result<()>;
     fn mark_approval_notified(&self, operation, id, at: f64) -> io::Result<()>;
     fn spend_approval(&self, operation, id, at: f64) -> io::Result<bool>;   // true once; false if spent or not live
     fn approve_by_class(&self, request, role: Option<&str>, clearance: &str, now: f64) -> io::Result<Option<Approval>>;
@@ -3384,7 +3411,8 @@ dropped oldest first), `entry_bytes` 128 KiB. Station `[sources]` gains `outbox_
 `max_created_per_day` 50, `max_split_depth` 2; counts are `Limit`s. It is parsed as written,
 the one declaration of these keys with their titles (`Schema`); `validate()` refuses what cannot
 work, `weakenings()` lists each value looser than the default, printed at start and published at check-in as `issues_weakened`;
-`compose_status(disclosure, phase)` words a status for the cover policy; `is_ready_label(operation,
+`source_pages(&toml::Table) -> Vec<SourcePage { provider, web, project }>` says where an Operation's
+`sources` are read on the web. `compose_status(disclosure, phase)` words a status for the cover policy; `is_ready_label(operation,
 label)` says whether a label would start work.
 
 `IssueLink` also carries `snapshot: Option<IssueSnapshot { title, body, state, labels, priority }>`, what the issue said when last read (untrusted; `set_issue_snapshot`). `[registry.limits.issues]` adds

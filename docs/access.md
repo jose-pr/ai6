@@ -47,7 +47,7 @@ are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.
 `assistant.memory.admin`, `audit.read`,
 `cable.read`, `cable.send`, `issue.comment`, `issue.create`, `issue.link`, `issue.update`,
 `memory.write`, `mission.control`, `mission.create`, `mission.read`,
-`mission.control`, `mission.create`, `mission.read`, `mission.review`,
+`mission.control`, `mission.create`, `mission.read`, `mission.review`, `mission.verify`,
 `pool.manage`, `pool.read`,
 `roster.manage`, `roster.read`, `session.context`, `session.input`, `session.read`,
 `station.configure` and `station.read`. `session.context` reads what an agent was given and did
@@ -64,7 +64,9 @@ a Session does not grant stopping it. `approval.decide` signs or refuses an Agen
 for [green ink](missions.md#green-ink) and `approval.class` manages class authorisations;
 neither comes with `mission.create` or `mission.control`. `mission.review` decides over a
 Mission's [review](review.md) panel, with a reason, and lets a brief name a review policy, which
-may weaken one. `cable.send` and `cable.read` on
+may weaken one. `mission.verify` gives a [verdict](missions.md#checking-an-outcome) on a Mission's
+outcome, which counts on its Agent's scorecard and settles a held Mission; it does not come with
+`mission.control`. `cable.send` and `cable.read` on
 `operation:<id>` are what [Moneypenny](assistant.md#cables) may do with Cables there for
 the person: send and reply, and read what is sent to her. The Station's `cables.toml` still
 has to let her Agent do it. A person reads and changes [Moneypenny's memory of
@@ -250,9 +252,9 @@ The policy has four built-in role names and two places to write more.
 | Role | What it holds | Written |
 | --- | --- | --- |
 | `chief` | every action, including any added later; not stored and not editable | only through the chief list (`chief = [...]` in the `access` record, `[unex.access] chief` in `ai6.cfg`) |
-| `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `mission.review`, `access.manage`, `account.manage`, `audit.read`, `access.read` and `session.context` | seeded; ordinary data you may edit or delete |
+| `controller` | everything an `operator` does, plus `roster.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `mission.review`, `mission.verify`, `access.manage`, `account.manage`, `audit.read`, `access.read` and `session.context` | seeded; ordinary data you may edit or delete |
 | `operator` | the read actions (`mission.read`, `session.read`, `agent.read`, `roster.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `session.input`, `cable.send`, `approval.decide`, `issue.link`, `issue.comment`, `issue.update`, `issue.create` | seeded |
-| `auditor` | the read actions, `audit.read`, `access.read` and `session.context` | seeded |
+| `auditor` | the read actions, `audit.read`, `access.read`, `session.context` and `mission.verify` | seeded |
 
 The first start of Universal Exports with user access and no `access` record writes the last
 three (audited `access.seeded`); a record that exists, even without roles, is never seeded

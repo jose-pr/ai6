@@ -156,7 +156,7 @@ its Station:
 
 | Action | Accepted when the Mission is | Effect |
 | --- | --- | --- |
-| `cancel` | queued, working, blocked, stalled, parked or quarantined | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below). |
+| `cancel` | queued, working, blocked, stalled, parked, quarantined or held | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below). |
 | `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined), else for the Agent the roster gives it now; it continues in the same safe house. |
 | `resume` | parked, blocked or stalled | The Mission resumes now on its provider Session, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
 | `interrupt` | working | The Session's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
@@ -222,6 +222,64 @@ Station and the Mission's Session at the time, and releases its lease. The Stati
 Mission, finding at its next check-in that its brief was settled so while it is still on that
 Session, stops the Mission; one retried since runs on.
 
+## Checking an outcome
+
+An Agent saying it finished is not the work being done, so what it said is kept and a person can
+record what they found.
+
+**The final report.** The message an Agent ends its turn with is filed against its Session, up to
+`[registry.limits.sessions] final_report_bytes` (64 KiB) with a cut marked, and goes into the Mission's
+outcome as `final_report` when its brief is filed. A later turn replaces it. Everyone who may read the
+Mission reads it, in `GET /v1/operations/{operation_id}/missions/{mission_id}` (each attempt's
+`final_report`; the list of Missions leaves it out), in `ai6ctl mission ID` and in the Outcome section
+of the Mission's page. It is the Agent's own account, as data. What another Operation may read of a
+Mission through a [compartment](compartments.md) does not include it.
+
+**A verdict.** A person with `mission.verify` on the Operation gives one on the latest attempt, once
+it has ended `done` or `held`; anything else is refused (`409`, saying how it stands):
+
+```bash
+curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions/$MISSION/verdict" \
+  -H "authorization: Bearer $UNEX_ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"verdict": "failed-verification", "note": "the tag was never pushed"}'
+
+ai6ctl missions verdict "$MISSION" disputed --note "not on main"
+```
+
+| Verdict | On a `done` Mission | On a `held` Mission | On the [scorecard](agents.md#scorecard) |
+| --- | --- | --- | --- |
+| `confirmed` | Stays `done` | Becomes `done` | Done |
+| `disputed` | Stays `done`, and shows it | Becomes `failed` | Disputed: a failure of that Agent |
+| `failed-verification` | Stays `done`, and shows it | Becomes `failed` | Disputed: a failure of that Agent |
+
+A later verdict replaces the earlier one while the attempt stands `done` or `held`. The verdict is kept
+on the attempt's Session record, so a retry starts clean and the failure stays with the Agent that ran
+it. M's holds and proposals read the same scorecard. It is audited as `mission.verdict` (target
+`MISSION VERDICT`, never the note) and goes on the timeline (kind `verdict`, action the verdict). The
+Mission's page and the board's attempts show it.
+
+**Requiring a decision.** A role that sets
+
+```toml
+[role.releaser]
+purpose = "Cuts releases"
+policy = "..."
+require_approval_before_done = true          # default false
+```
+
+holds its Missions' `done`: a Session that ends done with no green ink request decided in that attempt,
+approved or refused, by a person or a class authorisation, leaves the Mission `held` with the reason
+`no approval was decided` instead. A request that expired was not decided. What a brief or a prompt
+says it will do cannot be read, so this is what can be enforced: the role that must ask, and did not.
+
+A held Mission has no harness and its safe house is finished with the work kept. It holds no place in
+the Station's capacity, keeps its lease and brief, and waits for a person: a verdict settles it within a
+scheduler pass, and its brief is then filed with the outcome and the verdict. It cannot be resumed or
+retried while held; `cancel` abandons it. If its Station is lost, its Session is lost like any other's,
+and [Recovery](#recovery) decides. Review Missions are never held. It counts as waiting on a person on
+the scorecard until the verdict.
+
 ## Green ink
 
 Before an irreversible step (a push to a protected branch or tag, a merge, a release, a
@@ -230,14 +288,16 @@ of exactly that step. (M files the `clearance` requests itself, to promote an Ag
 [Track record and promotion](agents.md#track-record-and-promotion).) It calls
 `request_approval` on its Session's AI6 tool endpoint with
 the `kind` of step, its `target` (for a push, `REMOTE:REF` such as
-`origin:refs/heads/main`), a `reason` and a retry key, and is answered at once:
+`origin:refs/heads/main`), a `reason` and a retry key, and optionally `links`: up to 8
+`{label, url}` pairs naming what the request is about, each an `https` address with no credentials
+(`[registry.limits.approvals] links`, `link_label_bytes`, `link_url_bytes`). It is answered at once:
 
 | Status | Meaning |
 | --- | --- |
 | `not_required` | The Operation's [green ink policy](operations.md#green-ink) lets this Agent's clearance take the step. |
 | `approved` | A live class authorisation covers it, or a person already signed it; `expires_at` says until when. |
 | `pending` | A person decides. The Mission is `blocked` with reason `green-ink` until then. |
-| `rejected`, `expired` | Do not take the step. A request nobody decides within 24 hours (`request_ttl_secs`) expires as refused. |
+| `rejected`, `expired` | Do not take the step. A request nobody decides within 24 hours (`request_ttl_secs`) expires as refused, and is kept where a person can [re-arm it](#expired-requests). |
 
 While a request is pending the Mission's [Watchdog](watchdog.md) is paused: waiting for a
 person is not a stall, and terminal output or an operator message does not end the wait.
@@ -249,6 +309,14 @@ and approves one for a chosen time (one hour unless chosen) or rejects it with a
 The signer is always the signed-in person. The Station holding the Mission tells the Agent
 the outcome, the step and the expiry (in a message to its live Session, or by resuming the
 Session with it), and the Mission is `working` again once nothing it asked for is pending.
+
+The Green Ink page renders a reason as Markdown and links what it names to the Operation's
+[Sources](operations.md#sources): a Jira key of a configured project, `#12` or `owner/name#12`, a commit
+SHA, `refs/heads/x` and `branch x`. `GET .../green-ink/sources` says where those are read (each GitHub or
+GitLab instance's page, each Jira site and project, nothing not served over `https`). The app only forms
+the address; it asks the tracker nothing, so such a link may lead to a page that does not exist. These
+open at once, and so does a link the Agent gave to one of those hosts; any other shows its full address
+first.
 
 ```bash
 curl -f -X POST "$UNEX_URL/v1/user/operations/G/green-ink/$REQUEST_ID/approve" \
@@ -285,14 +353,15 @@ Registry step: of its review when reviewed as a proposal, and, for an operator's
 of everything vetting found except a malformed brief.
 
 An approval can be withdrawn before it expires (`POST
-.../green-ink/{request_id}/revoke`, or `ai6ctl green-ink revoke`); it then covers nothing,
-and a credential leased against it is revoked. Without the app, `ai6ctl` signs the same
-way:
+.../green-ink/{request_id}/revoke` with an optional `{"reason"}`, kept on the record as
+`revoked.note`, or `ai6ctl green-ink revoke`); it then covers nothing, and a credential leased
+against it is revoked. Without the app, `ai6ctl` signs the same way:
 
 ```bash
 ai6ctl green-ink list --operation G
 ai6ctl green-ink approve "$REQUEST_ID" --operation G --expires-in 1800 --note "main only"
 ai6ctl green-ink reject "$REQUEST_ID" --operation G --reason "not before the audit"
+ai6ctl green-ink revoke "$REQUEST_ID" --operation G --reason "wrong branch"
 ai6ctl class-authorizations list --operation G
 ai6ctl class-authorizations revoke "$CLASS_ID" --operation G
 ```
@@ -306,8 +375,29 @@ authorisation's `ID KINDS PATTERN`), never the Agent's reason:
 | `green_ink.approved`, `green_ink.rejected` | the signer | A person decides |
 | `green_ink.revoked` | the person | An approval is withdrawn |
 | `green_ink.expired` | `expiry` | The Station tells the Agent a request expired undecided |
+| `green_ink.rearmed` | the person | A request that expired undecided waits for a decision again |
 | `class_authorization.created`, `class_authorization.revoked` | the person | A class authorisation is granted or withdrawn |
 | `class_authorization.used` | `class:<id>` | A class authorisation approves a request |
+
+### Expired requests
+
+A request nobody decided in time counts as refused and leaves the inbox; it does not vanish. The
+Expired tab of the Green Ink page, `GET .../green-ink/expired?since=UNIX` and `ai6ctl green-ink list
+--expired` list those that expired since `since`, by default within `[text]
+green_ink_expired_window` (30 days), the newest first and at most `[registry.limits.approvals]
+expired_listed` (200). A request a person decided is not on it.
+
+A person with `approval.decide` can re-arm one: `POST .../green-ink/{request_id}/rearm` with
+`{"note"?, "expires_in_secs"?}`, `ai6ctl green-ink rearm REQUEST_ID --operation G [--note TEXT]
+[--expires-in SECONDS]`, or the tab's button. The same request is pending again until the new expiry,
+by default as long as it first waited, and decided like any other; approving it still needs what its
+kind needs. Only an expired, undecided request can be re-armed: one still waiting or one a person
+decided is `409`.
+
+The Station holding the Mission takes it up within a scheduler pass. A working Mission is `blocked`
+with reason `green-ink` again, and a live Session is told it waits again, having heard it expired. A
+Mission still waiting stays so, with no resume. One whose Session ended and which went on to end has
+nobody to tell: the approval is still recorded, and a retry of the Mission can use it.
 
 ### What holds a step
 

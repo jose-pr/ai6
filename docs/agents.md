@@ -563,14 +563,16 @@ The record above counts outcomes; the **scorecard** reads them again for a perso
 Agent, a route or a model is doing a good job. It is computed each time it is asked for, from the
 Registry's Session records and usage ledger, and nothing is stored besides them: a Session record
 names its Agent (`launch.agent`), when it opened and closed, and how its Mission stood at the last
-write (`result`: the state, the reason when AI6 knows one, and the tools its harness refused).
+write (`result`: the state, the reason when AI6 knows one, and the tools its harness refused), and
+what a person found when they checked it (`verdict`).
 
 Each attempt (one Session) gets one judgment, by whose doing the outcome was:
 
 | Judgment | Meaning | Judged? |
 | --- | --- | --- |
 | `done`, `failed`, `blown`, `stalled` | The Mission finished, ended unsuccessfully, broke its cover, or the Watchdog stopped it. | Yes: the Agent's own |
-| `waiting_on_person` | Waiting for green ink, a linked issue or an answer. | No |
+| `disputed` | A person's [verdict](missions.md#checking-an-outcome) is `disputed` or `failed-verification`, whatever the state. | Yes: a failure of the Agent |
+| `waiting_on_person` | Waiting for green ink, a linked issue, an answer or a verdict on a held Mission. | No |
 | `budget_stop` | A spending limit stopped it. | No: a cost, shown beside it |
 | `parked` | A provider limit holds it until the quota resets. | No |
 | `lost` | Its Station or runner was lost. | No |
@@ -579,7 +581,7 @@ Each attempt (one Session) gets one judgment, by whose doing the outcome was:
 | `running`, `unrecorded` | Still working; or closed with no outcome written. | No |
 
 A start that never got a Session (a failed checkout, a brief with no Agent) leaves no record and so
-no attempt. A row's failure rate is failed, blown and stalled over judged attempts; below
+no attempt. A row's failure rate is failed, blown, stalled and disputed over judged attempts; below
 `small_sample` judged attempts a row says so and nothing should be ranked on it. Each row also has
 tokens and cost from the ledger, wall time of the closed attempts (parked time included), and how many
 tools the harness refused, and **lists the attempts behind every number**, so a person can open the

@@ -95,6 +95,10 @@ origin leaves the public roots alone.
 - Wherever a command takes a Mission (`<MISSION_ID>`, `<MISSION>`, `--mission`), it takes its UID
   or any handle it had, compared without case; the gateway looks it up (`GET
   /v1/missions?mission=`), so a handle from before a rename still finds it.
+- `ai6ctl missions verdict <MISSION> <confirmed|disputed|failed-verification> [--note <TEXT>]
+  [--operation <ID>]` (`mission.verify`) posts `.../verdict` and prints `MISSION attempt N: VERDICT by
+  PERSON`; a refusal prints the gateway's words. `ai6ctl mission <ID>` also prints a `VERDICT` line under
+  a run and, from the Mission's detail, a `FINAL REPORT`.
 - `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
   `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the
   gateway's words and exits `1`. The Operation is looked up when not given.
@@ -206,6 +210,11 @@ Exit `1` when the control was rejected or expired, or the request was refused.
 `--operation <ID>` is required; IDs are encoded as single path segments. Every decision is
 signed by the token's person and audited with the step, never the Agent's reason.
 
+- `ai6ctl green-ink list --operation <ID> --expired` (`approval.decide`): the requests that
+  expired undecided, the newest first, from `GET .../green-ink/expired`. Header
+  `REQUEST\tMISSION\tAGENT\tSTEP\tTARGET\tEXPIRED_UNIX\tREASON`. `ai6ctl green-ink rearm <REQUEST_ID>
+  --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` opens one again and prints it as
+  `list` does; `ai6ctl green-ink revoke` takes `--reason <TEXT>`, kept on the record.
 - `ai6ctl green-ink list --operation <ID>` (`approval.decide`): the steps waiting for a
   decision, oldest first, from `GET .../green-ink`. Header
   `REQUEST\tMISSION\tAGENT\tSTEP\tTARGET\tEXPIRES_UNIX\tREASON`; the reason is the Agent's

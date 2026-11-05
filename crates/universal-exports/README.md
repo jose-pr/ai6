@@ -154,7 +154,11 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/user/operations/{operation_id}/green-ink` | Require `approval.decide`; list the steps Agents wait to take, oldest first. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/approve` | Require `approval.decide`; sign the step as the caller for `expires_in_secs` (default one hour) with an optional `note`. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/reject` | Require `approval.decide`; refuse the step, with an optional `reason` the Agent is told. |
-| `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/revoke` | Require `approval.decide`; withdraw an approval before it expires. |
+| `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/revoke` | Require `approval.decide`; withdraw an approval before it expires, with an optional `reason` kept on the record. |
+| `GET` | `/v1/user/operations/{operation_id}/green-ink/expired` | Require `approval.decide`; list the requests that expired undecided, the newest first. |
+| `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/rearm` | Require `approval.decide`; open an expired, undecided request again. |
+| `GET` | `/v1/user/operations/{operation_id}/green-ink/sources` | Require `approval.decide`; where the Operation's Sources are read on the web. |
+| `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/verdict` | Require `mission.verify`; say what you found when you checked the Mission's outcome. |
 | `GET`, `POST` | `/v1/user/operations/{operation_id}/class-authorizations` | Require `approval.class`; list, or grant as the caller, standing approvals of a kind of step on a target glob for named Agents or roles. |
 | `DELETE` | `/v1/user/operations/{operation_id}/class-authorizations/{id}` | Require `approval.class`; revoke one. |
 | `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Require `mission.control`; audit and queue a cancel, retry, resume or interrupt for the Station holding the Mission. Body: `{"action":"retry","agent":"008","idempotency_key":"…"}` (`agent` only with `retry`, `message` only with `resume`, optional `session_id`). Returns `202` and a `ControlStatus`, or `200` and the first one for a repeated key. |

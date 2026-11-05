@@ -131,6 +131,9 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   expiry), each approved for a chosen time with an optional note or rejected with a reason
   (`approval.decide`), and the Operation's class authorisations with their uses, revoking
   the live ones (`approval.class`). A Session held for green ink shows `BLOCKED · GREEN INK`.
+  Reasons are rendered as Markdown, what they name links to the Operation's Sources, and a request's
+  links follow them. The Expired tab lists what no one decided in time, and re-arms it. A Mission's
+  page shows its Agent's final message and any verdict, and takes one with `mission.verify`.
 - Agents, Account pools and Green ink open on **All Operations**: every Operation the person
   may read there, each one's rows under its name, an Operation that could not be read named with
   why. The picker narrows to one (`operation_id` in the route), and an action on a row goes to

@@ -281,6 +281,10 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | `class_entries` | 64 | **Entries per class authorization.** Step kinds, Agents, roles and proposed roles each class authorization may name. |
 | `pattern_bytes` | 256 | **Longest target pattern.** Bytes of a class authorization's target pattern. |
 | `name_bytes` | 128 | **Longest name in a class authorization.** Bytes of each Agent or role a class authorization names. |
+| `expired_listed` | 200 | **Expired requests listed.** Expired requests one list shows, the newest first. |
+| `links` | 8 | **Links per request.** Links one request may carry. |
+| `link_label_bytes` | 128 | **Longest link label.** Bytes of a link's label. |
+| `link_url_bytes` | 1 KiB | **Longest link address.** Bytes of a link's address. |
 <!-- schema:registry.limits.approvals:end -->
 
 `[registry.limits.assistant_log]`: Moneypenny's conversation log. How long it is kept, and how
@@ -436,6 +440,8 @@ global one.
 | `recent_events` | 20 | **Recent event lines per Session.** Recent event lines kept per Session. |
 | `recent_event_chars` | 300 | **Longest recent event line.** Characters kept of each recent event line and of a lost Session's reason. |
 | `exposure_sources` | 32 | **Sources of exposure per brief.** Sources of exposure one Session's brief records; the rest are not kept. |
+| `final_report_bytes` | 64 KiB | **Longest final report.** Bytes kept of an Agent's final message for its Mission's outcome; a longer one is cut and says so. |
+| `verdict_note_bytes` | 4 KiB | **Longest verdict note.** Bytes of the note a person gives with a verdict on a Mission's outcome. |
 <!-- schema:registry.limits.sessions:end -->
 
 `[registry.limits.sleepers]`
@@ -948,6 +954,7 @@ pending_per_station = 8
 | `agent_reason_chars` | 512 | **Longest reason for lowering a clearance.** Characters of the reason that lowers an Agent's clearance. |
 | `green_ink_max_grant` | 31,536,000 (365 days) | **Longest green ink grant or clearance.** The longest a green ink grant or a clearance may last, in seconds. |
 | `green_ink_note_chars` | 1,024 | **Longest green ink note.** Characters of a green ink note. |
+| `green_ink_expired_window` | 2,592,000 (30 days) | **Expired green ink listed by default.** How far back the list of expired green ink requests reaches when it is not told. |
 | `held_reason_chars` | 1,024 | **Longest reason for a held brief's decision.** Characters of the reason for a held brief's decision. |
 | `roster_target_bytes` | 512 | **Longest roster target line.** Bytes of a roster record's target line; longer text is cut. |
 | `roster_key_bytes` | 128 | **Longest roster key.** Bytes of a roster record's key. |

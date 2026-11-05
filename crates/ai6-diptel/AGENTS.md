@@ -45,7 +45,7 @@ identifies one operator control request.
 
 ```rust
 pub enum SessionState {
-    Queued, Working, Blocked, Stalled, Parked, Quarantined, Done, Failed, Abandoned,
+    Queued, Working, Blocked, Stalled, Parked, Quarantined, Held, Done, Failed, Abandoned,
 }
 impl SessionState {
     pub const fn as_str(self) -> &'static str;   // "queued", "working", ...
@@ -72,8 +72,9 @@ pub fn valid_reason(reason: &str) -> bool;   // 1..=64 bytes of a-z 0-9 - _ .
 
 All fields above are public. `SessionState` is non-exhaustive and carries the state
 of the Mission the Session serves: `Queued` means the Mission waits for another
-attempt (this Session will not run again) and `Abandoned` that an operator or AI6
-withdrew it. `reason` is an optional field of the lifecycle frame: `green-ink` on a
+attempt (this Session will not run again), `Abandoned` that an operator or AI6
+withdrew it, and `Held` that it ended done with something its role requires missing, for
+a person's verdict (reason `no-approval`). `reason` is an optional field of the lifecycle frame: `green-ink` on a
 `Blocked` Session whose Agent waits for a person's approval of an irreversible step,
 `permission-denied` on a `Done` or `Failed` one whose harness refused calls in its last turn.
 The receiver refuses a reason that `valid_reason` rejects. `sequence` is a monotonic cursor for events in one provider Session. A
