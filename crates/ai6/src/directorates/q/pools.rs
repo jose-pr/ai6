@@ -30,9 +30,11 @@ pub enum AccountKind {
     /// The directory of an existing login (`CLAUDE_CONFIG_DIR` or `CODEX_HOME`), used as it
     /// is: the way to share a subscription that issues no token.
     ConfigDir,
-    /// The login the harness already has where it runs (`grok login`, `agy`): AI6 hands over
-    /// nothing and only keeps count of its use and its limits, so several routes can share one
-    /// budget.
+    /// The login the harness keeps for itself. With no [`Account::files`] it is the login it
+    /// already has where it runs (`grok login`, `agy`): AI6 hands over nothing and only keeps
+    /// count of its use and its limits, so several routes can share one budget. With them, the
+    /// login is sealed in the Registry to named Stations, written under a home of the Session's
+    /// own, and what the harness renews there comes back.
     HarnessLogin,
 }
 
@@ -174,6 +176,9 @@ pub struct Account {
     priority: i64,
     max_concurrent: Option<usize>,
     labels: BTreeMap<String, String>,
+    files: Vec<String>,
+    renew_command: Vec<String>,
+    renew_env: BTreeMap<String, String>,
 }
 
 impl Account {
@@ -190,7 +195,33 @@ impl Account {
             priority: 0,
             max_concurrent: None,
             labels: BTreeMap::new(),
+            files: Vec::new(),
+            renew_command: Vec::new(),
+            renew_env: BTreeMap::new(),
         }
+    }
+
+    /// The files, relative to a home, a `harness-login` account's harness keeps its login in. The
+    /// login is then sealed in the Registry rather than left on a host.
+    #[must_use]
+    pub fn files(mut self, files: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.files = files.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The program and arguments that renew the login with no model turn, run with its home as
+    /// `HOME` and working directory. None: it is left to its next real use.
+    #[must_use]
+    pub fn renew_command(mut self, command: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.renew_command = command.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// A variable the renewal command is given, such as how early its CLI should renew.
+    #[must_use]
+    pub fn renew_env(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.renew_env.insert(name.into(), value.into());
+        self
     }
 
     /// Reads the credential from the loadout secret `name` (`[secret.<name>]`).
@@ -272,6 +303,26 @@ impl Account {
         &self.labels
     }
 
+    /// The files its harness keeps its login in, relative to a home.
+    pub fn login_files(&self) -> &[String] {
+        &self.files
+    }
+
+    /// Whether its login is kept sealed in the Registry.
+    pub fn keeps_login_files(&self) -> bool {
+        !self.files.is_empty()
+    }
+
+    /// The program and arguments that renew its login with no model turn.
+    pub fn renewal(&self) -> &[String] {
+        &self.renew_command
+    }
+
+    /// The variables the renewal command is given.
+    pub fn renewal_env(&self) -> &BTreeMap<String, String> {
+        &self.renew_env
+    }
+
     /// The variable the harness reads the credential or directory from, given the pool's
     /// handler: the override, else the kind's own, else for `config-dir` `CLAUDE_CONFIG_DIR`
     /// (handler `claude`) or `CODEX_HOME` (`codex`). `None` when none applies, and for a
@@ -310,6 +361,10 @@ impl Account {
             AccountKind::OpenaiApiKey | AccountKind::CodexAccessToken => Some(format!(
                 "account {pool}/{name} is logged in to a CODEX_HOME on the Station's disk for \
                  the Mission's life, since Codex reads its login only from there"
+            )),
+            AccountKind::HarnessLogin if self.keeps_login_files() => Some(format!(
+                "account {pool}/{name}'s login is written under a home of each Session's own, \
+                 which that Session's commands can read"
             )),
             _ => None,
         }
@@ -492,6 +547,13 @@ impl AccountPool {
                         "a harness-login account hands over nothing: no `secret`, `dir` or `env`",
                     ));
                 }
+                if let Some(file) = account.files.iter().find(|file| !plain_relative(file)) {
+                    return Err(at(&format!(
+                        "file {file:?} is not a path inside a home, with no `..`"
+                    )));
+                }
+            } else if !account.files.is_empty() {
+                return Err(at("only a harness-login account takes `files`"));
             } else {
                 match (account.kind.reads_secret(), &account.secret, &account.dir) {
                     (true, _, Some(_)) => return Err(at("only a config-dir account takes `dir`")),
@@ -520,6 +582,23 @@ impl AccountPool {
             }
             if account.max_concurrent == Some(0) {
                 return Err(at("max_concurrent must be greater than zero"));
+            }
+            if account.files.is_empty()
+                && (!account.renew_command.is_empty() || !account.renew_env.is_empty())
+            {
+                return Err(at("`renew_command` and `renew_env` need `files`"));
+            }
+            if account.renew_command.iter().any(|part| part.is_empty())
+                || (account.renew_command.is_empty() && !account.renew_env.is_empty())
+            {
+                return Err(at("`renew_env` needs a `renew_command` with a program"));
+            }
+            if let Some(name) = account
+                .renew_env
+                .keys()
+                .find(|name| !super::transport::kit::is_variable_name(name))
+            {
+                return Err(at(&format!("{name:?} is not a variable name")));
             }
         }
         Ok(())
@@ -769,6 +848,16 @@ impl AccountLogin for CommandLogin {
             }
         }
     }
+}
+
+/// Whether `file` stays inside the directory it is joined to.
+fn plain_relative(file: &str) -> bool {
+    let path = Path::new(file);
+    !file.is_empty()
+        && !file.contains('\\')
+        && path
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
 }
 
 fn valid_name(value: &str) -> bool {
@@ -1126,6 +1215,56 @@ mod tests {
                 .validate()
                 .unwrap_err();
             assert!(reason.contains("hands over nothing"), "{reason}");
+        }
+    }
+
+    #[test]
+    fn an_account_that_keeps_its_login_in_files_names_them_inside_a_home() {
+        let login = Account::new("free", AccountKind::HarnessLogin)
+            .files([".grok/auth.json"])
+            .renew_command(["grok", "models"])
+            .renew_env("GROK_AUTH_EARLY_INVALIDATION_SECS", "3600");
+        assert!(login.keeps_login_files());
+        assert_eq!(login.variable("acp"), None);
+        assert_eq!(login.secret_name(), None);
+        assert!(login.weakening("grok").is_some());
+        assert!(
+            AccountPool::new("grok", "acp")
+                .account(login.clone())
+                .validate()
+                .is_ok()
+        );
+        for (bad, expected) in [
+            (login.clone().files(["../auth.json"]), "inside a home"),
+            (login.clone().files(["/etc/passwd"]), "inside a home"),
+            (login.clone().files([""]), "inside a home"),
+            (
+                Account::new("a", AccountKind::OpenaiApiKey).files(["x"]),
+                "only a harness-login",
+            ),
+            (
+                Account::new("a", AccountKind::HarnessLogin).renew_command(["grok"]),
+                "need `files`",
+            ),
+            (
+                Account::new("a", AccountKind::HarnessLogin)
+                    .files(["x"])
+                    .renew_env("A", "1"),
+                "needs a `renew_command`",
+            ),
+            (
+                Account::new("a", AccountKind::HarnessLogin)
+                    .files(["x"])
+                    .renew_command(["grok"])
+                    .renew_env("NOT A NAME", "1"),
+                "is not a variable name",
+            ),
+        ] {
+            let reason = AccountPool::new("grok", "acp")
+                .account(bad)
+                .validate()
+                .unwrap_err();
+            assert!(reason.contains(expected), "{reason}");
         }
     }
 

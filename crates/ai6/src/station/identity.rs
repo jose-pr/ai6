@@ -18,6 +18,8 @@ pub use coqui_peer_tls::{
 use coqui_peer_tls::{PeerError, client_config_with, server_config_with};
 use rustls::{ClientConfig, ServerConfig};
 
+use crate::directorates::registry::sealed::StationSealingKey;
+
 /// The ALPN protocol Stations speak to each other.
 pub const STATION_ALPN: &[u8] = b"ai6-station/1";
 
@@ -135,6 +137,100 @@ pub fn server_config(
         &[STATION_ALPN],
         policy,
     )?)
+}
+
+/// What a Station's identity signs about its sealing key. A TLS 1.3 handshake's signed text starts
+/// with 64 spaces, so this cannot be replayed as one or taken from one.
+fn sealing_key_message(station: &str, public_key: &str) -> Vec<u8> {
+    format!("ai6 sealing key\n{station}\n{public_key}\n").into_bytes()
+}
+
+/// The sealing key `public_key` of `station`, signed by `identity`. The identity signs and never
+/// opens anything: the key it vouches for is a separate one.
+///
+/// # Errors
+///
+/// When the identity's key cannot sign.
+pub fn sign_sealing_key(
+    identity: &Identity,
+    station: &str,
+    public_key: &str,
+) -> Result<StationSealingKey, String> {
+    use base64::Engine as _;
+    use rustls::SignatureScheme;
+
+    let key = rustls::crypto::ring::sign::any_supported_type(&identity.private_key_der())
+        .map_err(|_| "the identity's key cannot sign".to_owned())?;
+    let signer = key
+        .choose_scheme(&[
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::ED25519,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::RSA_PSS_SHA256,
+        ])
+        .ok_or("the identity's key signs no scheme this Station knows")?;
+    let signature = signer
+        .sign(&sealing_key_message(station, public_key))
+        .map_err(|_| "the identity's key did not sign".to_owned())?;
+    let text = base64::engine::general_purpose::STANDARD;
+    Ok(StationSealingKey::new(station, public_key).signed(
+        text.encode(identity.certificate_der()),
+        u16::from(signer.scheme()),
+        text.encode(signature),
+    ))
+}
+
+/// Whether a published key can be trusted: a signature it carries must hold for its certificate,
+/// and `fingerprint`, when one is named, must be that certificate's.
+///
+/// # Errors
+///
+/// `Err(())` when it does not hold; the caller names the Station.
+#[allow(clippy::result_unit_err)]
+pub fn check_sealing_key(record: &StationSealingKey, fingerprint: Option<&str>) -> Result<(), ()> {
+    use base64::Engine as _;
+    let text = base64::engine::general_purpose::STANDARD;
+    let (Some(certificate), Some(scheme), Some(signature)) =
+        (&record.certificate, record.scheme, &record.signature)
+    else {
+        return if fingerprint.is_some() {
+            Err(())
+        } else {
+            Ok(())
+        };
+    };
+    let certificate = text.decode(certificate).map_err(|_| ())?;
+    let signature = text.decode(signature).map_err(|_| ())?;
+    if let Some(fingerprint) = fingerprint {
+        let wanted = fingerprint.parse::<PeerId>().map_err(|_| ())?;
+        if coqui_peer_tls::certificate_key(&certificate)
+            .map_err(|_| ())?
+            .id()
+            != wanted
+        {
+            return Err(());
+        }
+    }
+    let der = rustls_pki_types::CertificateDer::from(certificate.as_slice());
+    let end_entity = webpki::EndEntityCert::try_from(&der).map_err(|_| ())?;
+    let message = sealing_key_message(&record.station, &record.public_key);
+    let provider = rustls::crypto::ring::default_provider();
+    let scheme = rustls::SignatureScheme::from(scheme);
+    let (_, algorithms) = provider
+        .signature_verification_algorithms
+        .mapping
+        .iter()
+        .find(|(known, _)| *known == scheme)
+        .ok_or(())?;
+    if algorithms.iter().any(|algorithm| {
+        end_entity
+            .verify_signature(*algorithm, &message, &signature)
+            .is_ok()
+    }) {
+        Ok(())
+    } else {
+        Err(())
+    }
 }
 
 #[cfg(test)]
@@ -289,6 +385,26 @@ mod tests {
         let client =
             client_config(&client_identity, &server_identity.fingerprint(), &policy).unwrap();
         assert!(handshake(server.config, client.config).await.is_err());
+    }
+
+    #[test]
+    fn a_sealing_key_is_vouched_for_by_its_station_s_identity_and_no_other() {
+        let identity = Identity::generate().unwrap();
+        let other = Identity::generate().unwrap();
+        let own = identity.fingerprint().to_string();
+        let signed = sign_sealing_key(&identity, "station-a", "AAAA").unwrap();
+        assert!(check_sealing_key(&signed, None).is_ok());
+        assert!(check_sealing_key(&signed, Some(&own)).is_ok());
+        assert!(check_sealing_key(&signed, Some(&other.fingerprint().to_string())).is_err());
+        let mut swapped = signed.clone();
+        swapped.public_key = "BBBB".to_owned();
+        assert!(check_sealing_key(&swapped, None).is_err());
+        let mut moved = signed.clone();
+        moved.station = "station-b".to_owned();
+        assert!(check_sealing_key(&moved, None).is_err());
+        let unsigned = StationSealingKey::new("station-a", "AAAA");
+        assert!(check_sealing_key(&unsigned, None).is_ok());
+        assert!(check_sealing_key(&unsigned, Some(&own)).is_err());
     }
 
     #[test]

@@ -270,6 +270,20 @@ CREATE TABLE IF NOT EXISTS ai6_accounts (
     PRIMARY KEY (pool, account)
 );
 
+-- Values sealed to named Stations: ciphertext and who may open it, never a key or a value.
+CREATE TABLE IF NOT EXISTS ai6_sealed_values (
+    name TEXT PRIMARY KEY,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+
+-- Each Station's public sealing key, signed by its identity.
+CREATE TABLE IF NOT EXISTS ai6_sealing_keys (
+    station TEXT PRIMARY KEY,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+
 -- operation is '' for usage outside any Operation.
 CREATE TABLE IF NOT EXISTS ai6_usage (
     operation TEXT NOT NULL,

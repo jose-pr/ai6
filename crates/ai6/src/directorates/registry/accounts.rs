@@ -163,6 +163,65 @@ impl AccountProfile {
     }
 }
 
+/// The renewal lease of a login kept sealed in the Registry: who may renew it, until when.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenewalLease {
+    /// The Station that holds it.
+    pub station: String,
+    /// When it lapses unless renewed, as Unix seconds.
+    pub until: f64,
+}
+
+/// What every Station may know of a login kept sealed in the Registry: never the login.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoginState {
+    /// The Stations it is sealed to.
+    pub stations: Vec<String>,
+    /// The sealed value's revision when this was written.
+    pub revision: u64,
+    /// When the login ends, as Unix seconds, when its files say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<f64>,
+    /// When a renewed copy last reached the Registry, or it was added, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewed_at: Option<f64>,
+    /// When a renewal last ran and left it as it was, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<f64>,
+    /// Who may renew it now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<RenewalLease>,
+    /// Renewals that failed since the last that did not.
+    #[serde(default)]
+    pub failures: u32,
+    /// No renewal before this, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_try: Option<f64>,
+    /// When a person was last warned it may lapse with no way to renew it, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warned_at: Option<f64>,
+    /// Why it can no longer be renewed without a person; `None` while it can. Its Sessions go to
+    /// the next account or route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_person: Option<String>,
+}
+
+impl LoginState {
+    /// Whether `station` may use it: it is sealed to that Station and no person is needed.
+    pub fn usable_by(&self, station: &str) -> bool {
+        self.needs_person.is_none() && self.stations.iter().any(|named| named == station)
+    }
+
+    /// Whether a lease on it is still good at `now`.
+    pub fn leased_at(&self, now: f64) -> Option<&RenewalLease> {
+        self.lease.as_ref().filter(|lease| lease.until > now)
+    }
+}
+
 /// One account as the Registry holds it.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -187,6 +246,9 @@ pub struct AccountState {
     /// Tokens its Sessions used per UTC day (`YYYY-MM-DD`), the last few days.
     #[serde(default)]
     pub daily_tokens: BTreeMap<String, u64>,
+    /// Its login, when one is kept sealed in the Registry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login: Option<LoginState>,
 }
 
 impl AccountState {
@@ -200,6 +262,7 @@ impl AccountState {
             limited_until: None,
             last_used: None,
             daily_tokens: BTreeMap::new(),
+            login: None,
         }
     }
 
@@ -256,6 +319,8 @@ pub struct AccountCandidate {
     pub priority: i64,
     /// The most Sessions that may use it at once.
     pub max_concurrent: Option<usize>,
+    /// Its login is kept sealed in the Registry, so it has room only where that can be opened.
+    pub sealed_login: bool,
 }
 
 /// A Session's request for one account of a pool.
@@ -291,6 +356,7 @@ impl AccountClaimRequest {
                     account: account.name().to_owned(),
                     priority: account.priority_value(),
                     max_concurrent: account.concurrency(),
+                    sealed_login: account.keeps_login_files(),
                 })
                 .collect(),
             prefer: None,
@@ -365,7 +431,8 @@ impl AccountClaimRequest {
 /// Which account a pool's strategy picks among `candidates` at `now`, given their states:
 /// [`PoolStrategy`] says how, after `prefer` when it has room. An account has room when it is
 /// not limited and has fewer live claims than its `max_concurrent`; one whose provider
-/// reported no use counts as `unknown_use` thousandths used.
+/// reported no use counts as `unknown_use` thousandths used. An account whose login is kept sealed
+/// also needs a login that `station` may use.
 pub fn choose_account<'a>(
     strategy: PoolStrategy,
     candidates: &'a [AccountCandidate],
@@ -373,6 +440,7 @@ pub fn choose_account<'a>(
     prefer: Option<&str>,
     now: f64,
     unknown_use: u16,
+    station: &str,
 ) -> Option<&'a AccountCandidate> {
     let active = |candidate: &AccountCandidate| {
         states
@@ -382,6 +450,10 @@ pub fn choose_account<'a>(
     let room = |candidate: &&AccountCandidate| {
         let state = states.get(&candidate.account);
         !state.is_some_and(|state| state.is_limited(now))
+            && (!candidate.sealed_login
+                || state
+                    .and_then(|state| state.login.as_ref())
+                    .is_some_and(|login| login.usable_by(station)))
             && candidate
                 .max_concurrent
                 .is_none_or(|limit| active(candidate) < limit)
@@ -451,6 +523,7 @@ pub(super) fn claim_in(
             request.prefer.as_deref(),
             now,
             request.unknown_use,
+            &request.station,
         )
     }
     .map(|candidate| candidate.account.clone());
@@ -669,6 +742,17 @@ pub trait AccountStore {
     ///
     /// Returns an error when a record cannot be read.
     fn accounts(&self) -> io::Result<Vec<AccountState>>;
+
+    /// Changes an account's login state in one write and returns what it holds afterwards.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid name or when the Registry cannot be written.
+    fn change_login(
+        &self,
+        account: &AccountRef,
+        change: &mut dyn FnMut(&mut Option<LoginState>),
+    ) -> io::Result<Option<LoginState>>;
 }
 
 impl FileRegistry {
@@ -844,6 +928,19 @@ impl AccountStore for FileRegistry {
         }
         states.sort_by(|left, right| left.account.cmp(&right.account));
         Ok(states)
+    }
+
+    fn change_login(
+        &self,
+        account: &AccountRef,
+        change: &mut dyn FnMut(&mut Option<LoginState>),
+    ) -> io::Result<Option<LoginState>> {
+        let mut after = None;
+        self.update_account(account, |state| {
+            change(&mut state.login);
+            after = state.login.clone();
+        })?;
+        Ok(after)
     }
 }
 

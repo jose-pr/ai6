@@ -48,6 +48,11 @@ hyper = { version = "1.12.0", default-features = false, features = ["http1", "se
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "service"] }
 # Images in Moneypenny's messages travel as base64.
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
+# Sealed boxes (X25519 and XSalsa20-Poly1305) to each Station a login names. Pre-1.0: RustCrypto's
+# NaCl-compatible crate, the one audited (Cure53, 2022); no 1.0 exists.
+crypto_box = { version = "0.9.1", default-features = false, features = ["alloc", "getrandom", "salsa20", "seal"] }
+# The RFC 3339 times a harness's login file says it ends at; already built for rcgen.
+time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 # Keyed digests of the page cookie and of a page's view tokens.
 hmac = { version = "0.13.0", default-features = false }
 lru = { version = "0.12.5", default-features = false }

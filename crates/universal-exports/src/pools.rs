@@ -45,6 +45,24 @@ pub struct BoardClaim {
     pub since: f64,
 }
 
+/// What the board shows of a login kept sealed in the Registry: never the login.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BoardLogin {
+    /// The Stations it is sealed to.
+    pub stations: Vec<String>,
+    /// When it ends, as Unix seconds, when its files say.
+    pub expires_at: Option<f64>,
+    /// When a renewed copy last reached the Registry, as Unix seconds.
+    pub renewed_at: Option<f64>,
+    /// The Station holding its renewal lease now.
+    pub renewal_held_by: Option<String>,
+    /// Renewals that failed since the last that did not.
+    pub failures: u32,
+    /// Why a person is needed, when one is.
+    pub needs_person: Option<String>,
+}
+
 /// One pool account on the board.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -75,6 +93,8 @@ pub struct BoardAccount {
     pub last_used: Option<f64>,
     /// Tokens its Sessions used today (UTC).
     pub tokens_today: u64,
+    /// Its login, when one is kept sealed in the Registry.
+    pub login: Option<BoardLogin>,
 }
 
 /// The board for one Operation.
@@ -96,7 +116,16 @@ fn board_account(state: AccountState, operation: &str, now: f64) -> Option<Board
     let (own, others): (Vec<_>, Vec<_>) = state
         .live_claims(now)
         .partition(|claim| claim.operation.as_deref() == Some(operation));
+    let login = state.login.as_ref().map(|login| BoardLogin {
+        stations: login.stations.clone(),
+        expires_at: login.expires_at,
+        renewed_at: login.renewed_at,
+        renewal_held_by: login.leased_at(now).map(|lease| lease.station.clone()),
+        failures: login.failures,
+        needs_person: login.needs_person.clone(),
+    });
     Some(BoardAccount {
+        login,
         tokens_today: state.tokens_on_day(now as i64),
         active: own
             .into_iter()
@@ -260,6 +289,71 @@ mod tests {
                 .unwrap();
         }
         pool
+    }
+
+    #[tokio::test]
+    async fn the_board_shows_a_login_s_standing_and_nothing_of_the_login() {
+        use std::sync::Arc;
+
+        use ai6::directorates::q::logins::add_login;
+        use ai6::directorates::q::sealing::{Recipient, SealingKey, Vault};
+        use ai6::directorates::registry::sealed::StationSealingKey;
+
+        const PLANTED: &str = "planted-refresh-0451";
+        let served = served_with(ROLES).await;
+        let pool = AccountPool::new("free", "acp")
+            .account(Account::new("shared", AccountKind::HarnessLogin).files([".fake/auth.json"]));
+        let account = AccountRef::new("free", "shared");
+        served
+            .registry
+            .declare_account(
+                &account,
+                "worker",
+                &AccountProfile::of(&pool, "shared", vec!["G".to_owned()]).unwrap(),
+            )
+            .unwrap();
+        let key = Arc::new(SealingKey::generate());
+        served
+            .registry
+            .publish_sealing_key(&StationSealingKey::new(
+                "worker",
+                key.public_key().to_text(),
+            ))
+            .unwrap();
+        let vault = Vault::new(
+            Arc::new(ai6::FileRegistry::open(served.registry.root())),
+            "worker",
+            key,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".fake")).unwrap();
+        std::fs::write(
+            dir.path().join(".fake/auth.json"),
+            format!(r#"{{"refresh_token":"{PLANTED}","expires_at":1890000000}}"#),
+        )
+        .unwrap();
+        add_login(
+            &vault,
+            &account,
+            dir.path(),
+            &[".fake/auth.json".to_owned()],
+            &[Recipient::named("worker")],
+            1_790_000_000.0,
+        )
+        .unwrap();
+
+        let response = board(&served, &served.viewer, "G").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let text = response.text().await.unwrap();
+        assert!(!text.contains(PLANTED), "{text}");
+        assert!(!text.contains("auth.json"), "{text}");
+        let body: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let login = &body["accounts"][0]["login"];
+        assert_eq!(login["stations"], serde_json::json!(["worker"]));
+        assert_eq!(login["expires_at"], 1_890_000_000.0);
+        assert_eq!(login["renewed_at"], 1_790_000_000.0);
+        assert_eq!(login["renewal_held_by"], serde_json::Value::Null);
+        assert_eq!(login["needs_person"], serde_json::Value::Null);
     }
 
     async fn board(served: &Served, token: &str, operation: &str) -> reqwest::Response {

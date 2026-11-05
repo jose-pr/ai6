@@ -163,7 +163,7 @@ pub use directorates::q::{
 };
 pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,
-    QuotaWindow, choose_account,
+    LoginState, QuotaWindow, RenewalLease, choose_account,
 };
 pub use directorates::registry::agent_records::{
     AgentOutcome, AgentOutcomeReport, AgentRecord, AgentTally, ModelTenure, NO_OPERATION,
@@ -179,8 +179,8 @@ pub use directorates::registry::assistant_log::{
 pub use directorates::registry::backend::{
     AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore,
     AssistantLogStore, AuditStore, BriefStore, CableStore, ClearanceStore, Limited, LogbookStore,
-    QuarantineStore, RegistryBackend, SessionContextStore, SessionStore, SleeperStore, SourceStore,
-    StationStore, TimelineStore, UsageStore, VettingStore,
+    QuarantineStore, RegistryBackend, SealedStore, SessionContextStore, SessionStore, SleeperStore,
+    SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
     KeepVerified, LibraryPin, Origin, PinCheck, PinSet, PluginProfile, Provenance, PublisherKey,

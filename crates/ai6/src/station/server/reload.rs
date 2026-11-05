@@ -158,8 +158,14 @@ pub(super) fn spawn(state: &DaemonState) -> Option<tokio::task::JoinHandle<()>> 
         while !state.stopping.load(Ordering::Acquire) {
             if tokio::time::Instant::now() >= next {
                 let polling = state.clone();
-                // The source reads files or a database, so it is asked on the blocking pool.
-                let _ = tokio::task::spawn_blocking(move || poll(&polling)).await;
+                // The source reads files or a database, so it is asked on the blocking pool. A
+                // login's revision is read at the same beat: a renewal reaches running Sessions
+                // within one poll.
+                let _ = tokio::task::spawn_blocking(move || {
+                    poll(&polling);
+                    super::logins::tend(&polling);
+                })
+                .await;
                 next = tokio::time::Instant::now() + every;
             }
             tokio::time::sleep(STOP_CHECK.min(every)).await;

@@ -6,10 +6,14 @@ mod sandbox;
 mod secrets;
 
 pub mod ephemeral;
+#[cfg(feature = "daemon")]
+pub mod logins;
 pub mod outbound;
 pub mod overlays;
 pub mod provision;
 pub mod safehouse;
+#[cfg(feature = "daemon")]
+pub mod sealing;
 pub mod secret_kind;
 pub mod terminal;
 pub mod transport;
@@ -759,6 +763,12 @@ struct RawAccount {
     max_concurrent: Option<usize>,
     #[serde(default)]
     labels: BTreeMap<String, String>,
+    #[serde(default)]
+    files: Vec<String>,
+    #[serde(default)]
+    renew_command: Vec<String>,
+    #[serde(default)]
+    renew_env: BTreeMap<String, String>,
 }
 
 impl RawPool {
@@ -798,6 +808,10 @@ impl RawPool {
             }
             for (key, value) in raw.labels {
                 account = account.label(key, value);
+            }
+            account = account.files(raw.files).renew_command(raw.renew_command);
+            for (key, value) in raw.renew_env {
+                account = account.renew_env(key, value);
             }
             pool = pool.account(account);
         }
@@ -1059,7 +1073,8 @@ fn parse_document(
                 .because(format!("secret_provider {name:?}: {reason}"))
         };
         validate_name(&name, QErrorKind::Schema, path.clone())?;
-        if secret_kind::BUILT_IN.contains(&name.as_str()) {
+        if secret_kind::BUILT_IN.contains(&name.as_str()) || name == secret_kind::REGISTRY_PROVIDER
+        {
             return Err(refused(
                 "an instance may not take a built-in provider's name".to_owned(),
             ));

@@ -7,9 +7,9 @@ use std::time::Duration;
 use super::SqlRegistry;
 use super::db::Tx;
 use crate::directorates::registry::accounts::{
-    AccountClaimRequest, AccountProfile, AccountRef, AccountState, AccountStore, QuotaWindow,
-    add_tokens, claim_among, parse_state, release_in, renew_in, report_in, state_bytes,
-    validate_ref,
+    AccountClaimRequest, AccountProfile, AccountRef, AccountState, AccountStore, LoginState,
+    QuotaWindow, add_tokens, claim_among, parse_state, release_in, renew_in, report_in,
+    state_bytes, validate_ref,
 };
 use crate::directorates::registry::limits::AccountLimits;
 use crate::directorates::registry::store::invalid_data;
@@ -174,6 +174,19 @@ impl AccountStore for SqlRegistry {
 
     fn accounts(&self) -> io::Result<Vec<AccountState>> {
         self.read(|tx| all_accounts(tx, &self.limits.accounts))
+    }
+
+    fn change_login(
+        &self,
+        account: &AccountRef,
+        change: &mut dyn FnMut(&mut Option<LoginState>),
+    ) -> io::Result<Option<LoginState>> {
+        let mut after = None;
+        self.update_account(account, |state| {
+            change(&mut state.login);
+            after = state.login.clone();
+        })?;
+        Ok(after)
     }
 }
 

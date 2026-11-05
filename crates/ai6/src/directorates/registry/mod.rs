@@ -25,6 +25,7 @@ pub mod mission_issues;
 pub mod products;
 pub mod quarantine;
 pub mod reviews;
+pub mod sealed;
 pub mod sessions;
 pub mod sleepers;
 pub mod sources;

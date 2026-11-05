@@ -78,6 +78,8 @@ pub(crate) struct AccountDesk {
     /// like held ones.
     pending: Arc<Mutex<BTreeSet<String>>>,
     waiting: Arc<Mutex<BTreeMap<String, String>>>,
+    /// Logins kept sealed in the Registry.
+    pub(super) logins: super::logins::LoginDesk,
 }
 
 impl std::fmt::Debug for AccountDesk {
@@ -124,13 +126,36 @@ impl AccountDesk {
             .unwrap_or_else(|| Arc::new(CommandLogin::default().with_timeout(timeout)))
     }
 
-    fn homes(&self) -> Result<PathBuf, String> {
+    pub(super) fn homes(&self) -> Result<PathBuf, String> {
         match &self.homes {
             Some(dir) => Ok(dir.clone()),
             None => crate::bootstrap::platform_state_dir()
                 .map(|dir| dir.join("accounts"))
                 .map_err(|error| format!("no state directory for account homes: {error}")),
         }
+    }
+
+    /// The Mission's home for `account`, private to the Station's user and marked as this
+    /// Station's, so its cleanup removes it with the Mission and nothing else.
+    pub(super) fn private_home(
+        &self,
+        mission_id: &str,
+        pool: &AccountPool,
+        account: &Account,
+    ) -> Result<PathBuf, String> {
+        let root = self.homes()?;
+        let mission = root.join(path_component(mission_id));
+        let home = mission.join(format!("{}--{}", pool.id(), account.name()));
+        (|| {
+            fs::create_dir_all(&home)?;
+            fs::write(mission.join(HOME_MARKER), b"")?;
+            for dir in [&root, &mission, &home] {
+                private(dir)?;
+            }
+            Ok::<(), std::io::Error>(())
+        })()
+        .map_err(|error| format!("{}: {error}", home.display()))?;
+        Ok(home)
     }
 }
 
@@ -192,6 +217,7 @@ pub(super) fn best_account(
     states: &[AccountState],
     now: f64,
     unknown_use: u16,
+    station: &str,
 ) -> Option<AccountState> {
     pools
         .iter()
@@ -205,6 +231,7 @@ pub(super) fn best_account(
                 None,
                 now,
                 unknown_use,
+                station,
             )?;
             Some(
                 by_name.get(&chosen.account).cloned().unwrap_or_else(|| {
@@ -238,9 +265,13 @@ pub(super) fn route_carries_session(
     let states = state.intake.accounts().unwrap_or_default();
     let now = state.clock.now() as f64;
     let unknown_use = state.station.limits().accounts.unknown_use_permille;
-    has_room(&pools, &states, (now, unknown_use), |account| {
-        account.kind().carries_session()
-    })
+    has_room(
+        &pools,
+        &states,
+        (now, unknown_use),
+        &state.station_id,
+        |account| account.kind().carries_session(),
+    )
 }
 
 /// Whether the account `earlier` names is of a kind a provider Session can move away from.
@@ -505,6 +536,9 @@ pub(super) fn hand_over(
     environment: &mut BTreeMap<String, String>,
 ) -> Result<Option<SecretLease>, String> {
     if account.kind() == AccountKind::HarnessLogin {
+        if account.keeps_login_files() {
+            super::logins::hand_over(state, pool, account, mission_id, site, environment)?;
+        }
         return Ok(None);
     }
     let name = format!("{}/{}", pool.id(), account.name());
@@ -575,18 +609,14 @@ fn home_for(
     pool: &AccountPool,
     account: &Account,
 ) -> Result<PathBuf, String> {
-    let root = state.station.credentials.accounts.homes()?;
-    let mission = root.join(path_component(mission_id));
-    let home = mission.join(format!("{}--{}", pool.id(), account.name()));
-    let made = (|| {
-        fs::create_dir_all(&home)?;
-        fs::write(mission.join(HOME_MARKER), b"")?;
-        for dir in [&root, &mission, &home] {
-            private(dir)?;
-        }
-        fs::write(home.join("config.toml"), CODEX_CONFIG)
-    })();
-    made.map_err(|error| format!("CODEX_HOME {} could not be made: {error}", home.display()))?;
+    let home = state
+        .station
+        .credentials
+        .accounts
+        .private_home(mission_id, pool, account)
+        .map_err(|error| format!("CODEX_HOME could not be made: {error}"))?;
+    fs::write(home.join("config.toml"), CODEX_CONFIG)
+        .map_err(|error| format!("CODEX_HOME {} could not be made: {error}", home.display()))?;
     Ok(home)
 }
 
@@ -604,7 +634,7 @@ fn private(_dir: &Path) -> std::io::Result<()> {
 }
 
 /// A Mission ID as one path component.
-fn path_component(id: &str) -> String {
+pub(super) fn path_component(id: &str) -> String {
     id.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
@@ -701,7 +731,8 @@ pub(super) fn reattach(state: &DaemonState, mission: &Mission, session: &Session
 }
 
 /// At each check-in: renews this Station's claims for the Missions it still runs (dropping
-/// any other made before this pass), and removes the Codex homes of Missions that are over.
+/// any other made before this pass), and removes the private homes of Missions that are over,
+/// after taking back what a harness renewed in one.
 pub(super) fn tend(state: &DaemonState) {
     let desk = &state.station.credentials.accounts;
     let has_pools = !lock(&desk.held).is_empty()
@@ -725,6 +756,7 @@ pub(super) fn tend(state: &DaemonState) {
     {
         eprintln!("ai6: account claims not renewed: {error}");
     }
+    super::logins::tend(state);
     sweep_homes(state, &missions);
 }
 
@@ -819,6 +851,14 @@ pub(super) fn declare(state: &DaemonState) {
             if cfg!(windows) && account.kind().login_flag().is_some() {
                 eprintln!(
                     "ai6: account {}/{}: on Windows its CODEX_HOME keeps the access list it \
+                     inherits from the Station's state directory",
+                    pool.id(),
+                    account.name()
+                );
+            }
+            if cfg!(windows) && account.keeps_login_files() {
+                eprintln!(
+                    "ai6: account {}/{}: on Windows a Session's home keeps the access list it \
                      inherits from the Station's state directory",
                     pool.id(),
                     account.name()
@@ -991,9 +1031,10 @@ pub(super) fn on_limit(
                 let states = state.intake.accounts().unwrap_or_default();
                 let now = now as f64;
                 let unknown_use = state.station.limits().accounts.unknown_use_permille;
+                let station = state.station_id.as_str();
                 (
-                    has_room(&pools, &states, (now, unknown_use), |_| true),
-                    has_room(&pools, &states, (now, unknown_use), |account| {
+                    has_room(&pools, &states, (now, unknown_use), station, |_| true),
+                    has_room(&pools, &states, (now, unknown_use), station, |account| {
                         account.kind().carries_session()
                     }),
                 )
@@ -1028,6 +1069,7 @@ fn has_room(
     pools: &[&AccountPool],
     states: &[AccountState],
     (now, unknown_use): (f64, u16),
+    station: &str,
     keep: impl Fn(&Account) -> bool,
 ) -> bool {
     pools.iter().any(|pool| {
@@ -1045,6 +1087,7 @@ fn has_room(
             None,
             now,
             unknown_use,
+            station,
         )
         .is_some()
     })
@@ -1094,7 +1137,13 @@ pub(super) fn intake_hold(
     let states = state.intake.accounts().ok()?;
     let now = state.clock.now() as f64;
     let unknown_use = state.station.limits().accounts.unknown_use_permille;
-    if has_room(&pools, &states, (now, unknown_use), |_| true) {
+    if has_room(
+        &pools,
+        &states,
+        (now, unknown_use),
+        &state.station_id,
+        |_| true,
+    ) {
         return None;
     }
     let ids: Vec<String> = pools.iter().map(|pool| pool.id().to_owned()).collect();
@@ -2677,6 +2726,288 @@ secret = "codex-b"
         // The Mission is over: its homes go at the next check-in.
         tend(&state);
         assert!(!Path::new(&homes[0]).exists() && !Path::new(&homes[1]).exists());
+    }
+
+    const LOGIN_POOLS: &str = "[pool.free]\nhandler = \"mock-pooled\"\n\
+                               [pool.free.account.shared]\nkind = \"harness-login\"\n\
+                               files = [\".fake/auth.json\"]\n";
+    const LOGIN_FILE: &str = ".fake/auth.json";
+    const LOGIN_TEXT: &str = r#"{"refresh_token":"planted-0451","expires_at":1790100000}"#;
+
+    /// A Station with a sealing key, and a second Station's vault; the login is sealed to
+    /// `stations`.
+    fn login_state(
+        root: &Path,
+        stations: &[&str],
+    ) -> (DaemonState, Arc<crate::directorates::q::sealing::Vault>) {
+        use crate::directorates::q::logins::add_login;
+        use crate::directorates::q::sealing::{Recipient, SealingKey, Vault};
+        use crate::directorates::registry::sealed::StationSealingKey;
+
+        let (mut state, _, _) = pooled_state(root, "", "", LOGIN_POOLS);
+        let vault = |name: &str| {
+            let key = Arc::new(SealingKey::generate());
+            state
+                .intake
+                .publish_sealing_key(&StationSealingKey::new(name, key.public_key().to_text()))
+                .unwrap();
+            Arc::new(Vault::new(state.intake.clone(), name, key))
+        };
+        let (own, other) = (vault(state.station_id.as_str()), vault("other"));
+        let dir = root.join("logged-in");
+        fs::create_dir_all(dir.join(".fake")).unwrap();
+        fs::write(dir.join(LOGIN_FILE), LOGIN_TEXT).unwrap();
+        let named: Vec<Recipient> = stations
+            .iter()
+            .map(|name| {
+                Recipient::named(match *name {
+                    "own" => state.station_id.as_str(),
+                    other => other,
+                })
+            })
+            .collect();
+        add_login(
+            &other,
+            &AccountRef::new("free", "shared"),
+            &dir,
+            &[LOGIN_FILE.to_owned()],
+            &named,
+            START as f64,
+        )
+        .unwrap();
+        state.station.credentials.accounts.logins =
+            super::super::logins::LoginDesk::default().with_vault(own);
+        (state, other)
+    }
+
+    fn opened_login(vault: &crate::directorates::q::sealing::Vault) -> String {
+        use crate::directorates::q::logins::sealed_name;
+        vault
+            .open(&sealed_name(&AccountRef::new("free", "shared")))
+            .unwrap()
+            .value
+            .as_str()
+            .to_owned()
+    }
+
+    #[tokio::test]
+    async fn a_session_on_a_sealed_login_has_its_own_home_and_what_it_renews_comes_back() {
+        use base64::Engine as _;
+        let root = tempfile::tempdir().unwrap();
+        let (state, other) = login_state(root.path(), &["own", "other"]);
+        run(&state, "login-1").await;
+        let made = calls("login-1");
+        let home = made[0].2["HOME"].clone();
+        assert!(home.ends_with("free--shared"), "{home}");
+        assert!(Path::new(&home).starts_with(root.path()), "{home}");
+        if cfg!(windows) {
+            assert_eq!(made[0].2["USERPROFILE"], home);
+        }
+        let file = Path::new(&home).join(LOGIN_FILE);
+        assert_eq!(fs::read_to_string(&file).unwrap(), LOGIN_TEXT);
+        assert_eq!(
+            state
+                .intake
+                .session(&session_hold(&state, "login-1").unwrap().id)
+                .unwrap()
+                .unwrap()
+                .account,
+            Some(AccountRef::new("free", "shared"))
+        );
+
+        // The harness renews: the next poll seals it for the other Station too.
+        let renewed = r#"{"refresh_token":"renewed-0451","expires_at":1790200000}"#;
+        fs::write(&file, renewed).unwrap();
+        super::super::logins::tend(&state);
+        let text = base64::engine::general_purpose::STANDARD;
+        assert!(opened_login(&other).contains(&text.encode(renewed)));
+        let login = account(&state, "free", "shared").login.unwrap();
+        assert_eq!(login.revision, 2);
+        assert_eq!(login.expires_at, Some(1_790_200_000.0));
+
+        // The Mission is over: its home goes at the next check-in, and nothing stays.
+        tend(&state);
+        assert!(!Path::new(&home).exists());
+        assert!(!Path::new(&home).parent().unwrap().exists());
+    }
+
+    #[tokio::test]
+    async fn a_station_the_login_does_not_name_does_not_take_the_account() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, other) = login_state(root.path(), &["other"]);
+        let before = opened_login(&other);
+        create_mission(&state, "login-2");
+        let reason = refused_start(&state, "login-2").await;
+        assert!(reason.contains("free"), "{reason}");
+        assert!(calls("login-2").is_empty(), "its harness never started");
+        assert_eq!(
+            account(&state, "free", "shared").active.len(),
+            0,
+            "no claim was left behind"
+        );
+        assert_eq!(opened_login(&other), before);
+    }
+
+    #[tokio::test]
+    async fn a_person_is_needed_and_the_account_is_passed_over() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _) = login_state(root.path(), &["own"]);
+        state
+            .intake
+            .change_login(&AccountRef::new("free", "shared"), &mut |login| {
+                login.as_mut().unwrap().needs_person = Some("a person must log in".to_owned());
+            })
+            .unwrap();
+        create_mission(&state, "login-3");
+        let reason = refused_start(&state, "login-3").await;
+        assert!(reason.contains("free"), "{reason}");
+        assert!(calls("login-3").is_empty(), "its harness never started");
+    }
+
+    /// Why a Mission that should not start did not.
+    async fn refused_start(state: &DaemonState, id: &str) -> String {
+        let Err(refused) = start_mission(
+            axum::extract::State(state.clone()),
+            axum::extract::Path(id.to_owned()),
+            axum::Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        else {
+            panic!("{id} started");
+        };
+        refused.1.0.error.clone()
+    }
+
+    #[test]
+    fn a_failed_session_names_the_renewal_under_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, other) = login_state(root.path(), &["own", "other"]);
+        let pool = state
+            .station
+            .credentials
+            .catalog()
+            .unwrap()
+            .pool("free")
+            .unwrap()
+            .clone();
+        let site = Site {
+            resuming: false,
+            on_station: true,
+        };
+        let mut environment = BTreeMap::new();
+        super::super::logins::hand_over(
+            &state,
+            &pool,
+            pool.get("shared").unwrap(),
+            "login-4",
+            site,
+            &mut environment,
+        )
+        .unwrap();
+        assert_eq!(super::super::logins::stale_note(&state, "login-4"), None);
+        let name = crate::directorates::q::logins::sealed_name(&AccountRef::new("free", "shared"));
+        other
+            .replace(&name, &opened_login(&other), 1, START as f64)
+            .unwrap();
+        super::super::logins::tend(&state);
+        let note = super::super::logins::stale_note(&state, "login-4").unwrap();
+        assert!(
+            note.contains("free/shared") && note.contains("revision 1 to 2"),
+            "{note}"
+        );
+        assert!(!note.contains("planted-0451"), "{note}");
+        // A resume starts on the current login, and the note is spent.
+        super::super::logins::hand_over(
+            &state,
+            &pool,
+            pool.get("shared").unwrap(),
+            "login-4",
+            site,
+            &mut environment,
+        )
+        .unwrap();
+        assert_eq!(super::super::logins::stale_note(&state, "login-4"), None);
+        // Off the Station's own host there is nowhere to write it.
+        let refused = super::super::logins::hand_over(
+            &state,
+            &pool,
+            pool.get("shared").unwrap(),
+            "login-4",
+            Site {
+                resuming: false,
+                on_station: false,
+            },
+            &mut BTreeMap::new(),
+        )
+        .unwrap_err();
+        assert!(refused.contains("Station's own host"), "{refused}");
+    }
+
+    #[test]
+    fn a_station_that_restarts_picks_up_its_homes_and_what_they_renewed() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, other) = login_state(root.path(), &["own", "other"]);
+        let pool = state
+            .station
+            .credentials
+            .catalog()
+            .unwrap()
+            .pool("free")
+            .unwrap()
+            .clone();
+        let mut environment = BTreeMap::new();
+        let site = Site {
+            resuming: false,
+            on_station: true,
+        };
+        super::super::logins::hand_over(
+            &state,
+            &pool,
+            pool.get("shared").unwrap(),
+            "login-5",
+            site,
+            &mut environment,
+        )
+        .unwrap();
+        let home = Path::new(&environment["HOME"]).to_path_buf();
+        let scratch = state
+            .station
+            .credentials
+            .accounts
+            .homes()
+            .unwrap()
+            .join("renewing-left");
+        fs::create_dir_all(&scratch).unwrap();
+        fs::write(
+            home.join(LOGIN_FILE),
+            r#"{"refresh_token":"while-down","expires_at":1790300000}"#,
+        )
+        .unwrap();
+        // The same state directory under a Station that remembers nothing.
+        let mut restarted = state.clone();
+        restarted.station.credentials.accounts.logins = super::super::logins::LoginDesk::default()
+            .with_vault(
+                state
+                    .station
+                    .credentials
+                    .accounts
+                    .logins
+                    .vault()
+                    .unwrap()
+                    .clone(),
+            );
+        super::super::logins::recover(&restarted);
+        let name = crate::directorates::q::logins::sealed_name(&AccountRef::new("free", "shared"));
+        assert_eq!(
+            other.open(&name).unwrap().revision,
+            2,
+            "what it renewed went back"
+        );
+        assert!(!scratch.exists(), "a throwaway home a renewal left is gone");
     }
 
     #[test]

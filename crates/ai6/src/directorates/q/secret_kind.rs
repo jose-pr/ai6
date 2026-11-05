@@ -39,6 +39,10 @@ pub const RESERVED_FIELDS: [&str; 7] = [
 /// The providers every program has without loading anything.
 pub const BUILT_IN: [&str; 3] = ["file", "env", "inline"];
 
+/// The provider of values sealed in the Registry to named Stations. A Station makes it itself, so
+/// it needs a Registry and a sealing key: nothing a bootstrap file reads can be kept there.
+pub const REGISTRY_PROVIDER: &str = "registry";
+
 /// The fields of a secret reference or a provider instance beyond the keys AI6 reads, by name,
 /// as they were written. Never printed: [`Debug`](fmt::Debug) shows the names alone, and every
 /// text in it is overwritten with zeros when it is dropped, since a field such as `inline`'s

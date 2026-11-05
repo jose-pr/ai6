@@ -155,6 +155,10 @@ pub struct AccountLimits {
     #[schema(title = "Days of token counts per account")]
     #[map(default = AccountLimits::default().kept_days)]
     pub kept_days: u32,
+    /// Bytes of one sealed value's record, every Station's copy together.
+    #[schema(title = "Largest sealed value", format = "bytes")]
+    #[map(default = AccountLimits::default().sealed_bytes)]
+    pub sealed_bytes: Limit,
 }
 
 impl Default for AccountLimits {
@@ -164,6 +168,7 @@ impl Default for AccountLimits {
             claims: Limit::at(1024),
             windows: Limit::at(8),
             kept_days: 8,
+            sealed_bytes: Limit::at(4 * MIB),
         }
     }
 }

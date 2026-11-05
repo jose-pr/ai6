@@ -166,7 +166,7 @@ fn standing_of(
                 return Err("its pool is not configured on this Station".to_owned());
             };
             let pools: Vec<&AccountPool> = ids.iter().filter_map(|id| catalog.pool(id)).collect();
-            let best = accounts::best_account(&pools, states, now, unknown_use)
+            let best = accounts::best_account(&pools, states, now, unknown_use, &state.station_id)
                 .ok_or_else(|| accounts::no_room(&pools, states, now))?;
             (Some(best), None)
         }

@@ -589,6 +589,42 @@ pub struct AccountLimits {
     #[schema(title = "Longest model listing")]
     #[map(default = AccountLimits::default().model_probe_timeout)]
     pub model_probe_timeout: TimeLimit,
+    /// Seconds between the Headquarters Station's rounds over the logins kept in the Registry; 0
+    /// runs none.
+    #[schema(title = "Between login renewal rounds")]
+    #[map(default = AccountLimits::default().renew_every)]
+    pub renew_every: Seconds,
+    /// Seconds before a login's known end at which a round renews it: well before its harness's
+    /// own threshold, so a Session's harness has no reason to.
+    #[schema(title = "Renew a login this long before it ends")]
+    #[map(default = AccountLimits::default().renew_within)]
+    pub renew_within: Seconds,
+    /// Seconds since a login was last renewed at which a round renews it, where its end cannot
+    /// be read.
+    #[schema(title = "Renew a login of unknown end after")]
+    #[map(default = AccountLimits::default().renew_after)]
+    pub renew_after: Seconds,
+    /// Seconds a login's renewal command may take; never past its lease.
+    #[schema(title = "Longest login renewal")]
+    #[map(default = AccountLimits::default().renew_timeout)]
+    pub renew_timeout: Seconds,
+    /// Seconds a Station holds a login's renewal lease; another may take it after that.
+    #[schema(title = "A login's renewal lease lasts")]
+    #[map(default = AccountLimits::default().renew_lease)]
+    pub renew_lease: Seconds,
+    /// Seconds before the first retry of a failed renewal; each failure doubles it.
+    #[schema(title = "First wait after a failed renewal")]
+    #[map(default = AccountLimits::default().renew_backoff)]
+    pub renew_backoff: Seconds,
+    /// The longest wait between retries of a failed renewal, in seconds.
+    #[schema(title = "Longest wait after a failed renewal")]
+    #[map(default = AccountLimits::default().renew_backoff_max)]
+    pub renew_backoff_max: Seconds,
+    /// Failed renewals in a row before an account is marked as needing a person; `null` never
+    /// marks one.
+    #[schema(title = "Failed renewals before a person is needed")]
+    #[map(default = AccountLimits::default().renew_attempts)]
+    pub renew_attempts: Limit,
 }
 
 impl Default for AccountLimits {
@@ -602,6 +638,14 @@ impl Default for AccountLimits {
             models_every: Seconds::new(3_600),
             model_probes: Limit::at(4),
             model_probe_timeout: TimeLimit::secs(20),
+            renew_every: Seconds::new(600),
+            renew_within: Seconds::new(3_600),
+            renew_after: Seconds::new(6 * DAY),
+            renew_timeout: Seconds::new(120),
+            renew_lease: Seconds::new(300),
+            renew_backoff: Seconds::new(300),
+            renew_backoff_max: Seconds::new(6 * 3_600),
+            renew_attempts: Limit::at(5),
         }
     }
 }

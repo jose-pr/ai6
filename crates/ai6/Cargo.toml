@@ -13,7 +13,7 @@ exclude = [".*", "*.local.*"]
 [features]
 default = []
 # The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
-daemon = ["gate", "acp","dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "guatiao/load"]
+daemon = ["gate", "acp","dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "dep:base64", "dep:crypto_box", "dep:time", "guatiao/load"]
 # The Agent Client Protocol wire (`ai6::directorates::section_00::acp`): the client a Station
 # and the `acp` handler drive agents with, and the agent side serving any AgentHandler.
 acp = ["dep:agent-client-protocol", "dep:coqui-acp", "dep:futures"]
@@ -22,7 +22,7 @@ gate = ["dep:ureq", "dep:url"]
 # Adds bounded background event publication to the Universal Exports gateway.
 publisher = ["daemon", "dep:ai6-diptel", "dep:base64", "dep:url", "dep:webpki-root-certs"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]
-station-tls = ["dep:coqui-peer-tls", "dep:rustls"]
+station-tls = ["dep:coqui-peer-tls", "dep:rustls", "dep:base64"]
 # A Registry and roster kept in a SQLite database file.
 sqlite = ["dep:rusqlite"]
 # A Registry and roster kept in PostgreSQL, shared by every Station of an HA deployment.
@@ -63,6 +63,11 @@ name = "ha"
 path = "tests/ha.rs"
 required-features = ["cli"]
 
+[[test]]
+name = "shared_logins"
+path = "tests/shared_logins.rs"
+required-features = ["cli"]
+
 [dependencies]
 agent-client-protocol = { workspace = true, optional = true }
 coqui-acp = { workspace = true, optional = true }
@@ -89,6 +94,8 @@ coqui-peer = { workspace = true, features = ["serde"] }
 ring = { version = "0.17.14", optional = true }
 base64 = { workspace = true, optional = true }
 coqui-peer-tls = { workspace = true, optional = true }
+crypto_box = { workspace = true, optional = true }
+time = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 globset.workspace = true
 lru.workspace = true

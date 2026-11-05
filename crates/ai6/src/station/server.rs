@@ -20,6 +20,7 @@ mod harness;
 mod head_of_station;
 #[cfg(feature = "cables-mcp")]
 mod issues;
+mod logins;
 mod medical;
 #[cfg(feature = "cables-mcp")]
 mod memories;
@@ -167,6 +168,8 @@ pub struct StationConfig {
     hygiene: crate::station::safehouse::SafeHouseHygiene,
     /// Where the Station keeps its state; `None` is the platform's state directory.
     state_dir: Option<PathBuf>,
+    /// Where its sealing key is kept, beside its identity; `None` is the state directory.
+    sealing_dir: Option<PathBuf>,
     /// What the bootstrap file gives up against the defaults, reported at check-in.
     bootstrap_weakened: Vec<String>,
     /// The Station's own directories an assistant's interpreters may never read.
@@ -243,6 +246,14 @@ impl StationConfig {
         hygiene: crate::station::safehouse::SafeHouseHygiene,
     ) -> Self {
         self.hygiene = hygiene;
+        self
+    }
+
+    /// Keeps the Station's sealing key in `dir`, beside its identity, instead of its state
+    /// directory.
+    #[must_use]
+    pub fn with_sealing_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.sealing_dir = Some(dir.into());
         self
     }
 
@@ -354,6 +365,7 @@ impl Default for StationConfig {
             config_poll: DEFAULT_CONFIG_POLL,
             hygiene: Default::default(),
             state_dir: None,
+            sealing_dir: None,
             bootstrap_weakened: Vec::new(),
             protected_paths: Vec::new(),
             tls_weakened: Vec::new(),
@@ -827,6 +839,19 @@ where
             state_dir.join("registry"),
         )),
     };
+    let sealing_dir = config
+        .station
+        .sealing_dir
+        .clone()
+        .unwrap_or_else(|| state_dir.clone());
+    // Without a key this Station serves everything but logins sealed to it, and says why.
+    match logins::open_vault(&sealing_dir, &intake, &station_id) {
+        Ok(vault) => {
+            config.station.credentials.accounts.logins =
+                std::mem::take(&mut config.station.credentials.accounts.logins).with_vault(vault);
+        }
+        Err(error) => eprintln!("ai6: this Station has no sealing key: {error}"),
+    }
     let startup_recovery = recover_startup_missions(&mut missions)?;
     let listener = TcpListener::bind(config.address).await?;
     #[cfg(feature = "publisher")]
@@ -965,7 +990,11 @@ where
     let token = crate::station::runner::ensure_token_at(&state_dir.join(API_TOKEN_FILE))?;
     let app = api(state.clone(), token);
     let declaring = state.clone();
-    let _ = tokio::task::spawn_blocking(move || reload::declare(&declaring)).await;
+    let _ = tokio::task::spawn_blocking(move || {
+        reload::declare(&declaring);
+        logins::recover(&declaring);
+    })
+    .await;
     let scheduler = tokio::spawn(scheduler_loop(state.clone()));
     let reloading = reload::spawn(&state);
     #[cfg(feature = "publisher")]
@@ -1654,6 +1683,14 @@ async fn scheduler_loop(base: DaemonState) {
             verdicts::settle_held(&tick);
         })
         .await;
+        // A renewal runs a harness's command: it never holds up the beat.
+        if check_in && logins::begin_renewals(&state) {
+            let renewing = state.clone();
+            tokio::task::spawn_blocking(move || {
+                logins::run_renewals(&renewing);
+                logins::end_renewals(&renewing);
+            });
+        }
         // A look asks harnesses, which may take minutes: it never holds up the beat.
         if check_in && models::begin(&state) {
             let looking = state.clone();
@@ -1687,6 +1724,8 @@ async fn scheduler_loop(base: DaemonState) {
             let _ = tokio::task::spawn_blocking(move || promotion::round(&promoting)).await;
             let stewarding = state.clone();
             let _ = tokio::task::spawn_blocking(move || stewardship::round(&stewarding)).await;
+            let renewing = state.clone();
+            let _ = tokio::task::spawn_blocking(move || logins::round(&renewing)).await;
         }
         if is_headquarters && SourceDesk::has_work(&state.roster) && desk.begin() {
             let (desk, plugins, roster, registry) = (
@@ -6341,6 +6380,7 @@ fn spawn_event_pump_with_monitor(
                     }
                     if matches!(event.kind.as_str(), "completed" | "failed") {
                         let finished = finish_operation(&state, &mission_id, &session);
+                        let event = with_login_note(&state, &mission_id, event);
                         publish_finished_event(&state, &mission_id, event, finished);
                         break;
                     }
@@ -6374,6 +6414,7 @@ fn spawn_event_pump_with_monitor(
                         quota: Vec::new(),
                     };
                     let finished = finish_operation(&state, &mission_id, &session);
+                    let event = with_login_note(&state, &mission_id, event);
                     publish_finished_event(&state, &mission_id, event, finished);
                     break;
                 }
@@ -7368,6 +7409,19 @@ fn publish_finished_event(
     if cover_blown {
         medical::report_incident(state, mission_id, IncidentKind::Blown);
     }
+}
+
+/// A failed Session's words, with what its login did under it when that may be why.
+fn with_login_note(state: &DaemonState, mission_id: &str, mut event: AgentEvent) -> AgentEvent {
+    if event.kind == "failed"
+        && let Some(note) = logins::stale_note(state, mission_id)
+    {
+        event.text = Some(match event.text.take() {
+            Some(text) => format!("{text}\n{note}"),
+            None => note,
+        });
+    }
+    event
 }
 
 fn apply_finish_outcome(mut event: AgentEvent, finished: &FinishOutcome) -> AgentEvent {

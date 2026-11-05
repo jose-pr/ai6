@@ -34,6 +34,7 @@ mod mission_issues;
 mod postgres;
 mod records;
 mod reviews;
+mod sealed;
 mod sessions;
 mod stations;
 mod steps;

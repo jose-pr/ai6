@@ -14,7 +14,9 @@ use std::time::Duration;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::roster::Agent;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
-use crate::directorates::q::secret_kind::{BUILT_IN, SecretFields, SecretKeeper};
+use crate::directorates::q::secret_kind::{
+    BUILT_IN, REGISTRY_PROVIDER, SecretFields, SecretKeeper,
+};
 use crate::directorates::q::{
     CREDENTIAL_VARIABLES, Loadout, LoadoutCatalog, SecretBroker, SecretDefinition, SecretLease,
     SecretLeaseRequest,
@@ -171,7 +173,9 @@ impl CredentialDesk {
             if let Some(weakening) = definition.green_ink_weakening() {
                 weakened.push(weakening);
             }
-            if definition.green_ink() && BUILT_IN.contains(&provider) {
+            if definition.green_ink()
+                && (BUILT_IN.contains(&provider) || provider == REGISTRY_PROVIDER)
+            {
                 weakened.push(format!(
                     "green ink secret {name:?} is served from the Station's own files, \
                      environment or configuration, so revoking its lease cannot take the value \
@@ -240,6 +244,7 @@ impl CredentialDesk {
             catalog,
             secrets_dir: self.secrets_dir.clone(),
             built: self.built.clone(),
+            vault: self.accounts.logins.vault().cloned(),
         }
     }
 
@@ -265,6 +270,7 @@ struct Finder {
     catalog: Arc<LoadoutCatalog>,
     secrets_dir: Option<std::path::PathBuf>,
     built: Arc<Mutex<BTreeMap<String, Built>>>,
+    vault: Option<Arc<crate::directorates::q::sealing::Vault>>,
 }
 
 impl Finder {
@@ -273,6 +279,15 @@ impl Finder {
     /// `within` holds the instances whose settings are being read, so one whose credential
     /// leads back to itself is refused. Its error is the Station's own text, never a provider's.
     fn keeper(&self, name: &str, within: &mut Vec<String>) -> Result<Arc<SecretKeeper>, String> {
+        if name == REGISTRY_PROVIDER {
+            let vault = self
+                .vault
+                .clone()
+                .ok_or("this Station has no sealing key")?;
+            return Ok(Arc::new(SecretKeeper::new(Box::new(
+                crate::directorates::q::sealing::RegistrySecrets::new(vault),
+            ))?));
+        }
         let instance = self.catalog.secret_providers().get(name);
         let (provider, settings) = match instance {
             Some(instance) => {
