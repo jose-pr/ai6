@@ -19,6 +19,7 @@ pub struct universal_exports::AccessProviders
 impl universal_exports::AccessProviders
 pub fn universal_exports::AccessProviders::from_reverse_proxy(alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn universal_exports::AccessProviders::new(alloc::sync::Arc<dyn coqui_access::kind::Authenticator>, alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>) -> Self
+pub fn universal_exports::AccessProviders::with_page_authenticator(self, alloc::sync::Arc<dyn coqui_access::kind::Authenticator>) -> Self
 pub fn universal_exports::AccessProviders::with_proxy_identity(self, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn universal_exports::AccessProviders::with_proxy_secret(self, impl core::convert::Into<alloc::string::String>, usize) -> core::result::Result<Self, alloc::string::String>
 impl core::fmt::Debug for universal_exports::AccessProviders
@@ -221,6 +222,8 @@ pub fn universal_exports::Gateway::with_job_poll_max_wait(self, core::time::Dura
 pub fn universal_exports::Gateway::with_pages(self, universal_exports::PagesConfig) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
 pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>) -> Self
+impl universal_exports::Gateway
+pub async fn universal_exports::Gateway::serve_tls<F>(self, tokio::net::tcp::listener::TcpListener, alloc::sync::Arc<rustls::server::server_conn::ServerConfig>, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 impl core::fmt::Debug for universal_exports::Gateway
 pub fn universal_exports::Gateway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::GatewayConfig
@@ -414,3 +417,4 @@ pub universal_exports::ViewLimits::view_bytes: usize
 impl core::default::Default for universal_exports::ViewLimits
 pub fn universal_exports::ViewLimits::default() -> Self
 pub const universal_exports::PROXY_SECRET_HEADER: &str
+pub fn universal_exports::tls_server_config(&[u8], &[u8]) -> core::result::Result<rustls::server::server_conn::ServerConfig, alloc::string::String>

@@ -18,6 +18,7 @@ pub struct ai6_agent_claude::ClaudeHandler
 impl ai6::directorates::section_00::agent::AgentHandler for ai6_agent_claude::ClaudeHandler
 pub fn ai6_agent_claude::ClaudeHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_claude::ClaudeHandler::image_input(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::program(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_claude::ClaudeHandler::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>

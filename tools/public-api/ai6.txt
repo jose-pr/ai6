@@ -196,7 +196,7 @@ pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::secrets_dir(&self) ->
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_dir(&self) -> std::path::PathBuf
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_listen(&self) -> core::net::socket_addr::SocketAddr
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::proxy_secret_min_bytes(&self) -> u64
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_listen(&self) -> core::net::socket_addr::SocketAddr
@@ -264,7 +264,11 @@ pub ai6::bootstrap::UnexSettings::proxy_secret_min_bytes: core::option::Option<u
 pub ai6::bootstrap::UnexSettings::public_origin: core::option::Option<alloc::string::String>
 pub ai6::bootstrap::UnexSettings::state_dir: core::option::Option<std::path::PathBuf>
 pub ai6::bootstrap::UnexSettings::station_token: core::option::Option<ai6::bootstrap::SecretRef>
+pub ai6::bootstrap::UnexSettings::tls: ai6::bootstrap::UnexTlsSettings
 pub ai6::bootstrap::UnexSettings::url: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::bootstrap::UnexTlsSettings
+pub ai6::bootstrap::UnexTlsSettings::certificate: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::UnexTlsSettings::key: core::option::Option<std::path::PathBuf>
 pub const ai6::bootstrap::CONFIG_ENV: &str
 pub const ai6::bootstrap::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::bootstrap::DEFAULT_PAGES_LISTEN: core::net::socket_addr::SocketAddr
@@ -612,6 +616,11 @@ pub ai6::directorates::m::assistant::AssistantGatewayLimits::result_chars: ai6::
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::route_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::shared_base_wait: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::socket_message_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::source_answer_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::source_comments: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::source_items: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::source_reads: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantGatewayLimits::source_wait: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::sweep_every: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::token_reuse_margin: ai6::bounds::Seconds
 pub ai6::directorates::m::assistant::AssistantGatewayLimits::token_ttl: ai6::bounds::Seconds
@@ -629,6 +638,8 @@ pub ai6::directorates::m::assistant::AssistantLimits::commit_message_bytes: ai6:
 pub ai6::directorates::m::assistant::AssistantLimits::context_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::event_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::events: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantLimits::image_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantLimits::images: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::message_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::page_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::page_file_bytes: ai6::bounds::Limit
@@ -1127,6 +1138,8 @@ pub ai6::directorates::m::config::UnexRecord::gateway: ai6::directorates::m::une
 pub ai6::directorates::m::config::UnexRecord::login: ai6::directorates::m::unex_limits::LoginTable
 pub ai6::directorates::m::config::UnexRecord::login_tries_per_address: core::option::Option<u32>
 pub ai6::directorates::m::config::UnexRecord::login_tries_per_name: core::option::Option<u32>
+pub ai6::directorates::m::config::UnexRecord::page_authenticator: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::config::UnexRecord::page_authenticator_config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
 pub ai6::directorates::m::config::UnexRecord::provider_config_depth: ai6::bounds::Limit
 pub ai6::directorates::m::config::UnexRecord::proxy_lookup_by: alloc::string::String
 pub ai6::directorates::m::config::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
@@ -4371,18 +4384,21 @@ pub trait ai6::directorates::registry::backend::AccessTokenStore
 pub fn ai6::directorates::registry::backend::AccessTokenStore::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::backend::AccessTokenStore::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::backend::AccountStore
@@ -6585,6 +6601,7 @@ impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates:
 pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
@@ -6837,6 +6854,7 @@ impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates:
 pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::store::FileRegistry
@@ -6957,18 +6975,21 @@ pub trait ai6::directorates::registry::store::AccessTokenStore
 pub fn ai6::directorates::registry::store::AccessTokenStore::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::AccessTokenStore::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::store::AccessTokenStore::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::store::AgentRoleStore
@@ -7181,6 +7202,37 @@ pub ai6::directorates::registry::tracker::ReplyBatch::replies: alloc::vec::Vec<a
 pub struct ai6::directorates::registry::tracker::ReplyPoll
 pub ai6::directorates::registry::tracker::ReplyPoll::items: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::tracker::ReplyPoll::since: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::registry::tracker::SourceRead
+pub ai6::directorates::registry::tracker::SourceRead::comments: u32
+pub ai6::directorates::registry::tracker::SourceRead::id: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceRead::item: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::SourceRead::items: u32
+pub ai6::directorates::registry::tracker::SourceRead::operation: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceRead::query: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::SourceRead::tracker: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::registry::tracker::SourceReadAnswer
+pub ai6::directorates::registry::tracker::SourceReadAnswer::comments: alloc::vec::Vec<ai6::directorates::registry::tracker::SourceReadComment>
+pub ai6::directorates::registry::tracker::SourceReadAnswer::error: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::SourceReadAnswer::item: core::option::Option<ai6::directorates::registry::tracker::SourceReadItem>
+pub ai6::directorates::registry::tracker::SourceReadAnswer::items: alloc::vec::Vec<ai6::directorates::registry::tracker::SourceReadItem>
+pub struct ai6::directorates::registry::tracker::SourceReadComment
+pub ai6::directorates::registry::tracker::SourceReadComment::at: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceReadComment::author: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceReadComment::body: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceReadComment::role: alloc::string::String
+impl ai6::directorates::registry::tracker::SourceReadComment
+pub fn ai6::directorates::registry::tracker::SourceReadComment::of(ai6::directorates::registry::tracker::Reply) -> Self
+pub struct ai6::directorates::registry::tracker::SourceReadItem
+pub ai6::directorates::registry::tracker::SourceReadItem::assignees: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::SourceReadItem::author: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::SourceReadItem::body: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::SourceReadItem::id: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceReadItem::labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::tracker::SourceReadItem::state: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::tracker::SourceReadItem::title: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceReadItem::tracker: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceReadItem::updated: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceReadItem::url: core::option::Option<alloc::string::String>
 pub struct ai6::directorates::registry::tracker::TrackerCapabilities
 pub ai6::directorates::registry::tracker::TrackerCapabilities::assign: bool
 pub ai6::directorates::registry::tracker::TrackerCapabilities::children: alloc::string::String
@@ -7539,6 +7591,7 @@ pub trait ai6::directorates::section_00::agent::AgentHandler: core::marker::Send
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::image_input(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::program(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -7551,6 +7604,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::ki
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::image_input(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::program(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -7563,6 +7617,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::ki
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::image_input(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::program(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -7619,6 +7674,12 @@ pub ai6::directorates::section_00::assistant::AssistantEvent::text: core::option
 pub ai6::directorates::section_00::assistant::AssistantEvent::tools: alloc::vec::Vec<alloc::string::String>
 impl ai6::directorates::section_00::assistant::AssistantEvent
 pub fn ai6::directorates::section_00::assistant::AssistantEvent::new(&str, core::option::Option<alloc::string::String>) -> Self
+pub struct ai6::directorates::section_00::assistant::AssistantImage
+pub ai6::directorates::section_00::assistant::AssistantImage::bytes: u64
+pub ai6::directorates::section_00::assistant::AssistantImage::media_type: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantImage::sha256: alloc::string::String
+impl ai6::directorates::section_00::assistant::AssistantImage
+pub fn ai6::directorates::section_00::assistant::AssistantImage::validate(&self, &ai6::AssistantLimits) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::directorates::section_00::assistant::AssistantJob
 pub ai6::directorates::section_00::assistant::AssistantJob::agent_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::cable_confirm: core::option::Option<ai6::directorates::section_00::assistant::AssistantCableDecision>
@@ -7629,6 +7690,7 @@ pub ai6::directorates::section_00::assistant::AssistantJob::commit: core::option
 pub ai6::directorates::section_00::assistant::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantJob::conversation_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::groups: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::directorates::section_00::assistant::AssistantJob::images: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantImage>
 pub ai6::directorates::section_00::assistant::AssistantJob::interrupt: bool
 pub ai6::directorates::section_00::assistant::AssistantJob::job_id: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantJob::mcp_token: alloc::string::String
@@ -7714,6 +7776,18 @@ pub fn ai6::directorates::section_00::assistant::interpreter_name(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::directorates::section_00::assistant::repository_path(&str) -> bool
 pub fn ai6::directorates::section_00::assistant::valid_identity(&str) -> bool
+pub mod ai6::directorates::section_00::content
+pub struct ai6::directorates::section_00::content::MessageContent
+pub ai6::directorates::section_00::content::MessageContent::images: alloc::vec::Vec<ai6::directorates::section_00::content::MessageImage>
+pub ai6::directorates::section_00::content::MessageContent::text: alloc::string::String
+impl ai6::directorates::section_00::content::MessageContent
+pub fn ai6::directorates::section_00::content::MessageContent::decode(&str) -> core::option::Option<Self>
+pub fn ai6::directorates::section_00::content::MessageContent::encode(&self) -> alloc::string::String
+pub struct ai6::directorates::section_00::content::MessageImage
+pub ai6::directorates::section_00::content::MessageImage::data: alloc::string::String
+pub ai6::directorates::section_00::content::MessageImage::media_type: alloc::string::String
+pub const ai6::directorates::section_00::content::CONTENT_PREFIX: &str
+pub const ai6::directorates::section_00::content::IMAGE_MEDIA_TYPES: [&str; 4]
 pub mod ai6::directorates::section_00::denied
 pub enum ai6::directorates::section_00::denied::DenyEntry
 pub ai6::directorates::section_00::denied::DenyEntry::Category(&'static str)
@@ -7985,6 +8059,8 @@ pub ai6::station::limits::SourceLimits::outbox_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::poll: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::reopen_watch: ai6::bounds::Limit
 pub ai6::station::limits::SourceLimits::reopen_watch_every: ai6::bounds::Seconds
+pub ai6::station::limits::SourceLimits::read_bytes: ai6::bounds::Limit
+pub ai6::station::limits::SourceLimits::read_wait: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::replies_read: ai6::bounds::Limit
 pub ai6::station::limits::SourceLimits::reply_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::report_every: ai6::bounds::Seconds
@@ -9361,6 +9437,11 @@ pub ai6::AssistantGatewayLimits::result_chars: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::route_bytes: ai6::bounds::Limit
 pub ai6::AssistantGatewayLimits::shared_base_wait: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::socket_message_bytes: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::source_answer_bytes: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::source_comments: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::source_items: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::source_reads: ai6::bounds::Limit
+pub ai6::AssistantGatewayLimits::source_wait: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::sweep_every: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::token_reuse_margin: ai6::bounds::Seconds
 pub ai6::AssistantGatewayLimits::token_ttl: ai6::bounds::Seconds
@@ -9370,6 +9451,12 @@ pub fn ai6::AssistantGatewayLimits::validate(&self) -> core::result::Result<(), 
 pub fn ai6::AssistantGatewayLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::AssistantGatewayLimits
 pub fn ai6::AssistantGatewayLimits::default() -> Self
+pub struct ai6::AssistantImage
+pub ai6::AssistantImage::bytes: u64
+pub ai6::AssistantImage::media_type: alloc::string::String
+pub ai6::AssistantImage::sha256: alloc::string::String
+impl ai6::directorates::section_00::assistant::AssistantImage
+pub fn ai6::directorates::section_00::assistant::AssistantImage::validate(&self, &ai6::AssistantLimits) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::AssistantJob
 pub ai6::AssistantJob::agent_id: alloc::string::String
 pub ai6::AssistantJob::cable_confirm: core::option::Option<ai6::directorates::section_00::assistant::AssistantCableDecision>
@@ -9380,6 +9467,7 @@ pub ai6::AssistantJob::commit: core::option::Option<ai6::directorates::section_0
 pub ai6::AssistantJob::context: alloc::vec::Vec<alloc::string::String>
 pub ai6::AssistantJob::conversation_id: alloc::string::String
 pub ai6::AssistantJob::groups: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::AssistantJob::images: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantImage>
 pub ai6::AssistantJob::interrupt: bool
 pub ai6::AssistantJob::job_id: alloc::string::String
 pub ai6::AssistantJob::mcp_token: alloc::string::String
@@ -9404,6 +9492,8 @@ pub ai6::AssistantLimits::commit_message_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::context_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::event_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::events: ai6::bounds::Limit
+pub ai6::AssistantLimits::image_bytes: ai6::bounds::Limit
+pub ai6::AssistantLimits::images: ai6::bounds::Limit
 pub ai6::AssistantLimits::message_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::page_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::page_file_bytes: ai6::bounds::Limit
@@ -10386,6 +10476,7 @@ impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates:
 pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::store::FileRegistry
@@ -10762,6 +10853,15 @@ impl ai6::directorates::registry::memories::MemorySource
 pub fn ai6::directorates::registry::memories::MemorySource::exposed(&self) -> bool
 pub fn ai6::directorates::registry::memories::MemorySource::exposed_by(self, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::memories::MemorySource::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+pub struct ai6::MessageContent
+pub ai6::MessageContent::images: alloc::vec::Vec<ai6::directorates::section_00::content::MessageImage>
+pub ai6::MessageContent::text: alloc::string::String
+impl ai6::directorates::section_00::content::MessageContent
+pub fn ai6::directorates::section_00::content::MessageContent::decode(&str) -> core::option::Option<Self>
+pub fn ai6::directorates::section_00::content::MessageContent::encode(&self) -> alloc::string::String
+pub struct ai6::MessageImage
+pub ai6::MessageImage::data: alloc::string::String
+pub ai6::MessageImage::media_type: alloc::string::String
 pub struct ai6::MissionEntry
 impl ai6::directorates::registry::mission_ids::MissionEntry
 pub fn ai6::directorates::registry::mission_ids::MissionEntry::follow_up(&str, &str, &str) -> Self
@@ -11838,6 +11938,37 @@ impl core::default::Default for ai6::directorates::registry::limits::SourceLimit
 pub fn ai6::directorates::registry::limits::SourceLimits::default() -> Self
 pub struct ai6::SourcePoll
 pub ai6::SourcePoll::cursor: core::option::Option<alloc::string::String>
+pub struct ai6::SourceRead
+pub ai6::SourceRead::comments: u32
+pub ai6::SourceRead::id: alloc::string::String
+pub ai6::SourceRead::item: core::option::Option<alloc::string::String>
+pub ai6::SourceRead::items: u32
+pub ai6::SourceRead::operation: alloc::string::String
+pub ai6::SourceRead::query: core::option::Option<alloc::string::String>
+pub ai6::SourceRead::tracker: core::option::Option<alloc::string::String>
+pub struct ai6::SourceReadAnswer
+pub ai6::SourceReadAnswer::comments: alloc::vec::Vec<ai6::directorates::registry::tracker::SourceReadComment>
+pub ai6::SourceReadAnswer::error: core::option::Option<alloc::string::String>
+pub ai6::SourceReadAnswer::item: core::option::Option<ai6::directorates::registry::tracker::SourceReadItem>
+pub ai6::SourceReadAnswer::items: alloc::vec::Vec<ai6::directorates::registry::tracker::SourceReadItem>
+pub struct ai6::SourceReadComment
+pub ai6::SourceReadComment::at: alloc::string::String
+pub ai6::SourceReadComment::author: alloc::string::String
+pub ai6::SourceReadComment::body: alloc::string::String
+pub ai6::SourceReadComment::role: alloc::string::String
+impl ai6::directorates::registry::tracker::SourceReadComment
+pub fn ai6::directorates::registry::tracker::SourceReadComment::of(ai6::directorates::registry::tracker::Reply) -> Self
+pub struct ai6::SourceReadItem
+pub ai6::SourceReadItem::assignees: alloc::vec::Vec<alloc::string::String>
+pub ai6::SourceReadItem::author: core::option::Option<alloc::string::String>
+pub ai6::SourceReadItem::body: core::option::Option<alloc::string::String>
+pub ai6::SourceReadItem::id: alloc::string::String
+pub ai6::SourceReadItem::labels: alloc::vec::Vec<alloc::string::String>
+pub ai6::SourceReadItem::state: core::option::Option<alloc::string::String>
+pub ai6::SourceReadItem::title: alloc::string::String
+pub ai6::SourceReadItem::tracker: alloc::string::String
+pub ai6::SourceReadItem::updated: alloc::string::String
+pub ai6::SourceReadItem::url: core::option::Option<alloc::string::String>
 pub struct ai6::Spec
 pub ai6::Spec::argv: alloc::vec::Vec<alloc::string::String>
 pub ai6::Spec::cols: u16
@@ -12010,6 +12141,7 @@ impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates:
 pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
@@ -12499,6 +12631,8 @@ pub ai6::UnexRecord::gateway: ai6::directorates::m::unex_limits::UnexGatewayLimi
 pub ai6::UnexRecord::login: ai6::directorates::m::unex_limits::LoginTable
 pub ai6::UnexRecord::login_tries_per_address: core::option::Option<u32>
 pub ai6::UnexRecord::login_tries_per_name: core::option::Option<u32>
+pub ai6::UnexRecord::page_authenticator: core::option::Option<alloc::string::String>
+pub ai6::UnexRecord::page_authenticator_config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
 pub ai6::UnexRecord::provider_config_depth: ai6::bounds::Limit
 pub ai6::UnexRecord::proxy_lookup_by: alloc::string::String
 pub ai6::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
@@ -12749,18 +12883,21 @@ pub trait ai6::AccessTokenStore
 pub fn ai6::AccessTokenStore::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::AccessTokenStore::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 pub trait ai6::AccountLogin: core::marker::Send + core::marker::Sync
@@ -12804,6 +12941,7 @@ pub trait ai6::AgentHandler: core::marker::Send + core::marker::Sync
 pub fn ai6::AgentHandler::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::image_input(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::program(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -12816,6 +12954,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::ki
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::image_input(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::program(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -12828,6 +12967,7 @@ impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::ki
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_skills(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::clearance_refusal(&self, alloc::string::String) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::image_input(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::models(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<ai6::directorates::section_00::agent::ModelListing, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::program(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
