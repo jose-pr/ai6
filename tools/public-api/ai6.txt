@@ -667,6 +667,8 @@ pub ai6::directorates::m::assistant::AssistantPageLimits::default_ttl: ai6::boun
 pub ai6::directorates::m::assistant::AssistantPageLimits::feed_reads_per_minute: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::feeds: bool
 pub ai6::directorates::m::assistant::AssistantPageLimits::frame: bool
+pub ai6::directorates::m::assistant::AssistantPageLimits::handoff_ttl: ai6::bounds::Seconds
+pub ai6::directorates::m::assistant::AssistantPageLimits::handoffs: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::inline_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::max_feeds: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantPageLimits::max_file_bytes: ai6::bounds::Limit
@@ -8057,10 +8059,10 @@ pub ai6::station::limits::SourceLimits::min_poll: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::outbox_batch: ai6::bounds::Limit
 pub ai6::station::limits::SourceLimits::outbox_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::poll: ai6::bounds::Seconds
-pub ai6::station::limits::SourceLimits::reopen_watch: ai6::bounds::Limit
-pub ai6::station::limits::SourceLimits::reopen_watch_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::read_bytes: ai6::bounds::Limit
 pub ai6::station::limits::SourceLimits::read_wait: ai6::bounds::Seconds
+pub ai6::station::limits::SourceLimits::reopen_watch: ai6::bounds::Limit
+pub ai6::station::limits::SourceLimits::reopen_watch_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::replies_read: ai6::bounds::Limit
 pub ai6::station::limits::SourceLimits::reply_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::report_every: ai6::bounds::Seconds
@@ -9568,6 +9570,8 @@ pub ai6::AssistantPageLimits::default_ttl: ai6::bounds::Seconds
 pub ai6::AssistantPageLimits::feed_reads_per_minute: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::feeds: bool
 pub ai6::AssistantPageLimits::frame: bool
+pub ai6::AssistantPageLimits::handoff_ttl: ai6::bounds::Seconds
+pub ai6::AssistantPageLimits::handoffs: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::inline_bytes: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::max_feeds: ai6::bounds::Limit
 pub ai6::AssistantPageLimits::max_file_bytes: ai6::bounds::Limit
