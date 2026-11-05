@@ -293,7 +293,7 @@ fn program_agent(settings: &str) -> String {
 }
 
 /// A Station whose book holds no Mission yet.
-fn empty_book(root: &Path, agents: &str) -> DaemonState {
+pub(super) fn empty_book(root: &Path, agents: &str) -> DaemonState {
     let mut state = test_state(root, "", agents);
     state.missions = Arc::new(Mutex::new(MissionStore::default()));
     publish_station_check_in(&state);

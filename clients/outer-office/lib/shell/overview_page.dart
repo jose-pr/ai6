@@ -508,6 +508,7 @@ class _ActiveOperations extends StatelessWidget {
             'blocked',
             'stalled',
             'quarantined',
+            'held',
           }.contains(mission.state),
         )
         ? (tokens.warning, 'needs attention')

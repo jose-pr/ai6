@@ -1307,7 +1307,7 @@ enum Delivery {
     Now,
     /// Stalled, parked or quarantined: it can still go on, so it keeps what it is owed.
     Later,
-    /// Queued or finished: no Session of it will hear it.
+    /// Queued, held for a person's verdict or finished: no Session of it will hear it.
     Never,
 }
 
@@ -1317,6 +1317,7 @@ impl Delivery {
             MissionState::Working | MissionState::Blocked => Self::Now,
             MissionState::Stalled | MissionState::Parked | MissionState::Quarantined => Self::Later,
             MissionState::Queued
+            | MissionState::Held
             | MissionState::Done
             | MissionState::Failed
             | MissionState::Blown

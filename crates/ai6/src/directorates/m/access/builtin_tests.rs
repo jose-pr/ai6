@@ -95,7 +95,12 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
     operator.sort_unstable();
     let mut auditor: Vec<&str> = [
         &read[..],
-        &["access.read", "audit.read", "session.context"][..],
+        &[
+            "access.read",
+            "audit.read",
+            "mission.verify",
+            "session.context",
+        ][..],
     ]
     .concat();
     auditor.sort_unstable();
@@ -112,6 +117,7 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
             "compartment.manage",
             "memory.write",
             "mission.review",
+            "mission.verify",
             "pool.manage",
             "roster.manage",
             "session.context",

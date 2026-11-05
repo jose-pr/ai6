@@ -24,6 +24,7 @@ const operationActions = [
   'mission.control',
   'mission.create',
   'mission.read',
+  'mission.verify',
   'pool.manage',
   'pool.read',
   'session.context',

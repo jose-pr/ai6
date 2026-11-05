@@ -857,6 +857,15 @@ pub struct SessionLimits {
     #[schema(title = "Sources of exposure per brief")]
     #[map(default = SessionLimits::default().exposure_sources)]
     pub exposure_sources: Limit,
+    /// Bytes kept of an Agent's final message for its Mission's outcome; a longer one is cut and
+    /// says so.
+    #[schema(title = "Longest final report", format = "bytes")]
+    #[map(default = SessionLimits::default().final_report_bytes)]
+    pub final_report_bytes: Limit,
+    /// Bytes of the note a person gives with a verdict on a Mission's outcome.
+    #[schema(title = "Longest verdict note", format = "bytes")]
+    #[map(default = SessionLimits::default().verdict_note_bytes)]
+    pub verdict_note_bytes: Limit,
 }
 
 impl Default for SessionLimits {
@@ -870,6 +879,8 @@ impl Default for SessionLimits {
             recent_events: Limit::at(20),
             recent_event_chars: Limit::at(300),
             exposure_sources: Limit::at(32),
+            final_report_bytes: Limit::at(64 * KIB),
+            verdict_note_bytes: Limit::at(4 * KIB),
         }
     }
 }

@@ -65,7 +65,7 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// changes the memory of `operation:<id>`, or of everyone at `config:memory`.
 /// `session.context` reads what an agent was given and did in a Session: on `operation:<id>` a
 /// Mission's, and with `audit.read` on `config:assistant` another person's conversations with
-/// Moneypenny.
+/// Moneypenny. `mission.verify` gives a verdict on a Mission's outcome.
 pub const ACTIONS: &[&str] = &[
     "access.manage",
     "access.read",
@@ -91,6 +91,7 @@ pub const ACTIONS: &[&str] = &[
     "mission.read",
     "mission.review",
     "mission.status",
+    "mission.verify",
     "pool.manage",
     "pool.read",
     "product.read",
@@ -126,6 +127,7 @@ pub const OPERATION_ACTIONS: &[&str] = &[
     "mission.read",
     "mission.review",
     "mission.status",
+    "mission.verify",
     "pool.manage",
     "pool.read",
     "product.read",

@@ -40,6 +40,9 @@ pub enum MissionState {
     /// Medical or an operator stopped the work because its Agent is quarantined; only an
     /// operator releases it.
     Quarantined,
+    /// Its Session ended done with nothing a role requires, so a person's verdict settles it: the
+    /// work is kept and no harness runs. `blocked_reason` says why.
+    Held,
 }
 
 impl MissionState {
@@ -56,6 +59,7 @@ impl MissionState {
             Self::Abandoned => "abandoned",
             Self::Parked => "parked",
             Self::Quarantined => "quarantined",
+            Self::Held => "held",
         }
     }
 }
@@ -95,8 +99,9 @@ pub struct Mission {
     /// When a parked Mission resumes, as Unix seconds; set only while `state` is `Parked`.
     #[serde(default)]
     pub parked_until: Option<i64>,
-    /// Why a blocked Mission stopped when AI6 itself stopped it (`budget`); unset when the
-    /// Agent or the terminal is what is waiting. Cleared by the next state change.
+    /// Why a blocked Mission stopped when AI6 itself stopped it (`budget`), or why a held one
+    /// is held; unset when the Agent or the terminal is what is waiting. Cleared by the next
+    /// state change.
     #[serde(default)]
     pub blocked_reason: Option<String>,
     /// Why AI6 failed the Mission without its Agent: a harness that cannot be started. Cleared by
@@ -547,6 +552,27 @@ impl MissionStore {
         Ok(updated)
     }
 
+    /// Holds a Mission whose Session ended done with `reason` standing in the way of `done`.
+    pub fn hold_for(&mut self, mission_id: &str, reason: &str) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if !valid_transition(mission.state, MissionState::Held) {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Held,
+            });
+        }
+        mission.state = MissionState::Held;
+        mission.parked_until = None;
+        mission.blocked_reason = Some(reason.to_owned());
+        mission.failure = None;
+        mission.waiting = None;
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
     /// Quarantines an active Mission: its work stops and only an operator moves it on.
     ///
     /// Quarantining again is harmless. Finished Missions are left alone.
@@ -893,12 +919,17 @@ pub enum MissionError {
 
 fn valid_transition(from: MissionState, to: MissionState) -> bool {
     use MissionState::{
-        Abandoned, Blocked, Blown, Done, Failed, Parked, Quarantined, Queued, Stalled, Working,
+        Abandoned, Blocked, Blown, Done, Failed, Held, Parked, Quarantined, Queued, Stalled,
+        Working,
     };
     matches!(
         (from, to),
         (Queued, Working | Failed | Abandoned)
-            | (Working, Blocked | Stalled | Done | Failed | Abandoned)
+            | (
+                Working,
+                Blocked | Stalled | Done | Failed | Abandoned | Held
+            )
+            | (Held, Done | Failed | Abandoned)
             | (Blocked, Stalled | Working | Failed | Abandoned)
             | (Working, Blown)
             | (Blocked, Blown)

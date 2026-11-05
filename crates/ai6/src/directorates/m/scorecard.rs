@@ -3,10 +3,11 @@
 //! It is computed from the shared Session records and the usage ledger every time it is asked
 //! for; nothing is kept besides them. Each attempt gets one [`Judgment`] from [`judge`], and
 //! a judgment names whose doing the outcome was: only `done`, `failed`, `blown` and `stalled` are
-//! the Agent's own and are judged. A provider limit, a lost Station, a hand-off to another
-//! Agent, a person's stop, an approval someone has not given yet and a spending limit are shown
-//! but not held against it. An attempt that never started (a failed checkout, a brief with no
-//! Agent) has no Session record and so does not appear.
+//! the Agent's own and are judged, and a person's verdict that a `done` does not hold up turns it
+//! into a failure. A provider limit, a lost Station, a hand-off to another Agent, a person's stop,
+//! an approval someone has not given yet and a spending limit are shown but not held against it.
+//! An attempt that never started (a failed checkout, a brief with no Agent) has no Session record
+//! and so does not appear.
 //!
 //! Every number lists the attempts behind it, so a person can open the Missions and check.
 
@@ -20,7 +21,7 @@ use crate::directorates::m::roster::RouteRef;
 use crate::directorates::m::stewardship::StewardshipPolicy;
 use crate::directorates::medical::usage::UsageTotals;
 use crate::directorates::registry::sessions::{
-    SessionRecord, SessionResult, SessionStatus, SessionStore,
+    OutcomeVerdict, SessionRecord, SessionResult, SessionStatus, SessionStore,
 };
 use crate::directorates::registry::usage::UsageStore;
 
@@ -44,7 +45,9 @@ pub enum Judgment {
     Blown,
     /// The Watchdog stopped it for making no progress or looping: the Agent's.
     Stalled,
-    /// Waiting on a person's approval, an issue or an answer: not a failure.
+    /// A person disputed its outcome or found it failed verification: the Agent's.
+    Disputed,
+    /// Waiting on a person's approval, an issue, an answer or a verdict: not a failure.
     WaitingOnPerson,
     /// A spending limit stopped it: a cost, not a failure.
     BudgetStop,
@@ -64,11 +67,12 @@ pub enum Judgment {
 
 impl Judgment {
     /// Every judgment, in the order a scorecard lists them.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Done,
         Self::Failed,
         Self::Blown,
         Self::Stalled,
+        Self::Disputed,
         Self::WaitingOnPerson,
         Self::BudgetStop,
         Self::Parked,
@@ -86,6 +90,7 @@ impl Judgment {
             Self::Failed => "failed",
             Self::Blown => "blown",
             Self::Stalled => "stalled",
+            Self::Disputed => "disputed",
             Self::WaitingOnPerson => "waiting_on_person",
             Self::BudgetStop => "budget_stop",
             Self::Parked => "parked",
@@ -101,13 +106,16 @@ impl Judgment {
     pub fn is_judged(self) -> bool {
         matches!(
             self,
-            Self::Done | Self::Failed | Self::Blown | Self::Stalled
+            Self::Done | Self::Failed | Self::Blown | Self::Stalled | Self::Disputed
         )
     }
 
     /// Whether it counts against the Agent.
     pub fn is_fault(self) -> bool {
-        matches!(self, Self::Failed | Self::Blown | Self::Stalled)
+        matches!(
+            self,
+            Self::Failed | Self::Blown | Self::Stalled | Self::Disputed
+        )
     }
 }
 
@@ -115,6 +123,10 @@ impl Judgment {
 pub fn judge(record: &SessionRecord) -> Judgment {
     if record.status == SessionStatus::Lost {
         return Judgment::Lost;
+    }
+    let verdict = record.verdict.as_ref().map(|verdict| verdict.verdict);
+    if verdict.is_some_and(OutcomeVerdict::is_fault) {
+        return Judgment::Disputed;
     }
     let closed = record.status.is_closed();
     let Some(result) = &record.result else {
@@ -127,6 +139,8 @@ pub fn judge(record: &SessionRecord) -> Judgment {
     let reason = result.reason.as_deref();
     match result.state.as_str() {
         "done" => Judgment::Done,
+        "held" if verdict == Some(OutcomeVerdict::Confirmed) => Judgment::Done,
+        "held" => Judgment::WaitingOnPerson,
         "failed" => Judgment::Failed,
         "blown" => Judgment::Blown,
         "stalled" => Judgment::Stalled,
@@ -264,9 +278,9 @@ pub struct AttemptRef {
 pub struct Standing {
     /// The attempts of each judgment, oldest first. The numbers are their lengths.
     pub attempts: BTreeMap<Judgment, Vec<AttemptRef>>,
-    /// Attempts whose outcome is the Agent's own: done, failed, blown or stalled.
+    /// Attempts whose outcome is the Agent's own: done, failed, blown, stalled or disputed.
     pub judged: u64,
-    /// Failed, blown and stalled among the judged; `None` before any was judged.
+    /// Failed, blown, stalled and disputed among the judged; `None` before any was judged.
     pub failure_rate: Option<f64>,
     /// Whether `judged` is below the Operation's small-sample line, so no ranking should rest
     /// on it.
@@ -554,6 +568,7 @@ mod tests {
                 .then_some(1_100.0),
             result: Some(SessionResult::new(state).with_reason(reason.map(str::to_owned))),
             window: None,
+            verdict: None,
         }
     }
 
@@ -602,11 +617,75 @@ mod tests {
         for judgment in Judgment::ALL {
             let judged = matches!(
                 judgment,
-                Judgment::Done | Judgment::Failed | Judgment::Blown | Judgment::Stalled
+                Judgment::Done
+                    | Judgment::Failed
+                    | Judgment::Blown
+                    | Judgment::Stalled
+                    | Judgment::Disputed
             );
             assert_eq!(judgment.is_judged(), judged, "{judgment:?}");
             assert!(!judgment.is_fault() || judgment.is_judged());
         }
+    }
+
+    #[test]
+    fn a_verdict_changes_what_an_attempt_counts_as() {
+        use crate::directorates::registry::sessions::MissionVerdict;
+
+        let judged = |state: &str, verdict: Option<OutcomeVerdict>| {
+            let mut record = attempt("m", "007", "x", state, None);
+            record.verdict = verdict.map(|verdict| MissionVerdict::new(verdict, "p", 1.0, None));
+            judge(&record)
+        };
+        assert_eq!(judged("done", None), Judgment::Done);
+        assert_eq!(
+            judged("done", Some(OutcomeVerdict::Confirmed)),
+            Judgment::Done
+        );
+        assert_eq!(
+            judged("done", Some(OutcomeVerdict::Disputed)),
+            Judgment::Disputed
+        );
+        assert_eq!(
+            judged("done", Some(OutcomeVerdict::FailedVerification)),
+            Judgment::Disputed
+        );
+        assert_eq!(judged("held", None), Judgment::WaitingOnPerson);
+        assert_eq!(
+            judged("held", Some(OutcomeVerdict::Confirmed)),
+            Judgment::Done
+        );
+        assert_eq!(
+            judged("held", Some(OutcomeVerdict::Disputed)),
+            Judgment::Disputed
+        );
+        assert_eq!(
+            judged("failed", Some(OutcomeVerdict::Disputed)),
+            Judgment::Disputed,
+            "a held Mission a verdict failed counts once"
+        );
+
+        let records = [attempt("m1", "007", "x", "done", None), {
+            let mut record = attempt("m2", "007", "x", "done", None);
+            record.verdict = Some(MissionVerdict::new(
+                OutcomeVerdict::Disputed,
+                "p",
+                1.0,
+                None,
+            ));
+            record
+        }];
+        let card = Scorecard::build(
+            "G",
+            &records,
+            &BTreeMap::new(),
+            &ScorecardPolicy::default(),
+            2_000.0,
+        );
+        let standing = &card.agents[0].standing;
+        assert_eq!(standing.judged, 2);
+        assert_eq!(standing.count(Judgment::Done), 1);
+        assert_eq!(standing.failure_rate, Some(0.5));
     }
 
     #[test]

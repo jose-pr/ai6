@@ -26,13 +26,14 @@ use crate::{
 };
 
 /// The Mission states a Station may report after a control.
-const MISSION_STATES: [&str; 10] = [
+const MISSION_STATES: [&str; 11] = [
     "queued",
     "working",
     "blocked",
     "stalled",
     "parked",
     "quarantined",
+    "held",
     "done",
     "failed",
     "blown",

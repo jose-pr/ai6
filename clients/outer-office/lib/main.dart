@@ -2764,6 +2764,73 @@ class MissionBoard extends ChangeNotifier
     return now;
   }
 
+  /// The latest attempt at a Mission with its final report, which only the Mission's own detail
+  /// carries; `null` before one is recorded and in preview.
+  Future<MissionAttemptSummary?> loadLatestAttempt(
+    String operationId,
+    String missionId,
+  ) async {
+    if (demo) return currentAttempt(operationId, missionId);
+    final response = await _userRequest(
+      'GET',
+      '/v1/operations/${Uri.encodeComponent(operationId)}'
+          '/missions/${Uri.encodeComponent(missionId)}',
+    );
+    if (response.statusCode == 404) return null;
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the Mission.',
+      );
+    }
+    final mission = jsonDecode(response.body) as Map<String, dynamic>;
+    return (mission['attempts'] as List<dynamic>? ?? const [])
+        .map(
+          (attempt) =>
+              MissionAttemptSummary.fromJson(attempt as Map<String, dynamic>),
+        )
+        .fold<MissionAttemptSummary?>(
+          null,
+          (latest, attempt) =>
+              latest == null || attempt.attempt > latest.attempt
+              ? attempt
+              : latest,
+        );
+  }
+
+  /// Says what the person found when they checked a Mission's outcome: `confirmed`, `disputed`
+  /// or `failed-verification`.
+  Future<void> giveVerdict({
+    required String operationId,
+    required String missionId,
+    required String verdict,
+    String? note,
+  }) async {
+    if (demo) throw StateError('A verdict is unavailable in preview.');
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/missions/${Uri.encodeComponent(missionId)}/verdict',
+      body: {'verdict': verdict, 'note': ?note},
+    );
+    if (response.statusCode != 200) {
+      String? words;
+      try {
+        words =
+            (jsonDecode(response.body) as Map<String, dynamic>)['error']
+                as String?;
+      } on Object {
+        words = null;
+      }
+      throw GatewayRefused(
+        response.statusCode,
+        words ??
+            'The gateway refused the verdict (HTTP ${response.statusCode}).',
+      );
+    }
+    await refresh();
+  }
+
   /// The latest attempt at a Mission, whose Session sets its state; `null` before one is
   /// recorded.
   MissionAttemptSummary? currentAttempt(String operationId, String missionId) =>
@@ -4167,6 +4234,39 @@ class BriefOrigin {
   };
 }
 
+/// The words a person reads for a verdict's wire spelling.
+String verdictWords(String verdict) => switch (verdict) {
+  'confirmed' => 'Confirmed',
+  'disputed' => 'Disputed',
+  'failed-verification' => 'Failed verification',
+  _ => verdict,
+};
+
+/// What a person found when they checked how an attempt ended.
+class AttemptVerdictSummary {
+  const AttemptVerdictSummary({
+    required this.verdict,
+    required this.by,
+    this.note,
+  });
+
+  /// `confirmed`, `disputed` or `failed-verification`.
+  final String verdict;
+  final String by;
+  final String? note;
+
+  factory AttemptVerdictSummary.fromJson(Map<String, dynamic> json) =>
+      AttemptVerdictSummary(
+        verdict: json['verdict'] as String,
+        by: json['by'] as String,
+        note: json['note'] as String?,
+      );
+
+  /// `Disputed, by PERSON: the tag was never pushed`.
+  String describe() =>
+      '${verdictWords(verdict)}, by $by${note == null ? '' : ': $note'}';
+}
+
 /// One attempt at a Mission: where it ran and how it stands.
 class MissionAttemptSummary {
   const MissionAttemptSummary({
@@ -4179,6 +4279,8 @@ class MissionAttemptSummary {
     this.lost,
     this.checkpointBranch,
     this.route,
+    this.verdict,
+    this.finalReport,
   });
 
   final int attempt;
@@ -4203,6 +4305,12 @@ class MissionAttemptSummary {
   /// The handler, model and pool it ran on, once it was launched.
   final String? route;
 
+  /// What a person found when they checked how it ended.
+  final AttemptVerdictSummary? verdict;
+
+  /// The last message its Agent ended a turn with, as data; only one Mission's detail has it.
+  final String? finalReport;
+
   /// `handler model (pool name)`, from what a Session record says of its route.
   static String? _routeOf(Map<String, dynamic>? route) {
     if (route == null) return null;
@@ -4224,6 +4332,13 @@ class MissionAttemptSummary {
         lost: json['lost'] as String?,
         checkpointBranch: json['checkpoint_branch'] as String?,
         route: _routeOf(json['route'] as Map<String, dynamic>?),
+        verdict: switch (json['verdict']) {
+          final Map<String, dynamic> verdict => AttemptVerdictSummary.fromJson(
+            verdict,
+          ),
+          _ => null,
+        },
+        finalReport: json['final_report'] as String?,
       );
 
   String describe() => [

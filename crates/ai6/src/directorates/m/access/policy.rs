@@ -199,7 +199,8 @@ pub fn load_policy(
 
 /// The policy a first start writes: the roles `controller`, `operator` and `auditor`, no
 /// rules, no chief and the default cap. They are ordinary data, editable and deletable, and
-/// are never written again once the record exists.
+/// are never written again once the record exists. A verdict on a Mission's outcome is theirs who
+/// check the work, not theirs who run it: `mission.verify` is on `controller` and `auditor`.
 pub fn seeded_policy() -> AccessPolicy {
     const READ: [&str; 10] = [
         "mission.read",
@@ -214,6 +215,7 @@ pub fn seeded_policy() -> AccessPolicy {
         "compartment.read",
     ];
     const WATCH: [&str; 3] = ["audit.read", "access.read", "session.context"];
+    const VERIFY: [&str; 1] = ["mission.verify"];
     const WORK: [&str; 9] = [
         "mission.create",
         "mission.control",
@@ -255,7 +257,7 @@ pub fn seeded_policy() -> AccessPolicy {
         "controller".into(),
         role(
             "Administers: everything an operator does, plus roster, Agents, Stations, pools, green-ink classes, access and accounts",
-            &[&READ, &WATCH, &WORK, &ADMINISTER],
+            &[&READ, &WATCH, &VERIFY, &WORK, &ADMINISTER],
         ),
     );
     policy.roles.insert(
@@ -264,7 +266,10 @@ pub fn seeded_policy() -> AccessPolicy {
     );
     policy.roles.insert(
         "auditor".into(),
-        role("Views everything, changes nothing", &[&READ, &WATCH]),
+        role(
+            "Views everything and gives verdicts on Missions' outcomes; changes nothing else",
+            &[&READ, &WATCH, &VERIFY],
+        ),
     );
     policy
 }

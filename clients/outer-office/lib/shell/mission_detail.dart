@@ -7,6 +7,7 @@ import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
 import '../theme/oo_icon.dart';
+import 'mission_outcome.dart';
 import 'mission_rename.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
@@ -147,6 +148,12 @@ class MissionDetail extends StatelessWidget {
             Text(control.describe(), style: text.labelMedium),
           ],
           const SizedBox(height: 20),
+          MissionOutcomeSection(
+            board: board,
+            operationId: operationId,
+            missionId: mission.missionId,
+            state: mission.state,
+          ),
           Text('ATTEMPTS', style: ooSectionLabel(context)),
           const SizedBox(height: 8),
           if (attempts.isEmpty)
@@ -302,6 +309,8 @@ class _AttemptCard extends StatelessWidget {
               ),
             if (attempt.lost case final lost?)
               Text(lost, style: text.bodySmall?.copyWith(color: tokens.muted)),
+            if (attempt.verdict case final verdict?)
+              Text(verdict.describe(), style: text.bodySmall),
             if (attempt.checkpointBranch case final branch?)
               Text(
                 'Checkpointed to branch $branch',

@@ -631,6 +631,22 @@ enum MissionsCommand {
         #[arg(long, requires = "create_issue")]
         issue_body: Option<String>,
     },
+    /// Say what you found when you checked a Mission's outcome (needs mission.verify): a disputed
+    /// or failed one counts against its Agent, and a held one is settled by it. A later verdict
+    /// replaces it.
+    Verdict {
+        /// The Mission: its UID, or any handle it had.
+        mission_id: String,
+        /// `confirmed`, `disputed` or `failed-verification`.
+        #[arg(value_parser = ["confirmed", "disputed", "failed-verification"])]
+        verdict: String,
+        /// Why, for the record.
+        #[arg(long)]
+        note: Option<String>,
+        /// The Operation, when the Mission is not on the visible board.
+        #[arg(long)]
+        operation: Option<String>,
+    },
 }
 
 /// The body `missions create` sends.
@@ -874,6 +890,21 @@ struct BoardAttempt {
     route: Option<BoardRoute>,
     #[serde(default)]
     account: Option<BoardAccount>,
+    /// What a person found when they checked how it ended.
+    #[serde(default)]
+    verdict: Option<BoardVerdict>,
+    /// The last message its Agent ended a turn with; only one Mission's detail has it.
+    #[serde(default)]
+    final_report: Option<String>,
+}
+
+/// A person's verdict on how an attempt ended.
+#[derive(Debug, Deserialize)]
+struct BoardVerdict {
+    verdict: String,
+    by: String,
+    #[serde(default)]
+    note: Option<String>,
 }
 
 /// Which handler, model and pool an attempt ran on.
@@ -1342,6 +1373,40 @@ async fn run() -> Result<(), String> {
             }
         }
         Command::Missions {
+            command:
+                Some(MissionsCommand::Verdict {
+                    mission_id,
+                    verdict,
+                    note,
+                    operation,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let operation = match operation {
+                Some(operation) => operation,
+                None => mission_operation(&client, &server, &token, &mission_id).await?,
+            };
+            let mut url = server.clone();
+            url.path_segments_mut()
+                .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+                .extend(["v1", "user", "operations", &operation, "missions"])
+                .extend([mission_id.as_str(), "verdict"]);
+            let mut body = serde_json::json!({ "verdict": verdict });
+            if let Some(note) = note {
+                body["note"] = note.into();
+            }
+            let given =
+                access::exchange(&client, &token, Method::POST, url, None, Some(body)).await?;
+            println!(
+                "{} attempt {}: {} by {}",
+                access::text(&given["mission_id"]),
+                given["attempt"],
+                access::text(&given["verdict"]),
+                access::text(&given["by"])
+            );
+        }
+        Command::Missions {
             operation,
             subtree,
             compartment,
@@ -1576,7 +1641,10 @@ async fn run() -> Result<(), String> {
                 .collect::<Vec<_>>();
             match matches.as_slice() {
                 [] => return Err("Mission was not found".to_owned()),
-                [mission] => print_mission(mission),
+                [mission] => {
+                    print_mission(mission);
+                    print_final_report(&client, &server, &token, mission).await;
+                }
                 _ => {
                     return Err(
                         "Mission ID is visible in multiple Stations; pass --operation".to_owned(),
@@ -1796,6 +1864,47 @@ async fn named_missions(
         "Mission list",
     )
     .await
+}
+
+/// Prints the final report of a Mission's latest attempt, which only its detail carries. The
+/// board it is shown from already answered, so a detail that does not answer leaves it out.
+async fn print_final_report(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    mission: &BoardMission,
+) {
+    let mut url = server.clone();
+    let Ok(mut segments) = url.path_segments_mut() else {
+        return;
+    };
+    segments.extend([
+        "v1",
+        "operations",
+        mission.operation_id.as_str(),
+        "missions",
+        mission.mission_id.as_str(),
+    ]);
+    drop(segments);
+    let detail = send::<BoardMission>(
+        client.get(url).bearer_auth(access_token),
+        "a signed-in user",
+        "Mission",
+    )
+    .await;
+    let report = detail.ok().and_then(|detail| {
+        detail
+            .attempts
+            .into_iter()
+            .last()
+            .and_then(|attempt| attempt.final_report)
+    });
+    if let Some(report) = report {
+        println!("FINAL REPORT");
+        for line in report.lines() {
+            println!("{}", plain(line));
+        }
+    }
 }
 
 async fn stations(
@@ -2716,11 +2825,12 @@ impl ScorecardStanding {
     }
 }
 
-const VERDICT_COLUMNS: [&str; 12] = [
+const VERDICT_COLUMNS: [&str; 13] = [
     "done",
     "failed",
     "blown",
     "stalled",
+    "disputed",
     "waiting_on_person",
     "budget_stop",
     "parked",
@@ -3410,6 +3520,14 @@ fn print_mission(mission: &BoardMission) {
                 plain(&run.status),
                 run.route_column()
             );
+            if let Some(verdict) = &run.verdict {
+                println!(
+                    "VERDICT\t{}\t{}\t{}",
+                    plain(&verdict.verdict),
+                    plain(&verdict.by),
+                    plain(verdict.note.as_deref().unwrap_or("-"))
+                );
+            }
         }
     }
     println!("SESSION\tSTATE\tREASON\tSEQUENCE\tEXPOSURE");

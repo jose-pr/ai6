@@ -220,6 +220,14 @@ CREATE TABLE IF NOT EXISTS ai6_sessions (
 );
 CREATE INDEX IF NOT EXISTS ai6_sessions_mission ON ai6_sessions (mission_id);
 
+-- An Agent's last message on a Session, apart from its record so a board read stays small.
+CREATE TABLE IF NOT EXISTS ai6_final_reports (
+    session_id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ai6_sleeper_authorizations (
     operation TEXT NOT NULL,
     name TEXT NOT NULL,

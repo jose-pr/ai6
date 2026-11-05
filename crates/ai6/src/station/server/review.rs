@@ -1331,7 +1331,7 @@ async fn finish_passed(state: &DaemonState, mission_id: &str) {
 
 /// The telemetry of a Mission with no live Session, so its end reaches Universal Exports.
 #[cfg(feature = "publisher")]
-fn published(
+pub(super) fn published(
     state: &DaemonState,
     mission_id: &str,
 ) -> Option<std::sync::Arc<crate::station::publisher::SessionTelemetry>> {

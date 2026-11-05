@@ -106,6 +106,9 @@ pub enum SessionState {
     /// Medical stopped the operation because its Agent is quarantined; only an operator
     /// releases it.
     Quarantined,
+    /// The operation ended done with something its role requires missing; a person's verdict
+    /// settles it.
+    Held,
     /// The operation finished.
     Done,
     /// The agent operation exited unsuccessfully.
@@ -124,6 +127,7 @@ impl SessionState {
             Self::Stalled => "stalled",
             Self::Parked => "parked",
             Self::Quarantined => "quarantined",
+            Self::Held => "held",
             Self::Done => "done",
             Self::Failed => "failed",
             Self::Abandoned => "abandoned",
@@ -139,6 +143,7 @@ impl SessionState {
             "stalled" => Self::Stalled,
             "parked" => Self::Parked,
             "quarantined" => Self::Quarantined,
+            "held" => Self::Held,
             "done" => Self::Done,
             "failed" => Self::Failed,
             "abandoned" => Self::Abandoned,

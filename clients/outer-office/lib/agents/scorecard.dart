@@ -6,13 +6,14 @@ import '../main.dart';
 import '../shell/oo_link.dart';
 
 /// What the scorecard calls an attempt's outcome, in the order a row lists them, with the words
-/// a person reads. The first four are the Agent's own and are judged; the rest are shown and
+/// a person reads. The first five are the Agent's own and are judged; the rest are shown and
 /// not held against it.
 const scorecardJudgments = <(String, String)>[
   ('done', 'done'),
   ('failed', 'failed'),
   ('blown', 'blown'),
   ('stalled', 'stalled'),
+  ('disputed', 'disputed'),
   ('waiting_on_person', 'waiting on a person'),
   ('budget_stop', 'budget stops'),
   ('parked', 'parked by a limit'),
@@ -243,8 +244,8 @@ class _ScorecardSectionState extends State<ScorecardSection> {
         subtitle: Text(
           card == null
               ? (_error ?? 'Reading the Sessions…')
-              : 'Over ${card.window}. Done, failed, blown and stalled are the '
-                    'Agent\'s own; the rest are shown, not held against it.',
+              : 'Over ${card.window}. Done, failed, blown, stalled and disputed '
+                    'are the Agent\'s own; the rest are shown, not held against it.',
         ),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,

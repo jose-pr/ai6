@@ -514,6 +514,10 @@ pub struct AgentRole {
     /// Which review policy applies to this role's Missions at each gate, before the Operation's.
     #[serde(default, skip_serializing_if = "review_choice_is_empty")]
     pub review: ReviewChoice,
+    /// Whether a Session of this role that ends done with no green ink request decided in that
+    /// attempt is held for a person's verdict instead of being `done`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub require_approval_before_done: bool,
 }
 
 fn review_choice_is_empty(choice: &ReviewChoice) -> bool {
@@ -533,7 +537,15 @@ impl AgentRole {
             purpose: purpose.into(),
             policy: policy.into(),
             review: ReviewChoice::default(),
+            require_approval_before_done: false,
         }
+    }
+
+    /// This role with a `done` needing a decided green ink request, or held otherwise.
+    #[must_use]
+    pub fn requiring_approval_before_done(mut self, required: bool) -> Self {
+        self.require_approval_before_done = required;
+        self
     }
 
     /// This role with `review` choosing its Missions' review policies.
@@ -2436,6 +2448,11 @@ pub(crate) struct AgentRoleDefinition {
     #[map(default)]
     #[form(form)]
     review: ReviewChoice,
+    /// Whether a Session of this role that ends done with no green ink request decided in that
+    /// attempt is held for a person's verdict instead of being done.
+    #[schema(title = "Require a decision before done", advanced)]
+    #[map(default)]
+    require_approval_before_done: bool,
 }
 
 impl AgentRoleDefinition {
@@ -2445,6 +2462,7 @@ impl AgentRoleDefinition {
             purpose: self.purpose,
             policy: self.policy,
             review: self.review,
+            require_approval_before_done: self.require_approval_before_done,
         };
         role.validate()
             .map_err(|validation| error(format!("{source}: {validation}")))?;

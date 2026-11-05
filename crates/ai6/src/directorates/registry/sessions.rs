@@ -21,7 +21,9 @@ use super::accounts::AccountRef;
 
 use super::limits::SessionLimits;
 use super::mission_ids::{new_uid, run_handle};
+use super::products::CUT_MARKER;
 use super::store::{FileRegistry, invalid_data, read_headquarters, unix_time};
+use crate::bounds::Limit;
 
 /// Where a Session stands, as far as the Registry knows.
 #[non_exhaustive]
@@ -210,6 +212,130 @@ pub struct SessionRecord {
     /// The window (`20261025T0300Z`) a standing Sleeper's run answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<String>,
+    /// What a person found when they checked how the attempt ended; the latest one stands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<MissionVerdict>,
+}
+
+/// What a person found when they checked a Mission's outcome.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutcomeVerdict {
+    /// The work is what the Agent said it was.
+    Confirmed,
+    /// The person does not accept the Agent's account of it.
+    Disputed,
+    /// The person checked, and the work does not hold up.
+    FailedVerification,
+}
+
+impl OutcomeVerdict {
+    /// Every verdict.
+    pub const ALL: [Self; 3] = [Self::Confirmed, Self::Disputed, Self::FailedVerification];
+
+    /// The wire spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Confirmed => "confirmed",
+            Self::Disputed => "disputed",
+            Self::FailedVerification => "failed-verification",
+        }
+    }
+
+    /// The verdict its wire spelling names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|verdict| verdict.as_str() == name)
+    }
+
+    /// Whether the outcome counts as a failure of the Agent that ran it.
+    pub const fn is_fault(self) -> bool {
+        matches!(self, Self::Disputed | Self::FailedVerification)
+    }
+}
+
+/// A person's verdict on how an attempt at a Mission ended.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MissionVerdict {
+    /// What they found.
+    pub verdict: OutcomeVerdict,
+    /// Why, in their words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// The authenticated person.
+    pub by: String,
+    /// When, as Unix seconds.
+    pub at: f64,
+}
+
+impl MissionVerdict {
+    /// `by`'s `verdict` at `at`, for the reason in `note`.
+    pub fn new(
+        verdict: OutcomeVerdict,
+        by: impl Into<String>,
+        at: f64,
+        note: Option<String>,
+    ) -> Self {
+        Self {
+            verdict,
+            note,
+            by: by.into(),
+            at,
+        }
+    }
+}
+
+/// The last message an Agent ended a turn with on a Session: its own account of the work, as data.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FinalReport {
+    /// AI6's identifier for the Session.
+    pub session_id: String,
+    /// The UID of the Mission it worked for.
+    pub mission_id: String,
+    /// The message, within `[registry.limits.sessions] final_report_bytes` and marked if cut.
+    pub text: String,
+    /// When it was filed, as Unix seconds.
+    pub at: f64,
+}
+
+impl FinalReport {
+    /// Session `session_id`'s report of `text`, cut to `limit` bytes with the cut marked.
+    pub fn new(
+        session_id: impl Into<String>,
+        mission_id: impl Into<String>,
+        text: &str,
+        at: f64,
+        limit: Limit,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            mission_id: mission_id.into(),
+            text: cut_report(text, limit),
+            at,
+        }
+    }
+}
+
+/// `text` within `limit` bytes, the marker included, cut on a character boundary.
+fn cut_report(text: &str, limit: Limit) -> String {
+    if limit.allows(text.len()) {
+        return text.to_owned();
+    }
+    let most = limit.or_max();
+    let Some(room) = most.checked_sub(CUT_MARKER.len()) else {
+        return String::new();
+    };
+    let mut end = room;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{CUT_MARKER}", &text[..end])
 }
 
 /// How a Mission stood at its Session's last write: what a scorecard judges the attempt by.
@@ -258,6 +384,26 @@ impl SessionResult {
 }
 
 impl SessionRecord {
+    /// Whether a person may give a verdict on the attempt: it ended done or held.
+    ///
+    /// # Errors
+    ///
+    /// `Unsettled`, naming how it stands instead.
+    pub fn takes_verdict(&self) -> Result<(), SessionError> {
+        if self.status == SessionStatus::Lost {
+            return Err(SessionError::Unsettled("lost".to_owned()));
+        }
+        let state = self
+            .result
+            .as_ref()
+            .map_or("unrecorded", |result| result.state.as_str());
+        if matches!(state, "done" | "held") {
+            Ok(())
+        } else {
+            Err(SessionError::Unsettled(state.to_owned()))
+        }
+    }
+
     /// Whether the lease is still live at `now`, in Unix seconds.
     pub fn leased_at(&self, now: f64) -> bool {
         !self.status.is_closed() && self.lease_expires >= now
@@ -457,6 +603,9 @@ pub enum SessionError {
     Exists,
     /// The Session finished and is closed to every Station.
     Ended,
+    /// The attempt has not ended done or held, so there is no outcome to give a verdict on; the
+    /// state it stands in.
+    Unsettled(String),
     /// Another Station holds a live lease on the Session.
     HeldBy(String),
     /// The Station's lease or fencing token is no longer the current one.
@@ -471,6 +620,12 @@ impl fmt::Display for SessionError {
             Self::NotFound => f.write_str("no such Session record"),
             Self::Exists => f.write_str("a Session record with this ID already exists"),
             Self::Ended => f.write_str("the Session has ended"),
+            Self::Unsettled(state) => {
+                write!(
+                    f,
+                    "the latest attempt has no outcome to judge: it is {state}"
+                )
+            }
             Self::HeldBy(station) => write!(f, "Station {station:?} holds the Session lease"),
             Self::Stale => f.write_str("the Session lease or fencing token is stale"),
             Self::Io(error) => write!(f, "Session record: {error}"),
@@ -661,6 +816,7 @@ pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> Ses
         closed_at: None,
         result: None,
         window: new.window,
+        verdict: None,
     }
 }
 
@@ -794,6 +950,57 @@ pub(super) fn lose(
     Ok(())
 }
 
+/// Checks a verdict's bounds before it is stored.
+pub(super) fn validate_verdict(verdict: &MissionVerdict, limits: &SessionLimits) -> io::Result<()> {
+    let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
+    if verdict.by.trim().is_empty() || !verdict.at.is_finite() || verdict.at <= 0.0 {
+        return Err(invalid(
+            "a verdict needs the person who gave it and a positive time".to_owned(),
+        ));
+    }
+    if verdict.note.as_deref().is_some_and(|note| {
+        note.trim().is_empty()
+            || !limits.verdict_note_bytes.allows(note.len())
+            || note
+                .chars()
+                .any(|character| character.is_control() && !"\n\t".contains(character))
+    }) {
+        return Err(invalid(format!(
+            "the note must be 1 to {} bytes without control characters other than newlines",
+            limits.verdict_note_bytes
+        )));
+    }
+    Ok(())
+}
+
+/// Puts `verdict` on the attempt that ended done or held; a verdict already there is replaced.
+pub(super) fn apply_verdict(
+    record: &mut SessionRecord,
+    verdict: MissionVerdict,
+) -> Result<(), SessionError> {
+    record.takes_verdict()?;
+    record.verdict = Some(verdict);
+    Ok(())
+}
+
+/// Checks a final report's bounds before it is stored.
+pub(super) fn validate_final_report(
+    report: &FinalReport,
+    limits: &SessionLimits,
+) -> io::Result<()> {
+    validate_session_id(&report.session_id, limits)?;
+    if !limits.final_report_bytes.allows(report.text.len()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "a final report is at most {} bytes",
+                limits.final_report_bytes
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Every exposure of `records` (one Mission's Sessions, in ID order), earliest first, one
 /// entry per source.
 pub(super) fn merged_exposure(records: impl IntoIterator<Item = SessionRecord>) -> Vec<Exposure> {
@@ -903,6 +1110,34 @@ pub trait SessionStore {
     ///
     /// Returns an error when the Session records cannot be read.
     fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>;
+
+    /// Records a person's verdict on the latest attempt at a Mission of `operation`, replacing any
+    /// it has. It needs no lease: a person's word, not a holder's write.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the Operation has no attempt at the Mission; `Unsettled` when the latest
+    /// has not ended done or held; `Io` for a verdict out of bounds or a Registry failure.
+    fn record_verdict(
+        &self,
+        operation: &str,
+        mission_id: &str,
+        verdict: &MissionVerdict,
+    ) -> Result<SessionRecord, SessionError>;
+
+    /// Keeps a Session's final report, replacing the one it has.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an invalid Session ID or a report over its limit; I/O errors otherwise.
+    fn file_final_report(&self, report: &FinalReport) -> io::Result<()>;
+
+    /// A Session's final report, if it filed one.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an invalid Session ID; I/O errors otherwise.
+    fn final_report(&self, session_id: &str) -> io::Result<Option<FinalReport>>;
 }
 
 impl SessionStore for FileRegistry {
@@ -976,9 +1211,49 @@ impl SessionStore for FileRegistry {
                 .filter(|record| record.mission_id == mission_id),
         ))
     }
+
+    fn record_verdict(
+        &self,
+        operation: &str,
+        mission_id: &str,
+        verdict: &MissionVerdict,
+    ) -> Result<SessionRecord, SessionError> {
+        validate_verdict(verdict, &self.limits.sessions)?;
+        let _lock = self.lock()?;
+        let mut record = latest(self.sessions_locked()?.into_iter().filter(|record| {
+            record.mission_id == mission_id && record.operation.as_deref() == Some(operation)
+        }))
+        .ok_or(SessionError::NotFound)?;
+        apply_verdict(&mut record, verdict.clone())?;
+        self.write_session(&self.session_path(&record.session_id), &record)?;
+        Ok(record)
+    }
+
+    fn file_final_report(&self, report: &FinalReport) -> io::Result<()> {
+        validate_final_report(report, &self.limits.sessions)?;
+        let bytes = serde_json::to_vec(report).map_err(io::Error::other)?;
+        let _lock = self.lock()?;
+        self.write_atomic(&self.final_report_path(&report.session_id), &bytes)
+    }
+
+    fn final_report(&self, session_id: &str) -> io::Result<Option<FinalReport>> {
+        validate_session_id(session_id, &self.limits.sessions)?;
+        let _lock = self.lock()?;
+        match fs::read(self.final_report_path(session_id)) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|error| invalid_data(format!("invalid final report: {error}"))),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 impl FileRegistry {
+    fn final_report_path(&self, id: &str) -> std::path::PathBuf {
+        self.root.join("final-reports").join(format!("{id}.json"))
+    }
+
     /// Every Session record, in ID order, under the lock the caller holds.
     fn sessions_locked(&self) -> io::Result<Vec<SessionRecord>> {
         let mut records = Vec::new();
@@ -1062,6 +1337,9 @@ mod tests {
         the_holder_records_launch_recent_events_and_checkpoints_within_bounds,
         the_latest_session_is_the_highest_attempt,
         unsafe_ids_are_rejected_before_touching_the_filesystem,
+        a_verdict_lands_on_the_latest_attempt_that_ended,
+        a_verdict_is_refused_on_an_attempt_with_no_outcome,
+        a_final_report_is_kept_by_its_session_and_cut_when_long,
     );
 
     const NOW: f64 = 1_800_000_000.0;
@@ -1183,6 +1461,150 @@ mod tests {
             .take_session_at("s-1", "station-c", TTL, NOW + 1_000.0)
             .unwrap();
         assert!(again.fence > taken.fence);
+    }
+
+    /// A Mission of Operation `G` whose attempt `attempt` stands in `state`.
+    fn attempt_in(store: &dyn Store, mission: &str, attempt: u32, state: &str) -> SessionRecord {
+        let registry = store.handle();
+        let new = NewSession::new(format!("{mission}-{attempt}"), mission, "station-a")
+            .with_operation("G")
+            .with_attempt(attempt, None);
+        let opened = registry.open_session_at(new, TTL, NOW).unwrap();
+        registry
+            .write_fenced(
+                &opened.session_id,
+                "station-a",
+                opened.fence,
+                NOW,
+                None,
+                SessionUpdate::default().result(SessionResult::new(state)),
+            )
+            .unwrap()
+    }
+
+    fn a_verdict_lands_on_the_latest_attempt_that_ended(store: &dyn Store) {
+        let registry = store.handle();
+        attempt_in(store, "m-1", 1, "failed");
+        let last = attempt_in(store, "m-1", 2, "done");
+        let verdict = MissionVerdict::new(
+            OutcomeVerdict::Disputed,
+            "person-1",
+            NOW,
+            Some("the tag was never pushed".to_owned()),
+        );
+        let judged = registry.record_verdict("G", "m-1", &verdict).unwrap();
+        assert_eq!(judged.session_id, last.session_id);
+        assert_eq!(judged.verdict.as_ref(), Some(&verdict));
+        assert_eq!(
+            registry.session(&last.session_id).unwrap().unwrap().verdict,
+            Some(verdict)
+        );
+        assert_eq!(registry.session("m-1-1").unwrap().unwrap().verdict, None);
+
+        // A person changes their mind: the latest verdict stands.
+        let confirmed = MissionVerdict::new(OutcomeVerdict::Confirmed, "person-2", NOW + 1.0, None);
+        let judged = registry.record_verdict("G", "m-1", &confirmed).unwrap();
+        assert_eq!(judged.verdict, Some(confirmed));
+        assert_eq!(judged.result.unwrap().state, "done", "its state stays");
+
+        let held = attempt_in(store, "m-2", 1, "held");
+        let judged = registry
+            .record_verdict(
+                "G",
+                "m-2",
+                &MissionVerdict::new(OutcomeVerdict::FailedVerification, "p", NOW, None),
+            )
+            .unwrap();
+        assert_eq!(judged.session_id, held.session_id);
+    }
+
+    fn a_verdict_is_refused_on_an_attempt_with_no_outcome(store: &dyn Store) {
+        let registry = store.handle();
+        let verdict = MissionVerdict::new(OutcomeVerdict::Disputed, "p", NOW, None);
+        assert!(matches!(
+            registry.record_verdict("G", "m-none", &verdict),
+            Err(SessionError::NotFound)
+        ));
+        attempt_in(store, "m-1", 1, "done");
+        assert!(
+            matches!(
+                registry.record_verdict("other", "m-1", &verdict),
+                Err(SessionError::NotFound)
+            ),
+            "another Operation's Mission is not found"
+        );
+        for state in ["working", "blocked", "failed", "abandoned"] {
+            let mission = format!("m-{state}");
+            attempt_in(store, &mission, 1, state);
+            match registry.record_verdict("G", &mission, &verdict) {
+                Err(SessionError::Unsettled(found)) => assert_eq!(found, state),
+                other => panic!("{state}: {other:?}"),
+            }
+        }
+        // A later attempt that has not ended stands in the way of the earlier one's outcome.
+        attempt_in(store, "m-retried", 1, "done");
+        attempt_in(store, "m-retried", 2, "working");
+        assert!(matches!(
+            registry.record_verdict("G", "m-retried", &verdict),
+            Err(SessionError::Unsettled(_))
+        ));
+        for bad in [
+            MissionVerdict::new(OutcomeVerdict::Disputed, " ", NOW, None),
+            MissionVerdict::new(OutcomeVerdict::Disputed, "p", 0.0, None),
+            MissionVerdict::new(OutcomeVerdict::Disputed, "p", NOW, Some(" ".to_owned())),
+            MissionVerdict::new(
+                OutcomeVerdict::Disputed,
+                "p",
+                NOW,
+                Some("a\u{7}b".to_owned()),
+            ),
+            MissionVerdict::new(
+                OutcomeVerdict::Disputed,
+                "p",
+                NOW,
+                Some("x".repeat(SessionLimits::default().verdict_note_bytes.or_max() + 1)),
+            ),
+        ] {
+            assert!(
+                matches!(
+                    registry.record_verdict("G", "m-1", &bad),
+                    Err(SessionError::Io(error)) if error.kind() == io::ErrorKind::InvalidInput
+                ),
+                "{bad:?}"
+            );
+        }
+    }
+
+    fn a_final_report_is_kept_by_its_session_and_cut_when_long(store: &dyn Store) {
+        let registry = store.handle();
+        assert_eq!(registry.final_report("s-1").unwrap(), None);
+        let first = FinalReport::new("s-1", "m-1", "first", NOW, Limit::at(64));
+        registry.file_final_report(&first).unwrap();
+        assert_eq!(registry.final_report("s-1").unwrap().as_ref(), Some(&first));
+        let later = FinalReport::new("s-1", "m-1", "later turn", NOW + 1.0, Limit::at(64));
+        registry.file_final_report(&later).unwrap();
+        assert_eq!(registry.final_report("s-1").unwrap(), Some(later));
+        assert_eq!(registry.final_report("s-2").unwrap(), None);
+
+        let limit = Limit::at(32);
+        let cut = FinalReport::new("s-2", "m-1", &"\u{e9}".repeat(100), NOW, limit);
+        assert!(cut.text.ends_with(CUT_MARKER), "{}", cut.text);
+        assert!(limit.allows(cut.text.len()), "{}", cut.text.len());
+        let whole = FinalReport::new("s-2", "m-1", &"x".repeat(32), NOW, limit);
+        assert_eq!(whole.text.len(), 32, "at the limit is not cut");
+
+        let over = FinalReport::new(
+            "s-3",
+            "m-1",
+            &"x".repeat(SessionLimits::default().final_report_bytes.or_max() + 1),
+            NOW,
+            Limit::UNBOUNDED,
+        );
+        assert_eq!(
+            registry.file_final_report(&over).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(registry.final_report("../x").is_err());
     }
 
     fn a_session_keeps_its_agent_times_and_the_result_of_its_last_write(store: &dyn Store) {

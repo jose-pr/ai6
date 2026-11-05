@@ -22,6 +22,7 @@ const _areas = <(String, Map<String, String>)>[
       'mission.read': 'see',
       'mission.create': 'queue new',
       'mission.control': 'cancel, retry, resume, interrupt',
+      'mission.verify': 'give a verdict on',
     },
   ),
   (

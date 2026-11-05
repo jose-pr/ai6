@@ -28,6 +28,7 @@ mod timeline;
 mod tls;
 mod transcripts;
 mod tree;
+mod verdicts;
 
 use core::future::Future;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -1640,6 +1641,10 @@ impl Gateway {
                 post(held::withdraw),
             )
             .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/verdict",
+                post(verdicts::give),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/missions/{mission_id}/rename",
                 post(rename_user_mission),
             )
@@ -2212,9 +2217,15 @@ async fn mission_detail(
     if let Some(registry) = gateway.registry.clone() {
         let (operation, mission_id) = (mission.operation_id.clone(), mission.mission_id.clone());
         let (usage, mut attempts) = tokio::task::spawn_blocking(move || {
+            let mut attempts = attempts_by_mission(registry.sessions()?);
+            for attempt in attempts.get_mut(&mission_id).into_iter().flatten() {
+                attempt.final_report = registry
+                    .final_report(&attempt.session_id)?
+                    .map(|report| report.text);
+            }
             Ok::<_, std::io::Error>((
                 registry.mission_usage(Some(&operation), &mission_id)?,
-                attempts_by_mission(registry.sessions()?),
+                attempts,
             ))
         })
         .await
@@ -3831,6 +3842,7 @@ async fn user_profile(
                 "compartment.cover",
                 "mission.create",
                 "mission.control",
+                "mission.verify",
                 "approval.decide",
                 "approval.class",
                 "session.read",
@@ -4929,6 +4941,13 @@ pub struct MissionAttempt {
     pub route: Option<ai6::RouteRef>,
     /// The account it drew from, when it drew from a pool.
     pub account: Option<ai6::AccountRef>,
+    /// What a person found when they checked how it ended.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<ai6::MissionVerdict>,
+    /// The last message its Agent ended a turn with, as data. Only one Mission's detail has it:
+    /// each can be as long as `[registry.limits.sessions] final_report_bytes`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_report: Option<String>,
 }
 
 impl MissionAttempt {
@@ -4942,6 +4961,8 @@ impl MissionAttempt {
                 )
             }),
             account: record.account.clone(),
+            verdict: record.verdict.clone(),
+            final_report: None,
             attempt: record.attempt,
             session_id: record.session_id.clone(),
             handle: record.handle.clone(),

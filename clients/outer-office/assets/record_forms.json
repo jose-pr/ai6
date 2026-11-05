@@ -2314,6 +2314,13 @@
           "description": "Which review policy checks the plan and the output of this role's Missions, before what the Operation says.",
           "x-advanced": true,
           "default": {}
+        },
+        "require_approval_before_done": {
+          "type": "boolean",
+          "title": "Require a decision before done",
+          "description": "Whether a Session of this role that ends done with no green ink request decided in that attempt is held for a person's verdict instead of being done.",
+          "x-advanced": true,
+          "default": false
         }
       },
       "additionalProperties": false

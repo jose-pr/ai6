@@ -7,8 +7,8 @@ description = "Administers: everything an operator does, plus roster, Agents, St
 actions = [
   "access.manage", "access.read", "account.manage", "agent.configure", "agent.read",
   "approval.class", "approval.decide", "audit.read", "cable.read", "cable.send",
-  "mission.control", "mission.create", "mission.read", "pool.manage", "pool.read",
-  "roster.manage", "roster.read", "session.context", "session.input", "session.read",
+  "mission.control", "mission.create", "mission.read", "mission.verify", "pool.manage",
+  "pool.read", "roster.manage", "roster.read", "session.context", "session.input", "session.read",
   "station.configure", "station.read",
 ]
 
@@ -21,10 +21,10 @@ actions = [
 ]
 
 [role.auditor]
-description = "Views everything, changes nothing"
+description = "Views everything and gives verdicts on Missions' outcomes; changes nothing else"
 actions = [
-  "access.read", "agent.read", "audit.read", "cable.read", "mission.read", "pool.read",
-  "roster.read", "session.context", "session.read", "station.read",
+  "access.read", "agent.read", "audit.read", "cable.read", "mission.read", "mission.verify",
+  "pool.read", "roster.read", "session.context", "session.read", "station.read",
 ]
 
 # Controller for the Operation G (and the Operations under it).

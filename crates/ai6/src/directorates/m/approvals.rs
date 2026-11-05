@@ -67,6 +67,10 @@ pub const DEFAULT_APPROVAL_TTL: Duration = Duration::from_secs(60 * 60);
 /// The `blocked_reason` of a Mission waiting for green ink.
 pub const GREEN_INK_REASON: &str = "green-ink";
 
+/// Why a Mission is held: its role requires a decided green ink request before `done`, and its
+/// attempt ended with none.
+pub const NO_APPROVAL_REASON: &str = "no approval was decided";
+
 /// What an Agent asks to do: a kind of step and what it acts on.
 ///
 /// `kind` is a built-in ([`BUILTIN_KINDS`]) or one the Operation adds. `target` is free text

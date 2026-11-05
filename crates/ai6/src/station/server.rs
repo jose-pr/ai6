@@ -39,6 +39,7 @@ mod stewardship;
 mod stream_tests;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
+mod verdicts;
 mod vetting;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -1650,6 +1651,7 @@ async fn scheduler_loop(base: DaemonState) {
                 agents::enforce_clearances(&tick);
             }
             medical::enforce_quarantines(&tick);
+            verdicts::settle_held(&tick);
         })
         .await;
         // A look asks harnesses, which may take minutes: it never holds up the beat.
@@ -3544,6 +3546,18 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
     });
     if let Some(reason) = &mission.failure {
         outcome["reason"] = serde_json::json!(reason);
+    }
+    if let Some(hold) = session_hold(state, mission_id) {
+        if let Ok(Some(report)) = state.intake.final_report(&hold.id) {
+            outcome["final_report"] = serde_json::json!(report.text);
+        }
+        if let Ok(Some(verdict)) = state
+            .intake
+            .session(&hold.id)
+            .map(|record| record.and_then(|record| record.verdict))
+        {
+            outcome["verdict"] = serde_json::json!(verdict);
+        }
     }
     finish_intake_claim(state, lease, &outcome, mission.state == MissionState::Done)
 }
@@ -6311,6 +6325,7 @@ fn spawn_event_pump_with_monitor(
                         break;
                     }
                     if event.kind == "completed" {
+                        verdicts::file_final_report(&state, &mission_id, event.text.as_deref());
                         vetting::review_completed(&state, &mission_id, event.text.as_deref());
                         review::reviewer_answered(&state, &mission_id, event.text.as_deref());
                         if review::holds_plan(&state, &mission_id, &session, event.text.as_deref())
@@ -6833,6 +6848,7 @@ fn apply_event_state(
         "completed" => MissionState::Done,
         "failed" => MissionState::Failed,
         "blown" => MissionState::Blown,
+        verdicts::HELD_EVENT => MissionState::Held,
         _ => return None,
     };
     let Ok(mut missions) = state.missions.lock() else {
@@ -6842,12 +6858,16 @@ fn apply_event_state(
         return Some(target);
     };
     if current != target {
-        if target == MissionState::Done
+        if matches!(target, MissionState::Done | MissionState::Held)
             && matches!(current, MissionState::Blocked | MissionState::Stalled)
         {
             let _ = missions.transition(mission_id, MissionState::Working);
         }
-        let _ = missions.transition(mission_id, target);
+        if target == MissionState::Held {
+            let _ = missions.hold_for(mission_id, event.text.as_deref().unwrap_or_default());
+        } else {
+            let _ = missions.transition(mission_id, target);
+        }
     }
     let published_state = missions
         .get(mission_id)
@@ -6937,6 +6957,9 @@ fn denied_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> 
 fn held_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
     let missions = state.missions.lock().ok()?;
     let mission = missions.get(mission_id)?;
+    if mission.state == MissionState::Held {
+        return Some(verdicts::NO_APPROVAL_CODE);
+    }
     if mission.state != MissionState::Blocked {
         return None;
     }
@@ -6966,6 +6989,7 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
         MissionState::Quarantined => Some("quarantined"),
         MissionState::Queued => Some("queued"),
         MissionState::Abandoned => Some("abandoned"),
+        MissionState::Held => Some("held"),
     }
 }
 
@@ -7326,15 +7350,17 @@ fn publish_finished_event(
     };
     let cover_blown = finished.cover_blown;
     let event = apply_finish_outcome(event, &finished);
+    let event = verdicts::hold_unapproved(state, mission_id, event);
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = finished.telemetry {
-        let name = match event.kind.as_str() {
-            "completed" => Some("done"),
-            "failed" | "blown" => Some("failed"),
-            _ => None,
+        let (name, reason) = match event.kind.as_str() {
+            "completed" => (Some("done"), denied_reason(state, mission_id)),
+            "failed" | "blown" => (Some("failed"), denied_reason(state, mission_id)),
+            verdicts::HELD_EVENT => (Some("held"), Some(verdicts::NO_APPROVAL_CODE)),
+            _ => (None, None),
         };
         if let Some(name) = name {
-            telemetry.publish_lifecycle_for(name, denied_reason(state, mission_id));
+            telemetry.publish_lifecycle_for(name, reason);
         }
     }
     apply_event_state(state, mission_id, &event);
@@ -10339,6 +10365,7 @@ queue = 1
             .put_agent_role(
                 "G",
                 &AgentRole {
+                    require_approval_before_done: false,
                     id: "case-officer".to_owned(),
                     purpose: "Coordinate this Operation's work".to_owned(),
                     policy: "Use the Operation-specific role policy".to_owned(),

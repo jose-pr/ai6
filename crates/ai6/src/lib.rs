@@ -34,8 +34,8 @@ pub use directorates::m::access::{
 };
 pub use directorates::m::approvals::{
     ActionScope, BUILTIN_KINDS, DEFAULT_APPROVAL_TTL, DEFAULT_PROTECTED, DEFAULT_REQUEST_TTL,
-    GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, Requirement,
-    SAFE_HOUSE_DELETE, classify, clearance_at_least,
+    GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, NO_APPROVAL_REASON,
+    Requirement, SAFE_HOUSE_DELETE, classify, clearance_at_least,
 };
 pub use directorates::m::assistant::{
     AssistantDeskLimits, AssistantGatewayLimits, AssistantLimits, AssistantNarrowing,
@@ -214,8 +214,8 @@ pub use directorates::registry::mission_ids::{
 };
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
-    NewSession, SessionError, SessionLaunch, SessionRecord, SessionResult, SessionStatus,
-    SessionUpdate,
+    FinalReport, MissionVerdict, NewSession, OutcomeVerdict, SessionError, SessionLaunch,
+    SessionRecord, SessionResult, SessionStatus, SessionUpdate,
 };
 pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization,

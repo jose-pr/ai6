@@ -49,7 +49,8 @@ pub(crate) fn phase_of(state: MissionState, blocked_reason: Option<&str>) -> Opt
         MissionState::Blocked
         | MissionState::Stalled
         | MissionState::Parked
-        | MissionState::Quarantined => Some("paused"),
+        | MissionState::Quarantined
+        | MissionState::Held => Some("paused"),
         MissionState::Done => Some("done"),
         MissionState::Failed | MissionState::Blown | MissionState::Abandoned => Some("failed"),
         MissionState::Queued => None,

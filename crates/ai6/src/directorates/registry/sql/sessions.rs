@@ -3,15 +3,16 @@
 use std::io;
 use std::time::Duration;
 
-use super::SqlRegistry;
 use super::db::Tx;
 use super::stations::headquarters_in;
+use super::{SqlRegistry, from_json, to_json};
 use crate::directorates::medical::exposure::Exposure;
 use crate::directorates::registry::limits::SessionLimits;
 use crate::directorates::registry::sessions::{
-    NewSession, SessionError, SessionRecord, SessionStore, SessionUpdate, apply_fenced, latest,
-    lose, merged_exposure, opened, parse_session, same_run, session_json, take,
-    validate_new_session, validate_session_id,
+    FinalReport, MissionVerdict, NewSession, SessionError, SessionRecord, SessionStore,
+    SessionUpdate, apply_fenced, apply_verdict, latest, lose, merged_exposure, opened,
+    parse_session, same_run, session_json, take, validate_final_report, validate_new_session,
+    validate_session_id, validate_verdict,
 };
 use crate::directorates::registry::store::{invalid_data, validate_station_id};
 
@@ -280,5 +281,56 @@ impl SessionStore for SqlRegistry {
         Ok(latest(self.read(|tx| {
             records(tx, Some(mission_id), &self.limits.sessions)
         })?))
+    }
+
+    fn record_verdict(
+        &self,
+        operation: &str,
+        mission_id: &str,
+        verdict: &MissionVerdict,
+    ) -> Result<SessionRecord, SessionError> {
+        validate_verdict(verdict, &self.limits.sessions)?;
+        self.write(|tx, revision| {
+            let mut record = latest(
+                records(tx, Some(mission_id), &self.limits.sessions)?
+                    .into_iter()
+                    .filter(|record| record.operation.as_deref() == Some(operation)),
+            )
+            .ok_or(SessionError::NotFound)?;
+            apply_verdict(&mut record, verdict.clone())?;
+            put_session(tx, &record, revision, &self.limits.sessions)?;
+            Ok(record)
+        })
+    }
+
+    fn file_final_report(&self, report: &FinalReport) -> io::Result<()> {
+        validate_final_report(report, &self.limits.sessions)?;
+        let text = to_json(report)?;
+        self.write(|tx, revision| {
+            tx.execute(
+                "INSERT INTO ai6_final_reports (session_id, mission_id, record, revision) \
+                 VALUES ($1, $2, $3, $4) ON CONFLICT (session_id) \
+                 DO UPDATE SET record = excluded.record, revision = excluded.revision",
+                &[
+                    report.session_id.as_str().into(),
+                    report.mission_id.as_str().into(),
+                    text.as_str().into(),
+                    revision.into(),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn final_report(&self, session_id: &str) -> io::Result<Option<FinalReport>> {
+        validate_session_id(session_id, &self.limits.sessions)?;
+        self.read(|tx| {
+            tx.query_opt(
+                "SELECT record FROM ai6_final_reports WHERE session_id = $1",
+                &[session_id.into()],
+            )?
+            .map(|row| from_json(&row.text(0)?, "final report"))
+            .transpose()
+        })
     }
 }
