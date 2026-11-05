@@ -32,14 +32,15 @@ fn reference() -> AccountRef {
 }
 
 fn limits() -> AccountLimits {
-    let mut limits = AccountLimits::default();
-    limits.renew_within = crate::bounds::Seconds::new(3_600);
-    limits.renew_after = crate::bounds::Seconds::new(86_400);
-    limits.renew_lease = crate::bounds::Seconds::new(300);
-    limits.renew_backoff = crate::bounds::Seconds::new(60);
-    limits.renew_backoff_max = crate::bounds::Seconds::new(200);
-    limits.renew_attempts = crate::bounds::Limit::at(3);
-    limits
+    AccountLimits {
+        renew_within: crate::bounds::Seconds::new(3_600),
+        renew_after: crate::bounds::Seconds::new(86_400),
+        renew_lease: crate::bounds::Seconds::new(300),
+        renew_backoff: crate::bounds::Seconds::new(60),
+        renew_backoff_max: crate::bounds::Seconds::new(200),
+        renew_attempts: crate::bounds::Limit::at(3),
+        ..AccountLimits::default()
+    }
 }
 
 /// The provider: it knows one good refresh token, rotates it at each refresh, and refuses any

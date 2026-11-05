@@ -447,6 +447,7 @@ mod tests {
                 "labels",
                 "last_used",
                 "limited_until",
+                "login",
                 "max_concurrent",
                 "other_sessions",
                 "pool",
