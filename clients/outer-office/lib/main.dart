@@ -3352,7 +3352,7 @@ class HostResources {
     return [
       cpus == null ? 'CPUs unknown' : '${_number(cpus!)} CPUs',
       cpuPercent == null ? 'CPU busy unknown' : '${_number(cpuPercent!)}% busy',
-      load1m == null ? 'load unknown' : 'load ${load1m!.toStringAsFixed(2)}',
+      if (load1m != null) 'load ${load1m!.toStringAsFixed(2)}',
       memory,
       'sampled $sampledTime',
     ].join(' · ');
